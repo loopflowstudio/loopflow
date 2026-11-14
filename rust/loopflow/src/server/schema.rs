@@ -85,6 +85,7 @@ const REQUESTS: &[&str] = &[
     include_str!("../../tests/fixtures/dto/server/account_pause.json"),
     include_str!("../../tests/fixtures/dto/server/account_unpause.json"),
     include_str!("../../tests/fixtures/dto/server/attach.json"),
+    include_str!("../../tests/fixtures/dto/server/session_start.json"),
     include_str!("../../tests/fixtures/dto/server/checkout_commit.json"),
     include_str!("../../tests/fixtures/dto/server/checkout_create.json"),
     include_str!("../../tests/fixtures/dto/server/checkout_sync.json"),
@@ -103,6 +104,7 @@ const REQUESTS: &[&str] = &[
     include_str!("../../tests/fixtures/dto/server/repo_ci.json"),
     include_str!("../../tests/fixtures/dto/server/repo_release.json"),
     include_str!("../../tests/fixtures/dto/server/session_steer.json"),
+    include_str!("../../tests/fixtures/dto/server/session_boundary.json"),
     include_str!("../../tests/fixtures/dto/server/session_status.json"),
     include_str!("../../tests/fixtures/dto/server/skill_list.json"),
     include_str!("../../tests/fixtures/dto/server/skill_run.json"),
@@ -117,6 +119,12 @@ const REQUESTS: &[&str] = &[
     include_str!("../../tests/fixtures/dto/server/wave_plan_bind.json"),
     include_str!("../../tests/fixtures/dto/server/wave_plan_connect.json"),
     include_str!("../../tests/fixtures/dto/server/wave_plan_reteam.json"),
+    include_str!("../../tests/fixtures/dto/server/configure_remote.json"),
+    include_str!("../../tests/fixtures/dto/server/mobile_status_request.json"),
+    include_str!("../../tests/fixtures/dto/server/session_page.json"),
+    include_str!("../../tests/fixtures/dto/server/session_continue.json"),
+    include_str!("../../tests/fixtures/dto/server/task_create.json"),
+    include_str!("../../tests/fixtures/dto/server/upload.json"),
 ];
 
 /// Recorded answers and the operation each answers. A new `response`
@@ -173,6 +181,11 @@ const RESPONSES: &[(&str, &str, &str)] = &[
         include_str!("../../tests/fixtures/dto/server/attached.json"),
     ),
     (
+        "session_started",
+        "session.start",
+        include_str!("../../tests/fixtures/dto/server/session_started.json"),
+    ),
+    (
         "pr_abandoned",
         "pr.abandon",
         include_str!("../../tests/fixtures/dto/server/pr_abandoned.json"),
@@ -218,6 +231,11 @@ const RESPONSES: &[(&str, &str, &str)] = &[
         include_str!("../../tests/fixtures/dto/server/response.json"),
     ),
     (
+        "session_boundary_answer",
+        "session.boundary",
+        include_str!("../../tests/fixtures/dto/server/session_boundary_answer.json"),
+    ),
+    (
         "session_steered",
         "session.steer",
         include_str!("../../tests/fixtures/dto/server/session_steered.json"),
@@ -251,6 +269,21 @@ const RESPONSES: &[(&str, &str, &str)] = &[
         "wave_plan_reteamed",
         "wave.plan.reteam",
         include_str!("../../tests/fixtures/dto/server/wave_plan_reteamed.json"),
+    ),
+    (
+        "ticket_reply",
+        "request.upload",
+        include_str!("../../tests/fixtures/dto/server/ticket_reply.json"),
+    ),
+    (
+        "mobile_status",
+        "mobile.status",
+        include_str!("../../tests/fixtures/dto/server/mobile_status.json"),
+    ),
+    (
+        "remote",
+        "mobile.configure",
+        include_str!("../../tests/fixtures/dto/server/remote.json"),
     ),
 ];
 

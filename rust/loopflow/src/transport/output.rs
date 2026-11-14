@@ -62,6 +62,24 @@ impl Output {
         };
         let mut bytes =
             terminal::repaint(&terminal.terminal).context("Repaint the owner's screen")?;
+        bytes.extend(self.state());
+        bytes.extend(
+            terminal
+                .terminal
+                .continuation()
+                .context("Provider sequence exceeds snapshot limit; attach after it completes")?,
+        );
+        Ok(Some(bytes))
+    }
+
+    /// What lf reports about the screen besides its cells: directory, title
+    /// and program status. A viewer that continued from a position without a
+    /// snapshot receives it once it is live.
+    pub fn state(&self) -> Vec<u8> {
+        let Self::Terminal(terminal) = self else {
+            return Vec::new();
+        };
+        let mut bytes = Vec::new();
         if let Some(report) = terminal
             .directory
             .as_deref()
@@ -78,13 +96,7 @@ impl Output {
             bytes.extend(title_report(title));
         }
         bytes.extend(terminal.terminal.program_status().replay());
-        bytes.extend(
-            terminal
-                .terminal
-                .continuation()
-                .context("Provider sequence exceeds snapshot limit; attach after it completes")?,
-        );
-        Ok(Some(bytes))
+        bytes
     }
 
     /// The retained pipe tail a fresh viewer's stream begins with.
@@ -104,6 +116,10 @@ impl Output {
             Self::Terminal(terminal) => terminal.terminal.at_ground(),
             Self::Pipes { .. } => true,
         }
+    }
+
+    pub fn program_status(&self) -> Option<&crate::program_status::Records> {
+        self.terminal().map(ghostty_vt::Terminal::program_status)
     }
 
     /// Feed the program's output to the retained state. Returns the replies

@@ -4,7 +4,7 @@ use base64::prelude::*;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use loopflow::agent::{run_agent, AgentConfig, AgentProcessResult, ProcessConfig};
+use loopflow::agent::{run_agent, AgentConfig, AgentFailure, AgentProcessResult, ProcessConfig};
 use loopflow::error::CoreError;
 use loopflow::profile::{ProviderRoute, RouteScope};
 use loopflow::provider_auth::Provider;
@@ -184,6 +184,90 @@ fn launch_captures_stderr() {
     )]);
     let result = run_agent(&base_launch(), &base_process()).expect("launch");
     assert!(result.stderr.contains("error"));
+}
+
+#[test]
+fn model_unavailable_result_falls_through_or_stops_without_spending_quota() {
+    for (case, fallbacks, expected_launches, stop) in [
+        ("fallback", vec!["claude:opus"], "fable\nopus\n", None),
+        (
+            "pinned",
+            vec![],
+            "fable\n",
+            Some("No fallback remains. Change an `agent` or `-a` pin"),
+        ),
+        (
+            "exhausted",
+            vec!["claude:opus"],
+            "fable\nopus\n",
+            Some("Nothing is left in its order after claude:fable, claude:opus"),
+        ),
+    ] {
+        let home = TempDir::new().unwrap();
+        let script = claude_script(
+            r#"model = sys.argv[sys.argv.index('--model') + 1]
+with open(os.environ['LF_TEST_LAUNCHES'], 'a') as launches:
+    launches.write(model + '\n')
+failed = model == 'fable' or os.environ['LF_TEST_CASE'] == 'exhausted'
+text = 'Fable 5 is currently unavailable. Switch to another model.' if failed else 'finished on ' + model"#,
+        );
+        let _env = EnvGuard::with_lf_home(&[("claude", &script)], home.path());
+        let _lf = branch_lf();
+        let _directory = support::InDirectory::enter(home.path());
+        support::register_claude_login(home.path(), "fixture");
+        let launches = home.path().join("launches");
+        let launch = AgentConfig {
+            agent: Some("claude:fable".into()),
+            fallback_agents: fallbacks.into_iter().map(str::to_owned).collect(),
+            cwd: Some(home.path().to_path_buf()),
+            env: BTreeMap::from([
+                ("LF_TEST_LAUNCHES".into(), launches.display().to_string()),
+                ("LF_TEST_CASE".into(), case.into()),
+            ]),
+            ..base_launch()
+        };
+        let result = run_agent(
+            &launch,
+            &ProcessConfig {
+                wait_for_capacity: true,
+                ..base_process()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(launches).unwrap(),
+            expected_launches
+        );
+        let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+        let reason: String = db
+            .query_row(
+                "SELECT reason FROM agent_limit_recoveries ORDER BY rowid DESC LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        if let Some(stop) = stop {
+            assert_ne!(result.exit_code, 0);
+            assert_eq!(result.failure, Some(AgentFailure::ModelUnavailable));
+            assert!(reason.contains(stop), "{case}: {reason}");
+        } else {
+            assert_eq!(result.exit_code, 0, "{}", result.stderr);
+            assert_eq!(result.stdout, "finished on opus");
+            assert!(reason.contains("continuing on claude:opus"), "{reason}");
+        }
+        let store =
+            loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+        assert!(store
+            .provider_account_limits(Some("claude"))
+            .unwrap()
+            .is_empty());
+        let account = store
+            .get_provider_account("claude", &ProviderAccountId::parse("fixture").unwrap())
+            .unwrap()
+            .unwrap();
+        assert_eq!(account.cooldown_until, None);
+        assert_eq!(account.cooldown_reason, None);
+    }
 }
 
 #[test]
@@ -647,6 +731,8 @@ fn direct_native_codex_launch_preserves_account_policy_and_literal_input() {
         cwd: Some(home.path().into()),
         skip_permissions: true,
         provider_account_id: Some(ProviderAccountId::parse("fixture").unwrap()),
+        // A bare Codex runs as plain `codex`; the app-server belongs to a held Session.
+        holder: loopflow::session::Holder::Owner,
         ..Default::default()
     };
     let result = run_agent(&launch, &ProcessConfig::default()).unwrap();

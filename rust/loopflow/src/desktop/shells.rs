@@ -2,7 +2,7 @@
 //! The shared transport owns the PTY and SSH stream; Session viewers alone hold
 //! Task checkouts. This runtime needs no GUI on either execution Machine.
 mod store;
-pub(crate) use store::{jobs_settled, owners, request_retirement};
+pub(crate) use store::{jobs_settled, owners};
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -11,11 +11,6 @@ use anyhow::{anyhow, ensure, Result};
 use clap::Args;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
-
-use crate::durable::TaskId;
-use crate::id::LfProcessId;
-use crate::store::sqlite::SqliteStore;
-use crate::store::StoreResult;
 
 /// Private Desktop launch inputs, also carried verbatim across Machine routing.
 #[derive(Args, Debug)]
@@ -101,7 +96,7 @@ pub fn run(args: &ShellArgs) -> Result<()> {
             "Shell ended. Create a new shell explicitly; its commands will not be replayed"
         );
     }
-    crate::transport::attach(&owner, None, None, None)
+    crate::transport::attach(&crate::transport::Host::Owner(owner), None, None, None)
 }
 
 /// Desktop-supplied startup code and its relative UTF-8 resources. Carried as JSON
@@ -152,51 +147,4 @@ fn shell_command(id: &str, initial: &[String], bootstrap: Option<&str>) -> Resul
     ];
     argv.extend_from_slice(initial);
     Ok(argv)
-}
-
-/// Run inside the viewer observation's transaction, including brief return/leave.
-pub(crate) fn cancel_retirement(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<()> {
-    conn.execute(
-        "UPDATE desktop_shells SET close_requested=0 WHERE task_id=?1 AND close_requested=2",
-        [task.as_str()],
-    )?;
-    Ok(())
-}
-
-/// None is an ordinary Session owner; false keeps a Desktop shell alive.
-pub(crate) fn close_allowed(
-    store: &SqliteStore,
-    owner: &LfProcessId,
-    input_queued: bool,
-) -> Result<Option<bool>> {
-    let Some(close) = store.shell_close_request(owner)? else {
-        return Ok(None);
-    };
-    let requested = match close {
-        1 => true,
-        2 => crate::ops::task::retirement::owner_retiring(store, owner)?,
-        _ => false,
-    };
-    Ok(Some(
-        requested
-            && !input_queued
-            && (!store.shell_holds_work(owner)? || store.owner_retention(owner)?.is_none()),
-    ))
-}
-
-/// Whether work inside shell `owner` could receive typed input. An idle shell
-/// clears any draft it recorded earlier; an unreadable store keeps recording.
-pub(crate) fn holds_input(owner: &LfProcessId) -> bool {
-    let holds = crate::journal::process_ledger().and_then(|store| {
-        let holds = store.shell_holds_work(owner)?;
-        if !holds {
-            store.clear_owner_input(owner)?;
-        }
-        Ok(holds)
-    });
-    holds
-        .inspect_err(
-            |error| tracing::warn!(%error, %owner, "cannot judge shell work; retaining input"),
-        )
-        .unwrap_or(true)
 }

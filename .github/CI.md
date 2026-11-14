@@ -3,20 +3,37 @@
 ## Scratch, cancellation and macOS path filters
 
 Publish checkpoints with working notes in `scratch/`; hosted CI defers the full
-matrix until scratch is clear. `lf pr submit`, `lf land`, and `lf pr land`
-clear committed scratch additions before pushing a landing candidate. Scratch-free PRs, including
+matrix until scratch is clear. Gate turns the checkpoint into a candidate
+before it reviews (commit, sync, `lf scratch clear`, `lf pr publish`), so the
+matrix runs while it reads the diff. [Gate](../.lf/skills/gate.md) holds the
+steps and where the notes go.
+
+`lf pr submit`, `lf land`, and `lf pr land` clear committed scratch additions
+too; after gate they find none. Scratch-free PRs, including
 small changes and Dependabot updates, run the full test matrix in parallel.
-Implement/compress only build changed code and run its focused test. Gate owns
-affected suites and automated acceptance once; see the verification cadence in
-[AGENTS.md](../AGENTS.md#when-to-run-what). Scratch keeps one check-result line.
+Implement/compress only build changed code and run its focused test. Gate names
+the few tests that matter most for the change and reads their result, and the
+suites', from CI for the head it pushed; see the verification cadence in
+[AGENTS.md](../AGENTS.md#when-to-run-what). The PR body keeps one check-result line.
 Required checks run unattended; defer unavailable checks to capable CI and
 leave people's judgment to demo/review. Neither blocks earlier Graph steps.
 
 For checkpoint PRs, `scratch-clear` reports deferred tests and `tests-result`
-and the matrix jobs skip. That is not a passing test result. The required merge
+and the matrix jobs skip. That is not a passing test result, though
+`lf pr checks` exits 0 for it: read the lines. The required merge
 queue always rejects scratch artifacts and runs the Linux suite before merging.
 Missing scratch, classifier failures, and unexpected skipped candidate jobs
 still fail the aggregate. Restoring scratch on a later PR head defers its tests.
+
+After the final `lf sync`, run `lf scratch clear` and check that `scratch/`
+contains only `.gitkeep` before publishing or arming (cached PR copy is consumed
+by publication). A sync can restore notes retained during conflict resolution
+after an earlier cleanup. Check the final tree with the
+same predicate as CI:
+
+```bash
+test -d scratch && test -z "$(find scratch -mindepth 1 ! -path 'scratch/.gitkeep' -print)"
+```
 
 The repository owns the `scratch-clear` classifier; the native CLI does not exempt
 a failing required check by name. Delivery cleanup preserves existing scratch
@@ -32,8 +49,8 @@ queue, and only where its changes reach them (`scripts/macos_inputs.py`):
 
 | Job | Runs for |
 |-----|----------|
-| `loopflow-ui-test` | `swift/` (app, `project.yml`, GhosttyKit patches), its build scripts, Rust `build.rs` and libghostty-vt pin/patches |
-| `swift-test` | the above, `tests/fixtures/dto/`, the scripts and Python check it runs |
+| `loopflow-ui-test` | `swift/` (Desktop and iOS), its build scripts, DTO fixtures, server protocol and Read/Write types, Rust `build.rs` and libghostty-vt pin/patches |
+| `swift-test` | Swift sources, shared DTO fixtures and server types, Desktop build inputs, the scripts and Python check it runs |
 | `macos-process-test` | Rust files containing `target_os = "macos"`, data clones, store copy, OS process identity, `lf install` |
 
 CI changes, the classifier, an unknown diff or a failed classifier run all
@@ -45,6 +62,12 @@ main. Green moves `last-green`; red bisects the batch by dispatching the same
 workflow on first-parent commits and opens an unarmed revert PR for the culprit.
 
 ## Rust and Swift caches
+
+Every job that builds Rust or replays the migration catalog needs a full
+checkout (`fetch-depth: 0`) and `origin/main`. This includes lint, architecture,
+installation and native app builds. Without merge history, slug migrations
+fall back to name order, which can apply a trigger before its columns exist.
+When adding one of these jobs, follow `rust-build`'s checkout and history fetch.
 
 CI Rust cache keys include the root workspace's build profiles, which the cache
 action's member-manifest discovery omits. Profile changes get fresh dependency
@@ -103,7 +126,7 @@ Rust partitions wait for one shared build; the other suites run independently.
 | `task-installation` | ubuntu-latest | `uv run python scripts/test_task_installation.py` |
 | `swift-test` | macos-26 | app build, headless model/view tests, launch-and-quit check, boundary check |
 | `macos-process-test` | macos-15, macos-26 | deleted-executable and exact process-authority regression |
-| `loopflow-ui-test` | macos-26 | xcodegen + app/test-runner compile |
+| `loopflow-ui-test` | macos-26 | Desktop app/test-runner compile; native iOS model and UI tests on a disposable Simulator |
 
 Candidate and merge-group jobs must all pass for `tests-result` to pass; a
 macOS job may skip only when the classifier says it is unreached or outside

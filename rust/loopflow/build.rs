@@ -13,6 +13,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use sha2::{Digest, Sha256};
+
 // Identities are shared with the runtime; ordering runs only here (and in the
 // runtime's tests).
 #[path = "src/store/migration_build.rs"]
@@ -157,6 +159,27 @@ fn emit_migration_catalog(
         migration_schema::product_schema(&connection).expect("project catalog schema reference");
     let json = serde_json::to_vec(&*schema).expect("serialize catalog schema reference");
     fs::write(out_dir.join("canonical_schema.json"), json).expect("write catalog schema reference");
+    // Test processes each get an independent copy, including nextest's one-test
+    // processes. Replaying the catalog here keeps that cost out of every fixture.
+    let fixture = out_dir.join("test-store.db");
+    let _ = fs::remove_file(&fixture);
+    for (index, entry) in catalog.iter().enumerate() {
+        let sql = fs::read(&entry.path).expect("read fixture migration");
+        let checksum = format!("{:x}", Sha256::digest(&sql));
+        connection
+            .execute(
+                "INSERT INTO schema_migrations(version,applied_at,checksum) VALUES(?1,?2,?3)",
+                rusqlite::params![entry.version, index as i64, checksum],
+            )
+            .expect("record fixture migration");
+    }
+    connection
+        .execute(
+            "VACUUM INTO ?1",
+            [fixture.to_str().expect("UTF-8 build directory")],
+        )
+        .expect("write test store image");
+
     catalog
         .into_iter()
         .filter(|entry| !entry.merged)

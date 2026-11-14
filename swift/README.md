@@ -116,8 +116,8 @@ opens the exact conversation, including repository and Wave conversations withou
 first, then the bounded warm set reconnects with at most two preparations at once.
 Fresh completion and recorded Machine/checkout evidence must arrive before
 background retention. Close removes warm intent; refresh does not reopen it, and a
-deliberate selection does. Completed Tasks release on departure through the
-shared two-minute/fifteen-minute lifecycle.
+deliberate selection does. Completed Tasks become eligible for cleanup after
+fifteen minutes without a Session viewer, once live work settles.
 
 Automatic opening creates the primary Session if absent and starts its native
 conversation if it has no history. Existing history resumes on the same Session.
@@ -1248,15 +1248,29 @@ local prompt.
 Keep a Task Session viewer open to retain its worktree. Desktop shells accompany
 Task Sessions and add no separate hold. Switching Work, closing the window or
 quitting explicitly releases Desktop's viewers while execution stays on its
-owner. With no connected viewer, a completed Task's checkout and Desktop shells
-become eligible for cleanup after fifteen minutes. Installation's separate minute
-cleanup schedule normally starts deletion in 15–16 minutes while awake. Failed
-cleanup retries with backoff; a pending shell close continues on a later pass.
-Requested work, drafts and
-pending requests delay cleanup without restarting that clock; eligible idle
-agents follow the two-minute policy. LF's remote connection detects silent loss
-with viewer heartbeats. Reconnecting before cleanup cancels it; a longer outage
-can leave a completed Task without its checkout. Failed Quit delivery follows
-that same bounded absence policy.
+owner. With no connected viewer, a completed Task's conversations, checkout and
+Desktop shells become eligible for cleanup after fifteen minutes. The installed
+cleanup schedule runs once a minute, so deletion normally starts in 15–16 minutes
+while awake. Failed cleanup retries with backoff; a pending shell close continues
+on a later pass.
+
+Requested active work, pending requests and running Graphs delay cleanup without
+restarting that clock. Unsent drafts do not delay cleanup. LF's remote connection
+detects silent loss with viewer heartbeats. Reconnecting before cleanup cancels
+it; a longer outage can leave a completed Task without its checkout. Failed Quit
+delivery follows that same bounded absence policy.
 Conversation history remains; a deleted checkout is not recreated. See the
 [shared transport contract](../rust/loopflow/src/transport/README.md#task-shells-and-completed-workspaces).
+
+## iOS client
+
+```sh
+xcodegen generate --spec swift/ios.yml
+open swift/LoopflowMobile.xcodeproj
+```
+
+The **LoopflowiOS** scheme opens an explicitly offline Task → Session fixture.
+Disable its `--fixture` argument to connect a Machine over host Tailscale.
+[Native client and focused input tests](LoopflowiOS/README.md) describe its build,
+renderer choice and remaining device/live-integration proof. Desktop's project
+and package remain unchanged.

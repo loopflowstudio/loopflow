@@ -33,7 +33,6 @@ mod subscription_events;
 mod linear_team_checks;
 mod machine_records;
 mod metrics;
-mod native_input;
 pub(crate) mod planning_changes;
 pub(crate) mod planning_export;
 pub(crate) mod planning_order;
@@ -61,7 +60,9 @@ mod task_comments;
 mod task_content;
 mod task_details;
 mod task_retirement;
+mod transport;
 pub(crate) use task_retirement::{TaskRetirement, ViewerHold, WORKSPACE_GRACE};
+pub(crate) use transport::Transport;
 pub(crate) mod task_history;
 pub(crate) mod task_state_delivery;
 pub(crate) mod task_work;
@@ -72,6 +73,7 @@ pub use children::ClosedTaskPage;
 pub(crate) use graph_inventory::{entry_of, AgentLimitRecovery, GraphExecutionFacts};
 pub use project_selection::{ProjectActivation, ProjectReadiness, ProjectReadinessState};
 pub use revisions::StoreRevisions;
+pub(crate) use session_events::CurrentConversation;
 pub use task_details::TaskDetailFacts;
 pub(crate) use task_work::TaskShipping;
 
@@ -79,10 +81,6 @@ pub(crate) use task_work::TaskShipping;
 /// default while every process opens and records its first receipt. Durable
 /// writes wait for that bounded local contention instead of dropping evidence.
 pub(crate) const SQLITE_WRITE_BUSY_TIMEOUT: Duration = Duration::from_secs(15);
-
-/// A provider hook at a turn or tool boundary waits this long for a locked
-/// store, then treats it as unavailable: a busy install never stalls a turn.
-pub(crate) const HOOK_BUSY_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Bytes of write-ahead log kept on disk after a checkpoint resets it.
 const WAL_SIZE_LIMIT_BYTES: i64 = 64 * 1024 * 1024;
@@ -156,6 +154,18 @@ fn waves_in(conn: &Connection, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
 }
 
 impl SqliteStore {
+    /// Refresh `sqlite_stat1` for tables whose size changed enough to move a
+    /// plan. Bounded by `analysis_limit`, it holds the write lock under a
+    /// second on a store of 770 MB. The Machine server runs it at start and
+    /// about once a day; nothing else does.
+    pub(crate) fn refresh_statistics(&self) -> StoreResult<()> {
+        self.conn
+            .lock()
+            .expect("store mutex poisoned")
+            .execute_batch("PRAGMA analysis_limit=400; PRAGMA optimize=0x10002;")?;
+        Ok(())
+    }
+
     pub(crate) fn home_dir(&self) -> StoreResult<PathBuf> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         home_dir_in(&conn)
@@ -210,6 +220,13 @@ pub(crate) struct TaskWorktreeOwnership {
     pub path: PathBuf,
     pub completed: bool,
     pub unfinished: bool,
+}
+
+/// Copy only into a fresh fixture; reopening must retain its writes and schema.
+#[cfg(test)]
+fn copy_test_store(path: &Path) -> StoreResult<()> {
+    crate::test_support::test_database::copy(path)
+        .map_err(|error| StoreError::InvalidData(format!("copy test store: {error}")))
 }
 
 /// Open a registry read-only without migrating it.
@@ -519,13 +536,6 @@ impl SqliteStore {
         )
     }
 
-    /// Open for a provider hook at a turn or tool boundary. It waits at most
-    /// [`HOOK_BUSY_TIMEOUT`] for a locked store; the caller treats any error as
-    /// a recording gap and lets the turn continue.
-    pub(crate) fn open_for_hook(path: &Path) -> StoreResult<Self> {
-        Self::open(path, super::FrontierAdvance::Forbidden, HOOK_BUSY_TIMEOUT)
-    }
-
     /// Revalidate a connection after a child executable may have upgraded it.
     pub(crate) fn validate_current_schema(&self) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -556,6 +566,8 @@ impl SqliteStore {
                 StoreError::InvalidData(format!("failed to create db dir: {error}"))
             })?;
         }
+        #[cfg(test)]
+        copy_test_store(path)?;
         let mut conn = Connection::open(path)?;
         crate::performance::observe_sqlite(&conn);
         configure_write_connection(&mut conn, path, SQLITE_WRITE_BUSY_TIMEOUT)?;
@@ -607,6 +619,10 @@ impl SqliteStore {
             })?;
         }
 
+        #[cfg(test)]
+        if !existing_database {
+            copy_test_store(path)?;
+        }
         let mut conn = Connection::open(path)?;
         crate::performance::observe_sqlite(&conn);
         // Install the handler before journal-mode negotiation: that pragma can
@@ -1042,15 +1058,15 @@ impl SqliteStore {
     // -- Provider accounts -----------------------------------------------------
 
     pub fn upsert_provider_account(&self, account: &ProviderAccount) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        tx.execute("INSERT INTO provider_accounts(provider,account_id,home,credential_state,utilization_percent,cooldown_until,cooldown_reason,last_selected_at,created_at,updated_at,observed_email,observed_subject,observed_plan,observed_credential_digest)
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        // The preferences file is written before the row, outside any write
+        // transaction: a rejected preference writes neither.
+        crate::config::placement::write_account_preferences(&conn, account)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+        conn.execute("INSERT INTO provider_accounts(provider,account_id,home,credential_state,utilization_percent,cooldown_until,cooldown_reason,last_selected_at,created_at,updated_at,observed_email,observed_subject,observed_plan,observed_credential_digest)
             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)
             ON CONFLICT(provider,account_id) DO UPDATE SET home=excluded.home,credential_state=excluded.credential_state,utilization_percent=excluded.utilization_percent,cooldown_until=excluded.cooldown_until,cooldown_reason=excluded.cooldown_reason,last_selected_at=excluded.last_selected_at,updated_at=excluded.updated_at,observed_email=excluded.observed_email,observed_subject=excluded.observed_subject,observed_plan=excluded.observed_plan,observed_credential_digest=excluded.observed_credential_digest",
             params![account.provider,account.account_id.as_str(),account.home.as_ref().map(|path| path.to_string_lossy().to_string()),account.credential_state.as_str(),account.utilization_percent,account.cooldown_until,account.cooldown_reason,account.last_selected_at,account.created_at,account.updated_at,account.observed_email,account.observed_subject,account.observed_plan,account.observed_credential_digest])?;
-        crate::config::placement::write_account_preferences(&tx, account)
-            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-        tx.commit()?;
         Ok(())
     }
 
@@ -1987,8 +2003,17 @@ impl SqliteStore {
     /// writer holds the lock only briefly; a row an interrupted exit leaves is
     /// forgotten by the retention prune.
     pub fn record_process(&self, process: &crate::process::LfProcess) -> StoreResult<()> {
+        self.record_hosted_process(process, None)
+    }
+
+    /// Record a Process start or exit; a start inside a held terminal names it.
+    fn record_hosted_process(
+        &self,
+        process: &crate::process::LfProcess,
+        held_terminal: Option<&crate::id::TerminalId>,
+    ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        record_process_in(&conn, process)?;
+        record_process_in(&conn, process, held_terminal)?;
         if process.completed_at.is_some() {
             let forget = |scope: &str| {
                 conn.execute(
@@ -2012,6 +2037,7 @@ impl SqliteStore {
     pub(crate) fn record_process_within(
         &self,
         process: &crate::process::LfProcess,
+        held_terminal: Option<&crate::id::TerminalId>,
         wait: Duration,
     ) -> StoreResult<()> {
         let previous: u32 = {
@@ -2020,7 +2046,7 @@ impl SqliteStore {
             conn.busy_timeout(wait)?;
             previous
         };
-        let result = self.record_process(process);
+        let result = self.record_hosted_process(process, held_terminal);
         self.conn
             .lock()
             .expect("store mutex poisoned")
@@ -2036,22 +2062,25 @@ impl SqliteStore {
 }
 
 /// A start record never overwrites an existing row; a terminal record completes
-/// the row it started.
+/// the row it started. `held_terminal` is the terminal a held lf process runs
+/// in, so rules scoped to that terminal find the work started inside it.
 pub(super) fn record_process_in(
     conn: &rusqlite::Connection,
     process: &crate::process::LfProcess,
+    held_terminal: Option<&crate::id::TerminalId>,
 ) -> StoreResult<()> {
     conn.execute(
         "INSERT INTO processes(id,trace_id,parent_lf_process_id,command,repo,cwd,started_at,
-            via_agent,caller_session_id,caller_agent_process_id,completed_at,outcome,exit_code,signal,error,pid,os_started_at)
-         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)
+            via_agent,caller_session_id,caller_agent_process_id,completed_at,outcome,exit_code,signal,error,pid,os_started_at,
+            held_terminal_id)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)
          ON CONFLICT(id) DO UPDATE SET completed_at=excluded.completed_at,
             outcome=excluded.outcome,exit_code=excluded.exit_code,signal=excluded.signal,error=excluded.error
          WHERE processes.completed_at IS NULL AND excluded.completed_at IS NOT NULL",
         params![process.id,process.trace_id,process.parent_lf_process_id,process.command,process.repo,process.cwd,
             process.started_at,process.via_agent,process.caller_session_id,process.caller_agent_process_id,
             process.completed_at,process.outcome,process.exit_code,process.signal,process.error,process.pid,
-            process.os_started_at],
+            process.os_started_at,held_terminal],
     )?;
     Ok(())
 }
@@ -2068,6 +2097,96 @@ mod frontier_tests {
     use crate::store::FrontierAdvance::{self, Authorized, Forbidden};
     use crate::work::wave::Wave;
     use std::path::{Path, PathBuf};
+
+    #[test]
+    fn concurrent_copies_share_one_initialized_machine() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("store.db");
+        let start = std::sync::Barrier::new(8);
+        let machines = std::thread::scope(|scope| {
+            let workers: Vec<_> = (0..8)
+                .map(|_| {
+                    scope.spawn(|| {
+                        start.wait();
+                        super::copy_test_store(&path).unwrap();
+                        rusqlite::Connection::open(&path)
+                            .unwrap()
+                            .query_row("SELECT id FROM machines WHERE is_local=1", [], |row| {
+                                row.get::<_, String>(0)
+                            })
+                            .unwrap()
+                    })
+                })
+                .collect();
+            workers
+                .into_iter()
+                .map(|worker| worker.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        assert!(machines.iter().all(|machine| machine == &machines[0]));
+    }
+
+    #[test]
+    fn test_store_image_matches_migrations_and_copies_are_independent() {
+        let migrated = rusqlite::Connection::open_in_memory().unwrap();
+        crate::store::migrations::apply_sqlite(&migrated).unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let first = directory.path().join("first.db");
+        let second = directory.path().join("second.db");
+        super::copy_test_store(&first).unwrap();
+        super::copy_test_store(&second).unwrap();
+        let image = rusqlite::Connection::open(&first).unwrap();
+        let schema = crate::store::migration_schema::product_schema(&migrated).unwrap();
+        assert_eq!(
+            *schema,
+            *crate::store::migration_schema::product_schema(&image).unwrap()
+        );
+        for table in schema.iter().filter(|object| object.object_type == "table") {
+            let rows = |conn: &rusqlite::Connection| {
+                let mut query = conn
+                    .prepare(&format!("SELECT * FROM [{}]", table.name))
+                    .unwrap();
+                let columns = query.column_count();
+                let mut rows: Vec<_> = query
+                    .query_map([], |row| {
+                        (if table.name == "machines" { 3 } else { 0 }..columns)
+                            .map(|column| row.get::<_, rusqlite::types::Value>(column))
+                            .collect::<rusqlite::Result<Vec<_>>>()
+                    })
+                    .unwrap()
+                    .map(|row| format!("{:?}", row.unwrap()))
+                    .collect();
+                rows.sort();
+                rows
+            };
+            assert_eq!(rows(&migrated), rows(&image), "{}", table.name);
+        }
+        let machine = |conn: &rusqlite::Connection| {
+            conn.query_row("SELECT id FROM machines WHERE is_local=1", [], |row| {
+                row.get::<_, String>(0)
+            })
+            .unwrap()
+        };
+        assert_ne!(
+            machine(&image),
+            machine(&rusqlite::Connection::open(&second).unwrap())
+        );
+        image
+            .execute_batch("CREATE TABLE fixture_write(value); INSERT INTO fixture_write VALUES(1)")
+            .unwrap();
+        super::copy_test_store(&first).unwrap();
+        assert_eq!(
+            image
+                .query_row("SELECT value FROM fixture_write", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert!(rusqlite::Connection::open(second)
+            .unwrap()
+            .prepare("SELECT * FROM fixture_write")
+            .is_err());
+    }
 
     #[test]
     fn observation_reads_identity_without_execution_schema() {

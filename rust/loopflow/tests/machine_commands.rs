@@ -18,6 +18,12 @@ struct Machines {
 
 impl Machines {
     fn new() -> Self {
+        let fixture = Self::uninitialized();
+        support::seed_store(&fixture.root.path().join("local"));
+        fixture
+    }
+
+    fn uninitialized() -> Self {
         let root = tempfile::tempdir().unwrap();
         let home = root.path().join("local");
         let remote = root.path().join("remote");
@@ -450,6 +456,26 @@ fn add_alias_rename_connect_and_remove_preserve_identity() {
 }
 
 #[test]
+fn status_reads_the_same_build_as_the_same_version() {
+    let fixture = Machines::new();
+    // `lf --version` prints the build version with its label.
+    fixture.remote(
+        loopflow::build_info::VERSION_LINE,
+        "home_11111111111111111111111111111111",
+    );
+    assert_success(&fixture.run(&["machine", "add", "mini"]));
+    let output = fixture.run(&["machine", "status", "mini"]);
+    assert_success(&output);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("versions differ"), "{stderr}");
+    let statuses = fixture.json(&["machine", "status", "mini", "--json"]);
+    assert_eq!(
+        statuses[0]["remote_version"],
+        loopflow::build_info::BUILD_VERSION
+    );
+}
+
+#[test]
 fn status_reports_version_mismatch_and_unreachable_without_prompting() {
     let fixture = Machines::new();
     fixture.remote("0.0.1", "home_11111111111111111111111111111111");
@@ -486,7 +512,7 @@ fn status_reports_version_mismatch_and_unreachable_without_prompting() {
 
 #[test]
 fn explicit_machine_dispatch_requires_registration_but_does_not_preflight_identity() {
-    let fixture = Machines::new();
+    let fixture = Machines::uninitialized();
     let unregistered = fixture.run(&["--machine", "mini", "session", "list"]);
     assert!(!unregistered.status.success());
     assert!(String::from_utf8_lossy(&unregistered.stderr).contains("not added"));
@@ -871,6 +897,7 @@ fn remote_command_exit_is_retained_in_local_process_history() {
 fn machine_add_on_the_remote_updates_only_its_registry() {
     let fixture = Machines::new();
     let remote = fixture.root.path().join("remote");
+    support::seed_store(&remote.join("store"));
     executable(
         &remote.join(".local/bin/lf"),
         &format!(
@@ -915,6 +942,7 @@ fn machine_add_on_the_remote_updates_only_its_registry() {
 fn preview_machines() -> Machines {
     let fixture = Machines::new();
     let remote = fixture.root.path().join("remote");
+    support::seed_store(&remote.join("store"));
     executable(
         &remote.join(".local/bin/lf"),
         &format!(
@@ -1211,6 +1239,158 @@ fn remote_preview_uses_the_same_work_for_explicit_and_inferred_task_selection() 
     assert_eq!(checkpoint_bytes(&local_db), local_before);
     assert_eq!(checkpoint_bytes(&remote_db), remote_before);
     assert!(!fixture.root.path().join("forbidden-effect").exists());
+}
+
+#[test]
+fn task_run_open_resolves_remote_selectors_before_opening_locally() {
+    let fixture = Machines::new();
+    assert_success(&fixture.run(&["machine", "add", "mini"]));
+    let home = fixture.root.path().join("local");
+    let here = loopflow_test_support::TestRepo::new();
+    let selected = loopflow_test_support::TestRepo::new();
+    for repo in [&here, &selected] {
+        support::bind_task_planning(repo);
+        repo.create_branch("opening");
+    }
+    let local = support::register_task_without_pr(
+        &home,
+        &here.path().canonicalize().unwrap(),
+        "opening",
+        &here.head_sha(),
+    );
+    let target = support::register_task_without_pr(
+        &home,
+        &selected.path().canonicalize().unwrap(),
+        "opening",
+        &selected.head_sha(),
+    );
+    assert_ne!(local.task.id, target.task.id);
+    // Both repositories call their Task INF-123. The local cwd selects the
+    // other Task; the remote response must carry the exact identity back.
+    let db = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
+    db.execute(
+        "INSERT INTO agent_sessions(
+            id,title,title_source,created_at,input_published,interactive,task_id,wave_id,cwd,provider
+         ) VALUES('remote-selected-primary','Task conversation','generated',unixepoch(),1,1,?1,?2,?3,'claude')",
+        rusqlite::params![
+            target.task.id.as_str(),
+            target.task.wave_id.as_ref().unwrap().as_str(),
+            selected.path().to_str().unwrap(),
+        ],
+    )
+    .unwrap();
+    db.execute(
+        "UPDATE tasks SET primary_session_id='remote-selected-primary' WHERE id=?1",
+        [target.task.id.as_str()],
+    )
+    .unwrap();
+    let resolution = fixture
+        .command(&["--task", target.task.id.as_str(), "--explain", "--json"])
+        .current_dir(selected.path())
+        .output()
+        .unwrap();
+    assert_success(&resolution);
+    let resolution: Value = serde_json::from_slice(&resolution.stdout).unwrap();
+    assert_eq!(resolution["task"]["value"], target.task.id.as_str());
+    let remote = fixture.root.path().join("remote");
+    fs::write(
+        remote.join("selection.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "resolution": resolution, "action": null, "impediments": [], "unavailable": []
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    // Simulate the remote command at the SSH boundary. These paths and
+    // worktree names deliberately do not exist on the presentation Machine.
+    executable(
+        &remote.join(".local/bin/lf"),
+        &format!(
+            r#"#!/bin/sh
+case "$1 $2" in
+  '--version ') echo 'lf {version}'; exit 0;;
+  'machine id') echo 'home_11111111111111111111111111111111'; exit 0;;
+esac
+case " $* " in
+  *' --explain '*)
+    test -e "$HOME/launched" || exit 91
+    test ! -e "$HOME/read-fails" || exit 93
+    cat "$HOME/selection.json";;
+  *' task run '*)
+    touch "$HOME/launched"
+    echo 'Task INF-123 waits at review';;
+  *) exit 92;;
+esac
+"#,
+            version = loopflow::build_info::BUILD_VERSION
+        ),
+    );
+    let attach = home.join("lf-attach");
+    executable(
+        &attach,
+        &format!(
+            r#"#!/bin/sh
+if [ "$1 $2 $3" = 'session resume --start-if-free' ]; then
+  printf '%s\n' "$4" > "$LF_HOME/opened"
+  pwd -P > "$LF_HOME/opened-cwd"
+  exit 0
+fi
+exec '{}' "$@"
+"#,
+            env!("CARGO_BIN_EXE_lf")
+        ),
+    );
+    for selection in [
+        vec!["task", "run", "INF-123", "--open"],
+        vec!["task", "run", "--open"],
+        vec!["task", "run", "--open", "--json"],
+        vec!["task", "run", "--open", "--", "INF-123"],
+        vec!["--cwd", "/remote-only/checkout", "task", "run", "--open"],
+        vec!["--wt", "remote-worktree", "task", "run", "--open"],
+    ] {
+        let mut args = vec!["--machine", "mini", "--repo", "/remote-only/repo"];
+        args.extend(selection);
+        let output = fixture
+            .command(&args)
+            .current_dir(here.path())
+            .env("LF_BIN", &attach)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert_success(&output);
+        assert_eq!(
+            fs::read_to_string(home.join("opened"))
+                .unwrap_or_else(|error| panic!("{args:?}: {error}; {output:?}"))
+                .trim(),
+            "remote-selected-primary"
+        );
+        assert_eq!(
+            fs::read_to_string(home.join("opened-cwd")).unwrap().trim(),
+            selected.path().canonicalize().unwrap().to_str().unwrap()
+        );
+        fs::remove_file(home.join("opened")).unwrap();
+        fs::remove_file(remote.join("launched")).unwrap();
+    }
+    fs::write(remote.join("read-fails"), "").unwrap();
+    let output = fixture
+        .command(&[
+            "--machine",
+            "mini",
+            "--repo",
+            "/remote-only/repo",
+            "task",
+            "run",
+            "--open",
+        ])
+        .current_dir(here.path())
+        .env("LF_BIN", &attach)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(remote.join("launched").exists());
+    assert!(!home.join("opened").exists());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("selection could not be read"));
 }
 
 #[test]
@@ -1650,28 +1830,11 @@ fn task_ownership_never_routes_to_another_persons_machine() {
     let mini = plan.remote.local_machine().unwrap().id;
     // Kim claims on mini, a Machine this laptop also has registered. Her
     // person key, not the Machine, says whose claim it is.
-    let entry = serde_json::json!({
-        "id": format!("own_{}", uuid::Uuid::new_v4().simple()),
-        "task_id": task.as_str(), "kind": "claim", "person": "Kim",
-        "person_key": "kim@example.com",
-        "machine_id": mini.as_str(),
-        "at": time::OffsetDateTime::now_utc().unix_timestamp(),
-    });
-    plan.remote
-        .append_task_comment(
-            &task,
-            &loopflow::work::task::comment::TaskComment {
-                id: uuid::Uuid::new_v4().to_string(),
-                body: format!("Kim claimed this\n\n<!-- loopflow-ownership:{entry} -->"),
-                author: loopflow::work::task::comment::TaskCommentAuthor::Integration,
-                created_at: Some(
-                    time::OffsetDateTime::now_utc()
-                        .format(&time::format_description::well_known::Rfc3339)
-                        .unwrap(),
-                ),
-            },
-        )
-        .unwrap();
+    git(
+        &plan.remote_path,
+        &["config", "user.email", "kim@example.com"],
+    );
+    plan.remote.claim_task(&task).unwrap().unwrap();
     plan.to_local();
     assert_eq!(
         plan.local
@@ -1679,9 +1842,9 @@ fn task_ownership_never_routes_to_another_persons_machine() {
             .unwrap()
             .owner
             .unwrap()
-            .person
+            .person_key
             .as_deref(),
-        Some("Kim")
+        Some("kim@example.com")
     );
     // Someone else's claim stays theirs: no route to mini, no handoff or unassign.
     let route = plan.local.task_execution_route(&task).unwrap();
@@ -2225,6 +2388,70 @@ fn task_move_carries_ownership_graph_and_session() {
 }
 
 #[test]
+fn the_laptop_says_where_a_moved_task_runs_and_prunes_its_checkout() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::cloned(&fixture);
+    let (task, worktree) = placed_task(&plan, "left-task");
+    let identifier = plan.local.task(&task).unwrap().unwrap().identifier;
+    let laptop = |args: &[&str]| {
+        // Prune reads open paths with /usr/sbin/lsof.
+        let output = fixture
+            .command(args)
+            .env(
+                "PATH",
+                format!(
+                    "{}:/usr/bin:/bin:/usr/sbin",
+                    fixture.root.path().join("bin").display()
+                ),
+            )
+            .current_dir(&plan.local_path)
+            .output()
+            .unwrap();
+        assert_success(&output);
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    };
+    // Before the move, the checkout is the unfinished Task's.
+    let kept = laptop(&["wt", "prune", "--dry-run"]);
+    assert!(
+        kept.contains(&format!("Task {identifier} is unfinished")),
+        "{kept}"
+    );
+
+    laptop(&["task", "move", task.as_str(), "--machine", "mini"]);
+
+    let status = laptop(&["task", "status", task.as_str()]);
+    assert!(
+        status.contains(&format!("{identifier}  Runs on mini since ")),
+        "{status}"
+    );
+    let list = laptop(&["task", "list"]);
+    let row = list
+        .lines()
+        .find(|line| line.starts_with(&identifier))
+        .unwrap_or_else(|| panic!("{identifier} missing from:\n{list}"));
+    assert!(row.contains("Runs on mini since "), "{row}");
+    let machines = laptop(&["machine", "list"]);
+    assert!(
+        machines.contains(&format!("  {identifier} since ")),
+        "{machines}"
+    );
+    let listed = fixture.json(&["machine", "list", "mini", "--json"]);
+    assert_eq!(listed[0]["tasks"][0]["id"], task.as_str());
+    assert!(
+        listed[0]["tasks"][0]["since"].as_i64().unwrap() > 0,
+        "{listed}"
+    );
+    // The branch is pushed and mini checked it out, so prune takes the checkout.
+    let pruned = laptop(&["wt", "prune", "--dry-run"]);
+    assert!(
+        pruned.contains(&format!("Task {identifier} runs on mini")),
+        "{pruned}"
+    );
+    laptop(&["wt", "prune"]);
+    assert!(!worktree.exists());
+}
+
+#[test]
 fn resume_task_on_another_machine_moves_the_task_there() {
     let fixture = preview_machines();
     let plan = SharedPlan::cloned(&fixture);
@@ -2346,8 +2573,8 @@ fn task_move_hands_nothing_off_when_mini_cannot_receive_it() {
         assert!(stderr.contains(expected), "{stderr}");
     };
 
-    // Mini answers but has never synced the Task.
-    refused("unknown on this Machine");
+    // Mini answers, but its planning has never heard of the Task.
+    refused("not found in selected Git planning");
     unchanged();
 
     // Mini does not answer at all.
@@ -2359,61 +2586,256 @@ fn task_move_hands_nothing_off_when_mini_cannot_receive_it() {
     unchanged();
 }
 
+/// The move hands the Task off before it stops anything, so nothing here
+/// restarts it meanwhile. When the checkpoint cannot be pushed, it hands the
+/// Task back: this Machine owns it again and its conversation stays open.
 #[test]
-fn task_move_stops_a_live_graph() {
+fn task_move_hands_the_task_back_when_its_checkpoint_cannot_be_pushed() {
     let fixture = preview_machines();
     let plan = SharedPlan::cloned(&fixture);
-    let (task, worktree) = placed_task(&plan, "graph-task");
-    // A route whose step runs until something stops it.
-    fs::create_dir_all(worktree.join(".lf/graphs")).unwrap();
+    let (task, worktree) = placed_task(&plan, "refused-task");
+    let session = claude_conversation(&fixture, &worktree, "0199a213-81c0-7800-8aa1-bbab2a035a58");
+    fs::write(worktree.join("notes.txt"), "uncommitted\n").unwrap();
+    executable(
+        &plan._repos[0].bare_path().join("hooks/pre-receive"),
+        "#!/bin/sh\necho 'push refused' >&2\nexit 1\n",
+    );
+
+    let output = fixture
+        .command(&["task", "move", task.as_str(), "--machine", "mini"])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("push refused"), "{stderr}");
+
+    let local = plan.local.local_machine().unwrap().id;
+    let ownership = plan.local.task_ownership(&task).unwrap();
+    assert_eq!(ownership.owner.unwrap().machine.id, Some(local.clone()));
+    let kinds: Vec<_> = ownership
+        .log
+        .iter()
+        .rev()
+        .take(2)
+        .map(|entry| entry.machine_id.clone())
+        .collect();
+    assert_eq!(
+        kinds,
+        [Some(local), Some(plan.remote.local_machine().unwrap().id)],
+        "the log reads: handed to mini, handed back"
+    );
+    assert!(plan
+        .local
+        .session(&session)
+        .unwrap()
+        .unwrap()
+        .completed_at
+        .is_none());
+    assert!(plan
+        .remote
+        .task(&task)
+        .unwrap()
+        .is_none_or(|task| task.worktree.is_none()));
+}
+
+/// A repository that plans through a personal Git plan on its origin, the
+/// same person on both Machines, and a Task the laptop created in it. Mini
+/// has neither the repository nor a planning key yet.
+fn personal_plan_task(
+    fixture: &Machines,
+) -> (
+    loopflow_test_support::TestRepo,
+    loopflow::durable::TaskId,
+    String,
+) {
     fs::write(
-        worktree.join(".lf/graphs/hold.yaml"),
-        format!("- cmd: task wait {task} --timeout 120s\n- interactive: demo\n"),
+        fixture.root.path().join("remote/.gitconfig"),
+        "[user]\n\temail = test@test.com\n\tname = Jack\n",
     )
     .unwrap();
-    let mut run = fixture
-        .command(&["-b", "task", "run", task.as_str(), "hold"])
-        .current_dir(&worktree)
+    let repo = loopflow_test_support::TestRepo::new();
+    fs::create_dir_all(repo.path().join(".lf")).unwrap();
+    fs::write(
+        repo.path().join(".lf/config.yaml"),
+        "planning:\n  provider: git\n  personal: true\n",
+    )
+    .unwrap();
+    git(repo.path(), &["add", ".lf/config.yaml"]);
+    git(repo.path(), &["commit", "-qm", "plan personally"]);
+    git(repo.path(), &["push", "-q", "origin", "main"]);
+    let created = fixture
+        .command(&["task", "create", "--title", "Cold move", "--json"])
+        .current_dir(repo.path())
         .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .output()
+        .unwrap();
+    assert_success(&created);
+    let created: Value = serde_json::from_slice(&created.stdout).unwrap();
+    let task = loopflow::durable::TaskId::parse(created["task"]["id"].as_str().unwrap()).unwrap();
+    let identifier = created["task"]["identifier"].as_str().unwrap().to_string();
+    (repo, task, identifier)
+}
+
+/// The check clones the repository, takes the laptop's planning key and the
+/// Task, and the move lands. Only planning and origin are shared.
+#[test]
+fn task_move_to_a_mini_without_the_repository_takes_it_in_from_planning() {
+    let fixture = preview_machines();
+    let lf = env!("CARGO_BIN_EXE_lf");
+    let local_home = fixture.root.path().join("local");
+    let remote_home = fixture.root.path().join("remote/store");
+    let _laptop = loopflow_test_support::MachineServer::start(lf, &local_home);
+    let _mini = loopflow_test_support::MachineServer::start(lf, &remote_home);
+    let _ended = EndRecorded(vec![local_home.clone(), remote_home.clone()]);
+    let (repo, task, identifier) = personal_plan_task(&fixture);
+
+    let moved = fixture
+        .command(&["task", "move", &identifier, "--machine", "mini"])
+        .current_dir(repo.path())
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert_success(&moved);
+    let stderr = String::from_utf8_lossy(&moved.stderr);
+    assert!(
+        stderr.contains(&format!("Checked mini: it can take {identifier}")),
+        "{stderr}"
+    );
+    assert!(stderr.contains("Arrived on mini"), "{stderr}");
+
+    let remote =
+        loopflow::store::sqlite::SqliteStore::new(&remote_home.join("loopflow.db")).unwrap();
+    assert!(
+        remote.task(&task).unwrap().is_some(),
+        "mini never took the Task in"
+    );
+    assert_eq!(
+        remote
+            .task_ownership(&task)
+            .unwrap()
+            .owner
+            .unwrap()
+            .machine
+            .id,
+        Some(remote.local_machine().unwrap().id)
+    );
+    let local = loopflow::store::sqlite::SqliteStore::new(&local_home.join("loopflow.db")).unwrap();
+    assert_eq!(
+        remote.planning_user_key().unwrap(),
+        local.planning_user_key().unwrap(),
+        "mini reads another person's plan"
+    );
+    assert!(
+        fixture
+            .root
+            .path()
+            .join("remote/src")
+            .read_dir()
+            .unwrap()
+            .next()
+            .is_some(),
+        "mini has no clone"
+    );
+}
+
+/// The laptop's run approved Auto-Ship, and the approval travels in planning.
+/// Once the Task moved back, mini's recovery must not start shipping it.
+#[test]
+fn mini_starts_nothing_for_a_task_that_moved_back() {
+    let fixture = preview_machines();
+    let lf = env!("CARGO_BIN_EXE_lf");
+    let local_home = fixture.root.path().join("local");
+    let remote_home = fixture.root.path().join("remote/store");
+    let _laptop = loopflow_test_support::MachineServer::start(lf, &local_home);
+    let _mini = loopflow_test_support::MachineServer::start(lf, &remote_home);
+    let _ended = EndRecorded(vec![local_home.clone(), remote_home.clone()]);
+    let (repo, task, identifier) = personal_plan_task(&fixture);
+    fs::create_dir_all(repo.path().join(".lf/graphs")).unwrap();
+    fs::write(
+        repo.path().join(".lf/graphs/hold.yaml"),
+        format!("- cmd: task status {task}\n- cmd: task wait {task} --timeout 120s\n- interactive: demo\n"),
+    )
+    .unwrap();
+    git(repo.path(), &["add", ".lf/graphs/hold.yaml"]);
+    git(repo.path(), &["commit", "-qm", "hold"]);
+    git(repo.path(), &["push", "-q", "origin", "main"]);
+    let mut run = fixture
+        .command(&["-b", "task", "run", &identifier, "hold"])
+        .current_dir(repo.path())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .spawn()
         .unwrap();
-    let local_db = fixture.root.path().join("local/loopflow.db");
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
-    loop {
-        let waiting: i64 = rusqlite::Connection::open(&local_db)
-            .unwrap()
-            .query_row(
-                "SELECT count(*) FROM processes WHERE command LIKE '%\"wait\"%' AND completed_at IS NULL",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap_or(0);
-        if waiting > 0 {
-            break;
-        }
-        if run.try_wait().unwrap().is_some() {
-            let output = run.wait_with_output().unwrap();
-            panic!(
-                "the Task run ended before its step started: {}{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
-        if std::time::Instant::now() >= deadline {
-            let rows: Vec<(Option<String>, Option<i64>)> = rusqlite::Connection::open(&local_db)
-                .unwrap()
-                .prepare("SELECT command,completed_at FROM processes")
-                .unwrap()
-                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-                .unwrap()
-                .collect::<Result<_, _>>()
-                .unwrap();
-            panic!("the step never started: {rows:?}");
-        }
-        std::thread::sleep(std::time::Duration::from_millis(200));
+    assert!(
+        wait_step_live(&local_home.join("loopflow.db")),
+        "the laptop's step never started"
+    );
+    let move_to = |machine: &str| {
+        let output = fixture
+            .command(&["task", "move", &identifier, "--machine", machine])
+            .current_dir(repo.path())
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert_success(&output);
+    };
+    move_to("mini");
+    assert!(
+        exits_within_ten_seconds(&mut run),
+        "the laptop's run outlived the move"
+    );
+    assert!(
+        wait_step_live(&remote_home.join("loopflow.db")),
+        "mini's step never started"
+    );
+    let laptop = gethostname::gethostname().to_string_lossy().into_owned();
+    move_to(laptop.split('.').next().unwrap());
+
+    // Each process read on mini runs its recovery, which restarts ship processes.
+    for _ in 0..5 {
+        let read = fixture
+            .command(&["process", "list", "--json"])
+            .env("HOME", fixture.root.path().join("remote"))
+            .env("LF_HOME", &remote_home)
+            .current_dir(fixture.root.path().join("remote"))
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert_success(&read);
+        std::thread::sleep(std::time::Duration::from_millis(500));
     }
+    let remote_db = remote_home.join("loopflow.db");
+    assert_eq!(live_graph(&remote_db, &task), None, "a Graph runs on mini");
+    let ships: i64 = rusqlite::Connection::open(&remote_db)
+        .unwrap()
+        .query_row(
+            "SELECT count(*) FROM processes WHERE command LIKE '%\"ship\"%'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(ships, 0, "mini started shipping a Task it no longer owns");
+}
+
+/// A Task move that continues a run starts it for real on mini: each home
+/// gets its own server, so no launch installs one.
+#[test]
+fn task_move_leaves_a_live_graph_running_on_mini() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::cloned(&fixture);
+    let lf = env!("CARGO_BIN_EXE_lf");
+    let local_home = fixture.root.path().join("local");
+    let remote_home = fixture.root.path().join("remote/store");
+    let _laptop = loopflow_test_support::MachineServer::start(lf, &local_home);
+    let _mini = loopflow_test_support::MachineServer::start(lf, &remote_home);
+    // Ends the run on mini (and anything left on the laptop), also when an
+    // assertion fails.
+    let _ended = EndRecorded(vec![local_home.clone(), remote_home.clone()]);
+    let (task, worktree) = placed_task(&plan, "graph-task");
+    let mut run = start_hold_run(&fixture, &task, &worktree);
+    let remote_db = remote_home.join("loopflow.db");
     // What the step had written so far travels in the checkpoint.
     fs::write(worktree.join("step-edit.txt"), "halfway\n").unwrap();
 
@@ -2422,15 +2844,19 @@ fn task_move_stops_a_live_graph() {
         .current_dir(&plan.local_path)
         .output()
         .unwrap();
-    let stopped = (0..100).any(|_| {
-        std::thread::sleep(std::time::Duration::from_millis(100));
-        run.try_wait().unwrap().is_some()
-    });
-    if !stopped {
-        run.kill().unwrap();
-    }
+    let stopped = exits_within_ten_seconds(&mut run);
     assert_success(&moved);
     assert!(stopped, "the Task run outlived its stopped Graph");
+    let stderr = String::from_utf8_lossy(&moved.stderr);
+    for stage in [
+        "Checked mini: it can take",
+        "at `",
+        "Committed and pushed",
+        "Arrived on mini",
+        "Running on mini as Graph process",
+    ] {
+        assert!(stderr.contains(stage), "{stage:?} missing from:\n{stderr}");
+    }
     assert_eq!(
         git(
             plan._repos[0].bare_path(),
@@ -2438,18 +2864,241 @@ fn task_move_stops_a_live_graph() {
         ),
         "halfway"
     );
-    // Mini holds the Task on the same run, which reads as stopped there.
-    let (run_start, carrier): (Option<String>, Option<String>) =
-        rusqlite::Connection::open(fixture.root.path().join("remote/store/loopflow.db"))
-            .unwrap()
-            .query_row(
-                "SELECT run_start,lf_process_id FROM task_graphs WHERE task_id=?1",
-                [task.as_str()],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
+
+    // The Graph was running on mini when the move returned.
+    let graph =
+        live_graph(&remote_db, &task).expect("no live Graph on mini when the move returned");
+    // Mini's Graph stands at the step the laptop stopped, not the route's start.
+    let stopped_at = stderr
+        .lines()
+        .find_map(|line| line.strip_prefix("Stopped ")?.split_once(" at `"))
+        .and_then(|(_, step)| step.strip_suffix('`'))
+        .unwrap_or_else(|| panic!("no stopped step in:\n{stderr}"));
+    assert_eq!(stopped_at, format!("task wait {task} --timeout 120s"));
+    let mini_status = fixture
+        .command(&[
+            "--machine",
+            "mini",
+            "task",
+            "status",
+            task.as_str(),
+            "--json",
+        ])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&mini_status);
+    let mini_status: Value = serde_json::from_slice(&mini_status.stdout).unwrap();
+    assert_eq!(
+        mini_status["graph_processes"][0]["step"], stopped_at,
+        "{mini_status}"
+    );
+    // Once mini's `task wait` runs, a restarted route would already have
+    // recorded its `task status` step.
+    assert!(wait_step_live(&remote_db), "mini's step never started");
+    let first_steps: i64 = rusqlite::Connection::open(&remote_db)
+        .unwrap()
+        .query_row(
+            "SELECT count(*) FROM graph_process_steps s JOIN processes p ON p.id=s.lf_process_id
+             WHERE s.graph_lf_process_id=?1 AND p.command LIKE '%\"status\"%'",
+            [&graph],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(first_steps, 0, "mini ran the route's first step again");
+}
+
+/// Back is the same act: the laptop runs `lf task move X --machine laptop`
+/// while mini owns the Task, and mini's Graph continues on the laptop.
+#[test]
+fn a_moved_task_comes_back_with_the_same_command() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::cloned(&fixture);
+    let lf = env!("CARGO_BIN_EXE_lf");
+    let local_home = fixture.root.path().join("local");
+    let remote_home = fixture.root.path().join("remote/store");
+    let _laptop = loopflow_test_support::MachineServer::start(lf, &local_home);
+    let _mini = loopflow_test_support::MachineServer::start(lf, &remote_home);
+    let _ended = EndRecorded(vec![local_home.clone(), remote_home.clone()]);
+    let (task, worktree) = placed_task(&plan, "back-task");
+    let mut run = start_hold_run(&fixture, &task, &worktree);
+    let move_to = |machine: &str| {
+        let output = fixture
+            .command(&["task", "move", task.as_str(), "--machine", machine])
+            .current_dir(&plan.local_path)
+            .output()
             .unwrap();
-    assert!(run_start.is_some());
-    assert!(carrier.is_some());
+        assert_success(&output);
+        String::from_utf8_lossy(&output.stderr).into_owned()
+    };
+    move_to("mini");
+    let stopped = exits_within_ten_seconds(&mut run);
+    assert!(stopped, "the laptop's run outlived the move to mini");
+    assert!(
+        wait_step_live(&remote_home.join("loopflow.db")),
+        "mini's step never started"
+    );
+
+    let laptop = gethostname::gethostname().to_string_lossy().into_owned();
+    let laptop = laptop.split('.').next().unwrap().to_string();
+    let stderr = move_to(&laptop);
+    let step = format!("task wait {task} --timeout 120s");
+    let identifier = plan.local.task(&task).unwrap().unwrap().identifier;
+    for stage in [
+        format!("Stopped {identifier} at `{step}`"),
+        "Committed and pushed".into(),
+        format!("Arrived on {laptop} (this Machine) (Graph at `{step}`)"),
+        format!("Running on {laptop} (this Machine) as Graph process"),
+    ] {
+        assert!(stderr.contains(&stage), "{stage:?} missing from:\n{stderr}");
+    }
+    // Mini's Graph stopped, and the laptop's runs at the step mini was on.
+    assert_eq!(
+        live_graph(&remote_home.join("loopflow.db"), &task),
+        None,
+        "mini's Graph kept running"
+    );
+    let here = fixture
+        .command(&["task", "status", task.as_str(), "--json"])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&here);
+    let here: Value = serde_json::from_slice(&here.stdout).unwrap();
+    assert_eq!(here["graph_processes"][0]["step"], step.as_str(), "{here}");
+    assert!(
+        wait_step_live(&local_home.join("loopflow.db")),
+        "the laptop's step never started again"
+    );
+    // Mini says where the Task went. Forwarded from the laptop, the request
+    // reads the laptop's preferences, which never name the laptop itself.
+    let laptop_id = plan.local.local_machine().unwrap().id;
+    let forwarded = fixture
+        .command(&["--machine", "mini", "task", "status", task.as_str()])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&forwarded);
+    let forwarded = String::from_utf8_lossy(&forwarded.stdout);
+    assert!(
+        forwarded.contains(&format!("{identifier}  Runs on {laptop_id} since ")),
+        "{forwarded}"
+    );
+    // On mini, with the laptop registered there, it reads by that name.
+    executable(
+        &fixture.root.path().join("remote/.local/bin/ssh"),
+        &format!(
+            "#!/bin/sh\nprintf 'lf {}\\n{laptop_id}\\n'\n",
+            loopflow::build_info::BUILD_VERSION
+        ),
+    );
+    let on_mini = |args: &[&str]| {
+        let output = fixture
+            .command(args)
+            .env("HOME", fixture.root.path().join("remote"))
+            .env("LF_HOME", &remote_home)
+            .env(
+                "PATH",
+                format!(
+                    "{}:/usr/bin:/bin",
+                    fixture.root.path().join("remote/.local/bin").display()
+                ),
+            )
+            .current_dir(&plan.remote_path)
+            .output()
+            .unwrap();
+        assert_success(&output);
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    };
+    on_mini(&["machine", "add", "laptop"]);
+    let there = on_mini(&["task", "status", task.as_str()]);
+    assert!(
+        there.contains(&format!("{identifier}  Runs on laptop since ")),
+        "{there}"
+    );
+}
+
+/// Run a route on the laptop whose second step, `task wait`, holds until
+/// something stops it; returns once that step is live.
+fn start_hold_run(
+    fixture: &Machines,
+    task: &loopflow::durable::TaskId,
+    worktree: &Path,
+) -> std::process::Child {
+    fs::create_dir_all(worktree.join(".lf/graphs")).unwrap();
+    fs::write(
+        worktree.join(".lf/graphs/hold.yaml"),
+        // A first step that finishes, so restarting at the stopped step differs
+        // from restarting the route.
+        format!("- cmd: task status {task}\n- cmd: task wait {task} --timeout 120s\n- interactive: demo\n"),
+    )
+    .unwrap();
+    let mut run = fixture
+        .command(&["-b", "task", "run", task.as_str(), "hold"])
+        .current_dir(worktree)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    if !wait_step_live(&fixture.root.path().join("local/loopflow.db")) {
+        let _ = run.kill();
+        let output = run.wait_with_output().unwrap();
+        panic!(
+            "the laptop's step never started: {}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    run
+}
+
+/// Whether `run` exits within ten seconds; kills it if not.
+fn exits_within_ten_seconds(run: &mut std::process::Child) -> bool {
+    let exited = (0..100).any(|_| {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        run.try_wait().unwrap().is_some()
+    });
+    if !exited {
+        run.kill().unwrap();
+    }
+    exited
+}
+
+/// The process id of `task`'s running Graph in `db`.
+fn live_graph(db: &Path, task: &loopflow::durable::TaskId) -> Option<String> {
+    use rusqlite::OptionalExtension;
+    rusqlite::Connection::open(db)
+        .unwrap()
+        .query_row(
+            "SELECT p.id FROM task_graphs g JOIN processes p ON p.id=g.lf_process_id
+             WHERE g.task_id=?1 AND p.completed_at IS NULL",
+            [task.as_str()],
+            |row| row.get(0),
+        )
+        .optional()
+        .unwrap()
+}
+
+/// Whether a `task wait` step recorded in `db` is running within a minute.
+fn wait_step_live(db: &Path) -> bool {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while std::time::Instant::now() < deadline {
+        let waiting: i64 = rusqlite::Connection::open(db)
+            .and_then(|sql| {
+                sql.query_row(
+                    "SELECT count(*) FROM processes WHERE command LIKE '%\"wait\"%' AND completed_at IS NULL",
+                    [],
+                    |row| row.get(0),
+                )
+            })
+            .unwrap_or(0);
+        if waiting > 0 {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+    false
 }
 
 #[test]
@@ -2649,4 +3298,203 @@ fn served_ownership_routes_to_its_writer_and_never_falls_back_locally() {
     assert_eq!(plan.local.task_ownership(&task).unwrap(), local);
     assert!(plan.remote.task_ownership(&task).unwrap().owner.is_some());
     drop(server);
+}
+
+/// The held terminal of `owner` under `home`, as the owner names its socket.
+fn owner_socket(home: &Path, owner: &str) -> std::path::PathBuf {
+    use sha2::Digest;
+    let digest = hex::encode(sha2::Sha256::digest(
+        home.canonicalize().unwrap().as_os_str().as_encoded_bytes(),
+    ));
+    // SAFETY: geteuid has no preconditions.
+    std::path::PathBuf::from(format!(
+        "/tmp/lf-{}-{}/{owner}.sock",
+        unsafe { libc::geteuid() },
+        &digest[..16]
+    ))
+}
+
+/// Watch `owner`'s terminal as a viewer without input control until its
+/// stream shows `line`, returning everything it showed.
+fn watch_for(socket: &Path, line: String) -> std::thread::JoinHandle<String> {
+    use std::io::Read;
+    let mut socket = std::os::unix::net::UnixStream::connect(socket).unwrap();
+    let request = serde_json::json!({"id":1,"kind":"attach","control":false,"replace":true,"rows":24,"cols":80})
+        .to_string();
+    let mut frame = vec![0x11];
+    frame.extend((request.len() as u32).to_be_bytes());
+    frame.extend(request.as_bytes());
+    socket.write_all(&frame).unwrap();
+    socket
+        .set_read_timeout(Some(std::time::Duration::from_secs(1)))
+        .unwrap();
+    std::thread::spawn(move || {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        let mut shown = Vec::new();
+        let mut buffer = Vec::new();
+        let mut chunk = [0; 8192];
+        while std::time::Instant::now() < deadline
+            && !String::from_utf8_lossy(&shown).contains(&line)
+        {
+            match socket.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(read) => buffer.extend_from_slice(&chunk[..read]),
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => continue,
+                Err(error) => panic!("viewer read failed: {error}"),
+            }
+            // Frames: a tag, a big-endian length, the payload. 0x02 and 0x03
+            // carry terminal bytes.
+            while buffer.len() >= 5 {
+                let length = u32::from_be_bytes(buffer[1..5].try_into().unwrap()) as usize;
+                if buffer.len() < 5 + length {
+                    break;
+                }
+                if matches!(buffer[0], 0x02 | 0x03) {
+                    shown.extend_from_slice(&buffer[5..5 + length]);
+                }
+                buffer.drain(..5 + length);
+            }
+        }
+        String::from_utf8_lossy(&shown).into_owned()
+    })
+}
+
+/// Ends what the fixture's homes recorded, also when an assertion fails.
+struct EndRecorded(Vec<std::path::PathBuf>);
+
+impl Drop for EndRecorded {
+    fn drop(&mut self) {
+        for home in &self.0 {
+            loopflow_test_support::end_recorded_processes(
+                home,
+                Path::new(env!("CARGO_BIN_EXE_lf")),
+            );
+        }
+    }
+}
+
+/// The laptop terminal showing the Task's conversation is told where it went
+/// and how to open it there.
+#[test]
+fn the_terminal_showing_a_moved_task_says_how_to_open_it_on_mini() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::cloned(&fixture);
+    let lf = env!("CARGO_BIN_EXE_lf");
+    let local_home = fixture.root.path().join("local");
+    let remote_home = fixture.root.path().join("remote/store");
+    let _laptop = loopflow_test_support::MachineServer::start(lf, &local_home);
+    let _mini = loopflow_test_support::MachineServer::start(lf, &remote_home);
+    let _ended = EndRecorded(vec![local_home.clone(), remote_home]);
+    let (task, worktree) = placed_task(&plan, "viewed-task");
+    let identifier = plan.local.task(&task).unwrap().unwrap().identifier;
+    // A stand-in Claude that waits on its terminal; it never asks about trust.
+    fs::write(
+        local_home.join(".claude.json"),
+        serde_json::json!({"projects": {"/": {"hasTrustDialogAccepted": true}}}).to_string(),
+    )
+    .unwrap();
+    executable(
+        &fixture.root.path().join("bin/claude"),
+        r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+printf '%s\n' "$*" > "$HOME/claude-args"
+stty -echo < /dev/tty
+printf 'ready\r\n'
+read -r answer < /dev/tty
+"#,
+    );
+    let mut owner = fixture
+        .command(&[
+            "session",
+            "serve",
+            "--terminal",
+            "--",
+            lf,
+            "-i",
+            "-a",
+            "claude",
+            ":",
+            "keep going",
+        ])
+        .current_dir(&worktree)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::from(
+            fs::File::create(fixture.root.path().join("owner.log")).unwrap(),
+        ))
+        .spawn()
+        .unwrap();
+    let mut acknowledged = String::new();
+    std::io::BufRead::read_line(
+        &mut std::io::BufReader::new(owner.stdout.take().unwrap()),
+        &mut acknowledged,
+    )
+    .unwrap();
+    let owner_id = acknowledged.trim().to_string();
+    assert!(
+        !owner_id.is_empty(),
+        "owner ended before acknowledging: {}",
+        fs::read_to_string(fixture.root.path().join("owner.log")).unwrap_or_default()
+    );
+    let args = local_home.join("claude-args");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while fs::read_to_string(&args).map_or(true, |text| text.is_empty()) {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "Claude never started: {}",
+            fs::read_to_string(fixture.root.path().join("owner.log")).unwrap_or_default()
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let local_db = rusqlite::Connection::open(local_home.join("loopflow.db")).unwrap();
+    let (session, task_of): (String, Option<String>) = local_db
+        .query_row(
+            "SELECT id,task_id FROM agent_sessions WHERE transport_lf_process_id=?1",
+            [&owner_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    if task_of.as_deref() != Some(task.as_str()) {
+        assert_success(
+            &fixture
+                .command(&["session", "bind", &session, "--task", task.as_str()])
+                .current_dir(&worktree)
+                .output()
+                .unwrap(),
+        );
+    }
+    // The transcript Claude would have written for the conversation lf named.
+    let args = fs::read_to_string(&args).unwrap();
+    let words: Vec<&str> = args.split_whitespace().collect();
+    let thread = words
+        .windows(2)
+        .find(|pair| matches!(pair[0], "--session-id" | "--resume"))
+        .map(|pair| pair[1])
+        .unwrap_or_else(|| panic!("no conversation id in Claude's arguments: {args}"));
+    let project = local_home
+        .join(".claude/projects")
+        .join(claude_project(&worktree));
+    fs::create_dir_all(&project).unwrap();
+    fs::write(
+        project.join(format!("{thread}.jsonl")),
+        format!(
+            "{{\"type\":\"user\",\"sessionId\":\"{thread}\",\"cwd\":\"{}\",\"message\":{{\"role\":\"user\",\"content\":\"keep going\"}}}}\n",
+            worktree.display()
+        ),
+    )
+    .unwrap();
+    let notice = format!("This conversation moved to mini: lf resume --task {identifier}");
+    let viewer = watch_for(&owner_socket(&local_home, &owner_id), notice.clone());
+
+    let moved = fixture
+        .command(&["task", "move", task.as_str(), "--machine", "mini"])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    let shown = viewer.join().unwrap();
+    let _ = owner.kill();
+    let _ = owner.wait();
+
+    assert_success(&moved);
+    assert!(shown.contains(&notice), "{notice:?} missing from:\n{shown}");
 }

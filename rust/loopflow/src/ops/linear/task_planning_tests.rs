@@ -103,6 +103,7 @@ pub(crate) struct PlanningState {
     lose_comment: bool,
     comment_moves_issue: bool,
     slow_team_check: bool,
+    team_filter: Option<serde_json::Value>,
     history_unavailable: bool,
     completion_writes: usize,
     current_project_id: Option<String>,
@@ -234,6 +235,9 @@ async fn planning_response(
         .project_fields
         .clone()
         .unwrap_or_else(|| planning_project(&project_id, &project_id));
+    if query.contains("query TeamChanges") {
+        state.team_filter = Some(vars["issues"].clone());
+    }
     let full_issue = |issue: &serde_json::Value| {
         let mut issue = issue.clone();
         if !issue["project"].is_null() {
@@ -1643,6 +1647,13 @@ fn assert_native_runner_is_quiet_until_its_turn_ends(agent: &str, auto: bool, ta
         let launch = crate::agent::AgentConfig {
             agent: Some(agent.into()),
             cwd: Some(repo.to_path_buf()),
+            // A bare Codex runs as plain `codex` with no turn observer; the
+            // app-server and its turn boundaries belong to a held Session.
+            holder: if agent == "codex" {
+                crate::session::Holder::Owner
+            } else {
+                crate::session::Holder::Caller
+            },
             env: std::collections::BTreeMap::from([
                 ("PATH".into(), path),
                 ("FIXTURE_STARTED".into(), started.display().to_string()),
@@ -1669,12 +1680,7 @@ fn assert_native_runner_is_quiet_until_its_turn_ends(agent: &str, auto: bool, ta
                 }
                 // Native agent stays open without a watcher. Only the turn
                 // boundary may acquire the change made while it was idle.
-                tokio::time::sleep(std::time::Duration::from_secs(if agent == "codex" {
-                    60
-                } else {
-                    1
-                }))
-                .await;
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                 assert_eq!(state.lock().await.requests, 0);
                 let mut provider = state.lock().await;
                 provider.issues[0]["title"] = json!("Changed during the turn");
@@ -5753,6 +5759,103 @@ fn task_field_delivery_requires_revision_accepted_into_work() {
 }
 
 #[test]
+fn linear_scope_reads_each_repository_once_and_refreshes_next_check() {
+    with_planning_task(|runtime, fixture, repo, task, state| {
+        runtime.block_on(async {
+            let peers: Vec<_> = (0..3)
+                .map(|_| loopflow_test_support::TestRepo::new())
+                .collect();
+            let paths = [repo, peers[0].path(), peers[1].path(), peers[2].path()];
+            let configs = [
+                "planning:\n  provider: linear\n  team: team-1\n",
+                "planning:\n  provider: linear\n  team: team-1\n",
+                "planning:\n  provider: linear\n  team: other-team\n",
+                "planning: [invalid\n",
+            ];
+            let conn = rusqlite::Connection::open(&fixture.database).unwrap();
+            for (index, path) in paths.iter().enumerate() {
+                std::fs::create_dir_all(path.join(".lf")).unwrap();
+                std::fs::write(path.join(".lf/config.yaml"), configs[index]).unwrap();
+                let repository_id = fixture
+                    .store
+                    .sqlite
+                    .ensure_repository(path.to_str().unwrap())
+                    .unwrap();
+                // Both loops encounter every repository more than once, including failures.
+                for row in 0..2 {
+                    let wave = crate::work::wave::Wave::new(
+                        crate::id::WaveId::new(),
+                        format!("scope-{row}"),
+                        path.display().to_string(),
+                    );
+                    fixture.store.create_wave(&wave).await.unwrap();
+                    let saved = fixture
+                        .store
+                        .sqlite
+                        .create_task(&crate::work::task::NewTask {
+                            id: crate::durable::TaskId::new(),
+                            repository_id: repository_id.clone(),
+                            project_id: None,
+                            title: format!("Scope {index}/{row}"),
+                            description: String::new(),
+                            due_date: None,
+                        })
+                        .unwrap();
+                    conn.execute(
+                        "UPDATE tasks SET external_issue_id=?2, planning_completed=?3 WHERE id=?1",
+                        rusqlite::params![
+                            saved.id.as_str(),
+                            format!("scope-{index}-{row}"),
+                            row == 1
+                        ],
+                    )
+                    .unwrap();
+                }
+            }
+            // An empty delta isolates selection from ingestion's separate reads.
+            state.lock().await.issues.clear();
+            for included in [2, 4] {
+                if included == 4 {
+                    for path in &paths[2..] {
+                        std::fs::write(path.join(".lf/config.yaml"), configs[0]).unwrap();
+                    }
+                }
+                conn.execute("DELETE FROM linear_team_checks", []).unwrap();
+                crate::ops::planning_client::SCOPE_READS.with_borrow_mut(|reads| reads.clear());
+                assert!(!crate::ops::linear_observe::check_repository(
+                    &fixture.store,
+                    repo.to_str().unwrap()
+                )
+                .await
+                .unwrap());
+                let reads = crate::ops::planning_client::SCOPE_READS.with_borrow(Clone::clone);
+                assert_eq!(
+                    reads,
+                    paths.iter().map(|path| (path.to_path_buf(), 1)).collect()
+                );
+                let filter = state.lock().await.team_filter.clone().unwrap();
+                let mut live = vec![task.linear_id.as_ref().unwrap().as_str().to_owned()];
+                live.extend((0..included).map(|index| format!("scope-{index}-0")));
+                let mut finished: Vec<_> = (0..included)
+                    .map(|index| format!("scope-{index}-1"))
+                    .collect();
+                let mut actual_live: Vec<String> =
+                    serde_json::from_value(filter["or"][0]["id"]["in"].clone()).unwrap();
+                let mut actual_finished: Vec<String> =
+                    serde_json::from_value(filter["id"]["nin"].clone()).unwrap();
+                live.sort();
+                finished.sort();
+                actual_live.sort();
+                actual_finished.sort();
+                assert_eq!(filter["team"]["id"]["eq"], "team-1");
+                assert_eq!(actual_live, live);
+                assert_eq!(actual_finished, finished);
+            }
+        });
+    });
+}
+
+#[test]
 fn linear_on_demand_adopts_new_open_issues_without_allocating_execution() {
     with_planning_task(|runtime, fixture, repo, task, state| {
         runtime.block_on(async {
@@ -5793,189 +5896,6 @@ fn linear_on_demand_adopts_new_open_issues_without_allocating_execution() {
                 .unwrap()
                 .is_empty());
         });
-    });
-}
-
-// Child entry uses the real CLI parser and callback handler, with only the
-// credential/network boundary replaced by the same stand-in as the parent.
-#[test]
-fn linear_on_demand_hook_child() {
-    use clap::Parser;
-    let Ok(args) = std::env::var("LINEAR_FIXTURE_ARGS") else {
-        return;
-    };
-    let cli = crate::lf::Cli::try_parse_from(serde_json::from_str::<Vec<String>>(&args).unwrap())
-        .unwrap();
-    let Some(crate::lf::Commands::ContextBlock {
-        delivery,
-        moment: crate::context_block::ContextMoment::Stop,
-        ..
-    }) = cli.command
-    else {
-        panic!("generated turn hook must select the planning callback")
-    };
-    let delivery =
-        delivery.unwrap_or_else(|| std::env::var_os("LF_CONTEXT_DELIVERY").unwrap().into());
-    let context: crate::context_block::ContextDelivery =
-        serde_json::from_slice(&std::fs::read(&delivery).unwrap()).unwrap();
-    let path = context.home.join("loopflow.db");
-    let runtime = tokio::runtime::Runtime::new().unwrap();
-    let store = Arc::new(
-        runtime
-            .block_on(crate::store::open_store(
-                &crate::store::StorageConfig::sqlite(path.clone()),
-            ))
-            .unwrap(),
-    );
-    let context = super::LinearTestContext {
-        path,
-        store,
-        graphql_url: std::env::var("LINEAR_FIXTURE_URL").unwrap(),
-    };
-    let ready = std::env::var("LINEAR_FIXTURE_READY").unwrap();
-    std::fs::write(ready, "ready").unwrap();
-    let start = PathBuf::from(std::env::var("LINEAR_FIXTURE_START").unwrap());
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while !start.exists() {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "parent did not release hooks"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
-    LINEAR_TEST_CONTEXT.sync_scope(context, || {
-        crate::lf::commands::context::emit_block(
-            Some(&delivery),
-            crate::context_block::ContextMoment::Stop,
-        )
-        .unwrap();
-    });
-}
-
-#[test]
-fn linear_on_demand_native_hooks_share_freshness_across_processes() {
-    with_planning_task(|runtime, fixture, repo, task, state| {
-        let _env = crate::test_ambient::EnvGuard::clear(&["LF_BIN"]);
-        let shim = fixture.directory.path().join("lf-hook");
-        // A test-binary adapter replaces main's dispatch only. The generated
-        // shell command, parser, callback, store and acquisition all execute.
-        std::fs::write(&shim, format!(
-            "#!/usr/bin/env python3\nimport json, os, sys\nos.environ['LINEAR_FIXTURE_ARGS'] = json.dumps(['lf'] + sys.argv[1:])\nos.execv({}, [{}, '--exact', 'ops::linear::task_planning_tests::linear_on_demand_hook_child', '--nocapture'])\n",
-            serde_json::to_string(&std::env::current_exe().unwrap()).unwrap(),
-            serde_json::to_string(&std::env::current_exe().unwrap()).unwrap(),
-        )).unwrap();
-        std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
-        std::env::set_var("LF_BIN", &shim);
-        let delivery = crate::context_block::ContextDelivery {
-            repository: None,
-            repo: repo.to_owned(),
-            home: fixture.directory.path().to_owned(),
-            wave: None,
-            skill_file: None,
-            submitted_docs: None,
-            references: Vec::new(),
-        };
-        let claude = crate::harness::context::claude_args(&delivery).unwrap();
-        let settings: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(&claude[1]).unwrap()).unwrap();
-        let codex = crate::harness::context::codex_hooks(&delivery, None).unwrap();
-        let hooks = [
-            &settings["hooks"]["Stop"][0]["hooks"][0]["command"],
-            &codex["Stop"][0]["hooks"][0]["command"],
-        ];
-        runtime.block_on(async {
-            seed_finished_tasks(fixture, repo, &state).await;
-            let mut provider = state.lock().await;
-            provider.requests = 0;
-            provider.issues[0]["title"] = json!("Acquired through native Stop");
-            mark_issue_updated(&mut provider.issues[0]);
-        });
-        let conn = rusqlite::Connection::open(&fixture.database).unwrap();
-        conn.execute("DELETE FROM linear_team_checks", []).unwrap();
-        let start = fixture.directory.path().join("release-hooks");
-        let spawn_hook = |hook: &serde_json::Value, ready: &Path| {
-            let mut command = std::process::Command::new("/bin/sh");
-            for (name, _) in
-                std::env::vars_os().filter(|(name, _)| name.to_string_lossy().starts_with("LF_"))
-            {
-                command.env_remove(name);
-            }
-            delivery.configure_hooks(&mut command).unwrap();
-            command
-                .args(["-c", hook.as_str().unwrap()])
-                .env(
-                    "LINEAR_FIXTURE_URL",
-                    LINEAR_TEST_CONTEXT.with(|ctx| ctx.graphql_url.clone()),
-                )
-                .env("LINEAR_FIXTURE_READY", ready)
-                .env("LINEAR_FIXTURE_START", &start)
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .spawn()
-                .unwrap()
-        };
-        let mut children: Vec<_> = (0..4)
-            .map(|index| {
-                let ready = fixture.directory.path().join(format!("ready-{index}"));
-                let child = spawn_hook(hooks[index % 2], &ready);
-                (ready, child)
-            })
-            .collect();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        while children.iter().any(|(ready, _)| !ready.exists()) {
-            assert!(
-                std::time::Instant::now() < deadline,
-                "hooks did not reach barrier"
-            );
-            for (_, child) in &mut children {
-                assert!(
-                    child.try_wait().unwrap().is_none(),
-                    "hook exited before barrier"
-                );
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-        std::fs::write(&start, "go").unwrap();
-        for (_, child) in children {
-            let output = child.wait_with_output().unwrap();
-            assert!(
-                output.status.success(),
-                "{}\n{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
-        // A later process starts after the acquisition lock has been released;
-        // only the persisted stamp can suppress this request.
-        let output = spawn_hook(hooks[0], &fixture.directory.path().join("ready-later"))
-            .wait_with_output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        runtime.block_on(async {
-            // One delta and its changed Project across every process.
-            assert_eq!(state.lock().await.requests, 2);
-            assert_eq!(
-                fixture
-                    .store
-                    .get_task(&task.id)
-                    .await
-                    .unwrap()
-                    .unwrap()
-                    .title,
-                "Acquired through native Stop"
-            );
-        });
-        let watermark: Option<String> = conn
-            .query_row("SELECT synced_through FROM linear_team_checks", [], |r| {
-                r.get(0)
-            })
-            .unwrap();
-        assert!(watermark.is_some());
     });
 }
 

@@ -53,6 +53,17 @@ pub(crate) struct MovedTask {
     pub ownership_marker: String,
     /// Absent before the Task takes up a Graph.
     pub graph: Option<TaskGraphRecord>,
+    /// Absent unless the move stopped a running Graph, which continues where
+    /// the Task arrives.
+    pub stopped: Option<StoppedGraph>,
+}
+
+/// A Graph the move stopped.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct StoppedGraph {
+    /// The step it was running, which runs again from the checkpoint; absent
+    /// when no step was running, so the run starts again where it began.
+    pub step: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -135,9 +146,9 @@ pub(crate) async fn send(store: &SharedStore, id: &str, to: &MachineId) -> Resul
     })
 }
 
-/// Stop the Task's Graph, commit and push its worktree, take its conversation
-/// and hand it off to `to`. Nothing is handed off when a step before fails;
-/// repeating it after a failed receive reuses the handoff.
+/// Hand the Task off to `to`, then stop its Graph, commit and push its
+/// worktree and take its conversation. A failure in those steps hands it back
+/// here; repeating it after a failed receive reuses the handoff.
 pub(crate) async fn send_task(store: &SharedStore, issue: &str, to: &MachineId) -> Result<Move> {
     let task = store
         .get_task_by_issue(issue)
@@ -148,9 +159,64 @@ pub(crate) async fn send_task(store: &SharedStore, issue: &str, to: &MachineId) 
     if let Some(root) = &worktree {
         refuse_mid_operation(root, name)?;
     }
-    stop_graphs(store, &task).await?;
+    // Owned by `to` from here, so nothing on this Machine (recovery restarting
+    // a ship process, a run waiting out a limit) starts the Task again while
+    // the move stops it. If it cannot leave, it is handed back.
+    let sent_before = store
+        .sqlite
+        .task_ownership(&task.id)?
+        .owner
+        .and_then(|owner| owner.machine.id)
+        .as_ref()
+        == Some(to);
+    let handoff = hand_off(&store.sqlite, &task.id, to)?;
+    let (stopped, checkout, conversation, taken) =
+        match leave(store, &task, worktree.as_deref(), to).await {
+            Ok(left) => left,
+            Err(error) if sent_before => return Err(error),
+            Err(error) => {
+                store.sqlite.hand_back(&task.id, &handoff)?;
+                return Err(error);
+            }
+        };
+    if let Some(session) = &conversation {
+        store.sqlite.complete_moved_session(&session.id, to)?;
+    }
+    let (session, history) =
+        taken.map_or((None, None), |(session, history)| (Some(session), history));
+    Ok(Move {
+        from_machine_id: store.sqlite.local_machine()?.id,
+        session,
+        checkout,
+        history,
+        task: Some(MovedTask {
+            task_id: task.id.clone(),
+            identifier: task.identifier.clone(),
+            ownership_marker: crate::store::sqlite::task_ownership::marker(&handoff)?,
+            graph: store.sqlite.task_graph_record(&task.id)?,
+            stopped,
+        }),
+    })
+}
+
+type Left = (
+    Option<StoppedGraph>,
+    Option<MovedCheckout>,
+    Option<LfSession>,
+    Option<(MovedSession, Option<MovedHistory>)>,
+);
+
+/// What leaves with the Task: its stopped Graph, its pushed checkpoint and
+/// its stopped conversation.
+async fn leave(
+    store: &SharedStore,
+    task: &Task,
+    worktree: Option<&Path>,
+    to: &MachineId,
+) -> Result<Left> {
+    let name = &task.identifier;
+    let stopped = stop_graphs(store, task).await?;
     let checkout = worktree
-        .as_deref()
         .map(|root| checkpoint(&store.sqlite, root, name, to))
         .transpose()?;
     let conversation = match super::primary::task_conversation(store, &task.id).await? {
@@ -175,24 +241,7 @@ pub(crate) async fn send_task(store: &SharedStore, issue: &str, to: &MachineId) 
         }
         None => None,
     };
-    let handoff = hand_off(&store.sqlite, &task.id, to)?;
-    if let Some(session) = &conversation {
-        store.sqlite.complete_moved_session(&session.id, to)?;
-    }
-    let (session, history) =
-        taken.map_or((None, None), |(session, history)| (Some(session), history));
-    Ok(Move {
-        from_machine_id: store.sqlite.local_machine()?.id,
-        session,
-        checkout,
-        history,
-        task: Some(MovedTask {
-            task_id: task.id.clone(),
-            identifier: task.identifier.clone(),
-            ownership_marker: crate::store::sqlite::task_ownership::marker(&handoff)?,
-            graph: store.sqlite.task_graph_record(&task.id)?,
-        }),
-    })
+    Ok((stopped, checkout, conversation, taken))
 }
 
 /// A conversation checked out moments ago may still be launching: its
@@ -263,30 +312,40 @@ fn hand_off(store: &SqliteStore, task: &TaskId, to: &MachineId) -> Result<TaskOw
     if owner.is_none() {
         store.claim_task(task)?;
     }
-    Ok(store.handoff_task(task, to)?)
+    Ok(store.handoff_moving_task(task, to)?)
 }
 
 /// Interrupt the Task so nothing starts again, then end each Graph still
 /// running and the recorded step Processes it started. Each is signalled
-/// only once its pid is proven to be that recorded Process.
-async fn stop_graphs(store: &SharedStore, task: &Task) -> Result<()> {
+/// only once its pid is proven to be that recorded Process. Returns the
+/// stopped Graph, if one was running.
+async fn stop_graphs(store: &SharedStore, task: &Task) -> Result<Option<StoppedGraph>> {
     let live = |process: &crate::process::LfProcess| {
         process.completed_at.is_none()
             && crate::journal::lf_evidence(&store.sqlite, &process.id)
                 == ProcessIdentityEvidence::Live
     };
-    let processes: Vec<crate::process::LfProcess> = store
+    let graphs: Vec<_> = store
         .sqlite
         .task_graphs(&task.id)?
         .into_iter()
         .filter(|graph| live(&graph.process))
+        .collect();
+    let step = graphs.iter().find_map(|graph| {
+        graph
+            .latest()
+            .filter(|step| live(&step.process))
+            .map(|step| graph.label(step))
+    });
+    let processes: Vec<crate::process::LfProcess> = graphs
+        .into_iter()
         .flat_map(|graph| {
             std::iter::once(graph.process).chain(graph.steps.into_iter().map(|step| step.process))
         })
         .filter(|process| live(process))
         .collect();
     if processes.is_empty() {
-        return Ok(());
+        return Ok(None);
     }
     store
         .append_interrupt(&WorkRef::Task(task.id.clone()))
@@ -314,7 +373,7 @@ async fn stop_graphs(store: &SharedStore, task: &Task) -> Result<()> {
             .map(|process| process.id.to_string())
             .collect();
         if running.is_empty() {
-            return Ok(());
+            return Ok(Some(StoppedGraph { step }));
         }
         if std::time::Instant::now() >= deadline {
             bail!(
@@ -447,13 +506,30 @@ fn read_file(base: &Path, path: &Path) -> Result<MovedFile> {
     })
 }
 
-/// The Task a move carries, which this Machine must already know.
-pub(crate) async fn known_task(store: &SharedStore, task: &TaskId, name: &str) -> Result<Task> {
-    store.get_task(task).await?.ok_or_else(|| {
-        anyhow!(
-            "Task {name} is unknown on this Machine; sync its planning here, then move it again"
-        )
-    })
+/// The Task a move carries: saved here, else acquired from the planning of
+/// `main`, the repository it arrives in.
+pub(crate) async fn arriving_task(
+    store: &SharedStore,
+    main: &Path,
+    task: &TaskId,
+    identifier: &str,
+) -> Result<Task> {
+    if let Some(saved) = store.get_task(task).await? {
+        return Ok(saved);
+    }
+    let found =
+        crate::ops::planning_sync::find_task(store, &main.to_string_lossy(), identifier).await?;
+    let acquired = match found {
+        Some(task) => task,
+        None => crate::ops::task::acquire_from_planning(main, identifier).await?,
+    };
+    anyhow::ensure!(
+        acquired.id == *task,
+        "{identifier} in {} is Task {}, not the moving Task {task}",
+        main.display(),
+        acquired.id
+    );
+    Ok(acquired)
 }
 
 /// Check out the moved branch in a worktree of this repository, admit the
@@ -493,7 +569,7 @@ pub(crate) async fn receive(store: &SharedStore, moved: Move) -> Result<Option<L
         crate::transcript::conversation_home(&store.sqlite, provider, &history.agent_session_id)?
             .unwrap_or_else(|| crate::provider_account::activation::native_home(provider, None));
     let base = match provider {
-        Provider::Claude => home.join("projects").join(claude_project(&cwd)),
+        Provider::Claude => crate::transcript::live::claude_project(&home, &cwd),
         _ => home,
     };
     for file in &history.files {
@@ -520,33 +596,51 @@ pub(crate) async fn receive(store: &SharedStore, moved: Move) -> Result<Option<L
     .map(Some)
 }
 
-/// This Machine's checkout of the moved repository, cloned from its origin
-/// under `repo_root` when there is none.
+/// This Machine's checkout of the moved repository.
 async fn repository(store: &SharedStore, moved: &Move) -> Result<PathBuf> {
     let repository = match (&moved.checkout, &moved.task) {
         (Some(checkout), _) => checkout.repository_id.clone(),
         (None, Some(task)) => {
-            known_task(store, &task.task_id, &task.identifier)
+            store
+                .get_task(&task.task_id)
                 .await?
+                .ok_or_else(|| {
+                    anyhow!(
+                        "Task {} moved without a checkout and is unknown here",
+                        task.identifier
+                    )
+                })?
                 .repository_id
         }
         (None, None) => bail!("the move names neither a checkout nor a Task"),
     };
-    if let Some(path) = store.sqlite.repository_path(&repository)? {
-        return Ok(PathBuf::from(path));
-    }
-    let checkout = moved
+    let origin = moved
         .checkout
         .as_ref()
-        .ok_or_else(|| anyhow!("repository {repository} has no checkout on this Machine"))?;
-    let name = checkout
-        .origin
+        .map(|checkout| checkout.origin.as_str());
+    checkout_of(store, &repository, origin)
+}
+
+/// This Machine's checkout of `repository`, cloned from `origin` under
+/// `repo_root` when there is none. The pre-move check clones too, so a Machine
+/// that has never seen the repository can take its Task in before anything stops.
+pub(crate) fn checkout_of(
+    store: &SharedStore,
+    repository: &RepositoryId,
+    origin: Option<&str>,
+) -> Result<PathBuf> {
+    if let Some(path) = store.sqlite.repository_path(repository)? {
+        return Ok(PathBuf::from(path));
+    }
+    let origin =
+        origin.ok_or_else(|| anyhow!("repository {repository} has no checkout on this Machine"))?;
+    let name = origin
         .trim_end_matches('/')
         .rsplit(['/', ':'])
         .next()
         .map(|name| name.trim_end_matches(".git"))
         .filter(|name| !name.is_empty())
-        .ok_or_else(|| anyhow!("cannot name a checkout for {}", checkout.origin))?;
+        .ok_or_else(|| anyhow!("cannot name a checkout for {origin}"))?;
     let root = crate::repo::checkouts_root()?;
     let path = root.join(name);
     anyhow::ensure!(
@@ -555,13 +649,10 @@ async fn repository(store: &SharedStore, moved: &Move) -> Result<PathBuf> {
         path.display()
     );
     fs::create_dir_all(&root)?;
-    crate::git::git_stdout(
-        &root,
-        &["clone", "-q", &checkout.origin, &path.to_string_lossy()],
-    )?;
+    crate::git::git_stdout(&root, &["clone", "-q", origin, &path.to_string_lossy()])?;
     store
         .sqlite
-        .bind_repository(&path.canonicalize()?.to_string_lossy(), &repository)?;
+        .bind_repository(&path.canonicalize()?.to_string_lossy(), repository)?;
     Ok(path.canonicalize()?)
 }
 
@@ -574,7 +665,7 @@ async fn take_in_task(
     checkout: Option<&MovedCheckout>,
 ) -> Result<Task> {
     let name = &moved.identifier;
-    known_task(store, &moved.task_id, name).await?;
+    arriving_task(store, main, &moved.task_id, name).await?;
     store
         .sqlite
         .ingest_ownership_marker(&moved.task_id, &moved.ownership_marker)?;
@@ -615,15 +706,6 @@ fn readable(harness: HarnessKind, base: &Path, files: &[MovedFile]) -> bool {
         crate::transcript::read(harness, &Source::File(base.join(&file.path)))
             .is_ok_and(|turns| !turns.is_empty())
     })
-}
-
-/// Claude names a project directory for its absolute path, every character
-/// other than a letter or digit replaced by `-`.
-fn claude_project(cwd: &Path) -> String {
-    cwd.to_string_lossy()
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect()
 }
 
 fn write_file(base: &Path, file: &MovedFile) -> Result<()> {
@@ -713,7 +795,8 @@ async fn admit(
             _ => None,
         },
         graph_lf_process_id: None,
-        work_source: task.map(|_| WorkSource::Declared),
+        // Task, Wave and repository conversations are managed wherever they move.
+        work_source: (task.is_some() || moved.primary.is_some()).then_some(WorkSource::Declared),
         bound_at: None,
         interactive: true,
         repo: Some(repo.to_string()),
@@ -744,8 +827,7 @@ async fn admit(
 
 #[cfg(test)]
 mod tests {
-    use super::{claude_project, Move};
-    use std::path::Path;
+    use super::Move;
 
     #[test]
     fn a_move_round_trips_and_requires_its_source() {
@@ -755,17 +837,11 @@ mod tests {
             serde_json::from_str::<Move>(&serde_json::to_string(&moved).unwrap()).unwrap(),
             moved
         );
-        assert_eq!(moved.task.unwrap().graph.unwrap().step, "explore");
+        let task = moved.task.unwrap();
+        assert_eq!(task.graph.unwrap().step, "explore");
+        assert_eq!(task.stopped.unwrap().step.as_deref(), Some("implement"));
         let mut missing: serde_json::Value = serde_json::from_str(json).unwrap();
         missing.as_object_mut().unwrap().remove("from_machine_id");
         assert!(serde_json::from_value::<Move>(missing).is_err());
-    }
-
-    #[test]
-    fn claude_names_a_project_for_its_path() {
-        assert_eq!(
-            claude_project(Path::new("/Users/jack/src/loopflow.loo-628")),
-            "-Users-jack-src-loopflow-loo-628"
-        );
     }
 }

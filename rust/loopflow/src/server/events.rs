@@ -38,6 +38,7 @@ impl Observer {
             .cloned()
             .chain(self.tasks.keys().cloned())
             .collect();
+        let mut completed_now = store.completed_graph_steps(&watched.iter().collect::<Vec<_>>())?;
         let mut events = Vec::new();
         for task in watched {
             let first = !self.tasks.contains_key(&task);
@@ -75,19 +76,21 @@ impl Observer {
                     }
                 }
             }
-            let mut completed = HashSet::new();
-            for graph in store.task_graphs(&task)? {
-                for step in &graph.steps {
-                    if step.process.completed_at.is_none() {
-                        continue;
-                    }
-                    completed.insert(step.process.id.clone());
-                    if !first && !cursor.completed.contains(&step.process.id) {
-                        events.push(SubscriptionEvent::GraphStepFinished {
-                            task_id: task.clone(),
-                            graph_process_id: graph.id().clone(),
-                            step: graph.step_detail(step),
-                        });
+            let completed = completed_now.remove(&task).unwrap_or_default();
+            // Whole Graphs are read only for a Task with a step that finished since
+            // the last reading; the first reading only records what has finished.
+            if !first && !completed.is_subset(&cursor.completed) {
+                for graph in store.task_graphs(&task)? {
+                    for step in &graph.steps {
+                        if completed.contains(&step.process.id)
+                            && !cursor.completed.contains(&step.process.id)
+                        {
+                            events.push(SubscriptionEvent::GraphStepFinished {
+                                task_id: task.clone(),
+                                graph_process_id: graph.id().clone(),
+                                step: graph.step_detail(step),
+                            });
+                        }
                     }
                 }
             }

@@ -103,6 +103,11 @@ pub enum WorktreePruneReason {
     },
     /// `--all`: no unfinished Task or running process holds it.
     Unowned,
+    /// Its Task moved to another Machine, which checked out the pushed branch.
+    Moved {
+        task: String,
+        machine: String,
+    },
 }
 
 impl std::fmt::Display for WorktreePruneReason {
@@ -114,6 +119,7 @@ impl std::fmt::Display for WorktreePruneReason {
             Self::FinishedTask { task: None } => write!(f, "branch of a finished Task"),
             Self::Stale { days } => write!(f, "no Task or PR, untouched for {days} days"),
             Self::Unowned => write!(f, "no unfinished Task"),
+            Self::Moved { task, machine } => write!(f, "Task {task} runs on {machine}"),
         }
     }
 }
@@ -179,6 +185,9 @@ impl std::fmt::Display for WorktreeKeepReason {
 pub struct WorktreeOwnership {
     /// Unfinished Tasks' checkouts, with the Task's identifier when known.
     pub unfinished_checkouts: HashMap<PathBuf, Option<String>>,
+    /// Checkouts of unfinished Tasks another Machine now owns: the Task's
+    /// identifier and that Machine's name.
+    pub departed_checkouts: HashMap<PathBuf, (String, String)>,
     /// Done or Abandoned Tasks' checkouts, with the Task's identifier.
     pub finished_checkouts: HashMap<PathBuf, String>,
     /// Branches named by an unfinished Task.
@@ -267,12 +276,32 @@ pub fn git_common_dir(repo: &Path) -> Result<PathBuf, GitError> {
     }
 }
 
+/// The main checkout a linked worktree belongs to, read from the files Git
+/// keeps: the worktree's `.git` names its Git directory, whose `commondir`
+/// names the shared one, which the main checkout holds as `.git`. `None` for
+/// a submodule, a bare repository or a layout only Git can read.
+fn linked_main_root(root: &Path) -> Option<PathBuf> {
+    let marker = std::fs::read_to_string(root.join(".git")).ok()?;
+    let git_dir = root.join(marker.strip_prefix("gitdir:")?.trim());
+    let shared = std::fs::read_to_string(git_dir.join("commondir")).ok()?;
+    let common = git_dir.join(shared.trim()).canonicalize().ok()?;
+    (common.file_name()? == ".git" && common.is_dir())
+        .then(|| common.parent().map(Path::to_path_buf))?
+}
+
 pub fn main_repo_root(repo: &Path) -> Result<PathBuf, GitError> {
     match crate::git::worktree_root(repo) {
         Ok(root) if root.join(".git").is_dir() => return Ok(root),
+        Ok(root) => {
+            // Listing a folder of checkouts asks this once per worktree; launching
+            // Git for each made that read cost a `git worktree list` per checkout.
+            if let Some(main) = linked_main_root(&root) {
+                return Ok(main);
+            }
+        }
         // A path that cannot be resolved holds no repository; `git` cannot say otherwise.
         Err(GitError::Io(error)) => return Err(GitError::Io(error)),
-        _ => {}
+        Err(_) => {}
     }
     let worktrees = list_porcelain(repo)?;
     // A bare or separate Git directory can appear first instead of a checkout.
@@ -1543,15 +1572,22 @@ fn classify(
 ) -> Result<PruneVerdict, GitError> {
     use WorktreeKeepReason as Keep;
     let branch = state.branch.as_deref();
+    // The release registry still lists a departed Task's checkout and branch
+    // as unfinished, so departure outranks both.
+    let departed = held_by(&state.path, &ownership.departed_checkouts).cloned();
     let held = if state.path == current_path {
         Some(Keep::Current)
     } else if branch == Some(default_branch) {
         Some(Keep::DefaultBranch)
     } else if is_persistent_worktree(&state.path)? {
         Some(Keep::Persistent)
-    } else if let Some(task) = held_by(&state.path, &ownership.unfinished_checkouts) {
+    } else if let Some(task) =
+        held_by(&state.path, &ownership.unfinished_checkouts).filter(|_| departed.is_none())
+    {
         Some(Keep::UnfinishedTask { task: task.clone() })
-    } else if branch.is_some_and(|branch| ownership.live_branches.contains(branch)) {
+    } else if departed.is_none()
+        && branch.is_some_and(|branch| ownership.live_branches.contains(branch))
+    {
         Some(Keep::UnfinishedTaskBranch)
     } else if held_by(
         &state.path,
@@ -1577,6 +1613,8 @@ fn classify(
         })
     } else if branch.is_none() {
         Err(Keep::Detached)
+    } else if let Some((task, machine)) = departed {
+        Ok(WorktreePruneReason::Moved { task, machine })
     } else if state.pull_request == Some(PullRequestState::Merged) {
         Ok(WorktreePruneReason::Merged)
     } else if state.pull_request == Some(PullRequestState::Closed) {

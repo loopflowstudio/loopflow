@@ -61,7 +61,7 @@ Audit auth changes on this branch. Fix missing validation and untested paths.
 - interactive: design   # you take part; leaves scratch/<task>.md
 - implement             # leaves commits on the branch
 - audit
-- gate                  # leaves passing checks
+- gate                  # publishes the PR, reviews it while CI runs
 ```
 
 ```bash
@@ -78,7 +78,7 @@ Loopflow ships reasonable Graphs for software engineering, and they are
 templates. Copy one with `lf graph customize pursue`, change it, or write down
 the way you work and share it.
 
-`pursue` starts by editing the actual user docs. An attached Loopflow Desktop
+`pursue` plans the change, then edits the actual user docs. An attached Loopflow Desktop
 shows them in Files; elsewhere, the conversation lists their paths. Edit or
 discuss what's being built while work continues.
 

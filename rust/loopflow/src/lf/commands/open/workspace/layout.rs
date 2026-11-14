@@ -291,6 +291,7 @@ mod tests {
             work: saved.work.clone(),
             title: "Task".into(),
             states: Default::default(),
+            identifier: None,
             primary_session: None,
             location: Some(ViewLocation {
                 machine_id: "machine_recorded".into(),

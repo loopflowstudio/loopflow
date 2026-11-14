@@ -18,6 +18,26 @@ struct DTOFixtureTests {
         #expect(card.liveness == .unknown)
         #expect(card.controlHolder == nil)
         #expect(card.lastLine == nil)
+        #expect(card.session.turn?.state == .ended)
+        #expect(card.session.turn?.id == "u1")
+        #expect(card.session.turn?.usage?.cachedInputTokens == 38000)
+        #expect(card.session.raw == false)
+    }
+
+    @Test func sessionEncodingKeepsRequiredNullableTurnFields() throws {
+        let session = try JSONDecoder().decode(SessionRecord.self, from: loadFixtureData("session.json"))
+        let encoded = try JSONEncoder().encode(session)
+        let object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        #expect(object["turn"] is NSNull)
+        #expect(try JSONDecoder().decode(SessionRecord.self, from: encoded) == session)
+
+        let turn = try JSONDecoder().decode(SessionTurn.self, from: Data(#"{"id":null,"state":"running","started_at":null,"ended_at":null,"model":null,"usage":null}"#.utf8))
+        let turnData = try JSONEncoder().encode(turn)
+        let turnObject = try #require(JSONSerialization.jsonObject(with: turnData) as? [String: Any])
+        for field in ["id", "started_at", "ended_at", "model", "usage"] {
+            #expect(turnObject[field] is NSNull)
+        }
+        #expect(try JSONDecoder().decode(SessionTurn.self, from: turnData) == turn)
     }
 
     @Test func screenReadsRejectSelectedAnswers() throws {
@@ -1001,7 +1021,7 @@ struct DTOFixtureTests {
         let entries = try #require(JSONSerialization.jsonObject(with: loadFixtureData("subscribe_frames.json"))
             as? [[String: Any]])
         let scope = WorkScope(repo: "/src/loopflow", headless: false, task: "LOO-1",
-                              activity: WorkActivityScope(wave: nil, project: nil, task: "LOO-1"))
+                              activity: WorkActivityScope(wave: nil, project: nil, task: "LOO-1"), taskListWave: nil)
         let lines = try entries.map { try JSONSerialization.data(withJSONObject: try #require($0["frame"])) }
         let parts = try entries.map { try #require(WorkPart(rawValue: $0["part"] as? String ?? "")) }
         let frames = try zip(parts, lines).enumerated().map { index, entry in
@@ -1142,7 +1162,7 @@ struct TaskLifecycleCapture {
     func taskPart() throws -> WorkFrame.TaskPart {
         let line: [String: Any] = ["answers": NSNull(), "unavailable": NSNull(), "body": status]
         let frame = try WorkFrame.decode(
-            part: .task, scope: WorkScope(repo: nil, headless: false, task: "FIX-1", activity: nil),
+            part: .task, scope: WorkScope(repo: nil, headless: false, task: "FIX-1", activity: nil, taskListWave: nil),
             sequence: 1, line: JSONSerialization.data(withJSONObject: line))
         guard case .task(let part?) = frame.content else {
             throw CocoaError(.coderReadCorrupt)

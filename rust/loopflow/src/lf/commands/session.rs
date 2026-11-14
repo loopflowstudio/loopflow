@@ -104,6 +104,11 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
                 println!("{}", serde_json::to_string_pretty(&status)?);
             } else {
                 println!("{}; {} pending", status.capability, status.pending);
+                // Hooks deliver steers through the Machine server and nothing else.
+                let server = crate::server::client::status()?;
+                if let Some(error) = server.error.filter(|_| !server.listening) {
+                    println!("{error}. Steers wait and turns go unrecorded until it runs.");
+                }
                 if let Some(after) = status.next_after {
                     println!("Next page: --after {after}");
                 }
@@ -242,13 +247,30 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             Ok(())
         }
         SessionCommand::Receive {
-            check: true, task, ..
+            check: true,
+            task: Some(task),
+            issue: Some(issue),
+            repository: Some(repository),
+            origin,
+            planning_key,
+            ..
         } => {
             let store = open_shared_store().await?;
-            if let Some(task) = task {
-                let id = crate::durable::TaskId::parse(task)?;
-                crate::ops::human_session::moves::known_task(&store, &id, task).await?;
+            let path = crate::ops::human_session::moves::checkout_of(
+                &store,
+                repository,
+                origin.as_deref(),
+            )?;
+            let main = crate::git::worktrees::main_repo_root(&path)?;
+            if let Some(key) = planning_key {
+                crate::ops::planning_sync::adopt_personal_key(&store, &main, key).await?;
             }
+            let id = crate::durable::TaskId::parse(task)?;
+            crate::ops::human_session::moves::arriving_task(&store, &main, &id, issue).await?;
+            Ok(())
+        }
+        SessionCommand::Receive { check: true, .. } => {
+            open_shared_store().await?;
             Ok(())
         }
         SessionCommand::Receive { json, .. } => {
@@ -320,6 +342,10 @@ impl SessionFacts {
 pub fn list_sessions(args: &SessionListArgs) -> anyhow::Result<()> {
     let filter = list_filter(args, &std::env::current_dir()?)?;
     if args.subscribe {
+        // This process reads the subscription itself, so it watches
+        // transcripts the way the Machine server does.
+        let observations = crate::observe::Cache::shared();
+        let _transcripts = crate::transcript::watch::watch(&observations);
         return subscribe_list(filter, super::subscribe::Transport::Stdio).map(drop);
     }
     tokio::runtime::Runtime::new()?.block_on(async {
@@ -338,18 +364,29 @@ pub(crate) fn list_filter(
         blocked: args.selector.blocked,
         on: args.selector.on.clone(),
         available: args.available,
+        raw: !args.no_raw,
         repo: if args.all {
             None
         } else {
             crate::repository::CanonicalRepo::containing(directory)?.map(|repo| repo.to_string())
         },
         task: args.task.clone(),
+        wave: args
+            .wave
+            .as_deref()
+            .map(|wave| {
+                crate::work::wave::context::resolve_managed_wave_sync(
+                    (!args.all).then_some(directory),
+                    Some(wave),
+                )
+                .map(|wave| wave.id().clone())
+            })
+            .transpose()?,
+        primary: args.primary,
         orphan: args.orphan,
         search: args.search.clone(),
-        interactive: args.interactive.interactive(),
-        history: args.history,
+        headless: args.headless,
         limit: args.limit,
-        offset: args.offset,
         after: args.page.then(|| args.after.clone().unwrap_or_default()),
     })
 }
@@ -362,8 +399,8 @@ struct SessionWatchArgs {
     repo: Option<String>,
     task: Option<String>,
     search: Option<String>,
-    /// `null` selects both Sessions and Runs.
-    interactive: Option<bool>,
+    /// Include headless Sessions alongside interactive conversations.
+    headless: bool,
 }
 
 pub(crate) fn subscribe_list(
@@ -374,7 +411,7 @@ pub(crate) fn subscribe_list(
         repo: filter.repo.clone(),
         task: filter.task.clone(),
         search: filter.search.clone(),
-        interactive: filter.interactive,
+        headless: filter.headless,
     };
     super::subscribe::start(
         args,
@@ -383,7 +420,7 @@ pub(crate) fn subscribe_list(
                 repo: args.repo,
                 task: args.task,
                 search: args.search,
-                interactive: args.interactive,
+                headless: args.headless,
                 ..filter.clone()
             };
             async move {
@@ -571,8 +608,18 @@ async fn list(
     if sessions.is_empty() && copied.is_empty() {
         println!("No Sessions.");
     } else {
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
         for session in sessions {
-            println!(
+            let place = if session.raw {
+                format!("raw {}", session.provider.as_deref().unwrap_or_default())
+            } else {
+                session
+                    .work_path
+                    .as_deref()
+                    .unwrap_or("Repository")
+                    .to_owned()
+            };
+            let mut line = format!(
                 "{}  {:<7} {}  {}",
                 session.id,
                 match session.state {
@@ -582,12 +629,16 @@ async fn list(
                     SessionState::Detached => "detached",
                     SessionState::Closed => "closed",
                 },
-                session.work_path.as_deref().unwrap_or("Repository"),
+                place,
                 match &session.account {
                     Some(account) => format!("{}  on {account}", session.title),
                     None => session.title.clone(),
                 }
             );
+            if let Some(turn) = &session.turn {
+                line.push_str(&format!("  {}", turn.describe(now)));
+            }
+            println!("{line}");
             for action in session.actions {
                 println!(
                     "  {} — {}",
@@ -662,6 +713,7 @@ async fn resume(
     let store = open_shared_store().await?;
     let cwd = std::env::current_dir()?;
     drop(progress);
+    let named_work = connection.work_flag(cli).is_some();
     if let Some(message) = message {
         let id = select(&store, &cwd, target).await?;
         let session = crate::ops::human_session::session_by_id(&store, &id)
@@ -675,7 +727,9 @@ async fn resume(
         let session = crate::ops::human_session::admit_workspace(&store, session).await?;
         drop(launch);
         let id = session.id;
-        return tokio::task::block_in_place(|| crate::lf::commands::run::resume(&id, message, cli));
+        return tokio::task::block_in_place(|| {
+            crate::lf::commands::run::resume(&id, message, cli, named_work)
+        });
     }
     let session = reopen(
         &store,
@@ -684,6 +738,7 @@ async fn resume(
         connection,
         fork,
         connection.json || cli.json,
+        named_work,
     )
     .await?;
     print_opened(connection.json || cli.json, &session)
@@ -719,6 +774,7 @@ async fn reopen(
     connection: &SessionConnectionArgs,
     fork: bool,
     json: bool,
+    named_work: bool,
 ) -> anyhow::Result<SessionRecord> {
     let intent = connection.intent();
     if intent != SessionOpenIntent::Resume {
@@ -731,11 +787,21 @@ async fn reopen(
             intent,
             !connection.prepare,
             json,
+            named_work,
         )
         .await;
     }
     let id = select(store, directory, target).await?;
-    crate::ops::human_session::open(store, directory, &id, fork, !connection.prepare, json).await
+    crate::ops::human_session::open(
+        store,
+        directory,
+        &id,
+        fork,
+        !connection.prepare,
+        json,
+        named_work,
+    )
+    .await
 }
 
 /// What `lf session resume|new --prepare` run from `directory` records and
@@ -754,7 +820,17 @@ pub(crate) fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result
                 fork,
             } if connection.prepare => {
                 let target = connection.target(cli, id.as_deref())?;
-                reopen(&store, directory, target, connection, *fork, false).await
+                let named_work = connection.work_flag(cli).is_some();
+                let mut record = reopen(
+                    &store, directory, target, connection, *fork, false, named_work,
+                )
+                .await?;
+                // The opening terminal resumes this Session by id, managed
+                // when the prepare named its Work.
+                if let Some(flag) = connection.work_flag(cli) {
+                    record.open_argv.extend(flag.map(str::to_string));
+                }
+                Ok(record)
             }
             SessionCommand::New {
                 id,

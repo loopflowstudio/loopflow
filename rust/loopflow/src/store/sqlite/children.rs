@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension, TransactionBehavior};
 use time::OffsetDateTime;
 
-use crate::durable::{Author, TaskState};
+use crate::durable::{Author, RepositoryId, TaskState};
 use crate::id::WaveId;
 use crate::linear::{LinearIssueId, LinearProjectId};
 use crate::store::rows::now_unix;
@@ -128,14 +128,18 @@ pub(super) fn create_task_in(conn: &Connection, input: &NewTask) -> StoreResult<
 /// Git planning carries the Task's branch, so whoever runs it next checks out
 /// the same branch and finds the same PR. Remote providers supply their branch
 /// through planning acquisition. An already-recorded branch writes nothing.
-fn record_task_branch_in(tx: &Connection, task: &TaskId, branch: &str) -> StoreResult<()> {
-    let (repo, recorded): (String, Option<String>) = tx.query_row(
-        "SELECT w.repo,t.planning_branch_name FROM tasks t
-         JOIN repository_plans w ON w.id=t.repository_id WHERE t.id=?1",
+fn record_task_branch_in(
+    tx: &Connection,
+    task: &TaskId,
+    branch: &str,
+    planning_connected: bool,
+) -> StoreResult<()> {
+    let recorded: Option<String> = tx.query_row(
+        "SELECT planning_branch_name FROM tasks WHERE id=?1",
         [task.as_str()],
-        |row| Ok((row.get(0)?, row.get(1)?)),
+        |row| row.get(0),
     )?;
-    if recorded.as_deref() == Some(branch) || crate::ops::planning_client::connected(&repo) {
+    if recorded.as_deref() == Some(branch) || planning_connected {
         return Ok(());
     }
     super::planning_write::local(
@@ -156,6 +160,7 @@ fn place_task_in(
     worktree: &Path,
     workspace_slug: &str,
     pr: &TaskPr,
+    me: &super::task_ownership::OwnershipFacts,
 ) -> StoreResult<()> {
     let mut task = task_on(conn, task_id)?.ok_or(StoreError::NotFound)?;
     if task.worktree.is_some() {
@@ -172,8 +177,8 @@ fn place_task_in(
     require_task_planning(conn, &task)?;
     // Allocating a checkout is the actual work reservation: it claims an
     // unowned Task, and refuses one owned on another Machine.
-    super::task_ownership::claim_in(conn, task_id)?;
-    record_task_branch_in(conn, task_id, &pr.branch)?;
+    super::task_ownership::claim_in(conn, task_id, me)?;
+    record_task_branch_in(conn, task_id, &pr.branch, me.planning_connected())?;
     let local = super::durable::map_local_machine(conn)?.id;
     task.worktree = Some(worktree.to_path_buf());
     task.workspace_slug = workspace_slug.to_string();
@@ -227,8 +232,9 @@ impl SqliteStore {
     ) -> StoreResult<Task> {
         let _admission = self.lock_checkout(worktree)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let me = super::task_ownership::OwnershipFacts::of_task_in(&conn, task_id)?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        place_task_in(&tx, task_id, worktree, workspace_slug, pr)?;
+        place_task_in(&tx, task_id, worktree, workspace_slug, pr, &me)?;
         let task = task_on(&tx, task_id)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
         Ok(task)
@@ -246,6 +252,14 @@ impl SqliteStore {
         receipt: Option<&super::creation::CreationIdentity>,
     ) -> StoreResult<Task> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let me = match creation {
+            Some(input) => super::task_ownership::OwnershipFacts::of_new_task_in(
+                &conn,
+                &input.repository_id,
+                input.project_id.as_ref(),
+            )?,
+            None => super::task_ownership::OwnershipFacts::of_task_in(&conn, task_id)?,
+        };
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if let Some(input) = creation {
             if let Some(project) = &input.project_id {
@@ -268,7 +282,7 @@ impl SqliteStore {
             // Completion may have arrived after source preparation. Binding still
             // selects the conversation, without allocating or reopening work.
             if !super::durable::task_state_in(&tx, task_id)?.is_terminal() {
-                place_task_in(&tx, task_id, path, &pr.slug, pr)?;
+                place_task_in(&tx, task_id, path, &pr.slug, pr, &me)?;
                 insert_task_event_in(
                     &tx,
                     task_id,
@@ -280,7 +294,7 @@ impl SqliteStore {
             }
         }
         if let Some(session) = session {
-            super::task_ownership::claim_in(&tx, task_id)?;
+            super::task_ownership::claim_in(&tx, task_id, &me)?;
             // Transfer only the selected conversation out of its shared primary
             // scope. The checkout and historical captures retain their owners.
             tx.execute(
@@ -593,7 +607,11 @@ impl SqliteStore {
     pub fn list_open_tasks(&self, wave_id: Option<&WaveId>) -> StoreResult<Vec<Task>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let conn = conn.savepoint()?;
-        tasks_where(&conn, wave_id, &super::durable::task_open_sql("t"))
+        tasks_where(
+            &conn,
+            wave_id.map(|id| ("p.wave_id", id.as_str())),
+            &super::durable::task_open_sql("t"),
+        )
     }
 
     /// Closed Tasks of one repository (and Wave), newest first, `limit` at a
@@ -888,8 +906,10 @@ impl SqliteStore {
         task_id: &TaskId,
         observation: &crate::linear::LinearIssueObservation,
         observed_at: OffsetDateTime,
+        planning_connected: bool,
     ) -> StoreResult<LinearObservationOutcome> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let machine_names = super::task_ownership::machine_names_in(&conn)?;
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
 
         let existing = transaction
@@ -910,7 +930,12 @@ impl SqliteStore {
         let observed_at = observed_at.unix_timestamp();
         let mut follow_ups_created = Vec::new();
         for comment in &observation.comments {
-            if !super::task_comments::ingest_task_comment(&transaction, task_id, comment)? {
+            if !super::task_comments::ingest_task_comment(
+                &transaction,
+                task_id,
+                comment,
+                &machine_names,
+            )? {
                 continue;
             }
             if !crate::ops::linear_observe::is_direction_comment(
@@ -940,7 +965,7 @@ impl SqliteStore {
                 follow_ups_created.push(id);
             }
         }
-        super::task_ownership::reassert_in(&transaction, task_id)?;
+        super::task_ownership::reassert_in(&transaction, task_id, planning_connected)?;
 
         let Some((last_revision, last_title, last_description)) = existing else {
             // Baseline the definition; existing comments were imported above.
@@ -1594,11 +1619,12 @@ pub(super) fn short_task_id(conn: &Connection, id: &TaskId) -> StoreResult<Optio
     if identifier != format!("lf-{hex}") {
         return Ok(Some(identifier));
     }
-    let mut query = conn.prepare(
-        "SELECT lower(substr(id,6)) FROM tasks WHERE id!=?1 AND substr(lower(id),6,6)=?2",
-    )?;
+    // Task IDs are canonical lowercase hex, so the six-character prefix is a
+    // primary-key range rather than a scan of every Task.
+    let mut query =
+        conn.prepare("SELECT substr(id,6) FROM tasks WHERE id!=?1 AND id>=?2 AND id<?2||'~'")?;
     let others = query
-        .query_map(params![id.as_str(), &hex[..6]], |row| {
+        .query_map(params![id.as_str(), format!("task_{}", &hex[..6])], |row| {
             row.get::<_, String>(0)
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -2455,24 +2481,28 @@ pub(super) fn request_completion_in(
 }
 
 pub(super) fn tasks_in(conn: &Connection, wave_id: Option<&WaveId>) -> StoreResult<Vec<Task>> {
-    tasks_where(conn, wave_id, "1")
+    tasks_where(conn, wave_id.map(|id| ("p.wave_id", id.as_str())), "1")
+}
+
+pub(super) fn repository_tasks_in(
+    conn: &Connection,
+    repository: &RepositoryId,
+) -> StoreResult<Vec<Task>> {
+    tasks_where(conn, Some(("t.repository_id", repository.as_str())), "1")
 }
 
 fn tasks_where(
     conn: &Connection,
-    wave_id: Option<&WaveId>,
+    scope: Option<(&str, &str)>,
     condition: &str,
 ) -> StoreResult<Vec<Task>> {
-    let filter = match wave_id {
-        Some(_) => "p.wave_id=?1 AND ",
-        None => "",
-    };
+    let filter = scope.map_or_else(String::new, |(column, _)| format!("{column}=?1 AND "));
     let query = format!(
         "{TASK_COLUMNS} WHERE {filter}({condition}) AND {TASK_VISIBLE} ORDER BY t.updated_at DESC"
     );
     let identifiers = TaskIdentifiers::read(conn)?;
     let mut statement = conn.prepare(&query)?;
-    let rows = statement.query_map(params_from_iter(wave_id), |row| {
+    let rows = statement.query_map(params_from_iter(scope.map(|(_, value)| value)), |row| {
         map_listed_task_row(&identifiers, row)
     })?;
     rows.collect::<rusqlite::Result<_>>()
@@ -2507,6 +2537,17 @@ impl SqliteStore {
 
     pub(crate) fn seed_task(&self, task: &Task, pr: &TaskPr) -> StoreResult<Task> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let me = task
+            .worktree
+            .is_some()
+            .then(|| {
+                super::task_ownership::OwnershipFacts::of_new_task_in(
+                    &conn,
+                    &task.repository_id,
+                    task.project_id.as_ref(),
+                )
+            })
+            .transpose()?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         validate_task(task)?;
         validate_task_project(&tx, task)?;
@@ -2525,9 +2566,9 @@ impl SqliteStore {
             )?;
         }
         insert_task_pr(&tx, pr)?;
-        if task.worktree.is_some() {
-            // A seeded checkout is placed work, which claims the Task like `place_task`.
-            super::task_ownership::claim_in(&tx, &task.id)?;
+        // A seeded checkout is placed work, which claims the Task like `place_task`.
+        if let Some(me) = &me {
+            super::task_ownership::claim_in(&tx, &task.id, me)?;
         }
         seed_task_linear_observation(&tx, task)?;
         let saved = task_on(&tx, &task.id)?.ok_or(StoreError::NotFound)?;

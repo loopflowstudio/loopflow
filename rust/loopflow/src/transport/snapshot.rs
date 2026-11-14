@@ -12,9 +12,9 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 
 use crate::ghostty_vt::{self, Terminal};
-use crate::id::LfProcessId;
 
 use super::output::Output;
+use super::Host;
 
 const HEADER: &str = "lf-terminal-snapshot/1 ghostty=";
 
@@ -27,15 +27,19 @@ fn path(session: &str) -> PathBuf {
 
 /// Write the owner's terminal for whoever reopens its Session before the
 /// provider is back. Pipe owners and ownerless commands leave nothing.
-pub(super) fn leave(owner: &LfProcessId, output: &Output) {
+pub(super) fn leave(owner: &Host, output: &Output) {
     let Some(terminal) = output.terminal() else {
         return;
     };
     let written = || -> Result<Option<PathBuf>> {
         let store = crate::journal::process_ledger()?;
-        let session = if store.shell_close_request(owner)?.is_some() {
+        let shell = match owner.owner() {
+            Some(owner) => store.is_shell_owner(owner)?,
+            None => false,
+        };
+        let session = if shell {
             owner.to_string()
-        } else if let Some(session) = store.transport_session(owner)? {
+        } else if let Some(session) = store.transport_session(owner.transport())? {
             session
         } else {
             return Ok(None);

@@ -118,7 +118,7 @@ An operation's API kind, its `lf` spelling and any setting for it share one
 name (`task.create` is `lf task create`); the nouns are Loopflow's primitives.
 Old spellings live in `lf/aliases.rs` for one release.
 
-The [operation reference](../../rust/loopflow/src/server/README.md#local-protocol-revision-4)
+The [operation reference](../../rust/loopflow/src/server/README.md#local-protocol-revision-5)
 lists the served kinds and their CLI equivalents. `lf server describe --json`
 generates their schemas and result types from this build. App automation remains
 CLI-only; a served operation calls the same Rust owner as its CLI equivalent.
@@ -160,10 +160,12 @@ lets local clients request readiness from the selected installation; it does not
 select or install a different build. Machine has no service subcommands.
 
 Rust `server/`, Swift `ServerClient` / `ServerProtocol` and the shared fixtures
-under `rust/loopflow/tests/fixtures/dto/server/` speak revision 4: one connection per client,
+under `rust/loopflow/tests/fixtures/dto/server/` speak revision 5: one connection per client,
 a negotiated revision, requests multiplexed by id, newline-delimited JSON on the
-Unix socket. A revision-1 client is answered in its own framing with
-`incompatible` and nothing else. Machine identity fields, `LF_HOME`, SSH routing
+Unix socket and one text frame per message on the remote WebSocket carrier.
+Control messages are bounded at 1 MiB; terminals and larger messages travel on
+single-use ticketed connections bound to the requesting client. A revision-1
+client is answered in its own framing with `incompatible` and nothing else. Machine identity fields, `LF_HOME`, SSH routing
 and Work ownership are unchanged. Native terminal relays use `LF_SERVER` and
 `LF_SERVER_STATUS`.
 
@@ -176,7 +178,8 @@ the namespace change can recover to the same listener; old and new executables
 cannot listen concurrently. No socket alias or second path exists.
 No Work, credential or remote-setting files move in this local cutover.
 
-LOO-718 must move remote admission/pairing commands under `lf server` while
-retaining its credential/settings storage. The [local protocol](../../rust/loopflow/src/server/README.md)
-owns operation shapes and bounds. The working design records the precise handoff
-and acceptance still owed by the combined release.
+Remote admission lives under `lf server mobile`, with the owner's Tailscale
+node, user and endpoint saved in the Machine's `mobile.yaml`. This service state
+is separate from the typed preferences in `config.yaml`. The
+[protocol README](../../rust/loopflow/src/server/README.md) owns operation
+shapes, bounds and the ticket flow shared by both carriers.

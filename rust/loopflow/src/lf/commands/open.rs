@@ -689,12 +689,13 @@ fn available(cli: &crate::lf::Cli) -> Result<(Vec<Resolved>, Vec<String>)> {
                 None
             },
             task: cli.task.clone(),
+            wave: None,
+            primary: None,
             search: None,
-            interactive: Some(true),
+            headless: false,
             available: true,
-            history: false,
+            raw: true,
             limit: 0,
-            offset: 0,
             after: None,
         },
     ))?;
@@ -1075,7 +1076,10 @@ fn conversation_view(target: &Resolved) -> Result<Option<ConversationView>> {
             Ok(attachment) => attachment,
             // A failed provider launch can leave its reservation while the
             // transport has already returned the terminal and removed its socket.
-            Err(_) if crate::transport::leaving(&owner) => return Ok(desktop),
+            Err(_) if matches!(&owner, crate::transport::Host::Owner(id) if crate::transport::leaving(id)) =>
+            {
+                return Ok(desktop);
+            }
             Err(error) => return Err(error).context("read conversation attachment"),
         }
     } else {

@@ -1130,7 +1130,18 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                 if let Some(error) = &status.planning_error {
                     println!("Planning: {error}");
                 }
-                if let Some(execution) = &status.execution {
+                // A Task another Machine runs is read from its ownership; this
+                // Machine's records are what it left behind.
+                let elsewhere = match (&status.task, &status.ownership) {
+                    (Some(task), Some(ownership)) => {
+                        loopflow::ops::task_ownership::runs_elsewhere_here(ownership)?
+                            .map(|line| format!("{}  {line}", task.identifier))
+                    }
+                    _ => None,
+                };
+                if let Some(line) = elsewhere {
+                    println!("{line}");
+                } else if let Some(execution) = &status.execution {
                     print_task_snapshot(execution, false)?;
                 } else {
                     println!("No execution allocated.");
@@ -1357,6 +1368,17 @@ fn print_thread(
 
 fn main() -> std::process::ExitCode {
     loopflow::transport::initialize();
+    // The holder outlives servers and installs. It records no Process itself
+    // and opens no store, so it runs before any of that is set up.
+    if std::env::args().skip(1).eq(["holder", "run"]) {
+        return match loopflow::server::holder::run() {
+            Ok(()) => std::process::ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("lf holder: {error:#}");
+                std::process::ExitCode::FAILURE
+            }
+        };
+    }
     let _measurement = loopflow::performance::ProcessMeasurement::start();
     let result = journal::with_process(|| {
         let result = run();
@@ -1430,6 +1452,18 @@ fn configuration_directory(cli: &Cli) -> anyhow::Result<std::path::PathBuf> {
     loopflow::repo::working_directory_in(&directory)
 }
 
+fn checkout_task(directory: &Path, wave: Option<&str>) -> anyhow::Result<Option<String>> {
+    use loopflow::ops::context::ContextFact;
+
+    let resolution =
+        loopflow::lf::commands::context::explain_in(directory, wave, None, None, None)?;
+    match resolution.task {
+        ContextFact::Bound { value, .. } => Ok(Some(value)),
+        ContextFact::Unbound => Ok(None),
+        ContextFact::Unavailable { reason } => anyhow::bail!(reason),
+    }
+}
+
 fn run() -> anyhow::Result<()> {
     // A terminal relay is exec'd by the process that resolved its connection.
     // The relay avoids the command tree. A passive reveal records its terminal
@@ -1457,6 +1491,16 @@ fn run() -> anyhow::Result<()> {
             loopflow::lf::commands::session::print_returned(&session)?;
         }
         return Ok(());
+    }
+    // Clap has no `session attach`: a relay that names no valid host stops here.
+    if raw_args
+        .get(1..3)
+        .is_some_and(|args| args == ["session", "attach"])
+    {
+        anyhow::bail!(
+            "lf session attach names an owner LfProcess id or `--terminal TERMINAL_ID`; got {:?}",
+            &raw_args[3..]
+        );
     }
     if !raw_args
         .iter()
@@ -1597,6 +1641,17 @@ fn run() -> anyhow::Result<()> {
         journal::mark_effect_free_read();
         return Err(error);
     }
+    // Keep presentation in the initiating CLI, outside both the execution
+    // transport (which execs its relay) and remote Machine dispatch.
+    if raw_args.iter().any(|arg| arg == "--open") {
+        if let Ok(normalized) = loopflow::lf::navigation::normalize_args(raw_args.clone()) {
+            if let Ok(cli) = Cli::try_parse_from(reorder_args(normalized)).and_then(Cli::checked) {
+                if let Some(open) = task_run_open_args(&cli) {
+                    return run_task_and_open(&raw_args, open);
+                }
+            }
+        }
+    }
     // Ensure Ctrl+C terminates lf and the child agent. Without this,
     // child.wait() retries on EINTR and hangs while the agent catches
     // SIGINT and keeps running. SIGTERM the agent first so it doesn't
@@ -1670,11 +1725,6 @@ fn run() -> anyhow::Result<()> {
     if !journal::take_graph_step() && !cli.command.as_ref().is_none_or(Commands::changes_work) {
         journal::mark_read();
     }
-    // The observer runs beside a conversation for days. It opens the store only
-    // to record, and failing to open it must not stop it.
-    if matches!(cli.command, Some(Commands::CodexObserve)) {
-        return loopflow::harness::codex_connection::run_observer();
-    }
     if cli.harness_callback() {
         journal::harness_issued();
     }
@@ -1723,6 +1773,20 @@ fn run() -> anyhow::Result<()> {
     );
     let desktop_read = desktop_intent_read(&cli);
     init_tracing(cli.verbose);
+    // A turn or tool boundary asks the Machine server and binds no Work, so
+    // the hook opens no store.
+    if let Some(Commands::ContextBlock {
+        delivery,
+        moment:
+            moment @ (ContextMoment::Start
+            | ContextMoment::Compact
+            | ContextMoment::Tool
+            | ContextMoment::Stop),
+        ..
+    }) = &cli.command
+    {
+        return loopflow::lf::commands::context::emit_block(delivery.as_deref(), *moment);
+    }
     validate_desktop_platform(&cli)?;
     let _selected_repo_cwd = cli
         .repo
@@ -1756,13 +1820,6 @@ fn run() -> anyhow::Result<()> {
                                 | loopflow::lf::RepoCommand::Ci { .. }
                                 | loopflow::lf::RepoCommand::Plan { .. }
                         ),
-                        ..
-                    }
-                    | Commands::ContextBlock {
-                        moment: ContextMoment::Start
-                            | ContextMoment::Compact
-                            | ContextMoment::Tool
-                            | ContextMoment::Stop,
                         ..
                     }
             )
@@ -2294,6 +2351,119 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The `lf open` invocation that follows a successful `task run --open`.
+#[derive(Debug)]
+struct TaskRunOpen {
+    args: Vec<String>,
+    /// The launch writes its `task.run` value to stdout; the opener's receipt
+    /// then goes to stderr so stdout holds exactly one JSON document.
+    json: bool,
+}
+
+fn task_run_open_args(cli: &Cli) -> Option<TaskRunOpen> {
+    let Some(Commands::Task {
+        cmd:
+            TaskCommand::Run {
+                open: true,
+                quote: false,
+                json,
+                ..
+            },
+    }) = &cli.command
+    else {
+        return None;
+    };
+    if cli.context || cli.explain {
+        return None;
+    }
+    let mut args = vec!["open".to_owned()];
+    if let Some(agent) = &cli.agent {
+        args.extend(["--agent".into(), agent.clone()]);
+    }
+    for (flag, values) in [
+        ("--account", &cli.account),
+        ("--only-account", &cli.only_account),
+        ("--setting", &cli.settings),
+    ] {
+        for value in values {
+            args.extend([flag.to_owned(), value.clone()]);
+        }
+    }
+    Some(TaskRunOpen {
+        args,
+        json: *json || cli.json,
+    })
+}
+
+fn run_task_and_open(
+    args: &[String],
+    TaskRunOpen {
+        args: mut open,
+        json,
+    }: TaskRunOpen,
+) -> anyhow::Result<()> {
+    let mut literal = false;
+    let launch: Vec<_> = args[1..]
+        .iter()
+        .filter(|arg| {
+            literal |= arg.as_str() == "--";
+            literal || arg.as_str() != "--open"
+        })
+        .cloned()
+        .collect();
+    let executable = std::env::current_exe()?;
+    let run = |args: &[String], stdout: std::process::Stdio| -> anyhow::Result<()> {
+        let status = std::process::Command::new(&executable)
+            .args(args)
+            .stdout(stdout)
+            .status()?;
+        if !status.success() {
+            let code = status
+                .code()
+                .and_then(|code| u8::try_from(code).ok())
+                .unwrap_or(130);
+            return Err(loopflow::process::CommandExit(code).into());
+        }
+        Ok(())
+    };
+    run(&launch, std::process::Stdio::inherit())?;
+    // Resolve on the same Machine with the same selectors, after launch has
+    // acquired any previously unknown Task. Only portable identities cross
+    // back into presentation; remote checkout paths never enter the local CLI.
+    // Root preview flags also precede any end-of-options marker in the launch.
+    let output = std::process::Command::new(&executable)
+        .args(["--explain", "--json"])
+        .args(&launch)
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::inherit())
+        .output()?;
+    anyhow::ensure!(
+        output.status.success(),
+        "Task launched, but its selection could not be read for opening"
+    );
+    let selected: loopflow::ops::task::TaskRunExplanation =
+        serde_json::from_slice(&output.stdout).context("read the launched Task's selection")?;
+    for (flag, fact) in [
+        ("--task", selected.resolution.task),
+        ("--repo-id", selected.resolution.repository),
+    ] {
+        use loopflow::ops::context::ContextFact;
+        match fact {
+            ContextFact::Bound { value, .. } => open.extend([flag.into(), value]),
+            ContextFact::Unavailable { reason } => anyhow::bail!(reason),
+            ContextFact::Unbound => {
+                anyhow::bail!("Task launched, but {flag} is unavailable for opening")
+            }
+        }
+    }
+    let receipt = if json {
+        std::io::stderr().into()
+    } else {
+        std::process::Stdio::inherit()
+    };
+    run(&open, receipt)
+}
+
 fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
     // Own direct conversations and Graphs. Delivery controllers may launch an
     // independently owned agent, but retain their own cancellation/lifetime.
@@ -2316,7 +2486,18 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
                 },
             })
     );
-    if execution && loopflow::transport::delegate_current(cli.batch)? {
+    let task_run = matches!(
+        cli.command,
+        Some(Commands::Task {
+            cmd: TaskCommand::Run { .. }
+        })
+    );
+    if execution
+        && loopflow::transport::delegate_current(
+            cli.batch,
+            task_run || cli.work_subject_selector().is_some(),
+        )?
+    {
         return Ok(());
     }
     // Only the operation a launcher started reports; an execution owner in
@@ -2357,20 +2538,10 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             })
         ) && cli.task.is_none()
         {
-            let resolution = loopflow::lf::commands::context::explain_in(
-                &directory,
-                cli.wave.as_deref(),
-                None,
-                None,
-                None,
-            )?;
-            cli.task = match resolution.task {
-                loopflow::ops::context::ContextFact::Bound { value, .. } => Some(value),
-                loopflow::ops::context::ContextFact::Unavailable { reason } => {
-                    anyhow::bail!(reason)
-                }
-                _ => anyhow::bail!("No Task selected; name a Task or run from its checkout"),
-            };
+            cli.task = Some(
+                checkout_task(&directory, cli.wave.as_deref())?
+                    .context("No Task selected; name a Task or run from its checkout")?,
+            );
         }
         journal::admit_process(&directory, args);
         let mut stdin = std::io::stdin();
@@ -2433,26 +2604,23 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
         }) | Some(Commands::Ship { .. })
     ) && cli.task.is_none()
     {
-        let resolution =
-            loopflow::lf::commands::context::explain(cli.wave.as_deref(), None, None, None)?;
-        cli.task = Some(match resolution.task {
-            loopflow::ops::context::ContextFact::Bound { value, .. } => value,
-            loopflow::ops::context::ContextFact::Unavailable { reason } => anyhow::bail!(reason),
-            // Shipping a branch with no Task first gives it one.
-            loopflow::ops::context::ContextFact::Unbound
-                if matches!(&cli.command, Some(Commands::Ship { .. })) =>
-            {
-                let task = loopflow::ops::task::ship::ship_branch_task(
-                    &loopflow::repo::working_directory()?,
-                    cli.wave.as_deref(),
-                )?;
-                eprintln!("Created {} for this branch", task.identifier);
-                task.identifier
-            }
-            loopflow::ops::context::ContextFact::Unbound => {
-                anyhow::bail!("No Task selected; name a Task or run from its checkout")
-            }
-        });
+        cli.task = Some(
+            match checkout_task(&std::env::current_dir()?, cli.wave.as_deref())? {
+                Some(task) => task,
+                // Shipping a branch with no Task first gives it one.
+                None if matches!(&cli.command, Some(Commands::Ship { .. })) => {
+                    let task = loopflow::ops::task::ship::ship_branch_task(
+                        &loopflow::repo::working_directory()?,
+                        cli.wave.as_deref(),
+                    )?;
+                    eprintln!("Created {} for this branch", task.identifier);
+                    task.identifier
+                }
+                None => {
+                    anyhow::bail!("No Task selected; name a Task or run from its checkout")
+                }
+            },
+        );
     }
     // Reading this Machine's Tasks or processes recovers them first.
     if matches!(
@@ -2829,22 +2997,6 @@ fn execute_command(
                 )
             }),
         },
-        // Neither Pi callback reads hook JSON; a tool group's stdin is the command's.
-        Some(Commands::ContextBlock {
-            moment: ContextMoment::PiEvent,
-            ..
-        }) => loopflow::harness::pi::native_event(),
-        Some(Commands::ContextBlock {
-            moment: ContextMoment::ToolGroup,
-            lifeline,
-            provider_pid,
-            ..
-        }) => loopflow::harness::agent_process::guard_tool_lifeline(
-            lifeline
-                .as_deref()
-                .expect("clap requires --lifeline for tool-group"),
-            provider_pid.expect("clap requires --provider-pid with --lifeline"),
-        ),
         Some(Commands::ContextBlock {
             moment: ContextMoment::Limit,
             ..
@@ -2860,13 +3012,9 @@ fn execute_command(
             Ok(())
         }
         Some(Commands::ContextBlock {
-            moment: ContextMoment::Move,
-            ..
-        }) => loopflow::lf::commands::context::apply_session_move(),
-        Some(Commands::ContextBlock {
             delivery, moment, ..
         }) => loopflow::lf::commands::context::emit_block(delivery.as_deref(), *moment),
-        Some(Commands::CodexObserve) => unreachable!("the observer dispatches before any store"),
+        Some(Commands::Holder { .. }) => unreachable!("the holder dispatches before any store"),
         Some(Commands::Session { .. }) => unreachable!("Session dispatch precedes Work binding"),
         Some(Commands::Ship { .. }) => unreachable!("ship dispatch precedes Work binding"),
         Some(Commands::Machine {
@@ -2959,8 +3107,15 @@ fn execute_command(
                 &std::env::current_dir()?,
                 wave.as_deref(),
             )?;
+            if let loopflow::lf::commands::ops::PlanningRefresh::Unconnected(wave) = &refreshed {
+                if !*json {
+                    println!(
+                        "{wave}: no Linear Initiative; showing local planning (lf wave plan connect {wave})"
+                    );
+                }
+            }
             loopflow::lf::commands::waves::status(
-                refreshed.as_deref().or(wave.as_deref()),
+                refreshed.wave().or(wave.as_deref()),
                 *json,
                 false,
             )
@@ -3157,6 +3312,63 @@ mod tests {
     use clap::Parser;
     use loopflow::lf::{Cli, Commands, PrCommand, TaskCommand};
     use loopflow::work::task::{GithubPr, PrPublication, TaskId, TaskPr, TaskPrId};
+
+    #[test]
+    fn task_run_open_keeps_presentation_options_without_execution_selectors() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "--machine",
+            "worker",
+            "--repo-id",
+            "repo_11111111111111111111111111111111",
+            "--cwd",
+            "/checkout",
+            "--agent",
+            "claude",
+            "--account",
+            "personal",
+            "task",
+            "run",
+            "LOO-42",
+            "--open",
+            "--json",
+        ])
+        .unwrap();
+        let open = super::task_run_open_args(&cli).unwrap();
+        assert!(open.json);
+        assert!(!open.args.iter().any(|arg| arg == "--json"));
+        let opened = Cli::try_parse_from(reorder_args(
+            std::iter::once("lf".to_owned()).chain(open.args).collect(),
+        ))
+        .unwrap();
+        assert!(matches!(opened.command, Some(Commands::Open(_))));
+        assert!(opened.machine.is_none());
+        assert!(opened.task.is_none());
+        assert!(opened.repository.is_none());
+        assert!(opened.repo.is_none());
+        assert!(opened.wt.is_none());
+        assert!(opened.cwd.is_none());
+        assert_eq!(opened.agent, cli.agent);
+        assert_eq!(opened.account, cli.account);
+    }
+
+    #[test]
+    fn task_run_open_skips_reads_and_plain_runs() {
+        for flags in [
+            vec![],
+            vec!["--open", "--context"],
+            vec!["--open", "--explain"],
+            vec!["--open", "--quote"],
+        ] {
+            let args = ["lf", "task", "run", "LOO-42"]
+                .into_iter()
+                .chain(flags)
+                .map(str::to_owned)
+                .collect();
+            let cli = Cli::try_parse_from(reorder_args(args)).unwrap();
+            assert!(super::task_run_open_args(&cli).is_none());
+        }
+    }
 
     /// `--as` never degrades to raw attribution: an absent registry is named
     /// as such, and a store lf cannot open names its cause, never "empty".

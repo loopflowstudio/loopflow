@@ -29,6 +29,7 @@
       "graph": { "name": "code", "steps": [] },
       "step": "explore",
       "run_start": { "index": 1 }
-    }
+    },
+    "stopped": { "step": "implement" }
   }
 }

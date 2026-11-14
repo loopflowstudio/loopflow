@@ -6,13 +6,15 @@ import { randomUUID } from "node:crypto";
 export default {
   id: "loopflow-context",
   async setup({ session, event }) {
-    let compacted = false;
+    // The block is rendered at the first request and after each compaction,
+    // then reused; a block lf could not render is tried again next request.
+    let refresh = "start";
+    let block;
     let owner;
     // Context lf cannot serve is a recording gap, never a notice in the
     // conversation: like Claude's hooks, one line per changed failure in this
     // plugin's log (OpenCode's stderr, kept beside the capture), then quiet
-    // until the next prompt lf serves closes it. lf's own process records the
-    // gap in logs/lf.log when it runs.
+    // until the next block lf renders closes it.
     let gap;
     const recordingGap = (error) => {
       const message = error.message.split("\n")[0];
@@ -25,38 +27,45 @@ export default {
       console.error(`recording gap closed (context ${gap}); lf serves context from here`);
       gap = undefined;
     };
+    // A launch that reports no turns opens no connection: no steers, no turn end.
+    const server = spec.turns ? machineServer(delivery, (line) => console.error(line)) : undefined;
+    // The block comes from checkout files; the boundary itself went to the server.
+    const { LF_PROVIDER_CONTEXT: _, ...renderEnv } = process.env;
+    const render = (moment, callback) => JSON.parse(execFileSync(spec.executable,
+      ["__context-block", "--delivery", delivery, "--moment", moment], {
+        env: { ...renderEnv, LF_HOME: spec.delivery.home }, cwd: spec.delivery.repo,
+        input: JSON.stringify(callback), encoding: "utf8", timeout: 30000,
+      })).hookSpecificOutput.additionalContext;
     await session.hook("prompt", (input) => { owner ??= input.sessionID; });
-    await session.hook("compaction", (input) => { if (input.sessionID === owner) compacted = true; });
-    await session.hook("context", (input) => {
+    await session.hook("compaction", (input) => { if (input.sessionID === owner) refresh = "compact"; });
+    await session.hook("context", async (input) => {
       owner ??= input.sessionID;
       if (input.sessionID !== owner) return;
       if (spec.instructions) input.system.push({ type: "text", text: spec.instructions });
-      try {
-        const output = execFileSync(spec.executable, ["__context-block", "--delivery", delivery,
-          "--moment", compacted ? "compact" : "start"], {
-          env: { ...process.env, LF_HOME: spec.delivery.home },
-          cwd: spec.delivery.repo,
-          input: JSON.stringify({ session_id: input.sessionID,
-            hook_event_name: "OpenCodeMessagesTransform", adapter_invocation_id: randomUUID() }),
-          encoding: "utf8", timeout: 30000,
-        });
-        input.system.push({ type: "text", text: JSON.parse(output).hookSpecificOutput.additionalContext });
-        recovered();
-      } catch (error) {
-        recordingGap(error);
+      const callback = { session_id: input.sessionID, hook_event_name: "OpenCodeMessagesTransform",
+        adapter_invocation_id: randomUUID() };
+      const moment = refresh ?? "tool";
+      const answer = await server?.boundary(moment, callback);
+      if (refresh) {
+        try {
+          block = render(moment, callback);
+          refresh = undefined;
+          recovered();
+        } catch (error) {
+          recordingGap(error);
+        }
       }
+      const text = `${news(answer)}${block ?? ""}`;
+      if (text) input.system.push({ type: "text", text });
+      if (answer?.steers) server.printed(answer.steers.batch);
     });
+    if (!server) return async () => {};
     const controller = new AbortController();
     const watching = (async () => {
       for await (const item of event.subscribe({ signal: controller.signal })) {
         if (item.type !== "session.execution.succeeded" || item.data.sessionID !== owner) continue;
-        try {
-          execFileSync(spec.executable, ["__context-block", "--delivery", delivery,
-            "--moment", "stop"], {
-            env: { ...process.env, LF_HOME: spec.delivery.home }, cwd: spec.delivery.repo,
-            timeout: 10000, stdio: "ignore",
-          });
-        } catch { /* Planning remains pending until a later boundary. */ }
+        // An unanswered turn end leaves planning pending until a later boundary.
+        await server.boundary("stop", {});
       }
     })().catch((error) => { if (!controller.signal.aborted) throw error; });
     return async () => { controller.abort(); await watching; };

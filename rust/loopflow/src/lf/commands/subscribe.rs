@@ -647,9 +647,12 @@ fn strip_reading_time(value: &mut serde_json::Value) {
         serde_json::Value::Object(fields) => {
             fields.remove("generated_at");
             fields.remove("evidence_age_secs");
-            // A Task condition restates when it was derived.
-            if let Some(serde_json::Value::Object(condition)) = fields.get_mut("condition") {
-                condition.remove("observed_at");
+            // A Task condition restates when it was derived; acquisition and
+            // project readiness restate when the provider was last read.
+            for observation in ["condition", "acquisition", "project_readiness"] {
+                if let Some(serde_json::Value::Object(observed)) = fields.get_mut(observation) {
+                    observed.remove("observed_at");
+                }
             }
             fields.values_mut().for_each(strip_reading_time);
         }
@@ -969,13 +972,6 @@ mod tests {
         agent("codex");
 
         let before = reads.load(Ordering::Relaxed);
-        for index in 0..20 {
-            std::fs::write(&wave, format!("agent: pi # edit {index}\n")).unwrap();
-        }
-        agent("pi");
-        assert_eq!(reads.load(Ordering::Relaxed), before + 1);
-
-        let before = reads.load(Ordering::Relaxed);
         std::fs::write(checkout.join("unrelated.txt"), "changed\n").unwrap();
         let until = Instant::now() + Duration::from_millis(1200);
         while Instant::now() < until {
@@ -1067,7 +1063,11 @@ mod tests {
 
     #[test]
     fn the_time_of_a_reading_is_not_a_change() {
-        let rows = |at| serde_json::json!([{"id": 1, "condition": {"observed_at": at}}]);
+        let rows = |at| {
+            serde_json::json!([{"id": 1, "condition": {"observed_at": at},
+                "task": {"acquisition": {"state": "available", "observed_at": at}},
+                "project_readiness": {"state": "ready", "observed_at": at}}])
+        };
         let read = |body| identity(None, Some(&body)).unwrap();
         assert_eq!(read(rows(1)), read(rows(2)));
         assert_ne!(

@@ -94,8 +94,7 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
             activity_known: false,
         });
     }
-    let mut tasks = super::children::tasks_in(conn, None)?;
-    tasks.retain(|task| &task.repository_id == repository);
+    let mut tasks = super::children::repository_tasks_in(conn, repository)?;
     tasks.sort_by(|a, b| (a.rank, a.id.as_str()).cmp(&(b.rank, b.id.as_str())));
     let sessions = super::sessions::session_summaries_in(
         conn,
@@ -117,9 +116,22 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
             sessions_by_task.entry(task).or_default().push(session);
         }
     }
+    // State, publication and ownership for every Task in a fixed number of
+    // statements: a query per Task costs thousands on a large repository.
+    let ids: Vec<_> = tasks.iter().map(|task| task.id.clone()).collect();
+    let task_states = super::task_details::states_in(
+        conn,
+        &super::children::ids_json(ids.iter().map(|id| id.as_str())),
+    )?;
+    let published = super::project_adoption::published_in(conn, &ids)?;
+    let owners = super::task_ownership::owners_in(conn, &ids)?;
     for task in tasks {
-        let started = super::project_adoption::task_started_or_published_in(conn, &task.id)?;
-        let state = super::durable::task_state_in(conn, &task.id)?;
+        let state = *task_states
+            .get(&task.id)
+            .ok_or_else(|| invalid(format!("Task {} has no state", task.id)))?;
+        let owned = owners.contains_key(&task.id);
+        // Started as `task_started_or_published_in` defines it.
+        let started = owned || published.contains(&task.id);
         let open = started && !state.is_terminal();
         let mut states = BTreeSet::new();
         if open {
@@ -133,11 +145,7 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
             TaskState::Shipping => SelectionState::Shipping,
             TaskState::Done | TaskState::Abandoned => SelectionState::Done,
         });
-        let section = TaskSection::of(
-            state,
-            super::task_ownership::owned_in(conn, &task.id)?,
-            task.state.as_deref(),
-        );
+        let section = TaskSection::of(state, owned, task.state.as_deref());
         states.insert(match section {
             TaskSection::Backlog => SelectionState::Backlog,
             TaskSection::Working => SelectionState::Working,
@@ -281,6 +289,7 @@ fn plan_in(
             work: key.clone(),
             title: facts.map_or_else(|| key.id.clone(), |item| item.name.clone()),
             states: facts.map_or_else(BTreeSet::new, |item| item.states.clone()),
+            identifier: None,
             primary_session: None,
             location: None,
             argv: None,
@@ -293,6 +302,7 @@ fn plan_in(
         } else if key.kind == WorkWorkspaceKind::Task {
             let task_id = crate::durable::TaskId::parse(&key.id).map_err(invalid)?;
             let task = super::children::task_on(conn, &task_id)?.ok_or(StoreError::NotFound)?;
+            content.identifier = Some(task.identifier);
             content.title = task.title;
             let primary = super::sessions::primary_session_in(
                 conn,
@@ -358,11 +368,20 @@ fn plan_in(
     } else {
         SlotLayout::golden()
     };
+    let repo_path = conn
+        .query_row(
+            "SELECT repo FROM repository_plans WHERE id=?1",
+            [repository.as_str()],
+            |row| row.get(0),
+        )
+        .optional()?
+        .ok_or(StoreError::NotFound)?;
     Ok(ViewPlan {
         name: saved.and_then(|saved| saved.name.clone()),
         pinned: saved.is_some_and(|saved| saved.pinned),
         dashboard_id: saved.map(|saved| saved.id.clone()),
         repository: repository.to_string(),
+        repo_path,
         selection,
         saved_revision: saved.map(|saved| saved.revision),
         resolution,
@@ -373,6 +392,26 @@ fn plan_in(
             .unwrap_or(default_slots),
         contents,
     })
+}
+
+fn plan_selection_in(
+    conn: &Connection,
+    repository: &RepositoryId,
+    selection: Selection,
+) -> StoreResult<crate::work::selection::ViewPlan> {
+    let catalog = catalog_in(conn, repository)?;
+    let work = work_in(conn, repository)?;
+    let saved = selection
+        .referenced_query()
+        .and_then(|id| catalog.iter().find(|saved| &saved.id == id));
+    plan_in(
+        conn,
+        repository,
+        saved.map_or(selection, |saved| saved.selection.clone()),
+        saved,
+        &definitions(&catalog),
+        &work,
+    )
 }
 
 impl SqliteStore {
@@ -396,19 +435,45 @@ impl SqliteStore {
     ) -> StoreResult<crate::work::selection::ViewPlan> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let snapshot = conn.savepoint()?;
-        let catalog = catalog_in(&snapshot, repository)?;
-        let work = work_in(&snapshot, repository)?;
-        let saved = selection
-            .referenced_query()
-            .and_then(|id| catalog.iter().find(|saved| &saved.id == id));
-        plan_in(
-            &snapshot,
-            repository,
-            saved.map_or(selection, |saved| saved.selection.clone()),
-            saved,
-            &definitions(&catalog),
-            &work,
-        )
+        plan_selection_in(&snapshot, repository, selection)
+    }
+
+    /// One consistent reading of the same selection across `repos` (canonical
+    /// repository paths); a repository with no recorded Work identity has no
+    /// plan, and neither does one that holds none of the Waves it scopes to.
+    pub fn all_view_plans(
+        &self,
+        source: Option<&str>,
+        repos: &[String],
+    ) -> StoreResult<Vec<crate::work::selection::ViewPlan>> {
+        let selection = match source {
+            Some(source) => Selection::parse(source, None).map_err(StoreError::from)?,
+            None => repository_default(),
+        };
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let snapshot = conn.savepoint()?;
+        let waves = selection.waves();
+        let mut plans = Vec::new();
+        for repo in repos {
+            if let Some(repository) = super::repositories::repository_id_in(&snapshot, repo)? {
+                if !waves.is_empty()
+                    && !work_in(&snapshot, &repository)?.iter().any(|item| {
+                        item.key.kind == WorkWorkspaceKind::Wave
+                            && waves.iter().any(|wave| {
+                                item.key.id == *wave || item.name.eq_ignore_ascii_case(wave)
+                            })
+                    })
+                {
+                    continue;
+                }
+                plans.push(plan_selection_in(
+                    &snapshot,
+                    &repository,
+                    selection.clone(),
+                )?);
+            }
+        }
+        Ok(plans)
     }
 
     /// The observer and one-shot plans expose the same repository/default and saved views.
@@ -563,16 +628,17 @@ impl SqliteStore {
         if id.0.is_empty() {
             return Err(invalid("Dashboard ID must be nonempty"));
         }
+        let stale = || StoreError::Stale("Dashboard changed; read it again before editing".into());
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let catalog = catalog_in(&tx, repository)?;
+        // The Work read takes seconds in a large repository, so it reads a
+        // snapshot; the write transaction only checks the revision and writes.
+        let snapshot = conn.savepoint()?;
+        let catalog = catalog_in(&snapshot, repository)?;
         let prior = catalog.iter().find(|saved| &saved.id == id).cloned();
         if prior.as_ref().map(|saved| saved.revision) != expected_revision {
-            return Err(StoreError::Stale(
-                "Dashboard changed; read it again before editing".into(),
-            ));
+            return Err(stale());
         }
-        let work = work_in(&tx, repository)?;
+        let work = work_in(&snapshot, repository)?;
         let mut definitions = definitions(&catalog);
         definitions.insert(id.clone(), selection.clone());
         // Any cycle introduced by this edit must pass through this selection.
@@ -581,7 +647,7 @@ impl SqliteStore {
             .resolve(repository.as_str(), &work, &definitions)
             .map_err(StoreError::from)?;
         let expression_key = selection.expression_key();
-        let mut expected = arrangement_in(&tx, repository, id, &expression_key)?
+        let mut expected = arrangement_in(&snapshot, repository, id, &expression_key)?
             .map(|(_, arrangement)| arrangement)
             .or_else(|| prior.as_ref().map(|saved| saved.arrangement.clone()))
             .unwrap_or_else(|| Arrangement::automatic(&[]));
@@ -608,6 +674,20 @@ impl SqliteStore {
             selection: selection.clone(),
             arrangement,
         };
+        drop(snapshot);
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        // Every Dashboard write advances the revision, so an unchanged one
+        // means the catalog and arrangement read above are still current.
+        let current: Option<i64> = tx
+            .query_row(
+                "SELECT revision FROM dashboards WHERE repository_id=?1 AND id=?2",
+                params![repository.as_str(), id.0],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if current != expected_revision {
+            return Err(stale());
+        }
         tx.execute("INSERT INTO dashboards(repository_id,id,revision,expression_key,name,pinned) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(repository_id,id) DO UPDATE SET revision=excluded.revision,expression_key=excluded.expression_key",
             params![repository.as_str(),id.0,saved.revision,expression_key,saved.name,saved.pinned])?;
         tx.execute("INSERT INTO dashboard_arrangements(repository_id,dashboard_id,expression_key,selection_json,arrangement_json) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(repository_id,dashboard_id,expression_key) DO UPDATE SET selection_json=excluded.selection_json,arrangement_json=excluded.arrangement_json",
@@ -682,27 +762,43 @@ impl SqliteStore {
         to: &str,
     ) -> StoreResult<Vec<String>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let work = work_in(&tx, repository)?;
-        let resolution = repository_default()
-            .resolve(repository.as_str(), &work, &BTreeMap::new())
-            .map_err(StoreError::from)?;
-        let mut order = resolution.task_ids();
-        let from = order
-            .iter()
-            .position(|id| id == task)
-            .ok_or(StoreError::NotFound)?;
-        let target = order
-            .iter()
-            .position(|id| id == to)
-            .ok_or(StoreError::NotFound)?;
-        move_into_place(&mut order, from, target);
-        tx.execute(
-            "INSERT INTO task_orders(repository_id,task_ids_json) VALUES(?1,?2) ON CONFLICT(repository_id) DO UPDATE SET task_ids_json=excluded.task_ids_json",
-            params![repository.as_str(), serde_json::to_string(&order)?],
-        )?;
-        tx.commit()?;
-        Ok(order)
+        // The Work read takes seconds in a large repository, so it reads a
+        // snapshot. The write lands only on the order it read; a concurrent
+        // reorder sends this one back to read again.
+        for _ in 0..3 {
+            let (read, order) = {
+                let snapshot = conn.savepoint()?;
+                let read = task_order_in(&snapshot, repository)?;
+                let work = work_in(&snapshot, repository)?;
+                let resolution = repository_default()
+                    .resolve(repository.as_str(), &work, &BTreeMap::new())
+                    .map_err(StoreError::from)?;
+                let mut order = resolution.task_ids();
+                let from = order
+                    .iter()
+                    .position(|id| id == task)
+                    .ok_or(StoreError::NotFound)?;
+                let target = order
+                    .iter()
+                    .position(|id| id == to)
+                    .ok_or(StoreError::NotFound)?;
+                move_into_place(&mut order, from, target);
+                (read, order)
+            };
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            if task_order_in(&tx, repository)? != read {
+                continue;
+            }
+            tx.execute(
+                "INSERT INTO task_orders(repository_id,task_ids_json) VALUES(?1,?2) ON CONFLICT(repository_id) DO UPDATE SET task_ids_json=excluded.task_ids_json",
+                params![repository.as_str(), serde_json::to_string(&order)?],
+            )?;
+            tx.commit()?;
+            return Ok(order);
+        }
+        Err(StoreError::Stale(
+            "the Task order kept changing; read it again before reordering".into(),
+        ))
     }
 
     /// Move `work`'s visible occurrence into `to`'s place in a Dashboard's order,
@@ -1006,6 +1102,39 @@ mod tests {
             store.view_plan(&repo, None).unwrap().resolution.task_ids(),
             [three, two, one]
         );
+    }
+
+    #[test]
+    fn a_wave_scoped_reading_skips_repositories_without_that_wave() {
+        let (_dir, store, _repo) = fixture();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_22222222222222222222222222222222','/other',1)",
+                [],
+            )
+            .unwrap();
+        let repos = ["/repo".to_string(), "/other".to_string()];
+        let all = store
+            .all_view_plans(Some("kind:task state:working"), &repos)
+            .unwrap();
+        assert_eq!(
+            all.iter()
+                .map(|plan| plan.repo_path.as_str())
+                .collect::<Vec<_>>(),
+            ["/repo", "/other"]
+        );
+        let scoped = store
+            .all_view_plans(
+                Some("wave:11111111-1111-1111-1111-111111111111 kind:task state:working"),
+                &repos,
+            )
+            .unwrap();
+        assert_eq!(scoped.len(), 1);
+        assert_eq!(scoped[0].repo_path, "/repo");
+        assert!(scoped[0].resolution.unavailable.is_empty());
     }
 
     #[test]

@@ -18,13 +18,18 @@ also run `cargo test -p loopflow --test integration documented_commands::`.
 It checks command examples and maintained copy, including design documents;
 include `test(documented_commands::)` in the gate's Rust filter.
 
+Builtin Graph order or loop changes also include `test(world_recipes::)` in the
+gate's Rust filter, alongside `test(graph::)`. These recipes check the steps
+recorded by real Task runs, including the pursuit that stops at demo.
+
 Embedded skill Markdown also reaches `binary(golden_prompt)`, even when no Rust
 code changes. Follow the [prompt fixture checks](../rust/loopflow/tests/README.md)
 to regenerate and review snapshots for intended prompt changes before gate.
 
-After syncing, rerun affected tests when main changed APIs they call, even if
-Git merged cleanly. A passing check from before the sync does not cover that
-combination; renamed enum variants can leave new branch tests uncompilable.
+After the final sync, publish again when the Rust tree changed, even if Git
+merged cleanly. Main can add callers or fixtures for APIs this branch changes.
+A passing check from before the sync, local or hosted, does not cover that
+combination; new fixtures can omit fields this branch adds.
 
 CLI command or flag changes also run `cargo test -p loopflow --lib lf::tests::`.
 These parser and routing checks exercise canonical commands directly; navigation
@@ -40,6 +45,11 @@ Changes to server protocol types or their doc comments also run
 the generated schema; regenerate its checked-in fixture using the command in
 [the server README](../rust/loopflow/src/server/README.md) when it changes.
 
+Server startup or background store maintenance changes also run
+`binary(served_reads)`, including configuration access with an unreadable store.
+Seed corrupt databases before starting SQLite readers or writers; overwriting
+only a live database's main file can leave readable pages in its WAL.
+
 Changes to compile-time embedded files also run
 `cargo package --locked --allow-dirty -p loopflow`. The extracted source archive
 must compile without access to files outside the crate. Server examples shared
@@ -54,10 +64,24 @@ Creation receipt changes also run `test(local_planning::)`,
 `test(harness::fact_writer::tests::)` and
 `test(store::sqlite::sessions::metadata_tests::)`: recovery owners, turn attribution
 and metadata reads over historical detail all depend on it.
+Session completion or attachment changes also run
+`test(session_record::capture_tests::)`: a headless continuation reopens its
+Session while retaining the saved provider thread and completes again on exit.
+
+Changes to Task/Graph membership or execution reads also include
+`test(performance_tests::)` in the gate's Rust filter. Its planning and status
+checks catch per-Task and per-Graph SQL growth beyond focused store tests.
 
 Store-wide schema or trigger changes also run `binary(two_people)` and
 `binary(transport_tests)`: shared planning exchanges and detached owner lifetimes
 exercise writers beyond the changed store module.
+Fixture database seeding changes include
+`test(concurrent_copies_share_one_initialized_machine)` and
+`test(two_task_research_runs_leave_distinct_uncommitted_artifacts_for_the_next_prompt)`:
+concurrent first opens must retain one Machine identity and every writer's rows.
+Include `test(lf::commands::waves::tests::planning_failure_keeps_the_stored_workflow_readable)`
+for Task schema or trigger changes: its missing-column fixture checks that a
+planning read failure still leaves the Wave and stored Workflow readable.
 
 Configuration file loading or filtering changes also run `binary(two_people)`:
 it checks that a shared Wave graph choice reaches another person's Task launch.
@@ -91,7 +115,12 @@ uv run pytest python/tests/test_gate_bounded.py          # one Python file
 
 Never `cargo test`, `cargo test --all` or `cargo nextest run --all` here.
 
-## Gate: affected suites once per tree
+## Gate: a few named tests; CI runs the suites
+
+Gate publishes the candidate first ([CI.md](../.github/CI.md)) and CI's
+partitions run the suites. "Plan first" above is the map for naming the two to
+five tests that matter most. Run them here only for fast feedback on a review
+fix, to reproduce a CI failure, or for a risk no suite covers:
 
 ```bash
 uv run python scripts/test.py --reuse-passing --rust-filter 'test(skills::catalog::) | test(prompt::) | binary(golden_prompt)'
@@ -112,7 +141,7 @@ fails the whole filterset before anything runs. A change to what `src/bin/lf.rs`
 calls (store openers, work binding) reaches `binary(lf)`: `--lib` never runs it.
 A filtered run covers `-p loopflow` only. Substring filters such as
 `test(ship)` or `test(planning::)` also reach slow suites (`land_tests`,
-`local_planning`) and can exhaust the Rust phase's 2400 s budget; name modules.
+`local_planning`) and can exhaust the Rust phase's 1800 s budget; name modules.
 Changes to `swift/project.yml`, `scripts/loopflow-dev.py`, or the libghostty-vt
 pin/build reach both Desktop build paths: run `--swift --loopflow`. Desktop
 talks to the CLI server; GhosttyKit supplies its renderer. Xcode also packages
@@ -121,6 +150,14 @@ with `transport 'https' not allowed`, run `swift package resolve` in `swift/` on
 and rerun.
 `--reuse-passing` returns at once for an identical tree and plan. A later pass
 narrows `--rust-filter` to what changed since the last pass.
+
+Phone, shared Swift models and server protocol changes also select `ios`.
+`uv run python scripts/test_ios.py` runs that suite directly; pass
+`-only-testing:LoopflowiOSTests/SessionTerminalTests` for a focused check. It creates
+and removes its own Simulator, using an installed iOS runtime and ad-hoc signing.
+The suite covers pairing, Task creation and the terminal; the shared protocol
+decoders, owner stream included, run with the macOS Swift tests. Whether a
+Session works is checked on a physical phone against a real Machine.
 Website checks generate command reference pages from `LF_BIN` or `lf` on PATH.
 After building the candidate, prepend its directory to `PATH` for the gate or
 website command when the installed CLI differs: `PATH="$PWD/target/debug:$PATH"`.
@@ -129,11 +166,10 @@ the docs check on the candidate's command tree inside that boundary.
 Before gate, regenerate the portable architecture page after edits to
 `docs/dev/index.md` or its rendering, following [website/README.md](../website/README.md#testing).
 Include `docs/dev/index.html` in the change; the website suite checks it for drift.
-A filter reaching `ops::linear::` subtracts its four-to-five-minute fixtures
-(`- test(native_runner_is_quiet_until_its_turn_ends) - test(linear_on_demand_native_hooks_share_freshness_across_processes) - test(linear_on_demand_shares_checks_and_excludes_finished_tasks)`)
-unless the diff reaches them; together they exceed the 2400 s Rust budget, and
-CI's partitions run them. In filtersets `-` binds tighter than `|`, so wrap
-the union first: `(test(a::) | test(b::)) - test(slow)`; without the
+A filter reaching `ops::linear::` subtracts its long on-demand fixture
+(`- test(linear_on_demand_shares_checks_and_excludes_finished_tasks)`)
+unless the diff reaches it; CI's partitions run it. In filtersets `-` binds
+tighter than `|`, so wrap the union first: `(test(a::) | test(b::)) - test(slow)`; without the
 parentheses the subtraction applies only to the last term.
 A filter matching only `#[ignore]` tests (the loopback-SSH `ssh_shells::`
 suite) runs nothing and fails with `no tests to run`; run those by name with
@@ -144,6 +180,15 @@ Omit `--rust-filter` (the whole workspace) only to reproduce a CI
 
 ## macOS traps
 
+- The runner stops at sustained `syspolicyd` pressure, which can last as long
+  as other checkouts keep compiling. Run its printed Rust plan by hand (build,
+  the `nextest` line with the same `-E` filter, clippy), then each suite's
+  command, and record that the runner's pressure stop was bypassed. A run by
+  hand keeps nextest's limits from `.config/nextest.toml`: a test is killed at
+  five minutes and the run at twenty. Don't raise them or wait past them; a
+  test that times out only under load goes to CI. In zsh, clear `LF_*`
+  inline with `env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /')`; a
+  variable holding those flags is passed as one word and clears nothing.
 - `served_reads` compares paths, and macOS temp directories are symlinks: run it
   with a resolved `TMPDIR` (`/private/var/...`).
 - File-watch tests (`TaskFiles`, `remote_file_observer_…`) need working FSEvents.
@@ -154,6 +199,10 @@ Omit `--rust-filter` (the whole workspace) only to reproduce a CI
   and Graph fixtures see every installed harness ("No agent selected"). Rerun
   such failures from the built binary in an empty directory with a temp `HOME`
   and a PATH holding only `uv`, the Rust toolchain and `/usr/bin:/bin`.
+  Fixtures that place a Task also read the Machine's `~/.lf/config.yaml`
+  unless `LF_HOME` is set (the OS supplies the real home); one rewritten by a
+  newer `lf` fails them with "unknown or ineligible setting". Set a temp
+  `LF_HOME` too.
   The test constructor supplies its private home with a fixture Git identity;
   repository-local identities still win. Do not inject `GIT_CONFIG_GLOBAL` to
   repair a test: it hides missing setup in that private home.

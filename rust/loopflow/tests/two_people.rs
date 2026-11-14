@@ -11,8 +11,21 @@ use std::process::{Command, Output, Stdio};
 use serde_json::Value;
 
 struct Pair {
+    /// Each person's Task conversations start only beside their Machine server.
+    _servers: Vec<loopflow_test_support::MachineServer>,
     root: tempfile::TempDir,
     world: PathBuf,
+}
+
+impl Drop for Pair {
+    fn drop(&mut self) {
+        for person in [Person::Maya, Person::Lee] {
+            loopflow_test_support::end_recorded_processes(
+                &self.home(person).join("home"),
+                Path::new(env!("CARGO_BIN_EXE_lf")),
+            );
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -36,7 +49,20 @@ impl Pair {
         for home in [world.clone(), world.join("lee")] {
             std::fs::write(home.join(".gitconfig"), "").unwrap();
         }
-        Self { root, world }
+        let mut pair = Self {
+            _servers: Vec::new(),
+            root,
+            world,
+        };
+        pair._servers = [Person::Maya, Person::Lee]
+            .map(|person| {
+                loopflow_test_support::MachineServer::start(
+                    env!("CARGO_BIN_EXE_lf"),
+                    pair.env(person)["LF_HOME"].as_str().unwrap().as_ref(),
+                )
+            })
+            .into();
+        pair
     }
 
     fn clean(binary: &str, home: &Path) -> Command {
@@ -297,4 +323,45 @@ fn two_people_share_one_repository() {
     let fresh = pair.create_task(Lee, "Review me");
     let preview = pair.json(Lee, &["task", "run", &fresh, "--explain", "--json"]);
     assert_eq!(preview["action"]["graph"], "review", "{preview}");
+
+    let owners: Vec<u32> = [Maya, Lee]
+        .into_iter()
+        .flat_map(|person| {
+            let db =
+                rusqlite::Connection::open(pair.home(person).join("home/loopflow.db")).unwrap();
+            let mut query = db
+                .prepare(
+                    // A Task conversation is held: its process is the holder.
+                    "SELECT DISTINCT p.pid FROM processes p
+                 WHERE p.completed_at IS NULL AND p.pid IS NOT NULL
+                     AND (p.id IN (SELECT transport_lf_process_id FROM agent_sessions)
+                         OR (p.command='[\"lf\",\"holder\",\"run\"]'
+                             AND EXISTS (SELECT 1 FROM agent_sessions s
+                                 JOIN held_terminals t ON t.id=s.held_terminal_id
+                                 WHERE t.ended_at IS NULL)))",
+                )
+                .unwrap();
+            let owners = query
+                .query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<Result<Vec<u32>, _>>()
+                .unwrap();
+            assert!(!owners.is_empty(), "checkout started no conversation");
+            owners
+        })
+        .collect();
+    drop(pair);
+    for pid in owners {
+        let output = Command::new("ps")
+            .args(["-p", &pid.to_string(), "-o", "stat="])
+            .output()
+            .unwrap();
+        assert!(
+            !output.status.success()
+                || String::from_utf8_lossy(&output.stdout)
+                    .trim()
+                    .starts_with('Z'),
+            "fixture owner {pid} survived teardown"
+        );
+    }
 }

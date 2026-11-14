@@ -1,7 +1,8 @@
-//! Carrier-independent server protocol, revision 4: one connection per client,
+//! Carrier-independent server protocol, revision 5: one connection per client,
 //! negotiated revision, requests multiplexed by id. Local admission is
-//! same-user only. Each carrier delimits messages its own way; the Unix socket
-//! carries one JSON object per line.
+//! same-user only; the remote carrier admits the Machine owner's other
+//! Tailscale devices. Each carrier delimits messages its own way: the Unix
+//! socket carries one JSON object per line, the WebSocket one per text frame.
 use crate::engine::{Error, ErrorCode};
 use crate::id::LfProcessId;
 use crate::lf::commands::{read::Read, subscribe::SubscriptionFrame, write::Write};
@@ -10,10 +11,14 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// The newest revision this build speaks.
-pub const REVISION: u32 = 4;
+pub const REVISION: u32 = 5;
 /// The oldest revision this build speaks.
-pub const MIN_REVISION: u32 = 4;
-pub const MAX_MESSAGE: usize = 32 * 1024 * 1024;
+pub const MIN_REVISION: u32 = 5;
+/// The largest message a control connection carries, so a reading never waits
+/// behind a large body. Larger messages travel on a ticketed connection.
+pub const MAX_MESSAGE: usize = 1024 * 1024;
+/// The largest message a ticketed connection carries in either direction.
+pub const MAX_BULK: usize = 32 * 1024 * 1024;
 /// Welcomed client connections; terminal bridges are not among them.
 pub const MAX_CONNECTIONS: usize = 64;
 /// How long a `session.attach` ticket opens a bridge.
@@ -92,11 +97,12 @@ pub enum Operation {
 #[serde(tag = "kind", deny_unknown_fields)]
 pub enum ServerOperation {
     /// A ticket for the Session's terminal: the server resolves the Session's
-    /// current owner LfProcess and answers `{ticket, owner_lf_process_id,
-    /// expires_in_ms}`. A new connection presents the ticket as its first
-    /// message (`attach`) and becomes the bridge; this connection stays a
-    /// client. When the owner ends, the bridge closes; attaching again by the
-    /// same Session reaches its next owner. With `owner_lf_process_id`, the
+    /// held terminal, else its current owner LfProcess, and answers `{ticket,
+    /// owner_lf_process_id, terminal_id, expires_in_ms}` with one ID null. A
+    /// new connection presents the ticket as its first message (`attach`) and
+    /// becomes the bridge; this connection stays a client. When the terminal
+    /// or owner ends, the bridge closes; attaching again by the same Session
+    /// reaches its next one. With `owner_lf_process_id`, the
     /// Session must still be owned by exactly that LfProcess, for a client that
     /// reconnects only to the owner it had.
     #[serde(rename = "session.attach")]
@@ -104,16 +110,165 @@ pub enum ServerOperation {
     SessionAttach {
         session: crate::id::LfSessionId,
         owner_lf_process_id: Option<LfProcessId>,
+        /// Attach only to this held terminal. Without either ID, a Session's
+        /// held terminal is preferred to an owner.
+        terminal_id: Option<crate::id::TerminalId>,
     },
+    /// Start the Session's agent in this build's holder and answer
+    /// `{terminal_id}`. `env` is the caller's whole environment; the server's
+    /// is not used. Repeating `request` answers the terminal it started.
+    /// This is the only operation here that creates a process.
+    #[serde(rename = "session.start")]
+    #[schemars(extend("x-result" = generator.subschema_for::<SessionStarted>()))]
+    SessionStart {
+        session: Option<crate::id::LfSessionId>,
+        request: String,
+        argv: Vec<String>,
+        cwd: std::path::PathBuf,
+        env: Vec<(String, String)>,
+        rows: u16,
+        cols: u16,
+        /// The Desktop pane (`LF_TERMINAL_ID`) the caller's own terminal was
+        /// validated as; the held child continues it on its PTY. Null outside
+        /// a pane.
+        #[serde(deserialize_with = "Option::deserialize")]
+        placement: Option<String>,
+    },
+    /// Continue an existing Session in a held terminal: `lf session resume`
+    /// of exactly `session`, in its directory, with the server's environment.
+    /// Answers `{terminal_id}`; repeating `request` answers the terminal it
+    /// started. For a client with no environment of its own to send.
+    #[serde(rename = "session.continue")]
+    #[schemars(extend("x-result" = generator.subschema_for::<SessionStarted>()))]
+    SessionContinue {
+        session: crate::id::LfSessionId,
+        request: String,
+        rows: u16,
+        cols: u16,
+    },
+    /// Mobile access readiness; same-user local socket only.
+    #[serde(rename = "mobile.status")]
+    #[schemars(extend("x-result" = generator.subschema_for::<super::mobile::Status>()))]
+    MobileStatus,
+    /// Turn mobile access on with `configuration`, or off with null; same-user
+    /// local socket only. Answers `{configuration}`.
+    #[serde(rename = "mobile.configure")]
+    #[schemars(extend("x-result" = schemars::json_schema!({"type": "object", "properties": {"configuration": generator.subschema_for::<Option<super::mobile::Configuration>>()}, "required": ["configuration"], "additionalProperties": false}))) ]
+    MobileConfigure {
+        configuration: Option<super::mobile::Configuration>,
+    },
+    /// A ticket for a connection that carries one request of `bytes` bytes,
+    /// larger than `limits.max_message`; answers `{ticket}`. The uploaded
+    /// request is answered here under its own id.
+    #[serde(rename = "request.upload")]
+    #[schemars(extend("x-result" = schemars::json_schema!({"type": "object", "properties": {"ticket": {"type": "string"}}, "required": ["ticket"], "additionalProperties": false}))) ]
+    RequestUpload { bytes: usize },
+    /// A provider hook at a turn or tool boundary. The server records what the
+    /// boundary says (the native turn, the acknowledged input, `gap`) and
+    /// answers the Session's pending steers. At `stop` it answers first, then
+    /// refreshes planning and applies a pending Session move.
+    #[serde(rename = "session.boundary")]
+    #[schemars(extend("x-result" = generator.subschema_for::<SessionBoundaryAnswer>()))]
+    SessionBoundary(SessionBoundary),
+}
+
+/// What a hook says at a turn or tool boundary.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SessionBoundary {
+    pub moment: BoundaryMoment,
+    /// The Session's context delivery file.
+    pub delivery: std::path::PathBuf,
+    /// The provider context the launch gave the agent; null for a
+    /// conversation lf did not start (a Codex app-server thread), whose
+    /// `stop` only refreshes planning.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub adapter: Option<crate::steer::SteerAdapter>,
+    /// The JSON the provider sent the hook, unchanged.
+    #[schemars(with = "Untyped")]
+    pub callback: serde_json::Value,
+    /// The hook's open recording gap; the server writes it into the
+    /// Session's history as one `store-gap` observation.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub gap: Option<BoundaryGap>,
+    /// Steer batches from earlier answers that this conversation's hooks
+    /// printed and have not yet told the server about.
+    pub printed: Vec<crate::id::SteerBatchId>,
+    /// The key file Claude publishes for the conversation's cross-session
+    /// inbox, `sessions/<pid>.<sha256 of socket>.key` in its configuration
+    /// directory, where an idle conversation takes steers and Task updates.
+    /// A path; the server reads the key when it sends. Null for other
+    /// providers and a Claude with no inbox.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub inbox: Option<std::path::PathBuf>,
+}
+
+/// Where in a native conversation a hook fired.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BoundaryMoment {
+    Start,
+    Compact,
+    Tool,
+    Stop,
+    /// A Pi event the extension reports (`callback` is the event): the server
+    /// records the turn from it and, while a turn runs, answers steers.
+    Event,
+}
+
+/// Boundaries the hook could not record, in Unix seconds.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BoundaryGap {
+    pub first: i64,
+    pub last: i64,
+}
+
+/// What `session.boundary` answers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SessionBoundaryAnswer {
+    /// The next pending steers; null when none are ready.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub steers: Option<SteerBatch>,
+    /// What changed on the Session's Tasks since its last update, rendered
+    /// for the provider; null when nothing did. Recorded as delivered when
+    /// answered.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub update: Option<String>,
+    /// An earlier answer's batch is unconfirmed and its hook may still print
+    /// it: the hook asks again at its next tool boundary.
+    pub waiting: bool,
+}
+
+/// Steers rendered for the provider. They count as delivered once a later
+/// request lists `batch` in `printed`; unconfirmed, they are answered again.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SteerBatch {
+    pub batch: crate::id::SteerBatchId,
+    pub text: String,
+}
+
+/// What `session.start` answers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SessionStarted {
+    pub terminal_id: crate::id::TerminalId,
 }
 
 /// What `session.attach` answers: a ticket that opens one bridge.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SessionAttached {
-    /// 16 random bytes as 22 base64url characters; single use.
+    /// Opaque random ticket; single use.
     pub ticket: String,
-    pub owner_lf_process_id: LfProcessId,
+    /// The owner the bridge reaches; null for a held terminal.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub owner_lf_process_id: Option<LfProcessId>,
+    /// The held terminal the bridge reaches; null for an owner.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub terminal_id: Option<crate::id::TerminalId>,
     /// How long the ticket opens a bridge, from when it was issued.
     pub expires_in_ms: u64,
 }
@@ -164,10 +319,14 @@ pub enum ServerMessage {
         trace_id: crate::id::TraceId,
         result: serde_json::Value,
     },
-    /// The answer to `attach`: the connection now speaks the owner protocol
-    /// with this LfProcess, and nothing more arrives from the server.
+    /// The answer to `attach`: the connection now speaks the viewer protocol
+    /// with this owner LfProcess or this held terminal, whichever is not null,
+    /// and nothing more arrives from the server.
     Bridged {
-        owner_lf_process_id: LfProcessId,
+        #[serde(deserialize_with = "Option::deserialize")]
+        owner_lf_process_id: Option<LfProcessId>,
+        #[serde(deserialize_with = "Option::deserialize")]
+        terminal_id: Option<crate::id::TerminalId>,
     },
     /// One subscription line; its `body` has the shape of the read's `x-result`.
     Reading {
@@ -177,6 +336,15 @@ pub enum ServerMessage {
         #[schemars(with = "SubscriptionFrame<'static, Untyped>")]
         frame: serde_json::Value,
     },
+    /// The answer for `id` is `bytes` long, more than `limits.max_message`:
+    /// a ticketed connection delivers it as one message.
+    Bulk {
+        id: String,
+        ticket: String,
+        bytes: usize,
+    },
+    /// A ticketed connection's answer; what follows is what the ticket names.
+    Admitted,
     /// Connection-local ordering; never a replay or reading checkpoint.
     Event {
         id: String,
@@ -285,9 +453,18 @@ mod tests {
             include_str!("../../tests/fixtures/dto/server/cancel.json"),
             include_str!("../../tests/fixtures/dto/server/attach.json"),
             include_str!("../../tests/fixtures/dto/server/attach_ticket.json"),
+            include_str!("../../tests/fixtures/dto/server/session_start.json"),
             include_str!("../../tests/fixtures/dto/server/view_plan.json"),
             include_str!("../../tests/fixtures/dto/server/configuration.json"),
             include_str!("../../tests/fixtures/dto/server/task_from_session.json"),
+            include_str!("../../tests/fixtures/dto/server/task_create.json"),
+            include_str!("../../tests/fixtures/dto/server/session_continue.json"),
+            include_str!("../../tests/fixtures/dto/server/session_page.json"),
+            include_str!("../../tests/fixtures/dto/server/view_select.json"),
+            include_str!("../../tests/fixtures/dto/server/configure_remote.json"),
+            include_str!("../../tests/fixtures/dto/server/mobile_status_request.json"),
+            include_str!("../../tests/fixtures/dto/server/upload.json"),
+            include_str!("../../tests/fixtures/dto/server/ticket.json"),
             include_str!("../../tests/fixtures/dto/server/task_run.json"),
             include_str!("../../tests/fixtures/dto/server/task_ship.json"),
             include_str!("../../tests/fixtures/dto/server/task_hold.json"),
@@ -296,6 +473,7 @@ mod tests {
             include_str!("../../tests/fixtures/dto/server/task_interrupt.json"),
             include_str!("../../tests/fixtures/dto/server/task_wait.json"),
             include_str!("../../tests/fixtures/dto/server/session_steer.json"),
+            include_str!("../../tests/fixtures/dto/server/session_boundary.json"),
             include_str!("../../tests/fixtures/dto/server/session_status.json"),
             include_str!("../../tests/fixtures/dto/server/wave_plan_bind.json"),
             include_str!("../../tests/fixtures/dto/server/wave_plan_connect.json"),
@@ -340,16 +518,24 @@ mod tests {
             include_str!("../../tests/fixtures/dto/server/response.json"),
             include_str!("../../tests/fixtures/dto/server/attached.json"),
             include_str!("../../tests/fixtures/dto/server/bridged.json"),
+            include_str!("../../tests/fixtures/dto/server/bridged_terminal.json"),
+            include_str!("../../tests/fixtures/dto/server/session_started.json"),
             include_str!("../../tests/fixtures/dto/server/reading.json"),
             include_str!("../../tests/fixtures/dto/server/event_shipped.json"),
             include_str!("../../tests/fixtures/dto/server/event_steer.json"),
             include_str!("../../tests/fixtures/dto/server/event_step_finished.json"),
             include_str!("../../tests/fixtures/dto/server/error.json"),
             include_str!("../../tests/fixtures/dto/server/not_found.json"),
+            include_str!("../../tests/fixtures/dto/server/remote.json"),
+            include_str!("../../tests/fixtures/dto/server/mobile_status.json"),
+            include_str!("../../tests/fixtures/dto/server/ticket_reply.json"),
+            include_str!("../../tests/fixtures/dto/server/bulk.json"),
+            include_str!("../../tests/fixtures/dto/server/admitted.json"),
             include_str!("../../tests/fixtures/dto/server/task_running.json"),
             include_str!("../../tests/fixtures/dto/server/task_shipping.json"),
             include_str!("../../tests/fixtures/dto/server/task_held.json"),
             include_str!("../../tests/fixtures/dto/server/session_steered.json"),
+            include_str!("../../tests/fixtures/dto/server/session_boundary_answer.json"),
             include_str!("../../tests/fixtures/dto/server/wave_plan_connected.json"),
             include_str!("../../tests/fixtures/dto/server/wave_plan_reteamed.json"),
             include_str!("../../tests/fixtures/dto/server/repo_ci_report.json"),
@@ -380,7 +566,7 @@ mod tests {
         }
         // A missing field is an error, never a default.
         assert!(serde_json::from_str::<ClientMessage>(
-            r#"{"type":"hello","revision":4,"min_revision":4}"#
+            r#"{"type":"hello","revision":5,"min_revision":5}"#
         )
         .is_err());
         assert!(

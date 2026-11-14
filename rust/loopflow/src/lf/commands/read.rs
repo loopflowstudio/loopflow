@@ -95,7 +95,12 @@ pub enum Read {
     #[serde(rename = "desktop.view.list")]
     #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::work::selection::ViewPlan>>()))]
     DesktopViewList { directory: PathBuf },
-    /// `lf --cwd <directory> session list`, with `--interactive all`
+    /// `lf desktop view list --all [--expression <expression>]`: one selection
+    /// across the portfolio repositories, as the phone lists open Tasks.
+    #[serde(rename = "view.select")]
+    #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::work::selection::ViewPlan>>()))]
+    ViewSelect { expression: Option<String> },
+    /// `lf --cwd <directory> session list`, with `--headless`
     /// when `headless` Sessions are shown too: every row, or with a `limit`
     /// one page (`--page --limit <limit> [--after <after>]`). Only the whole
     /// list has a subscription.
@@ -106,6 +111,8 @@ pub enum Read {
         headless: bool,
         after: Option<String>,
         limit: Option<u32>,
+        /// Only the Sessions of this Task, as `--task <task>` filters them.
+        task: Option<String>,
     },
     /// `lf plan board`: compact Task rows for a board.
     #[serde(rename = "plan.board")]
@@ -382,11 +389,17 @@ impl Read {
             Self::DesktopViewList { directory } => {
                 at(directory, &["desktop", "view", "list", "--json"])
             }
+            Self::ViewSelect { expression } => {
+                let mut argv = words(&["desktop", "view", "list", "--all", "--json"]);
+                argv.extend(optional("--expression", expression.as_ref()));
+                argv
+            }
             Self::SessionList {
                 directory,
                 headless,
                 after,
                 limit,
+                task,
             } => {
                 let mut argv = at(directory, &["session", "list"]);
                 argv.extend(words(session_flags(*headless)));
@@ -397,6 +410,7 @@ impl Read {
                 } else {
                     argv.extend(words(&["--limit", "0"]));
                 }
+                argv.extend(optional("--task", task.as_ref()));
                 argv
             }
             Self::TaskDetail { directory, issue } => {
@@ -673,6 +687,9 @@ impl Read {
             Self::DesktopViewList { directory } => {
                 value(&super::desktop::read_plans(None, directory)?)
             }
+            Self::ViewSelect { expression } => {
+                value(&super::desktop::read_all_view_plans(expression.as_deref())?)
+            }
             Self::SessionList {
                 directory,
                 after,
@@ -914,6 +931,13 @@ impl Read {
             Self::DesktopViewList { directory } => {
                 super::desktop::subscribe_plans(None, directory, transport)
             }
+            Self::DesktopViewGet {
+                directory,
+                expression,
+            } => super::desktop::subscribe_view_plan(directory, expression, transport),
+            Self::ViewSelect { expression } => {
+                super::desktop::subscribe_all_view_plans(expression, transport)
+            }
             Self::SessionList {
                 ref directory,
                 limit: None,
@@ -975,7 +999,7 @@ impl Read {
 
 fn session_flags(headless: bool) -> &'static [&'static str] {
     if headless {
-        &["--interactive", "all"]
+        &["--headless"]
     } else {
         &[]
     }
@@ -1032,8 +1056,7 @@ mod tests {
                 "/r",
                 "session",
                 "list",
-                "--interactive",
-                "all",
+                "--headless",
                 "--json",
                 "--limit",
                 "0"
@@ -1076,11 +1099,53 @@ mod tests {
             headless: false,
             after: None,
             limit: None,
+            task: None,
         };
         let filter = read.session_filter(home.path()).unwrap();
         let sessions = store.session_summaries(&filter, 0).unwrap();
         assert_eq!(sessions.len(), 101);
         assert!(sessions.iter().any(|session| session.id == "session-100"));
+    }
+
+    #[test]
+    fn served_session_lists_include_headless_but_never_completed() {
+        let home = tempfile::tempdir().unwrap();
+        let store =
+            crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("store.db"))
+                .unwrap();
+        for id in ["interactive", "headless", "closed", "closed-headless"] {
+            store.test_session(id, &crate::session_record::new_artifact_key());
+        }
+        store.conn.lock().unwrap().execute_batch(
+            "UPDATE agent_sessions SET interactive=0 WHERE id IN ('headless','closed-headless');
+             UPDATE agent_sessions SET completed_at=2 WHERE id IN ('closed','closed-headless');"
+        ).unwrap();
+        for limit in [None, Some(100)] {
+            for headless in [false, true] {
+                let read = Read::SessionList {
+                    directory: home.path().into(),
+                    headless,
+                    after: None,
+                    limit,
+                    task: None,
+                };
+                let filter = read.session_filter(home.path()).unwrap();
+                let sessions = store.session_summaries(&filter, 0).unwrap();
+                let mut ids = sessions
+                    .iter()
+                    .map(|row| row.id.as_str())
+                    .collect::<Vec<_>>();
+                ids.sort_unstable();
+                assert_eq!(
+                    ids,
+                    if headless {
+                        vec!["headless", "interactive"]
+                    } else {
+                        vec!["interactive"]
+                    }
+                );
+            }
+        }
     }
 
     #[test]

@@ -175,9 +175,6 @@ impl FactWriter {
             ProviderFact::Output { turn, answer } => {
                 event(turn, SessionEventKind::Output, answer)?;
             }
-            ProviderFact::Usage { turn, receipt } => {
-                event(turn, SessionEventKind::Usage, receipt)?;
-            }
             ProviderFact::TurnCompleted { turn, detail, .. } => {
                 // A replayed completion keeps its receipt and leaves the live
                 // turn's tally alone.
@@ -228,16 +225,6 @@ impl FactWriter {
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
         self.activity
             .record_at(&self.store, &self.session, attachment, signals, now);
-    }
-
-    /// Offer the store the reading it refused, so the Session's activity row
-    /// catches up with the stream at the store's first answer.
-    pub(super) fn catch_up(&mut self) -> StoreResult<()> {
-        let Some(attachment) = &self.attachment else {
-            return Ok(());
-        };
-        self.activity
-            .catch_up(&self.store, &self.session, attachment)
     }
 }
 
@@ -305,8 +292,6 @@ struct SessionActivityTracker {
     failed: bool,
     /// The reading the store holds; marked only by a successful write.
     saved: Option<SessionActivity>,
-    /// The reading the store refused, offered again until it takes one.
-    unsaved: Option<SessionActivity>,
     failure: RecordingGap,
     preview: Option<SessionPreview>,
 }
@@ -387,7 +372,7 @@ impl SessionActivityTracker {
     }
 
     /// Activity is display evidence: a failed save never fails the turn. The
-    /// reading waits for the next signal or [`Self::catch_up`].
+    /// reading waits for the next signal.
     fn record_at(
         &mut self,
         store: &SqliteStore,
@@ -405,18 +390,6 @@ impl SessionActivityTracker {
         }
     }
 
-    fn catch_up(
-        &mut self,
-        store: &SqliteStore,
-        session: &str,
-        attachment: &SessionAttachment,
-    ) -> StoreResult<()> {
-        match self.unsaved.take() {
-            Some(reading) => self.save(store, session, attachment, reading),
-            None => Ok(()),
-        }
-    }
-
     fn save(
         &mut self,
         store: &SqliteStore,
@@ -427,13 +400,11 @@ impl SessionActivityTracker {
         match store.record_session_activity(session, attachment, &reading) {
             Ok(()) => {
                 self.saved = Some(reading);
-                self.unsaved = None;
                 self.failure.recovered();
                 Ok(())
             }
             Err(error) => {
                 self.failure.note("Session activity", &error);
-                self.unsaved = Some(reading);
                 Err(error)
             }
         }
@@ -542,11 +513,6 @@ mod tests {
             );
         }
 
-        fn catch_up(&mut self) -> crate::store::StoreResult<()> {
-            self.activity
-                .catch_up(&self.store, "conversation", &self.attachment)
-        }
-
         /// Whether the inventory calls it Available `quiet` seconds after the
         /// last message.
         fn available_after(&self, quiet: i64) -> bool {
@@ -606,42 +572,6 @@ mod tests {
             session.hear(claude(&mut decoder, &line));
         }
         assert!(!session.available_after(QUIET * 100));
-    }
-
-    #[test]
-    fn served_availability_follows_the_quiet_deadline_without_a_store_write() {
-        let mut session = Driven::new(true);
-        let now = time::OffsetDateTime::now_utc().unix_timestamp();
-        session.now = now - QUIET + 1;
-        session.hear(claude(
-            &mut ClaudeDecoder::default(),
-            &json!({"type":"result","subtype":"error_during_execution","is_error":true}),
-        ));
-        let cache = crate::observe::Cache::shared();
-        let read = || {
-            session
-                .store
-                .session_summary(
-                    "conversation",
-                    time::OffsetDateTime::now_utc().unix_timestamp(),
-                )
-                .unwrap()
-                .unwrap()
-                .available
-        };
-        let (available, dependencies) = cache.capture(read);
-        assert!(!available);
-        let revisions = session.store.revisions().unwrap();
-        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while !dependencies.changed() && std::time::Instant::now() < until {
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
-        assert!(
-            dependencies.changed(),
-            "quiet deadline did not wake the read"
-        );
-        assert!(cache.capture(read).0);
-        assert_eq!(session.store.revisions().unwrap(), revisions);
     }
 
     #[test]
@@ -807,35 +737,6 @@ mod tests {
     }
 
     #[test]
-    fn a_yielded_reading_the_store_refused_is_saved_when_it_answers() {
-        let mut session = Driven::new(true);
-        session.hear(vec![Decoded::Fact(ProviderFact::Activity(Signal::Working))]);
-        assert!(!session.available_after(0));
-        let sql = rusqlite::Connection::open(session._home.path().join("facts.db")).unwrap();
-        sql.execute_batch(
-            "CREATE TRIGGER refuse_activity BEFORE UPDATE ON session_activity
-             BEGIN SELECT RAISE(FAIL, 'fixture store unavailable'); END;",
-        )
-        .unwrap();
-        session.hear(vec![Decoded::Fact(ProviderFact::Activity(
-            Signal::Yielded(true),
-        ))]);
-        assert!(
-            !session.available_after(0),
-            "the yield never reached the store"
-        );
-        assert!(session.catch_up().is_err());
-        sql.execute_batch("DROP TRIGGER refuse_activity").unwrap();
-        // Nothing more is heard; the hosting relay's idle tick asks again.
-        session.catch_up().unwrap();
-        assert!(
-            session.available_after(0),
-            "the store caught up with the stream"
-        );
-        session.catch_up().unwrap();
-    }
-
-    #[test]
     fn cpu_samples_update_liveness_without_waking_session_readers() {
         let mut session = Driven::new(false);
         let revision = |session: &Driven| -> i64 {
@@ -942,6 +843,7 @@ mod tests {
         assert_eq!(
             events[2].payload,
             json!({"status":"completed","result_id":"result","errors":null,"subtype":"success",
+                "total_cost_usd":null,
                 "context":{"first_request_tokens":null,"peak_request_tokens":null,"tool_results":0,
                     "tool_output_tokens":0,"compactions":0,"compaction_tokens":null}})
         );
@@ -1254,11 +1156,16 @@ mod tests {
                 hear(&mut decoder, &mut writer_for(&current), message);
             }
             assert_eq!(store.session_history("conversation", 0, 0).unwrap(), before);
-            hear(
-                &mut decoder,
-                &mut writer_for(&first),
-                json!({"method":"thread/tokenUsage/updated","params":{"threadId":"thread","turnId":"late","tokenUsage":{"total":{"inputTokens":12},"last":{"inputTokens":12}}}}),
-            );
+            // The turn's usage row comes from its rollout, under the same id.
+            store
+                .record_turn_usage(
+                    "conversation",
+                    &"thread".into(),
+                    "late",
+                    0,
+                    &json!({"total":{"inputTokens":12},"last":{"inputTokens":12}}),
+                )
+                .unwrap();
             hear(
                 &mut decoder,
                 &mut writer_for(&first),
@@ -1384,13 +1291,6 @@ mod tests {
     #[test]
     fn opencode_steers_share_execution_but_keep_the_initiating_capture_after_handoff() {
         let (home, store, attachment) = attached(false);
-        let input = store
-            .session("conversation")
-            .unwrap()
-            .unwrap()
-            .input_key()
-            .unwrap()
-            .clone();
         let sql = rusqlite::Connection::open(home.path().join("facts.db")).unwrap();
         let mut writer = writer(&store, &attachment);
         let mut decoder = OpenCodeDecoder::new("native".into(), None);
@@ -1433,16 +1333,5 @@ mod tests {
         let completion: Value = serde_json::from_str(&completion).unwrap();
         assert_eq!(completion["status"], "completed");
         assert!(completion["error"].is_null());
-        let usage = store.input_history(input.as_str()).unwrap().usage;
-        assert_eq!(usage.input_tokens, Some(30));
-        assert_eq!(usage.output_tokens, Some(10));
-        assert_eq!(
-            store
-                .input_history(next.input_key().unwrap().as_str())
-                .unwrap()
-                .usage
-                .input_tokens,
-            None
-        );
     }
 }

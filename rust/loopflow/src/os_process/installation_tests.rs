@@ -63,6 +63,7 @@ fn running_provider_uses_updated_install_for_commands_hooks_and_graph() {
     );
     repo.create_file(".lf/graphs/inner.yaml", "- cmd: sync --plan\n");
     let delivery = crate::context_block::ContextDelivery {
+        identity: None,
         repository: None,
         repo: repo.path().to_path_buf(),
         home: home.clone(),
@@ -73,7 +74,9 @@ fn running_provider_uses_updated_install_for_commands_hooks_and_graph() {
     };
     let delivery_path = files.path().join("delivery.json");
     fs::write(&delivery_path, serde_json::to_vec(&delivery).unwrap()).unwrap();
-    let hooks = delivery.hook_settings().unwrap();
+    let hooks = delivery
+        .hook_settings(crate::session::Holder::Server)
+        .unwrap();
     let hook = hooks["Stop"][0]["hooks"][0]["command"].as_str().unwrap();
     assert!(hook.contains(gate.to_str().unwrap()));
     let caller = json!({"session_id":session.id,"agent_process_id":null,"origin_exec_id":"e3904e02-0219-45fd-8c4e-c7f289c60552"}).to_string();

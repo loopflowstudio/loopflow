@@ -30,7 +30,8 @@ pub(crate) fn touch(path: &Path) -> std::io::Result<()> {
 }
 
 /// Survives attachment-only handoff; replacement creates another capability.
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct SteerAdapter {
     pub session: String,
     pub agent_process_id: crate::id::AgentProcessId,
@@ -52,6 +53,26 @@ pub(crate) enum NativeBoundary<'a> {
         source: &'a str,
     },
     Turn,
+}
+
+/// A managed conversation whose last boundary was a turn end, and how the
+/// Machine server reaches it there.
+#[derive(Debug, Clone)]
+pub(crate) struct IdleConversation {
+    pub adapter: SteerAdapter,
+    /// The Session's selected native conversation.
+    pub thread: String,
+    /// The Session's working directory, where rendered steers are saved.
+    pub cwd: std::path::PathBuf,
+    pub reach: IdleReach,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum IdleReach {
+    /// The inbox key file Claude publishes beside its session record.
+    Claude(std::path::PathBuf),
+    /// The Session's private app-server.
+    Codex(std::path::PathBuf),
 }
 
 impl std::fmt::Debug for SteerAdapter {

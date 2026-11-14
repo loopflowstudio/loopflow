@@ -259,12 +259,10 @@ struct TaskPatchLine: Equatable, Sendable {
         let source = patch as NSString
         source.enumerateSubstrings(in: NSRange(location: 0, length: source.length), options: .byLines) { line, range, _, _ in
             guard let line else { return }
-            if line.hasPrefix("@@") {
-                inHunk = true
-            } else if line.hasPrefix("diff ") {
-                inHunk = false
-            } else if inHunk, line.hasPrefix("+") || line.hasPrefix("-") {
-                lines.append(TaskPatchLine(range: range, added: line.hasPrefix("+")))
+            switch PatchLineKind.next(line, inHunk: &inHunk) {
+            case .added: lines.append(TaskPatchLine(range: range, added: true))
+            case .removed: lines.append(TaskPatchLine(range: range, added: false))
+            case .header, .hunk, .context: break
             }
         }
         return lines
@@ -585,7 +583,7 @@ final class TaskFilesStore {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = ["git", "-C", checkout, "check-ignore", "--stdin", "-z"]
-        let input = Pipe(), output = Pipe(), errors = Pipe()
+        let input = Pipe.uninherited(), output = Pipe.uninherited(), errors = Pipe.uninherited()
         process.standardInput = input
         process.standardOutput = output
         process.standardError = errors

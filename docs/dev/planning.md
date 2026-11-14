@@ -225,7 +225,7 @@ mutation journal grows with every edit, so `lf repo plan journal` reads it on
 request: every change, losing values included, and the ranked candidate IDs, which
 are not applied or published evidence; rejected projections retain their failure reasons.
 Journal read failures fail the status read; Desktop keeps its last reading with the
-error, rather than inventing an empty plan. Foreground CLI, headless Run and Desktop connections own Git exchange
+error, rather than inventing an empty plan. Foreground CLI, headless Session and Desktop connections own Git exchange
 for their lifetimes; Linear checks run at the boundaries described below. A short save attempts exchange before returning. No resident,
 whole-store callback, scheduler or implicit turn/Graph replay is involved.
 
@@ -457,8 +457,8 @@ alternative, into a graph the Graph process holds in memory. One cursor and its 
 counters identify loop passes. Subgraphs and passes are display lenses over the
 step processes, with no separate record or process.
 
-Every Graph naming a Task, or run in its checkout, is equally that Task's
-work; none is selected or privileged. Taskless and Task execution share the
+Every Graph started for a Task, by naming it or in its checkout, is equally that
+Task's work; none is selected or privileged. Taskless and Task execution share the
 Graph runner. `lf graph` runs an `interactive:` step in place, with the person at a
 terminal, else headless. Each `task run` starts a fresh Graph as a child Graph process
 (hidden `lf --task ISSUE graph run`), and a fresh one again when that Graph process
@@ -498,6 +498,9 @@ or terminating Processes. Reopening supersedes old requests. Ordinary reads do
 not execute completion. Task state is derived: `active` at an interactive step
 with nothing running, `moving` while a run carries it with an interactive step
 ahead, `shipping` once Auto-Ship is approved and running; abandonment is its own mark.
+An unfinished Graph or step in the Task's work also makes it `moving` (or
+`shipping` when approved), including a Graph started before checkout adoption.
+That execution does not add the Graph to the Task's history.
 
 On-demand team checks acquire issue membership/state independently of
 comment and state delivery. Delivery receipts retain their original provider revision,

@@ -436,14 +436,6 @@ impl CodexDecoder {
         out
     }
 
-    /// The person's client started this turn on its own connection, so no
-    /// request here answers for it; it still takes its origin from this attachment.
-    pub(super) fn client_turn(&mut self, turn: &str) {
-        self.observe(turn)
-            .request
-            .get_or_insert_with(|| format!("client:{turn}"));
-    }
-
     /// A turn already in progress when this connection resumed its thread;
     /// turn-less notifications report under it.
     pub(super) fn resume_turn(&mut self, turn: Option<String>) {
@@ -563,16 +555,8 @@ impl CodexDecoder {
                     );
                 }
                 "thread/tokenUsage/updated" => {
-                    // Keep the provider's cumulative and last-request counters.
-                    // Missing baseline is not permission to attribute all lifetime
-                    // usage to the client which reconnected halfway through a turn.
-                    out.push(
-                        ProviderFact::Usage {
-                            turn: provider_turn(&turn),
-                            receipt: params["tokenUsage"].clone(),
-                        }
-                        .into(),
-                    );
+                    // The usage row comes from the rollout; this only sizes
+                    // the request for the turn's context reading.
                     if let Some(input_tokens) = params
                         .pointer("/tokenUsage/last/inputTokens")
                         .and_then(Value::as_u64)
@@ -1105,7 +1089,7 @@ mod tests {
         format!("{fact} 0197f00d-aaaa-7000-8000-000000000001/0197f00d-{turn}{rest}")
     }
 
-    /// Usage arrives before completion; the answer follows it.
+    /// The request's size arrives before completion; the answer follows it.
     #[test]
     fn trace_codex_normal_turn() {
         let turn = "bbbb-7000-8000-000000000002";
@@ -1120,7 +1104,6 @@ mod tests {
                 "Activity Working".to_owned(),
                 "Activity Working".to_owned(),
                 r#"Activity Previewed "OK""#.to_owned(),
-                at("Usage", turn, ""),
                 "Request 16065".to_owned(),
                 "RateLimit".to_owned(),
                 "Activity Yielded(true)".to_owned(),
@@ -1154,7 +1137,6 @@ mod tests {
                 "Activity NewTurn".to_owned(),
                 at("TurnStarted", turn, ""),
                 r#"Activity Previewed "Recovered after the retry.""#.to_owned(),
-                at("Usage", turn, ""),
                 "Request 100".to_owned(),
                 "Activity Yielded(true)".to_owned(),
                 at("TurnCompleted", turn, " Completed"),

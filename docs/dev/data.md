@@ -1,7 +1,7 @@
 # Data and persistence
 
 ```bash
-lf session list --interactive false --json
+lf session list --headless --json
 lf session history SESSION --json
 lf process show GRAPH_PROCESS --json
 lf process list --json
@@ -40,7 +40,7 @@ Retired history stores and intermediate branch schemas have no runtime readers.
 | Submitted creation identity and outcome | `creation_receipts`, shared by CLI and server; retained independently of the created resource |
 | Desktop submissions awaiting reconciliation | Versioned immutable request payloads in the device's Work cache; outcomes come from server receipts |
 | A Graph's identity, state and step results | Its Graph process and child step processes in `processes` |
-| A Graph's name, launched graph and each step's node | GraphProcess: `graph_processes` and `graph_process_steps`, appended by the Graph process |
+| A Graph's name, launched graph, the Task it started for and each step's node | GraphProcess: `graph_processes` and `graph_process_steps`, appended by the Graph process |
 | A Task's graph and the step it stands at | `task_graphs`, one row per Task updated in place; written only by `lf task run` and its child Graph process |
 | A Task's state: unstarted, idle, active, moving, shipping, done | Read from its checkout, `task_graphs` step, running Graph and Auto-Ship approval; never stored. `tasks.abandoned_at` is the one mark beside it |
 | Large captured prompts, transcripts and output | Immutable or append-only payloads referenced by their owning records |
@@ -78,12 +78,13 @@ receipts arrive; each turn's `completed` receipt carries its prompt context.
 
 A Graph is one lf process and the step processes it starts, and its ID is the
 Graph process's. The Graph process keeps the cursor in memory and appends GraphProcess: the
-Graph's name and compiled graph at launch, then each step's Process, node and
+Graph's name, compiled graph and Task at launch, then each step's Process, node and
 iteration counts. Nothing updates those rows, and no step reads or writes them.
 A Session reaches its Graph through the step row of the Process that captured its
-input. Every Graph naming a Task, or run in its checkout, is equally that Task's
-work. Taskless execution uses the same Graph runner. A step's result is how its
-process exited; a deciding or routing step also answers through the Session turn
+input. Every Graph started for a Task, by naming it or in its checkout, is
+equally that Task's work. In a nested checkout it is the deepest Task's. A
+Graph started before a Task adopted its checkout stays taskless. Taskless execution uses the same Graph runner. A step's result
+is how its process exited; a deciding or routing step also answers through the Session turn
 its Process captured. No generic attempt lifecycle sits between these owners.
 
 A retry appends Session history. A killed Graph process leaves its Processes as history;
@@ -152,6 +153,80 @@ For this machine, resumable filesystem conversations are converted offline after
 old writers stop and before promotion. The binary has no old-layout discovery or
 import command. Rehearse on a database backup and copied captures; never point a
 branch binary at the installed Machine.
+
+## Query cost and the write lock
+
+```bash
+sqlite3 ~/.lf/loopflow.db ".backup /tmp/lf-plan.db"
+sqlite3 /tmp/lf-plan.db "ANALYZE; EXPLAIN QUERY PLAN
+  SELECT steer_id FROM session_steers WHERE session_id = 'x' AND applicable = 1;"
+cargo test -p loopflow --lib store::query_plans::
+```
+
+```text
+QUERY PLAN
+`--SEARCH session_steers USING INDEX sqlite_autoindex_session_steers_1 (session_id=?)
+```
+
+One Machine runs hundreds of agents over about 10,000 Tasks, and every one of
+them shares one SQLite write lock. A query that is fast on a fresh store can be
+a full scan on that one, so plan statements against a `.backup` copy of a real
+store, never the live file.
+
+Every statement on a path that runs per hook, per server request, per Desktop
+read, per Work projection or per Graph step plans as `SEARCH` or reads a fixed
+small table. `SCAN` of a table that grows with use (`steers`, `session_steers`,
+`steer_deliveries`, `agent_sessions`, `session_events`, `processes`, `tasks`
+and their peers) is a bug. Filters an index cannot serve are the usual cause: an `OR`
+across columns, a function wrapped around an indexed column, a correlated `IN`
+subquery, or a per-row query inside a loop where one query would do. Fix it
+with an index in the Task's migration or by rewriting the filter. Reads that
+feed a screen take a `LIMIT`.
+
+While a write transaction is open, every other writer on the Machine waits:
+
+- Read first; open no write transaction when nothing changes.
+- Keep process spawns, network calls, file IO and large reads outside it.
+  Config counts: Git identity, placement YAML, Machine declarations and
+  planning connections load before `BEGIN` and pass in as values, even when
+  the code that uses them runs per Task inside the transaction.
+- Never hold one across an `await`, a request or a provider call.
+
+`store::query_plans` traces what a hot path executes on a fixture store, then
+plans each statement twice: unanalyzed, and with `sqlite_stat1` measured on a
+Machine at that size. A `SCAN` of a growing table fails the test, and so does
+a walk of a partial index on one that holds 1,000 or more rows in the measured
+statistics:
+
+```text
+analyzed: SCAN session_events USING INDEX session_observation_receipt (176447 rows measured)
+  in SELECT ... WHERE kind='observed' AND json_extract(payload,'$.evidence.provider_session_id')=?1
+```
+
+A partial index over a live subset (`processes_unfinished`, `open_sessions`)
+stays small because concurrency bounds it, so walking it passes. One over
+history grows with the table and gets an index on the filtered column like any
+other scan. Every partial index on a growing table needs a row in the measured
+statistics, or the test fails: fixture `ANALYZE` sees a handful of rows and
+would wave any walk through. When you add one, copy its `sqlite_stat1` row from
+a Machine store into `MEASURED` in `store/query_plans.rs`.
+
+A new hot path gets a test there (`server::boundary` uses the same helpers).
+Foreign-key checks never appear in `EXPLAIN QUERY PLAN`: deleting a parent row
+or changing its key looks up every child. The guard reads each foreign key from
+the schema and plans that lookup (`SELECT 1 FROM <child> WHERE <column> = ?`)
+under the same rules, so a child column on a growing table needs an index
+whatever its `ON DELETE` action. A partial `WHERE <column> IS NOT NULL` index
+serves it when the column is mostly NULL.
+
+The Machine server keeps the statistics current: `PRAGMA analysis_limit=400;
+PRAGMA optimize=0x10002` once when it starts and about once a day after, never
+per connection or per command. A store that never ran a server stays
+unanalyzed, which is why the guard plans both ways.
+
+When a write still holds the lock past 3 s, the connection writes `held the
+store write lock` with its call site to `logs/lf.log`, and `lf doctor` groups
+those lines by binary.
 
 ## Planning and external transitions
 

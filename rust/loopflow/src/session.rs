@@ -213,19 +213,81 @@ pub enum WorkSource {
     Bound,
 }
 
-/// SQL selection for conversation inventory; mode and completion are independent.
+impl WorkSource {
+    /// A launch is managed when a Task or Wave command named its Work (a
+    /// selector, a Task's run, a Task or Wave conversation, a binding); a bare
+    /// `lf` in a Task's checkout, or a child run a Session's agent started,
+    /// only counts toward the Task. What each kind gets is in
+    /// `server/README.md` ("Turn and tool boundaries").
+    pub(crate) fn is_managed(self) -> bool {
+        matches!(self, Self::Declared | Self::Bound)
+    }
+}
+
+/// Who holds a launch's provider process. It decides the launch's hooks,
+/// whether it needs the Machine server and whether it takes steers, and is
+/// decided once, where the launch is configured.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Holder {
+    /// A bare launch: the terminal it runs in, or the caller waiting on a
+    /// headless run. It behaves as the harness alone would, with only the two
+    /// context hooks, no server and no steers.
+    #[default]
+    Caller,
+    /// A bare conversation a per-Session owner holds (a Desktop shell's
+    /// relay, a framed `lf ssh` viewer). Its hooks say when it can take a
+    /// reply, so it gets every hook and steers, without the server check.
+    Owner,
+    /// Task, Wave or repository work: every hook and steers, beside a
+    /// Machine server that must be up before the agent starts.
+    Server,
+}
+
+impl Holder {
+    /// `work`: the launch's Work was selected with `--task` or `--wave`, or
+    /// the Session it reopens is not bare (`SqliteStore::is_bare`).
+    pub(crate) fn of(work: bool, interactive: bool) -> Self {
+        if work {
+            Self::Server
+        } else if interactive && crate::transport::current().is_some() {
+            Self::Owner
+        } else {
+            Self::Caller
+        }
+    }
+
+    /// Whether the provider reports its turn and tool boundaries and takes steers.
+    pub(crate) fn reports_turns(self) -> bool {
+        self != Self::Caller
+    }
+}
+
+/// Which scopes' current primary conversations to list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum SessionPrimary {
+    All,
+    Task,
+    Wave,
+    Repository,
+}
+
+/// Inventory selection; SQL filters metadata, then the list resolves checkout membership.
 #[derive(Debug, Clone)]
 pub struct SessionFilter {
     pub orphan: bool,
     pub repo: Option<String>,
     pub task: Option<String>,
+    /// Attribution or resolved checkout membership, selected before pagination.
+    pub wave: Option<WaveId>,
+    pub primary: Option<SessionPrimary>,
     pub search: Option<String>,
-    pub interactive: Option<bool>,
+    /// Include headless Sessions alongside interactive conversations.
+    pub headless: bool,
     /// Only conversations available for a person, chosen before paging.
     pub available: bool,
-    pub history: bool,
+    /// Also list raw conversations: providers lf never launched, which have no Session.
+    pub raw: bool,
     pub limit: usize,
-    pub offset: usize,
     /// Present for stable-ID pages; empty starts the first page.
     pub after: Option<String>,
     /// Only Sessions whose next message would fail: their login cannot take
@@ -243,12 +305,13 @@ impl Default for SessionFilter {
             orphan: false,
             repo: None,
             task: None,
+            wave: None,
+            primary: None,
             search: None,
-            interactive: Some(true),
+            headless: false,
             available: false,
-            history: false,
+            raw: true,
             limit: 100,
-            offset: 0,
             after: None,
         }
     }
@@ -261,8 +324,10 @@ pub(crate) struct SessionSummary {
     pub transition: Option<crate::store::sqlite::provider_transitions::ProviderTransition>,
     pub preview: Option<SessionPreview>,
     pub terminal_id: Option<String>,
-    /// Its execution owner runs with no viewer attached.
+    /// Its execution owner or held terminal runs with no viewer attached.
     pub unviewed: bool,
+    /// Its agent runs in a terminal a holder keeps; any number of views attach.
+    pub held: bool,
     pub primary_scope: Option<String>,
     pub agent_process_evidence: crate::journal::ProcessIdentityEvidence,
     /// Available for a person, as of the read's clock.

@@ -165,6 +165,7 @@ struct TaskRowMetadataTests {
             fixtureViewPlan(owner: owner, members: [member]),
         ], reason: "")
         model.select(owner.reference)
+        model.applyStartedFixture(working: [key.id], wave: owner.id)
         #expect(model.sidebarTaskIDs == [task.id])
         var conversationOpened = false
         let view = WorkNavigator(model: model, onOpenSession: { _ in conversationOpened = true })

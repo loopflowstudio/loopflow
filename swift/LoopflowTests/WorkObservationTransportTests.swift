@@ -68,7 +68,7 @@ struct WorkObservationTransportTests {
         var frames = observation.frames.makeAsyncIterator()
         try await subscriptions.answer(.allPlans, 0)
         #expect(try await frames.next()?.sequence == 1)
-        observation.request(.scope(id: 2, WorkScope(repo: "/src/loopflow", headless: false, task: "LOO-1", activity: nil)))
+        observation.request(.scope(id: 2, WorkScope(repo: "/src/loopflow", headless: false, task: "LOO-1", activity: nil, taskListWave: nil)))
         // The plan answers from its last reading.
         #expect(try await frames.next()?.answers == 2)
         #expect(subscriptions.launched.contains(.taskGet(directory: "/src/loopflow", issue: "LOO-1")))

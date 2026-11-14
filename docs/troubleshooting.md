@@ -77,7 +77,8 @@ lf doctor          # selected installation and store health
 input readiness. Its last available screen stays readable; without a saved
 screen the same pane stays empty until output arrives.
 **Reconnecting…** means a connection was lost and Desktop is trying the same
-Session owner. Neither status changes the terminal's dimensions. Keep the pane
+running conversation. Its agent is still working: agents run in a holder
+process that a server restart leaves alone. Neither status changes the terminal's dimensions. Keep the pane
 open; its screen and local reading actions remain available. If automatic retries
 end, **Retry connection** reconnects without replaying input or restarting the provider.
 A lost connection-status channel also pauses input; the terminal relay keeps
@@ -90,6 +91,67 @@ System Settings, or enable its user service on Linux. Retry and status do not
 change that setting. Use `lf install` for an installation/build mismatch; do not
 start a second foreground server. A server outage alone is no reason to relaunch
 the Task's Graph. See [Connect clients](server.md).
+
+## A steer arrived late, or a turn is missing from history
+
+**Symptom:** the agent kept working past a steer, or `lf session history`
+shows a gap where a turn should be.
+
+```bash
+lf server status                      # is the server listening, and on this build?
+grep 'recording gap' ~/.lf/logs/lf.log | tail
+grep 'recording gap' ~/.lf/logs/pi-extension.log | tail   # Pi conversations
+```
+
+Hooks at each prompt, tool and turn end ask the Machine server to record the
+turn and hand over waiting steers. When the server is stopped, restarting or
+slow, the hook gives up after two seconds and the conversation continues
+without it; `logs/lf.log` has one `recording gap` line for that conversation
+until the server answers again. OpenCode and Pi ask from inside the provider
+instead of a hook process, and write that line to their own log:
+`logs/pi-extension.log`, or `opencode.stderr.log` beside the Session's
+capture. A steer saved while the server was down is
+still waiting and arrives at the next boundary the server answers. One the
+server sent after the hook gave up shows `uncertain` in
+`lf session steers <session>` and is sent again at the next boundary; a steer
+can arrive twice this way, and is never dropped. The missed turns show in the Session's
+history as one `store-gap` entry, read as unknown rather than still running.
+
+Nothing needs relaunching. If `lf server status` reports no server or a
+mismatched build, run `lf install`.
+
+A headless run started with plain `lf -b <skill>` or `lf graph`, by you or
+by an agent, takes no steers, even inside a Task's checkout: steer the Task's
+own conversation, or the agent that started the run.
+
+## A Task run stops with "Loopflow server is not running"
+
+```bash
+lf install server                     # register and start the Machine's server
+lf server status
+```
+
+Agents started by a Task or Wave command (`lf task run`, `--task`, `--wave`,
+a Task or Wave conversation) start only once the Machine server answers,
+including headless runs, because their turns and steers go through it. A launch that finds none runs
+`lf install server` itself; the message appears when that did not bring one
+up, and carries what the install said. On another Machine, run the two
+commands there: `lf --machine <machine> install server`. Plain `lf`,
+`lf <skill>` and `lf graph` run without a server, in a Task's checkout too.
+
+Conversations already running in a holder keep running while the server is
+away, and their views reconnect when it returns.
+
+## Several `lf holder run` processes
+
+One per installed build that still has an open Task or Wave conversation.
+Each exits a minute after its last conversation ends; ending those
+conversations, not killing the holder, is how to retire one. Killing a holder
+ends every agent it holds. `lf session serve` processes belong to
+conversations opened before holders, to Desktop Task shells and to an
+`lf <skill>` typed in a Desktop shell, and end with their conversation. An
+`lf <skill>` typed at a terminal has none: its agent is a child of your
+terminal.
 
 ## A creation has no confirmed answer
 
@@ -179,13 +241,28 @@ failures four times, continuing the same provider conversation so partial work
 survives; the backoff tops out at 30 seconds.
 
 An exhausted subscription takes a different path: lf marks that login
-unavailable until its reported reset and moves to your next login with room.
+unavailable until its reported reset and moves to your next login with room,
+then to the next provider in `agents`. A limit that refuses the launch itself
+moves on the same way. A model-unavailable refusal skips directly to the next
+allowed entry in `agents`, without marking the login’s quota spent. An explicit
+model pin stays put and stops with advice to change the pin.
 
 ```bash
-lf account                           # every login, its capacity and when it resets
-lf gate -a codex                     # run this one on another harness
-lf --only-account claude=work@ gate  # stay inside the logins you name
+lf account                         # every login, its capacity and when it resets
+lf set --global agents claude,codex # let headless steps move to Codex when Claude is out
+lf gate -a codex                    # run this one on another harness
+lf --only-account claude=work@ gate # stay inside the logins you name
 ```
+
+A step with nowhere left to move stops its run once, without automatic retries.
+The stop line and `lf task status` say whether its order ran out or it had no
+next entry. Use
+`lf config settings --skill <name> --explain` to inspect the order and any
+`agent` choice or `-a` that pins its provider.
+Change the pin to select another model or provider, or remove it to allow `agents`
+fallbacks. Add entries if the list is missing or has only one entry.
+After a reset or an `agents` change, `lf task run <ID>` starts the run again
+at the stopped step; earlier steps stay done.
 
 `--account` prefers a login and still falls back; `--only-account` never leaves
 the logins it names.
@@ -292,6 +369,49 @@ lf process prune                   # releases it; the Session can resume
 ```
 
 The release is kept as a Session fact in `lf session history show <session>`.
+
+## Many `lf` processes running
+
+```bash
+ps -axo pid,etime,command | grep -E '[ /]lf( |$)'   # every lf process, its age and the binary that started it
+lf session list --all --interactive all      # the conversations they serve
+lf process list                              # live call trees lf recorded
+lf process rollover --dry-run                # why each owner is still running
+```
+
+Most resident processes belong to one conversation each. `lf process list`
+and `lf process rollover --dry-run` name a `session serve` owner by its PID.
+
+| In `ps` | What it is | Stopping it loses |
+|---|---|---|
+| `lf session serve <ID>` | Holds one conversation's agent on its terminal | The running agent and any turn in flight; `lf resume <ID>` continues from history |
+| `lf session serve --terminal -- /bin/sh -c …` | A Desktop shell tab, shown or hidden | The shell's jobs and environment; its saved screen stays |
+| `lf session attach` | A terminal showing that conversation | Nothing; the conversation keeps running detached |
+| `lf session observe-status <ID>` | Records one conversation-status reading; it exits once written | Nothing; one that keeps running is from an older Desktop and stays until every terminal pane that Desktop opened has exited |
+| `lf __codex-observe` | Records a Codex conversation's turns beside its client | Turn and usage records for that conversation; the conversation itself keeps going |
+| `lf __context-block --moment task-updates` | A Claude hook that delivers Task updates | Task updates in that conversation until it next starts or resumes |
+| `lf server run` | The Machine server | Desktop's connection until the server is started again |
+
+Conversations remain running while their scope is open. Done Tasks end their
+conversations during cleanup, about fifteen minutes after you stop viewing them,
+once live turns, pending requests and Graphs settle. Abandoning a Task ends its
+unviewed conversation. Typed input does not hold either cleanup.
+`lf process rollover --dry-run` shows which owners can move to the selected lf;
+rollover discards unsent input when it replaces a provider.
+
+A Desktop shell runs until you close its tab or its Task is cleaned up; hiding
+it or quitting Desktop leaves it running.
+
+A process started from a build other than the installed `lf`, such as
+`target/debug/lf`, `/tmp/lf-*/bin/lf` or `Loopflow Dev.app`, is left over from
+development. Tests end every process they start before they exit; one that
+remains is a bug worth filing with its command line. Quitting a demo app leaves
+its conversation owners running. Use the demo's saved Machine environment to
+`lf resume` each conversation and quit its agent before stopping anything by PID.
+
+Stop processes one at a time by PID, after reading what each serves. Never stop
+them by name or pattern (`pkill lf`, `killall lf`): that ends live
+conversations in other checkouts along with the leftovers.
 
 ## A Wave isn't moving
 

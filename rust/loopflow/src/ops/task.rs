@@ -727,6 +727,13 @@ pub(crate) fn select_task_run(
             )));
         }
     }
+    // A Graph that was running in the checkout before the Task adopted it.
+    if let Some(execution) =
+        crate::ops::task_execution::open_graph_execution(&store.sqlite, &task.id)
+            .map_err(task_error)?
+    {
+        return Err(task_error(execution.reason));
+    }
     let step = row.as_ref().map_or(START, |row| row.step.as_str());
     let start = match (from, row.as_ref().and_then(|row| row.run.as_ref())) {
         (Some(name), _) => Some(graph.find(name).ok_or_else(|| {
@@ -737,10 +744,14 @@ pub(crate) fn select_task_run(
             ))
         })?),
         // A run that stopped starts again from where it began, or from the
-        // step it was waiting at on a usage limit: the steps before it are done.
-        (None, Some((cursor, _))) => limit_recovery::waiting_on_limit(&store.sqlite, &task.id)
+        // step a usage limit held or stopped: the steps before it are done.
+        (None, Some((cursor, _))) => limit_recovery::ended_step_recovery(&store.sqlite, &task.id)
             .map_err(task_error)?
-            .and_then(|wait| graph.find(&wait.step))
+            .filter(|(_, recovery)| {
+                recovery.retry_at.is_some()
+                    || crate::ops::task_execution::limit_stop(recovery).is_some()
+            })
+            .and_then(|(step, _)| graph.find(&step))
             .or_else(|| graph.place_of(cursor)),
         (None, None) if step == START => graph.find(START),
         (None, None) if step == END => {
@@ -897,6 +908,26 @@ pub(crate) fn check_out_moved_task(repo: &Path, source: remote::TaskSource) -> O
     )
 }
 
+/// Take a Task this Machine has not saved from the repository's planning.
+pub(crate) async fn acquire_from_planning(main: &Path, issue: &str) -> OpsResult<Task> {
+    match crate::config::load_config(Some(main))
+        .map_err(task_error)?
+        .unwrap_or_default()
+        .planning_transport()
+    {
+        crate::config::PlanningConfig::Linear { .. } => {
+            super::linear::acquire_task(main, issue, super::linear::LinearRefresh::Auto).await
+        }
+        crate::config::PlanningConfig::Git { .. } => Err(task_error(format!(
+            "Task {issue:?} not found in selected Git planning"
+        ))),
+        remote => Err(task_error(format!(
+            "Task {issue:?} not found in Loopflow planning; {} tasks are not acquired yet",
+            remote.remote_name().unwrap_or("provider")
+        ))),
+    }
+}
+
 /// `source` is the branch and commit another Machine pushed for this Task.
 fn prepare_task(
     repo: &Path,
@@ -916,27 +947,7 @@ fn prepare_task(
         let acquired = saved.is_none();
         let task = match saved {
             Some(task) => task,
-            None => match crate::config::load_config(Some(&main))
-                .map_err(task_error)?
-                .unwrap_or_default()
-                .planning_transport()
-            {
-                crate::config::PlanningConfig::Linear { .. } => {
-                    super::linear::acquire_task(&main, issue, super::linear::LinearRefresh::Auto)
-                        .await?
-                }
-                crate::config::PlanningConfig::Git { .. } => {
-                    return Err(task_error(format!(
-                        "Task {issue:?} not found in selected Git planning"
-                    )));
-                }
-                remote => {
-                    return Err(task_error(format!(
-                        "Task {issue:?} not found in Loopflow planning; {} tasks are not acquired yet",
-                        remote.remote_name().unwrap_or("provider")
-                    )));
-                }
-            },
+            None => acquire_from_planning(&main, issue).await?,
         };
         let destination = store
             .task_execution_route(&task.id)
@@ -1535,19 +1546,25 @@ fn prepare_placement(
             base_commit
         }
     };
-    let github = if observe_pr {
-        super::pr::branch_pr(main_repo, &plan.branch)?
-            .map(|pr| {
-                Ok::<_, OpsError>(GithubPr {
-                    number: u32::try_from(pr.number).map_err(task_error)?,
-                    url: pr.url,
-                    head_sha: pr.head_sha,
-                })
+    // An unreadable PR (no GitHub login on this Machine, an origin GitHub
+    // does not host) leaves the checkout without one; a later sync finds it.
+    let found = observe_pr
+        .then(|| {
+            super::pr::branch_pr(main_repo, &plan.branch).unwrap_or_else(|error| {
+                tracing::warn!(branch = %plan.branch, %error, "PR unread for the Task checkout");
+                None
             })
-            .transpose()?
-    } else {
-        None
-    };
+        })
+        .flatten();
+    let github = found
+        .map(|pr| {
+            Ok::<_, OpsError>(GithubPr {
+                number: u32::try_from(pr.number).map_err(task_error)?,
+                url: pr.url,
+                head_sha: pr.head_sha,
+            })
+        })
+        .transpose()?;
     if plan.strategy != PlacementStrategy::Create {
         let branch_ref = if ref_exists(main_repo, &format!("refs/heads/{}", plan.branch))? {
             format!("refs/heads/{}", plan.branch)
@@ -1923,14 +1940,29 @@ pub(crate) fn task_worktree_blocker_after(
 }
 
 pub(crate) async fn task_for_checkout(store: &SharedStore, repo: &Path) -> OpsResult<Option<Task>> {
+    match counted_task(&store.sqlite, repo)? {
+        Some(id) => store.get_task(&id).await.map_err(task_error),
+        None => Ok(None),
+    }
+}
+
+/// The Task a conversation run in `cwd` belongs to: the one whose checkout
+/// on this Machine holds it. A launch counts toward it, with usage rows; a
+/// raw conversation only lists under it. Both ask here, so whether a calling
+/// Session's Task should outrank its checkout's is decided by changing this
+/// function alone.
+pub(crate) fn counted_task(
+    store: &SqliteStore,
+    cwd: &Path,
+) -> OpsResult<Option<crate::durable::TaskId>> {
     // Branch names are not checkout identity: another clone can use the same
     // branch. Never probe a remote Machine's recorded path on this Machine.
-    let Ok(root) = crate::git::worktree_root(repo) else {
+    let Ok(root) = crate::git::worktree_root(cwd) else {
         return Ok(None);
     };
-    let local = store.local_machine().await.map_err(task_error)?.id;
+    let local = store.local_machine().map_err(task_error)?.id;
     let mut id = None;
-    for checkout in store.task_checkouts().await.map_err(task_error)? {
+    for checkout in store.task_checkouts().map_err(task_error)? {
         if checkout.machine_id.as_ref() != Some(&local) {
             if checkout.machine_id.is_none() && checkout.worktree == root {
                 return Err(task_error("Task checkout Machine is unknown"));
@@ -1944,10 +1976,7 @@ pub(crate) async fn task_for_checkout(store: &SharedStore, repo: &Path) -> OpsRe
             id = Some(checkout.task_id);
         }
     }
-    match id {
-        Some(id) => store.get_task(&id).await.map_err(task_error),
-        None => Ok(None),
-    }
+    Ok(id)
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
@@ -2165,22 +2194,6 @@ pub fn start_conversation_beside(task: &Task) {
     if let Err(error) = started {
         tracing::warn!(task = %task.identifier, %error, "background Task conversation did not start");
     }
-}
-
-/// One Task's tracker sync beside a conversation that just started: pending
-/// writes out, then comments made elsewhere in. Nothing else in the repository.
-pub(crate) fn sync_for_conversation(issue: &str) -> OpsResult<()> {
-    let outbound = task_sync(issue, false);
-    let inbound = block_on_task(async {
-        let store = task_store().await?;
-        let task = store
-            .get_task_by_issue(issue)
-            .await
-            .map_err(task_error)?
-            .ok_or_else(|| task_error(format!("Task {issue} is unavailable")))?;
-        super::linear_observe::refresh_task_comments(&store, &task).await
-    });
-    outbound.and(inbound)
 }
 
 pub fn task_sync(issue: &str, retry_updates: bool) -> OpsResult<String> {
@@ -2727,7 +2740,7 @@ async fn live_execution(store: &SharedStore, task: &Task) -> OpsResult<Option<St
         let name = graph.name.clone();
         let facts = store
             .sqlite
-            .graph_execution_facts([&graph])
+            .graph_execution_facts([&graph], &[&task.id])
             .map_err(task_error)?;
         let (execution, _) = crate::ops::task_execution::execution_of_latest_graph(
             &store.sqlite,

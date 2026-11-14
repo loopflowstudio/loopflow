@@ -97,10 +97,6 @@ pub(crate) async fn ensure_task(
     Ok((prepare(store, &session.id).await?, started))
 }
 
-/// Background Task conversations stop starting at this many running ones;
-/// Desktop keeps the same number of Tasks warm.
-pub(crate) const BACKGROUND_TASK_CONVERSATIONS: usize = 16;
-
 /// Start a newly checked-out Task's conversation beside its Graph, so `lf
 /// resume` reattaches instead of creating it. Best-effort: a failure is logged
 /// and `lf resume` creates the conversation as before.
@@ -120,11 +116,6 @@ async fn start_in_background(
     store: &SharedStore,
     task: &crate::work::task::Task,
 ) -> Result<Option<String>> {
-    let running = store.sqlite.running_task_conversations()?;
-    if running >= BACKGROUND_TASK_CONVERSATIONS {
-        tracing::info!(task = %task.identifier, running, "background Task conversation skipped");
-        return Ok(None);
-    }
     let worktree = task.worktree()?.clone();
     let wave = match &task.wave_id {
         Some(id) => store.get_wave(id).await?,
@@ -164,8 +155,9 @@ async fn start_in_background(
         "resume".into(),
         id.clone(),
     ];
+    let held = session.id.clone();
     tokio::task::spawn_blocking(move || {
-        crate::transport::start(&argv, true, &worktree, &|command| {
+        crate::transport::start_held(&argv, &worktree, Some(&held), &|command| {
             let key = crate::work::wave::context::WAVE_ID_ENV;
             match &wave {
                 Some(wave) => command.env(key, wave.id().as_str()),
@@ -318,6 +310,7 @@ fn repository_session(repo: &crate::repository::CanonicalRepo) -> Result<LfSessi
         .unwrap_or_else(|| repo.to_string());
     Ok(LfSession {
         repo: Some(repo.to_string()),
+        work_source: Some(WorkSource::Declared),
         ..conversation(repo.as_path(), "repo/session", title)?
     })
 }
@@ -431,6 +424,11 @@ mod tests {
             let session = store.session(&first.id).await.unwrap().unwrap();
             assert_eq!(session.skill.as_deref(), Some("repo-session"));
             assert_eq!((session.wave_id, session.task_id), (None, None));
+            // Managed like Task and Wave conversations: held, with hooks.
+            assert_eq!(
+                session.work_source,
+                Some(crate::session::WorkSource::Declared)
+            );
 
             // A Wave's conversation in the same repository is a separate scope.
             let ambient_wave = wave(&store, &repo).await;

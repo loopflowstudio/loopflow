@@ -250,7 +250,8 @@ definitions! {
         #[serde(skip)] context_budget_sources: BTreeMap<BudgetKey, String> = BTreeMap::new();
     };
     agent: Option<String> = "null", Launch, Replace, Portable, NextLaunch, Agents, "Harness[:model] choice; every choice precedes every fallback";
-    default_agent: Option<String> = "null", Launch, Replace, Portable, NextLaunch, Agents, "Harness[:model] when no applicable agent choice exists; a comma list names the providers a step falls through to";
+    default_agent: Option<String> = "null", Launch, Replace, Portable, NextLaunch, Agents, "Harness[:model] tried first when no applicable agent choice exists; the rest of agents stays behind it";
+    agents: Vec<String> = "[]", Launch, Replace, Portable, NextLaunch, Agents, "Ordered harness[:model] entries Loopflow may pick; a headless step refused by a usage limit moves to the next";
     context: ContextConfig = "{}", Launch, Merge, Portable, NextLaunch, Agents, "Files and other inputs supplied to the agent";
     yolo: bool = "false", Launch, Replace, Portable, NextLaunch, Agents, "Skip agent permission prompts: Claude, Codex and OpenCode; Pi keeps its own tool policy";
     chrome: Option<bool> = "null", Launch, Replace, HostLocal, NextLaunch, Agents, "Claude Chrome integration; unset leaves Claude's own setting; Codex, OpenCode and Pi have no equivalent";
@@ -307,16 +308,24 @@ pub fn definition(key: &str) -> Option<&'static Definition> {
         .max_by_key(|definition| definition.key.len())
 }
 
+/// Every setting at its built-in default. Validation asks for this once per
+/// value it checks, so the tree is parsed from the catalogue once per process.
 pub fn defaults() -> Value {
-    let mut values = Value::Mapping(Default::default());
-    for definition in all_definitions() {
-        super::settings::insert(
-            &mut values,
-            &definition.key.split('.').collect::<Vec<_>>(),
-            serde_yaml_ng::from_str(definition.default).expect("catalogue default is valid YAML"),
-        );
-    }
-    values
+    static DEFAULTS: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
+    DEFAULTS
+        .get_or_init(|| {
+            let mut values = Value::Mapping(Default::default());
+            for definition in all_definitions() {
+                super::settings::insert(
+                    &mut values,
+                    &definition.key.split('.').collect::<Vec<_>>(),
+                    serde_yaml_ng::from_str(definition.default)
+                        .expect("catalogue default is valid YAML"),
+                );
+            }
+            values
+        })
+        .clone()
 }
 
 /// Full paths and their own policies, grouped for CLI and Desktop browsing.

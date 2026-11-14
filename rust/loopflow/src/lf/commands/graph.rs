@@ -43,13 +43,8 @@ pub fn run(
     };
     let binding = binding.or(checkout.as_ref());
     let items = compile_graph(graph, repo)?;
-    if let Some(WorkRef::Task(task)) = binding.map(|binding| &binding.work) {
-        block_on(async {
-            let store = open_graph_store().await?;
-            store.sqlite.require_task_launch(task)?;
-            Ok(())
-        })?;
-    }
+    // A named Graph runs here with the checkout's context; only `task run`
+    // advances the Task's Graph and requires admission to start Task work.
     print_pipeline_header(&graph.name, &items);
     let bound_message = binding
         .filter(|binding| !matches!(binding.work, WorkRef::Task(_)))
@@ -148,20 +143,42 @@ pub fn list(repo: &Path, json: bool) -> Result<()> {
 /// How many times one `lf task run` starts its Graph before giving up.
 const TASK_RUN_ATTEMPTS: u32 = 3;
 
-/// A Task run whose every attempt failed with the same error. A shipped Task
-/// stops shipping on it rather than starting the run again later.
+/// A Task run that must stop rather than retry, including when shipping.
 #[derive(Debug, thiserror::Error)]
-#[error("the run of {run} failed {TASK_RUN_ATTEMPTS} times with the same error; this Task run stops here: {cause}")]
-pub struct RepeatedRunFailure {
-    pub run: String,
-    pub cause: String,
+enum TaskRunStopped {
+    #[error("the run of {run} failed {TASK_RUN_ATTEMPTS} times with the same error; this Task run stops here: {cause}")]
+    Repeated { run: String, cause: String },
+    #[error(
+        "the run of {run} stopped after a provider refusal at {step}: {cause}; `lf task run {issue}` starts the run again at it"
+    )]
+    Limit {
+        issue: String,
+        run: String,
+        step: String,
+        cause: String,
+    },
+}
+
+impl TaskRunStopped {
+    fn stop(self, task: &Task, status: std::process::ExitStatus) -> Result<()> {
+        // Render before the detached run's log closes when its process exits.
+        eprintln!("{self}");
+        let cause = match &self {
+            Self::Repeated { cause, .. } | Self::Limit { cause, .. } => cause,
+        };
+        // Both `task run` and `ship` end the approval at a terminal stop.
+        // With no approval, ship_halt does nothing and records no person's stop.
+        crate::ops::task::ship::ship_halt(&task.identifier, cause)?;
+        Err(anyhow::Error::new(exit_of(status)).context(self))
+    }
 }
 
 /// Carry one Task run: start the Task's Graph as a child Graph process, and
-/// start it again while a Graph process fails. Each attempt records its own
-/// GraphProcess beneath this process. A Graph held for a person or a watcher, an
-/// interrupted one, and a launch refused before any Graph started are returned
-/// as they ended. Once someone interrupts the Task, nothing is started again.
+/// retry failed Graphs unless a provider refusal stopped them. Each attempt records
+/// its own GraphProcess beneath this process. A Graph held for a person or a
+/// watcher, an interrupted one, and a launch refused before any Graph started
+/// are returned as they ended. Once someone interrupts the Task, nothing is
+/// started again.
 /// `run` names the graph and where the run set out, for messages.
 ///
 /// With `release`, a bare run inside its execution owner lets its launcher go
@@ -224,7 +241,7 @@ pub fn run_task_graph_for(
         }
         // Only a Graph process that failed is started again.
         let graph = match status.code() {
-            Some(1) => attempt_graph(store, &process, mark)?,
+            Some(1) => store.graph_child_after(&process, mark)?,
             _ => None,
         };
         let failed = graph.is_some();
@@ -237,30 +254,39 @@ pub fn run_task_graph_for(
             }
             let cause = store.failure_cause(graph)?.map(|(_, cause)| cause);
             repeated = cause.filter(|cause| attempt == 1 || repeated.as_ref() == Some(cause));
-        }
-        // A run that ended waiting out a limit starts again at the reset, by
-        // the recovery sweep; starting it now would only wait again.
-        if let Some(wait) = crate::ops::task::limit_recovery::waiting_on_limit(store, &task.id)?
-            .filter(|wait| failed && wait.retry_at > crate::store::rows::now_unix())
-        {
-            eprintln!(
-                "The run of {run} is waiting on a limit until {}; it starts again at {} then.",
-                crate::lf::output::format_time(wait.retry_at),
-                wait.step
-            );
-            return Err(exit_of(status).into());
+            if let Some((step, recovery)) =
+                crate::ops::task::limit_recovery::ended_step_recovery(store, &task.id)?
+            {
+                // The recovery sweep restarts a wait at its reset, not now.
+                if let Some(retry_at) = recovery
+                    .retry_at
+                    .filter(|at| *at > crate::store::rows::now_unix())
+                {
+                    eprintln!(
+                        "The run of {run} is waiting on a limit until {}; it starts again at {step} then.",
+                        crate::lf::output::format_time(retry_at),
+                    );
+                    return Err(exit_of(status).into());
+                }
+                if let Some(cause) = crate::ops::task_execution::limit_stop(&recovery) {
+                    let stop = TaskRunStopped::Limit {
+                        issue: task.identifier.clone(),
+                        run: run.to_string(),
+                        step,
+                        cause,
+                    };
+                    return stop.stop(task, status);
+                }
+            }
         }
         if !failed || attempt == TASK_RUN_ATTEMPTS {
             if failed {
                 if let Some(cause) = repeated {
-                    // Render it here: a detached run's log closes when this
-                    // process records its exit, before `main` prints errors.
-                    let repeated = RepeatedRunFailure {
+                    let repeated = TaskRunStopped::Repeated {
                         run: run.to_string(),
                         cause,
                     };
-                    eprintln!("{repeated}");
-                    return Err(anyhow::Error::new(exit_of(status)).context(repeated));
+                    return repeated.stop(task, status);
                 }
                 eprintln!("The run of {run} failed {attempt} times; this Task run stops here.");
             }
@@ -425,17 +451,6 @@ impl PendingLog {
     }
 }
 
-/// The attempt's child once it has recorded a GraphProcess.
-fn attempt_graph(
-    store: &SqliteStore,
-    process: &LfProcessId,
-    mark: i64,
-) -> Result<Option<LfProcessId>> {
-    Ok(store
-        .child_process_after(process, mark)?
-        .filter(|child| matches!(store.graph_process(child.as_str()), Ok(Some(_)))))
-}
-
 /// Wait until the attempt records its GraphProcess or ends first. No deadline:
 /// the child's own exit bounds it.
 fn registration(
@@ -445,7 +460,7 @@ fn registration(
     child: &mut std::process::Child,
 ) -> Result<Option<LfProcessId>> {
     loop {
-        let registered = attempt_graph(store, process, mark)?;
+        let registered = store.graph_child_after(process, mark)?;
         if registered.is_some() {
             return Ok(registered);
         }
@@ -532,6 +547,7 @@ fn execute(
             .record_graph_process(
                 &running.process,
                 &crate::graph::compiled::CompiledGraph::new(graph_name, items),
+                running.task.as_ref(),
             )
             .context("could not record the Graph; no steps launched")?;
         drop(admission);
@@ -1103,6 +1119,11 @@ impl SkillExecutor for &RunningGraph<'_> {
         )?;
         step_cli.skill_input = Some(input.path().to_path_buf());
         let mut args = step_cli.step_args();
+        // A Task run's step is the Task's own conversation, not a bare `lf`
+        // in its checkout, so it names the Task.
+        if let Some(task) = self.task.as_ref().filter(|_| self.task_run) {
+            args.extend(["--task".to_owned(), task.to_string()]);
+        }
         args.extend(["skill".to_owned(), name.clone()]);
         if !message.trim().is_empty() {
             args.push(message);

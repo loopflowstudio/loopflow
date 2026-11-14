@@ -236,46 +236,11 @@ pub struct SessionConfig {
     /// Machine-local terminal application used to present detached sessions.
     #[serde(default)]
     pub terminal: Option<String>,
-    /// How long a Session keeps its agent running after its last viewer leaves.
-    #[serde(default)]
-    pub end_detached_after: DetachedLimit,
-}
-
-/// How long a Session nobody views and nothing uses stays resident before its
-/// agent ends: `2m`, `30m`, `24h`, or `off`. `lf resume` reopens it.
-#[derive(schemars::JsonSchema, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
-pub enum DetachedLimit {
-    Off,
-    After(std::time::Duration),
-}
-
-impl Default for DetachedLimit {
-    fn default() -> Self {
-        Self::After(std::time::Duration::from_secs(2 * 60))
-    }
-}
-
-impl TryFrom<String> for DetachedLimit {
-    type Error = String;
-
-    fn try_from(value: String) -> Result<Self, String> {
-        if value.trim() == "off" {
-            return Ok(Self::Off);
-        }
-        parse_duration(&value)
-            .map(Self::After)
-            .map_err(|error| format!("end_detached_after: {error}; or use off"))
-    }
-}
-
-impl From<DetachedLimit> for String {
-    fn from(limit: DetachedLimit) -> Self {
-        match limit {
-            DetachedLimit::Off => "off".into(),
-            DetachedLimit::After(duration) => format!("{}s", duration.as_secs()),
-        }
-    }
+    // Remove in task_c118380f31f14d07ba28669499efa395 after LOO-823 ships:
+    // released lf still reads this shared config key. It no longer has an effect.
+    #[serde(default, rename = "end_detached_after", skip_serializing)]
+    #[schemars(skip)]
+    _end_detached_after: Option<String>,
 }
 
 /// Parse `30`, `10s`, `5m`, `1h` or `2d`; a bare number is seconds.
@@ -521,8 +486,8 @@ pub struct LogConfig {
 }
 
 impl Config {
-    /// Resolve authored preferences, or the sole installed harness. A
-    /// `default_agent` list (`claude,codex`) selects its first entry.
+    /// Resolve authored preferences, or the sole installed harness: an `agent`
+    /// choice, else the first of [`Config::agent_order`].
     ///
     /// # Errors
     /// Returns `AgentSelection` when no preference resolves and installation is ambiguous or absent.
@@ -530,31 +495,43 @@ impl Config {
         select_agent(
             self.agent
                 .as_deref()
-                .or_else(|| self.default_agent.as_deref().map(first_agent)),
+                .or(self.default_agent.as_deref())
+                .or_else(|| self.agents.first().map(String::as_str)),
         )
     }
 
-    /// The agents a headless step may fall through to when every account for
-    /// its own is held back: the rest of the `default_agent` list, in order.
-    /// An explicit `agent` choice has none; it is followed within itself.
-    pub fn fallback_agents(&self) -> Vec<String> {
-        match (&self.agent, &self.default_agent) {
-            (None, Some(list)) => agent_list(list).skip(1).map(str::to_owned).collect(),
-            _ => Vec::new(),
+    /// What Loopflow tries, in order: an `agent` choice alone, else
+    /// `default_agent` followed by the rest of `agents`. A `default_agent`
+    /// the list lacks is added in front for this context only. Entries are
+    /// `harness[:model]` as written; a bare harness is its own entry.
+    pub fn agent_order(&self) -> Vec<String> {
+        if let Some(agent) = &self.agent {
+            return vec![agent.clone()];
         }
+        self.default_agent
+            .iter()
+            .chain(
+                self.agents
+                    .iter()
+                    .filter(|entry| Some(*entry) != self.default_agent.as_ref()),
+            )
+            .cloned()
+            .collect()
+    }
+
+    /// The agents a headless step may move to when a usage limit refuses its
+    /// own: the rest of [`Config::agent_order`]. An `agent` choice has none.
+    pub fn fallback_agents(&self) -> Vec<String> {
+        self.agent_order().into_iter().skip(1).collect()
     }
 }
 
-/// The entries of an ordered agent preference, `harness[:model]` each.
-pub fn agent_list(value: &str) -> impl Iterator<Item = &str> {
+/// The entries of a comma-separated agent list, such as `claude,codex`.
+pub(crate) fn agent_list(value: &str) -> impl Iterator<Item = &str> {
     value
         .split(',')
         .map(str::trim)
         .filter(|agent| !agent.is_empty())
-}
-
-fn first_agent(value: &str) -> &str {
-    agent_list(value).next().unwrap_or(value)
 }
 
 /// Parse agent string like 'claude:opus' into (harness, model).
@@ -688,7 +665,7 @@ pub fn config_layers(
     config_layers_with(repo_root, wave, &PersonalSettings::read(repo_root, wave))
 }
 
-fn config_layers_with(
+pub(crate) fn config_layers_with(
     repo_root: Option<&Path>,
     wave: Option<&str>,
     personal_values: &PersonalSettings,
@@ -1068,6 +1045,36 @@ chrome: true
     }
 
     #[test]
+    fn default_agent_leads_the_agents_order_and_a_choice_pins_one() {
+        let order = |yaml: &str| {
+            let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
+            (config.agent().unwrap().to_owned(), config.agent_order())
+        };
+        assert_eq!(
+            order("agents: [claude:opus, codex, claude:fable]"),
+            (
+                "claude:opus".into(),
+                vec!["claude:opus".into(), "codex".into(), "claude:fable".into()]
+            )
+        );
+        // An entry the list has moves up; one it lacks is added in front.
+        assert_eq!(
+            order("agents: [claude:opus, codex, claude:fable]\ndefault_agent: claude:fable").1,
+            ["claude:fable", "claude:opus", "codex"]
+        );
+        assert_eq!(
+            order("agents: [claude, codex]\ndefault_agent: codex:sol").1,
+            ["codex:sol", "claude", "codex"]
+        );
+        assert_eq!(order("default_agent: claude").1, ["claude"]);
+        let pinned: Config =
+            serde_yaml_ng::from_str("agents: [claude, codex]\ndefault_agent: codex\nagent: pi")
+                .unwrap();
+        assert_eq!(pinned.agent_order(), ["pi"]);
+        assert!(pinned.fallback_agents().is_empty());
+    }
+
+    #[test]
     fn config_from_yaml_supported_harnesses() {
         let yaml = r#"
 supported_harnesses:
@@ -1129,33 +1136,17 @@ session:
     }
 
     #[test]
-    fn detached_sessions_end_after_two_minutes_unless_configured() {
-        use super::DetachedLimit;
-        use std::time::Duration;
-        let parse = |yaml: &str| serde_yaml_ng::from_str::<Config>(yaml).map(|c| c.session);
-        assert_eq!(
-            parse("agent: claude").unwrap().end_detached_after,
-            DetachedLimit::After(Duration::from_secs(120))
-        );
-        assert_eq!(
-            parse("session: {end_detached_after: 90m}")
+    fn obsolete_detached_limit_is_readable_but_not_written() {
+        for value in ["2m", "off"] {
+            let config: super::SessionConfig = serde_yaml_ng::from_str(&format!(
+                "terminal: Ghostty\nend_detached_after: {value}\n"
+            ))
+            .unwrap();
+            assert_eq!(config.terminal.as_deref(), Some("Ghostty"));
+            assert!(!serde_yaml_ng::to_string(&config)
                 .unwrap()
-                .end_detached_after,
-            DetachedLimit::After(Duration::from_secs(5_400))
-        );
-        assert_eq!(
-            parse("session: {end_detached_after: 2d}")
-                .unwrap()
-                .end_detached_after,
-            DetachedLimit::After(Duration::from_secs(172_800))
-        );
-        assert_eq!(
-            parse("session: {end_detached_after: off}")
-                .unwrap()
-                .end_detached_after,
-            DetachedLimit::Off
-        );
-        assert!(parse("session: {end_detached_after: soon}").is_err());
+                .contains("end_detached_after"));
+        }
     }
 
     #[test]

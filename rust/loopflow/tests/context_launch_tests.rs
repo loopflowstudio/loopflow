@@ -531,6 +531,10 @@ fn terminal_context_refreshes_without_replacing_instructions_or_losing_failed_se
     let harness = "claude";
     repo.create_file(".lf/wave/fixture/MEMORY.md", "CURRENT_WAVE_MEMORY");
     let home = tempfile::tempdir().unwrap();
+    let _server = loopflow_test_support::MachineServer::start(
+        env!("CARGO_BIN_EXE_lf"),
+        &home.path().join("machine"),
+    );
     let store = loopflow::store::sqlite::SqliteStore::new(&home.path().join("machine/loopflow.db"))
         .unwrap();
     store
@@ -553,6 +557,7 @@ for arg in "$@"; do
     printf '%s\000' "$arg" >> "$HOME/argv"
 done
 printf '%s' "$LF_CONTEXT_DELIVERY" > "$HOME/delivery-path"
+printf '%s' "$LF_PROVIDER_CONTEXT" > "$HOME/provider-context"
 cat > "$HOME/input"
 printf 'provider fixture refused this request\n' >&2
 exit 23
@@ -599,6 +604,7 @@ exit 23
     assert!(!instructions.contains("CURRENT_SCRATCH"));
     assert!(!instructions.contains("CURRENT_WAVE_MEMORY"));
     assert!(!instructions.contains("Saved active skill."));
+    assert!(!instructions.contains("This Session:"));
     assert!(!raw.contains("model_instructions_file"));
     assert!(!raw.contains("dangerously-bypass-hook-trust"));
     let input = fs::read_to_string(home.path().join("input")).unwrap();
@@ -615,23 +621,41 @@ exit 23
             .map(|group| group["hooks"][0]["command"].as_str().unwrap().to_owned())
             .collect()
     };
+    let provider_context = fs::read_to_string(home.path().join("provider-context")).unwrap();
+    let adapter: loopflow::steer::SteerAdapter = serde_json::from_str(&provider_context).unwrap();
+    let identity = format!("This Session: {}\n", adapter.session);
+    assert!(!instructions.contains(&adapter.session));
     let invoke = |moment: &str| {
         let callback = callbacks
             .iter()
             .find(|callback| callback.ends_with(&format!(" {moment}")))
             .unwrap();
-        let output = Command::new("/bin/sh")
+        let mut child = Command::new("/bin/sh")
             .env_clear()
             .env("PATH", "/usr/bin:/bin")
             .env("HOME", home.path())
+            .env("LF_HOME", home.path().join("machine"))
+            .env("LF_PROVIDER_CONTEXT", &provider_context)
             .env(
                 "LF_CONTEXT_DELIVERY",
                 fs::read_to_string(home.path().join("delivery-path")).unwrap(),
             )
             .current_dir(repo.path())
             .args(["-c", callback])
-            .output()
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
             .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(
+                br#"{"session_id":"native-context-fixture","hook_event_name":"SessionStart"}"#,
+            )
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
         assert!(
             output.status.success(),
             "{}",
@@ -644,6 +668,7 @@ exit 23
             .to_string()
     };
     let first = invoke("start");
+    assert!(first.starts_with(&identity), "{first}");
     assert!(first.contains("CURRENT_SCRATCH"));
     assert!(first.contains("CURRENT_WAVE_MEMORY"));
     assert!(!first.contains("Saved active skill.\n"));
@@ -653,6 +678,7 @@ exit 23
     repo.create_file("scratch/small.md", "FRESH_SCRATCH");
     repo.create_file(".lf/wave/fixture/MEMORY.md", "FRESH_WAVE_MEMORY");
     let compact = invoke("compact");
+    assert!(compact.starts_with(&identity), "{compact}");
     assert!(compact.contains("FRESH_WAVE_MEMORY"));
     assert!(!compact.contains("CURRENT_WAVE_MEMORY"));
     assert!(compact.contains("FRESH_SCRATCH"));
@@ -745,6 +771,13 @@ while read -r line; do :; done
         .as_str()
         .unwrap()
         .contains(&content));
+    let database = rusqlite::Connection::open(home.path().join("machine/loopflow.db")).unwrap();
+    let session: String = database
+        .query_row("SELECT id FROM agent_sessions", [], |row| row.get(0))
+        .unwrap();
+    let instructions = thread["params"]["developerInstructions"].as_str().unwrap();
+    assert!(!instructions.contains(&session));
+    assert!(!instructions.contains("This Session:"));
     // The actual emitted hook runs with no launch-delivery environment. Codex's
     // app-server supplies native thread identity on stdin, including compaction.
     for (group, expected) in [(0, "start"), (1, "compact")] {
@@ -777,10 +810,15 @@ while read -r line; do :; done
             String::from_utf8_lossy(&output.stderr)
         );
         let context: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-        assert!(context["hookSpecificOutput"]["additionalContext"]
+        let text = context["hookSpecificOutput"]["additionalContext"]
             .as_str()
-            .unwrap()
-            .contains("ONLY_THREAD_FIXTURE_CONTEXT"));
+            .unwrap();
+        assert!(
+            text.starts_with(&format!("This Session: {session}\n")),
+            "{text}"
+        );
+        assert!(!text.contains("This Session's Task:"));
+        assert!(text.contains("ONLY_THREAD_FIXTURE_CONTEXT"));
     }
     let turn: serde_json::Value =
         serde_json::from_slice(&fs::read(home.path().join("turn-request")).unwrap()).unwrap();
@@ -972,6 +1010,10 @@ fn saved_claude_model_is_used_by_new_sessions_but_not_changed_on_resume() {
 fn claude_opens_a_task_checkout_already_trusted() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
+    let _server = loopflow_test_support::MachineServer::start(
+        env!("CARGO_BIN_EXE_lf"),
+        &home.path().join("machine"),
+    );
     let script = "cp \"$CLAUDE_CONFIG_DIR/.claude.json\" \"$HOME/seen.json\"";
     let created: serde_json::Value = serde_json::from_str::<serde_json::Value>(&succeed(
         claude_launch(home.path(), script)
@@ -1036,9 +1078,12 @@ fn open_task_conversations(db: &Path, task: &str) -> i64 {
     rusqlite::Connection::open(db)
         .unwrap()
         .query_row(
-            "SELECT count(*) FROM agent_sessions s JOIN processes o ON o.id=s.transport_lf_process_id
+            "SELECT count(*) FROM agent_sessions s
+             LEFT JOIN processes o ON o.id=s.transport_lf_process_id
+             LEFT JOIN held_terminals t ON t.id=s.held_terminal_id
              WHERE s.task_id=?1 AND s.interactive=1 AND s.completed_at IS NULL
-                 AND o.completed_at IS NULL",
+                 AND ((o.id IS NOT NULL AND o.completed_at IS NULL)
+                     OR (t.id IS NOT NULL AND t.ended_at IS NULL))",
             [task],
             |row| row.get(0),
         )
@@ -1062,6 +1107,10 @@ fn assert_background_conversation(run_graph: bool) {
     repo.commit("Add a graph that waits for review");
     repo.push();
     let home = tempfile::tempdir().unwrap();
+    let _server = loopflow_test_support::MachineServer::start(
+        env!("CARGO_BIN_EXE_lf"),
+        &home.path().join("machine"),
+    );
     let stop = home.path().join("stop");
     let _release = Release(stop.clone());
     // The provider holds until released, so the conversation can be seen.
@@ -1088,6 +1137,30 @@ fn assert_background_conversation(run_graph: bool) {
     .unwrap();
     let id = created["task"]["id"].as_str().unwrap();
     let db = home.path().join("machine/loopflow.db");
+    // Older open Tasks must not prevent this newly checked-out conversation
+    // from starting. These receipts deliberately exceed the former count cap.
+    let conn = rusqlite::Connection::open(&db).unwrap();
+    for _ in 0..16 {
+        let task = loopflow::durable::TaskId::new();
+        let owner = loopflow::id::LfProcessId::new();
+        let session = uuid::Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO tasks(id,repository_id,issue_identifier,created_at)
+            SELECT ?1,repository_id,?1,1 FROM tasks WHERE id=?2",
+            rusqlite::params![task.as_str(), id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO processes(id,trace_id,command,cwd,started_at)
+            VALUES(?1,?1,'[\"lf\"]','/older',1)",
+            [&owner],
+        )
+        .unwrap();
+        conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,interactive,transport_lf_process_id)
+            VALUES(?1,'Older conversation','generated',1,1,'/older',?2,1,?3)", rusqlite::params![session,task.as_str(),owner]).unwrap();
+    }
+    drop(conn);
+
     let worktree = if run_graph {
         succeed(
             claude_launch(home.path(), &script)
@@ -1151,38 +1224,20 @@ fn assert_background_conversation(run_graph: bool) {
     let timing = fs::read_to_string(home.path().join("machine/logs/launch-timing.jsonl")).unwrap();
     assert_eq!(timing.matches("background_start").count(), 1, "{timing}");
 
-    let conn = rusqlite::Connection::open(&db).unwrap();
-    let owner: String = conn
-        .query_row(
-            "SELECT transport_lf_process_id FROM agent_sessions WHERE task_id=?1 AND interactive=1",
-            [id],
-            |row| row.get(0),
-        )
-        .unwrap();
     succeed(
         claude_launch(home.path(), &script)
             .current_dir(repo.path())
             .args(["task", "abandon", id]),
     );
+    // A Task conversation is held; abandoning ends its unviewed terminal.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-    loop {
-        let ended: bool = conn
-            .query_row(
-                "SELECT completed_at IS NOT NULL FROM processes WHERE id=?1",
-                [&owner],
-                |row| row.get(0),
-            )
-            .unwrap();
-        if ended {
-            break;
-        }
+    while open_task_conversations(&db, id) > 0 {
         assert!(
             std::time::Instant::now() < deadline,
             "abandon left the conversation running"
         );
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
-    assert_eq!(open_task_conversations(&db, id), 0);
 }
 
 #[test]
@@ -1227,6 +1282,7 @@ fn existing_task_checkout_preloads_work_without_enrolling_other_checkouts() {
     let home = tempfile::tempdir().unwrap();
     let machine = home.path().join("machine");
     fs::create_dir(&machine).unwrap();
+    let _server = loopflow_test_support::MachineServer::start(env!("CARGO_BIN_EXE_lf"), &machine);
     let registered =
         support::register_task_without_pr(&machine, &task_checkout, "managed", &repo.head_sha());
     let bin = home.path().join("bin");

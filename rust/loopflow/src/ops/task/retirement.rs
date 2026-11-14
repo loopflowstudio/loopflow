@@ -5,13 +5,13 @@ use std::path::Path;
 
 use super::{block_on_task, task_error, task_store};
 use crate::durable::{TaskId, WorkStatus};
-use crate::id::LfProcessId;
 use crate::journal::ProcessIdentityEvidence;
 use crate::ops::{NullProgress, OpsError, OpsResult};
 use crate::store::{
     sqlite::{SqliteStore, TaskRetirement, ViewerHold},
     SharedStore,
 };
+use crate::transport::Host;
 use crate::work::task::Task;
 use fs2::FileExt;
 
@@ -20,7 +20,7 @@ fn now() -> i64 {
 }
 
 // Completion, landing and each cleanup pass serialize against the same Task.
-// A returning viewer revokes queued work before the next pass performs an effect.
+// A returning viewer resets the checkout deadline before the next pass.
 pub(super) fn lock(task: &TaskId) -> OpsResult<File> {
     let file = lock_file(task.as_str())?;
     file.lock_exclusive()?;
@@ -49,8 +49,9 @@ fn viewer_hold(store: &SqliteStore, task: &TaskId, now: i64) -> OpsResult<Option
             ViewerHold::Viewed(at) => {
                 if !owner.ended
                     && now < at + VIEWER_OBSERVATION_GRACE
-                    && crate::journal::lf_evidence(store, &owner.owner)
-                        != ProcessIdentityEvidence::Dead
+                    && owner.owner.owner().is_none_or(|owner| {
+                        crate::journal::lf_evidence(store, owner) != ProcessIdentityEvidence::Dead
+                    })
                 {
                     return Ok(Some(ViewerHold::Viewed(at)));
                 }
@@ -71,31 +72,65 @@ fn reconcile(store: &SqliteStore, task: &TaskId) -> OpsResult<Option<TaskRetirem
         .map_err(task_error)
 }
 
-/// Owners consume automatic closes between sweeps. The queued phase alone
-/// cannot authorize ending execution after Session viewing has returned.
-pub(crate) fn owner_retiring(store: &SqliteStore, owner: &LfProcessId) -> OpsResult<bool> {
+/// Task cleanup owns closure, including Tasks without a checkout and resumed
+/// conversations whose checkout was already retired.
+pub(crate) fn close_conversations(store: &SqliteStore, task: &TaskId) -> OpsResult<()> {
+    for (host, abandoned) in conversation_closes(store, task)? {
+        let notice = if abandoned {
+            "Task abandoned"
+        } else {
+            "Task completed"
+        };
+        match &host {
+            Host::Owner(owner) => end_owner(store, owner, notice)?,
+            // A held terminal has no process to signal: the server ends it on
+            // its notice. One the server cannot reach is a candidate next pass.
+            Host::Terminal(_) => {
+                if let Err(error) = crate::transport::close_notice(&host, notice) {
+                    tracing::warn!(%host, %error, "held terminal close unavailable");
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn conversation_closes(store: &SqliteStore, task: &TaskId) -> OpsResult<Vec<(Host, bool)>> {
     let now = now();
-    for task in store.owner_retiring_tasks(owner).map_err(task_error)? {
-        match viewer_hold(store, &task, now)? {
-            Some(ViewerHold::Viewed(_)) => continue,
+    let mut hosts = store.task_close_candidates(task, now).map_err(task_error)?;
+    let Some((_, abandoned)) = hosts.first() else {
+        return Ok(hosts);
+    };
+    if *abandoned {
+        let holds = store.task_viewer_holds(task).map_err(task_error)?;
+        hosts.retain(|(host, _)| {
+            !holds.iter().any(|hold| &hold.owner == host
+            && matches!(hold.hold, ViewerHold::Viewed(at) if now < at + VIEWER_OBSERVATION_GRACE))
+        });
+    } else {
+        match viewer_hold(store, task, now)? {
+            Some(ViewerHold::Viewed(_)) => return Ok(Vec::new()),
             Some(ViewerHold::Absent(at)) if at + crate::store::sqlite::WORKSPACE_GRACE > now => {
-                continue;
+                return Ok(Vec::new())
             }
             _ => {}
         }
-        // Read intent after viewing: a concurrent return revokes this phase,
-        // including a return that has already left again.
-        if store
-            .task_retirement(&task)
-            .map_err(task_error)?
-            .is_some_and(|intent| {
-                intent.phase == "closing" && intent.due_at.is_some_and(|due| due <= now)
-            })
-        {
-            return Ok(true);
+        if unsettled_work(store, task)?.is_some() {
+            return Ok(Vec::new());
         }
     }
-    Ok(false)
+    Ok(hosts)
+}
+
+fn end_owner(store: &SqliteStore, owner: &crate::id::LfProcessId, notice: &str) -> OpsResult<()> {
+    let Some(pid) = crate::journal::live_process_pid(store, owner) else {
+        return Ok(());
+    };
+    // Older owners may not understand the notice; the verified signal still ends them.
+    if let Err(error) = crate::transport::close_notice(&Host::Owner(owner.clone()), notice) {
+        tracing::debug!(%owner, %error, "Owner close notice unavailable");
+    }
+    crate::ops::human_session::end_owner(store, owner, pid).map_err(task_error)
 }
 
 pub(crate) async fn schedule(store: &SharedStore, task: &Task) -> OpsResult<()> {
@@ -124,9 +159,6 @@ pub fn run(issue: Option<&str>) -> OpsResult<()> {
 }
 
 async fn sweep(store: &SharedStore, tasks: &[TaskId]) -> OpsResult<()> {
-    if tasks.is_empty() {
-        return Ok(());
-    }
     let guard = lock_file("sweep")?;
     match guard.try_lock_exclusive() {
         Ok(()) => {}
@@ -168,6 +200,7 @@ async fn sweep(store: &SharedStore, tasks: &[TaskId]) -> OpsResult<()> {
 }
 
 async fn advance(store: &SharedStore, task: &Task) -> OpsResult<()> {
+    close_conversations(&store.sqlite, &task.id)?;
     let Some(intent) = reconcile(&store.sqlite, &task.id)? else {
         return Ok(());
     };
@@ -177,39 +210,30 @@ async fn advance(store: &SharedStore, task: &Task) -> OpsResult<()> {
     if intent.due_at.is_none_or(|due| due > now()) || intent.retry_at.is_some_and(|at| at > now()) {
         return Ok(());
     }
-    if super::task_work_status(store, task).await? != WorkStatus::Done {
-        return Ok(());
+    match super::task_work_status(store, task).await? {
+        WorkStatus::Abandoned => {
+            let repo = super::repository_for_task(store, task)?;
+            if !super::lifecycle::cleanup_abandoned(&repo, store, task, false).await? {
+                return Err(task_error("Retained checkout without unmerged delivery"));
+            }
+            store
+                .sqlite
+                .retirement_progress(&intent, "retired", None)
+                .map_err(task_error)?;
+            return Ok(());
+        }
+        WorkStatus::Done => {}
+        _ => return Ok(()),
     }
-    let Some(pr) = store.active_task_pr(&task.id).await.map_err(task_error)? else {
-        return Err(task_error("Retained PR-less checkout"));
-    };
-    if pr.branch != intent.branch {
-        return Err(task_error(
-            "Task delivery branch changed; retained checkout",
-        ));
-    }
-    if super::completion_refusal(Some(&pr), &task.identifier).is_some() {
-        return Err(task_error("Delivery is unresolved"));
-    }
-    let repo = crate::git::worktrees::main_repo_root(&super::repository_for_task(store, task)?)?;
     let checkout = Path::new(&intent.checkout);
     let _mutation = checkout
         .is_dir()
         .then(|| super::lock_task_pr_mutation(checkout))
         .transpose()?;
-    // Prepare before closing anything. This preserves primary/persistent and
-    // changed committed refs while allowing uncommitted files to be discarded.
-    let deletion = crate::ops::wt::prepare_task_retirement(
-        &repo,
-        &intent.branch,
-        pr.head_sha()
-            .ok_or_else(|| task_error("Merged PR has no recorded head"))?,
-        checkout,
-    )?;
-    if let Err(error) = require_settled_work(store, task) {
+    if let Some(reason) = unsettled_work(&store.sqlite, &task.id)? {
         store
             .sqlite
-            .retirement_progress(&intent, &intent.phase, Some(&error.to_string()))
+            .retirement_progress(&intent, &intent.phase, Some(&reason))
             .map_err(task_error)?;
         return Ok(());
     }
@@ -220,9 +244,14 @@ async fn advance(store: &SharedStore, task: &Task) -> OpsResult<()> {
     {
         return Ok(());
     }
-    crate::desktop::shells::request_retirement(&store.sqlite, &task.id).map_err(task_error)?;
-    // The existing owner policy sees the closing intent and rechecks active
-    // work and queued input in the serving loop before ending the provider.
+    for owner in crate::desktop::shells::owners(&store.sqlite, &task.id).map_err(task_error)? {
+        end_owner(&store.sqlite, &owner, "Task completed")?;
+    }
+    store
+        .sqlite
+        .settle_unstarted_task_shells(&task.id)
+        .map_err(task_error)?;
+    // A signal is not proof that all execution and shell jobs have settled.
     let blockers = crate::ops::task_execution::task_execution_blockers(&store.sqlite, &task.id)?;
     if !blockers.is_empty() {
         store
@@ -231,6 +260,9 @@ async fn advance(store: &SharedStore, task: &Task) -> OpsResult<()> {
             .map_err(task_error)?;
         return Ok(());
     }
+    // A closed Task ends its conversations whether or not its checkout can go.
+    // Check merged delivery only once execution has settled and deletion is next.
+    let deletion = prepare_deletion(store, task, &intent).await?;
     if !crate::desktop::shells::jobs_settled(&store.sqlite, &task.id).map_err(task_error)? {
         return Err(task_error(
             "Shell owner ended without confirmed job cleanup; retained checkout",
@@ -254,45 +286,70 @@ async fn advance(store: &SharedStore, task: &Task) -> OpsResult<()> {
     Ok(())
 }
 
-fn require_settled_work(store: &SharedStore, task: &Task) -> OpsResult<()> {
-    let shells = crate::desktop::shells::owners(&store.sqlite, &task.id).map_err(task_error)?;
+/// The checkout deletion merged delivery allows. Preparation keeps
+/// primary/persistent and changed committed refs and lets uncommitted files go.
+async fn prepare_deletion(
+    store: &SharedStore,
+    task: &Task,
+    intent: &TaskRetirement,
+) -> OpsResult<crate::ops::wt::BranchDeletion> {
+    let Some(pr) = store.active_task_pr(&task.id).await.map_err(task_error)? else {
+        return Err(task_error("Retained PR-less checkout"));
+    };
+    if pr.branch != intent.branch {
+        return Err(task_error(
+            "Task delivery branch changed; retained checkout",
+        ));
+    }
+    if super::completion_refusal(Some(&pr), &task.identifier).is_some() {
+        return Err(task_error("Delivery is unresolved"));
+    }
+    let repo = crate::git::worktrees::main_repo_root(&super::repository_for_task(store, task)?)?;
+    crate::ops::wt::prepare_task_retirement(
+        &repo,
+        &intent.branch,
+        pr.head_sha()
+            .ok_or_else(|| task_error("Merged PR has no recorded head"))?,
+        Path::new(&intent.checkout),
+    )
+}
+
+fn unsettled_work(store: &SqliteStore, task: &TaskId) -> OpsResult<Option<String>> {
+    let shells = crate::desktop::shells::owners(store, task).map_err(task_error)?;
     let mut allowed: HashSet<_> = shells.into_iter().collect();
-    for session in store
-        .sqlite
-        .task_work(&task.id)
-        .map_err(task_error)?
-        .sessions
-    {
-        if session.completed_at.is_some() {
+    for host in store.task_session_hosts(task).map_err(task_error)? {
+        if host.owner().is_some_and(|owner| {
+            crate::journal::lf_evidence(store, owner) == ProcessIdentityEvidence::Dead
+        }) {
             continue;
         }
-        if let Some(owner) = store
-            .sqlite
-            .session_transport(session.id.as_str())
+        if store
+            .owner_retention(host.transport())
             .map_err(task_error)?
+            .is_some()
         {
-            if crate::journal::lf_evidence(&store.sqlite, &owner) == ProcessIdentityEvidence::Dead {
-                continue;
+            return Ok(Some(
+                "Requested work or a pending request still holds this Task".into(),
+            ));
+        }
+        // A held terminal is no process: the lf processes that started inside
+        // it stand where an owner would.
+        match host {
+            Host::Owner(owner) => {
+                allowed.extend(store.owner_session_launchers(&owner).map_err(task_error)?);
+                allowed.insert(owner);
             }
-            if store
-                .sqlite
-                .owner_retention(&owner)
-                .map_err(task_error)?
-                .is_some()
-            {
-                return Err(task_error(
-                    "Requested work, a draft or a pending request still holds this Task",
-                ));
+            Host::Terminal(terminal) => {
+                allowed.extend(
+                    store
+                        .held_terminal_processes(&terminal)
+                        .map_err(task_error)?,
+                );
             }
-            allowed.insert(owner);
         }
     }
-    let processes = store
-        .sqlite
-        .task_open_processes(&task.id)
-        .map_err(task_error)?;
-    for (process, _) in crate::ops::task_execution::unresolved_processes(&store.sqlite, &processes)?
-    {
+    let processes = store.task_open_processes(task).map_err(task_error)?;
+    for (process, _) in crate::ops::task_execution::unresolved_processes(store, &processes)? {
         // An agent's owners are lf processes, so its walk starts at its parent.
         let mut current = match process {
             crate::process::ProcessEntry::Lf(process) => Some(process.id.clone()),
@@ -306,19 +363,18 @@ fn require_settled_work(store: &SharedStore, task: &Task) -> OpsResult<()> {
                 break;
             }
             current = store
-                .sqlite
                 .lf_process(&id)
                 .map_err(task_error)?
                 .and_then(|p| p.parent_lf_process_id);
         }
         if !owned {
-            return Err(task_error(format!(
+            return Ok(Some(format!(
                 "Process {} still has live or unresolved work",
                 process.id()
             )));
         }
     }
-    Ok(())
+    Ok(None)
 }
 
 #[cfg(test)]

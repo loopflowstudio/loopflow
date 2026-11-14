@@ -11,8 +11,6 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use crate::id::LfProcessId;
-
 const MAX_ATTEMPTS: u32 = 8;
 
 #[derive(Debug)]
@@ -234,7 +232,7 @@ impl Status {
     /// intent to replace claims. Recovery may only ask for free claims.
     pub(super) fn connect(
         &mut self,
-        owner: &LfProcessId,
+        owner: &super::Host,
         session: &crate::id::LfSessionId,
         initial: bool,
     ) -> Result<Option<(UnixStream, bool)>> {
@@ -285,7 +283,7 @@ impl Status {
                 let (owner, session) = (owner.clone(), session.clone());
                 let (send, receive) = mpsc::sync_channel(1);
                 std::thread::spawn(move || {
-                    let result = crate::server::client::bridge_existing(&session, &owner);
+                    let result = super::open_bridge(&owner, &session);
                     // Presentation cannot prevent the terminal from reconnecting.
                     let transition = crate::store::read_existing_registry()
                         .ok()

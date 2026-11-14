@@ -165,7 +165,7 @@ impl LfProcessRuntime {
             })?;
         let attachment = resume_session_agent_process(&store, &session.id, &lf_process_id)?;
         if let Some(owner) = crate::transport::current() {
-            store.bind_session_transport(&session.id, &attachment, owner)?;
+            store.bind_session_transport(&session.id, &attachment, owner.transport())?;
         }
         runtime.owner = Some((store, session.id.to_string(), attachment));
         drop(runtime);
@@ -203,6 +203,7 @@ impl LfProcessRuntime {
     pub(crate) fn spawn_native_agent(
         &self,
         mut command: std::process::Command,
+        holder: crate::session::Holder,
     ) -> anyhow::Result<(std::process::Child, crate::process::SessionAttachment)> {
         let mut runtime = self.0.lock().expect("Process runtime mutex poisoned");
         if runtime.settled_outcome.is_some() {
@@ -221,7 +222,7 @@ impl LfProcessRuntime {
         );
         let snapshot = attachment.clone();
         // Keep the invocation's settlement snapshot fixed through admission.
-        let child = crate::harness::agent_process::spawn_native(command, owner)?;
+        let child = crate::harness::agent_process::spawn_native(command, owner, holder)?;
         Ok((child, snapshot))
     }
 
@@ -502,6 +503,11 @@ impl RuntimeState {
                     tracing::warn!(%error, %session, "cannot record the Session attachment's end")
                 }
             }
+            crate::transcript::facts::record_session(
+                &store,
+                &session,
+                crate::transcript::facts::Moment::Exit,
+            );
         }
         self.recorder.finish(outcome)
     }
@@ -772,6 +778,7 @@ mod tests {
             crate::harness::agent_process::spawn_native(
                 command,
                 &(store.clone(), "resume".into(), attached.clone()),
+                crate::session::Holder::Caller,
             )
             .unwrap(),
         );

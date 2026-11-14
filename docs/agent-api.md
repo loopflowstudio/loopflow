@@ -110,6 +110,28 @@ merge behavior as other content, including edits to existing notes. The child's 
 merge, then `lf sync` merges main using the recorded fork as the comparison base.
 Child edits survive the parent's squash landing without replay.
 
+## Run a child agent
+
+```bash
+lf list                                              # is there a Skill or Graph for this?
+lf -b -a codex research 'how does src/sync.rs retry? report; edit nothing'
+```
+
+`lf -b` runs the child headless in the current checkout and returns when it
+ends, printing its output. Unlike the harness's own subagent, it can run another
+harness or model, leaves a recorded Session, and counts its cost to the Task.
+The harness's subagent stays available for quick lookups.
+
+The agent that starts a child directs it and answers for its result. A plain
+`lf -b` child receives no steers; its brief is all it gets, so the brief says
+what to do, what done looks like and where the result goes. A finished `lf -b`
+child can't be resumed; start another whose brief carries what the first returned.
+A child does the work itself and starts no children unless its brief says to.
+
+A child job that recurs belongs in a skill under `.lf/skills/`, so the next
+child starts from it; `lf skill customize NAME` copies a builtin there to edit.
+Work that ends in its own PR is a Task; wait for it with `lf task wait`.
+
 ## Steer
 
 ```bash

@@ -47,11 +47,25 @@ pub(crate) async fn find_task(
 /// One acquisition per destination, also used before resolving a cold Task.
 /// An unavailable remote never prevents a saved local plan from being used.
 pub(crate) async fn acquire_repository(store: &Store, repo: &str) -> OpsResult<()> {
-    exchange_repository(store, repo, false).await
+    exchange_repository(store, repo, Exchange::Acquire).await
 }
 
+/// Publishes unless another process is publishing; that one or the next
+/// connection tick sends this save out.
 pub(crate) async fn publish_repository(store: &Store, repo: &str) -> OpsResult<()> {
-    exchange_repository(store, repo, true).await
+    exchange_repository(store, repo, Exchange::Publish { wait: false }).await
+}
+
+/// Publishes after any concurrent publication, whose export may predate this
+/// Machine's latest save, so pending changes are out when it returns.
+pub(crate) async fn publish_repository_now(store: &Store, repo: &str) -> OpsResult<()> {
+    exchange_repository(store, repo, Exchange::Publish { wait: true }).await
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Exchange {
+    Acquire,
+    Publish { wait: bool },
 }
 
 /// A short command saves first, then makes one foreground exchange attempt.
@@ -112,6 +126,36 @@ pub(crate) async fn configured_destination(store: &Store, repo: &str) -> OpsResu
         .await
         .map_err(message)?;
     Ok(Some(id))
+}
+
+/// A Task moving here from another of the person's Machines brings their
+/// planning key, so a personal Git plan reads the same journal on both. A
+/// Machine that already plans under another key refuses: keys never change.
+pub(crate) async fn adopt_personal_key(store: &Store, repo: &Path, key: &str) -> OpsResult<()> {
+    use crate::config::{load_config, GitPlan, PlanningConfig};
+    let config = load_config(Some(repo))
+        .map_err(message)?
+        .unwrap_or_default();
+    if !matches!(
+        config.planning_transport(),
+        PlanningConfig::Git {
+            plan: GitPlan::Personal,
+            ..
+        }
+    ) {
+        return Ok(());
+    }
+    match store.planning_user_key().await.map_err(message)? {
+        Some(saved) if saved == key => Ok(()),
+        Some(saved) => Err(message(format!(
+            "this Machine plans under planning key {saved}, the sending Machine under {key}; \
+             a personal plan follows one key, so this Machine cannot read the Task's plan"
+        ))),
+        None => store
+            .provision_planning_user_key(key)
+            .await
+            .map_err(message),
+    }
 }
 
 /// The first personal connection creates the key; a concurrent creator's key wins.
@@ -201,7 +245,7 @@ pub(crate) fn defer_exchange(deferred: bool) {
     EXCHANGE_DEFERRED.store(deferred, Ordering::SeqCst);
 }
 
-async fn exchange_repository(store: &Store, repo: &str, publish: bool) -> OpsResult<()> {
+async fn exchange_repository(store: &Store, repo: &str, exchange: Exchange) -> OpsResult<()> {
     if EXCHANGE_DEFERRED.load(Ordering::SeqCst) {
         return Ok(());
     }
@@ -211,22 +255,33 @@ async fn exchange_repository(store: &Store, repo: &str, publish: bool) -> OpsRes
     let sqlite = store.sqlite.clone();
     let repo = repo.to_owned();
     crate::journal::request::spawn_blocking(move || {
-        exchange_destination(&sqlite, &repo, &destination, publish)
+        exchange_destination(&sqlite, &repo, &destination, exchange)
     })
     .await
     .map_err(message)?
 }
 
-fn exchange_destination(store: &SqliteStore, repo: &str, id: &str, publish: bool) -> OpsResult<()> {
+fn exchange_destination(
+    store: &SqliteStore,
+    repo: &str,
+    id: &str,
+    exchange: Exchange,
+) -> OpsResult<()> {
+    let publish = matches!(exchange, Exchange::Publish { .. });
     // The blocking worker retains effect ownership through status writes, even
     // if its async waiter is canceled. Acquisition never takes this lock.
-    let _lock = if publish {
+    let _lock = if let Exchange::Publish { wait } = exchange {
         let path = store
             .home_dir()
             .map_err(message)?
             .join("locks/planning-peers")
             .join(format!("{id}.lock"));
-        let Some(lock) = super::planning_delivery::lock_delivery(&path)? else {
+        let lock = if wait {
+            wait_for_publication(&path)?
+        } else {
+            super::planning_delivery::lock_delivery(&path)?
+        };
+        let Some(lock) = lock else {
             return Ok(());
         };
         Some(lock)
@@ -259,6 +314,22 @@ fn exchange_destination(store: &SqliteStore, repo: &str, id: &str, publish: bool
         .map_err(message)?;
     result
 }
+
+/// A holder stuck past the wait leaves the save to the next publication.
+fn wait_for_publication(path: &Path) -> OpsResult<Option<std::fs::File>> {
+    let deadline = std::time::Instant::now() + PUBLICATION_WAIT;
+    loop {
+        if let Some(lock) = super::planning_delivery::lock_delivery(path)? {
+            return Ok(Some(lock));
+        }
+        if std::time::Instant::now() >= deadline {
+            return Ok(None);
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+const PUBLICATION_WAIT: Duration = Duration::from_secs(10);
 
 fn acquire_destination(
     store: &SqliteStore,

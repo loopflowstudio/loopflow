@@ -10,6 +10,7 @@ Waves.
 ```bash
 pbpaste | lf task create                     # first line is the title, the rest its notes
 lf task run LOO-12                           # returns once its Graph is running
+lf task run LOO-12 --open                    # continue its Graph and open its conversation
 lf task run LOO-13 --stack-on LOO-12         # builds on LOO-12's branch before it lands
 lf capture-tasks                             # talk it through; the Session files the Tasks
 ```
@@ -23,14 +24,37 @@ updates and squash merge.
 conversation in the background when an agent is configured and installed.
 An in-place `lf -i task run` uses its current terminal instead.
 `lf resume` in its worktree reattaches to it. Previously opened conversations
-stay as they are, and starting stops at sixteen running Task conversations.
+stay as they are. Every newly checked-out Task can start its conversation;
+there is no background conversation cap.
 A running Graph keeps its conversation alive; abandoning the Task stops its
 unviewed conversation. A conversation you are viewing stays open.
 Preparing a conversation, including Desktop's preload, does not launch an agent.
 
+Add `--open` to open the Task's primary conversation when launch returns,
+including when the Task is waiting at an interactive step. It reuses the Task's
+primary Session, including one already started in the background. A bare run
+opens at Graph registration; `-b` and `-i` still wait for their foreground run
+before opening.
+
+Opening follows [`lf open`'s host selection](workspaces.md#choose-where-it-appears):
+a direct CLI invocation attaches in the current terminal; an agent tool call
+opens a sibling tab. When the Graph runs on another Machine, the conversation
+opens locally where you invoked the command. `--explain` and `--quote` open
+nothing. Task runs reject `--context`; use `--explain` to inspect their selection.
+With `--json`, stdout holds only the `task.run` value; the open receipt goes to
+stderr.
+
+A failed launch opens nothing. An opening failure does not stop the Graph.
+Fix the reported host or attachment problem, then use
+`lf open --task LOO-12` to open the conversation without advancing the Graph.
+
 Every agent that works on a Task starts from the same place: the Task's notes
 and thread, its checkout and `scratch/`, and, in a Wave, the Wave's goal,
 memory and KRs.
+
+Run `lf incident` in a Task checkout to investigate a failure, including after
+the Task is done. A named Graph keeps the checkout's Task context and records
+its own run; it leaves the Task's Graph position and completion unchanged.
 
 ### Recover a creation whose reply was lost
 
@@ -71,8 +95,13 @@ lf session bind SESSION --task LOO-12           # select this Task’s conversat
 Promotion preserves the branch, dirty and untracked files, and the Session's
 provider history and live attachment. The selected Session becomes the Task's
 primary conversation; `lf open --task LOO-12` and `lf resume --task LOO-12` find it.
-Pass `--session` explicitly to keep a conversation. An agent uses its own
-`LF_AGENT_CALLER.session_id` or looks it up with `lf session list --json`.
+Pass `--session` explicitly to keep a conversation. An agent reads its own
+Session ID from its lf context block.
+A Graph belongs to the Task it was started for. Graphs that ran in an adopted
+checkout before the Task adopted it stay unattached; `lf task status` lists the
+Graphs launched for the Task from then on. While an earlier Graph still runs
+in that checkout, status shows the Task moving and reports its execution;
+`lf task run` starts no other Graph until it finishes.
 Without `--run`, `lf task create --worktree` adopts only the checkout; it selects
 no conversation. `--run` then uses ordinary Task conversation admission.
 Opening a conversation more recently never selects it. Explicit-source retries
@@ -101,7 +130,7 @@ Already-running clients may keep their original directory; subsequent connection
 use the selected one. Files remain in their original checkout. If an open Task has no checkout, binding adopts the Session’s unowned
 linked checkout. Done Tasks can still select an unfinished conversation without
 reopening work. With no Task checkout, the conversation stays in place and no
-checkout is adopted. Closed Sessions and headless Runs cannot become primary.
+checkout is adopted. Closed or headless Sessions cannot become primary.
 
 ## Steer it while it runs
 
@@ -113,9 +142,9 @@ lf task unassign LOO-12                           # nobody owns it: ship and CI 
 ```
 
 A steer saves locally first, then reaches every Session working on the Task at
-its next supported boundary: before a Graph step or after an agent turn. Idle
-Sessions stay idle; nothing is replayed into them. Direction from teammates, in
-Loopflow or as comments in your tracker, arrives the same way.
+its next supported boundary: before a Graph step or after an agent turn. An
+idle Task conversation is woken with it. Direction from teammates, in Loopflow
+or as comments in your tracker, arrives the same way.
 
 `lf task claim LOO-12` takes it back without starting anything; `lf task run`
 claims and runs. To reopen a conversation, use `lf resume` ([Sessions](sessions.md)).
@@ -228,6 +257,15 @@ Each Task is one item in the tracker, and the tracker is where coworkers work:
 In Linear, a Wave is an Initiative and its planning is a Linear Project. Offline,
 commands save locally and deliver on the next connected command;
 `lf task sync LOO-12` retries one Task.
+
+A Wave not yet connected to an Initiative has nothing to exchange. Its Tasks
+stay local and `lf wave sync` shows them without asking Linear, until
+`lf wave plan connect billing` connects one:
+
+```text
+$ lf wave sync billing
+billing: no Linear Initiative; showing local planning (lf wave plan connect billing)
+```
 
 ## Waves
 
@@ -425,7 +463,8 @@ position; retry it alone if it fails. `lf task reopen` keeps the same PR.
 **Sync.** `lf task sync LOO-12` looks for its tracker creation now and re-sends
 it with its saved ID when absent; between syncs, every `lf` command looks for an
 uncertain creation once per window. `--retry-updates` retries saved field
-changes after reading the tracker again. `lf wave sync` refreshes from Linear first.
+changes after reading the tracker again. `lf wave sync` refreshes from Linear
+first; a Wave with no Initiative skips the refresh and still succeeds.
 
 Every flag: [`lf task`](lf-reference.md#lf-task), [`lf wave`](lf-reference.md#lf-wave).
 

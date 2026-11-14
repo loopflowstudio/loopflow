@@ -88,23 +88,18 @@ impl SqliteStore {
                 "machine target and label must be nonempty; local is reserved".into(),
             ));
         }
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if map_local_machine(&tx)?.id == *machine_id {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        if map_local_machine(&conn)?.id == *machine_id {
             return Err(StoreError::InvalidData(
                 "cannot add the local machine as remote".into(),
             ));
         }
-        let now = now_unix();
-        tx.execute(
-            "INSERT INTO machines(id,is_local,created_at,observed_at) VALUES(?1,0,?2,?2)
-            ON CONFLICT(id) DO UPDATE SET observed_at=excluded.observed_at",
-            params![machine_id.as_str(), now],
-        )?;
+        // The declaration file is written first, outside any write transaction.
+        // A declared Machine needs no row until it is contacted.
         let declaration = crate::config::placement::MachineDeclaration {
             id: machine_id.clone(),
         };
-        let path = crate::config::placement::home(&tx)
+        let path = crate::config::placement::home(&conn)
             .map_err(|error| StoreError::InvalidData(error.to_string()))?
             .join("config.yaml");
         crate::config::files::update(&path, |document| {
@@ -129,7 +124,11 @@ impl SqliteStore {
             Ok(())
         })
         .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-        tx.commit()?;
+        conn.execute(
+            "INSERT INTO machines(id,is_local,created_at,observed_at) VALUES(?1,0,?2,?2)
+            ON CONFLICT(id) DO UPDATE SET observed_at=excluded.observed_at",
+            params![machine_id.as_str(), now_unix()],
+        )?;
         map_machine_by_id(&conn, machine_id)?.ok_or(StoreError::NotFound)
     }
 
@@ -480,8 +479,8 @@ pub(super) fn map_machine_by_id(
 }
 
 /// Completion and abandonment are durable. An open Task's state follows
-/// what it is doing: a Graph runs for it while its Task run or ship process
-/// has not exited, and the Auto-Ship approval (`shipped_at`) makes that run shipping.
+/// what it is doing: its Task run, ship process or a Graph in its work has not
+/// exited, and the Auto-Ship approval (`shipped_at`) makes that run shipping.
 /// Approved with nothing running, it is idle until recovery restarts its ship process.
 pub(crate) fn task_state_sql(t: &str) -> String {
     format!(
@@ -489,11 +488,17 @@ pub(crate) fn task_state_sql(t: &str) -> String {
          WHEN {t}.planning_completed=1 THEN 'done' \
          WHEN EXISTS(SELECT 1 FROM processes lp WHERE lp.completed_at IS NULL AND (lp.id={t}.ship_lf_process_id \
              OR lp.id=(SELECT tg.lf_process_id FROM task_graphs tg WHERE tg.task_id={t}.id))) \
+             OR EXISTS({open_processes}) \
          THEN CASE WHEN {t}.shipped_at IS NOT NULL THEN 'shipping' ELSE 'moving' END \
          WHEN {t}.shipped_at IS NULL AND EXISTS(SELECT 1 FROM task_graphs tg WHERE tg.task_id={t}.id \
              AND tg.lf_process_id IS NULL AND tg.step NOT IN ('start','end')) THEN 'active' \
          WHEN {t}.worktree IS NULL THEN 'unstarted' \
-         ELSE 'idle' END"
+         ELSE 'idle' END",
+        open_processes = super::task_work::task_open_process_ids(
+            &format!("{t}.id"),
+            "p.kind='lf' AND EXISTS(SELECT 1 FROM graph_processes g \
+                WHERE g.lf_process_id IN (p.id,p.parent_lf_process_id))",
+        )
     )
 }
 
@@ -1762,14 +1767,14 @@ mod durable_store_tests {
                 .unwrap(),
             bound
         );
-        // A late cumulative observation belongs to the old turn, never the new bind.
+        // A late observation belongs to the old turn, never the new bind.
         store
             .record_session_event(
                 "orphan",
                 &"thread".into(),
                 "active",
-                crate::session::SessionEventKind::Usage,
-                &serde_json::json!({"input": 30}),
+                crate::session::SessionEventKind::Completed,
+                &serde_json::json!({"status": "completed"}),
             )
             .unwrap();
         // Attribution freezes when the attached LfProcess sends the request.

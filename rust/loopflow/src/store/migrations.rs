@@ -1466,6 +1466,81 @@ mod tests {
     }
 
     #[test]
+    fn finished_headless_sessions_upgrade_to_history_without_closing_live_runs() {
+        let conn = open();
+        apply_before_migration(&conn, "complete_finished_headless_sessions");
+        for (session, interactive, completed) in [
+            ("finished", false, None),
+            ("no-process", false, None),
+            ("live", false, None),
+            ("older-live", false, None),
+            ("interactive", true, None),
+            ("already-completed", false, Some(15)),
+        ] {
+            conn.execute(
+                "INSERT INTO agent_sessions(id,title,title_source,created_at,cwd,input_published,
+                    interactive,completed_at) VALUES(?1,?1,'generated',10,'/repo',0,?2,?3)",
+                rusqlite::params![session, interactive, completed],
+            )
+            .unwrap();
+        }
+        for (session, completed) in [
+            ("finished", Some(20)),
+            ("live", None),
+            ("older-live", Some(20)),
+            ("interactive", Some(20)),
+            ("already-completed", Some(20)),
+        ] {
+            let process = crate::id::AgentProcessId::new();
+            conn.execute(
+                "INSERT INTO processes(id,trace_id,started_at,kind,agent_session_id,completed_at)
+                 VALUES(?1,?1,10,'agent',?2,?3)",
+                rusqlite::params![process, session, completed],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE agent_sessions SET agent_process_id=?2 WHERE id=?1",
+                rusqlite::params![session, process],
+            )
+            .unwrap();
+        }
+        // Any unfinished agent keeps its Session open, even when it is no longer
+        // current. Unassociated processes must not poison the NOT IN query.
+        for session in [Some("older-live"), None] {
+            let process = crate::id::AgentProcessId::new();
+            conn.execute(
+                "INSERT INTO processes(id,trace_id,started_at,kind,agent_session_id)
+                 VALUES(?1,?1,10,'agent',?2)",
+                rusqlite::params![process, session],
+            )
+            .unwrap();
+        }
+
+        upgrade_from_migration(&conn, "complete_finished_headless_sessions");
+
+        let sessions = conn
+            .prepare("SELECT id,completed_at FROM agent_sessions ORDER BY id")
+            .unwrap()
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, Option<i64>>(1)?))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(
+            sessions,
+            [
+                ("already-completed".into(), Some(15)),
+                ("finished".into(), Some(20)),
+                ("interactive".into(), None),
+                ("live".into(), None),
+                ("no-process".into(), Some(10)),
+                ("older-live".into(), None),
+            ]
+        );
+    }
+
+    #[test]
     fn task_update_revision_upgrade_preserves_existing_counters() {
         let conn = open();
         apply_before_migration(&conn, "task_update_revision");
@@ -1520,6 +1595,38 @@ mod tests {
         ] {
             assert!(conn.execute(sql, []).is_err(), "{sql}");
         }
+    }
+
+    #[test]
+    fn graph_process_task_backfills_the_read_time_pairing() {
+        let conn = open();
+        apply_before_migration(&conn, "graph_process_task");
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/graph_process_task_released.sql"
+        ))
+        .unwrap();
+        apply_pending_migrations(&conn);
+
+        let tasks: Vec<(String, Option<String>)> = conn
+            .prepare("SELECT lf_process_id,task_id FROM graph_processes ORDER BY lf_process_id")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        let expected = [
+            ("graph-deep", Some("task_inner")),
+            ("graph-moved", Some("task_bound")),
+            ("graph-outside", None),
+            ("graph-session", Some("task_bound")),
+            ("graph-sibling", Some("task_sibling")),
+        ]
+        .map(|(graph, task)| (graph.to_string(), task.map(str::to_string)));
+        assert_eq!(tasks, expected);
+        assert!(conn
+            .execute("UPDATE graph_processes SET task_id=NULL", [])
+            .is_err());
+        validate_foreign_keys(&conn).unwrap();
     }
 
     #[test]
@@ -3075,6 +3182,40 @@ mod tests {
             [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
         ).unwrap();
         assert_eq!(stop, (25, None, None));
+    }
+
+    #[test]
+    fn task_workspace_teardown_upgrade_keeps_explicit_closes_and_rejudges_automatic_closes() {
+        let conn = open();
+        apply_before_migration(&conn, "task_workspace_teardown");
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/task_workspace_teardown_released.sql"
+        ))
+        .unwrap();
+        apply_pending_migrations(&conn);
+        let mut query = conn
+            .prepare(
+                "SELECT id,close_requested FROM desktop_shells WHERE owner IS NOT NULL ORDER BY id",
+            )
+            .unwrap();
+        let requests = query
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(
+            requests,
+            vec![("automatic".into(), 0), ("explicit".into(), 1)]
+        );
+        let closed: bool = conn
+            .query_row(
+                "SELECT jobs_settled FROM desktop_shells WHERE id='unstarted'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(closed);
+        validate_foreign_keys(&conn).unwrap();
     }
 
     #[test]

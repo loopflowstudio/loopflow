@@ -1075,7 +1075,13 @@ mod tests {
             // The resuming invocation and its capture share this fixture's store.
             let resumed = crate::journal::with_test_ledger(
                 crate::store::database_path_from_env().unwrap(),
-                || crate::lf::commands::util::resume_session(&capture.artifact_key(), &history),
+                || {
+                    crate::lf::commands::util::resume_session(
+                        &capture.artifact_key(),
+                        &history,
+                        false,
+                    )
+                },
             );
             let error = resumed.unwrap_err().to_string();
             assert!(error.contains("was deleted"), "{error}");

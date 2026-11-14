@@ -70,6 +70,54 @@ An approval of an older commit is not an approval of the current head; `reviews`
 shows which commit each one covered. `checks` exits 8 while checks are pending,
 which is not a failure. `--logs` pulls failed GitHub Actions logs.
 
+### Review while CI runs
+
+```bash
+lf gate                  # publish the PR so CI starts, then review the change
+```
+
+```text
+Tests that matter most
+- retry_budget::stops_at_three      the limit this change moves
+- refresh::expired_token_retries    most-edited file; a 401 used to be swallowed
+- ship_api::acceptance              the design's acceptance check
+
+4c1e9a2  superseded. CI passed 14 checks; says nothing about the fix below.
+b70d3f5  CI pending: rust-test, tests-result. Passing: rust-lint, python-test.
+         Skipped: macos (paths not reached). Local: refresh:: passed.
+         Fixed in review: refresh dropped the retry count after a 401.
+Auto-merge not requested.
+```
+
+Gate publishes first. It reads enough of the diff and your notes to commit one
+coherent candidate, syncs, and runs `lf pr publish`, creating a ready PR if the
+branch has none. Then it checks that the real suites are queued, running or
+already completed for the head it pushed. Suites that report skipped did not
+start, and gate fixes the cause or says so.
+
+The review covers what a green check can't show: security and data handling
+where the change touches them, correctness, failure handling and recovery,
+ownership, interfaces and docs. Gate fixes what it finds in scope and publishes
+the fixes together, since each push restarts CI.
+
+It names the two to five tests that cover the riskiest or most-edited behavior,
+with a line of why each. CI runs them along with everything else. Gate runs
+one locally only for fast feedback on a fix, to reproduce a CI failure, or for
+a risk no suite covers.
+
+The report is by commit. Passing, failing, pending, skipped and unavailable
+stay separate, and a pass on an earlier head doesn't carry to a later one.
+Gate doesn't wait for a pending run or request auto-merge: `lf land
+--wait-and-fix` does both, and `lf ship` runs it next.
+
+Without a remote, publishing access, `gh` or any CI, gate says which is missing
+and runs its named tests here. It reports "no CI ran" when that is known;
+unreadable CI status stays unavailable. A local pass is reported as local.
+
+If your CI only tests PRs in some state (a label, no draft, a cleared notes
+directory), name that step in your agent guide. Gate does it before publishing.
+`lf skill customize gate` copies the Skill to change the rest.
+
 ### When CI fails
 
 ```bash

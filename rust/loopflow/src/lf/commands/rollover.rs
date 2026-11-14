@@ -10,8 +10,9 @@
 //! its Sessions resumes on the
 //! selected lf. The sweep signals owners directly, so existing viewers may
 //! need to reopen.
-//! An owner holding a turn, draft or pending request stays, answering or not:
-//! saved history cannot restore its native editor. A Graph runner isn't
+//! An owner holding a turn or pending request stays, answering or not:
+//! saved history cannot restore a pending request. Moving an idle owner discards
+//! unsent input, just as quitting its provider does. A Graph runner isn't
 //! stopped: each step resolves the installed entry when it launches, so its next
 //! step already runs on the selected lf and the runner leaves with the Graph.
 //! Everything else is listed with why it stays.
@@ -160,12 +161,29 @@ fn live_lf_processes(
         .map(|process| (process.pid, process))
         .collect::<HashMap<_, _>>();
     let current = crate::journal::current_lf_process_id();
+    let records = store.unfinished_processes()?;
+    // A native launcher execs its provider: its pid now runs the agent, whose
+    // binary no rollover replaces.
+    let providers: std::collections::HashSet<_> = records
+        .iter()
+        .filter_map(|record| match record {
+            crate::process::ProcessEntry::Agent(agent) => Some((agent.pid?, agent.os_started_at?)),
+            crate::process::ProcessEntry::Lf(_) => None,
+        })
+        .collect();
     let mut live = Vec::new();
-    for record in store.unfinished_processes()? {
+    for record in records {
         let crate::process::ProcessEntry::Lf(record) = record else {
             continue;
         };
         if Some(&record.id) == current.as_ref() {
+            continue;
+        }
+        if record
+            .pid
+            .zip(record.os_started_at)
+            .is_some_and(|process| providers.contains(&process))
+        {
             continue;
         }
         let mut live_pid = None;
@@ -239,8 +257,13 @@ fn binary_version(path: &Path) -> Option<String> {
 }
 
 fn parse_version(output: &str) -> Option<String> {
-    let version = output.trim().strip_prefix("lf ")?.trim();
-    (!version.is_empty() && !version.contains(char::is_whitespace)).then(|| version.to_owned())
+    // `lf 0.15.3+1660be243 (schema work 1660be243 on v0.15.3)`: the first word.
+    let version = output
+        .trim()
+        .strip_prefix("lf ")?
+        .split_whitespace()
+        .next()?;
+    Some(version.to_owned())
 }
 
 /// `3 processes on lf-d49c57c (0.14.16); 2 on lf-270110a (0.14.15)`.
@@ -653,11 +676,58 @@ mod tests {
         );
     }
 
+    /// A launcher that exec'd its provider runs the agent's binary, not lf's.
+    #[test]
+    fn a_launcher_running_its_provider_is_no_lf_binary() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&directory.path().join("lf.db")).unwrap();
+        let me = crate::journal::OsProcess::read(std::process::id())
+            .unwrap()
+            .unwrap();
+        let launcher = LfProcessId::new();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO processes(id,trace_id,command,started_at,pid,os_started_at)
+                 VALUES(?1,?1,'[\"lf\",\"resume\"]',?2,?3,?2)",
+                rusqlite::params![launcher, me.started_at, me.pid],
+            )
+            .unwrap();
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        let listed = |store: &SqliteStore| {
+            super::live_lf_processes(store, now)
+                .unwrap()
+                .into_iter()
+                .map(|(process, _)| process.id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(listed(&store), std::slice::from_ref(&launcher));
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO processes(id,kind,trace_id,parent_lf_process_id,started_at,pid,os_started_at,
+                     agent_provider,agent_interactive,attached_lf_process_id)
+                 VALUES(?1,'agent',?2,?2,?3,?4,?3,'claude',1,?2)",
+                rusqlite::params![crate::id::AgentProcessId::new(), launcher, me.started_at, me.pid],
+            )
+            .unwrap();
+        assert!(listed(&store).is_empty());
+    }
+
     #[test]
     fn versions_come_from_the_binary_banner() {
         assert_eq!(
             parse_version("lf 0.14.16+e9b2c2eac\n").as_deref(),
             Some("0.14.16+e9b2c2eac")
+        );
+        assert_eq!(
+            parse_version("lf 0.15.3+d8e06926b.dirty (dirty build d8e06926b on v0.15.3)\n")
+                .as_deref(),
+            Some("0.15.3+d8e06926b.dirty")
         );
         assert_eq!(parse_version("error: unexpected argument"), None);
     }
@@ -811,10 +881,5 @@ mod tests {
             owner_disposition(&store, &owner.id).unwrap(),
             Disposition::Moves(_)
         ));
-        // No active turn is needed to protect either a plain or edited draft.
-        for bytes in [b"draft".as_slice(), b"\x7f"] {
-            assert!(store.try_record_owner_input(&owner.id, bytes).unwrap());
-            stays("native input");
-        }
     }
 }

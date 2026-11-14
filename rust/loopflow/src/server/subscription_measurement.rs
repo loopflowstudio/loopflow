@@ -13,7 +13,7 @@ use tokio::net::UnixListener;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
-use super::{Clients, Connection, Tickets};
+use super::{connection, Clients, Tickets};
 use crate::durable::TaskId;
 use crate::id::LfProcessId;
 use crate::performance::subscription_measurement as meter;
@@ -263,8 +263,7 @@ fn subscription_server() {
                     let tickets = tickets.clone();
                     let subscriptions = subscriptions.clone();
                     connections.spawn(async move {
-                        Connection { instance: "subscription-fixture", executable_sha256: "frozen-by-runner",
-                            clients: &clients, slots: &slots, tickets: &tickets, subscriptions: &subscriptions, uid: 501 }.serve(socket).await
+                        connection(socket, "subscription-fixture", "frozen-by-runner", &clients, None, None, tickets, &slots, &subscriptions).await
                     });
                 }
                 Some(result) = connections.join_next(), if !connections.is_empty() => { result.unwrap().unwrap(); }

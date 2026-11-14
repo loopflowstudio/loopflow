@@ -299,11 +299,19 @@ fn require_ondemand(sqlite: &SqliteStore, name: &str) -> anyhow::Result<OnDemand
     })
 }
 
+fn held_ids(
+    sqlite: &SqliteStore,
+    machine: &MachineId,
+) -> anyhow::Result<Vec<crate::durable::TaskId>> {
+    let held = sqlite.tasks_held_by(machine)?;
+    Ok(held.into_iter().map(|(task, _)| task).collect())
+}
+
 fn listing(sqlite: &SqliteStore, rental: Rental) -> anyhow::Result<RentalListing> {
     let (machine, tasks, copied) = match &rental.machine_id {
         Some(id) => (
             sqlite.machine_by_id(id)?.and_then(|machine| machine.label),
-            sqlite.tasks_held_by(id)?,
+            held_ids(sqlite, id)?,
             Some(sqlite.copy_counts(id)?).filter(|counts| counts.sessions + counts.processes > 0),
         ),
         None => (None, Vec::new(), None),
@@ -922,7 +930,7 @@ fn give_back(
             ..Holdings::default()
         }
     });
-    holdings.tasks = sqlite.tasks_held_by(&machine.id)?;
+    holdings.tasks = held_ids(sqlite, &machine.id)?;
     holdings.placed = sqlite.machine_ever_held(&machine.id)?;
     holdings.finished_at = sqlite.work_finished_at(&machine.id)?;
     match rental::give_back(rental, &holdings, explicit, force, now()) {

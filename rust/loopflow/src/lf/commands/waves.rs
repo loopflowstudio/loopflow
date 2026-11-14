@@ -878,14 +878,18 @@ pub fn list_tasks(repo: &Path, query: &TaskListArgs, json: bool) -> Result<()> {
         };
         if json {
             println!("{}", serde_json::to_string(&tasks)?);
-        } else {
+        } else if let Some(store) = &store {
+            // Without a store there are no Tasks to print.
+            let local = store.sqlite.local_machine()?.id;
             for task in tasks {
-                println!(
-                    "{} · {} · {}",
-                    task.task.identifier,
-                    owner_text(task.runtime.as_ref()),
-                    task.task.name
-                );
+                let id = crate::durable::TaskId::from_raw(task.task.id.clone());
+                let ownership = store.sqlite.task_ownership(&id)?;
+                let mut owner = owner_text(task.runtime.as_ref()).to_string();
+                if let Some(place) = crate::ops::task_ownership::runs_elsewhere(&ownership, &local)
+                {
+                    owner = format!("{owner} · {place}");
+                }
+                println!("{} · {owner} · {}", task.task.identifier, task.task.name);
             }
         }
         Ok(())
@@ -1014,13 +1018,16 @@ pub(crate) async fn task_detail(
     let row = snapshot_task_details(store, vec![&task], false, &shared)?
         .pop()
         .expect("a registered Task has a row");
+    let capacity = crate::provider_account::LaunchCapacity::read(&store.sqlite)?;
     let mut sessions = Vec::new();
     for session in status
         .overview
         .map(|overview| overview.sessions)
         .unwrap_or_default()
     {
-        if let Some(record) = crate::ops::human_session::listed(store, session.id.as_str())? {
+        if let Some(record) =
+            crate::ops::human_session::listed(store, session.id.as_str(), &capacity)?
+        {
             sessions.push(SessionFacts::of(record));
         }
     }
@@ -1646,6 +1653,10 @@ struct DetailReads<'a> {
     >,
     /// Each handed-off Task's Auto-Ship progress.
     shipping: HashMap<crate::durable::TaskId, crate::ops::task::ship::ShippingSnapshot>,
+    /// Agents already resolved in this reading, by the configuration that chose
+    /// them. Checkouts of one repository usually share their files, and resolving
+    /// validates every setting, so each distinct configuration resolves once.
+    agents: std::sync::Mutex<HashMap<String, Option<String>>>,
     /// Each Task's latest Graph and what its execution reads, asked once.
     graphs: HashMap<crate::durable::TaskId, crate::ops::graph_process::GraphProcess>,
     execution: crate::store::sqlite::GraphExecutionFacts,
@@ -1657,7 +1668,10 @@ impl<'a> DetailReads<'a> {
         let graphs = store
             .sqlite
             .latest_task_graphs(&tasks.iter().map(|task| &task.id).collect::<Vec<_>>())?;
-        let execution = store.sqlite.graph_execution_facts(graphs.values())?;
+        let execution = store.sqlite.graph_execution_facts(
+            graphs.values(),
+            &tasks.iter().map(|task| &task.id).collect::<Vec<_>>(),
+        )?;
         let mut defaults = HashMap::<_, (String, Option<crate::config::ConfigSource>)>::new();
         let mut selections = HashMap::new();
         let mut wave_names = HashMap::new();
@@ -1723,7 +1737,39 @@ impl<'a> DetailReads<'a> {
             shipping,
             graphs,
             execution,
+            agents: Default::default(),
         })
+    }
+
+    /// The agent Task work at `checkout` would launch with, resolved once per
+    /// distinct configuration in this reading.
+    fn agent(
+        &self,
+        checkout: &Path,
+        wave: Option<&str>,
+        personal: &crate::config::PersonalSettings,
+    ) -> Option<String> {
+        let resolve = || crate::ops::task::resolve_task_agent(checkout, wave, personal, None).ok();
+        let Ok(layers) = crate::config::config_layers_with(Some(checkout), wave, personal) else {
+            return resolve();
+        };
+        // Paths only name where a value came from; the agent depends on the values.
+        let key = serde_json::to_string(
+            &layers
+                .iter()
+                .map(|layer| (&layer.source, &layer.scope, &layer.value))
+                .collect::<Vec<_>>(),
+        )
+        .expect("configuration values serialize");
+        if let Some(agent) = self.agents.lock().expect("agent memo poisoned").get(&key) {
+            return agent.clone();
+        }
+        let agent = resolve();
+        self.agents
+            .lock()
+            .expect("agent memo poisoned")
+            .insert(key, agent.clone());
+        agent
     }
 }
 
@@ -1776,13 +1822,8 @@ async fn snapshot_task_detail(
         .personal
         .get(&(task.wave_id.clone(), task.repository_id.clone()))
         .ok_or_else(|| anyhow!("Task {} has no setup reading", task.id))?;
-    let agent = crate::ops::task::resolve_task_agent(
-        task.worktree.as_deref().unwrap_or(repo),
-        wave,
-        personal,
-        None,
-    );
-    let provider = agent.ok().map(|agent| crate::config::parse_agent(&agent).0);
+    let agent = reads.agent(task.worktree.as_deref().unwrap_or(repo), wave, personal);
+    let provider = agent.map(|agent| crate::config::parse_agent(&agent).0);
     let runtime = snapshot_task_runtime(&execution, task, status, pending, owner, provider);
     let machine_id = shared
         .checkouts
@@ -4203,8 +4244,11 @@ mod tests {
             .replace("}]}','demo',3)", "}]}','end',3)");
         conn.execute_batch(&fixture).unwrap();
         crate::store::migrations::upgrade_from_migration(&conn, "task_paused");
+        // Remove the column's dependents so the planning read, not this setup, fails.
         conn.execute_batch(
-            "DROP INDEX tasks_ship_process; ALTER TABLE tasks DROP COLUMN ship_lf_process_id",
+            "DROP INDEX tasks_ship_process;
+             DROP TRIGGER store_revision_tasks_update;
+             ALTER TABLE tasks DROP COLUMN ship_lf_process_id",
         )
         .unwrap();
         let frontier = crate::store::migrations::latest_applied_version_sqlite(&conn).unwrap();

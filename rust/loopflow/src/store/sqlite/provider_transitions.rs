@@ -34,13 +34,29 @@ pub(crate) struct ProviderLineage {
     original_running: Option<bool>,
 }
 
+// Transitions are the observations whose receipt keys name them; the predicate
+// matches the `session_provider_transitions` partial index word for word.
+macro_rules! transitions {
+    () => {
+        "kind='observed' AND (receipt_key GLOB 'provider-transition:*' OR receipt_key GLOB 'agent-session:*')"
+    };
+}
+
 pub(crate) fn latest_in(
     conn: &Connection,
     session: &str,
 ) -> StoreResult<Option<ProviderTransition>> {
-    let row = conn.query_row(
-        "SELECT payload,observed_at FROM session_events WHERE session_id=?1 AND (CASE WHEN json_valid(payload) THEN json_extract(payload,'$.type') END) IN ('provider_transition','agent_session_selected') ORDER BY seq DESC LIMIT 1",
-        [session], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))).optional()?;
+    let row = conn
+        .query_row(
+            concat!(
+                "SELECT payload,observed_at FROM session_events WHERE session_id=?1 AND ",
+                transitions!(),
+                " ORDER BY seq DESC LIMIT 1"
+            ),
+            [session],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+        )
+        .optional()?;
     row.map(|(payload, at)| decode(&payload, at)).transpose()
 }
 
@@ -69,28 +85,52 @@ fn decode(payload: &str, at: i64) -> StoreResult<ProviderTransition> {
     })
 }
 
-pub(crate) fn observe_in(
+fn live_process(
     conn: &Connection,
     session: &str,
-    thread: &str,
-    source: &str,
-) -> StoreResult<()> {
-    let process: Option<crate::id::AgentProcessId> = conn
+) -> StoreResult<Option<crate::id::AgentProcessId>> {
+    Ok(conn
         .query_row(
             "SELECT p.id FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id
          WHERE s.id=?1 AND p.pid IS NOT NULL AND p.completed_at IS NULL",
             [session],
             |row| row.get(0),
         )
-        .optional()?;
-    let Some(process) = process else {
+        .optional()?)
+}
+
+fn is_latest(
+    previous: Option<&ProviderTransition>,
+    process: &crate::id::AgentProcessId,
+    thread: &str,
+) -> bool {
+    previous.is_some_and(|p| p.to_agent_process == *process && p.to_provider_session == thread)
+}
+
+/// Whether [`observe_in`] would record nothing: no live provider, or `thread`
+/// in it is already the latest transition.
+pub(crate) fn observed_in(conn: &Connection, session: &str, thread: &str) -> StoreResult<bool> {
+    let Some(process) = live_process(conn, session)? else {
+        return Ok(true);
+    };
+    Ok(is_latest(
+        latest_in(conn, session)?.as_ref(),
+        &process,
+        thread,
+    ))
+}
+
+pub(crate) fn observe_in(
+    conn: &Connection,
+    session: &str,
+    thread: &str,
+    source: &str,
+) -> StoreResult<()> {
+    let Some(process) = live_process(conn, session)? else {
         return Ok(());
     };
     let previous = latest_in(conn, session)?;
-    if previous
-        .as_ref()
-        .is_some_and(|p| p.to_agent_process == process && p.to_provider_session == thread)
-    {
+    if is_latest(previous.as_ref(), &process, thread) {
         return Ok(());
     }
     let lineage: Option<String> = conn.query_row(
@@ -143,7 +183,11 @@ impl SqliteStore {
 
     pub fn provider_transitions(&self, session: &str) -> StoreResult<Vec<ProviderTransition>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare("SELECT payload,observed_at FROM session_events WHERE session_id=?1 AND (CASE WHEN json_valid(payload) THEN json_extract(payload,'$.type') END) IN ('provider_transition','agent_session_selected') ORDER BY seq")?;
+        let mut statement = conn.prepare(concat!(
+            "SELECT payload,observed_at FROM session_events WHERE session_id=?1 AND ",
+            transitions!(),
+            " ORDER BY seq"
+        ))?;
         let rows = statement.query_map([session], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
         })?;
@@ -215,6 +259,29 @@ mod tests {
         assert_eq!(legacy.from_provider_session.as_deref(), Some("earlier"));
         assert_eq!(legacy.observed_at, 42);
         assert_eq!(legacy.original_running, None);
+    }
+
+    #[test]
+    fn latest_transition_reads_only_indexed_transition_rows() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let conn = store.conn.lock().unwrap();
+        let mut statement = conn
+            .prepare(concat!(
+                "EXPLAIN QUERY PLAN SELECT payload FROM session_events WHERE session_id=?1 AND ",
+                transitions!(),
+                " ORDER BY seq DESC LIMIT 1"
+            ))
+            .unwrap();
+        let plan: Vec<String> = statement
+            .query_map(["conversation"], |row| row.get::<_, String>(3))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert_eq!(
+            plan,
+            ["SEARCH session_events USING INDEX session_provider_transitions (session_id=?)"]
+        );
     }
 
     #[test]

@@ -204,9 +204,10 @@ provider generation in caller provenance, turn origin and Program Status.
 ### Conversation and attachment lifetime
 
 Every agent conversation is an LfSession: skills, inline prompts, helpers,
-reviews, interactive and headless work. Default views select interactive
-conversations. `lf session list --available` selects conversations Available for a
-person, using the same Rust projection as Desktop. `session_activity` holds both
+reviews, interactive and headless work. Default views select unfinished interactive
+conversations. `lf session list --headless` adds unfinished headless Sessions;
+`lf history` owns finished conversations. `lf session list --available` selects
+conversations Available for a person, using the same Rust projection as Desktop. `session_activity` holds both
 the attached LfProcess's latest stream reading and an optional terminal-reported snapshot.
 Its optional preview carries bounded provider text, native thread/turn identity,
 source and observation time. Only the current live AgentProcess and attachment
@@ -242,9 +243,8 @@ reading's AgentProcess, on the connection Desktop already holds. No process
 runs per pane. Stream identity and increasing sequence fence replacements in SQLite.
 An unchanged provider keeps reports across attachment handoff. Report text is literal
 and display-sanitized; protocol IDs never select Sessions or grant process,
-Graph or completion authority. Detached relay observation remains unimplemented. Explicit filters expose headless and
-completed history; `--all`
-continues to mean all repositories. Interactive mode grants neither review
+Graph or completion authority. Detached relay observation remains unimplemented.
+`--headless` includes headless Sessions; `--all` means all repositories. Interactive mode grants neither review
 completion nor Graph authority.
 
 A primary Session is the one ongoing conversation of a scope. It is an ordinary
@@ -342,9 +342,14 @@ left running with a close error.
 Closing clears the live endpoint and retains the native thread ID and history.
 Native terminal providers own their own process exit. An observed
 normal or interrupted exit retires an unbound, non-primary conversation only
-when that LfProcess launched its AgentProcess. Task/Wave conversations, primary
-Sessions, Asks and Graph reviews remain available. A stopped turn or missing
-process never completes a conversation, and retirement never settles a Graph.
+when that LfProcess launched its AgentProcess. Interactive Task/Wave conversations, primary
+Sessions, Asks and Graph reviews remain available. A headless conversation
+completes when its AgentProcess exits, whatever its Work, purpose or Graph:
+completion means it is no longer doing work, not that it cannot continue.
+A new AgentProcess on it, such as a Graph correcting its own step, reopens it
+until that process exits. Pruning a dead AgentProcess also completes its headless
+Session. A stopped turn alone never completes a conversation, and retirement
+never settles a Graph.
 Completed Sessions retain their history but contribute no current rows or counts.
 Terminal Tasks cannot acquire current review obligations;
 independent unresolved Asks remain discoverable.
@@ -393,12 +398,15 @@ boundaries and retained paths after removal. It neither follows causal ancestry
 nor rewrites recorded work or usage. Session inventory exposes `task_ids` so
 Desktop navigation uses the same membership as Task status.
 
-No Graph is privileged: every one naming the Task, or run in its checkout,
-is equally its work. `task status`'s `work` contains all Sessions, Graphs and
-Processes, including headless and closed history. Its `execution` and Task Graph
-record observe the most recently launched Graph only: `none`, `latest` or
-`finished`. The one control is `start`, available whenever the Task can run,
-even when an earlier Graph exists.
+No Graph is privileged: every one started for the Task, by naming it or in its
+checkout, is equally its work. The Graph records that Task when it starts, so
+reading a Task's Graphs costs the same however many other Graphs ran.
+`task status`'s `work` contains all Sessions, Graphs and Processes, including
+headless and closed history. Its Task Graph record observes the most recently
+launched Graph: `none`, `latest` or `finished`. Execution also reports an open
+Graph in the Task's work, including one started before checkout adoption. The
+`start` control is available whenever the Task can run, even when an earlier
+Graph exists.
 
 Cleanup, abandon, restore and landing repair treat all Task Graphs alike and ask
 one question of one gate: does OS process evidence show any of the work's
@@ -427,8 +435,8 @@ and releases its attachment without reporting a provider turn.
 
 A step is told nothing about its Graph and writes nothing about it. The Graph process
 writes GraphProcess, and only by appending: `graph_processes` holds one row per Graph process
-(Graph process, Graph name, graph as compiled at launch) and `graph_process_steps` one
-row per step it started (child Process, graph node key, per-edge iterations). The
+(Graph process, Graph name, graph as compiled at launch, the Task it started for
+or none) and `graph_process_steps` one row per step it started (child Process, graph node key, per-edge iterations). The
 Graph process finds a step's Process as its own newest child. Running, finished and each
 step's result are read from the Processes. Nothing reads the record back to resume,
 and no command changes a running Graph; the control is ending its Graph process.
@@ -463,7 +471,7 @@ A Session's permanent assignment is write-once: null to a Task, validating any
 explicit Wave against its membership. Reassignment and clearing are unavailable.
 Public binding also selects that unfinished interactive Session as primary and
 immediately sets its cwd to the Task's worktree; repeating binding reselects it.
-Closed Sessions and headless Runs cannot become primary. Done/landed Tasks remain
+Closed or headless Sessions cannot become primary. Done/landed Tasks remain
 valid without reopening them. CLI states the permanent target; Desktop confirms
 the exact target before writing. CLI adds no confirmation prompt. The writer
 commits assignment, primary choice and cwd atomically, preserving live input and

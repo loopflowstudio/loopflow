@@ -1,23 +1,29 @@
 //! Public launch and continuation contract, with providers recording their real process inputs.
 #![cfg(unix)]
 use std::fs;
+use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
-use loopflow_test_support::TestRepo;
+use loopflow_test_support::{MachineServer, TestRepo};
 use serde_json::Value;
 
 struct Fixture {
+    /// Task and Wave launches start their agent only once it answers.
+    _server: MachineServer,
     repo: TestRepo,
     home: tempfile::TempDir,
 }
 
 impl Fixture {
     fn new(provider: &str) -> Self {
+        let home = tempfile::tempdir().unwrap();
+        support::seed_store(&home.path().join("machine"));
         let fixture = Self {
+            _server: MachineServer::start(env!("CARGO_BIN_EXE_lf"), &home.path().join("machine")),
             repo: TestRepo::new(),
-            home: tempfile::tempdir().unwrap(),
+            home,
         };
         fs::create_dir(fixture.home.path().join("bin")).unwrap();
         fixture.repo.create_file(
@@ -460,6 +466,21 @@ fn resume_fallback_preserves_provider_and_can_refresh_its_model() {
         pair(&resumed, "--model", expected);
         assert_eq!(fixture.session(), session);
     }
+    for (agents, expected) in [
+        ("[codex, claude:haiku]", "sonnet"),
+        ("[claude:haiku, codex]", "haiku"),
+    ] {
+        let resumed = fixture.run(&[
+            "--setting",
+            &format!("agents={agents}"),
+            "session",
+            "resume",
+            &session,
+        ]);
+        pair(&resumed, "--resume", token);
+        pair(&resumed, "--model", expected);
+        assert_eq!(fixture.session(), session);
+    }
 }
 
 #[test]
@@ -760,6 +781,10 @@ fn task_conversation_preparation_is_passive_and_connect_uses_shared_launch_setti
         serde_json::from_slice::<Value>(&explicit.stdout).unwrap()["id"],
         id
     );
+    fixture.repo.create_file(
+        ".lf/config.yaml",
+        "agents: [claude:sonnet, codex]\nyolo: true\nchrome: true\ndiff: false\ndiff_files: false\npaste: false\n",
+    );
     let first = fixture.run(&["resume"]);
     bypass(&first, "claude", true);
     assert!(args(&first).contains(&"--chrome"));
@@ -896,13 +921,16 @@ fn a_running_claude_named_onto_another_login_keeps_its_client_and_says_where_it_
     fs::write(
         bin.join("claude"),
         r#"#!/usr/bin/python3
-import os, sys, time
+import os, select, sys
 if '--version' in sys.argv:
     print('fixture'); sys.exit(0)
 home = os.environ['LF_HOME']
+sys.stdin.read()
+terminal = open('/dev/tty')
 open(home+'/claude-pids', 'a').write(str(os.getpid())+'\n')
 while not os.path.exists(home+'/quit'):
-    time.sleep(0.05)
+    if select.select([terminal], [], [], 0.05)[0] and terminal.readline().strip() == 'resumed':
+        open(home+'/resumed-input', 'w').write(str(os.getpid()))
 "#,
     )
     .unwrap();
@@ -928,6 +956,8 @@ while not os.path.exists(home+'/quit'):
     let mut first = fixture
         .command()
         .env("USER", "fixture")
+        // Give Claude a controlling terminal after it consumes prompt-file stdin.
+        .env("LF_VIEWER_STREAM", "1")
         .args([
             "-i",
             "--account",
@@ -935,6 +965,8 @@ while not os.path.exists(home+'/quit'):
             ":",
             "hello",
         ])
+        // Keep the first viewer's input open while the second viewer attaches.
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -947,15 +979,27 @@ while not os.path.exists(home+'/quit'):
     assert!(signed_in("fixture"));
     let session = fixture.session();
 
-    let output = fixture
+    let mut output = fixture
         .command()
         .env("USER", "fixture")
         .args(["--account", "claude=other@example.com", "resume", &session])
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
     wait("the login never moved", &mut || signed_in("other"));
+    output
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(b"resumed\n")
+        .unwrap();
+    // The login changes before resume attaches. Quit only after its viewer can
+    // reach the existing client, or the test itself can make resume relaunch it.
+    wait("the resumed viewer never reached Claude", &mut || {
+        machine.join("resumed-input").exists()
+    });
     fs::write(machine.join("quit"), "").unwrap();
     let output = output.wait_with_output().unwrap();
     let printed = format!(
@@ -969,7 +1013,11 @@ while not os.path.exists(home+'/quit'):
     );
     first.wait().unwrap();
     // The same client carried on: a resume that relaunched would add a pid.
-    assert_eq!(fs::read_to_string(&pids).unwrap().lines().count(), 1);
+    assert_eq!(
+        fs::read_to_string(&pids).unwrap().lines().count(),
+        1,
+        "{printed}"
+    );
     // `--account` names one resume; nothing is held.
     assert!(!machine.join("accounts/claude/held").exists());
 }
@@ -1296,23 +1344,81 @@ fn provider_switch_imports_session_history_with_current_policy() {
 
 #[test]
 fn opencode_headless_start_selects_the_model_and_permissions() {
-    let fixture = Fixture::new("opencode:opencode/first-model");
-    fixture.create_wave();
-    let script = include_str!("support/opencode_server.py").replace("__WAIT__", "False").replace(
+    for managed in [false, true] {
+        let fixture = Fixture::new("opencode:opencode/first-model");
+        if managed {
+            fixture.create_wave();
+        }
+        let script = include_str!("support/opencode_server.py").replace("__WAIT__", "False").replace(
         "            if evidence := os.environ.get(\"LF_TEST_REPLAY_EVIDENCE\"):",
         "            (HOME / 'received.json').write_text(json.dumps({'session':self.path.split('/')[3], 'request':body, 'config':json.loads(os.environ['OPENCODE_CONFIG_CONTENT'])}))\n            if evidence := os.environ.get(\"LF_TEST_REPLAY_EVIDENCE\"):"
     );
-    fs::write(fixture.home.path().join("bin/opencode"), script).unwrap();
-    fixture.settings("opencode:opencode/first-model", true, false);
-    let first = fixture.run(&["-b", "--wave", "fixture", ":", "first turn"]);
-    assert_eq!(
-        serde_json::from_slice::<Value>(
-            &fs::read(fixture.home.path().join("native-model.json")).unwrap()
+        fs::write(fixture.home.path().join("bin/opencode"), script).unwrap();
+        fixture.settings("opencode:opencode/first-model", true, false);
+        let first = fixture.run(if managed {
+            &["-b", "--wave", "fixture", ":", "first turn"]
+        } else {
+            &["-b", ":", "first turn"]
+        });
+        assert_eq!(
+            serde_json::from_slice::<Value>(
+                &fs::read(fixture.home.path().join("native-model.json")).unwrap()
+            )
+            .unwrap()["id"],
+            "first-model"
+        );
+        assert_eq!(first["config"]["permissions"][0]["effect"], "allow");
+        let plugin = first["config"]["plugins"][0]
+            .as_str()
+            .unwrap()
+            .strip_prefix("file://")
+            .unwrap();
+        let source = fs::read_to_string(Path::new(plugin).join("index.js")).unwrap();
+        let mut lines = source.lines();
+        let spec: Value = serde_json::from_str(
+            lines
+                .next()
+                .unwrap()
+                .strip_prefix("const spec = ")
+                .unwrap()
+                .trim_end_matches(';'),
         )
-        .unwrap()["id"],
-        "first-model"
-    );
-    assert_eq!(first["config"]["permissions"][0]["effect"], "allow");
+        .unwrap();
+        let delivery: String = serde_json::from_str(
+            lines
+                .next()
+                .unwrap()
+                .strip_prefix("const delivery = ")
+                .unwrap()
+                .trim_end_matches(';'),
+        )
+        .unwrap();
+        let session = fixture.session();
+        assert!(!spec["instructions"].as_str().unwrap().contains(&session));
+        for moment in ["start", "compact"] {
+            let output = fixture
+                .command()
+                .args([
+                    "__context-block",
+                    "--delivery",
+                    &delivery,
+                    "--moment",
+                    moment,
+                ])
+                .output()
+                .unwrap();
+            success(&output);
+            let context: Value = serde_json::from_slice(&output.stdout).unwrap();
+            let text = context["hookSpecificOutput"]["additionalContext"]
+                .as_str()
+                .unwrap();
+            assert!(
+                text.starts_with(&format!("This Session: {session}\n")),
+                "{text}"
+            );
+            assert!(!text.contains("This Session's Task:"));
+        }
+    }
 }
 
 #[test]
@@ -1585,17 +1691,13 @@ fn contextual_resume_uses_scope_and_recovers_unassociated_checkouts() {
     assert_eq!(explanation["resolution"]["session"]["value"], id);
     assert_eq!(count(), before);
     assert_eq!(prepare(&linked, &["resume", id])["id"], id);
+    // Beside an id, a Task or Wave only makes the resume managed: the id
+    // still selects, whatever Work the flag names.
     for argv in [
         vec!["resume", id, "--wave", "fixture"],
         vec!["--task", "missing", "resume", id],
     ] {
-        assert!(!fixture
-            .command()
-            .args(argv)
-            .output()
-            .unwrap()
-            .status
-            .success());
+        success(&fixture.command().args(argv).output().unwrap());
         assert_eq!(count(), before);
     }
 }
@@ -1713,54 +1815,70 @@ fn pi_fixture() -> Fixture {
 
 #[test]
 fn pi_public_headless_skill_delivers_context() {
-    let fixture = pi_fixture();
-    fixture.create_wave();
-    fixture.repo.create_file(
-        ".lf/skills/pi-proof.md",
-        &format!(
-            "Preserve this Pi skill and its exact arguments. LARGE_START{}LARGE_END",
-            "雪<&>".repeat(20_000)
-        ),
-    );
-    fixture
-        .repo
-        .create_file("scratch/pi-context.md", "Pi context sentinel.");
-    let output = fixture
-        .command()
-        .env(
-            "PI_FIXTURE_RECORD",
-            fixture.home.path().join("received.json"),
-        )
-        .args([
-            "-b",
-            "--wave",
-            "fixture",
-            "skill",
-            "pi-proof",
-            "Unicode 雪 stays intact",
-        ])
-        .output()
-        .unwrap();
-    success(&output);
-    let received = fixture.received();
-    assert!(received["input"]
-        .as_str()
-        .unwrap()
-        .contains("Preserve this Pi skill"));
-    assert!(received["input"]
-        .as_str()
-        .unwrap()
-        .contains("Unicode 雪 stays intact"));
-    assert!(received["input"]
-        .as_str()
-        .unwrap()
-        .contains(&format!("LARGE_START{}LARGE_END", "雪<&>".repeat(20_000))));
-    assert!(received["context"]
-        .as_str()
-        .unwrap()
-        .contains("Pi context sentinel"));
-    assert_eq!(received["caller"]["session_id"], fixture.session());
-    assert_eq!(received["lf_bin"], env!("CARGO_BIN_EXE_lf"));
+    for managed in [false, true] {
+        let fixture = pi_fixture();
+        if managed {
+            fixture.create_wave();
+        }
+        fixture.repo.create_file(
+            ".lf/skills/pi-proof.md",
+            &format!(
+                "Preserve this Pi skill and its exact arguments. LARGE_START{}LARGE_END",
+                "雪<&>".repeat(20_000)
+            ),
+        );
+        fixture
+            .repo
+            .create_file("scratch/pi-context.md", "Pi context sentinel.");
+        let output = fixture
+            .command()
+            .env(
+                "PI_FIXTURE_RECORD",
+                fixture.home.path().join("received.json"),
+            )
+            .args(if managed {
+                vec![
+                    "-b",
+                    "--wave",
+                    "fixture",
+                    "skill",
+                    "pi-proof",
+                    "Unicode 雪 stays intact",
+                ]
+            } else {
+                vec!["-b", "skill", "pi-proof", "Unicode 雪 stays intact"]
+            })
+            .output()
+            .unwrap();
+        success(&output);
+        let received = fixture.received();
+        assert!(received["input"]
+            .as_str()
+            .unwrap()
+            .contains("Preserve this Pi skill"));
+        assert!(received["input"]
+            .as_str()
+            .unwrap()
+            .contains("Unicode 雪 stays intact"));
+        assert!(received["input"]
+            .as_str()
+            .unwrap()
+            .contains(&format!("LARGE_START{}LARGE_END", "雪<&>".repeat(20_000))));
+        assert!(received["context"]
+            .as_str()
+            .unwrap()
+            .contains("Pi context sentinel"));
+        assert!(received["context"]
+            .as_str()
+            .unwrap()
+            .starts_with(&format!("This Session: {}\n", fixture.session())));
+        assert!(!received["system"]
+            .as_str()
+            .unwrap()
+            .contains("This Session:"));
+        assert_eq!(received["caller"]["session_id"], fixture.session());
+        assert_eq!(received["lf_bin"], env!("CARGO_BIN_EXE_lf"));
+    }
 }
 
 #[test]
@@ -1819,7 +1937,7 @@ fn pi_native_callbacks_retain_identity_final_output_and_usage() {
 }
 
 #[test]
-fn pi_native_crash_retains_partial_usage_without_completing_the_turn() {
+fn pi_native_crash_keeps_the_paid_step_and_interrupts_the_turn() {
     let fixture = pi_fixture();
     let output = fixture
         .command()
@@ -1830,12 +1948,19 @@ fn pi_native_crash_retains_partial_usage_without_completing_the_turn() {
     assert!(!output.status.success());
     let session = fixture.session();
     let db = rusqlite::Connection::open(fixture.home.path().join("machine/loopflow.db")).unwrap();
-    let (count, tokens, final_receipt): (i64, i64, bool) = db.query_row(
-        "SELECT count(*), json_extract(payload,'$.usage.total_input_tokens'), json_extract(payload,'$.final') FROM session_events WHERE session_id=?1 AND kind='usage'",
-        [&session], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap();
-    assert_eq!((count, tokens, final_receipt), (1, 13, false));
-    let completions: i64 = db.query_row("SELECT count(*) FROM session_events WHERE session_id=?1 AND kind='completed' AND provider_turn IS NOT NULL", [&session], |row| row.get(0)).unwrap();
-    assert_eq!(completions, 0);
+    let (count, tokens): (i64, i64) = db.query_row(
+        "SELECT count(*), json_extract(payload,'$.usage.total_input_tokens') FROM session_events WHERE session_id=?1 AND kind='usage'",
+        [&session], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
+    assert_eq!((count, tokens), (1, 13));
+    // The exit read closes the turn the transcript left open.
+    let statuses: Vec<String> = db
+        .prepare("SELECT json_extract(payload,'$.status') FROM session_events WHERE session_id=?1 AND kind='completed' AND provider_turn IS NOT NULL")
+        .unwrap()
+        .query_map([&session], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(statuses, ["interrupted"]);
 }
 
 #[test]

@@ -2,6 +2,7 @@
 import AppKit
 import Darwin
 import Foundation
+import SQLite3
 import SwiftUI
 import Testing
 import ViewInspector
@@ -991,7 +992,7 @@ struct DesktopPerformanceTests {
         _ = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(roadmap.utf8))
         let planning = PerformancePlanning(roadmap: roadmap)
         let sessions = try JSONSerialization.data(withJSONObject: stride(from: 0, to: taskCount, by: 2).map { index in
-            ["id": "perf-session-\(index)", "run_id": "perf-run-\(index)", "interactive": true,
+            ["id": "perf-session-\(index)", "turn": NSNull(), "raw": false, "interactive": true,
              "work": ["kind": "task", "id": "perf-work-\(index)"],
              "workspace": ["machine_id": fixtureMachineId, "worktree": checkout,
                            "task_id": "perf-work-\(index)", "unavailable": NSNull()],
@@ -1142,7 +1143,7 @@ private final class PerformanceReader {
 
     /// One subscription line, as `lf … --json --subscribe` prints it for this scope.
     private func send(_ part: WorkPart, _ answers: Int, _ body: String) {
-        let scope = scope ?? WorkScope(repo: nil, headless: false, task: nil, activity: nil)
+        let scope = scope ?? WorkScope(repo: nil, headless: false, task: nil, activity: nil, taskListWave: nil)
         sequence += 1
         let line = #"{"answers":\#(answers),"unavailable":null,"body":\#(body)}"#
         // A frame this file wrote; one that does not decode fails the wait on it.
@@ -1458,7 +1459,7 @@ actor SnapshotReads {
         do {
             let verb = args.prefix(2).joined(separator: " ")
             if let fixture, verb == "session resume" || verb == "machine self"
-                || args.contains(fixture.issue) || args.contains(fixture.taskId) {
+                || args.contains(fixture.issue) || args.contains(fixture.taskId) || args.contains(fixture.sessionId) {
                 return .success(try await fixture.read(args))
             }
             let output = try await Task.detached {
@@ -1479,8 +1480,9 @@ actor SnapshotReads {
                 // The synthetic conversation remains explicitly discoverable after
                 // client exit. Copied entries and their paging cursor stay intact.
                 if let page = value as? [String: Any], !(page["next"] is NSNull) { return .success(output) }
-                let owned = try await fixture.read(["session", "list", "--all", "--history", "--json"])
-                let extra = try #require(JSONSerialization.jsonObject(with: Data(owned.utf8)) as? [Any])
+                let owned = try await fixture.read(["session", "card", fixture.sessionId, "--json"])
+                let card = try #require(JSONSerialization.jsonObject(with: Data(owned.utf8)) as? [String: Any])
+                let extra = [try #require(card["session"])]
                 if var page = value as? [String: Any] {
                     if page["next"] is NSNull { page["entries"] = (try #require(page["entries"] as? [Any])) + extra }
                     value = page
@@ -1490,17 +1492,50 @@ actor SnapshotReads {
         } catch { return .failure(error) }
     }
 
+    func records(binary: String, home: String, cwd: String, fixture: DesktopNativeSessionFixture? = nil) async throws -> [SessionRecord] {
+        let ids = try snapshotSessionIDs(home: home)
+        var records: [SessionRecord] = []
+        for id in ids {
+            let output = try await read(binary: binary, home: home, args: ["session", "card", id, "--json"], cwd: cwd).get()
+            records.append(try JSONDecoder().decode(SessionCard.self, from: Data(output.utf8)).session)
+        }
+        if let fixture { records += try await fixture.records() }
+        return records
+    }
+
     func finish() async {
         closed = true
         while active > 0 { try? await Task.sleep(for: .milliseconds(10)) }
     }
 }
 
+func snapshotSessionIDs(home: String) throws -> [String] {
+    var database: OpaquePointer?
+    guard sqlite3_open_v2(home + "/loopflow.db", &database, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+        if let database { sqlite3_close(database) }
+        throw RegistryQueryError("Cannot read snapshot Session IDs")
+    }
+    defer { sqlite3_close(database) }
+    var statement: OpaquePointer?
+    guard sqlite3_prepare_v2(database, "SELECT id FROM agent_sessions WHERE interactive=1 ORDER BY title,id", -1, &statement, nil) == SQLITE_OK else {
+        throw RegistryQueryError("Cannot select snapshot Session IDs")
+    }
+    defer { sqlite3_finalize(statement) }
+    var ids: [String] = []
+    var result = sqlite3_step(statement)
+    while result == SQLITE_ROW {
+        ids.append(String(cString: sqlite3_column_text(statement, 0)))
+        result = sqlite3_step(statement)
+    }
+    guard result == SQLITE_DONE else { throw RegistryQueryError("Cannot finish snapshot Session IDs") }
+    return ids
+}
+
 private func snapshotRead(binary: String, home: String, args: [String], cwd: String) throws -> String {
     // Copied launch authority is never exercised. This transport permits only local
     // reads; no network, Session connection, watcher, worker or provider can start.
     let verb = args.prefix(2).joined(separator: " ")
-    guard ["wave show", "wave list", "wave status", "session list", "session history", "machine self", "task status", "task files", "task diff", "graph list"].contains(verb) else {
+    guard ["wave show", "wave list", "wave status", "session list", "session card", "session history", "machine self", "task status", "task files", "task diff", "graph list"].contains(verb) else {
         throw RegistryQueryError("Snapshot does not execute \(verb)")
     }
     let process = Process()

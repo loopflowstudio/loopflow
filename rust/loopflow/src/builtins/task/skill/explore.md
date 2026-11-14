@@ -1,5 +1,5 @@
 ---
-requires: a Task brief or kickoff plan
+requires: a Task brief
 produces: a chosen direction recorded in the design, with the visions it was chosen from
 action_style: exploratory
 ---
@@ -7,9 +7,9 @@ Show several distinct visions of the outcome so the choice can be "this one, bui
 
 ## Read what exists
 
-Read the Task, the current plan and the risks it found. Those findings constrain
-the visions; the plan's chosen approach is only one candidate. Read enough of
-the system to make each vision concrete.
+Read the Task, `scratch/` and what people have already said. An existing design
+or a suggested approach is only one candidate. Read enough of the system to make
+each vision concrete and to know what each would cost.
 
 ## Dream three visions
 
@@ -60,9 +60,8 @@ used, with the speaker's name. "Looks fine" stays "looks fine"; never turn a
 reply into "accepted" or "chose". To settle an open thread, ask a specific
 numbered question so "2b" is a complete answer. Keep open threads
 open; skip what the page or code already shows. The page is a view; the
-decision lives in the Markdown design. After "build this," update the design's
-slices and acceptance checks where the direction changed them, and link the
-latest page.
+decision lives in the Markdown design. After "build this," write the chosen
+direction into the design for kickoff to plan, and link the latest page.
 
 ## Headless
 

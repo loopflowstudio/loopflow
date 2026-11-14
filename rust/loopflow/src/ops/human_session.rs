@@ -3,6 +3,7 @@ mod resume_explanation;
 pub(crate) use resume_explanation::explain_resume;
 pub use resume_explanation::{SessionResumeAction, SessionResumeExplanation, SessionResumeIntent};
 
+mod turns;
 mod workspace;
 pub use workspace::SessionWorkspace;
 
@@ -58,17 +59,19 @@ pub enum SessionTarget<'a> {
 }
 
 impl<'a> SessionTarget<'a> {
+    /// A Session id selects that conversation even beside `--task` or
+    /// `--wave`; naming the Work there only makes the command managed.
     pub fn from_selectors(
         id: Option<&'a str>,
         task: Option<&'a str>,
         wave: Option<&'a str>,
     ) -> Result<Self> {
         match (id, task, wave) {
-            (None, None, None) => Ok(Self::Context),
-            (Some(id), None, None) => Ok(Self::Session(id)),
+            (_, Some(_), Some(_)) => bail!("select one Task or Wave"),
+            (Some(id), _, _) => Ok(Self::Session(id)),
             (None, Some(task), None) => Ok(Self::Task(task)),
             (None, None, Some(wave)) => Ok(Self::Wave(wave)),
-            _ => bail!("select one Session, Task or Wave target"),
+            (None, None, None) => Ok(Self::Context),
         }
     }
 }
@@ -325,6 +328,9 @@ pub(crate) fn session_actions(
 }
 
 fn projected_actions(session: &crate::session::SessionSummary) -> Vec<SessionAction> {
+    if session.interactive && session.held {
+        return held_actions(session);
+    }
     let occupied = session.agent_process_id.is_some()
         && session.agent_process_evidence != crate::journal::ProcessIdentityEvidence::Dead;
     // Listing reads the marker alone: `capture_is_prepared` opens the store per Session.
@@ -348,6 +354,25 @@ fn projected_actions(session: &crate::session::SessionSummary) -> Vec<SessionAct
         name_session_holder(&mut actions, session.terminal_id.as_deref());
     }
     actions
+}
+
+/// A held terminal takes any number of views, so opening one takes no other
+/// terminal's input; Take back belongs to an execution owner.
+fn held_actions(session: &crate::session::SessionSummary) -> Vec<SessionAction> {
+    vec![SessionAction {
+        kind: SessionActionKind::Open,
+        label: if session.unviewed {
+            "Reconnect"
+        } else {
+            "Open here"
+        }
+        .to_string(),
+        help: format!(
+            "View the running conversation here: lf resume {}",
+            session.id
+        ),
+        unavailable_reason: None,
+    }]
 }
 
 fn name_session_holder(actions: &mut [SessionAction], terminal: Option<&str>) {
@@ -425,6 +450,12 @@ pub struct SessionRecord {
     pub ready_summary: Option<String>,
     pub open_argv: Vec<String>,
     pub terminal_ids: Vec<String>,
+    /// Its current or last turn while it is live; `null` when nothing says.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub turn: Option<crate::transcript::live::SessionTurn>,
+    /// A conversation open here that Loopflow never launched; `id` is the
+    /// provider's conversation ID and no Session records it.
+    pub raw: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -528,16 +559,19 @@ pub(crate) async fn list(
     // Checkout resolution must precede Task filtering and pagination: SQL path
     // prefixes cannot recognize symlink aliases or nested repositories. Neither
     // can they judge capacity.
-    let association_filter =
-        filter.orphan || filter.task.is_some() || filter.blocked || filter.on.is_some();
+    let association_filter = filter.orphan
+        || filter.task.is_some()
+        || filter.wave.is_some()
+        || filter.blocked
+        || filter.on.is_some();
     let mut selection = filter.clone();
     if association_filter {
         selection.task = None;
+        selection.wave = None;
         selection.orphan = false;
         selection.blocked = false;
         selection.on = None;
         selection.limit = 0;
-        selection.offset = 0;
     }
     let on = match &filter.on {
         Some(raw) => Some(SessionOn::resolve(store, raw).await?),
@@ -549,30 +583,41 @@ pub(crate) async fn list(
     for session in store.session_summaries(&selection, now).await? {
         sessions.push(summary_surface(&session, &capacity));
     }
-    workspace::associate(store, &mut sessions).await?;
+    let mut workspaces = workspace::associate(store, &mut sessions).await?;
+    turns::read(&store.sqlite, &mut sessions)?;
+    let task = match &filter.task {
+        Some(selector) => store.sqlite.resolve_task_id(selector, None)?,
+        None => None,
+    };
+    let in_task = |session: &SessionRecord| {
+        filter.task.is_none()
+            || task
+                .as_ref()
+                .is_some_and(|task| session.task_ids.contains(task))
+    };
+    let wave_tasks = match &filter.wave {
+        Some(wave) => store.sqlite.task_ids_in_wave(wave)?,
+        None => Default::default(),
+    };
+    let mut in_work = |session: &SessionRecord| {
+        (!filter.orphan || (session.task_ids.is_empty() && session.wave_id.is_none()))
+            && in_task(session)
+            && (filter.wave.is_none()
+                || session.wave_id == filter.wave
+                || session
+                    .task_ids
+                    .iter()
+                    .any(|task| wave_tasks.contains(task))
+                || workspaces.in_task_checkout(Path::new(&session.cwd), &wave_tasks))
+    };
     if association_filter {
-        let task = if let Some(selector) = &filter.task {
-            store.sqlite.resolve_task_id(selector, None)?
-        } else {
-            None
-        };
         sessions.retain(|session| {
-            (!filter.orphan || session.task_ids.is_empty())
-                && (filter.task.is_none()
-                    || task
-                        .as_ref()
-                        .is_some_and(|task| session.task_ids.contains(task)))
+            in_work(session)
                 && (!filter.blocked || session.blocked)
                 && on.as_ref().is_none_or(|on| on.selects(session, &capacity))
         });
-        let offset = if filter.after.is_some() {
-            0
-        } else {
-            filter.offset
-        };
         sessions = sessions
             .into_iter()
-            .skip(offset)
             .take(if filter.limit == 0 {
                 usize::MAX
             } else {
@@ -580,7 +625,26 @@ pub(crate) async fn list(
             })
             .collect();
     }
+    if lists_raw(filter) {
+        let raw = turns::raw(&store.sqlite, filter.repo.as_deref())?;
+        sessions.extend(
+            raw.into_iter()
+                .filter(|raw| (!filter.available || raw.availability.is_some()) && in_work(raw)),
+        );
+    }
     Ok(sessions)
+}
+
+/// Raw conversations list unless `--no-raw` asks otherwise. They have no
+/// account or page position, so a selection by any of those leaves
+/// them out. One open in a Task's checkout lists under that Task.
+fn lists_raw(filter: &crate::session::SessionFilter) -> bool {
+    filter.raw
+        && filter.primary.is_none()
+        && !filter.blocked
+        && filter.on.is_none()
+        && filter.search.is_none()
+        && filter.after.is_none()
 }
 
 /// Where a Session's step stands in its Graph: the last one a still-open Graph
@@ -600,14 +664,25 @@ fn graph_occurrence(
     }
 }
 
-/// One Session as `list` reads it; `None` once it is gone.
-pub(crate) fn listed(store: &SharedStore, id: &str) -> Result<Option<SessionRecord>> {
+/// One conversation as `list` reads it: the Session with this ID, else the
+/// open raw conversation whose provider ID it is. `None` once it is gone.
+pub(crate) fn listed(
+    store: &SharedStore,
+    id: &str,
+    capacity: &LaunchCapacity,
+) -> Result<Option<SessionRecord>> {
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    let capacity = LaunchCapacity::read(&store.sqlite)?;
-    Ok(store
+    let Some(mut session) = store
         .sqlite
         .session_summary(id, now)?
-        .map(|session| summary_surface(&session, &capacity)))
+        .map(|session| summary_surface(&session, capacity))
+    else {
+        return Ok(turns::raw(&store.sqlite, None)?
+            .into_iter()
+            .find(|raw| raw.id.as_str() == id));
+    };
+    turns::read(&store.sqlite, std::slice::from_mut(&mut session))?;
+    Ok(Some(session))
 }
 
 /// What `--on <account|harness[:model]>` names, resolved once before filtering.
@@ -685,19 +760,19 @@ fn summary_surface(
         (None, Some(wave)) => Some(WorkRef::Wave(wave.clone())),
         _ => None,
     };
-    let work_path = session.wave_id.as_ref().map(|wave| {
-        let wave = session
+    let wave = session.wave_id.as_ref().map(|wave| {
+        session
             .wave_name
             .clone()
-            .unwrap_or_else(|| format!("Wave {wave} (unavailable)"));
-        match &session.task_id {
-            None => wave,
-            Some(task) => match &session.task_identifier {
-                Some(label) => format!("{wave} / {label}"),
-                None => format!("Task {task} (unavailable)"),
-            },
-        }
+            .unwrap_or_else(|| format!("Wave {wave} (unavailable)"))
     });
+    let task = session.task_id.as_ref().map(|task| {
+        session
+            .task_identifier
+            .clone()
+            .unwrap_or_else(|| format!("Task {task} (unavailable)"))
+    });
+    let work_path = join_work_path(wave, task);
     let graph_membership = match (&session.graph_lf_process_id, &session.graph) {
         (None, _) if session.independent => SessionGraphMembership::Independent,
         (None, _) => SessionGraphMembership::Unknown {
@@ -769,6 +844,8 @@ fn summary_surface(
         ready_summary: session.ready_summary.clone(),
         open_argv,
         terminal_ids: session.terminal_id.clone().into_iter().collect(),
+        turn: None,
+        raw: false,
     }
 }
 
@@ -840,7 +917,7 @@ async fn serve_locked(store: &SharedStore, session: &LfSession, launch_lock: Fil
 }
 
 /// Environment naming the inherited descriptor that holds a Session launch lock.
-const LAUNCH_LOCK_ENV: &str = "LF_LAUNCH_LOCK";
+pub(crate) const LAUNCH_LOCK_ENV: &str = "LF_LAUNCH_LOCK";
 
 fn pass_launch_lock(command: &mut std::process::Command, lock: &File) -> Result<()> {
     use std::os::fd::AsRawFd;
@@ -945,7 +1022,7 @@ pub(crate) fn prepared_artifact_key() -> Result<Option<String>> {
 }
 
 /// Get back to a Session. A terminal showing it hands over control; a provider
-/// client lf started stops only when no live turn, draft or request needs it.
+/// client lf started stops only when no live turn or request needs it.
 /// With `fork`, the holder keeps it and a new Session continues from its log. A
 /// Run is refused; it is never taken over or resumed.
 pub(crate) async fn open(
@@ -955,6 +1032,7 @@ pub(crate) async fn open(
     fork: bool,
     resume: bool,
     json: bool,
+    named_work: bool,
 ) -> Result<SessionRecord> {
     crate::agent_input_timing::record("connect_begin", session_id);
     let progress = resume.then(|| crate::startup::Startup::new("Preparing conversation"));
@@ -1084,17 +1162,17 @@ pub(crate) async fn open(
             }
         }
         if crate::transport::delegate_session(
-            false,
             json.then_some(session.id.as_str()),
             session.interactive.then_some(session.id.as_str()),
             true,
+            named_work,
         )? {
             return surface(store, session).await;
         }
     }
     if session.captured.is_none() {
         if resume {
-            open_waiting(store, &session.id).await?;
+            open_waiting(store, &session.id, named_work).await?;
         }
         return surface(store, session).await;
     }
@@ -1105,13 +1183,15 @@ pub(crate) async fn open(
     let Some(provider_session) = provider_session else {
         let surface = surface(store, session).await?;
         if resume {
-            open_waiting(store, &session.id).await?;
+            open_waiting(store, &session.id, named_work).await?;
         }
         return Ok(surface);
     };
     let result = surface(store, session).await?;
     if resume {
-        if running()? {
+        // A conversation started with `lf <skill>` belongs to its terminal;
+        // this one runs a second agent on the same thread beside it.
+        if running()? && !store.sqlite.runs_in_its_terminal(&session.id)? {
             crate::harness::agent_process::stop_session_agent(
                 &store.sqlite,
                 &session.id,
@@ -1122,7 +1202,11 @@ pub(crate) async fn open(
                 session.provider.as_deref().unwrap_or("provider")
             ));
         }
-        crate::lf::commands::util::resume_session(session.input_key()?, &provider_session)?;
+        crate::lf::commands::util::resume_session(
+            session.input_key()?,
+            &provider_session,
+            named_work,
+        )?;
     }
     Ok(result)
 }
@@ -1137,6 +1221,7 @@ pub(crate) async fn open_without_replacing(
     intent: SessionOpenIntent,
     launch: bool,
     json: bool,
+    named_work: bool,
 ) -> Result<SessionRecord> {
     let start = intent == SessionOpenIntent::Start;
     let lock_id = id.to_owned();
@@ -1203,17 +1288,21 @@ pub(crate) async fn open_without_replacing(
         crate::transport::attach_existing(owner, id, json)?;
         return Ok(record);
     }
-    // A new transport re-executes this same intent and acquires the lock again.
-    if crate::transport::current().is_none() {
+    // A held terminal re-executes this same intent and acquires the lock
+    // again; a bare conversation opens here, in this terminal.
+    let lock = if crate::transport::current().is_none() {
         drop(lock);
-        if crate::transport::delegate_session(false, json.then_some(id), Some(id), false)? {
+        if crate::transport::delegate_session(json.then_some(id), Some(id), false, named_work)? {
             return Ok(record);
         }
-        bail!("Conversation transport could not be started");
-    }
+        let lock_id = id.to_owned();
+        tokio::task::spawn_blocking(move || lock_session_process(&lock_id)).await??
+    } else {
+        lock
+    };
     let Some(native) = native else {
         // Keep the ownership read and first-thread admission under one lock.
-        return open_waiting_locked(store, session, lock)
+        return open_waiting_locked(store, session, lock, named_work)
             .await
             .map(|()| record);
     };
@@ -1238,6 +1327,7 @@ pub(crate) async fn open_without_replacing(
         Some(&native),
         &environment,
         Some(lock),
+        named_work,
     )?;
     Ok(record)
 }
@@ -1302,9 +1392,10 @@ async fn fork(
 
 /// Preparation has already mutated the Session. Only its resulting identity
 /// crosses to the owner; opening it reacquires the lock and reads current state.
+/// Its new thread has no native history, so it launches with the Session's Work.
 async fn open_prepared(store: &SharedStore, id: &str, json: bool) -> Result<()> {
     if !crate::transport::delegate_prepared_session(id, json)? {
-        open_waiting(store, id).await?;
+        open_waiting(store, id, false).await?;
     }
     Ok(())
 }
@@ -1350,7 +1441,7 @@ fn departure_here() -> crate::process::Departure {
 
 /// Open a conversation: resume its native history, else
 /// launch its prepared input, else append another attempt to the Session.
-async fn open_waiting(store: &SharedStore, id: &str) -> Result<()> {
+async fn open_waiting(store: &SharedStore, id: &str, named_work: bool) -> Result<()> {
     crate::agent_input_timing::record("launch_lock_begin", id);
     let lock_id = id.to_string();
     let launch_lock =
@@ -1362,13 +1453,14 @@ async fn open_waiting(store: &SharedStore, id: &str) -> Result<()> {
         .session(id)
         .await?
         .ok_or_else(|| session_not_found(id))?;
-    open_waiting_locked(store, session, launch_lock).await
+    open_waiting_locked(store, session, launch_lock, named_work).await
 }
 
 async fn open_waiting_locked(
     store: &SharedStore,
     session: LfSession,
     launch_lock: File,
+    named_work: bool,
 ) -> Result<()> {
     let id = session.id.clone();
     let session = primary::admit_workspace(store, session).await?;
@@ -1379,7 +1471,13 @@ async fn open_waiting_locked(
         session
     };
     let token = session_token(&session);
-    if resume_native_session(store, session.input_key()?, &token, &mut launch_lock)? {
+    if resume_native_session(
+        store,
+        session.input_key()?,
+        &token,
+        &mut launch_lock,
+        named_work,
+    )? {
         return Ok(());
     }
     crate::agent_input_timing::record("fresh_launch_selected", &id);
@@ -1583,17 +1681,23 @@ pub(crate) fn owner_running(store: &SqliteStore, owner: &crate::id::LfProcessId)
 }
 
 /// Attach to protected work even when its owner cannot answer: saved history
-/// cannot reconstruct its editor or pending requests. An idle owner that is
+/// cannot reconstruct an active turn or pending request. An idle owner that is
 /// superseded or does not answer gives way to native continuation. So does an
 /// unanswering superseded owner with no open Session: no work is known there, while
 /// an answering one may hold a turn or draft nothing records, so a viewer attaches.
 /// Compare builds against the launch entry so a development viewer in the main Home
 /// still selects the installed lf.
-fn attaches(
+pub(crate) fn attaches(
     store: &SqliteStore,
     session: &LfSession,
-    owner: &crate::id::LfProcessId,
+    host: &crate::transport::Host,
 ) -> Result<bool> {
+    let owner = match host {
+        crate::transport::Host::Owner(owner) => owner,
+        // A held terminal is attached while its child runs, answering or
+        // not: a stopped server never means a second agent for the Session.
+        crate::transport::Host::Terminal(terminal) => return Ok(store.terminal_running(terminal)?),
+    };
     if !owner_running(store, owner)? {
         return Ok(false);
     }
@@ -1615,9 +1719,9 @@ fn attaches(
         .and_then(|pid| Some((pid, crate::journal::OsProcess::executable(pid)?)))
         .filter(|(_, executable)| crate::installation::superseded(executable));
     let Some((pid, executable)) = superseded else {
-        return Ok(answering(owner));
+        return Ok(answering(host));
     };
-    if unknown && answering(owner) {
+    if unknown && answering(host) {
         return Ok(true);
     }
     end_owner(store, owner, pid).with_context(|| {
@@ -1646,6 +1750,13 @@ pub(crate) fn end_owner(
     pid: u32,
 ) -> Result<()> {
     const STOP_TIMEOUT: Duration = Duration::from_secs(10);
+    if !owner_running(store, owner)? {
+        return Ok(());
+    }
+    anyhow::ensure!(
+        crate::journal::live_process_pid(store, owner) == Some(pid),
+        "owner {owner} no longer has verified pid {pid}"
+    );
     crate::platform::kill_process(pid);
     let deadline = std::time::Instant::now() + STOP_TIMEOUT;
     while owner_running(store, owner)? {
@@ -1661,7 +1772,7 @@ pub(crate) fn end_owner(
 
 /// Whether a running owner answers its socket. This observes reachability,
 /// not whether its provider can safely be replaced.
-fn answering(owner: &crate::id::LfProcessId) -> bool {
+fn answering(owner: &crate::transport::Host) -> bool {
     match crate::transport::controlled(owner) {
         Ok(_) => true,
         Err(error) => {
@@ -1765,8 +1876,11 @@ pub(crate) async fn surface(store: &SharedStore, session: &LfSession) -> Result<
         ready_summary: session.ready_summary.clone(),
         terminal_ids: metadata.terminal_id.clone().into_iter().collect(),
         open_argv,
+        turn: None,
+        raw: false,
     };
     workspace::associate(store, std::slice::from_mut(&mut reading)).await?;
+    turns::read(&store.sqlite, std::slice::from_mut(&mut reading))?;
     Ok(reading)
 }
 
@@ -1780,20 +1894,29 @@ fn launch_model(session: &LfSession) -> String {
 }
 
 async fn session_work_path(store: &SharedStore, session: &LfSession) -> Result<Option<String>> {
-    let Some(wave_id) = &session.wave_id else {
-        return Ok(None);
+    let wave = match &session.wave_id {
+        Some(id) => Some(match store.get_wave(id).await? {
+            Some(wave) => wave.slug().to_string(),
+            None => format!("Wave {id} (unavailable)"),
+        }),
+        None => None,
     };
-    let wave = match store.get_wave(wave_id).await? {
-        Some(wave) => wave.slug().to_string(),
-        None => format!("Wave {wave_id} (unavailable)"),
-    };
-    Ok(Some(match &session.task_id {
-        None => wave,
-        Some(id) => match store.get_task(id).await? {
-            Some(task) => format!("{wave} / {}", task.identifier),
+    let task = match &session.task_id {
+        Some(id) => Some(match store.get_task(id).await? {
+            Some(task) => task.identifier,
             None => format!("Task {id} (unavailable)"),
-        },
-    }))
+        }),
+        None => None,
+    };
+    Ok(join_work_path(wave, task))
+}
+
+/// "Wave / Task", either alone, or nothing for a repository conversation.
+fn join_work_path(wave: Option<String>, task: Option<String>) -> Option<String> {
+    match (wave, task) {
+        (Some(wave), Some(task)) => Some(format!("{wave} / {task}")),
+        (wave, task) => wave.or(task),
+    }
 }
 
 pub(crate) fn local_capture_dir(artifact_key: &str) -> Option<PathBuf> {
@@ -1899,6 +2022,7 @@ pub(crate) fn resume_native_session(
     artifact_key: &String,
     token: &HumanSessionToken,
     launch_lock: &mut Option<File>,
+    named_work: bool,
 ) -> Result<bool> {
     let Some(session) = store.sqlite.session_for_artifact(artifact_key)? else {
         return Ok(false);
@@ -1934,6 +2058,7 @@ pub(crate) fn resume_native_session(
         provider_session.as_ref(),
         &environment,
         launch_lock.take(),
+        named_work,
     )?;
     Ok(true)
 }
@@ -1993,6 +2118,8 @@ fn active_session_token() -> Result<HumanSessionToken> {
 /// One Program Status reading from the terminal showing a Session. `stream`
 /// names one observer; its first reading (`sequence` 1) fences any earlier
 /// stream, even on the same provider. It owns no Session and no provider.
+/// A held terminal's server records its Session's status; a view's reading
+/// of one is ignored.
 pub(crate) async fn record_program_status(
     store: &SharedStore,
     id: &str,
@@ -2009,6 +2136,10 @@ pub(crate) async fn record_program_status(
     let session = find_session(store, id, false)
         .await?
         .context("Session not found")?;
+    // A held terminal's server records its status; a view's would race it.
+    if store.sqlite.session_is_held(&session.id)? {
+        return Ok(());
+    }
     if sequence == 1 {
         let current = store
             .sqlite

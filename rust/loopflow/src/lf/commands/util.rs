@@ -52,7 +52,7 @@ pub(crate) fn launch_session(
     agent_session: Option<&AgentSessionId>,
     context_file: Option<&Path>,
     capture: Option<&LfProcessRuntime>,
-) -> Result<()> {
+) -> Result<SessionCommandOutcome> {
     let command = build_session_command(
         config,
         ProviderInvocation::Terminal {
@@ -61,7 +61,7 @@ pub(crate) fn launch_session(
         context_file,
     )?;
     let environment = session_environment(config, context_file)?;
-    spawn_session_command_with_env(
+    run_session_command_with_env(
         &command,
         &environment,
         agent_session,
@@ -74,28 +74,46 @@ pub(crate) fn launch_session(
 pub(crate) fn resume_session(
     artifact_key: &String,
     provider_session: &crate::session_record::ProviderSessionRef,
+    named_work: bool,
 ) -> Result<()> {
-    resume_session_with_env(artifact_key, Some(provider_session), &BTreeMap::new(), None)
+    resume_session_with_env(
+        artifact_key,
+        Some(provider_session),
+        &BTreeMap::new(),
+        None,
+        named_work,
+    )
 }
 
+/// Continue a recorded conversation. `named_work` is the resume command's: a
+/// Task or Wave resume starts only beside the Machine server.
 pub(crate) fn resume_session_with_env(
     artifact_key: &String,
     provider_session: Option<&crate::session_record::ProviderSessionRef>,
     extra_environment: &BTreeMap<String, String>,
     launch_lock: Option<File>,
+    named_work: bool,
 ) -> Result<()> {
     let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
     let session = store
         .session_for_artifact(artifact_key)?
         .ok_or_else(|| anyhow!("Session input {artifact_key} is not recorded"))?;
     let mut config = crate::agent::resolve_session_config(&session, &crate::lf::Cli::default())?;
+    // Reopening a conversation recorded as Task, Wave or repository work is
+    // Work whatever command reopened it.
+    let work = store.is_work(named_work, Some(&session))?;
+    config.holder = crate::session::Holder::of(work, true);
     anyhow::ensure!(
         session.provider.as_deref() == Some(crate::config::parse_agent(config.agent()?).0.as_str()),
         "native history cannot resume in {}; continue it with lf resume -a {}",
         config.agent()?,
         config.agent()?,
     );
-    if provider_session.is_some() && session.provider.as_deref() != Some("codex") {
+    // A held Codex sends its first turn only to a thread with none; any other
+    // resumed thread already has it.
+    let held_codex = session.provider.as_deref() == Some("codex")
+        && config.holder != crate::session::Holder::Caller;
+    if provider_session.is_some() && !held_codex {
         config.task_prompt.clear();
     }
     config.env.extend(extra_environment.clone());
@@ -165,6 +183,25 @@ fn spawn_session_command_with_env(
     launch_lock: Option<File>,
     capture: Option<&LfProcessRuntime>,
 ) -> Result<()> {
+    run_session_command_with_env(
+        command,
+        environment,
+        agent_session,
+        exact_account_id,
+        launch_lock,
+        capture,
+    )?
+    .result(&command.program, agent_session.is_some(), command.holder)
+}
+
+fn run_session_command_with_env(
+    command: &SessionCommand,
+    environment: &BTreeMap<String, String>,
+    agent_session: Option<&AgentSessionId>,
+    exact_account_id: Option<&crate::store::ProviderAccountId>,
+    launch_lock: Option<File>,
+    capture: Option<&LfProcessRuntime>,
+) -> Result<SessionCommandOutcome> {
     let _planning_sync =
         crate::ops::planning_sync::PlanningSync::start_for_directory(&command.cwd)?;
     let outcome = session_command_status_with_env(
@@ -178,7 +215,7 @@ fn spawn_session_command_with_env(
     if let Some(moved) = &outcome.moved {
         eprintln!("{moved}");
     }
-    outcome.result(&command.program, agent_session.is_some())
+    Ok(outcome)
 }
 
 pub(crate) fn departure_notice(
@@ -238,8 +275,35 @@ impl SessionCommandOutcome {
         }
     }
 
-    pub(crate) fn result(&self, program: &str, resuming: bool) -> Result<()> {
-        if self.moved.is_some() || self.status.success() || self.interrupted {
+    /// Whether the launch failed: an interrupt or a mover ends it as a success.
+    pub(crate) fn failed(&self) -> bool {
+        self.moved.is_none() && !self.interrupted && !self.status.success()
+    }
+
+    /// The status a bare launch exits with: the provider's own, as its shell
+    /// would see it alone. lf names a failure the person did not cause.
+    pub(crate) fn bare_exit_code(&self, program: &str) -> u8 {
+        if !self.status.success() && !self.interrupted {
+            eprintln!("{program} exited with {}", self.status);
+        }
+        crate::transport::provider_exit_code(self.status)
+    }
+
+    /// A bare launch ends as its provider would alone, with the provider's
+    /// own status, unless a mover took its conversation; only a held
+    /// conversation can have another client.
+    pub(crate) fn result(
+        &self,
+        program: &str,
+        resuming: bool,
+        holder: crate::session::Holder,
+    ) -> Result<()> {
+        if holder == crate::session::Holder::Caller && self.moved.is_none() {
+            match self.bare_exit_code(program) {
+                0 => Ok(()),
+                code => Err(crate::process::CommandExit(code).into()),
+            }
+        } else if !self.failed() {
             Ok(())
         } else if resuming {
             Err(anyhow!(
@@ -392,7 +456,7 @@ fn session_command_status_with_env(
                 crate::process::resume_session_agent_process(&store, &session.id, &process)?;
             store.make_session_interactive(&session.id, &attachment)?;
             if let Some(owner) = crate::transport::current() {
-                store.bind_session_transport(&session.id, &attachment, owner)?;
+                store.bind_session_transport(&session.id, &attachment, owner.transport())?;
             }
             environment.insert(
                 crate::process::AGENT_CALLER_ENV.into(),
@@ -430,6 +494,11 @@ fn session_command_status_with_env(
                     tracing::warn!(%error, %session, "cannot record the Session attachment's end")
                 }
             }
+            crate::transcript::facts::record_session(
+                &store,
+                &session,
+                crate::transcript::facts::Moment::Exit,
+            );
         }
         if let Some(capture) = capture {
             if let Err(error) = capture.finish(outcome) {
@@ -485,7 +554,7 @@ fn run_native_session(
             .or_else(super::open::host_placement)
             .as_deref(),
     )?;
-    if command.program == "codex" && command.remote.is_none() {
+    if command.program == "codex" && command.launch.is_some() {
         return run_codex_native(
             command,
             environment,
@@ -562,12 +631,15 @@ fn run_native_session(
         }
     }
     process.env_remove(crate::context_block::CONTEXT_DELIVERY_ENV);
-    if let Some(context) = &command.context {
-        context.configure_hooks(&mut process)?;
-    }
+    let delivery = command
+        .context
+        .as_ref()
+        .map(|context| context.configure_hooks(&mut process))
+        .transpose()?;
     process.args(crate::harness::context::native_args(
         &command.program,
         command.context.as_ref(),
+        command.holder,
     )?);
     process.args(&command.args);
     if command.program == "claude" {
@@ -575,11 +647,21 @@ fn run_native_session(
             crate::agent::configure_native_input(&mut process, input)?;
         }
     }
+    // Only an explicit remote connection is a client of a surviving AgentProcess.
+    let owned = command.remote.is_none().then_some(&attachment);
+    // Refused before the provider conversation is recorded, so the next launch
+    // starts it fresh instead of resuming one that never ran. A Session's
+    // first launch (`lf resume` starting a repository conversation) names no
+    // Work on its command line; its recorded Session does.
+    if let Some((store, session, _)) = owned {
+        let named_work = command.holder == crate::session::Holder::Server;
+        if store.is_work(named_work, store.session(session)?.as_ref())? {
+            crate::harness::agent_process::require_server()?;
+        }
+    }
     if let (Some(capture_dir), Some(agent_session)) = (capture_dir.as_deref(), agent_session) {
         crate::session_record::write_provider_session(capture_dir, agent_session, account.clone())?;
     }
-    // Only an explicit remote connection is a client of a surviving AgentProcess.
-    let owned = command.remote.is_none().then_some(&attachment);
     tracing::debug!(
         elapsed_ms = started.elapsed().as_millis(),
         "prepared native provider launch"
@@ -587,13 +669,6 @@ fn run_native_session(
     let output = crate::terminal_output::TerminalOutput::enter()?;
     output.configure_child(&mut process)?;
     record_interactive_opened(environment)?;
-    // A failed observer is a recording gap; the conversation opens regardless.
-    let client_opened = |client: u32| {
-        crate::transport::report_directory(&command.cwd);
-        if let Err(error) = observe_client(command, agent_session, &account, &attachment, client) {
-            tracing::warn!(%error, session = attachment.1, "Codex conversation will go unrecorded");
-        }
-    };
     if crate::transport::current().is_some() {
         // Hand the wait to the execution owner and become the provider, or its
         // client: no launcher sits beside the agent holding the heap that built it.
@@ -605,7 +680,6 @@ fn run_native_session(
             attachment: attachment.2.clone(),
             provider: command.program.clone(),
             client: owned.is_none(),
-            resuming: agent_session.is_some(),
             cwd: command.cwd.clone(),
             capture: capture.map(LfProcessRuntime::hand_off),
             capture_key: environment
@@ -619,11 +693,14 @@ fn run_native_session(
                 let _native = native_return(&attachment);
                 drop(activation);
                 let error = match owned {
-                    Some(owner) => {
-                        crate::harness::agent_process::exec_native(process, owner, launch_lock)
-                    }
+                    Some(owner) => crate::harness::agent_process::exec_native(
+                        process,
+                        owner,
+                        command.holder,
+                        launch_lock,
+                    ),
                     None => {
-                        client_opened(std::process::id());
+                        crate::transport::report_directory(&command.cwd);
                         crate::harness::agent_process::exec_client(process, launch_lock)
                     }
                 };
@@ -640,8 +717,14 @@ fn run_native_session(
             }
         }
     }
+    // A bare Codex names its thread only to its start hook.
+    let reported_thread = delivery
+        .filter(|_| command.program == "codex" && agent_session.is_none())
+        .map(|delivery| crate::context_block::reported_thread_path(&delivery))
+        .filter(|path| std::fs::write(path, "").is_ok());
+    let foreground = crate::os_process::foreground::hand_to(&mut process);
     let spawned = match owned {
-        Some(owner) => crate::harness::agent_process::spawn_native(process, owner),
+        Some(owner) => crate::harness::agent_process::spawn_native(process, owner, command.holder),
         None => {
             let (store, session, expected) = &attachment;
             store
@@ -662,14 +745,33 @@ fn run_native_session(
 
     drop(activation);
     if owned.is_none() {
-        client_opened(child.id());
+        crate::transport::report_directory(&command.cwd);
+    }
+    if let Some(foreground) = &foreground {
+        foreground.lead(child.id());
     }
     let _native = native_return(&attachment);
     // The process record now owns the launch identity.
     drop(launch_lock);
+    let pid = child.id();
+    // A client's conversation can move to another attachment; this client then
+    // stops, so only one writes to it.
+    let client = owned.is_none().then_some(pid);
+    let mut checked = std::time::Instant::now();
     let status = crate::os_process::wait_for_exit(&mut child, None, || {
+        if let Some(foreground) = &foreground {
+            foreground.follow_stop(pid);
+        }
         if let Some(title) = &mut title {
             title.refresh();
+        }
+        let Some(pid) = client.filter(|_| checked.elapsed() >= CLIENT_ATTACHMENT_CHECK) else {
+            return;
+        };
+        checked = std::time::Instant::now();
+        if attachment_lost(&attachment).unwrap_or(false) {
+            // SAFETY: kill reads no memory; `pid` is this process's unreaped child.
+            unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
         }
     })
     .map(|result| result.0);
@@ -687,11 +789,20 @@ fn run_native_session(
         }),
         None => false,
     };
+    let interrupted = interrupted
+        || foreground
+            .as_ref()
+            .is_some_and(|foreground| foreground.interrupted(&status));
     // A mover ended this attachment; the conversation's home is now its business.
     let lost = attachment_lost(&attachment).unwrap_or_else(|error| {
         tracing::warn!(%error, "cannot read this launch's Session attachment");
         false
     });
+    if let (Some(path), Some(capture_dir)) = (&reported_thread, capture_dir.as_deref()) {
+        if let Err(error) = record_reported_thread(path, capture_dir, account.clone()) {
+            tracing::warn!(%error, "Codex reported no conversation; it cannot be resumed");
+        }
+    }
     // Record which home this conversation lives in, so reopening returns there.
     if let (Some(route), Some(capture_dir), false) = (&account_route, capture_dir.as_deref(), lost)
     {
@@ -709,32 +820,25 @@ fn run_native_session(
     })
 }
 
-fn observe_client(
-    command: &SessionCommand,
-    agent_session: Option<&AgentSessionId>,
-    account: &Option<crate::store::ProviderAccountId>,
-    (_, session, attachment): &crate::harness::agent_process::AttachmentOwner,
-    client: u32,
+/// Record the thread a bare launch's start hook reported as the conversation
+/// `lf resume` reopens.
+fn record_reported_thread(
+    path: &Path,
+    capture_dir: &Path,
+    account: Option<crate::store::ProviderAccountId>,
 ) -> Result<()> {
-    let (Some(endpoint), Some(thread)) = (&command.remote, agent_session) else {
-        return Ok(());
-    };
-    let born = crate::journal::process_started_at(client)?
-        .ok_or_else(|| anyhow!("native client birth unavailable"))?;
-    crate::harness::codex_connection::spawn_observer(
-        &crate::harness::codex_connection::CodexObserver {
-            database: crate::store::database_path_from_env()?,
-            session: session.clone(),
-            attachment: attachment.clone(),
-            endpoint: endpoint.clone(),
-            thread: thread.clone(),
-            account: account.clone(),
-            cwd: command.cwd.clone(),
-            client: (client, born),
-            input: command.input.clone(),
-        },
-    )
+    let thread = std::fs::read_to_string(path)?;
+    let _ = std::fs::remove_file(path);
+    crate::session_record::write_provider_session(
+        capture_dir,
+        &AgentSessionId::from(thread.trim()),
+        account,
+    )?;
+    Ok(())
 }
+
+/// How often a native client checks that its Session is still attached here.
+const CLIENT_ATTACHMENT_CHECK: std::time::Duration = std::time::Duration::from_secs(2);
 
 pub(crate) fn run_native_agent(
     launch: &crate::agent::AgentConfig,
@@ -768,7 +872,9 @@ pub(crate) fn run_native_agent(
             .transpose()?
             .flatten();
     Ok(crate::agent::AgentProcessResult {
-        exit_code: if outcome.interrupted {
+        exit_code: if launch.holder == crate::session::Holder::Caller {
+            outcome.bare_exit_code(&command.program).into()
+        } else if outcome.interrupted {
             0
         } else {
             outcome.status.code().unwrap_or(1)
@@ -828,16 +934,9 @@ fn run_opencode_native(
                 // The native renderer owns output. Rust still records history and
                 // attention, and drains errors without writing over its screen.
                 tokio::pin!(closed_rx);
-                let mut updates = crate::harness::task_updates::TaskUpdates::default();
-                let mut clock = tokio::time::interval(std::time::Duration::from_secs(1));
                 loop {
                     tokio::select! {
                         _ = &mut closed_rx => break,
-                        _ = clock.tick() => {
-                            if let Err(error) = harness.report_task_update(&mut updates).await {
-                                tracing::warn!(%error, "native Task update delivery unavailable");
-                            }
-                        }
                         event = rx.recv() => {
                             if let Some(crate::chat::types::ConversationEvent::Error { message, .. }) = event {
                                 if let Some(path) = observer_diagnostics {
@@ -970,7 +1069,6 @@ fn run_codex_native(
         command.cwd.clone(),
         &opened.thread,
         opened.endpoint,
-        opened.input,
         command.attachment.clone(),
     );
     run_native_session(
@@ -988,8 +1086,6 @@ struct OpenedCodex {
     thread: AgentSessionId,
     endpoint: PathBuf,
     account: Option<crate::store::ProviderAccountId>,
-    /// The launch's first turn, while the conversation has not received it.
-    input: Option<String>,
 }
 
 /// Start the app-server and open the conversation with lf's configuration, so
@@ -1041,13 +1137,28 @@ async fn open_codex_native(
     if let Some(context) = &launch.conversation_context {
         // Hooks run on the app-server, which never inherits the terminal's
         // launch file. Bind before the client can send a turn.
+        let mut context = context.clone();
+        context.identify(store, session)?;
         context.bind_codex_session(thread.as_str())?;
+    }
+    if turns == 0 && !launch.task_prompt.is_empty() {
+        // Provider history settles on the next read whether it ran, so a
+        // broken store cannot stop the turn.
+        codex_connection::start_turn(
+            store,
+            session,
+            attachment,
+            &endpoint,
+            &thread,
+            &launch.task_prompt,
+        )
+        .await
+        .context("Codex first turn was not sent")?;
     }
     Ok(OpenedCodex {
         thread,
         endpoint,
         account,
-        input: (turns == 0 && !launch.task_prompt.is_empty()).then(|| launch.task_prompt.clone()),
     })
 }
 
@@ -1193,15 +1304,14 @@ mod tests {
         provider
     }
 
-    #[cfg(unix)]
-    #[test]
-    fn provider_sigterm_without_stop_intent_remains_an_error() {
+    /// A bare launch's provider failure, without a terminal handing it signals.
+    fn bare_provider_error(body: &str) -> anyhow::Error {
         let ledger = crate::journal::TestLedgerGuard::new();
         let temp = tempfile::tempdir().unwrap();
         ledger.set_db_path(temp.path().join("loopflow.db"));
         let _home = EnvRestore::capture(&["LF_HOME"]);
         std::env::set_var("LF_HOME", temp.path());
-        let provider = fake_provider(&temp, "kill -TERM $$");
+        let provider = fake_provider(&temp, body);
         let capture = crate::session_record::SessionRecorder::begin_at(
             temp.path(),
             crate::session_record::SessionCaptureSpec {
@@ -1221,6 +1331,7 @@ mod tests {
         .unwrap();
         let command = SessionCommand {
             launch: None,
+            holder: crate::session::Holder::Caller,
             input: None,
             context: None,
             attachment: None,
@@ -1229,18 +1340,32 @@ mod tests {
             args: Vec::new(),
             cwd: temp.path().to_path_buf(),
         };
+        spawn_session_command_with_env(&command, &capture.environment(), None, None, None, None)
+            .expect_err("a failed provider fails its launch")
+    }
 
-        let error = spawn_session_command_with_env(
-            &command,
-            &capture.environment(),
-            None,
-            None,
-            None,
-            None,
-        )
-        .expect_err("unexplained SIGTERM must remain an error");
+    fn exit_code(error: &anyhow::Error) -> u8 {
+        error
+            .downcast_ref::<crate::process::CommandExit>()
+            .unwrap_or_else(|| panic!("not the provider's own status: {error:?}"))
+            .0
+    }
 
-        assert!(error.to_string().contains("signal: 15"));
+    #[cfg(unix)]
+    #[test]
+    fn provider_sigterm_without_stop_intent_remains_an_error() {
+        assert_eq!(exit_code(&bare_provider_error("kill -TERM $$")), 143);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_bare_launch_returns_its_providers_own_status() {
+        let error = bare_provider_error("exit 7");
+        assert_eq!(exit_code(&error), 7);
+        assert!(
+            !format!("{error:?}").contains("another client"),
+            "{error:?}"
+        );
     }
 
     #[cfg(unix)]
@@ -1350,6 +1475,7 @@ mod tests {
                     Some(&session),
                     &BTreeMap::new(),
                     None,
+                    false,
                 )
             };
             if index % 2 == 0 {
@@ -1404,6 +1530,69 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn bare_codex_resume_does_not_resend_its_first_turn() {
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let temp = tempfile::tempdir().unwrap();
+        ledger.set_db_path(temp.path().join("loopflow.db"));
+        let _restore = EnvRestore::capture(&["LF_HOME", "PATH"]);
+        std::env::set_var("LF_HOME", temp.path());
+        let provider = fake_provider(&temp, "printf '%s\\0' \"$@\" > received");
+        std::fs::rename(provider, temp.path().join("codex")).unwrap();
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        std::env::set_var(
+            "PATH",
+            std::env::join_paths(
+                std::iter::once(temp.path().to_path_buf()).chain(std::env::split_paths(&path)),
+            )
+            .unwrap(),
+        );
+        let request = crate::session_record::AgentProcessRequest::from_prepared(&AgentConfig {
+            agent: Some("codex".into()),
+            task_prompt: "the first turn".into(),
+            ..Default::default()
+        })
+        .unwrap();
+        let capture = crate::session_record::SessionRecorder::begin_at_with_request(
+            temp.path(),
+            crate::session_record::SessionCaptureSpec {
+                harness: "codex".into(),
+                model: None,
+                surface: "tui".into(),
+                cwd: temp.path().to_path_buf(),
+                repo: None,
+                worktree: None,
+                skill: None,
+                subjects: Vec::new(),
+                graph: crate::session_record::SessionGraphMembership::Independent,
+                work: None,
+            },
+            request,
+        )
+        .unwrap();
+        let capture_dir = capture.artifact_dir();
+        crate::session_record::write_provider_session(&capture_dir, &"thread-1".into(), None)
+            .unwrap();
+        let session = crate::session_record::read_provider_session(&capture_dir)
+            .unwrap()
+            .unwrap();
+
+        resume_session_with_env(
+            &capture.artifact_key(),
+            Some(&session),
+            &BTreeMap::new(),
+            None,
+            false,
+        )
+        .unwrap();
+
+        let received = std::fs::read_to_string(temp.path().join("received")).unwrap();
+        let arguments = received.split_terminator('\0').collect::<Vec<_>>();
+        assert!(arguments.ends_with(&["resume", "--", "thread-1"]));
+        assert!(!received.contains("the first turn"));
+    }
+
     #[test]
     fn recorded_native_move_returns_cleanly_without_stop_receipts() {
         let ledger = crate::journal::TestLedgerGuard::new();
@@ -1434,6 +1623,7 @@ mod tests {
         });
         let command = SessionCommand {
             launch: None,
+            holder: crate::session::Holder::Caller,
             input: None,
             context: None,
             program: "/bin/sleep".into(),
@@ -1456,6 +1646,7 @@ mod tests {
         let home = ledger.home();
         let mut command = SessionCommand {
             launch: None,
+            holder: crate::session::Holder::Caller,
             input: None,
             program: "/bin/sh".into(),
             args: vec!["-c".into(), "printf '%s' \"$$\" > pid".into()],
@@ -1541,6 +1732,7 @@ mod tests {
             let mut provider = crate::harness::agent_process::spawn_native(
                 command,
                 &(store.clone(), session.id.to_string(), original.clone()),
+                crate::session::Holder::Caller,
             )?;
             let endpoint = home.join("provider.sock");
             store.record_session_connection(
@@ -1562,6 +1754,7 @@ mod tests {
             let before = store.agent_process(&attached.agent_process_id)?.unwrap();
             let mut command = SessionCommand {
                 launch: None,
+                holder: crate::session::Holder::Caller,
                 input: None,
                 program: "/usr/bin/true".into(),
                 args: vec![],
@@ -1644,6 +1837,7 @@ mod tests {
             )?;
             let command = SessionCommand {
                 launch: None,
+                holder: crate::session::Holder::Caller,
                 input: None,
                 context: None,
                 attachment: capture.session_attachment(),

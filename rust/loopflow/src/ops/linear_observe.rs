@@ -6,6 +6,8 @@
 //! Exactly-once, the baseline, and the monotonic-revision guard all live in the
 //! store; acquisition supplies observations without proposing a second write.
 
+use std::collections::HashMap;
+use std::path::Path;
 use std::time::Duration;
 
 use sha2::{Digest, Sha256};
@@ -49,7 +51,8 @@ pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> O
         return Ok(());
     };
     let repository = super::task::repository_for_task(store, &task)?;
-    if !super::planning_client::connected(&repository.to_string_lossy()) {
+    let planning_connected = super::planning_client::connected(&repository.to_string_lossy());
+    if !planning_connected {
         return Ok(());
     }
     // The Team delta carries this issue's new comments; a current one needs no
@@ -96,7 +99,12 @@ pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> O
         }
     }
     store
-        .apply_linear_observation(&task.id, observation, OffsetDateTime::now_utc())
+        .apply_linear_observation(
+            &task.id,
+            observation,
+            OffsetDateTime::now_utc(),
+            planning_connected,
+        )
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
     Ok(())
@@ -156,11 +164,18 @@ pub(crate) async fn check_repository(store: &Store, repository: &str) -> OpsResu
 
 /// `check_repository` unless a check started within `fresh_for` seconds.
 async fn check_scope(store: &Store, repository: &str, fresh_for: i64) -> OpsResult<bool> {
-    if !super::planning_client::connected(repository) {
+    let planning_connected = super::planning_client::connected(repository);
+    if !planning_connected {
         return Ok(false);
     }
-    let repo = std::path::Path::new(repository);
+    let repo = Path::new(repository);
     let team = super::planning_client::repository_scope(repo)?;
+    let mut scope_matches = HashMap::from([(repo.to_path_buf(), true)]);
+    let mut same_scope = |repo: &Path| {
+        *scope_matches.entry(repo.to_path_buf()).or_insert_with(|| {
+            super::planning_client::repository_scope(repo).is_ok_and(|scope| scope == team)
+        })
+    };
     let mut live = Vec::new();
     let mut finished = Vec::new();
     let waves: Vec<_> = store
@@ -168,20 +183,11 @@ async fn check_scope(store: &Store, repository: &str, fresh_for: i64) -> OpsResu
         .await
         .map_err(message)?
         .into_iter()
-        .filter(|wave| {
-            super::planning_client::repository_scope(std::path::Path::new(wave.repo()))
-                .ok()
-                .as_ref()
-                == Some(&team)
-        })
+        .filter(|wave| same_scope(Path::new(wave.repo())))
         .collect();
     for task in store.list_tasks(None).await.map_err(message)? {
         let task_repo = super::task::repository_for_task(store, &task)?;
-        if super::planning_client::repository_scope(&task_repo)
-            .ok()
-            .as_ref()
-            != Some(&team)
-        {
+        if !same_scope(&task_repo) {
             continue;
         }
         let Some(issue) = task.linear_id else {
@@ -274,7 +280,7 @@ async fn check_scope(store: &Store, repository: &str, fresh_for: i64) -> OpsResu
             let mut observation = observation;
             claim_local_comments(store, &task, &client, &mut observation)?;
             store
-                .apply_linear_observation(&task.id, observation, now)
+                .apply_linear_observation(&task.id, observation, now, planning_connected)
                 .await
                 .map_err(message)?;
         }

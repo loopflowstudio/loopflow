@@ -21,6 +21,11 @@ pub(super) const PROCESS_SELECT: &str =
     e.caller_agent_process_id,e.command,e.repo,e.cwd,
     e.started_at,e.completed_at,e.outcome,e.exit_code,e.signal,e.error,e.pid,e.kind,e.agent_session_id,e.os_started_at FROM processes e";
 
+fn agent_process_query() -> String {
+    format!("{} WHERE e.kind='agent' AND e.completed_at IS NULL ORDER BY e.id",
+        PROCESS_SELECT.replace(" FROM processes e",",e.attached_lf_process_id,e.attachment_token,e.agent_provider,e.agent_interactive,(e.spawn_state IS 'reserved' AND e.pid IS NULL) FROM processes e"))
+}
+
 /// A finished `lf` Process nothing needs any more, over alias `p`: no agent
 /// issued it, no running parent may still read its result, and no row
 /// references it. Exit and prune both forget exactly these rows. Agent-side
@@ -311,6 +316,21 @@ fn require_attachment_in(
     Ok(())
 }
 
+/// A headless run whose AgentProcess died without a recorded exit, or whose
+/// exit an earlier lf recorded and kept open, is history.
+pub(super) fn complete_dead_headless_run_in(
+    conn: &rusqlite::Connection,
+    agent_process: &str,
+    at: i64,
+) -> StoreResult<()> {
+    conn.execute(
+        "UPDATE agent_sessions SET completed_at=?2 WHERE agent_process_id=?1
+         AND interactive=0 AND completed_at IS NULL AND moved_to_machine_id IS NULL",
+        params![agent_process, at],
+    )?;
+    Ok(())
+}
+
 pub(super) fn attach_in(
     tx: &rusqlite::Transaction<'_>,
     session: &str,
@@ -346,7 +366,7 @@ pub(super) fn attach_in(
         // A best-effort start receipt can lose to a held write lock; the
         // attaching lf's row lands here instead, never a self-rooted agent.
         if let Some(start) = crate::journal::current_start_record(process) {
-            super::record_process_in(tx, &start)?;
+            super::record_process_in(tx, &start, crate::transport::held_terminal())?;
         }
         tx.execute(
             "INSERT INTO processes(id,kind,trace_id,parent_lf_process_id,command,repo,cwd,
@@ -356,8 +376,12 @@ pub(super) fn attach_in(
             params![session,attached.agent_process_id,process,
                 time::OffsetDateTime::now_utc().unix_timestamp()],
         )?;
+        // A new AgentProcess on a finished headless run is working again; its
+        // exit completes the run once more. A moved conversation stays moved.
         tx.execute(
-            "UPDATE agent_sessions SET agent_process_id=?2 WHERE id=?1",
+            "UPDATE agent_sessions SET agent_process_id=?2,
+                completed_at=CASE WHEN interactive=0 AND moved_to_machine_id IS NULL
+                    THEN NULL ELSE completed_at END WHERE id=?1",
             params![session, attached.agent_process_id],
         )?;
     }
@@ -527,6 +551,20 @@ impl SqliteStore {
                 read_lf_process,
             )
             .optional()?)
+    }
+
+    /// The lf processes that started inside held terminal `terminal`.
+    pub(crate) fn held_terminal_processes(
+        &self,
+        terminal: &crate::id::TerminalId,
+    ) -> StoreResult<Vec<LfProcessId>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query =
+            conn.prepare("SELECT id FROM processes WHERE kind='lf' AND held_terminal_id=?1")?;
+        let ids = query
+            .query_map([terminal], |row| row.get(0))?
+            .collect::<Result<_, _>>()?;
+        Ok(ids)
     }
 
     /// Read one provider OS process by its own identity.
@@ -1042,8 +1080,7 @@ impl SqliteStore {
     /// All unfinished agent rows, including detached and replaced processes.
     pub(crate) fn agent_processes(&self) -> StoreResult<Vec<crate::process::AgentProcessState>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(&format!("{} WHERE e.kind='agent' AND e.completed_at IS NULL ORDER BY e.id",
-            PROCESS_SELECT.replace(" FROM processes e",",e.attached_lf_process_id,e.attachment_token,e.agent_provider,e.agent_interactive,(e.spawn_state IS 'reserved' AND e.pid IS NULL) FROM processes e")))?;
+        let mut query = conn.prepare(&agent_process_query())?;
         let rows = query
             .query_map([], |row| {
                 Ok(crate::process::AgentProcessState {
@@ -1095,7 +1132,7 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if let Some(start) = repairer.and_then(crate::journal::current_start_record) {
-            super::record_process_in(&tx, &start)?;
+            super::record_process_in(&tx, &start, crate::transport::held_terminal())?;
         }
         let released = tx.execute(
             &format!(
@@ -1165,16 +1202,17 @@ impl SqliteStore {
             return Ok(false);
         }
         terminate()?;
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let at = time::OffsetDateTime::now_utc().unix_timestamp();
+        tx.execute(
             "UPDATE processes SET completed_at=?2,
                 spawn_state=CASE WHEN spawn_state='reserved' AND pid IS NULL THEN 'spawn_failed' ELSE 'exited' END,
                 endpoint=NULL WHERE id=?1",
-            params![
-                expected.process.id,
-                time::OffsetDateTime::now_utc().unix_timestamp()
-            ],
+            params![expected.process.id, at],
         )?;
+        complete_dead_headless_run_in(&tx, expected.process.id.as_str(), at)?;
+        tx.commit()?;
         Ok(true)
     }
 
@@ -1217,13 +1255,51 @@ impl SqliteStore {
         Ok(attachment)
     }
 
+    /// Whether a recorded Session is bare: neither recorded as Task, Wave or
+    /// repository work nor a scope's ongoing conversation.
+    pub(crate) fn is_bare(&self, session: &crate::session::LfSession) -> StoreResult<bool> {
+        Ok(!session
+            .work_source
+            .is_some_and(crate::session::WorkSource::is_managed)
+            && self.primary_scope(&session.id)?.is_none())
+    }
+
+    /// Whether a launch is Work: its command names a Task or Wave
+    /// (`named_work`), or the recorded Session it opens is not bare.
+    pub(crate) fn is_work(
+        &self,
+        named_work: bool,
+        session: Option<&crate::session::LfSession>,
+    ) -> StoreResult<bool> {
+        match session {
+            Some(session) if !named_work => Ok(!self.is_bare(session)?),
+            _ => Ok(named_work),
+        }
+    }
+
+    /// Whether this interactive Session runs as the foreground program of the
+    /// terminal that started it (`lf <skill>`): no holder or owner keeps it,
+    /// so nothing else may stop it, and another launch on its thread runs
+    /// beside it.
+    pub(crate) fn runs_in_its_terminal(&self, session: &str) -> StoreResult<bool> {
+        let Some(record) = self.session(session)? else {
+            return Ok(false);
+        };
+        Ok(record.interactive
+            && self.is_bare(&record)?
+            && self.session_transport(session)?.is_none())
+    }
+
     /// Resume excludes takeover from observation through settlement and claim.
     /// The close callback runs without SQLite held; its positive death evidence
     /// commits with the caller's reservation, never as a successful agent outcome.
+    /// With `beside`, a previous agent that is still running keeps running,
+    /// detached from the Session, and its lf keeps waiting for it.
     pub(super) fn with_session_resume<T>(
         &self,
         session: &str,
         expected: Option<&SessionAttachment>,
+        beside: bool,
         close: impl FnOnce() -> StoreResult<bool>,
         claim: impl FnOnce(&rusqlite::Transaction<'_>) -> StoreResult<T>,
     ) -> StoreResult<T> {
@@ -1231,7 +1307,10 @@ impl SqliteStore {
         if self.session_attachment(session)?.as_ref() != expected {
             return Err(attachment_changed());
         }
-        if let Some(attached) = expected.and_then(|attachment| attachment.lf_process_id.as_ref()) {
+        if let Some(attached) = expected
+            .filter(|_| !beside)
+            .and_then(|attachment| attachment.lf_process_id.as_ref())
+        {
             if crate::journal::lf_evidence(self, attached)
                 != crate::journal::ProcessIdentityEvidence::Dead
             {
@@ -1241,6 +1320,7 @@ impl SqliteStore {
             }
         }
         let mut closed = false;
+        let mut running = false;
         if let Some(previous) = expected {
             let (ended, reserved) = {
                 let conn = self.conn.lock().expect("store mutex poisoned");
@@ -1248,14 +1328,15 @@ impl SqliteStore {
             };
             if !ended && !reserved {
                 closed = close()?;
-                if !closed {
+                if !closed && !beside {
                     return Err(no_observed_exit());
                 }
+                running = !closed;
             }
         }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if let Some(previous) = expected {
+        if let Some(previous) = expected.filter(|_| !running) {
             // A never-launched reservation is retired without inventing OS exit.
             tx.execute(
                 "UPDATE processes SET completed_at=COALESCE(completed_at,?2),
@@ -1282,7 +1363,8 @@ impl SqliteStore {
     ) -> StoreResult<SessionAttachment> {
         let canonical = crate::id::canonical_session(session);
         let session = canonical.as_str();
-        self.with_session_resume(session, expected, close, |tx| {
+        let beside = self.runs_in_its_terminal(session)?;
+        self.with_session_resume(session, expected, beside, close, |tx| {
             attach_in(tx, session, expected, process, true)
         })
     }
@@ -1436,15 +1518,18 @@ impl SqliteStore {
             |row| row.get(0),
         )?;
         // A departure continues the Session elsewhere; only an exit without a
-        // destination retires an ordinary disposable conversation. Primary
-        // conversations, Wave conversations, Task work and Graph reviews stay open.
+        // destination completes it. A headless run is history once it stops
+        // working, whatever Work or Graph it served; attaching a later turn
+        // reopens it. Interactive primary, Wave and Task conversations, and
+        // Graph reviews, stay open.
         tx.execute(
             &format!(
                 "UPDATE agent_sessions AS s SET completed_at=?2 WHERE s.id=?1
-             AND s.completed_at IS NULL AND s.primary_scope IS NULL
-             AND s.wave_id IS NULL AND {} IS NULL
+             AND s.completed_at IS NULL AND ?4
              AND EXISTS(SELECT 1 FROM processes p WHERE p.id=s.agent_process_id AND p.attached_lf_process_id=p.parent_lf_process_id)
-             AND NOT EXISTS({}) AND ?3 IN ('completed','interrupted') AND ?4",
+             AND CASE WHEN s.interactive=0 THEN ?3 IN ('completed','interrupted','failed')
+             ELSE ?3 IN ('completed','interrupted') AND s.primary_scope IS NULL
+             AND s.wave_id IS NULL AND {} IS NULL AND NOT EXISTS({}) END",
                 super::sessions::SESSION_GRAPH,
                 super::task_work::session_tasks("s")
             ),
@@ -2679,6 +2764,84 @@ mod attachment_tests {
         }
     }
     #[test]
+    fn live_agent_inventory_upgrade_skips_other_processes() {
+        use crate::store::migrations::{apply_before_migration, apply_pending_migrations};
+        use rusqlite::{types::Value, StatementStatus};
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_before_migration(&conn, "session_list_indexes");
+        conn.execute_batch(
+            "WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<6000)
+             INSERT INTO processes(id,trace_id,started_at,kind,completed_at)
+             SELECT printf('00000000-0000-4000-8000-%012x',i),
+                    printf('00000000-0000-4000-8000-%012x',i),1,
+                    CASE WHEN i>4000 THEN 'agent' ELSE 'lf' END,
+                    CASE WHEN i>2000 THEN 2 END FROM n;
+             INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd)
+             VALUES('inventory','Inventory','human',1,0,'/repo');
+             UPDATE processes SET completed_at=NULL,agent_session_id='inventory',
+                spawn_state='reserved',agent_provider='codex',agent_interactive=1
+                WHERE id IN ('00000000-0000-4000-8000-000000001001',
+                             '00000000-0000-4000-8000-000000001002');
+             UPDATE processes SET pid=4242,os_started_at=1,spawn_state='spawn_requested'
+                WHERE id='00000000-0000-4000-8000-000000001001';
+             UPDATE agent_sessions SET agent_process_id='00000000-0000-4000-8000-000000001002'
+                WHERE id='inventory';",
+        )
+        .unwrap();
+        let sql = super::agent_process_query();
+        let read = || {
+            let mut query = conn.prepare(&sql).unwrap();
+            let width = query.column_count();
+            let rows = query
+                .query_map([], |row| {
+                    (0..width)
+                        .map(|i| row.get::<_, Value>(i))
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            (
+                rows,
+                query.get_status(StatementStatus::VmStep),
+                query.get_status(StatementStatus::FullscanStep),
+            )
+        };
+        let (before, before_steps, _) = read();
+        apply_pending_migrations(&conn);
+        let (after, after_steps, scans) = read();
+        assert_eq!(after, before);
+        assert_eq!(after.len(), 2); // Detached previous agent and reserved replacement.
+        assert_eq!(
+            after[0][0],
+            Value::Text("00000000-0000-4000-8000-000000001001".into())
+        );
+        assert_eq!(
+            after[1][0],
+            Value::Text("00000000-0000-4000-8000-000000001002".into())
+        );
+        assert!(
+            after_steps < before_steps / 4,
+            "VM steps: {before_steps} -> {after_steps}"
+        );
+        assert!(scans <= 2, "fullscan steps: {scans}");
+        let plans: Vec<String> = conn
+            .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+            .unwrap()
+            .query_map([], |row| row.get(3))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(
+            plans
+                .iter()
+                .any(|line| line.contains("agent_process_unfinished")),
+            "{plans:?}"
+        );
+    }
+
+    #[test]
     fn detached_and_replaced_agents_remain_in_the_process_inventory() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
@@ -2814,6 +2977,41 @@ mod attachment_tests {
         assert_eq!(retained.pid, Some(4242));
         assert_eq!(retained.parent_lf_process_id, Some(a));
         assert!(retained.completed_at.is_some());
+    }
+
+    #[test]
+    fn settling_a_dead_headless_run_moves_it_to_history() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let mut completed = Vec::new();
+        for (number, id, interactive) in [(1, "run", false), (2, "conversation", true)] {
+            let session = store.test_session(id, &crate::session_record::new_artifact_key());
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "UPDATE agent_sessions SET interactive=?2 WHERE id=?1",
+                    rusqlite::params![session.id, interactive],
+                )
+                .unwrap();
+            let owner = insert_process(&store, number, 1);
+            let attachment = store
+                .claim_session_attachment(&session.id, None, &owner, true)
+                .unwrap();
+            store
+                .record_agent_process_identity(&session.id, &attachment, 4242, 123)
+                .unwrap();
+            let agent = store
+                .agent_processes()
+                .unwrap()
+                .into_iter()
+                .find(|agent| agent.process.agent_session_id.as_deref() == Some(id))
+                .unwrap();
+            assert!(store.settle_agent_process(&agent, || Ok(())).unwrap());
+            completed.push(store.session(id).unwrap().unwrap().completed_at.is_some());
+        }
+        assert_eq!(completed, [true, false]);
     }
 }
 

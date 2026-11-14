@@ -75,6 +75,16 @@ fn snapshot_preview_fixture() {
             let _ = socket.read_to_end(&mut discarded);
             return;
         }
+        if case == "startup_input" {
+            std::fs::write(home.join("pending"), "1").unwrap();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !home.join("typed").exists() {
+                assert!(Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            // Give the relay a readable cooked line before acknowledging attach.
+            std::thread::sleep(Duration::from_millis(250));
+        }
         let mut live = Terminal::new(80, 24).unwrap();
         if case == "modes" {
             live.write(MODES);
@@ -126,6 +136,25 @@ fn snapshot_preview_fixture() {
                 ))
                 .unwrap();
         }
+        if case == "startup_input" {
+            socket
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            let mut received = Vec::new();
+            while !received.ends_with(b"\n") {
+                let mut bytes = [0; 4096];
+                let n = socket.read(&mut bytes).unwrap();
+                assert_ne!(n, 0);
+                decoder.extend(&bytes[..n]);
+                while let Some((tag, payload)) = decoder.next().unwrap() {
+                    if tag == Tag::Input {
+                        received.extend(payload);
+                    }
+                }
+            }
+            assert_eq!(received, b"typed while opening\n");
+            std::fs::write(home.join("forwarded"), received).unwrap();
+        }
         // A marker outside the screen lets the parent inspect the blank handoff.
         socket
             .write_all(&wire::frame(Tag::Out, b"\x1b]777;live-ready\x07"))
@@ -142,7 +171,7 @@ fn snapshot_preview_fixture() {
             ));
         }
     });
-    attach_with_terminal(&owner, None, None, preview, true).unwrap();
+    attach_with_terminal(&super::Host::Owner(owner), None, None, preview, true).unwrap();
     peer.join().unwrap();
     std::fs::write(
         viewer_cwd,
@@ -204,6 +233,13 @@ printf '%s\n' "$*" >> "$HOME/launches"
     let session: String = sql
         .query_row("SELECT id FROM agent_sessions", [], |r| r.get(0))
         .unwrap();
+    // Only a scope's conversation, which stays open across exits, resumes
+    // under an owner behind the preview; any other runs bare in the terminal.
+    sql.execute(
+        "UPDATE agent_sessions SET primary_scope='repository', completed_at=NULL WHERE id=?1",
+        [&session],
+    )
+    .unwrap();
     std::fs::rename(
         home.join(format!("screens/{SESSION}.ghostsnp")),
         home.join(format!("screens/{session}.ghostsnp")),
@@ -224,6 +260,8 @@ read -r answer < /dev/tty
         )
         .unwrap();
     }
+    // Resuming a repository conversation starts it under the Machine server.
+    let _server = loopflow_test_support::MachineServer::start(&binary, &home);
     let mut resume = command();
     resume.args(["resume", &session]);
     if case == "reveal" {
@@ -298,6 +336,7 @@ fn preview_case(case: &str) -> (tempfile::TempDir, Vec<u8>) {
     let mut output = Vec::new();
     let mut cancelled = false;
     let mut inspected = false;
+    let mut typed = false;
     let status = loop {
         assert!(
             Instant::now() < deadline,
@@ -315,6 +354,11 @@ fn preview_case(case: &str) -> (tempfile::TempDir, Vec<u8>) {
             let n = master.read(&mut bytes).unwrap();
             display.write(&bytes[..n]);
             output.extend_from_slice(&bytes[..n]);
+        }
+        if case == "startup_input" && !typed && home.path().join("pending").exists() {
+            master.write_all(b"typed while opening\n").unwrap();
+            std::fs::write(home.path().join("typed"), "1").unwrap();
+            typed = true;
         }
         if case == "cancel" && !cancelled && home.path().join("pending").exists() {
             assert!(display.alternate_screen());
@@ -461,4 +505,13 @@ fn directory_case(case: &str) -> bool {
 #[test]
 fn viewer_taking_a_terminal_enters_the_execution_and_retires_its_report() {
     assert!(directory_case("directory"));
+}
+
+#[test]
+fn snapshot_preview_keeps_typing_until_initial_attachment_is_acknowledged() {
+    let (home, _) = preview_case("startup_input");
+    assert_eq!(
+        std::fs::read(home.path().join("forwarded")).unwrap(),
+        b"typed while opening\n"
+    );
 }

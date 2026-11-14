@@ -152,7 +152,7 @@ struct DesktopHeadlessTests {
                 "answers": answers, "unavailable": NSNull(), "body": body,
             ]
             return try WorkFrame.decode(part: try #require(WorkPart(rawValue: part)),
-                                        scope: WorkScope(repo: nil, headless: false, task: task, activity: nil),
+                                        scope: WorkScope(repo: nil, headless: false, task: task, activity: nil, taskListWave: nil),
                                         sequence: sequence, line: JSONSerialization.data(withJSONObject: line))
         }
         let roadmap = try object("roadmap_snapshot.json")

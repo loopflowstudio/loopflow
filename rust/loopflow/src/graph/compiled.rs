@@ -612,20 +612,20 @@ mod tests {
             (
                 "pursue",
                 &[
+                    "kickoff",
                     "write-docs",
                     "implement",
-                    "compress",
+                    "concept-review",
                     "sync",
                     "realign",
                     "loop-or-next",
-                    "concept-review",
-                    "loop-or-next",
+                    "compress",
                     "qa",
                     "loop-or-next",
                     "pr-publish",
                 ],
                 &[],
-                3,
+                2,
             ),
             ("deliver", &["gate", "land --wait-and-fix"], &[], 0),
             ("vsm-operate", &["s1", "s2", "s3", "s4", "s5"], &[], 0),
@@ -694,20 +694,20 @@ mod tests {
         assert_eq!(
             labels,
             [
+                "kickoff",
                 "write-docs",
                 "implement",
-                "compress",
+                "concept-review",
                 "sync",
                 "realign",
                 "loop-or-next",
-                "concept-review",
-                "loop-or-next",
+                "compress",
                 "qa",
                 "loop-or-next",
                 "pr-publish",
             ]
         );
-        let implement = compiled.steps[1].key;
+        let implement = compiled.steps[2].key;
         let returns: Vec<_> = compiled
             .steps
             .iter()
@@ -716,8 +716,7 @@ mod tests {
         assert_eq!(
             returns,
             [
-                (compiled.steps[5].key, &implement),
-                (compiled.steps[7].key, &implement),
+                (compiled.steps[6].key, &implement),
                 (compiled.steps[9].key, &implement)
             ]
         );

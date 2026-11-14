@@ -662,7 +662,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn settings_polling_counts_git_children_in_main_and_linked_checkouts() {
+    fn settings_polling_launches_no_git_in_main_or_linked_checkouts() {
         use crate::lf::commands::graph::EnvVarGuard;
         use std::os::unix::fs::PermissionsExt;
 
@@ -712,11 +712,8 @@ mod tests {
                 checkout.display(),
                 calls.lines().count()
             );
-            assert_eq!(
-                calls.lines().count(),
-                if checkout == repo.path() { 0 } else { 10 },
-                "{calls}"
-            );
+            // A linked checkout finds its main checkout from Git's own files.
+            assert_eq!(calls.lines().count(), 0, "{calls}");
             assert!(
                 !calls.contains("ls-files") && !calls.contains("check-ignore"),
                 "{calls}"
@@ -1063,6 +1060,7 @@ mod tests {
 
     #[test]
     fn relocating_wave_preferences_preserves_conflicts_and_concurrent_edits() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
         let source = loopflow_test_support::TestRepo::new();
         let target = loopflow_test_support::TestRepo::new();
         let id = crate::id::WaveId::new();

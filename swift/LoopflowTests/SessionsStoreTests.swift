@@ -122,6 +122,22 @@ struct SessionsStoreTests {
         #expect(item(store, "main")?.agentOverride == nil)
     }
 
+    @Test("A Task workspace reopens its Session by id with the Task beside it, so it resumes managed")
+    func taskWorkspaceReopenNamesTheTask() async throws {
+        let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { args, _ in
+            guard args == ["session", "resume", "--reveal-existing", "main", "--task", "task_1", "--prepare", "--json"] else {
+                throw RegistryQueryError("unexpected argv: \(args)")
+            }
+            return session(id: "main", state: "closed")
+        }, work: .task(id: "task_1"))
+        let original = try #require(records([session(id: "main", state: "active")]).first)
+        store.reconcile([original])
+        store.adoptPreparation(original)
+        store.recordPaneLive("main")
+        await store.refresh("main")
+        #expect(item(store, "main")?.state == .prepared)
+    }
+
     @Test("Reset restarts the same Session with a fresh launch")
     func resetRestartsSameSession() async throws {
         let submitted = OSAllocatedUnfairLock<String?>(initialState: nil)
@@ -841,7 +857,7 @@ private func session(id: String, state: String, primary: Bool = false) -> String
       "ready_summary": \(state == "available" ? "\"Ready for review\"" : "null"),
       "work_path": "product / Desktop / LOO-291",
       "actions": \(sessionActionFixtureJSON(state: wire)),
-      "blocked": false, "title_source": "generated", "task_primary": \(primary), "graph_membership": {"kind": "independent"}, "task_ids": ["task-\(id)"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids": [],
+      "blocked": false, "title_source": "generated", "task_primary": \(primary), "graph_membership": {"kind": "independent"}, "task_ids": ["task-\(id)"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "turn":null,"raw":false,"terminal_ids": [],
       "open_argv": ["lf", "session", "resume", "\(id)"]
     }
     """

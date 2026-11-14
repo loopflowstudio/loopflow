@@ -235,12 +235,11 @@ fn mechanical_failure_retains_earlier_step_success() {
         ["sync --plan", "graph show no-such-graph"]
     );
     assert_eq!(step_fields(&graphs[0], "outcome"), ["succeeded", "failed"]);
-    let sessions = lf_json(
-        repo.path(),
-        home.path(),
-        &["session", "list", "--all", "--history", "--json"],
-    );
-    assert_eq!(sessions, serde_json::json!([]));
+    let count: i64 = rusqlite::Connection::open(home.path().join("loopflow.db"))
+        .unwrap()
+        .query_row("SELECT count(*) FROM agent_sessions", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(count, 0);
 }
 
 #[test]
@@ -352,12 +351,11 @@ while not repo.joinpath("release").exists():
             "an effect's exit does not finish its dead Graph process"
         );
     }
-    let sessions = lf_json(
-        repo.path(),
-        home.path(),
-        &["session", "list", "--all", "--history", "--json"],
-    );
-    assert_eq!(sessions, serde_json::json!([]));
+    let count: i64 = rusqlite::Connection::open(home.path().join("loopflow.db"))
+        .unwrap()
+        .query_row("SELECT count(*) FROM agent_sessions", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(count, 0);
 }
 
 fn expand_named_graph(repo: &Path, name: &str) -> Vec<ConcreteStep> {
@@ -667,6 +665,10 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
         let repo = loopflow_test_support::TestRepo::new();
         support::bind_task_planning(&repo);
         let home = TempDir::new().unwrap();
+        let _server = loopflow_test_support::MachineServer::start(
+            loopflow_test_support::lf_binary(),
+            home.path(),
+        );
         let checkout = repo.path().canonicalize().unwrap();
         let child =
             support::register_task_with_pr(home.path(), &checkout, "child-task", &repo.head_sha());
@@ -1022,22 +1024,32 @@ fn authored_graph_records_each_skill_as_one_session() {
     assert!(runs
         .iter()
         .all(|run| run["recorded_outcome"] == "completed"));
-    let sessions = lf_json(
-        repo.path(),
-        home.path(),
-        &[
-            "session",
-            "list",
-            "--all",
-            "--interactive",
-            "false",
-            "--history",
-            "--json",
-        ],
-    );
-    let mut titles = sessions
-        .as_array()
+    let sessions: Vec<_> = runs
+        .iter()
+        .map(|run| {
+            lf_json(
+                repo.path(),
+                home.path(),
+                &[
+                    "session",
+                    "card",
+                    run["session_id"].as_str().unwrap(),
+                    "--json",
+                ],
+            )["session"]
+                .clone()
+        })
+        .collect();
+    let count: i64 = rusqlite::Connection::open(home.path().join("loopflow.db"))
         .unwrap()
+        .query_row(
+            "SELECT count(*) FROM agent_sessions WHERE interactive=0",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 2);
+    let mut titles = sessions
         .iter()
         .map(|session| session["title"].as_str().unwrap())
         .collect::<Vec<_>>();
@@ -1217,6 +1229,10 @@ fn task_run_history_reads_only_that_tasks_runs_without_starting_it() {
     let repo = loopflow_test_support::TestRepo::new();
     repo.create_branch("task-history");
     let home = TempDir::new().unwrap();
+    let _server = loopflow_test_support::MachineServer::start(
+        loopflow_test_support::lf_binary(),
+        home.path(),
+    );
     let task =
         support::register_task_with_pr(home.path(), repo.path(), "task-history", &repo.head_sha());
     let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -1320,6 +1336,10 @@ fn task_run_history_reads_only_that_tasks_runs_without_starting_it() {
 fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
     let repo = loopflow_test_support::TestRepo::new();
     let home = TempDir::new().unwrap();
+    let _server = loopflow_test_support::MachineServer::start(
+        loopflow_test_support::lf_binary(),
+        home.path(),
+    );
     let task =
         support::register_task_with_pr(home.path(), repo.path(), "task-binding", &repo.head_sha());
     let sibling_worktree = repo.create_named_worktree("task-sibling");
@@ -1424,13 +1444,13 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
     // A checkout no Task owns stays unbound and retires on exit.
     let unrelated = repo.create_named_worktree("unregistered");
     let unbound = launch(&unrelated, &["-i", "binding-work"]);
-    let history = json(&["desktop", "sessions", "--all", "--history", "--json"]);
-    let retired = history
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|row| row["id"] == session_id_for_capture(home.path(), &unbound))
-        .unwrap();
+    let card = json(&[
+        "session",
+        "card",
+        &session_id_for_capture(home.path(), &unbound),
+        "--json",
+    ]);
+    let retired = &card["session"];
     assert_eq!(retired["work"], serde_json::Value::Null);
     assert_eq!(retired["state"], "closed");
     assert_eq!(task_runs("INF-123"), vec![bound.clone()]);
@@ -1487,6 +1507,10 @@ fn bound_graphs_keep_task_context_and_leave_other_graphs_and_shared_edits_alone(
     support::bind_task_planning(&repo);
     let caller = TestRepo::new();
     let home = TempDir::new().unwrap();
+    let _server = loopflow_test_support::MachineServer::start(
+        loopflow_test_support::lf_binary(),
+        home.path(),
+    );
     let checkout = repo.path().canonicalize().unwrap();
     let task = support::register_task_with_pr(
         home.path(),
@@ -1951,6 +1975,10 @@ fn task_graph_read_keeps_captured_topology_and_counts_both_returns() {
     let repo = loopflow_test_support::TestRepo::new();
     support::bind_task_planning(&repo);
     let home = TempDir::new().unwrap();
+    let _server = loopflow_test_support::MachineServer::start(
+        loopflow_test_support::lf_binary(),
+        home.path(),
+    );
     // A Task's Graphs are those whose Processes ran in its checkout, as Processes name it.
     let checkout = repo.path().canonicalize().unwrap();
     repo.create_branch("task-graph-read");
@@ -2152,6 +2180,10 @@ fn three_nested_loops_return_to_named_occurrences_of_one_skill() {
     let repo = loopflow_test_support::TestRepo::new();
     support::bind_task_planning(&repo);
     let home = TempDir::new().unwrap();
+    let _server = loopflow_test_support::MachineServer::start(
+        loopflow_test_support::lf_binary(),
+        home.path(),
+    );
     let checkout = repo.path().canonicalize().unwrap();
     let task =
         support::register_task_with_pr(home.path(), &checkout, "nested-loops", &repo.head_sha());
@@ -2245,6 +2277,10 @@ fn the_research_graph_stops_at_its_findings_then_reaches_end() {
     let repo = loopflow_test_support::TestRepo::new();
     support::bind_task_planning(&repo);
     let home = TempDir::new().unwrap();
+    let _server = loopflow_test_support::MachineServer::start(
+        loopflow_test_support::lf_binary(),
+        home.path(),
+    );
     let checkout = repo.path().canonicalize().unwrap();
     let task =
         support::register_task_without_pr(home.path(), &checkout, "research-end", &repo.head_sha());

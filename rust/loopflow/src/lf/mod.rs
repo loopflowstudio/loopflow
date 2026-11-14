@@ -574,6 +574,11 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: ServerCommand,
     },
+    /// Keep this build's Task and Wave terminals; started only by the server
+    Holder {
+        #[command(subcommand)]
+        cmd: HolderCommand,
+    },
     /// Name, connect, pool and rent Machines
     Machine {
         #[command(subcommand)]
@@ -658,8 +663,7 @@ pub enum Commands {
         cmd: DiscordCommand,
     },
     /// Internal provider turn-boundary hook: context at startup and compaction,
-    /// steers at tool and prompt boundaries, Linear acquisition at turn end,
-    /// Pi's native lifecycle events and its bash tool groups.
+    /// steers at tool and prompt boundaries, Linear acquisition at turn end.
     // Running providers retain this older Stop spelling across lf upgrades.
     #[command(name = "__context-block", alias = "__planning-check", hide = true)]
     ContextBlock {
@@ -667,20 +671,7 @@ pub enum Commands {
         delivery: Option<std::path::PathBuf>,
         #[arg(long, value_enum, default_value = "stop")]
         moment: crate::context_block::ContextMoment,
-        /// The FIFO Pi holds open while a `tool-group` command runs
-        #[arg(
-            long,
-            required_if_eq("moment", "tool-group"),
-            requires = "provider_pid"
-        )]
-        lifeline: Option<std::path::PathBuf>,
-        #[arg(long, requires = "lifeline")]
-        provider_pid: Option<u32>,
     },
-    /// Subscription a Codex conversation beside its native client. Started by the
-    /// launcher, which sends the launch on stdin.
-    #[command(name = "__codex-observe", hide = true)]
-    CodexObserve,
     /// External: skill/graph name (when no subcommand matches)
     #[command(external_subcommand)]
     External(Vec<String>),
@@ -1015,6 +1006,12 @@ impl DesktopCommand {
 pub enum DesktopViewCommand {
     /// Print the repository's default and saved Dashboard plans as JSON
     List {
+        /// Apply one selection across every portfolio repository
+        #[arg(long)]
+        all: bool,
+        /// Selection to apply with --all; omitted uses each repository's default
+        #[arg(long, requires = "all")]
+        expression: Option<String>,
         #[arg(long, required = true)]
         json: bool,
         /// Print a JSON line now and each time the plans change, until stdin closes
@@ -1164,14 +1161,12 @@ impl Commands {
             Self::Wt { cmd } => cmd.changes_work(),
             Self::Machine { cmd } => cmd.changes_work(),
             Self::Account { cmd, cached, .. } => account_changes_work(cmd.as_ref(), *cached),
-            Self::Server { .. } => false,
+            Self::Server { .. } | Self::Holder { .. } => false,
             Self::Commit { .. } | Self::Sync(_) => true,
             Self::Repo { cmd, .. } => cmd.as_ref().is_some_and(|cmd| cmd.changes_work()),
             Self::Config { cmd } => cmd.changes_work(),
             Self::Self_ { cmd } => cmd.changes_work(),
-            Self::List { .. } | Self::Help { .. } | Self::Context { .. } | Self::CodexObserve => {
-                false
-            }
+            Self::List { .. } | Self::Help { .. } | Self::Context { .. } => false,
             Self::Ship { .. }
             | Self::Open(_)
             | Self::Workspace(_)
@@ -1417,6 +1412,12 @@ impl WtCommand {
 }
 
 #[derive(Debug, Subcommand)]
+pub enum HolderCommand {
+    /// Hold PTYs and their agents until the last one ends.
+    Run,
+}
+
+#[derive(Debug, Subcommand)]
 pub enum ServerCommand {
     /// Look up a submitted creation without retrying it
     Receipt {
@@ -1428,6 +1429,15 @@ pub enum ServerCommand {
     Run,
     /// Report local readiness without registering or starting anything.
     Status,
+    /// Configure private mobile access using this host's signed-in Tailscale installation.
+    Mobile {
+        /// Stop remote access without stopping local Sessions.
+        #[arg(long, conflicts_with = "status")]
+        off: bool,
+        /// Report saved approval and live mobile readiness without enabling access.
+        #[arg(long)]
+        status: bool,
+    },
     /// Summarize the protocol this build speaks; needs no server.
     Describe {
         /// Print its JSON Schema, generated from the wire types
@@ -1615,25 +1625,6 @@ pub enum GraphCommand {
     External(Vec<String>),
 }
 
-#[derive(Debug, Clone, Copy, clap::ValueEnum)]
-pub enum SessionMode {
-    #[value(name = "true")]
-    Interactive,
-    #[value(name = "false")]
-    Headless,
-    All,
-}
-
-impl SessionMode {
-    pub fn interactive(self) -> Option<bool> {
-        match self {
-            Self::Interactive => Some(true),
-            Self::Headless => Some(false),
-            Self::All => None,
-        }
-    }
-}
-
 /// Shared selection, preparation and next-turn options for `resume` and `session new`.
 #[derive(Args, Debug)]
 pub struct SessionConnectionArgs {
@@ -1669,6 +1660,16 @@ impl SessionConnectionArgs {
         }
     }
 
+    /// The Task or Wave this command names, as the flag and value that name
+    /// it. Naming one makes the resume managed, as `--task` or `--wave` does
+    /// for a launch, also beside a Session id.
+    pub fn work_flag<'a>(&'a self, cli: &'a Cli) -> Option<[&'a str; 2]> {
+        let task = self.task.as_deref().or(cli.task.as_deref());
+        let wave = self.wave.as_deref().or(cli.wave.as_deref());
+        task.map(|task| ["--task", task])
+            .or_else(|| wave.map(|wave| ["--wave", wave]))
+    }
+
     pub fn target<'a>(
         &'a self,
         cli: &'a Cli,
@@ -1698,7 +1699,7 @@ impl SessionConnectionArgs {
     }
 }
 
-/// Which Sessions `lf session list` and `lf desktop sessions` read.
+/// Which unfinished Sessions `lf session list` reads.
 #[derive(Args, Debug, Clone)]
 pub struct SessionListArgs {
     #[command(flatten)]
@@ -1708,29 +1709,33 @@ pub struct SessionListArgs {
     /// Include Sessions from every repository on this machine
     #[arg(long)]
     pub all: bool,
-    /// Select interactive (true), headless (false), or both (all)
-    #[arg(long, value_enum, default_value = "true")]
-    pub interactive: SessionMode,
-    /// Include completed conversations and historical reviews
+    /// Include headless Sessions alongside interactive conversations
     #[arg(long)]
-    pub history: bool,
+    pub headless: bool,
     /// Only conversations available for your input
     #[arg(long)]
     pub available: bool,
+    /// Leave out raw conversations: a plain `claude` or `codex` lf never launched
+    #[arg(long)]
+    pub no_raw: bool,
     /// Maximum conversations; 0 reads the complete matching inventory
     #[arg(long, default_value_t = 100)]
     pub limit: usize,
-    #[arg(long, default_value_t = 0)]
-    pub offset: usize,
     /// Return a bounded stable-ID page with a continuation cursor
-    #[arg(long, requires = "json", conflicts_with = "offset")]
+    #[arg(long, requires = "json")]
     pub page: bool,
     /// Previous page's next identity; keep the same filters
     #[arg(long, requires = "page")]
     pub after: Option<String>,
     #[arg(long)]
     pub task: Option<String>,
-    /// Only Sessions without a Task association
+    /// Conversations attributed to this Wave or inside one of its Tasks' checkouts
+    #[arg(long, id = "session_wave", value_name = "W")]
+    pub wave: Option<String>,
+    /// Current primary conversations; omit the value to include all three scopes
+    #[arg(long, value_enum, num_args = 0..=1, default_missing_value = "all", value_name = "task|wave|repository")]
+    pub primary: Option<crate::session::SessionPrimary>,
+    /// Outside the work model: no Task association and no Wave
     #[arg(long, conflicts_with = "task")]
     pub orphan: bool,
     #[arg(long)]
@@ -1846,7 +1851,7 @@ pub enum SessionCommand {
         #[command(flatten)]
         selection: crate::lf::Selection,
     },
-    /// List Sessions
+    /// List unfinished Sessions; use `lf history` for finished conversations
     List(SessionListArgs),
     /// Show direct provider-authored usage from recorded Session inputs
     Usage(commands::history::UsageArgs),
@@ -1857,11 +1862,11 @@ pub enum SessionCommand {
     },
     /// Get back to a conversation: this scope's, a Task's, or an exact one
     #[command(
-        after_help = "Reconnects to the running provider or continues its saved thread after safe replacement: a terminal showing it hands it over and says where it went; a dead provider resumes from its history. A live turn, draft or pending request keeps its provider; if attachment fails, resume reports the failure, leaves that work intact and resends no input. With nothing to resume, it starts one.\n\nOther harness:\n  lf resume -a codex                       continue on Codex, seeded with what the last thread knew\nMoves:\n  lf session move --blocked -a claude:opus continue blocked Sessions on Opus\n  lf --machine <machine> resume <session>  move only this conversation to another Machine\n  lf task move <task> --machine <machine>  move a Task with its Workflow and Session"
+        after_help = "Reconnects to the running provider or continues its saved thread after safe replacement: a terminal showing it hands it over and says where it went; a dead provider resumes from its history. A live turn or pending request keeps its provider; if attachment fails, resume reports the failure, leaves that work intact and resends no input. Replacing an idle provider discards unsent input, just as quitting it does. With nothing to resume, it starts one.\n\nOther harness:\n  lf resume -a codex                       continue on Codex, seeded with what the last thread knew\nMoves:\n  lf session move --blocked -a claude:opus continue blocked Sessions on Opus\n  lf --machine <machine> resume <session>  move only this conversation to another Machine\n  lf task move <task> --machine <machine>  move a Task with its Workflow and Session"
     )]
     Resume {
-        /// Session ID, Task identifier, or provider conversation ID
-        #[arg(conflicts_with_all = ["task", "wave"])]
+        /// Session ID, Task identifier, or provider conversation ID; beside
+        /// `--task`/`--wave` the ID selects and the Work makes it managed
         id: Option<String>,
         #[command(flatten)]
         connection: SessionConnectionArgs,
@@ -1898,7 +1903,7 @@ pub enum SessionCommand {
     },
     /// Bind a Session as the Task's primary conversation without starting work
     #[command(
-        after_help = "Select an unfinished interactive Session by its Loopflow ID or recorded provider ID. Binding is permanent; repeating it selects the same conversation again. The Task keeps its existing worktree and binding immediately sets the Session directory to it. Already-running clients may keep their original directory. Files and live input stay intact. An open Task without a worktree adopts the Session's unowned linked checkout; main and Wave checkouts stay shared. Done Tasks remain done; without a checkout, their conversation stays in place. Closed Sessions and headless Runs cannot become primary. Remote calls use the target Machine's Sessions and paths."
+        after_help = "Select an unfinished interactive Session by its Loopflow ID or recorded provider ID. Binding is permanent; repeating it selects the same conversation again. The Task keeps its existing worktree and binding immediately sets the Session directory to it. Already-running clients may keep their original directory. Files and live input stay intact. An open Task without a worktree adopts the Session's unowned linked checkout; main and Wave checkouts stay shared. Done Tasks remain done; without a checkout, their conversation stays in place. Closed Sessions and headless Sessions cannot become primary. Remote calls use the target Machine's Sessions and paths."
     )]
     Bind {
         /// Session ID or provider conversation ID
@@ -1934,9 +1939,23 @@ pub enum SessionCommand {
         /// Read no move; exit non-zero unless this Machine can receive one
         #[arg(long)]
         check: bool,
-        /// With --check, also require that this Machine knows the Task
-        #[arg(long, requires = "check")]
+        /// With --check, also take in this Task from planning when this
+        /// Machine has not saved it yet
+        #[arg(long, requires_all = ["check", "issue", "repository"])]
         task: Option<String>,
+        /// The Task's identifier in planning, such as LOO-12
+        #[arg(long, requires = "task")]
+        issue: Option<String>,
+        /// The Task's repository
+        #[arg(long, requires = "task")]
+        repository: Option<crate::durable::RepositoryId>,
+        /// Where a Machine without the repository clones it from
+        #[arg(long, requires = "task")]
+        origin: Option<String>,
+        /// The sending Machine's planning key, adopted by a Machine with none
+        /// so a personal Git plan reads the same journal
+        #[arg(long, requires = "task")]
+        planning_key: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -2013,7 +2032,8 @@ pub enum WaveCommand {
         #[command(subcommand)]
         cmd: Option<WavePlanCommand>,
     },
-    /// Refresh one Wave's planning from its provider (Git or Linear), then show its status
+    /// Refresh one Wave's planning from its provider (Git or Linear), then show its status;
+    /// a Wave with no Linear Initiative shows its local planning
     Sync {
         /// Wave name (default: the ambient wave)
         wave: Option<String>,
@@ -2218,7 +2238,8 @@ pub enum TaskCommand {
 conversation; the next `lf task run` continues after it. `-i` runs every step with you in this \
 terminal instead. A run that reaches `end`, as `-b` does, approves Auto-Ship like `lf ship`, \
 which may merge the PR, unless someone stopped shipping; then it waits at the landing step \
-until `lf ship`."
+until `lf ship`. Add --open to open its primary conversation locally when the launch returns, \
+using lf open's ordinary host selection. Preview and --quote open nothing."
     )]
     Run {
         issue: Option<String>,
@@ -2246,6 +2267,9 @@ until `lf ship`."
         /// Print where it would run and the most it could cost; run nothing
         #[arg(long)]
         quote: bool,
+        /// Open the Task's primary conversation locally after launch returns
+        #[arg(long)]
+        open: bool,
         /// Print what the run set out to do, as `task.run` returns it
         #[arg(long)]
         json: bool,
@@ -2476,7 +2500,7 @@ until `lf ship`."
     },
     /// Change Task membership, or move the Task to another Machine, preserving its recorded work
     #[command(
-        after_help = "`--machine` stops the Task's Graph, commits and pushes its worktree, and hands it off with its Workflow position and Session; `lf task run` there runs its route again. A worktree mid-merge or mid-rebase refuses to move.\n  lf task move LOO-12 --machine mini"
+        after_help = "`--machine` stops the Task's Graph, commits and pushes its worktree, and hands it off with its Session, then continues the Graph on that Machine at the step that was running. The terminal showing the Session prints `lf resume --task <ID>` to open it there. A worktree mid-merge or mid-rebase refuses to move.\n  lf task move LOO-12 --machine mini"
     )]
     Move {
         issue: String,
@@ -3641,6 +3665,58 @@ mod tests {
     }
 
     #[test]
+    fn session_list_selects_wave_and_optional_primary_without_changing_launch_wave() {
+        use crate::session::SessionPrimary;
+        for (words, expected) in [
+            (vec!["--primary"], SessionPrimary::All),
+            (vec!["--primary", "task"], SessionPrimary::Task),
+            (vec!["--primary=wave"], SessionPrimary::Wave),
+            (vec!["--primary", "repository"], SessionPrimary::Repository),
+        ] {
+            let cli = Cli::try_parse_from(
+                ["lf", "session", "list", "--wave", "craft", "--all"]
+                    .into_iter()
+                    .chain(words),
+            )
+            .unwrap();
+            assert!(cli.wave.is_none());
+            let Some(Commands::Session {
+                cmd: SessionCommand::List(args),
+            }) = cli.command
+            else {
+                panic!("session list")
+            };
+            assert_eq!(args.primary, Some(expected));
+            assert_eq!(args.wave.as_deref(), Some("craft"));
+            assert!(!args.headless);
+            assert!(args.all);
+        }
+        assert!(Cli::try_parse_from(["lf", "session", "list", "--offset", "1"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "session", "list", "--primary", "former"]).is_err());
+    }
+
+    #[test]
+    fn session_list_adds_headless_and_rejects_history_and_mode_filters() {
+        let cli = Cli::try_parse_from(["lf", "session", "list", "--headless"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Session {
+                cmd: SessionCommand::List(SessionListArgs { headless: true, .. })
+            })
+        ));
+        for flags in [
+            vec!["--history"],
+            vec!["--interactive", "true"],
+            vec!["--interactive", "false"],
+            vec!["--interactive", "all"],
+        ] {
+            assert!(
+                Cli::try_parse_from(["lf", "session", "list"].into_iter().chain(flags)).is_err()
+            );
+        }
+    }
+
+    #[test]
     fn orphan_selects_inventory_and_cannot_opt_out_at_launch() {
         let cli = Cli::try_parse_from(["lf", "session", "list", "--orphan", "--json"]).unwrap();
         assert!(matches!(
@@ -4027,7 +4103,7 @@ mod tests {
             .filter(|command| command.is_hide_set())
             .map(|command| command.get_name().to_string())
             .collect::<Vec<_>>();
-        assert_eq!(hidden, ["__context-block", "__codex-observe"]);
+        assert_eq!(hidden, ["__context-block"]);
         fn internal(command: &clap::Command) -> Vec<String> {
             command
                 .get_subcommands()
@@ -4040,7 +4116,7 @@ mod tests {
                 })
                 .collect()
         }
-        assert_eq!(internal(&root), ["__context-block", "__codex-observe"]);
+        assert_eq!(internal(&root), ["__context-block"]);
         let hidden_flags = root
             .get_arguments()
             .filter(|arg| arg.is_hide_set())
@@ -4385,6 +4461,25 @@ mod tests {
     }
 
     #[test]
+    fn task_run_open_is_optional_and_has_no_start_alias() {
+        for (args, expected) in [
+            (vec!["lf", "task", "run", "LOO-42"], false),
+            (vec!["lf", "task", "run", "LOO-42", "--open"], true),
+            (
+                vec!["lf", "--task", "LOO-42", "task", "run", "--open"],
+                true,
+            ),
+            (vec!["lf", "task", "run", "--open"], true),
+        ] {
+            let cli = Cli::try_parse_from(args).unwrap();
+            assert!(matches!(cli.command, Some(Commands::Task {
+                cmd: TaskCommand::Run { open, .. }
+            }) if open == expected));
+        }
+        assert!(Cli::try_parse_from(["lf", "task", "start", "LOO-42"]).is_err());
+    }
+
+    #[test]
     fn task_run_takes_a_step_and_completion_is_its_own_command() {
         let cli =
             Cli::try_parse_from(["lf", "task", "run", "LOO-42", "--from", "implement"]).unwrap();
@@ -4543,14 +4638,30 @@ mod tests {
                 .may_launch_agent()
         );
         assert!(!checked(&["lf", "--task", "LOO-1", "task", "hold"]).may_launch_agent());
+        // A Session id beside its Work selects the Session; Task and Wave
+        // together stay one selection too many.
         for argv in [
             vec!["lf", "--task", "LOO-1", "session", "resume", "session-id"],
-            vec![
-                "lf", "--wave", "infra", "session", "resume", "--task", "LOO-1",
-            ],
+            vec!["lf", "session", "resume", "session-id", "--wave", "infra"],
         ] {
-            assert!(Cli::try_parse_from(argv).and_then(Cli::checked).is_err());
+            let cli = checked(&argv);
+            let Some(Commands::Session {
+                cmd: SessionCommand::Resume { id, connection, .. },
+            }) = &cli.command
+            else {
+                panic!("not a resume");
+            };
+            assert!(matches!(
+                connection.target(&cli, id.as_deref()).unwrap(),
+                crate::ops::human_session::SessionTarget::Session("session-id")
+            ));
+            assert!(connection.work_flag(&cli).is_some());
         }
+        assert!(Cli::try_parse_from([
+            "lf", "--wave", "infra", "session", "resume", "--task", "LOO-1",
+        ])
+        .and_then(Cli::checked)
+        .is_err());
     }
 
     #[test]

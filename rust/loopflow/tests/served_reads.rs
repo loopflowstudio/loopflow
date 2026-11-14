@@ -103,10 +103,12 @@ fn configuration_edits_use_the_server_without_work_processes() {
     let _env = EnvGuard::with_home(&[], Some(home.path()));
     std::env::set_var("LF_HOME", home.path().canonicalize().unwrap());
     let repo = TestRepo::new();
-    let _server = Server::start(repo.path(), home.path());
     let database = home.path().join("loopflow.db");
+    // Seed corruption before SQLite opens it: a live WAL can restore pages
+    // over a later overwrite of just the main database file.
     fs::write(&database, "unreadable Work registry").unwrap();
     let before = fs::read(&database).unwrap();
+    let _server = Server::start(repo.path(), home.path());
     let status: Value =
         serde_json::from_str(&read(repo.path(), home.path(), &["server", "status"], None)).unwrap();
     assert_eq!(status["ready"], true, "{status}");
@@ -981,6 +983,7 @@ fn server_operations_match_their_lf_commands() {
         headless,
         after: None,
         limit: None,
+        task: None,
     };
     let task_pane = || Read::TaskGet {
         directory: repo.path().to_owned(),
@@ -995,6 +998,7 @@ fn server_operations_match_their_lf_commands() {
         | Read::CreationGet { .. }
         | Read::ProcessList
         | Read::DesktopViewList { .. }
+        | Read::ViewSelect { .. }
         | Read::SessionList { .. }
         | Read::TaskGet { .. }
         | Read::TaskDetail { .. }
@@ -1175,6 +1179,14 @@ fn server_operations_match_their_lf_commands() {
                     headless: true,
                     after: None,
                     limit: Some(100),
+                    task: None,
+                },
+                Read::SessionList {
+                    directory: repo.path().to_owned(),
+                    headless: false,
+                    after: None,
+                    limit: Some(100),
+                    task: Some("INF-123".into()),
                 },
                 Read::RepoTokens {
                     directory: repo.path().to_owned(),
@@ -1205,6 +1217,9 @@ fn server_operations_match_their_lf_commands() {
                 history(),
                 Read::ProcessList,
                 all_plans(),
+                Read::ViewSelect {
+                    expression: Some("kind:task state:open".into()),
+                },
                 plans(),
                 sessions(false),
                 sessions(true),

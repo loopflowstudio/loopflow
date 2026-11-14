@@ -68,6 +68,30 @@ fn display_value(value: &Value) -> String {
     }
 }
 
+/// Settings shown as part of the `agent` row rather than on their own.
+const FOLDED_INTO_AGENT: [&str; 2] = ["default_agent", "agents"];
+
+/// Everything a step would try: the selected agent, then the rest of `agents`
+/// unless an `agent` choice pins it.
+fn agent_order(agent: &Value, agents: &Value) -> String {
+    let first = display_value(&agent["value"]);
+    let pinned = agent["candidates"]
+        .as_array()
+        .and_then(|candidates| candidates.last())
+        .is_some_and(|candidate| candidate["key"] == "agent");
+    let rest = agents
+        .as_array()
+        .filter(|_| !pinned)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .filter(|entry| *entry != first);
+    std::iter::once(first.as_str())
+        .chain(rest)
+        .collect::<Vec<_>>()
+        .join(", then ")
+}
+
 fn category(key: &str) -> Category {
     definition(key)
         .expect("inspected settings come from the catalogue")
@@ -173,7 +197,7 @@ fn render(output: &[Value], repo: &Path, options: &ShowOptions, colors: &Colors)
         };
         let mut visible: Vec<_> = settings
             .iter()
-            .filter(|(key, _)| key.as_str() != "default_agent")
+            .filter(|(key, _)| !FOLDED_INTO_AGENT.contains(&key.as_str()))
             .filter(|(key, setting)| {
                 options.all
                     || key.as_str() == "agent"
@@ -194,6 +218,8 @@ fn render(output: &[Value], repo: &Path, options: &ShowOptions, colors: &Colors)
                     key.as_str(),
                     if key.as_str() == "agent" && setting["value"].is_null() {
                         "Not selected".into()
+                    } else if key.as_str() == "agent" {
+                        agent_order(setting, &settings["agents"]["value"])
                     } else {
                         truncate(&display_value(&setting["value"]), 36)
                     },
@@ -227,8 +253,12 @@ fn render(output: &[Value], repo: &Path, options: &ShowOptions, colors: &Colors)
                 colors.cyan, colors.reset, colors.green, colors.reset
             ));
         }
-        let hidden =
-            settings.len() - usize::from(settings.contains_key("default_agent")) - visible.len();
+        let hidden = settings.len()
+            - FOLDED_INTO_AGENT
+                .iter()
+                .filter(|key| settings.contains_key(**key))
+                .count()
+            - visible.len();
         if settings
             .get("agent")
             .is_some_and(|agent| agent["value"].is_null())

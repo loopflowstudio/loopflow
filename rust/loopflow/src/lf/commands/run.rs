@@ -6,7 +6,7 @@ use crate::agent::ProcessConfig;
 use crate::config::parse_agent;
 use crate::graph::Skill;
 use crate::lf::commands::context::preview::PromptPreview;
-use crate::lf::commands::util::launch_session;
+use crate::lf::commands::util::{launch_session, SessionCommandOutcome};
 use crate::lf::output::{format_context_header, format_reproducible_command, Colors};
 use crate::lf::Cli;
 use crate::process::LfProcessRuntime;
@@ -46,6 +46,13 @@ pub fn run(repo_root: &Path, skill: Option<&str>, message: Option<&str>, cli: &C
             source: crate::session::WorkSource::Declared,
         })
     });
+    built.agent_config.holder = crate::session::Holder::of(
+        built
+            .work
+            .as_ref()
+            .is_some_and(|work| work.source.is_managed()),
+        !cli.batch,
+    );
 
     print_context_header(&built, cli);
     run_prompt(&built, cli).map(|_| ())
@@ -98,8 +105,9 @@ pub(crate) fn preview_prompt(
 
 /// `lf -b resume ID --message TEXT`: one more headless turn of a conversation,
 /// using `message` and the provider's own history without re-executing its skill.
-pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
-    if crate::transport::delegate_current(true)? {
+/// `named_work` when the resume command named a Task or Wave.
+pub fn resume(id: &str, message: &str, cli: &Cli, named_work: bool) -> Result<()> {
+    if crate::transport::delegate_current(true, named_work)? {
         return Ok(());
     }
     let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
@@ -176,6 +184,7 @@ pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
         task_prompt: prepared.task_prompt,
         structured_replies: prepared.structured_replies,
         env: prepared.env,
+        holder: crate::session::Holder::of(named_work, false),
         ..resolved
     };
     (built.harness, built.model) = parse_agent(&built.agent_config.resolved_agent()?);
@@ -252,6 +261,7 @@ fn build_bound_prompt(
             .remove(crate::work::wave::context::WAVE_ID_ENV);
     }
     built.subjects = binding.subjects.clone();
+    built.agent_config.holder = crate::session::Holder::of(binding.source.is_managed(), !cli.batch);
     built.work = Some(crate::session::SessionWork {
         task_id: match &binding.work {
             crate::durable::WorkRef::Task(id) => Some(id.clone()),
@@ -430,8 +440,8 @@ fn prepare_task_input(
         } else {
             crate::store::open_store(&crate::store::storage_config_from_env()?).await?
         });
-        // The launch reads local state; the Task updates observer syncs this
-        // Task with its tracker after the provider starts.
+        // The launch reads local state; each turn end's planning refresh
+        // syncs this Task with its tracker.
         let task = store
             .get_task_by_issue(id)
             .await?
@@ -671,7 +681,12 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<String>> {
     if !built.process.auto {
         info!("launching interactive vendor session");
         let runtime = begin_process_runtime(built, "tui", &built.agent_config, None)?;
-        let agent_session: Option<crate::id::AgentSessionId> = if built.harness == "claude" {
+        // Claude and a bare Pi take the thread id lf gives them; a held Pi
+        // reports its file through its extension.
+        let names_thread = built.harness == "claude"
+            || (built.harness == "pi"
+                && built.agent_config.holder == crate::session::Holder::Caller);
+        let agent_session: Option<crate::id::AgentSessionId> = if names_thread {
             let artifact_key = runtime.artifact_key();
             let raw_id = artifact_key
                 .as_str()
@@ -709,12 +724,20 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<String>> {
                 provider_session.account_id,
             );
         }
-        runtime.finish(if result.is_ok() {
-            "completed"
-        } else {
-            "failed"
-        })?;
-        return result.map(|_| None);
+        runtime.finish(
+            result
+                .as_ref()
+                .map_or("failed", SessionCommandOutcome::capture_outcome),
+        )?;
+        return result
+            .and_then(|outcome| {
+                outcome.result(
+                    &built.harness,
+                    agent_session.is_some(),
+                    built.agent_config.holder,
+                )
+            })
+            .map(|()| None);
     }
 
     // Native terminals own their turn status. A separate lf record would remain
@@ -801,6 +824,10 @@ fn run_headless_prompt(
     debug!(exit_code = result.exit_code, "agent completed");
     if result.exit_code == 0 {
         Ok(())
+    } else if !process.auto && agent_config.holder == crate::session::Holder::Caller {
+        // A bare terminal launch exits as its provider did; lf already said
+        // whether the provider failed.
+        Err(crate::process::CommandExit(u8::try_from(result.exit_code).unwrap_or(1)).into())
     } else if result.exit_code == 130 {
         eprintln!("The agent's turn was interrupted.");
         Err(crate::process::CommandExit(130).into())

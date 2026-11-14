@@ -10,10 +10,12 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
-use loopflow_test_support::TestRepo;
+use loopflow_test_support::{MachineServer, TestRepo};
 use serde_json::Value;
 
 struct Fixture {
+    /// Task and Wave launches start their agent only once it answers.
+    _server: MachineServer,
     home: tempfile::TempDir,
     repo: TestRepo,
     launched: PathBuf,
@@ -23,6 +25,7 @@ impl Fixture {
     /// `waits` keeps the stand-in attached until its stdin receives a line.
     fn new(waits: bool) -> Self {
         let home = tempfile::tempdir().unwrap();
+        support::seed_store(home.path());
         let bin = home.path().join("bin");
         std::fs::create_dir(&bin).unwrap();
         std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_lf"), bin.join("lf")).unwrap();
@@ -36,6 +39,7 @@ impl Fixture {
         .unwrap();
         std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
         Self {
+            _server: MachineServer::start(env!("CARGO_BIN_EXE_lf"), home.path()),
             home,
             repo: TestRepo::new(),
             launched,
@@ -94,6 +98,21 @@ impl Fixture {
 
     fn sessions(&self) -> Vec<Value> {
         serde_json::from_value(self.json(&["desktop", "sessions", "--all", "--json"])).unwrap()
+    }
+
+    fn recorded_sessions(&self) -> Vec<Value> {
+        let db = self.db();
+        let mut query = db
+            .prepare("SELECT id FROM agent_sessions ORDER BY title,id")
+            .unwrap();
+        let ids = query
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        ids.iter()
+            .map(|id| self.json(&["session", "card", id, "--json"])["session"].clone())
+            .collect()
     }
 
     fn launches(&self) -> Vec<String> {
@@ -499,7 +518,7 @@ fn work_first_repository_entry_preserves_primary_and_mixed_inventory() {
         "primary": primary,
         "reopened": again,
         "task_primary": task_primary,
-        "sessions": fixture.json(&["desktop", "sessions", "--history", "--all", "--json"]),
+        "sessions": fixture.recorded_sessions(),
         "roadmap": fixture.json(&["desktop", "plan", "--all", "--json"]),
     });
     assert_eq!(fixture.count("agent_sessions"), 3);
@@ -818,9 +837,9 @@ fn conversation_keeps_its_name_and_identity_until_completed() {
         (saved_title.as_str(), saved_source.as_str()),
         ("Parser review", "human")
     );
-    let history = fixture.json(&["session", "list", "--history", "--all", "--json"]);
-    assert_eq!(history[0]["id"], id);
-    assert_eq!(history[0]["state"], "closed");
+    let card = fixture.json(&["session", "card", &id, "--json"]);
+    assert_eq!(card["session"]["id"], id);
+    assert_eq!(card["session"]["state"], "closed");
 
     let (second, second_run) = fixture.attach(&LAUNCH);
     let (second_id, ..) = fixture.session_row(&second_run);
@@ -969,9 +988,18 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
     ]);
     assert_eq!(filtered.as_array().unwrap().len(), 1);
     assert_eq!(filtered[0]["id"], "inventory-112");
-    let end = fixture.json(&["session", "list", "--json", "--limit", "2", "--offset", "2"]);
-    assert_eq!(end.as_array().unwrap().len(), 1);
-    assert_eq!(end[0]["id"], "inventory-112");
+    let end = fixture.json(&[
+        "session",
+        "list",
+        "--json",
+        "--page",
+        "--limit",
+        "2",
+        "--after",
+        "inventory-111",
+    ]);
+    assert_eq!(end["entries"].as_array().unwrap().len(), 1);
+    assert_eq!(end["entries"][0]["id"], "inventory-112");
     fixture
         .db()
         .execute(
@@ -981,15 +1009,7 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
         .unwrap();
     let default = fixture.json(&["session", "list", "--json", "--limit", "0"]);
     assert_eq!(default.as_array().unwrap().len(), 2);
-    let both = fixture.json(&[
-        "session",
-        "list",
-        "--interactive",
-        "all",
-        "--json",
-        "--limit",
-        "0",
-    ]);
+    let both = fixture.json(&["session", "list", "--headless", "--json", "--limit", "0"]);
     assert_eq!(both.as_array().unwrap().len(), 3);
     assert!(both
         .as_array()
@@ -999,8 +1019,7 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
     let everywhere = fixture.json(&[
         "session",
         "list",
-        "--interactive",
-        "all",
+        "--headless",
         "--all",
         "--json",
         "--limit",
@@ -1023,19 +1042,22 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
         assert_eq!(current.as_array().unwrap().len(), 1);
         assert_eq!(current[0]["id"], "inventory-111");
     }
-    let history = fixture.json(&[
+    let current = fixture.json(&[
         "session",
         "list",
         "--task",
         &task.task.identifier,
-        "--interactive",
-        "all",
-        "--history",
+        "--headless",
         "--json",
     ]);
-    assert_eq!(history.as_array().unwrap().len(), 3);
+    assert_eq!(current.as_array().unwrap().len(), 2);
+    let history = fixture.json(&["session", "card", "inventory-110", "--json"]);
     // A historical Session completion without an AgentProcess proves no death.
-    assert_eq!(history[0]["state"], "unknown");
+    assert_eq!(history["session"]["state"], "unknown");
+    assert_eq!(
+        history["session"]["task_ids"],
+        serde_json::json!([task.task.id])
+    );
     assert_eq!(fixture.count("agent_sessions"), 113);
 }
 
@@ -1104,15 +1126,12 @@ fn binding_closed_session_preserves_history_and_primary() {
     assert!(output.status.success(), "{output:?}");
     let capture = fixture.launches()[0].clone();
     let (session, ..) = fixture.session_row(&capture);
-    let before = fixture.json(&["session", "list", "--history", "--all", "--json"]);
+    let before = fixture.recorded_sessions();
     let refused = fixture.run(&["session", "bind", &session, "--task", task_id]);
     assert!(!refused.status.success(), "{refused:?}");
     assert!(String::from_utf8_lossy(&refused.stderr).contains("unfinished interactive Session"));
     assert_eq!(fixture.run_parents(&capture), (None, None, None));
-    assert_eq!(
-        fixture.json(&["session", "list", "--history", "--all", "--json"]),
-        before
-    );
+    assert_eq!(fixture.recorded_sessions(), before);
     assert_eq!(
         fixture.json(&["resume", "--task", task_id, "--prepare", "--json"])["id"],
         primary["id"]
@@ -1699,10 +1718,11 @@ fn declared_agent_can_start_another_tasks_graph() {
     );
     let bin = fixture.home.path().join("bin");
     std::fs::remove_file(bin.join("lf")).unwrap();
+    // Record only the Graph command; background conversation hooks also use lf.
     std::fs::write(
         bin.join("lf"),
         format!(
-            "#!/bin/sh\nprintf '%s' \"$LF_AS\" >'{}'\nexec '{}' \"$@\"\n",
+            "#!/bin/sh\nif [ \"$#\" -eq 2 ] && [ \"$1\" = sync ] && [ \"$2\" = --plan ]; then\n  printf '%s' \"$LF_AS\" >'{}'\nfi\nexec '{}' \"$@\"\n",
             fixture.home.path().join("step-declaration").display(),
             env!("CARGO_BIN_EXE_lf")
         ),
@@ -1728,7 +1748,7 @@ fn declared_agent_can_start_another_tasks_graph() {
     .unwrap();
     assert_eq!(result["code"], 0, "{result}");
     // A bare run returns after registration; wait for Y to stop at demo.
-    // -b would execute demo headlessly and start Y's provider.
+    // Its background conversation opens separately from the Graph's demo step.
     let deadline = Instant::now() + PATIENCE;
     let graphs = loop {
         let graphs = support::recorded_graphs(fixture.home.path());
@@ -1748,7 +1768,27 @@ fn declared_agent_can_start_another_tasks_graph() {
         status["execution"]["work"]["graph"]["position"],
         serde_json::json!({"kind": "at", "step": "demo"})
     );
-    assert_eq!(fixture.launches().len(), 1);
+    let deadline = Instant::now() + PATIENCE;
+    let captures = loop {
+        let captures = fixture.launches();
+        if captures.len() >= 2 {
+            break captures;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Y's background conversation never opened: {captures:?}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert_eq!(captures.len(), 2);
+    let mut launched_tasks: Vec<_> = captures
+        .iter()
+        .map(|capture| fixture.run_parents(capture).0.unwrap())
+        .collect();
+    launched_tasks.sort();
+    let mut expected = vec![caller.id.to_string(), target.task.id.to_string()];
+    expected.sort();
+    assert_eq!(launched_tasks, expected);
     assert_eq!(
         std::fs::read_to_string(fixture.home.path().join("step-declaration")).unwrap(),
         format!("task:{}", target.task.id)
@@ -1913,7 +1953,7 @@ fn unavailable_store_starts_no_provider() {
 }
 
 #[test]
-fn headless_history_is_discoverable_without_entering_the_interactive_list() {
+fn finished_headless_runs_leave_the_open_list_and_keep_their_history() {
     let fixture = Fixture::new(false);
     support::managed_codex_account(fixture.home.path());
     let provider = fixture.home.path().join("bin/codex");
@@ -1940,8 +1980,12 @@ fn headless_history_is_discoverable_without_entering_the_interactive_list() {
     ]);
     assert!(output.status.success(), "{output:?}");
     assert!(fixture.sessions().is_empty());
-    let sessions = fixture.json(&["session", "list", "--interactive", "false", "--json"]);
-    assert_eq!(sessions.as_array().unwrap().len(), 1);
+    assert_eq!(
+        fixture.json(&["session", "list", "--headless", "--json"]),
+        serde_json::json!([])
+    );
+    let sessions = fixture.recorded_sessions();
+    assert_eq!(sessions.len(), 1);
     let session = &sessions[0]["id"];
     {
         let rows = fixture.json(&["history", "usage", "--wave", "task-pr-tests", "--json"]);
@@ -2175,6 +2219,102 @@ fn custom_router_returns_a_captured_path_without_an_in_turn_command() {
     assert_eq!(steps[0]["key"], 0);
     assert_eq!(steps[1]["label"], "work-proof");
     assert_eq!(steps[1]["key"], 1);
+}
+
+#[test]
+fn standalone_graph_launches_in_a_completed_tasks_checkout() {
+    let fixture = Fixture::new(false);
+    support::install_native_codex(&fixture.home.path().join("bin"));
+    support::managed_codex_account(fixture.home.path());
+    let checkout = fixture.repo.create_named_worktree("finished-work");
+    std::fs::create_dir_all(checkout.join(".lf/graphs")).unwrap();
+    std::fs::create_dir_all(checkout.join(".lf/skills")).unwrap();
+    std::fs::write(
+        checkout.join(".lf/graphs/incident.yaml"),
+        "- recovery-proof\n",
+    )
+    .unwrap();
+    std::fs::write(
+        checkout.join(".lf/skills/recovery-proof.md"),
+        "Inspect the failure.\n",
+    )
+    .unwrap();
+    let created = fixture.json(&[
+        "task",
+        "create",
+        "--title",
+        "Finished work",
+        "--worktree",
+        checkout.to_str().unwrap(),
+        "--json",
+    ])["task"]
+        .clone();
+    let task = created["id"].as_str().unwrap();
+    fixture
+        .db()
+        .execute(
+            "INSERT INTO task_graphs(task_id,graph,step,updated_at) VALUES(?1,?2,'end',1)",
+            rusqlite::params![
+                task,
+                serde_json::json!({"name": "code", "steps": []}).to_string()
+            ],
+        )
+        .unwrap();
+    let completed = fixture.run(&["task", "complete", task]);
+    assert!(completed.status.success(), "{completed:?}");
+    let before = fixture.json(&["task", "status", task, "--json"])["task"].clone();
+    assert_eq!(before["state"], "done");
+    assert_eq!(
+        before["graph"],
+        serde_json::json!({"name": "code", "step": "end"})
+    );
+    let output = fixture
+        .command(&["-b", "--agent", "codex", "incident"])
+        .current_dir(&checkout)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(fixture.count("agent_sessions"), 1);
+    let session_task: String = fixture
+        .db()
+        .query_row(
+            "SELECT task_id FROM agent_sessions WHERE skill='recovery-proof'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(session_task, task);
+    assert!(fixture
+        .home
+        .path()
+        .join("native-server-config.json")
+        .exists());
+    assert_eq!(
+        fixture.json(&["task", "status", task, "--json"])["task"],
+        before
+    );
+    assert_eq!(
+        support::recorded_graphs(fixture.home.path())[0]
+            .0
+            .as_deref(),
+        Some("succeeded")
+    );
+    let restart = fixture.run(&["-b", "task", "run", task]);
+    assert!(!restart.status.success(), "{restart:?}");
+    assert!(
+        String::from_utf8_lossy(&restart.stderr)
+            .contains("reopens planning without moving its Graph"),
+        "{restart:?}"
+    );
+    assert_eq!(fixture.count("agent_sessions"), 1);
+    assert_eq!(
+        fixture.json(&["task", "status", task, "--json"])["task"],
+        before
+    );
 }
 
 #[test]

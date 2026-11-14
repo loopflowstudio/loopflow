@@ -2520,6 +2520,138 @@ async fn task_preparation_stacks_without_moving_a_published_parents_merge_reques
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // Serializes PATH while GitHub is replaced by a fixture.
+async fn task_preparation_stacks_on_a_published_parent_without_a_remote_branch() {
+    let _environment_lock = crate::journal::test_env_lock();
+    let _environment = EnvRestore::capture(&["PATH"]);
+    let bin = tempfile::tempdir().unwrap();
+    let gh = bin.path().join("gh");
+    std::fs::write(
+        &gh,
+        r#"#!/bin/sh
+fixture="$(dirname "$0")"
+case "$*" in
+  *--disable-auto*) rm "$fixture/armed" ;;
+  *LoopflowPrMerge*) cat "$fixture/pr.json" ;;
+  *) exit 1 ;;
+esac
+"#,
+    )
+    .unwrap();
+    std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let prior_path = std::env::var_os("PATH").unwrap_or_default();
+    std::env::set_var(
+        "PATH",
+        std::env::join_paths(
+            std::iter::once(bin.path().to_path_buf()).chain(std::env::split_paths(&prior_path)),
+        )
+        .unwrap(),
+    );
+    for changed_head in [false, true] {
+        let repo = loopflow_test_support::TestRepo::new();
+        let parent = task_fixture_at("FIX-1", repo.path().canonicalize().unwrap()).await;
+        repo.create_branch(&parent.task.branch);
+        repo.create_file("published.txt", "reviewed work");
+        repo.stage_all();
+        repo.commit("Published parent work");
+        repo.push_new_branch(&parent.task.branch);
+        let published_tip = repo.head_sha();
+        let mut pr = parent
+            .store
+            .active_task_pr(&parent.task.id)
+            .await
+            .unwrap()
+            .unwrap();
+        pr.publication = Some(PrPublication {
+            requested_at: pr.created_at,
+            presentation: Some(PrPresentation {
+                title: "Parent work".into(),
+                body: "Reviewed parent changes".into(),
+                head_sha: published_tip.clone(),
+            }),
+            github: Some(GithubPr {
+                number: 42,
+                url: "https://github.com/fixture/repo/pull/42".into(),
+                head_sha: Some(published_tip.clone()),
+            }),
+            merge: Some(PrMergeRequest {
+                mode: PrMergeMode::Auto,
+                requested_at: pr.created_at,
+                head_sha: published_tip.clone(),
+            }),
+        });
+        parent.store.update_task_pr(&pr).await.unwrap();
+        if changed_head {
+            repo.create_file("unreviewed.txt", "local work");
+            repo.stage_all();
+            repo.commit("Unreviewed parent work");
+        }
+        let local_tip = repo.head_sha();
+        assert!(std::process::Command::new("git")
+            .current_dir(repo.path())
+            .args(["push", "origin", "--delete", &parent.task.branch])
+            .output()
+            .unwrap()
+            .status
+            .success());
+        std::fs::write(bin.path().join("armed"), "").unwrap();
+        std::fs::write(bin.path().join("pr.json"), serde_json::json!({
+            "data": {"repository": {
+                "mergeCommitAllowed": true, "squashMergeAllowed": true, "rebaseMergeAllowed": true,
+                "pullRequest": {
+                    "id": "PR_fixture", "number": 42, "url": "https://github.com/fixture/repo/pull/42",
+                    "state": "OPEN", "isDraft": false, "headRefName": parent.task.branch,
+                    "headRefOid": published_tip, "mergedAt": null, "mergeCommit": null,
+                    "mergeStateStatus": "CLEAN", "isMergeQueueEnabled": false, "isInMergeQueue": false,
+                    "autoMergeRequest": {"enabledAt": "2026-11-13T00:00:00Z"}, "mergeQueueEntry": null
+                }
+            }}
+        }).to_string()).unwrap();
+        // Reject exposing a changed head while GitHub Auto is still armed.
+        if changed_head {
+            let hook = repo.bare_path().join("hooks/pre-receive");
+            std::fs::write(
+                &hook,
+                format!("#!/bin/sh\ntest ! -f '{}/armed'\n", bin.path().display()),
+            )
+            .unwrap();
+            std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let child = Task {
+            id: TaskId::new(),
+            ..parent.task.clone()
+        };
+        let prepared = super::prepare_task_placement(
+            &parent.store,
+            repo.path(),
+            &child,
+            None,
+            &super::TaskProcessOptions {
+                name: Some("child-task".into()),
+                stack_on: Some("FIX-1".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(prepared.plan.base_ref, local_tip);
+        assert_eq!(prepared.pr(&child.id).parent_pr_id, Some(pr.id.clone()));
+        assert_eq!(
+            crate::git::rev_parse(repo.bare_path(), &parent.task.branch).unwrap(),
+            local_tip
+        );
+        assert_eq!(repo.head_sha(), local_tip);
+        assert_eq!(bin.path().join("armed").exists(), !changed_head);
+        let saved = parent.store.get_task_pr(&pr.id).await.unwrap().unwrap();
+        if changed_head {
+            pr.publication.as_mut().unwrap().merge = None;
+            pr.updated_at = saved.updated_at;
+        }
+        assert_eq!(saved, pr);
+    }
+}
+
+#[tokio::test]
 async fn task_preparation_stacks_on_origin_when_the_parent_branch_diverged() {
     let repo = loopflow_test_support::TestRepo::new();
     let parent = task_fixture_at("FIX-1", repo.path().canonicalize().unwrap()).await;

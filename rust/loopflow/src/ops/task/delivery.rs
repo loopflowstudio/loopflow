@@ -463,7 +463,7 @@ pub(crate) fn lock_task_pr_mutation(repo: &Path) -> OpsResult<TaskPrMutationGuar
     }
 }
 
-async fn clear_task_pr_merge(
+pub(super) async fn clear_task_pr_merge(
     store: &SharedStore,
     task: &Task,
     repo: &Path,

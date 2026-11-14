@@ -6,9 +6,10 @@ The stopped ship loop and personal configuration stay untouched.
 
 ## Outcome and approach
 
-Stack on any placed Task branch. Push to origin without force when absent or
-behind only when the parent has no publication. Record an unpublished Task PR
-when needed; open no parent GitHub PR. Share parent selection between new and
+Stack on any placed Task branch. Push to origin without force when absent, or
+when behind an unpublished parent. A published parent’s missing remote branch uses the commit fence:
+changed heads revoke Auto before pushing; the same clean head retains intent.
+Record an unpublished Task PR when needed; open no parent GitHub PR. Share parent selection between new and
 existing placements. Origin remains the child's base; the stack message counts
 omitted local commits. Placement without a Task PR is intentional; stacking or
 publication records it when needed.
@@ -25,8 +26,8 @@ that parent's upstream branch. Sync keeps the old parent's files as child work.
 Separate existing/new stack selectors and published-parent preconditions were
 replaced by `select_stack_parent` / `record_stack_parent`. Keep that one path.
 Remove the abandoned-specific refusal, historical abandoned-parent retry,
-parent-only re-parenting update, unconditional published-parent push, and
-past-tense push in preview. Preserve unpublished pushes, rejection/divergence,
+parent-only re-parenting update, unconditional published-parent push,
+published-remote-absence refusal, and past-tense push in preview. Preserve unpublished pushes, rejection/divergence,
 history, cycle checks, retry identity, child edits and squash-parent sync.
 
 ## Recovery and earlier checks
@@ -52,28 +53,21 @@ checkout explanation, sync, documented commands and planning performance.
 Then demo; no interactive judgment collected here. Store API callers also reach
 Task initialization, handoff, PR range and Graph fixtures. Realign
 (2026-11-13) found code, help and the four docs agreeing with the
-published-parent rule; nothing else remains before gate.
+published-parent rule. This iteration adds missing-remote restoration before gate.
 
 ## Published parent repair (concept review, 2026-11-13)
 
 The reviewed counterexample: a published parent has Auto requested and a local
-commit made with `lf commit`; stacking a child must not push that unreviewed head.
+commit made with `lf commit`; stacking onto its existing remote branch must not
+push that unreviewed head.
 The original direction was “it shoudl always be safe to publish a remote branch”.
-The headless assumption in `questions.md` limits that to unpublished parents;
-a child's command must not revoke its parent's Auto through the commit fence.
-
-`stack_parent_branch` now selects a push only for an unpublished parent.
-Published parents with local-only commits share the existing omitted-commit
-report and base on origin; a missing published remote branch names the absence
-and points to `lf commit -p` in the parent checkout. `StackParentBranch::note`
-takes the push verb: checkout explanation passes “stacking pushes”, execution
-“pushed”. `StackParent::is_published` is the one published-parent test. Docs and help describe the same rule,
-and `ops.md` names the already-merged refusal.
-
-Delete — do not maintain: the unconditional published-parent push decision,
-`StackParentBranch::Diverged` (now `LeftOut`, covering published parents too),
-and past-tense push wording in checkout preview. Keep one selector and recorder,
-unpublished publication, divergence, retries, history and re-parenting behavior.
+The earlier headless assumption in `questions.md` was superseded by iteration
+direction: “Implement publication for that case while respecting the parent’s
+commit-fence behavior”. Existing published remote branches stay untouched.
+Missing branches are pushed through the existing parent mutation lock and
+`clear_task_pr_merge` fence; no GitHub PR is opened. Preview and execution share
+`stack_parent_branch`; the missing-remote refusal is deleted. Docs and help now
+describe restoration and Auto revocation.
 
 Regression: a published parent with Auto requested and one unpushed commit;
 stack preparation uses the published base, origin and local heads remain intact,
@@ -85,7 +79,12 @@ the taught concept is a Task with a branch. Keeping the row current caused the
 abandoned-parent, retry and re-parenting repairs. A parent Task plus fork could
 remove the need to allocate a parent PR row; that redesign remains separate.
 
-- `cargo test -p loopflow --lib ops::task::tests::task_preparation_stacks`: three existing cases passed; the new Auto fixture required PR presentation copy. After correcting the fixture, `...::task_preparation_stacks_without_moving_a_published_parents_merge_request` passed (3.76 s). Build emitted the existing macOS unwind-section linker warning; clippy remains gate-owned.
-- `cargo nextest run -p loopflow --test global_commands --test integration -E 'test(task_checkout_explain_reuses_explicit_and_inferred_work_without_effects) | test(documented_commands::)'`: 5 passed; checkout preview took 73.753 s, no effects on the checkpointed store or Git refs.
-- `cargo fmt --all -- --check` and `git diff --check`: passed; scratch remains within both context limits.
-- Compress (shared note, `is_published`): `cargo test -p loopflow --lib ops::task::tests::task_preparation_stacks` 4 passed (6.31 s); `cargo nextest run -p loopflow --test global_commands -E 'test(task_checkout_explain_reuses_explicit_and_inferred_work_without_effects)'` passed (75.128 s). Clippy remains gate-owned.
+Earlier focused checks and preview results: `b89812f9fc:scratch/loo-837-demo.md`.
+The missing-remote regression covers unchanged and changed heads, checking origin,
+child base, parent PR identity/copy, retained same-head Auto and remote revocation
+before a changed-head push.
+
+- `cargo test -p loopflow --lib ops::task::tests::task_preparation_stacks`: 5 passed (3.51 s); the new missing-remote case with its final environment lock passed separately (2.09 s). Existing macOS unwind-section linker warning remains gate-owned.
+- Compress: only a published parent takes the parent lock and fence, so an unpublished parent needs no checkout and its push never waits on the parent's `lf commit`; the post-clear PR re-read is gone (callers read id and branch). Same filter: 5 passed (4.61 s).
+- `cargo test -p loopflow --test integration documented_commands::`: 4 passed (6.94 s).
+- `cargo fmt --all -- --check` and `git diff --check`: passed; scratch is within both context limits.

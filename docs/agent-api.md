@@ -106,7 +106,9 @@ default execution surface.
 `--stack-on` forks the child's worktree from the parent Task's branch, records
 the fork commit, and inherits the parent's files. The parent needs a placed
 branch, not a PR. When the parent has no PR yet, its branch is pushed to origin
-if needed, never forced. A published parent's branch stays untouched; the child
+if needed, never forced. A published parent's missing remote branch is restored
+through the commit fence: a changed head revokes Auto before pushing; the same
+clean head keeps its merge request. When its remote branch exists, the child
 uses `origin/<branch>` and reports any local commits left out. Run `lf commit -p`
 in the parent's checkout to include them. Scratch follows the same Git
 merge behavior as other content, including edits to existing notes. The child's PR targets the parent's branch until

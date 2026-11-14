@@ -299,12 +299,14 @@ lf task run LOO-13 --stack-on LOO-12
 
 When the parent has no PR yet, stacking pushes its branch if origin lacks it or
 is behind. It never force-pushes or opens a PR for the parent. A published
-parent's branch stays untouched. If the published parent is ahead of origin, or
+parent's missing remote branch is restored through the commit fence: a changed
+head revokes Auto before pushing; the same clean head keeps its merge request.
+If the published parent's remote branch exists and is behind, or
 origin has diverged, the child bases on `origin/<branch>` and the stack line
 counts the local commits it leaves out. Run `lf commit -p` in the parent's
 checkout to include them. Stacking stops when the parent is not a Task, has no
-branch yet (`lf checkout LOO-12` places one), has already merged, its published
-branch is absent from origin, or the push fails; a failed push shows git's message.
+branch yet (`lf checkout LOO-12` places one), has already merged, or the push
+fails; a failed push shows git's message.
 
 Conflicts stay visible: resolve them, then `lf sync --continue`, or `lf sync --abort`.
 

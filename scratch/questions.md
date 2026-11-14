@@ -1,13 +1,12 @@
 # Open questions
 
-## LOO-837: stacking on a published parent that is ahead of origin (2026-11-13)
+## LOO-837: published parents (2026-11-13)
 
-Assumed: stacking pushes the parent's branch only when the parent has no
-published PR. A published parent with unpushed commits is left alone and the
-child bases on `origin/<branch>`, with the left-out commits counted in the stack
-line. The other option is pushing through the commit fence, which revokes the
-parent's Auto from the child's command. Detail in `scratch/loo-837-demo.md`.
+The earlier headless assumption that a published parent must already exist on
+origin is superseded by the iteration direction: “Implement publication for
+that case while respecting the parent’s commit-fence behavior”.
 
-If a published parent's remote branch is absent, stacking names that absence
-and points to `lf commit -p` in the parent's checkout. It cannot select an
-origin base without publishing that parent's commits.
+Stacking restores a missing remote branch through the existing commit fence.
+A changed head revokes Auto remotely before clearing the merge request and
+pushing; the same clean head retains the request. An existing published remote
+branch stays untouched; the child reports local commits left out.

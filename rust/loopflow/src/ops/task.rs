@@ -1242,7 +1242,7 @@ impl StackParent {
             .map_or(self.task.branch.as_str(), |pr| pr.branch.as_str())
     }
 
-    /// A published branch carries review and merge requests; stacking never moves it.
+    /// A published branch carries review and merge requests.
     fn is_published(&self) -> bool {
         self.pr.as_ref().is_some_and(|pr| pr.publication.is_some())
     }
@@ -1303,7 +1303,7 @@ async fn select_stack_parent(
     })
 }
 
-/// Select the parent, push its unpublished branch when origin lacks it or is behind, then
+/// Select the parent, push its branch when origin lacks it (or an unpublished one is behind), then
 /// return its PR record, recording an unpublished one when the parent has none.
 /// The note says what stacking pushed, or which local commits the child leaves out.
 async fn record_stack_parent(
@@ -1318,9 +1318,20 @@ async fn record_stack_parent(
     if parent.pr.as_ref().is_some_and(TaskPr::is_settled) {
         return Ok((parent.pr.expect("settled parent has a PR record"), None));
     }
-    let branch = parent.branch();
     let state = stack_parent_branch(main_repo, &parent)?;
     if state == StackParentBranch::Behind {
+        // Only a published branch carries a merge request: the push goes through
+        // the commit fence, so a changed head revokes Auto before origin sees it.
+        // Callers read the parent's id and branch, never its merge request.
+        let _mutation = if parent.is_published() {
+            let checkout = parent.task.worktree()?;
+            let mutation = lock_task_pr_mutation(checkout)?;
+            delivery::clear_task_pr_merge(store, &parent.task, checkout, false, &|_| {}).await?;
+            Some(mutation)
+        } else {
+            None
+        };
+        let branch = parent.branch();
         git_output(main_repo, &["push", "--set-upstream", "origin", branch]).map_err(|error| {
             task_error(format!(
                 "failed to push stack parent {}'s branch {branch} to origin: {error}",
@@ -1351,7 +1362,7 @@ async fn record_stack_parent(
 enum StackParentBranch {
     /// Origin has every local commit, or there is no origin to push to.
     Current,
-    /// Origin lacks the unpublished branch or is behind it; stacking pushes it.
+    /// Origin lacks the branch or is behind an unpublished one; stacking pushes it.
     Behind,
     /// A published or diverged branch stays untouched; the child uses origin's version.
     LeftOut { left_out: usize },
@@ -1394,12 +1405,6 @@ fn stack_parent_branch(main_repo: &Path, parent: &StackParent) -> OpsResult<Stac
             )))
         }
         (false, true) => return Ok(StackParentBranch::Current),
-        (true, false) if parent.is_published() => {
-            return Err(task_error(format!(
-                "stack parent {}'s published branch {branch} is absent from origin; run `lf commit -p` in its checkout before stacking",
-                parent.task.identifier
-            )))
-        }
         (true, false) => return Ok(StackParentBranch::Behind),
         (true, true) => {}
     }

@@ -156,8 +156,11 @@ async fn read_checkout(
         }
         report.unavailable.push("Checkout finalization may record CheckoutReady and clear inherited scratch for an untouched stacked PR; it has not run".into());
         if let Some(parent) = options.stack_on.as_deref() {
-            match super::select_existing_stack_parent(store, &task, parent).await {
-                Ok(_) => report.unavailable.push("Stack mutation validation runs under the execution lock; no dependency was changed".into()),
+            match super::select_stack_parent(store, &task, parent).await {
+                Ok(parent) => {
+                    report.unavailable.push("Stack mutation validation runs under the execution lock; no dependency was changed".into());
+                    push_stack_effects(&repo, &parent, report);
+                }
                 Err(error) => report.impediments.push(error.to_string()),
             }
         }
@@ -177,12 +180,55 @@ async fn read_checkout(
             branch: plan.branch,
             stack_on: options.stack_on.clone(),
         });
-        if let Err(error) =
-            super::select_new_stack_parent(store, &task, options.stack_on.as_deref()).await
-        {
-            report.impediments.push(error.to_string());
+        if let Some(parent) = options.stack_on.as_deref() {
+            match super::select_stack_parent(store, &task, parent).await {
+                Ok(parent) => push_stack_effects(&repo, &parent, report),
+                Err(error) => report.impediments.push(error.to_string()),
+            }
         }
         report.unavailable.push("Proposed path and branch use local Git facts only; fetched refs, base commit and provider PR evidence are unavailable. No checkout or PR was allocated".into());
     }
     Ok(())
+}
+
+/// What stacking would change outside this Task, read from refs already fetched.
+fn push_stack_effects(
+    repo: &Path,
+    parent: &super::StackParent,
+    report: &mut TaskCheckoutExplanation,
+) {
+    if parent.pr.as_ref().is_some_and(super::TaskPr::is_settled) {
+        return;
+    }
+    match super::stack_parent_branch(repo, parent) {
+        Ok(state) => {
+            if state == super::StackParentBranch::Behind && parent.has_open_pr() {
+                report.unavailable.push(format!(
+                    "Not run: stacking reads {}'s PR from GitHub before restoring its missing branch; a merged PR refuses, a closed PR uses a new unpublished record",
+                    parent.task.identifier
+                ));
+            }
+            let head = crate::git::rev_parse(repo, &format!("refs/heads/{}", parent.branch()));
+            if let (super::StackParentBranch::Behind, Ok(head)) = (&state, head) {
+                if let Some(request) = super::stale_merge_request(parent.pr.as_ref(), &head) {
+                    report.unavailable.push(format!(
+                        "Not run: stacking {} before pushing",
+                        request.note(parent, "turns off", "withdraws")
+                    ));
+                }
+            }
+            report.unavailable.extend(
+                state
+                    .note(parent, "stacking pushes")
+                    .map(|note| format!("Not run (based on already-fetched refs): {note}")),
+            );
+        }
+        Err(error) => report.impediments.push(error.to_string()),
+    }
+    if parent.pr.is_none() {
+        report.unavailable.push(format!(
+            "Not run: stacking records an unpublished PR for {}",
+            parent.task.identifier
+        ));
+    }
 }

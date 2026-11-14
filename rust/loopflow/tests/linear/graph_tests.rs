@@ -416,6 +416,8 @@ fn task_checkout_selects_parent_without_rewriting_work_or_publication() {
         support::register_task_with_pr(home.path(), repo.path(), "child-task", &repo.head_sha());
     let parent_path = repo.create_named_worktree("parent-task");
     let parent = support::register_sibling_task(&child, "INF-124", "parent-task", &parent_path);
+    // A published parent has a remote branch; its absence triggers GitHub reconciliation.
+    repo.push_new_branch("parent-task");
     repo.create_branch("child-task");
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let task_before = runtime
@@ -598,7 +600,11 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
         if upstream == "parent-task" {
             let parent_pr = publish_stack_fixture_pr(&runtime, &child.store, &parent.id);
             runtime
-                .block_on(child.store.stack_task_placement(&child.task, &parent_pr.id))
+                .block_on(child.store.stack_task_placement(
+                    &child.task,
+                    &parent_pr.id,
+                    &child.task.base_commit,
+                ))
                 .unwrap();
         }
         write_skill(repo.path(), "identity-proof", "Prove checkout identity.");

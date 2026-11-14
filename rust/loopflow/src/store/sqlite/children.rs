@@ -754,8 +754,13 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Select a dependency without claiming that Git or GitHub has moved.
-    pub fn stack_task_placement(&self, expected: &Task, parent_id: &TaskPrId) -> StoreResult<()> {
+    /// Select a dependency and its comparison fork without moving Git or GitHub.
+    pub fn stack_task_placement(
+        &self,
+        expected: &Task,
+        parent_id: &TaskPrId,
+        base_commit: &str,
+    ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let child = task_on(&tx, &expected.id)?.ok_or(StoreError::NotFound)?;
@@ -787,9 +792,9 @@ impl SqliteStore {
             ));
         }
         let parent = task_pr_on(&tx, parent_id)?.ok_or(StoreError::NotFound)?;
-        if parent.is_settled() || parent.github().is_none() {
+        if parent.is_settled() {
             return Err(StoreError::InvalidAuthority(
-                "open the parent PR before stacking work on it".into(),
+                "stack parent PR has merged or closed; it has no live branch to stack on".into(),
             ));
         }
         let same_repo: bool = tx.query_row(
@@ -818,8 +823,8 @@ impl SqliteStore {
             };
         }
         if tx.execute(
-            "UPDATE task_checkouts SET parent_pr_id=?2 WHERE task_id=?1",
-            params![child.id.as_str(), parent_id.as_str()],
+            "UPDATE task_checkouts SET parent_pr_id=?2, base_commit=?3 WHERE task_id=?1",
+            params![child.id.as_str(), parent_id.as_str(), base_commit],
         )? == 0
         {
             return Err(StoreError::InvalidAuthority(

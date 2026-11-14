@@ -11,12 +11,13 @@ Waves.
 pbpaste | lf task create                     # first line is the title, the rest its notes
 lf task run LOO-12                           # returns once its Graph is running
 lf task run LOO-12 --open                    # continue its Graph and open its conversation
-lf task run LOO-13 --stack-on LOO-12         # builds on LOO-12's open PR before it merges
+lf task run LOO-13 --stack-on LOO-12         # builds on LOO-12's branch before it lands
 lf capture-tasks                             # talk it through; the Session files the Tasks
 ```
 
 A Task adopts existing work or gets its own worktree beside your repository, its own branch and at
-most one pull request. A stacked Task forks from its parent's PR; `lf sync`
+most one pull request. A stacked Task forks from its parent's branch on origin,
+pushing it when absent or when an unpublished parent is ahead; `lf sync`
 carries the child through the parent's updates and squash merge.
 
 `lf task run`, `lf ship`, and an explicit `lf task checkout` start the Task's

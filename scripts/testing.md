@@ -17,6 +17,10 @@ Task Graph selection, cursors or step names also reach
 `test(ops::task::explain::tests::)`: previews share the execution selector and
 display names. Run these rows before the Task launch fixtures.
 
+Task stacking changes also run
+`test(graph_tests::task_checkout_selects_parent_without_rewriting_work_or_publication)`:
+the CLI fixture checks that selecting a parent retains checkout bytes and publication.
+
 Markdown changes under `docs/`, builtins or skills, and README or AGENTS edits,
 also run `cargo test -p loopflow --test integration documented_commands::`.
 It checks command examples and maintained copy, including design documents;

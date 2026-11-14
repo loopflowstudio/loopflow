@@ -1,0 +1,1 @@
+- LOO-895: the deadline-then-assert pattern also lives in SessionsStoreTests and ProgramStatusTests (both failed under parallel load on 2026-11-13). Left out of scope; candidate follow-up Task.

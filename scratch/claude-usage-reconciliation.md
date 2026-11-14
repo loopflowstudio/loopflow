@@ -193,13 +193,13 @@ buckets first, use reported/launch family only where bucket semantics require it
 and keep unknown buckets distinct. No additional capacity record or public API
 is needed. Keep the existing model-unspecified behavior of `next`.
 
-Next implement direction: correct scope precedence at decoding/normalization and
-add decoder-to-store routing regressions for both counterexamples. Show that a
-Fable-only poll cannot recover the global rejection, a matching global reading
-with room can, and the conflicting-label Fable bucket affects Fable alone.
-Retain the existing in-flight refresh winner and report behavior. The review
-changed only this design and `scratch/concept-review.html`; no checks were rerun
-or production files changed during this step.
+Implemented: `claude_decode.rs::rate_limit_signal` takes the reported model
+only for `seven_day_overage_included`; every other bucket's scope comes from
+its name. `claude_usage_reconciliation_bucket_scope_outranks_the_reported_model`
+drives both counterexamples through the recorder and poll: the global rejection
+holds Sonnet and Fable, a Fable-only poll leaves it, a matching `seven_day`
+poll with room clears it, and the mislabelled `seven_day_fable` holds Fable
+alone.
 
 ## Implementation and remaining delivery
 
@@ -269,7 +269,7 @@ by `scripts/testing.md`; account tests run from an empty temporary directory
 with isolated HOME when invoking the built test binary directly.
 
 - `cargo test -p loopflow --lib claude_usage_reconciliation_` — implementation
-  focused check — passed, 11 tests, including the account-handler race, upgrade
+  focused check — passed, 12 tests, including the account-handler race, upgrade
   and indexed 10,000-account lookup checks.
 - `uv run python scripts/test.py --reuse-passing --rust-filter 'test(claude_usage_reconciliation_) | test(provider_account::) | test(subscription::) | test(harness::claude_decode::) | test(lf::commands::account) | test(lf::commands::profile::) | test(store::sqlite::account) | test(documented_commands::)'`
   — gate runs once; expected affected routing, store, status, parser and docs

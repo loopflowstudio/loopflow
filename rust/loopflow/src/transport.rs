@@ -10,11 +10,11 @@ mod native;
 mod output;
 pub(crate) mod registry;
 pub(crate) use output::local_directory_report;
+#[cfg(test)]
+mod relay_tests;
 mod snapshot;
 mod stream;
 mod terminal;
-#[cfg(test)]
-mod viewer_tests;
 mod wire;
 
 use std::collections::VecDeque;
@@ -47,12 +47,46 @@ const CONTROL_ENV: &str = "LF_TRANSPORT_CONTROL";
 const TERMINAL_ENV: &str = "LF_TRANSPORT_TERMINAL";
 const LIMIT: usize = 4 * 1024 * 1024;
 // Short liveness timers use uptime: laptop sleep is not a silent connection.
-const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How a relay paces its connection to a host.
+#[derive(Debug, Clone, Copy)]
+struct Pace {
+    heartbeat: Duration,
+    /// Silence after which the bridge counts as lost.
+    silence: Duration,
+    /// How long an attachment waits for its acknowledgement.
+    attach: Duration,
+    /// The first reconnect delay; later attempts double it, up to 32 times.
+    backoff: Duration,
+    /// How long a write to the host may wait before the host counts as no
+    /// longer reading.
+    stall: Duration,
+}
+
+const PACE: Pace = Pace {
+    heartbeat: Duration::from_secs(10),
+    silence: HEARTBEAT_TIMEOUT,
+    attach: Duration::from_secs(5),
+    backoff: Duration::from_millis(100),
+    stall: Duration::from_secs(2),
+};
+
+#[cfg(test)]
+thread_local! {
+    /// A relay fixture's thread chooses its own pace.
+    static TEST_PACE: std::cell::Cell<Pace> = const { std::cell::Cell::new(PACE) };
+}
+
+fn pace() -> Pace {
+    #[cfg(test)]
+    return TEST_PACE.get();
+    #[cfg(not(test))]
+    PACE
+}
 
 pub(crate) const STREAM_ENV: &str = "LF_VIEWER_STREAM";
 
-const ATTACH_TIMEOUT: Duration = Duration::from_secs(5);
 // SSH connection setup and destination Session resolution precede attachment.
 const COMMAND_ATTACH_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -2007,7 +2041,7 @@ fn attach_with_terminal(
         }),
         moved,
         terminal,
-        ATTACH_TIMEOUT,
+        pace().attach,
         replace,
     )
 }
@@ -2111,7 +2145,8 @@ fn view(
     let mut stdin_open = true;
     let mut previous_size = (rows, cols);
     let mut title = id.map(crate::terminal_title::ViewerTitle::new);
-    let mut heartbeat = Instant::now() + HEARTBEAT_INTERVAL;
+    let pace = pace();
+    let mut heartbeat = Instant::now() + pace.heartbeat;
     let mut last_response = Instant::now();
     let mut catching_up: Option<CatchingUp> = None;
     'relay: loop {
@@ -2181,7 +2216,7 @@ fn view(
             };
             socket = stream::Stream::socket(next)?;
             last_response = Instant::now();
-            heartbeat = last_response + HEARTBEAT_INTERVAL;
+            heartbeat = last_response + pace.heartbeat;
             decoder = Decoder::default();
             controlled = false;
             owned = false;
@@ -2196,7 +2231,7 @@ fn view(
             title.tick();
         }
         if Instant::now() >= heartbeat {
-            heartbeat = Instant::now() + HEARTBEAT_INTERVAL;
+            heartbeat = Instant::now() + pace.heartbeat;
             if let Err(error) = send(&mut socket, Request::Controlled { ready: None }) {
                 if !can_reconnect {
                     return Err(error);
@@ -2500,7 +2535,7 @@ fn view(
             }
         }
         // Drain available replies before judging an unanswered heartbeat.
-        if acknowledgement_deadline.is_none() && last_response.elapsed() >= HEARTBEAT_TIMEOUT {
+        if acknowledgement_deadline.is_none() && last_response.elapsed() >= pace.silence {
             if can_reconnect {
                 interrupted = Some("The bridge stopped answering".to_owned());
                 continue;

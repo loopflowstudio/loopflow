@@ -702,11 +702,14 @@ fn another_agent_resumes_a_failed_codex_bootstrap_on_its_own_input() {
     let fixture = Fixture::new("codex");
     let machine = fixture.home.path().join("machine");
     support::register_codex_account(&machine);
+    fixture.create_wave();
     fs::write(machine.join("fail-server"), "").unwrap();
     let failed = fixture
         .command()
         .args([
             "-i",
+            "--wave",
+            "fixture",
             "--only-account",
             "fixture@example.com",
             ":",

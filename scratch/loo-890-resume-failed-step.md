@@ -91,6 +91,23 @@ Graph after a six-hour step is worse.
   limit, `Repeated`, retained-edits stash, held exits (3/130), an interrupt.
   After an interrupt, the next `lf task run` resumes at the interrupted step.
 
+### Concept review (2026-11-13)
+
+One record, one meaning: `run_start` is where the run goes on, and every reader
+(retry loop, `select_task_run`, move, status) takes it verbatim. Settled, no change:
+
+- `Run { step, at }` keeps the wire key `step` for the segment origin. Desktop
+  binds it as `from`, but renaming the key would make a released Desktop fail
+  to decode every Task from a branch `lf`; `at` is additive.
+- `run_start` keeps its column name: a rename is a staged migration for no
+  behavior.
+- A Graph that checkpointed past its last step and died before arriving: the
+  cursor has no place, `select_task_run` returns no start, and the next
+  `lf task run` ends the Task as that run would have. XOR children never
+  checkpoint at their path's end (`finish_inner` returns to the parent).
+- A `-i`/`-b` run that decided at an interactive step and died before settling:
+  a plain `lf task run` puts the Task at that step and the person decides again.
+
 ## Alternatives
 
 - Derive the resume point from GraphProcess history (`graph_process_steps.node`

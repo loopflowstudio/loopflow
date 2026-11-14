@@ -1,0 +1,2103 @@
+start 21:45:29
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite ServerClientTests started.
+◇ Suite "Retained Work workspaces" started.
+◇ Suite "Session refresh" started.
+◇ Suite SessionControlsTests started.
+◇ Suite "Native Session reopen fixture" started.
+◇ Suite "Terminal pane clearance" started.
+◇ Suite "App Bootstrap Resources" started.
+◇ Suite "Wave" started.
+◇ Suite "Terminal feedback" started.
+◇ Suite PortfolioServiceTests started.
+◇ Suite ServerConnectionTests started.
+➜ Suite "Desktop experience measurements" skipped: "Optional display-session diagnostic"
+◇ Suite "Wave detail reading" started.
+➜ Suite "Native window appearance" skipped: "Optional display-session diagnostic"
+◇ Suite "New Task" started.
+◇ Suite "Roadmap controls" started.
+◇ Suite "Wave Lens" started.
+◇ Suite "Headless window appearance" started.
+◇ Suite "NOW condition projection" started.
+◇ Suite "Exact Desktop pane arrangement" started.
+◇ Suite "Retention card" started.
+➜ Suite "Task Session preparation subprocess proof" skipped: "Optional display-session diagnostic"
+◇ Suite "Launch journal" started.
+◇ Suite "Configuration destinations" started.
+◇ Suite "Retained Task tool tabs" started.
+◇ Suite "Sessions polish" started.
+◇ Suite "Unified Work and Session navigation" started.
+◇ Suite SessionRenameTests started.
+◇ Suite "New Wave sheet" started.
+◇ Suite "Wave origin resolution" started.
+◇ Suite "Work observation retry" started.
+◇ Suite "Workspace Session lifecycle" started.
+◇ Suite "Work model" started.
+◇ Suite "Work observation stream" started.
+➜ Suite "Embedded terminal input" skipped: "Optional display-session diagnostic"
+◇ Suite "Project activation" started.
+◇ Suite "Warm conversations start unmounted" started.
+◇ Suite CreationSubmissionTests started.
+◇ Suite "Pane resizing" started.
+◇ Suite "Embedded terminal shell blocks" started.
+◇ Suite "Independent Task conversations" started.
+◇ Suite "Desktop without a display" started.
+➜ Suite "Retained terminal mounts" skipped: "Optional display-session diagnostic"
+◇ Suite "Wave standup" started.
+◇ Suite "Application workspace retention" started.
+➜ Suite "Task Graph native proof" skipped: "Optional display-session diagnostic"
+◇ Suite "Program Status" started.
+◇ Suite "Dashboard workspace integration" started.
+◇ Suite "Sessions store" started.
+◇ Suite OwnerStreamTests started.
+◇ Suite "Loopflow state" started.
+◇ Suite "Rename Wave sheet" started.
+➜ Suite SessionConnectionProofTests skipped: "Optional display-session diagnostic"
+◇ Suite ServerProtocolTests started.
+◇ Suite OpenSourceLicensesTests started.
+➜ Suite "Task history and Session rows native proof" skipped: "Optional display-session diagnostic"
+◇ Suite "Workspace subscription transport" started.
+◇ Suite "Retained workspace panes" started.
+◇ Suite ServerMessageOrderTests started.
+◇ Suite "CLI to retained Work sidebar" started.
+◇ Suite "Desktop polish" started.
+◇ Suite ProviderTransitionTests started.
+◇ Suite "Terminal color" started.
+➜ Suite "Unified workspace navigation proof" skipped: "Optional display-session diagnostic"
+◇ Suite "Sidebar Task metadata" started.
+◇ Suite "Desktop socket API" started.
+◇ Suite "Console retained tools" started.
+◇ Suite "Local wave launcher" started.
+◇ Suite "Compact GitHub pull request" started.
+◇ Suite "Terminal polish" started.
+◇ Suite "Retained work through theme preview" started.
+◇ Suite "WavePlanParser" started.
+◇ Suite "Uninherited pipes" started.
+◇ Suite "Task Graph" started.
+◇ Suite "Whole-app themes" started.
+◇ Suite "Desktop benchmark fixtures" started.
+◇ Suite "Workspace projection measurements" started.
+◇ Suite "Work cache" started.
+➜ Suite SessionChromeProofTests skipped: "Optional display-session diagnostic"
+◇ Suite "Work destinations" started.
+◇ Suite "Desktop semantic colors" started.
+◇ Suite ServerPerformanceTests started.
+◇ Suite "Wave surface primary hierarchy vocabulary" started.
+◇ Suite "Desktop startup measurements" started.
+◇ Suite "Remove Wave sheet" started.
+◇ Suite "Portfolio Repo State" started.
+◇ Suite "Work addresses from the built CLI" started.
+◇ Suite AppUpdatesTests started.
+◇ Suite MobilePairingTests started.
+◇ Suite "RegistryQuery" started.
+◇ Suite "Wave Row View" started.
+◇ Suite TaskStatusTests started.
+◇ Suite "Task history" started.
+◇ Test canonical_ids_reopening_session_preserves_pane_and_focus() started.
+◇ Suite "DTO Fixtures" started.
+◇ Test canonical_ids_workspace_keys_decode_canonically_without_changing_paths() started.
+◇ Test "Session input history retains distinct native results and unknown Process" started.
+◇ Suite "Multiplexer store" started.
+◇ Suite "Shared Work selection" started.
+◇ Suite "Multiplexer layout" started.
+◇ Suite RawJSONTests started.
+◇ Suite "Mock wave fixture" started.
+◇ Suite "TaskFiles" started.
+◇ Suite "Desktop log" started.
+◇ Suite "Task directive editing" started.
+◇ Test "Binding a visible repository conversation relocates its pane without changing terminal identity" started.
+◇ Test "Task actions offer primary selection for an already assigned Session" started.
+◇ Test "A failed Machine refresh retains the same workspace identity" started.
+◇ Test "packaged app resolves the SwiftPM bundle from Contents/Resources" started.
+◇ Test "Switching worktrees restores companion terminals, layout and focus" started.
+◇ Test "Files and the Graph process log open as browser tabs beside a Session and are revealed, not duplicated" started.
+◇ Test "Repository, Wave and two Tasks sharing one path keep distinct retained Work" started.
+◇ Test "A refused bind keeps its exact confirmation for safe same-target retry" started.
+◇ Test "Binding preview matches Rust and requires every identity field" started.
+◇ Test "Unchanged offline refresh stays quiet while new errors and recovery remain visible" started.
+➜ Test measureExperiences() skipped: "Optional display-session diagnostic"
+◇ Test sharedFixtureDecodes() started.
+◇ Test admissionBusyWaitsThenCompletesTheWriteOnce() started.
+◇ Test mutationWaitsForPendingReading() started.
+◇ Test "Host Copy, Paste and Find do not consume modified TUI shortcuts" started.
+◇ Test "Conversation launch adds a tab and undo keeps the same shell" started.
+◇ Test "Preview is inert; confirmation uses exact Task and fences an older poll" started.
+◇ Test openingWaitsForNativeReadinessAndRecoversInPlace() started.
+➜ Test measureWriteToVisible() skipped: "Optional display-session diagnostic"
+➜ Test terminalMemoryPhases() skipped: "Optional display-session diagnostic"
+◇ Test legacyImportRequiresAnUnconfiguredSharedSelection() started.
+◇ Test "⌘` and ⌘⇧` leave the terminal to cycle windows; ⌃` and plain ` stay with it" started.
+◇ Test "Inspection reads retained panes and drafts without allocating, focusing or opening a client" started.
+➜ Test "Copy, Find and hidden retained surfaces preserve text" skipped: "Optional display-session diagnostic"
+➜ Test measureSnapshotTaskOpening() skipped: "Optional display-session diagnostic"
+➜ Test repeatedNativeReopen() skipped: "Optional display-session diagnostic"
+◇ Test "a readable status with no chapter does not revive cached KRs" started.
+◇ Test "Copy notices stay with the originating window and retained view" started.
+➜ Test ownedChildrenCanExitButHostSignalsStayDenied() skipped.
+◇ Test "Mac metric summary distinguishes official health, candidates, and contract issues" started.
+◇ Test "a successful refresh clears the stale warning" started.
+◇ Test desktopWritesReadBackThroughCLI() started.
+◇ Test "unavailable chapter planning retains the reading and never claims no target" started.
+◇ Test "a failed refresh discards volatile status and metric evidence" started.
+◇ Test "an unset chapter target preserves the reading without failing the measure" started.
+◇ Test "The recommended action explains itself" started.
+◇ Test "Task actions come from the shared legal-action model" started.
+◇ Test "a project with only clean tasks is genuinely black" started.
+➜ Test embeddedLaunchContract() skipped: "Optional display-session diagnostic"
+◇ Test "a Task review step is blue and wins over Project planning state" started.
+➜ Test "Native controls and the custom palette follow the same window appearance" skipped: "Optional display-session diagnostic"
+◇ Test portfolioTaskClickOpensItsRepositoryDestination() started.
+◇ Test "Mac metric rows render the shared DTO fields without recomputing evidence" started.
+◇ Test "Nested corner centers coincide and split gaps match the outer inset" started.
+◇ Test mutationsPublishSharedReadingAndFailureRetainsMembership() started.
+◇ Test "the shared W2-123 fixture maps every state verbatim" started.
+◇ Test "every lens carries a reason for VoiceOver" started.
+◇ Test "a project with no runtime and no tasks is off" started.
+◇ Test "Wave counts do not claim Task health or process liveness" started.
+◇ Test "unavailable task evidence stays unknown with its reason, never black" started.
+◇ Test "Task conditions map to lens colors one-to-one" started.
+◇ Test "a red Task wins over a black sibling" started.
+◇ Test "An assigned non-primary Session offers primary selection through binding" started.
+◇ Test "Session location changes renew exact targets without changing its Work or duplicating its surface" started.
+◇ Test "Creation and binding keep the selected conversation and change its Work without launching" started.
+◇ Test "Unplaced Work opens without acquiring a location or a shell" started.
+◇ Test cardShowsWhatIsKeptWhatExpiresAndHowToKeepMore() started.
+◇ Test "view model exposes registry identity" started.
+◇ Test "NOW flattens across waves and drops empty groups" started.
+◇ Test "A launch records one exit, whichever path reports first" started.
+◇ Test "A full file keeps its newest whole lines, across processes" started.
+◇ Test "Each Task lands in the group its shared evidence dictates" started.
+◇ Test "Nothing is written before a launch begins" started.
+◇ Test "unreadable task evidence surfaces as unknown, not a silent black" started.
+◇ Test fixtureRoundTripsTheRustWireShape() started.
+◇ Test "A launch names its process, bundle, revision and macOS" started.
+◇ Test "objective tagline uses the first authored line" started.
+◇ Test "The window modifier follows preview, Cancel and Apply" started.
+◇ Test destinationsMatchRustWithoutIndependentScopeOrPath() started.
+◇ Test "The sheet's fields map to one lf task create command and Rust's default read" started.
+◇ Test "A launch records each milestone once, with the app version and no arguments" started.
+◇ Test "Failed reads keep last-good work and exact Sessions with a visible error" started.
+◇ Test "One window's registry retains a repo workspace across visits" started.
+◇ Test "A signal's preformatted line is NDJSON naming the signal and the time it is stamped with" started.
+◇ Test "A shell exit from another Machine cannot close a same-ID pane" started.
+◇ Test "Work tabs retain their own conversation and details choice across aliases and close/reopen" started.
+◇ Test "A shell attachment exit retains its pane for recovery while SessionsView is absent" started.
+◇ Test catalogueIncludesFeatureCategory() started.
+◇ Test "The sidebar header names the Dashboard under the repository, and ⌘1 marks its first member" started.
+◇ Test "State uses the resolved repository plan identity, never its opening path" started.
+◇ Test "Bound Sessions retain ancestry and panes across planning loss and return" started.
+◇ Test "unknown is a lit lens, distinct from the off black" started.
+◇ Test "Shipping Tasks sit under an Autonomous heading below the Working Tasks, in light and dark" started.
+◇ Test "Workflow loading, unavailable and absent readings remain distinct" started.
+◇ Test cardNamesAnUnavailableSummary() started.
+◇ Test "Each breadcrumb's › lists what is inside it and searches that scope; ⌘K keeps Find Work" started.
+◇ Test "Autonomous, upcoming and human work share stable ranked planning rows" started.
+◇ Test "Task inspection retains Available links without a Session inventory" started.
+◇ Test "task lens is the shared level and reason, verbatim" started.
+◇ Test "exit() names the first frame that called it outside the system libraries" started.
+◇ Test "the most demanding Task condition wins" started.
+◇ Test "Checkout-only Sessions use Rust membership in Task navigation" started.
+◇ Test "Abandoning the open Task drops its row and opens the next one before the command returns; a refusal puts it back" started.
+◇ Test "Inside a Wave view, the sidebar and ⌘N count its started Tasks and enter through the Wave on the Task's page" started.
+◇ Test "Breadcrumb navigation and sidebar toggling retain panes and width" started.
+◇ Test "A quit Apple event names why it was sent" started.
+◇ Test "Working Tasks opens as a Dashboard; a sidebar Task keeps it in the trail, as its tile does" started.
+◇ Test "Shared fixture preserves all Task conditions and the spoken reason" started.
+◇ Test "A delayed New session failure stays with its Task across Task and repository navigation" started.
+◇ Test "An unstarted Task's Session slot offers Start; showing it starts nothing" started.
+◇ Test "Sidebar search includes its filtered Tasks and Waves without changing the open Work" started.
+◇ Test "A held rename publishes Rust's name; an older poll cannot restore the old one" started.
+◇ Test "The breadcrumb drills Wave → Task → exact Session, with siblings as the final choice" started.
+◇ Test "Task briefs and the Wave standup board share the current snapshot" started.
+◇ Test "Ready and Working-now filters read the started list's Task states, as the phone's filters do" started.
+◇ Test "Selecting Work closes Find Work and preserves the sidebar preference" started.
+◇ Test "Returning to a repository retains its last-good Sessions when refresh fails" started.
+◇ Test "The heading reads the Task's lifecycle, never Linear's planning state" started.
+◇ Test "Checkout association groups independent Sessions despite different attribution" started.
+◇ Test "Slow planning does not gate Session reading or navigation" started.
+➜ Test "Delayed preparation and launch failures stay with the requesting Task; retry uses its prepared checkout" skipped: "Optional display-session diagnostic"
+◇ Test "Every navigator entry restores its caller after a previous accepted navigation" started.
+◇ Test "Separate windows never share a multiplexer or surface pool" started.
+◇ Test "A late rename cannot dismiss a newer draft for the same Session" started.
+◇ Test "A Dashboard scopes the sidebar to its visible Tasks in arrangement order; ⌘N, ⌃⇥ and rows keep the board" started.
+◇ Test "Repository conversation reuses its exact pane without selecting another Work" started.
+◇ Test "Unscoped Sessions remain in history without navigation entries" started.
+◇ Test "In-place navigation, resizing, collapse and history preserve Work and drafts" started.
+◇ Test "Presentation and repo changes preserve selection, viewport and terminal splits" started.
+◇ Test "A rejected rename keeps the typed name and error on that Session only" started.
+◇ Test "Incomplete planning preserves the repository's selected Task" started.
+◇ Test "Typed durable joins preserve top-level, multiple, completed and unmatched Sessions" started.
+◇ Test "Standalone Tasks keep their workspace and draft across Wave moves" started.
+◇ Test "Working Tasks are the repository plan's members, not visits; a Wave scopes the sidebar until Back" started.
+◇ Test "Work outside the plan remains explained in Wave details" started.
+◇ Test "Chapter history remains reachable when the current plan is unavailable" started.
+◇ Test "Repository view reconstruction keeps the Session store's resolved location" started.
+◇ Test leftoversStayOpenWithTheRustLineAndADoneButton() started.
+◇ Test "Changing repository clears cached Sessions" started.
+◇ Test "Repository scope filters one shared snapshot and clears outside selection" started.
+◇ Test "The Machine control reads the current Work's Machine from planning; unstarted Tasks and the repository have none" started.
+◇ Test "A Wave row counts its working and autonomous Tasks, not backlog or done" started.
+◇ Test "Zooming a Working Tasks tile keeps Working Tasks in the trail, and Back returns to it" started.
+◇ Test "Session refresh reads Task GraphSteps" started.
+◇ Test "Unbound Sessions do not acquire ancestry from display text or checkout" started.
+◇ Test "Session rename is scoped to its draft without a second breadcrumb" started.
+◇ Test "A late Activity query cannot replace evidence for a newer selection" started.
+◇ Test "A delayed historical reference cannot replace newer navigation" started.
+◇ Test "Registry Wave paths cannot create repository choices" started.
+◇ Test "Back visits retained Work in repository order without recording its own return" started.
+◇ Test "A dropped Task row takes its place before the order is written" started.
+◇ Test "A recovered part begins a fresh healthy interval" started.
+◇ Test "Navigation shortcuts leave Escape and extra-modifier provider shortcuts alone" started.
+◇ Test "Refresh failure preserves last-good evidence and exposes the reason" started.
+◇ Test "Repo and Wave Sessions cannot join a Task through checkout or stored associations" started.
+➜ Test "pasting screenshot bytes gives the provider a readable PNG path" skipped: "Optional display-session diagnostic"
+◇ Test offersAnOptionalObjectiveBesideTheName() started.
+◇ Test "Stable Work selection resolves against the latest snapshot" started.
+◇ Test "A quiet healthy observation resets only at thirty seconds" started.
+◇ Test "Repeated failures back off to thirty seconds with or without successful frames" started.
+◇ Test "A checkout's repository identity follows its origin once that is resolved" started.
+◇ Test "A row dragged over another lands there on release and leaves no drag behind" started.
+◇ Test "leaving a Wave does not cancel its activation or replace another Wave's feedback" started.
+◇ Test "Work selection becomes one server-side Activity filter" started.
+◇ Test "the portfolio shows pending activation alongside retained planning" started.
+◇ Test "Selected Task survives a chapter transfer with temporarily absent membership" started.
+➜ Test "releasing a retained terminal affects only its owning window" skipped: "Optional display-session diagnostic"
+◇ Test "Navigation selects one destination and retains each Task's panes" started.
+➜ Test "clicking a split terminal makes that exact pane the input target" skipped: "Optional display-session diagnostic"
+➜ Test "terminal title events retain the originating Session identity" skipped: "Optional display-session diagnostic"
+➜ Test "text and block selection replace each other, and copy follows the one shown" skipped: "Optional display-session diagnostic"
+➜ Test "A failed Session child retains its final output before releasing the surface" skipped: "Optional display-session diagnostic"
+➜ Test "Find reserves space and survives a resize without replacing the terminal" skipped: "Optional display-session diagnostic"
+➜ Test "file, image, and text drags are accepted; foreign drags are refused" skipped: "Optional display-session diagnostic"
+➜ Test "a discarded pooled view is not revived by a later reopen" skipped: "Optional display-session diagnostic"
+◇ Test "A late Session refresh cannot cross repository scope" started.
+◇ Test "A failure after a healthy interval keeps the earned reset" started.
+◇ Test "Attention opens the exact retained conversation and Back returns to interrupted Work" started.
+◇ Test "An unavailable part cannot be healed by another part or checkpoint" started.
+◇ Test "A prepared Session starts its terminal before any pane shows it" started.
+◇ Test "A prepared Start stays non-replacing through refresh; only Take back transfers input" started.
+◇ Test "Explicit history-only reveal preserves Start recovery outside working Task initialization" started.
+◇ Test "activation failure belongs to its Wave and retry preserves planning" started.
+◇ Test "Automatic Start stops at a consumed launch instead of reporting a holder" started.
+➜ Test "Shell-launched sessions focus their live terminal and external clients stay elsewhere" skipped: "Optional display-session diagnostic"
+➜ Test "paste shortcuts reach only the focused terminal in a split" skipped: "Optional display-session diagnostic"
+◇ Test "Restoring twelve Sessions prepares only attachments, then switches without preparation" started.
+➜ Test "raw image bytes take the provider shortcut; files and text do not" skipped: "Optional display-session diagnostic"
+◇ Test "Current chapter source references navigate directly to the Wave" started.
+◇ Test "Fresh saved history clears an unavailable opening without starting it" started.
+◇ Test "A consumed first launch recovers with one Try again; refresh never repeats it" started.
+◇ Test "Retry stays non-replacing while another client holds input" started.
+◇ Test "Leaving an unavailable part's scope permits recovery" started.
+◇ Test "Unavailable preparation preserves the pane identity" started.
+◇ Test "Data-directory frames and confirmed Machine identity preserve the same workspace" started.
+◇ Test "Cancellation after preparation cannot create a late viewer" started.
+◇ Test "Automatic preparations start selected first, stay bounded and honor Close" started.
+◇ Test "Eviction fences a preparation that returns after release" started.
+◇ Test "a plain subdirectory of a repo is its own origin — no walking up" started.
+◇ Test "Showing a pane resumes saved history and leaves external input alone" started.
+◇ Test "Retry after a transient failure only reveals and retains a newly observed holder" started.
+◇ Test "A new shell appears in its designated pane beside the golden split" started.
+◇ Test twoShellsAndFilesRestoreIdentitiesSelectionAndDrafts() started.
+➜ Test "typing from restored Kitty scrollback returns to the live viewport" skipped: "Optional display-session diagnostic"
+◇ Test "non-git paths resolve unchanged" started.
+◇ Test "New conversation binds the Task without selecting an operating skill" started.
+◇ Test "A store without a runtime prepares and shows but launches nothing" started.
+◇ Test "Nested panes contribute minimum size and small windows shrink both sides to fit" started.
+◇ Test "Fresh ownership replaces unavailable opening with Take back" started.
+◇ Test "Task lifecycle controls remain available without a Workflow" started.
+◇ Test "The repository roadmap reads Git planning through the ordinary query" started.
+◇ Test "a worktree resolves to its origin repo; the origin to itself" started.
+◇ Test "The run page names interactive review independently of completed runs" started.
+◇ Test "Planning sync shows saves, uncertainty and retained losing edits, then clears settled work" started.
+◇ Test "A Task's work, comments and pending delivery arrive from the stream, with no lf read" started.
+◇ Test "An ensured running primary attaches when shown" started.
+◇ Test "a header is the marked prompt row, looked for only where a prompt can be" started.
+◇ Test "Drag snaps near either golden proportion and moves freely elsewhere" started.
+◇ Test "command blocks are full-width bands on the padded grid's rows" started.
+◇ Test "Recent unfinished Tasks stay warm; window Close ends viewers but keeps history" started.
+◇ Test "Same-name definitions keep separate destinations and a failed refresh retains visible stale data" started.
+◇ Test "a right-click on the selected block keeps it; anywhere else goes to the terminal" started.
+◇ Test "A workflow is drawn as a graph: circles, described interactive steps, a loop arc and an arrow per run" started.
+◇ Test "Known repository entry presents its scene before admitting a new link" started.
+◇ Test "A builtin Workflow offers Customize beside its interactive steps" started.
+◇ Test wavePartsHideOnHoverAndTheBoardHeaderShowsThem() started.
+◇ Test "A Task that becomes working starts the history its reveal could not find" started.
+◇ Test "A Task's Workflow shows its running run, offers a stopped one again, continues after an interactive step, and starts from any step" started.
+◇ Test "A Task lists available conversations before working ones, its primary leading each" started.
+◇ Test boardRendersHeaderColumnsAndMetrics() started.
+◇ Test "A page turn lets go of the last-ranked unvisited Tasks, never the freshest" started.
+◇ Test "the embedded config parses, and Command-Up and Command-Down jump between prompts" started.
+◇ Test "Run history preserves nested positions, repeated nodes and failed exits" started.
+◇ Test columnsAreRustSections() started.
+◇ Test "Reopening a repository keeps twelve Work layouts and drafts before inventory arrives" started.
+◇ Test "the default-prompt shell gets a context header and reports a failed command" started.
+◇ Test "Repository windows retain separate surface pools and Work" started.
+◇ Test "Restart restores bounded warm intent and preserves explicit Close" started.
+◇ Test peopleAppearOnceTwoPeopleShareTheWave() started.
+◇ Test "Loading, unavailable, empty and selected Work have distinct content" started.
+◇ Test "A reopened scene preserves the shared repository identity learned before closing" started.
+◇ Test "The Workflow bar shows the interactive steps, what runs now and Auto-Ship, and opens to its step cells" started.
+◇ Test "The workflow inspector draws builtins and keeps invalid definitions editable" started.
+◇ Test wavePartsZoomResizeAndTurnSectionsAsLfDesktopDoes() started.
+◇ Test "Saved unfinished Tasks fill spare warmth without evicting working Tasks" started.
+◇ Test "A shipping Task says what shipping is doing and cannot be shipped again" started.
+➜ Test "Dismantling an old mount keeps the retained terminal in its new mount" skipped: "Optional display-session diagnostic"
+◇ Test "Reopened content stays visible while resolution stalls or fails" started.
+◇ Test "The warm-conversation bound spans repository windows without sharing surfaces" started.
+◇ Test oneEmailIsOnePersonAndANameAloneJoinsIt() started.
+◇ Test "only a reported failure has a red gutter" started.
+◇ Test "A board larger than its page warms sixteen Tasks and the page; a turn opens the next page" started.
+◇ Test "A Task workspace reopens its Session by id with the Task beside it, so it resumes managed" started.
+◇ Test replacementAndChildLifetime() started.
+◇ Test "an unfinished persisted Process without a live command remains unknown" started.
+◇ Test "An unresolved restored locator cannot mount a retained registry" started.
+◇ Test "Reset leaves the Session live while preparing and keeps updates when it fails" started.
+◇ Test "Refresh replaces the viewer and reveals the same conversation without resetting it" started.
+◇ Test repositoryPageIsTheSameBoardOverEveryRepositoryTask() started.
+◇ Test "A working Task shown as a tile stays warm after the Dashboard leaves" started.
+◇ Test "Ended Session output survives a fresh inventory without relaunch" started.
+◇ Test "An unplaced Task and its CLI comment thread decode without a display" started.
+◇ Test "A failed transfer retains concurrent Session updates and can retry" started.
+◇ Test "Warm visits are bounded; completed departure and Close release without refresh reopening" started.
+◇ Test "Retained review feedback stays visible" started.
+◇ Test "Explicit reopen revalidates a cached observation failure" started.
+◇ Test "A prepared Task target enters its terminal without another preparation" started.
+◇ Test "Prepared Sessions accept current provider and terminal evidence without losing their launch" started.
+➜ Test "Template disclosure and the Task workspace keep the Session's terminal, draft and companion" skipped: "Optional display-session diagnostic"
+◇ Test "An externally killed terminal reclassifies as active elsewhere" started.
+◇ Test "Filtered refresh retains Sessions without creating local terminals" started.
+◇ Test "Closing every Work preserves hidden panes when a repository window reopens" started.
+◇ Test "A Session opened elsewhere during selection is not prepared locally" started.
+◇ Test "Reset restarts the same Session with a fresh launch" started.
+◇ Test "A failed open stays visible across polling until superseded" started.
+◇ Test gapsAndOversizedFramesRequireReconnect() started.
+◇ Test unansweredHeartbeatRequiresReconnect() started.
+◇ Test startsFromTheCurrentAddressWithRenameDisabled() started.
+◇ Test rustOwnerSnapshotRendersOnceAfterGeometryAcrossEveryReadBoundary() started.
+◇ Test "Explicit Start opens only the requested terminal" started.
+◇ Test "Repository and Wave primaries stay warm beside the Task bound; Close releases until a deliberate visit" started.
+◇ Test doneWindowCountsWholeDaysBackFromNow() started.
+◇ Test readinessProbesWithoutHello() started.
+➜ Test "A mounted Session keeps its screen and keyboard input across server loss" skipped: "Optional display-session diagnostic"
+◇ Test configurationUsesTheSharedDestinationContract() started.
+◇ Test configurationEncodingsKeepTheirKindsAndFields() started.
+◇ Test ticketsAdmitTerminalAndBulkConnections() started.
+◇ Test "Selecting an active Session leaves its other terminal running until Move here" started.
+◇ Test errorsBranchOnTheirCode() started.
+◇ Test coreLoopWritesShareTheRustWriteContract() started.
+◇ Test remoteDirectoryAdvancesTheStreamWithoutChangingLocalState() started.
+➜ Test "An off-window representable cannot steal a displayed terminal" skipped: "Optional display-session diagnostic"
+◇ Test sessionAdoptionSharesTheRustWriteContract() started.
+◇ Test ownerReportsAndClearUseTheSharedStatusShapeWithoutChangingClaims() started.
+◇ Test controlGrantWaitsForTheReplacementScreenAndLossRevokesInput() started.
+◇ Test aWaitEndsAfterTheReadingThatReachedIt() started.
+◇ Test leftoversStayOpenWithTheRustLinesAndADoneButton() started.
+◇ Test "missing state has no selection" started.
+◇ Test subscriptionsCarryTheirRequestId() started.
+◇ Test "Both sides keep their minimum size; snapping cannot override it" started.
+◇ Test "A refused provider change preserves the original Session presentation" started.
+◇ Test everyEncodedOperationIsTheDescribedOperation() started.
+◇ Test "Provider switching keeps the Session and prepares an explicit provider launch" started.
+◇ Test connectionErrorsHaveNoRequestId() started.
+◇ Test commandTraceAndExistingOwnerShareRustFixtures() started.
+◇ Test theMirrorSpeaksTheDescribedRevision() started.
+◇ Test heartbeatUsesOwnerProtocolWithoutTakingControlOrConsumingAttachmentReply() started.
+◇ Test missingNoticesReportFailure() started.
+◇ Test "A server command completes from an async caller" started.
+◇ Test eventsAreSequencedBeforeLargeReadingsDeferTheirDelivery() started.
+◇ Test cancellationDropsDeferredFramesAndLatePayloads() started.
+◇ Test failureKeepsTheNameAndShowsTheError() started.
+◇ Test stalledTransferHasABoundedQueue() started.
+◇ Test "Polling preserves the prepared interactive launch command" started.
+◇ Test helloAndWelcomeNegotiateTheRevision() started.
+◇ Test wrongRequestAndNestedTicketsCannotReplaceThePayload() started.
+◇ Test "An open Work model keeps its last reading and recovers after server replacement" started.
+◇ Test everyFixtureIsMirrored() started.
+◇ Test "The existing full-Task consumer keeps pane focus, Session context and controls" started.
+◇ Test mobileOperationsUseTheSharedFixtures() started.
+◇ Test "selected repository round-trips" started.
+◇ Test "Rendering borrows Task A while B is selected, retaining Files and caller-owned focus" started.
+◇ Test "A Wave view part's hover buttons clear the tile's rounded corner in light and dark" started.
+◇ Test "A finished Task without history shows its record, never a Start or Open placeholder" started.
+◇ Test consecutiveTicketsRetainOrderWhileOtherIDsFlow() started.
+◇ Test "A failed Task conversation shows its reason beside Retry" started.
+➜ Test "A hidden retained terminal relinquishes focus and keeps its unfinished PTY input" skipped: "Optional display-session diagnostic"
+◇ Test "Session actions use the main repository for a linked worktree" started.
+◇ Test "A single visible Session keeps Refresh available" started.
+➜ Test "Session inputs load on demand for their own Task; Session rows show recorded provider and summary" skipped: "Optional display-session diagnostic"
+◇ Test "Every Task pane hides on hover and the header's Show… restores it" started.
+◇ Test hookBoundarySharesTheRustServerContract() started.
+➜ Test "The workspace retains native navigation without completion controls" skipped: "Optional display-session diagnostic"
+◇ Test "A finished Task nobody owns reveals its conversation into visible panes" started.
+◇ Test mountedPresentationRetiresNormalAndPromotedResults(resource:) started.
+◇ Test missingRequiredFieldsDoNotBecomeDefaults() started.
+➜ Test "The work list retains its viewport through presentations, refresh and repository return" skipped: "Optional display-session diagnostic"
+◇ Test primarySessionSelectionUsesTheSharedViewPlanRead() started.
+◇ Test typedEventsCarryTheirPayloadAndUnknownKindsStayLocal() started.
+◇ Test "Live clients and unknown readings omit activity; shared Available remains visible" started.
+◇ Test "Validated reports win over runtime inference" started.
+◇ Test "Selection preserves reported failure and shared Available semantics" started.
+◇ Test "Stored links are separate from retained conversation navigation" started.
+◇ Test simultaneousWindowsShareOneRecoveryAndUnavailableLookupNeverSends() started.
+◇ Test coldRecoveryAndFailedRemovalRepeatOnlyPresentationAndLookup() started.
+◇ Test "Unknown and live-client-only rows omit status; read failures stay inspectable" started.
+◇ Test "A client reads state, gets typed errors, and receives the first change frame" started.
+➜ Test "Renaming a Session and returning through its ancestors keeps its terminal, draft and companion" skipped: "Optional display-session diagnostic"
+◇ Test restartAtEachSubmissionWindowRecoversTheOriginalResource() started.
+◇ Test lookupDispositionsRoundTrip() started.
+◇ Test "Task identifiers remain visible without an external issue URL" started.
+◇ Test continuationUsesTheSavedPayloadWithoutInterpretingMilestones() started.
+◇ Test "Headers name known providers and leave arbitrary shell titles as context" started.
+◇ Test "Rows name the owner and Machine, or say the Task is unowned" started.
+◇ Test unknownLaunchAndAnotherMachineNeverAuthorizeResubmission() started.
+➜ Test "Production Metal colors render offscreen" skipped: "ghostty-build runs the shader check; set LOOPFLOW_GHOSTTY_SOURCE to run it here"
+◇ Test "Different terminals retain independent report ids and source attribution" started.
+◇ Test "Saved readings cannot resurrect program reports or Available" started.
+◇ Test "the app selects its bundled helper" started.
+◇ Test "Cleared reporter records do not revive inferred activity or Available" started.
+➜ Test "Session rows restore their shell and companion layout across navigation" skipped: "Optional display-session diagnostic"
+◇ Test aRecordFromAnEarlierRevisionReadsItsReceiptAndNeverResends() started.
+◇ Test togglesRetainShellTabsAndFileDrafts() started.
+◇ Test "the launcher's terminal and agent output policy are dropped; account authority stays" started.
+◇ Test "New session prepares Task Work without running its Graph and uses the returned checkout" started.
+◇ Test "a missing bundled helper never falls through to PATH" started.
+◇ Test "finite queries drain both full pipes while sending a large draft" started.
+◇ Test "Contrast is an overrideable theme default" started.
+◇ Test "oversized CLI responses fail instead of retaining unbounded output" started.
+◇ Test "An unused terminal releases without constructing Find during deinitialization" started.
+◇ Test "canceling a request reaps only its CLI child" started.
+◇ Test "development launcher preserves the selected Machine registry" started.
+◇ Test storageFailurePrecedesSendingAndRecordsHaveNoOutcomeFields() started.
+◇ Test "query completion does not await inherited pipes in surviving descendants" started.
+◇ Test "Find distinguishes pending, empty and selected results" started.
+◇ Test aReceiptForAnotherRequestIsRefusedAndNothingIsResent() started.
+◇ Test githubReadingDistinguishesPendingFailedAndUnavailableChecks() started.
+◇ Test removingPublicationClearsRetainedDiffPresentation() started.
+◇ Test "Copy confirmation counts empty lines and ignores the final line ending" started.
+◇ Test "Separate catalogs retain invalid entries and compiled composition" started.
+◇ Test "a stalled CLI request times out and reaps its child" started.
+◇ Test customizeOpensTheEditorInPlaceAndRevertRestoresTheBuiltin() started.
+◇ Test "parses the objective from GOAL.md" started.
+➜ Test "Cmd-K searches over retained PTYs and restores terminal input" skipped: "Optional display-session diagnostic"
+◇ Test "Occurrence state keeps pass completions while iteration keeps each edge count" started.
+◇ Test "Selection, focus, links and failures have independent roles" started.
+➜ Test projection() skipped.
+◇ Test "A Graph process's length and the two return ports" started.
+◇ Test paneForkedMeanwhileDoesNotHoldTheWriter() started.
+◇ Test "Status wording, selection and focus survive every appearance" started.
+◇ Test "Status chip colors follow the supplied palette, independently of native appearance" started.
+◇ Test "returns nil when GOAL.md is absent" started.
+◇ Test "Template disclosure keeps repeated and empty groups, XOR paths and both returns" started.
+➜ Test "Task navigation reveals the existing conversation and keeps the Workflow and companions" skipped: "Optional display-session diagnostic"
+◇ Test "Task due date appears beside the conversation" started.
+◇ Test "Toggling both tools away keeps conversation entry in the session pane" started.
+◇ Test "Captured numeric IDs preserve nested containment and independent return counts" started.
+◇ Test "A queued or failed primary shows opening or its failure with Retry, never an Open gate" started.
+◇ Test "A workspace saved under another Machine is dropped" started.
+◇ Test "A stopped Graph preserves the last Process outcome" started.
+◇ Test "a private home selects its explicit helper before the bundled one" started.
+◇ Test "Text and indicators retain contrast on actual composited surfaces" started.
+◇ Test "Saved text never claims a live process or a legal mutation" started.
+◇ Test "A returning launch restores its cache before any read finishes" started.
+◇ Test "A failed refresh keeps the saved workspace under one truthful status" started.
+◇ Test "A delayed same-path Session read cannot populate a replacement Machine" started.
+◇ Test "Prepared checkout receipts retain the owning Machine and require its evidence" started.
+◇ Test publishedDiffDisclosesMissingAndPartialPatchesAndRenames() started.
+◇ Test "A preparation reply behind its Session frame leaves the person's focus alone" started.
+◇ Test "A first launch has one loading message" started.
+◇ Test "A refresh that finishes after a selection change keeps the newer selection" started.
+◇ Test "A Wave named after another Wave's ID keeps its own primary without repeated preparation" started.
+◇ Test "Close and a failure keep a person's next action" started.
+◇ Test "Repository and Wave primaries open on load beside the Task bound, before any selection" started.
+◇ Test theConnectionRowNamesTheObservedForkAndDatesSourceLiveness() started.
+◇ Test bundledNoticesAreReadableOffline() started.
+◇ Test "Another window in the same process opens from the workspace already held" started.
+◇ Test "Collapsed panes offer Open conversation when the named Session isn't held" started.
+◇ Test "A Session read that finishes after a repository switch saves nothing" started.
+◇ Test "A started Task replaces its refused reveal with an automatic Start" started.
+➜ Test measureBoundary() skipped.
+◇ Test "connected waves keep only this repo's rows" started.
+◇ Test "a development worktree sees the origin registry rows" started.
+◇ Test "Fresh restart prepares the saved conversations and honors saved Close" started.
+◇ Test goldenSlotsMatchJacksLayoutAndFocusGrowsInPlace() started.
+◇ Test "Focusing a tile past the bound starts its conversation, as selection does" started.
+◇ Test "Connection feedback never changes terminal geometry" started.
+◇ Test "An unchanged poll writes nothing" started.
+◇ Test "A board past the bound opens its page; a turn opens the arriving tile and no other" started.
+◇ Test "A saved launch repository opens without git and is checked afterwards" started.
+◇ Test "A failed load Start shows its failure, never a Start offer" started.
+◇ Test "A reveal refused after its Task started leaves no offer and starts" started.
+◇ Test "Explicit repository choices resolve to their own roots" started.
+◇ Test "Every working tile on the page opens with no click, two preparations at a time" started.
+◇ Test loopflowUsesNeutralWorkSelection() started.
+◇ Test leftoversStayOpenWithTheRustLinesAndADoneButton() started.
+◇ Test customInstallationSurvivesLaunchWithoutTheInstallEnvironment() started.
+◇ Test "A slow provider keeps the saved workspace usable under Updating…" started.
+➜ Test measureStartup() skipped.
+◇ Test sameNamedRepositoriesOpenOnlyWhenQualified() started.
+◇ Test "Only the most recently saved repositories are kept" started.
+◇ Test onlyTheInstalledAppUpdatesItself() started.
+◇ Test "lf history composes Work filters before the bounded result" started.
+◇ Test desktopCodeContainsOnlyTheMachineAddress() started.
+◇ Test "no primary pane surfaces registered-wave vocabulary or a raw sync timestamp" started.
+◇ Test "lf wave status maps the work hierarchy onto the wave" started.
+◇ Test failureKeepsThePreviewAndOffersRetry() started.
+◇ Test "lf wave show is one optionally scoped machine query" started.
+◇ Test "lf usage preserves direct Run evidence through a Work drill" started.
+◇ Test completeHistoryAndDraftRefreshUseOnlyFixtureTransport() started.
+◇ Test "lf wave list can be decoded once for every repo" started.
+◇ Test "Task workspace queries preserve paths and binary/truncation evidence, outside the checkout" started.
+◇ Test "Session adoption returns the served Task and preserves uncertain failure" started.
+◇ Test "Paired task and dashboard actions keep distinct wire kinds" started.
+◇ Test "Recording a remote reading preserves its Machine and transport" started.
+◇ Test "Graph logs read captured execution from the content Machine, never a peer path locally" started.
+◇ Test settingsDecodeTheMachinesConfiguration() started.
+◇ Test "A link's reveal refused after its Task started leaves no offer and starts" started.
+◇ Test aNewBundleVersionIsAdoptedOnce() started.
+◇ Test "Served writes encode as Rust's Write" started.
+◇ Test "lf doctor decodes every check" started.
+◇ Test "Sessions list and recover through the Session CLI" started.
+◇ Test "Fresh repository load prefetches working Tasks without saved visits and honors Close" started.
+◇ Test previewRendersRustSentencesAndEnablesRemove() started.
+◇ Test "Step history uses the exact process on the content Machine" started.
+◇ Test "Served reads encode as Rust's Read" started.
+◇ Test "A working Task behind both preparation slots shows opening, never Open conversation" started.
+◇ Test "Restart keeps the selected Task but does not retain stale completion or location" started.
+◇ Test unresolvedGraphAndRetainedSessionSurviveHiddenHistory() started.
+◇ Test "Settings inspection retains skill and authored occurrence selectors" started.
+◇ Test "lf status keeps unavailable evidence unavailable" started.
+◇ Test waveBoardShowsTheWaveAndStartStaysWithRust() started.
+◇ Test numberGlyphsSuffixAndCheckboxDoNotMoveWhenEditing() started.
+◇ Test "waves hold one stable alphabetical order, not a status regrouping" started.
+◇ Test "Absent, corrupt and incompatible files load as nothing and are removed" started.
+◇ Test devRunsNoUpdater() started.
+◇ Test theAppFollowsTheStreamLfInstallRecorded() started.
+◇ Test "a failed lf query surfaces as an error" started.
+◇ Test "Session pages return a stable continuation and preserve renamed records" started.
+➜ Test "⌘T and ⌘W add and close shell tabs without replacing the original terminal" skipped: "Optional display-session diagnostic"
+◇ Test "lf wave show requests every repository when no Wave narrows it" started.
+◇ Test rollingDurationCrossesDSTWithoutCalendarDayArithmetic() started.
+◇ Test inlineEditingAppliesCancelsAndRemembersRange() started.
+◇ Test closedPagesJoinOpenTasksOnceAndReachTheirRange() started.
+◇ Test "a renamed Wave keeps its plan; a replacement at its old address does not inherit it" started.
+◇ Test rollingBoundariesAndValidation() started.
+◇ Test theMostUrgentStateNamesTheTask() started.
+◇ Test "Activity requires Session and input identity instead of unrelated process fallbacks" started.
+◇ Test noConversationOrAnUnavailableReadingSaySo() started.
+◇ Test settledMissingCheckoutDoesNotBypassHistoryWindow() started.
+◇ Test case passing 2 arguments axis → .vertical, dark → false to "Nested corner centers coincide and split gaps match the outer inset" started.
+◇ Test case passing 2 arguments axis → .horizontal, dark → false to "Nested corner centers coincide and split gaps match the outer inset" started.
+◇ Test case passing 2 arguments axis → .horizontal, dark → true to "Nested corner centers coincide and split gaps match the outer inset" started.
+◇ Test case passing 2 arguments axis → .vertical, dark → true to "Nested corner centers coincide and split gaps match the outer inset" started.
+◇ Test "A taskless exact link selects its conversation without enumerating history" started.
+◇ Test case passing 1 argument theme → .light to "The window modifier follows preview, Cancel and Apply" started.
+◇ Test "Sessions fixture preserves the unresolved Session projection" started.
+◇ Test "Task execution names who started its Graph and who stopped Auto-Ship, requiring every mark" started.
+◇ Test screenReadsDecodeTheirCompletePayloads() started.
+◇ Test "Composed delivery keeps completion independent of the running Graph and its arrival" started.
+◇ Test case passing 1 argument planning → "absent-task" to "Bound Sessions retain ancestry and panes across planning loss and return" started.
+◇ Test contextExplanationPreservesAvailabilityAndProvenance() started.
+◇ Test "Conversation history retains native evidence and unknown LfProcess" started.
+◇ Test case passing 1 argument planning → "no-current-project" to "Bound Sessions retain ancestry and panes across planning loss and return" started.
+◇ Test "Work Activity fixture carries Session records tagged with Work" started.
+◇ Test case passing 1 argument planning → "no-waves" to "Bound Sessions retain ancestry and panes across planning loss and return" started.
+◇ Test "Work status fixture preserves every status" started.
+◇ Test case passing 1 argument scheme → .dark to "Shipping Tasks sit under an Autonomous heading below the Working Tasks, in light and dark" started.
+◇ Test case passing 1 argument scheme → .light to "Shipping Tasks sit under an Autonomous heading below the Working Tasks, in light and dark" started.
+◇ Test repoPeopleCarryEmailsAndOptionalGitHubUsers() started.
+◇ Test "Task comments keep the complete thread and require every field" started.
+◇ Test "Task acquisition evidence is required independently of delivery" started.
+◇ Test "Task work retains conversations, Graphs and command history" started.
+◇ Test "Session Graph membership mirrors every Rust projection and is required" started.
+◇ Test "Session page retains complete enumeration and requires entries" started.
+◇ Test "Metadata does not manufacture a live state or current occurrence" started.
+◇ Test case passing 1 argument pinned → false to "Selecting Work closes Find Work and preserves the sidebar preference" started.
+◇ Test case passing 1 argument pinned → true to "Selecting Work closes Find Work and preserves the sidebar preference" started.
+◇ Test workLinksCarryReadableLabelsRoutesAndConversationRelation() started.
+◇ Test "Session states follow process evidence" started.
+◇ Test sessionOpenIntentsDistinguishExplicitResumeFromPassiveReveal() started.
+◇ Test taskPlanningExplanationsPreserveIntentAndEffects() started.
+◇ Test "Task overview reads its graph without diagnostic history" started.
+◇ Test case passing 1 argument truncated → true to "Incomplete planning preserves the repository's selected Task" started.
+◇ Test sessionEncodingKeepsRequiredNullableTurnFields() started.
+◇ Test "closed Task page carries Wave status rows and their continuation" started.
+◇ Test "Task completion preserves execution and dated unstarted Tasks" started.
+◇ Test "Watch frames decode through their part and keep the wire text a saved workspace needs" started.
+◇ Test "Process pages retain command outcomes, caller evidence and continuation" started.
+◇ Test case passing 1 argument destination → "history" to "A delayed historical reference cannot replace newer navigation" started.
+◇ Test case passing 1 argument destination → "task" to "A delayed historical reference cannot replace newer navigation" started.
+✔ Test canonical_ids_workspace_keys_decode_canonically_without_changing_paths() passed after 0.009 seconds.
+◇ Test "canonical_ids: structured Session IDs decode canonically; native bytes stay exact" started.
+◇ Test waveRenamedReceiptDecodesItsLeftovers() started.
+◇ Test "Direction preserves named and historical authors" started.
+◇ Test screenReadsRejectSelectedAnswers() started.
+◇ Test repositoryIdentityPreservesExplicitLocalLocators() started.
+◇ Test case passing 1 argument seconds → 29 to "A recovered part begins a fresh healthy interval" started.
+◇ Test "Context report keeps unknown sources distinct from zero" started.
+◇ Test case passing 1 argument destination → "repo" to "A delayed historical reference cannot replace newer navigation" started.
+◇ Test sessionResumeExplanationsPreserveIntentAndUnavailableEvidence() started.
+◇ Test taskRunExplanationsPreserveActionsAndMissingEvidence() started.
+◇ Test case passing 1 argument seconds → 29 to "A quiet healthy observation resets only at thirty seconds" started.
+◇ Test case passing 1 argument seconds → 30 to "A quiet healthy observation resets only at thirty seconds" started.
+◇ Test case passing 1 argument truncated → false to "Incomplete planning preserves the repository's selected Task" started.
+◇ Test desktopTextDistinguishesEmptyAndUnavailable() started.
+◇ Test case passing 1 argument withReadings → true to "Repeated failures back off to thirty seconds with or without successful frames" started.
+◇ Test waveAddedReceiptDecodesItsLeftover() started.
+◇ Test case passing 1 argument seconds → 30 to "A recovered part begins a fresh healthy interval" started.
+◇ Test "roadmap fixture preserves sections and durable Task references" started.
+◇ Test "A Session move report round-trips and summarizes every outcome" started.
+◇ Test desktopOpeningDoesNotConfuseLaunchWithUsability() started.
+◇ Test case passing 1 argument withReadings → false to "Repeated failures back off to thirty seconds with or without successful frames" started.
+◇ Test case passing 1 argument alreadyRetained → false to "Attention opens the exact retained conversation and Back returns to interrupted Work" started.
+◇ Test case passing 1 argument alreadyRetained → true to "Attention opens the exact retained conversation and Back returns to interrupted Work" started.
+◇ Test taskFilesFramesKeepInvalidationSeparateFromHeartbeat() started.
+◇ Test "Peer planning keeps independent receipts" started.
+◇ Test "Configured Project selection survives competing statuses and provider renames" started.
+◇ Test desktopActionRequestsAndReceiptRoundTrip() started.
+◇ Test "wave detail fixture preserves Project and Task identity" started.
+◇ Test "A Graph process keeps its launched graph and every step, and requires each field" started.
+◇ Test case passing 2 arguments state → "detached", expected → .prepared to "Showing a pane resumes saved history and leaves external input alone" started.
+◇ Test case passing 2 arguments state → "active", expected → .elsewhere to "Showing a pane resumes saved history and leaves external input alone" started.
+◇ Test case passing 2 arguments state → "closed", expected → .prepared to "Showing a pane resumes saved history and leaves external input alone" started.
+◇ Test desktopInspectionRetainsUnavailableWorkAndExactPanes() started.
+◇ Test taskCheckoutExplanationsKeepProposalsSeparateFromAdmission() started.
+◇ Test "unplaced Wave fixture retains planning without a Machine" started.
+◇ Test "Every Session kind retains its identity without a Run field" started.
+◇ Test "Activity retains unknown record identity without a PID" started.
+◇ Test screenReadOperationsKeepCliAndWireNames() started.
+◇ Test case passing 1 argument state → "unstarted" to "Task lifecycle controls remain available without a Workflow" started.
+◇ Test "A Graph whose process exited early reads as stopped and requires its name" started.
+◇ Test case passing 1 argument state → "canceled" to "Task lifecycle controls remain available without a Workflow" started.
+◇ Test "Planning delivery retains uncertainty, errors and both conflict values" started.
+◇ Test case passing 1 argument state → "completed" to "Task lifecycle controls remain available without a Workflow" started.
+◇ Test "Historical Graph Session feedback survives without completion controls" started.
+◇ Test waveRemovalPreviewDecodesEveryField() started.
+◇ Test case passing 2 arguments outcome → "success", restored → false to "Known repository entry presents its scene before admitting a new link" started.
+◇ Test "metric portfolio fixture preserves every closed evidence payload" started.
+◇ Test case passing 2 arguments outcome → "failure", restored → false to "Known repository entry presents its scene before admitting a new link" started.
+◇ Test case passing 2 arguments outcome → "success", restored → true to "Known repository entry presents its scene before admitting a new link" started.
+◇ Test case passing 2 arguments outcome → "cancellation", restored → true to "Known repository entry presents its scene before admitting a new link" started.
+◇ Test taskLocationsRetainFreshnessAndUnavailableEvidence() started.
+◇ Test case passing 1 argument full → false to "Saved unfinished Tasks fill spare warmth without evicting working Tasks" started.
+◇ Test case passing 2 arguments outcome → "cancellation", restored → false to "Known repository entry presents its scene before admitting a new link" started.
+◇ Test case passing 1 argument identityChanged → true to "Reopened content stays visible while resolution stalls or fails" started.
+◇ Test case passing 2 arguments outcome → "failure", restored → true to "Known repository entry presents its scene before admitting a new link" started.
+◇ Test case passing 1 argument fails → true to "Reset leaves the Session live while preparing and keeps updates when it fails" started.
+◇ Test case passing 1 argument result → "available" to "Explicit reopen revalidates a cached observation failure" started.
+◇ Test case passing 1 argument result → "refused" to "Explicit reopen revalidates a cached observation failure" started.
+◇ Test case passing 1 argument ended → false to "A prepared Task target enters its terminal without another preparation" started.
+◇ Test case passing 1 argument identityChanged → false to "Reopened content stays visible while resolution stalls or fails" started.
+◇ Test case passing 1 argument full → true to "Saved unfinished Tasks fill spare warmth without evicting working Tasks" started.
+◇ Test case passing 1 argument result → "unavailable" to "Explicit reopen revalidates a cached observation failure" started.
+◇ Test case passing 1 argument fails → false to "Reset leaves the Session live while preparing and keeps updates when it fails" started.
+◇ Test case passing 1 argument ended → true to "A prepared Task target enters its terminal without another preparation" started.
+◇ Test case passing 1 argument agent → "claude" to "Provider switching keeps the Session and prepares an explicit provider launch" started.
+◇ Test case passing 1 argument agent → "codex" to "Provider switching keeps the Session and prepares an explicit provider launch" started.
+◇ Test case passing 1 argument agent → "opencode" to "Provider switching keeps the Session and prepares an explicit provider launch" started.
+◇ Test case passing 1 argument agent → "pi" to "Provider switching keeps the Session and prepares an explicit provider launch" started.
+✔ Test "Session input history retains distinct native results and unknown Process" passed after 0.012 seconds.
+◇ Test case passing 1 argument replacing → false to "Polling preserves the prepared interactive launch command" started.
+◇ Test case passing 1 argument replacing → true to "Polling preserves the prepared interactive launch command" started.
+✘ Test "A server command completes from an async caller" recorded an issue at BuiltLf.swift:33:13: Expectation failed: (FileManager.default → <NSFileManager: 0x10099f060>).isExecutableFile(atPath: path → "/Users/jack/src/loopflow.loo-895-fix-or-delete/target/debug/lf")
+↳ Build with cargo build -p loopflow --bin lf
+✘ Test desktopWritesReadBackThroughCLI() recorded an issue at BuiltLf.swift:33:13: Expectation failed: (FileManager.default → <NSFileManager: 0x10099f060>).isExecutableFile(atPath: path → "/Users/jack/src/loopflow.loo-895-fix-or-delete/target/debug/lf")
+↳ Build with cargo build -p loopflow --bin lf
+◇ Test case passing 1 argument scheme → .light to "A Wave view part's hover buttons clear the tile's rounded corner in light and dark" started.
+◇ Test case passing 1 argument scheme → .dark to "A Wave view part's hover buttons clear the tile's rounded corner in light and dark" started.
+◇ Test case passing 1 argument resource → .task("original") to mountedPresentationRetiresNormalAndPromotedResults(resource:) started.
+◇ Test case passing 1 argument resource → .session("original") to mountedPresentationRetiresNormalAndPromotedResults(resource:) started.
+◇ Test case passing 1 argument state → .idle to "Validated reports win over runtime inference" started.
+◇ Test case passing 1 argument state → .working to "Validated reports win over runtime inference" started.
+◇ Test case passing 1 argument state → .done to "Validated reports win over runtime inference" started.
+◇ Test case passing 1 argument state → .blocked to "Validated reports win over runtime inference" started.
+◇ Test case passing 1 argument state → .error to "Validated reports win over runtime inference" started.
+◇ Test "Browser tabs open once; tab changes keep the occurrence and missing evidence keeps the owner" started.
+◇ Test "Opening a conversation switches the session pane in place" started.
+◇ Test "A Task workspace holds its three designated panes; tools start hidden" started.
+◇ Test "Close hides a pane and Undo shows it again; the last visible pane stays" started.
+◇ Test "Focus and close follow split geometry instead of tree order" started.
+◇ Test "Shell tabs accumulate in one pane; the last one closing hides it" started.
+◇ Test "A portable layout restores the same panes, tabs and visibility" started.
+◇ Test "Moving, zooming and resizing rearrange the same three panes" started.
+◇ Test "A delivered Wave link selects that Wave in its repository window" started.
+◇ Test dashboardKeepsIdentitySeparateFromItsQuery() started.
+◇ Test portablePaneRecordRetainsDraftAndZoomSeparatelyFromFocus() started.
+◇ Test queryPlansArriveFromTheirSubscription() started.
+◇ Test everyStateRustSendsDecodes() started.
+◇ Test viewPlanRetainsOccurrencesAndMissingPrimaryWithoutExecution() started.
+◇ Test "Row is one keyboard-operable selection control" started.
+◇ Test "Row shows wave display name" started.
+◇ Test case passing 1 argument stderr → false to "oversized CLI responses fail instead of retaining unbounded output" started.
+◇ Test case passing 1 argument stderr → true to "oversized CLI responses fail instead of retaining unbounded output" started.
+◇ Test "Row shows open-task count only when nonzero" started.
+◇ Test "resizing updates the split between two panes" started.
+◇ Test malformedEnvelopesThrow() started.
+◇ Test "Row renders an operational lens" started.
+◇ Test "a nested tree round-trips through Codable" started.
+◇ Test fieldsKeepEachValueVerbatim() started.
+◇ Test "replacing pane content preserves identity and tree shape" started.
+◇ Test "removing the only pane returns nil" started.
+◇ Test "removing a pane collapses its split back to the sibling" started.
+◇ Test "Pane locations preserve terminal capture and refuse unavailable file owners" started.
+◇ Test "Designated layouts name each pane once; only Tasks have tools" started.
+◇ Test "Pruning nested panes retains surviving occurrences, axes and ratios" started.
+◇ Test "splitting a leaf yields two panes under a split" started.
+◇ Test "the error detail state discards volatile detail under a framed footer" started.
+◇ Test "live UI-test mode keeps production registry reads" started.
+◇ Test "the loading detail state withholds the snapshot and keeps the loading affordance" started.
+◇ Test "the stable list preserves active work and Wave ancestry" started.
+◇ Test "detailState reads LOOPFLOW_UI_TEST_DETAIL_STATE" started.
+◇ Test case passing 1 argument dark → false to "Selection, focus, links and failures have independent roles" started.
+◇ Test case passing 1 argument dark → true to "Selection, focus, links and failures have independent roles" started.
+◇ Test case passing 1 argument theme → .light to "Status wording, selection and focus survive every appearance" started.
+◇ Test case passing 1 argument theme → .dark to "Status wording, selection and focus survive every appearance" started.
+◇ Test case passing 1 argument theme → .lightImport to "Status wording, selection and focus survive every appearance" started.
+◇ Test case passing 1 argument theme → .darkImport to "Status wording, selection and focus survive every appearance" started.
+◇ Test case passing 1 argument theme → .bundled to "Status wording, selection and focus survive every appearance" started.
+◇ Test case passing 1 argument outcome → "succeeded" to "A stopped Graph preserves the last Process outcome" started.
+◇ Test case passing 1 argument outcome → "failed" to "A stopped Graph preserves the last Process outcome" started.
+◇ Test case passing 1 argument outcome → "interrupted" to "A stopped Graph preserves the last Process outcome" started.
+◇ Test "The heartbeat counts reads and kills, and warns at a storm of cancelled reads" started.
+◇ Test escapedStringsDecode() started.
+◇ Test case passing 1 argument theme → "Loopflow Light" to "Text and indicators retain contrast on actual composited surfaces" started.
+◇ Test case passing 1 argument theme → "Loopflow Dark" to "Text and indicators retain contrast on actual composited surfaces" started.
+◇ Test case passing 1 argument theme → "Hearth" to "Text and indicators retain contrast on actual composited surfaces" started.
+◇ Test case passing 1 argument theme → "Linen" to "Text and indicators retain contrast on actual composited surfaces" started.
+◇ Test case passing 1 argument theme → "Aubergine" to "Text and indicators retain contrast on actual composited surfaces" started.
+◇ Test "A sample of this process reads real vitals" started.
+◇ Test case passing 1 argument theme → "Catppuccin Latte" to "Text and indicators retain contrast on actual composited surfaces" started.
+◇ Test case passing 1 argument theme → "Catppuccin Mocha" to "Text and indicators retain contrast on actual composited surfaces" started.
+◇ Test case passing 1 argument theme → "Celadon" to "Text and indicators retain contrast on actual composited surfaces" started.
+◇ Test case passing 1 argument theme → "Clay" to "Text and indicators retain contrast on actual composited surfaces" started.
+◇ Test case passing 1 argument theme → "Flexoki Dark" to "Text and indicators retain contrast on actual composited surfaces" started.
+◇ Test case passing 1 argument theme → "Flexoki Light" to "Text and indicators retain contrast on actual composited surfaces" started.
+◇ Test case passing 1 argument theme → "Frost" to "Text and indicators retain contrast on actual composited surfaces" started.
+◇ Test case passing 1 argument theme → "Gruvbox Dark" to "Text and indicators retain contrast on actual composited surfaces" started.
+◇ Test case passing 1 argument theme → "Gruvbox Light" to "Text and indicators retain contrast on actual composited surfaces" started.
+◇ Test case passing 1 argument theme → "Moss" to "Text and indicators retain contrast on actual composited surfaces" started.
+◇ Test case passing 1 argument theme → "Night Owl" to "Text and indicators retain contrast on actual composited surfaces" started.
+◇ Test case passing 1 argument theme → "Noctis Lilac" to "Text and indicators retain contrast on actual composited surfaces" started.
+◇ Test case passing 1 argument theme → "Onyx" to "Text and indicators retain contrast on actual composited surfaces" started.
+◇ Test case passing 1 argument theme → "Pewter" to "Text and indicators retain contrast on actual composited surfaces" started.
+◇ Test case passing 1 argument theme → "Phosphor" to "Text and indicators retain contrast on actual composited surfaces" started.
+◇ Test case passing 1 argument theme → "Rosewood" to "Text and indicators retain contrast on actual composited surfaces" started.
+◇ Test case passing 1 argument theme → "Sea Glass" to "Text and indicators retain contrast on actual composited surfaces" started.
+◇ Test case passing 1 argument theme → "Solarized Dark" to "Text and indicators retain contrast on actual composited surfaces" started.
+◇ Test "Lines join lf.log in lf's shape, ending with the process and build that wrote them" started.
+◇ Test case passing 1 argument theme → "Vellum" to "Text and indicators retain contrast on actual composited surfaces" started.
+◇ Test case passing 1 argument theme → "171924/CAD2EF" to "Text and indicators retain contrast on actual composited surfaces" started.
+◇ Test case passing 1 argument theme → "FFF4DF/34291F" to "Text and indicators retain contrast on actual composited surfaces" started.
+◇ Test case passing 1 argument theme → "747474/FFFFFF" to "Text and indicators retain contrast on actual composited surfaces" started.
+◇ Test case passing 1 argument theme → "330909/FFEEDD" to "Text and indicators retain contrast on actual composited surfaces" started.
+◇ Test case passing 1 argument theme → "888888/000000" to "Text and indicators retain contrast on actual composited surfaces" started.
+◇ Test case passing 1 argument closed → false to "Fresh restart prepares the saved conversations and honors saved Close" started.
+◇ Test case passing 1 argument closed → true to "Fresh restart prepares the saved conversations and honors saved Close" started.
+◇ Test localFilesKeepTheirContentLocationAndDraftWithoutPlanning() started.
+◇ Test case passing 1 argument recordFirst → false to "Recording a remote reading preserves its Machine and transport" started.
+◇ Test case passing 1 argument recordFirst → true to "Recording a remote reading preserves its Machine and transport" started.
+◇ Test case passing 1 argument closed → false to "Fresh repository load prefetches working Tasks without saved visits and honors Close" started.
+◇ Test case passing 1 argument closed → true to "Fresh repository load prefetches working Tasks without saved visits and honors Close" started.
+◇ Test "Directive updates keep their Task target and distinguish rejected writes from unavailable refreshed planning" started.
+◇ Test case passing 1 argument machineUnavailable → false to "Restart keeps the selected Task but does not retain stale completion or location" started.
+◇ Test case passing 1 argument machineUnavailable → true to "Restart keeps the selected Task but does not retain stale completion or location" started.
+✔ Test "⌘` and ⌘⇧` leave the terminal to cycle windows; ⌃` and plain ` stay with it" passed after 0.025 seconds.
+✔ Test "Wave counts do not claim Task health or process liveness" passed after 0.025 seconds.
+✔ Test "unavailable task evidence stays unknown with its reason, never black" passed after 0.025 seconds.
+✔ Test "every lens carries a reason for VoiceOver" passed after 0.025 seconds.
+✔ Test "a project with no runtime and no tasks is off" passed after 0.025 seconds.
+✔ Test "Task conditions map to lens colors one-to-one" passed after 0.025 seconds.
+✔ Test "a Task review step is blue and wins over Project planning state" passed after 0.026 seconds.
+✔ Test "a red Task wins over a black sibling" passed after 0.025 seconds.
+✔ Test "view model exposes registry identity" passed after 0.025 seconds.
+✔ Test "Mac metric summary distinguishes official health, candidates, and contract issues" passed after 0.026 seconds.
+✔ Test "packaged app resolves the SwiftPM bundle from Contents/Resources" passed after 0.026 seconds.
+✔ Test "a project with only clean tasks is genuinely black" passed after 0.026 seconds.
+◇ Test case passing 1 argument waveScoped → false to "A taskless exact link selects its conversation without enumerating history" started.
+✔ Test "Nothing is written before a launch begins" passed after 0.025 seconds.
+✔ Test "objective tagline uses the first authored line" passed after 0.025 seconds.
+✔ Test "unreadable task evidence surfaces as unknown, not a silent black" passed after 0.025 seconds.
+✔ Test "an unset chapter target preserves the reading without failing the measure" passed after 0.026 seconds.
+✔ Test "Host Copy, Paste and Find do not consume modified TUI shortcuts" passed after 0.025 seconds.
+✔ Test "unavailable chapter planning retains the reading and never claims no target" passed after 0.026 seconds.
+✔ Test destinationsMatchRustWithoutIndependentScopeOrPath() passed after 0.026 seconds.
+✔ Test "unknown is a lit lens, distinct from the off black" passed after 0.026 seconds.
+✔ Test catalogueIncludesFeatureCategory() passed after 0.027 seconds.
+✔ Test "task lens is the shared level and reason, verbatim" passed after 0.028 seconds.
+✔ Test "the shared W2-123 fixture maps every state verbatim" passed after 0.028 seconds.
+✔ Test "the most demanding Task condition wins" passed after 0.028 seconds.
+✔ Test "exit() names the first frame that called it outside the system libraries" passed after 0.028 seconds.
+✔ Test "The recommended action explains itself" passed after 0.029 seconds.
+✔ Test "Each Task lands in the group its shared evidence dictates" passed after 0.029 seconds.
+✔ Test "Task actions come from the shared legal-action model" passed after 0.029 seconds.
+✔ Test "NOW flattens across waves and drops empty groups" passed after 0.029 seconds.
+✔ Test "a successful refresh clears the stale warning" passed after 0.029 seconds.
+✔ Test "a failed refresh discards volatile status and metric evidence" passed after 0.029 seconds.
+✔ Test "A quit Apple event names why it was sent" passed after 0.030 seconds.
+✔ Test canonical_ids_reopening_session_preserves_pane_and_focus() passed after 0.032 seconds.
+✔ Test "Mac metric rows render the shared DTO fields without recomputing evidence" passed after 0.031 seconds.
+✔ Test "A signal's preformatted line is NDJSON naming the signal and the time it is stamped with" passed after 0.031 seconds.
+✔ Test "Shared fixture preserves all Task conditions and the spoken reason" passed after 0.032 seconds.
+✔ Test "A recovered part begins a fresh healthy interval" with 2 test cases passed after 0.031 seconds.
+✔ Test "A quiet healthy observation resets only at thirty seconds" with 2 test cases passed after 0.031 seconds.
+✔ Test "Repeated failures back off to thirty seconds with or without successful frames" with 2 test cases passed after 0.032 seconds.
+✔ Test "An unavailable part cannot be healed by another part or checkpoint" passed after 0.032 seconds.
+✔ Test "A launch names its process, bundle, revision and macOS" passed after 0.033 seconds.
+✔ Test "A failure after a healthy interval keeps the earned reset" passed after 0.032 seconds.
+✔ Test "a readable status with no chapter does not revive cached KRs" passed after 0.034 seconds.
+✔ Test "A launch records one exit, whichever path reports first" passed after 0.033 seconds.
+✔ Test "Leaving an unavailable part's scope permits recovery" passed after 0.032 seconds.
+✔ Test "New conversation binds the Task without selecting an operating skill" passed after 0.034 seconds.
+✔ Test "command blocks are full-width bands on the padded grid's rows" passed after 0.034 seconds.
+✔ Test "non-git paths resolve unchanged" passed after 0.035 seconds.
+✔ Test "A launch records each milestone once, with the app version and no arguments" passed after 0.036 seconds.
+✔ Test "a right-click on the selected block keeps it; anywhere else goes to the terminal" passed after 0.035 seconds.
+✔ Test replacementAndChildLifetime() passed after 0.035 seconds.
+✔ Test "only a reported failure has a red gutter" passed after 0.035 seconds.
+✔ Test errorsBranchOnTheirCode() passed after 0.034 seconds.
+✔ Test gapsAndOversizedFramesRequireReconnect() passed after 0.035 seconds.
+✔ Test controlGrantWaitsForTheReplacementScreenAndLossRevokesInput() passed after 0.035 seconds.
+✔ Test "missing state has no selection" passed after 0.034 seconds.
+✔ Test unansweredHeartbeatRequiresReconnect() passed after 0.035 seconds.
+✔ Test configurationUsesTheSharedDestinationContract() passed after 0.035 seconds.
+✔ Test remoteDirectoryAdvancesTheStreamWithoutChangingLocalState() passed after 0.034 seconds.
+✔ Test rustOwnerSnapshotRendersOnceAfterGeometryAcrossEveryReadBoundary() passed after 0.035 seconds.
+✔ Test readinessProbesWithoutHello() passed after 0.035 seconds.
+✔ Test sessionAdoptionSharesTheRustWriteContract() passed after 0.035 seconds.
+✔ Test ownerReportsAndClearUseTheSharedStatusShapeWithoutChangingClaims() passed after 0.035 seconds.
+✔ Test "a header is the marked prompt row, looked for only where a prompt can be" passed after 0.035 seconds.
+✔ Test ticketsAdmitTerminalAndBulkConnections() passed after 0.035 seconds.
+✔ Test connectionErrorsHaveNoRequestId() passed after 0.035 seconds.
+✔ Test cancellationDropsDeferredFramesAndLatePayloads() passed after 0.035 seconds.
+✔ Test subscriptionsCarryTheirRequestId() passed after 0.035 seconds.
+✔ Test heartbeatUsesOwnerProtocolWithoutTakingControlOrConsumingAttachmentReply() passed after 0.035 seconds.
+✘ Test "A server command completes from an async caller" failed after 0.035 seconds with 1 issue.
+✔ Test wrongRequestAndNestedTicketsCannotReplaceThePayload() passed after 0.035 seconds.
+✔ Test configurationEncodingsKeepTheirKindsAndFields() passed after 0.035 seconds.
+✔ Test missingNoticesReportFailure() passed after 0.035 seconds.
+✔ Test consecutiveTicketsRetainOrderWhileOtherIDsFlow() passed after 0.034 seconds.
+✔ Test aWaitEndsAfterTheReadingThatReachedIt() passed after 0.035 seconds.
+✔ Test "selected repository round-trips" passed after 0.035 seconds.
+✔ Test helloAndWelcomeNegotiateTheRevision() passed after 0.035 seconds.
+✔ Test eventsAreSequencedBeforeLargeReadingsDeferTheirDelivery() passed after 0.035 seconds.
+✔ Test stalledTransferHasABoundedQueue() passed after 0.035 seconds.
+✔ Test primarySessionSelectionUsesTheSharedViewPlanRead() passed after 0.034 seconds.
+✔ Test theMirrorSpeaksTheDescribedRevision() passed after 0.035 seconds.
+✔ Test typedEventsCarryTheirPayloadAndUnknownKindsStayLocal() passed after 0.034 seconds.
+✔ Test mobileOperationsUseTheSharedFixtures() passed after 0.035 seconds.
+✔ Test "the app selects its bundled helper" passed after 0.034 seconds.
+✔ Test lookupDispositionsRoundTrip() passed after 0.035 seconds.
+✔ Test aRecordFromAnEarlierRevisionReadsItsReceiptAndNeverResends() passed after 0.035 seconds.
+✔ Test continuationUsesTheSavedPayloadWithoutInterpretingMilestones() passed after 0.035 seconds.
+✔ Test "the launcher's terminal and agent output policy are dropped; account authority stays" passed after 0.035 seconds.
+✔ Test missingRequiredFieldsDoNotBecomeDefaults() passed after 0.035 seconds.
+✔ Test "New session prepares Task Work without running its Graph and uses the returned checkout" passed after 0.035 seconds.
+✔ Test unknownLaunchAndAnotherMachineNeverAuthorizeResubmission() passed after 0.035 seconds.
+✔ Test "a missing bundled helper never falls through to PATH" passed after 0.035 seconds.
+✔ Test "development launcher preserves the selected Machine registry" passed after 0.035 seconds.
+✔ Test restartAtEachSubmissionWindowRecoversTheOriginalResource() passed after 0.035 seconds.
+✔ Test "Find distinguishes pending, empty and selected results" passed after 0.035 seconds.
+✔ Test commandTraceAndExistingOwnerShareRustFixtures() passed after 0.036 seconds.
+✔ Test hookBoundarySharesTheRustServerContract() passed after 0.035 seconds.
+✔ Test githubReadingDistinguishesPendingFailedAndUnavailableChecks() passed after 0.035 seconds.
+✔ Test "Selection, focus, links and failures have independent roles" with 2 test cases passed after 0.035 seconds.
+✔ Test "Separate catalogs retain invalid entries and compiled composition" passed after 0.035 seconds.
+✔ Test aReceiptForAnotherRequestIsRefusedAndNothingIsResent() passed after 0.036 seconds.
+✔ Test "Copy confirmation counts empty lines and ignores the final line ending" passed after 0.035 seconds.
+✔ Test "Status chip colors follow the supplied palette, independently of native appearance" passed after 0.035 seconds.
+✔ Suite "Workspace projection measurements" passed after 0.040 seconds.
+✔ Test "Occurrence state keeps pass completions while iteration keeps each edge count" passed after 0.035 seconds.
+✔ Test "Captured numeric IDs preserve nested containment and independent return counts" passed after 0.035 seconds.
+✔ Test paneForkedMeanwhileDoesNotHoldTheWriter() passed after 0.035 seconds.
+✔ Test "returns nil when GOAL.md is absent" passed after 0.035 seconds.
+✔ Test "A stopped Graph preserves the last Process outcome" with 3 test cases passed after 0.035 seconds.
+✔ Test "a private home selects its explicit helper before the bundled one" passed after 0.035 seconds.
+✔ Test "Text and indicators retain contrast on actual composited surfaces" with 29 test cases passed after 0.035 seconds.
+✔ Test "parses the objective from GOAL.md" passed after 0.036 seconds.
+✔ Test "Prepared checkout receipts retain the owning Machine and require its evidence" passed after 0.035 seconds.
+✔ Test publishedDiffDisclosesMissingAndPartialPatchesAndRenames() passed after 0.036 seconds.
+✔ Test everyEncodedOperationIsTheDescribedOperation() passed after 0.036 seconds.
+✔ Test coreLoopWritesShareTheRustWriteContract() passed after 0.037 seconds.
+✔ Suite ServerPerformanceTests passed after 0.041 seconds.
+✔ Suite "Desktop startup measurements" passed after 0.041 seconds.
+✔ Test onlyTheInstalledAppUpdatesItself() passed after 0.035 seconds.
+✔ Test "lf history composes Work filters before the bounded result" passed after 0.035 seconds.
+✔ Test "lf wave status maps the work hierarchy onto the wave" passed after 0.035 seconds.
+✔ Test "lf wave show is one optionally scoped machine query" passed after 0.035 seconds.
+✔ Test "lf usage preserves direct Run evidence through a Work drill" passed after 0.035 seconds.
+✔ Test storageFailurePrecedesSendingAndRecordsHaveNoOutcomeFields() passed after 0.036 seconds.
+✔ Test customInstallationSurvivesLaunchWithoutTheInstallEnvironment() passed after 0.035 seconds.
+✔ Test "Session adoption returns the served Task and preserves uncertain failure" passed after 0.035 seconds.
+✔ Test "Task workspace queries preserve paths and binary/truncation evidence, outside the checkout" passed after 0.035 seconds.
+✔ Test "Paired task and dashboard actions keep distinct wire kinds" passed after 0.035 seconds.
+✔ Test "lf wave list can be decoded once for every repo" passed after 0.035 seconds.
+✔ Test aNewBundleVersionIsAdoptedOnce() passed after 0.035 seconds.
+✔ Test "Recording a remote reading preserves its Machine and transport" with 2 test cases passed after 0.035 seconds.
+✔ Test "lf doctor decodes every check" passed after 0.035 seconds.
+✔ Test "Step history uses the exact process on the content Machine" passed after 0.035 seconds.
+◇ Test case passing 1 argument outcome → .rejected to "Directive updates keep their Task target and distinguish rejected writes from unavailable refreshed planning" started.
+✔ Test "Served writes encode as Rust's Write" passed after 0.035 seconds.
+✔ Test "Served reads encode as Rust's Read" passed after 0.035 seconds.
+✔ Test "Settings inspection retains skill and authored occurrence selectors" passed after 0.035 seconds.
+✔ Test "lf status keeps unavailable evidence unavailable" passed after 0.035 seconds.
+✔ Test devRunsNoUpdater() passed after 0.035 seconds.
+✔ Test theAppFollowsTheStreamLfInstallRecorded() passed after 0.035 seconds.
+✔ Test "a failed lf query surfaces as an error" passed after 0.035 seconds.
+✔ Test "lf wave show requests every repository when no Wave narrows it" passed after 0.035 seconds.
+✔ Test "Sessions list and recover through the Session CLI" passed after 0.035 seconds.
+✔ Test theMostUrgentStateNamesTheTask() passed after 0.035 seconds.
+✔ Test noConversationOrAnUnavailableReadingSaySo() passed after 0.035 seconds.
+✔ Test "Session pages return a stable continuation and preserve renamed records" passed after 0.036 seconds.
+✔ Test "Sessions fixture preserves the unresolved Session projection" passed after 0.034 seconds.
+✔ Test screenReadsDecodeTheirCompletePayloads() passed after 0.033 seconds.
+✔ Test "Task execution names who started its Graph and who stopped Auto-Ship, requiring every mark" passed after 0.033 seconds.
+✔ Test "Conversation history retains native evidence and unknown LfProcess" passed after 0.033 seconds.
+✔ Test "Work Activity fixture carries Session records tagged with Work" passed after 0.033 seconds.
+✔ Test "Work status fixture preserves every status" passed after 0.033 seconds.
+✔ Test contextExplanationPreservesAvailabilityAndProvenance() passed after 0.033 seconds.
+✔ Test repoPeopleCarryEmailsAndOptionalGitHubUsers() passed after 0.033 seconds.
+✔ Test "Task comments keep the complete thread and require every field" passed after 0.033 seconds.
+✔ Test "Activity requires Session and input identity instead of unrelated process fallbacks" passed after 0.036 seconds.
+✔ Test "Task acquisition evidence is required independently of delivery" passed after 0.033 seconds.
+✔ Test "Graph logs read captured execution from the content Machine, never a peer path locally" passed after 0.035 seconds.
+✔ Test "Session page retains complete enumeration and requires entries" passed after 0.032 seconds.
+✔ Test "Composed delivery keeps completion independent of the running Graph and its arrival" passed after 0.033 seconds.
+✔ Test "Metadata does not manufacture a live state or current occurrence" passed after 0.032 seconds.
+✔ Test "Session states follow process evidence" passed after 0.032 seconds.
+✔ Test sessionOpenIntentsDistinguishExplicitResumeFromPassiveReveal() passed after 0.032 seconds.
+✔ Test "Task work retains conversations, Graphs and command history" passed after 0.033 seconds.
+✔ Test "Task overview reads its graph without diagnostic history" passed after 0.032 seconds.
+✔ Test sessionEncodingKeepsRequiredNullableTurnFields() passed after 0.032 seconds.
+✔ Test "closed Task page carries Wave status rows and their continuation" passed after 0.032 seconds.
+✔ Test taskPlanningExplanationsPreserveIntentAndEffects() passed after 0.032 seconds.
+✔ Test "canonical_ids: structured Session IDs decode canonically; native bytes stay exact" passed after 0.032 seconds.
+✔ Test waveRenamedReceiptDecodesItsLeftovers() passed after 0.032 seconds.
+✔ Test "Process pages retain command outcomes, caller evidence and continuation" passed after 0.032 seconds.
+✔ Test "Direction preserves named and historical authors" passed after 0.032 seconds.
+✔ Test workLinksCarryReadableLabelsRoutesAndConversationRelation() passed after 0.032 seconds.
+✔ Test repositoryIdentityPreservesExplicitLocalLocators() passed after 0.032 seconds.
+✔ Test screenReadsRejectSelectedAnswers() passed after 0.032 seconds.
+✔ Test "Watch frames decode through their part and keep the wire text a saved workspace needs" passed after 0.032 seconds.
+✔ Test waveAddedReceiptDecodesItsLeftover() passed after 0.032 seconds.
+✔ Test "no primary pane surfaces registered-wave vocabulary or a raw sync timestamp" passed after 0.036 seconds.
+✔ Test "Context report keeps unknown sources distinct from zero" passed after 0.032 seconds.
+✔ Test taskRunExplanationsPreserveActionsAndMissingEvidence() passed after 0.032 seconds.
+✔ Test desktopOpeningDoesNotConfuseLaunchWithUsability() passed after 0.032 seconds.
+✔ Test "A Session move report round-trips and summarizes every outcome" passed after 0.032 seconds.
+✔ Test "Session Graph membership mirrors every Rust projection and is required" passed after 0.033 seconds.
+✔ Test taskFilesFramesKeepInvalidationSeparateFromHeartbeat() passed after 0.032 seconds.
+✔ Test "Task completion preserves execution and dated unstarted Tasks" passed after 0.032 seconds.
+✔ Test "A Graph process keeps its launched graph and every step, and requires each field" passed after 0.031 seconds.
+✔ Test "unplaced Wave fixture retains planning without a Machine" passed after 0.031 seconds.
+✔ Test sessionResumeExplanationsPreserveIntentAndUnavailableEvidence() passed after 0.032 seconds.
+✔ Test "wave detail fixture preserves Project and Task identity" passed after 0.031 seconds.
+✔ Test screenReadOperationsKeepCliAndWireNames() passed after 0.031 seconds.
+✔ Test "Configured Project selection survives competing statuses and provider renames" passed after 0.032 seconds.
+✔ Test "Every Session kind retains its identity without a Run field" passed after 0.031 seconds.
+✔ Test "Activity retains unknown record identity without a PID" passed after 0.031 seconds.
+✔ Test "roadmap fixture preserves sections and durable Task references" passed after 0.032 seconds.
+✔ Test "Peer planning keeps independent receipts" passed after 0.032 seconds.
+✔ Test "A Graph whose process exited early reads as stopped and requires its name" passed after 0.031 seconds.
+✔ Test waveRemovalPreviewDecodesEveryField() passed after 0.031 seconds.
+✔ Test taskCheckoutExplanationsKeepProposalsSeparateFromAdmission() passed after 0.031 seconds.
+✔ Test "Historical Graph Session feedback survives without completion controls" passed after 0.032 seconds.
+✔ Test desktopActionRequestsAndReceiptRoundTrip() passed after 0.032 seconds.
+✔ Test taskLocationsRetainFreshnessAndUnavailableEvidence() passed after 0.032 seconds.
+✔ Test "Planning delivery retains uncertainty, errors and both conflict values" passed after 0.031 seconds.
+✔ Test everyStateRustSendsDecodes() passed after 0.026 seconds.
+✔ Test queryPlansArriveFromTheirSubscription() passed after 0.027 seconds.
+✔ Test "metric portfolio fixture preserves every closed evidence payload" passed after 0.031 seconds.
+✔ Test desktopTextDistinguishesEmptyAndUnavailable() passed after 0.032 seconds.
+✔ Test "resizing updates the split between two panes" passed after 0.026 seconds.
+✔ Test "a nested tree round-trips through Codable" passed after 0.026 seconds.
+✔ Test fieldsKeepEachValueVerbatim() passed after 0.026 seconds.
+✘ Test desktopWritesReadBackThroughCLI() failed after 0.041 seconds with 1 issue.
+✔ Test "replacing pane content preserves identity and tree shape" passed after 0.026 seconds.
+✔ Test malformedEnvelopesThrow() passed after 0.026 seconds.
+✔ Test dashboardKeepsIdentitySeparateFromItsQuery() passed after 0.027 seconds.
+✔ Test everyFixtureIsMirrored() passed after 0.038 seconds.
+✔ Test "Designated layouts name each pane once; only Tasks have tools" passed after 0.025 seconds.
+✔ Test "splitting a leaf yields two panes under a split" passed after 0.026 seconds.
+✔ Test "Pruning nested panes retains surviving occurrences, axes and ratios" passed after 0.025 seconds.
+✔ Test "removing the only pane returns nil" passed after 0.025 seconds.
+✔ Test "the loading detail state withholds the snapshot and keeps the loading affordance" passed after 0.025 seconds.
+✔ Test "Pane locations preserve terminal capture and refuse unavailable file owners" passed after 0.026 seconds.
+✔ Test "the stable list preserves active work and Wave ancestry" passed after 0.025 seconds.
+✔ Test "live UI-test mode keeps production registry reads" passed after 0.025 seconds.
+✔ Test desktopInspectionRetainsUnavailableWorkAndExactPanes() passed after 0.032 seconds.
+✔ Test "detailState reads LOOPFLOW_UI_TEST_DETAIL_STATE" passed after 0.025 seconds.
+✔ Test escapedStringsDecode() passed after 0.024 seconds.
+✔ Test viewPlanRetainsOccurrencesAndMissingPrimaryWithoutExecution() passed after 0.026 seconds.
+✔ Test "the error detail state discards volatile detail under a framed footer" passed after 0.025 seconds.
+✔ Test "A sample of this process reads real vitals" passed after 0.023 seconds.
+✔ Test "removing a pane collapses its split back to the sibling" passed after 0.025 seconds.
+✔ Test portablePaneRecordRetainsDraftAndZoomSeparatelyFromFocus() passed after 0.027 seconds.
+✔ Test "query completion does not await inherited pipes in surviving descendants" passed after 0.038 seconds.
+✔ Suite "Wave" passed after 0.044 seconds.
+✔ Suite "Wave Lens" passed after 0.043 seconds.
+✔ Suite "App Bootstrap Resources" passed after 0.044 seconds.
+✔ Suite "Configuration destinations" passed after 0.043 seconds.
+✔ Suite "NOW condition projection" passed after 0.043 seconds.
+✔ Suite "Wave detail reading" passed after 0.044 seconds.
+✔ Suite "Work observation retry" passed after 0.043 seconds.
+✔ Suite "Loopflow state" passed after 0.043 seconds.
+➜ Test ownedTemporaryFilesAndPTYRemainAvailable() skipped.
+✔ Suite ServerMessageOrderTests passed after 0.043 seconds.
+✔ Suite "Independent Task conversations" passed after 0.043 seconds.
+✔ Test "Lines join lf.log in lf's shape, ending with the process and build that wrote them" passed after 0.022 seconds.
+✔ Suite "Uninherited pipes" passed after 0.043 seconds.
+✔ Suite "WavePlanParser" passed after 0.043 seconds.
+✔ Suite AppUpdatesTests passed after 0.043 seconds.
+✔ Suite TaskStatusTests passed after 0.043 seconds.
+✔ Suite "RegistryQuery" passed after 0.043 seconds.
+✔ Suite OwnerStreamTests passed after 0.043 seconds.
+✔ Suite "Wave surface primary hierarchy vocabulary" passed after 0.043 seconds.
+✔ Suite RawJSONTests passed after 0.042 seconds.
+✔ Suite "Multiplexer layout" passed after 0.043 seconds.
+✔ Suite "Mock wave fixture" passed after 0.042 seconds.
+✔ Suite "DTO Fixtures" passed after 0.043 seconds.
+✔ Test "The heartbeat counts reads and kills, and warns at a storm of cancelled reads" passed after 0.025 seconds.
+◇ Test "Native turn reports reach pane and Session labels without a launcher Working record" started.
+✔ Suite "Desktop log" passed after 0.042 seconds.
+✔ Suite ServerProtocolTests passed after 0.043 seconds.
+◇ Test "The server serves a read and ends it on cancel" started.
+➜ Test inheritedSandboxRejectsExternalEffects() skipped.
+✔ Test simultaneousWindowsShareOneRecoveryAndUnavailableLookupNeverSends() passed after 0.039 seconds.
+➜ Test combinedWorkspacePreservesTaskMembershipAndRejectsCopiedClients() skipped.
+➜ Test reopenPreservesSessionAndNativeHistory() skipped.
+✔ Suite "Native Session reopen fixture" passed after 0.044 seconds.
+✘ Test "The server serves a read and ends it on cancel" recorded an issue at BuiltLf.swift:33:13: Expectation failed: (FileManager.default → <NSFileManager: 0x10099f060>).isExecutableFile(atPath: path → "/Users/jack/src/loopflow.loo-895-fix-or-delete/target/debug/lf")
+↳ Build with cargo build -p loopflow --bin lf
+✘ Test "The server serves a read and ends it on cancel" failed after 0.001 seconds with 1 issue.
+◇ Test "A read Loopflow does not serve fails its subscription" started.
+✘ Test "A read Loopflow does not serve fails its subscription" recorded an issue at BuiltLf.swift:33:13: Expectation failed: (FileManager.default → <NSFileManager: 0x10099f060>).isExecutableFile(atPath: path → "/Users/jack/src/loopflow.loo-895-fix-or-delete/target/debug/lf")
+↳ Build with cargo build -p loopflow --bin lf
+✘ Test "A read Loopflow does not serve fails its subscription" failed after 0.001 seconds with 1 issue.
+◇ Test "A scope change keeps a subscription whose read is unchanged and starts the new ones" started.
+✔ Test "A scope change keeps a subscription whose read is unchanged and starts the new ones" passed after 0.001 seconds.
+◇ Test "A checkpoint follows once every running subscription has answered it" started.
+✔ Test "A checkpoint follows once every running subscription has answered it" passed after 0.001 seconds.
+◇ Test "Malformed frames and ended subscriptions fail rather than becoming empty" started.
+◇ Test case passing 1 argument kind → "malformed" to "Malformed frames and ended subscriptions fail rather than becoming empty" started.
+◇ Test case passing 1 argument kind → "wrong-type" to "Malformed frames and ended subscriptions fail rather than becoming empty" started.
+✔ Test "finite queries drain both full pipes while sending a large draft" passed after 0.040 seconds.
+◇ Test case passing 1 argument kind → "ended" to "Malformed frames and ended subscriptions fail rather than becoming empty" started.
+✔ Test "Malformed frames and ended subscriptions fail rather than becoming empty" with 3 test cases passed after 0.001 seconds.
+◇ Test "The line reader accepts its frame limit and rejects the next byte" started.
+◇ Test case passing 1 argument terminated → false to "The line reader accepts its frame limit and rejects the next byte" started.
+✔ Test "a plain subdirectory of a repo is its own origin — no walking up" passed after 0.043 seconds.
+✔ Test bundledNoticesAreReadableOffline() passed after 0.041 seconds.
+✔ Suite OpenSourceLicensesTests passed after 0.047 seconds.
+◇ Test case passing 1 argument terminated → true to "The line reader accepts its frame limit and rejects the next byte" started.
+✔ Test "The line reader accepts its frame limit and rejects the next byte" with 2 test cases passed after 0.008 seconds.
+◇ Test "Silence after the first frame expires a reader that must speak, not a subscription" started.
+✔ Test "canceling a request reaps only its CLI child" passed after 0.070 seconds.
+✔ Test "Copy notices stay with the originating window and retained view" passed after 0.081 seconds.
+✔ Suite "Terminal feedback" passed after 0.083 seconds.
+✔ Test "a worktree resolves to its origin repo; the origin to itself" passed after 0.090 seconds.
+✔ Suite "Wave origin resolution" passed after 0.094 seconds.
+✔ Test "oversized CLI responses fail instead of retaining unbounded output" with 2 test cases passed after 0.092 seconds.
+✔ Test portfolioTaskClickOpensItsRepositoryDestination() passed after 0.115 seconds.
+✔ Suite "Roadmap controls" passed after 0.117 seconds.
+✘ Test "The window modifier follows preview, Cancel and Apply" recorded an issue with 1 argument theme → .light at BuiltLf.swift:33:13: Expectation failed: (FileManager.default → <NSFileManager: 0x10099f060>).isExecutableFile(atPath: path → "/Users/jack/src/loopflow.loo-895-fix-or-delete/target/debug/lf")
+↳ Build with cargo build -p loopflow --bin lf
+◇ Test case passing 1 argument theme → .dark to "The window modifier follows preview, Cancel and Apply" started.
+[GhosttyManager] CoreVideo display link unavailable (-6661); using timer rendering
+✔ Test "the default-prompt shell gets a context header and reports a failed command" passed after 0.136 seconds.
+✔ Test "A prepared Session starts its terminal before any pane shows it" passed after 0.150 seconds.
+✔ Test twoShellsAndFilesRestoreIdentitiesSelectionAndDrafts() passed after 0.173 seconds.
+◇ Test emptyFilesRetainTheirRecordedLocation() started.
+✔ Test "Fresh ownership replaces unavailable opening with Take back" passed after 0.187 seconds.
+✔ Test "A full file keeps its newest whole lines, across processes" passed after 0.446 seconds.
+✔ Suite "Launch journal" passed after 0.449 seconds.
+✔ Test "the embedded config parses, and Command-Up and Command-Down jump between prompts" passed after 0.502 seconds.
+✔ Suite "Embedded terminal shell blocks" passed after 0.507 seconds.
+✔ Test "A prepared Task target enters its terminal without another preparation" with 2 test cases passed after 0.598 seconds.
+✘ Test "An open Work model keeps its last reading and recovers after server replacement" recorded an issue at BuiltLf.swift:33:13: Expectation failed: (FileManager.default → <NSFileManager: 0x10099f060>).isExecutableFile(atPath: path → "/Users/jack/src/loopflow.loo-895-fix-or-delete/target/debug/lf")
+↳ Build with cargo build -p loopflow --bin lf
+✘ Test "An open Work model keeps its last reading and recovers after server replacement" failed after 0.608 seconds with 1 issue.
+◇ Test "Load initializes working Task and repository conversations without a Start click" started.
+◇ Test case passing 1 argument prepared → false to "Load initializes working Task and repository conversations without a Start click" started.
+✔ Test "Contrast is an overrideable theme default" passed after 0.867 seconds.
+✔ Suite "Terminal color" passed after 0.872 seconds.
+✔ Test "An unused terminal releases without constructing Find during deinitialization" passed after 0.871 seconds.
+✔ Test "A Graph process's length and the two return ports" passed after 0.871 seconds.
+✔ Test "Status wording, selection and focus survive every appearance" with 5 test cases passed after 1.332 seconds.
+✔ Suite "Desktop semantic colors" passed after 1.337 seconds.
+✔ Test "Template disclosure keeps repeated and empty groups, XOR paths and both returns" passed after 1.333 seconds.
+✔ Test "Task due date appears beside the conversation" passed after 1.335 seconds.
+✔ Suite "Task Graph" passed after 1.340 seconds.
+✔ Test removingPublicationClearsRetainedDiffPresentation() passed after 1.335 seconds.
+✔ Suite "Compact GitHub pull request" passed after 1.340 seconds.
+✔ Test "Connection feedback never changes terminal geometry" passed after 1.548 seconds.
+✔ Suite "Terminal polish" passed after 1.553 seconds.
+✘ Test sameNamedRepositoriesOpenOnlyWhenQualified() recorded an issue at BuiltLf.swift:33:13: Expectation failed: (FileManager.default → <NSFileManager: 0x10099f060>).isExecutableFile(atPath: path → "/Users/jack/src/loopflow.loo-895-fix-or-delete/target/debug/lf")
+↳ Build with cargo build -p loopflow --bin lf
+✘ Test sameNamedRepositoriesOpenOnlyWhenQualified() failed after 1.548 seconds with 1 issue.
+◇ Test taskAndWaveAddressesDeliverToTheirRepositoryWindow() started.
+✔ Test "A failed Machine refresh retains the same workspace identity" passed after 1.592 seconds.
+✔ Test "A delivered Wave link selects that Wave in its repository window" passed after 1.581 seconds.
+✔ Suite "Shared Work selection" passed after 1.597 seconds.
+✔ Test localFilesKeepTheirContentLocationAndDraftWithoutPlanning() passed after 1.578 seconds.
+◇ Test filePaneRoutesWithoutLinkedSessionPrimingAndRetainsDrafts() started.
+✘ Test "The window modifier follows preview, Cancel and Apply" recorded an issue with 1 argument theme → .dark at BuiltLf.swift:33:13: Expectation failed: (FileManager.default → <NSFileManager: 0x10099f060>).isExecutableFile(atPath: path → "/Users/jack/src/loopflow.loo-895-fix-or-delete/target/debug/lf")
+↳ Build with cargo build -p loopflow --bin lf
+◇ Test case passing 1 argument theme → .lightImport to "The window modifier follows preview, Cancel and Apply" started.
+✔ Test "Automatic Start stops at a consumed launch instead of reporting a holder" passed after 3.708 seconds.
+✔ Test "Showing a pane resumes saved history and leaves external input alone" with 3 test cases passed after 3.718 seconds.
+✔ Test "A builtin Workflow offers Customize beside its interactive steps" passed after 3.854 seconds.
+✘ Test "A Task that becomes working starts the history its reveal could not find" recorded an issue at SessionsStoreTests.swift:575:9: Expectation failed: (store.sessions.first?.state → .opening) == .prepared
+✘ Test "A Task that becomes working starts the history its reveal could not find" recorded an issue at SessionsStoreTests.swift:576:9: Expectation failed: (store.sessions.first?.launchArguments.contains("--start-if-free") → false) == true
+✘ Test "A Task that becomes working starts the history its reveal could not find" failed after 3.885 seconds with 2 issues.
+✔ Test "The workflow inspector draws builtins and keeps invalid definitions editable" passed after 3.963 seconds.
+✔ Test "A Task workspace reopens its Session by id with the Task beside it, so it resumes managed" passed after 3.990 seconds.
+✔ Test "An ensured running primary attaches when shown" passed after 3.993 seconds.
+✔ Test "Refresh replaces the viewer and reveals the same conversation without resetting it" passed after 3.992 seconds.
+✔ Test "Prepared Sessions accept current provider and terminal evidence without losing their launch" passed after 4.077 seconds.
+✔ Test "A Session opened elsewhere during selection is not prepared locally" passed after 4.077 seconds.
+✔ Test "Explicit reopen revalidates a cached observation failure" with 3 test cases passed after 4.085 seconds.
+✔ Test "Explicit Start opens only the requested terminal" passed after 4.085 seconds.
+✔ Test "A failed open stays visible across polling until superseded" passed after 4.085 seconds.
+✔ Test "An externally killed terminal reclassifies as active elsewhere" passed after 4.091 seconds.
+✔ Test "Selecting an active Session leaves its other terminal running until Move here" passed after 4.094 seconds.
+✔ Test "Provider switching keeps the Session and prepares an explicit provider launch" with 4 test cases passed after 4.096 seconds.
+✔ Test "Polling preserves the prepared interactive launch command" with 2 test cases passed after 4.097 seconds.
+✘ Test "Load initializes working Task and repository conversations without a Start click" recorded an issue with 1 argument prepared → false at BuiltLf.swift:33:13: Expectation failed: (FileManager.default → <NSFileManager: 0x10099f060>).isExecutableFile(atPath: path → "/Users/jack/src/loopflow.loo-895-fix-or-delete/target/debug/lf")
+↳ Build with cargo build -p loopflow --bin lf
+◇ Test case passing 1 argument prepared → true to "Load initializes working Task and repository conversations without a Start click" started.
+✔ Test "Rendering borrows Task A while B is selected, retaining Files and caller-owned focus" passed after 4.512 seconds.
+✔ Test admissionBusyWaitsThenCompletesTheWriteOnce() passed after 4.905 seconds.
+◇ Test aDispatchedFailureIsNeverRetried(code:) started.
+◇ Test case passing 1 argument code → "busy" to aDispatchedFailureIsNeverRetried(code:) started.
+◇ Test case passing 1 argument code → "outcome_unknown" to aDispatchedFailureIsNeverRetried(code:) started.
+✔ Test aDispatchedFailureIsNeverRetried(code:) with 2 test cases passed after 0.001 seconds.
+◇ Test cancelledReadSendsCancelDropsLateAnswerAndKeepsTheConnection() started.
+✔ Test cancelledReadSendsCancelDropsLateAnswerAndKeepsTheConnection() passed after 0.033 seconds.
+◇ Test unansweredReadsExpireThenEndAStalledConnection() started.
+✔ Test unansweredReadsExpireThenEndAStalledConnection() passed after 0.252 seconds.
+◇ Test refusedWriteThrowsItsCodeAndWritesReturnTheirValue() started.
+✔ Test refusedWriteThrowsItsCodeAndWritesReturnTheirValue() passed after 0.001 seconds.
+◇ Test disconnectFailsEveryPendingRequestAndTheNextReopens() started.
+✔ Test disconnectFailsEveryPendingRequestAndTheNextReopens() passed after 0.001 seconds.
+◇ Test disconnectedWatchResumesItsBaselineAndNewestConfirmation() started.
+✔ Test disconnectedWatchResumesItsBaselineAndNewestConfirmation() passed after 0.137 seconds.
+◇ Test disconnectedWatchKeepsItsQueuedBaselineUntilTheConsumerReadsIt() started.
+✔ Test disconnectedWatchKeepsItsQueuedBaselineUntilTheConsumerReadsIt() passed after 0.176 seconds.
+◇ Test stalledHandshakeFailsWithinTheBoundAndTheNextRequestReopens() started.
+✔ Test "a development worktree sees the origin registry rows" passed after 5.779 seconds.
+✘ Test taskAndWaveAddressesDeliverToTheirRepositoryWindow() recorded an issue at BuiltLf.swift:33:13: Expectation failed: (FileManager.default → <NSFileManager: 0x10099f060>).isExecutableFile(atPath: path → "/Users/jack/src/loopflow.loo-895-fix-or-delete/target/debug/lf")
+↳ Build with cargo build -p loopflow --bin lf
+✘ Test taskAndWaveAddressesDeliverToTheirRepositoryWindow() failed after 5.611 seconds with 1 issue.
+↳ /// Registered only through the CLI: the Task and its Wave open in that
+↳ /// repository's one window, the Task as its conversation.
+✘ Suite "Work addresses from the built CLI" failed after 7.166 seconds with 2 issues.
+↳ /// The built CLI resolves Work addresses; production Swift routing consumes them.
+✔ Test "Binding a visible repository conversation relocates its pane without changing terminal identity" passed after 7.168 seconds.
+✔ Test waveBoardShowsTheWaveAndStartStaysWithRust() passed after 7.325 seconds.
+✔ Test "Switching worktrees restores companion terminals, layout and focus" passed after 7.343 seconds.
+✔ Test "Conversation launch adds a tab and undo keeps the same shell" passed after 7.343 seconds.
+◇ Test case passing 1 argument waveScoped → true to "A taskless exact link selects its conversation without enumerating history" started.
+✔ Test sharedFixtureDecodes() passed after 7.343 seconds.
+✔ Test "Binding preview matches Rust and requires every identity field" passed after 7.343 seconds.
+✔ Test "Files and the Graph process log open as browser tabs beside a Session and are revealed, not duplicated" passed after 7.343 seconds.
+✔ Test "Repository, Wave and two Tasks sharing one path keep distinct retained Work" passed after 7.343 seconds.
+✔ Test "Inspection reads retained panes and drafts without allocating, focusing or opening a client" passed after 7.343 seconds.
+✘ Test completeHistoryAndDraftRefreshUseOnlyFixtureTransport() recorded an issue at DesktopPerformanceTests.swift:1053:17: Expectation failed: (ContinuousClock.now → Instant(_value: 1936658.832938083 seconds)) < (deadline → Instant(_value: 1936658.0204315828 seconds))
+✘ Test completeHistoryAndDraftRefreshUseOnlyFixtureTransport() failed after 7.399 seconds with 1 issue.
+✘ Suite "Desktop benchmark fixtures" failed after 7.405 seconds with 1 issue.
+✘ Test "Native turn reports reach pane and Session labels without a launcher Working record" recorded an issue at ProgramStatusTests.swift:243:17: Expectation failed: (ContinuousClock.now → Instant(_value: 1936658.848641375 seconds)) < (deadline → Instant(_value: 1936658.0308565001 seconds))
+↳ Status observation did not settle
+✘ Test "Native turn reports reach pane and Session labels without a launcher Working record" failed after 7.376 seconds with 1 issue.
+◇ Test clearUsesPathComponents() started.
+✔ Test "Nested corner centers coincide and split gaps match the outer inset" with 4 test cases passed after 7.418 seconds.
+✔ Test clearUsesPathComponents() passed after 0.001 seconds.
+◇ Test promptAndExitRetainOnlyResultsUntilInput() started.
+✔ Test "Unplaced Work opens without acquiring a location or a shell" passed after 7.419 seconds.
+✔ Test "Session location changes renew exact targets without changing its Work or duplicating its surface" passed after 7.418 seconds.
+✔ Test cardShowsWhatIsKeptWhatExpiresAndHowToKeepMore() passed after 7.418 seconds.
+✔ Test fixtureRoundTripsTheRustWireShape() passed after 7.418 seconds.
+✘ Test "The window modifier follows preview, Cancel and Apply" recorded an issue with 1 argument theme → .lightImport at BuiltLf.swift:33:13: Expectation failed: (FileManager.default → <NSFileManager: 0x10099f060>).isExecutableFile(atPath: path → "/Users/jack/src/loopflow.loo-895-fix-or-delete/target/debug/lf")
+↳ Build with cargo build -p loopflow --bin lf
+✔ Suite "Terminal pane clearance" passed after 7.421 seconds.
+✔ Suite "Retained Work workspaces" passed after 7.421 seconds.
+✔ Test promptAndExitRetainOnlyResultsUntilInput() passed after 0.001 seconds.
+◇ Test resetPreservesReportPrecedence() started.
+◇ Test case passing 1 argument theme → .darkImport to "The window modifier follows preview, Cancel and Apply" started.
+✔ Test "One window's registry retains a repo workspace across visits" passed after 7.419 seconds.
+✔ Test resetPreservesReportPrecedence() passed after 0.001 seconds.
+◇ Test boundedRecordsEvictLeastRecentlyUpdated() started.
+✘ Test "Data-directory frames and confirmed Machine identity preserve the same workspace" recorded an issue at WorkModelTests.swift:403:6: Caught error: RegistryQueryError(message: "reader 1 never opened", stdout: "")
+✔ Test "The sidebar header names the Dashboard under the repository, and ⌘1 marks its first member" passed after 7.419 seconds.
+✔ Test "The sheet's fields map to one lf task create command and Rust's default read" passed after 7.419 seconds.
+✔ Test "Shipping Tasks sit under an Autonomous heading below the Working Tasks, in light and dark" with 2 test cases passed after 7.419 seconds.
+✔ Test "Checkout-only Sessions use Rust membership in Task navigation" passed after 7.419 seconds.
+✔ Test "Working Tasks opens as a Dashboard; a sidebar Task keeps it in the trail, as its tile does" passed after 7.419 seconds.
+✔ Test "The breadcrumb drills Wave → Task → exact Session, with siblings as the final choice" passed after 7.419 seconds.
+✔ Test "Autonomous, upcoming and human work share stable ranked planning rows" passed after 7.419 seconds.
+◇ Test "The sheet follows the scope's reported workflow, names whose default it is, and waits for a request" started.
+✔ Test "Every navigator entry restores its caller after a previous accepted navigation" passed after 7.419 seconds.
+✔ Test "Inside a Wave view, the sidebar and ⌘N count its started Tasks and enter through the Wave on the Task's page" passed after 7.419 seconds.
+✔ Test "Ready and Working-now filters read the started list's Task states, as the phone's filters do" passed after 7.419 seconds.
+✔ Test "A shell attachment exit retains its pane for recovery while SessionsView is absent" passed after 7.420 seconds.
+✔ Test cardNamesAnUnavailableSummary() passed after 7.420 seconds.
+✔ Test boundedRecordsEvictLeastRecentlyUpdated() passed after 0.001 seconds.
+✔ Test "Work tabs retain their own conversation and details choice across aliases and close/reopen" passed after 7.420 seconds.
+✔ Test "A shell exit from another Machine cannot close a same-ID pane" passed after 7.420 seconds.
+✘ Test "Data-directory frames and confirmed Machine identity preserve the same workspace" failed after 7.419 seconds with 1 issue.
+✔ Test "A Dashboard scopes the sidebar to its visible Tasks in arrangement order; ⌘N, ⌃⇥ and rows keep the board" passed after 7.419 seconds.
+✔ Test "Sidebar search includes its filtered Tasks and Waves without changing the open Work" passed after 7.420 seconds.
+✔ Test leftoversStayOpenWithTheRustLineAndADoneButton() passed after 7.419 seconds.
+✔ Test "Unbound Sessions do not acquire ancestry from display text or checkout" passed after 7.420 seconds.
+◇ Test inheritedAppIsResolvedWithoutChangingRecords() started.
+✔ Test "Chapter history remains reachable when the current plan is unavailable" passed after 7.419 seconds.
+◇ Test "Failed or truncated planning retains saved rows, selection, panes and cache" started.
+✔ Test "The heading reads the Task's lifecycle, never Linear's planning state" passed after 7.420 seconds.
+✔ Suite "Retention card" passed after 7.423 seconds.
+✔ Test "Typed durable joins preserve top-level, multiple, completed and unmatched Sessions" passed after 7.420 seconds.
+✔ Test "A Wave row counts its working and autonomous Tasks, not backlog or done" passed after 7.419 seconds.
+✔ Test "Repository view reconstruction keeps the Session store's resolved location" passed after 7.420 seconds.
+✔ Test inheritedAppIsResolvedWithoutChangingRecords() passed after 0.001 seconds.
+◇ Test displayRemovesInvisibleFormattingAndKeepsLiteralMarkup() started.
+✔ Test "Zooming a Working Tasks tile keeps Working Tasks in the trail, and Back returns to it" passed after 7.420 seconds.
+✔ Test "Separate windows never share a multiplexer or surface pool" passed after 7.420 seconds.
+✔ Test "Working Tasks are the repository plan's members, not visits; a Wave scopes the sidebar until Back" passed after 7.420 seconds.
+✔ Test "Checkout association groups independent Sessions despite different attribution" passed after 7.420 seconds.
+✔ Suite "Sessions polish" passed after 7.423 seconds.
+✔ Test displayRemovesInvisibleFormattingAndKeepsLiteralMarkup() passed after 0.001 seconds.
+◇ Test snapshotsEncodeNullableFieldsAndRequireSeen() started.
+✔ Test snapshotsEncodeNullableFieldsAndRequireSeen() passed after 0.001 seconds.
+◇ Test callbackCopiesBorrowedStrings() started.
+✔ Test callbackCopiesBorrowedStrings() passed after 0.001 seconds.
+◇ Test staleSurfaceAndClosedCallbacksCannotPublish() started.
+✔ Test "Navigation shortcuts leave Escape and extra-modifier provider shortcuts alone" passed after 7.421 seconds.
+✔ Test "Repo and Wave Sessions cannot join a Task through checkout or stored associations" passed after 7.421 seconds.
+✔ Test "Registry Wave paths cannot create repository choices" passed after 7.421 seconds.
+✔ Test "A checkout's repository identity follows its origin once that is resolved" passed after 7.421 seconds.
+✔ Test "Back visits retained Work in repository order without recording its own return" passed after 7.421 seconds.
+✔ Test offersAnOptionalObjectiveBesideTheName() passed after 7.421 seconds.
+✔ Suite "New Wave sheet" passed after 7.425 seconds.
+✔ Test "A prepared Start stays non-replacing through refresh; only Take back transfers input" passed after 7.448 seconds.
+✔ Test "A row dragged over another lands there on release and leaves no drag behind" passed after 7.449 seconds.
+✔ Test "State uses the resolved repository plan identity, never its opening path" passed after 7.450 seconds.
+✘ Test "Explicit history-only reveal preserves Start recovery outside working Task initialization" recorded an issue at SessionsStoreTests.swift:549:9: Expectation failed: (store.sessions.first?.state → .opening) == .prepared
+◇ Test "A Task's first conversation brings Files into view once; closing hides it and toggling returns it" started.
+✘ Test "Explicit history-only reveal preserves Start recovery outside working Task initialization" recorded an issue at SessionsStoreTests.swift:550:9: Expectation failed: (store.sessions.first?.launchArguments → ["lf", "session", "resume", "missing"]) == (["lf", "session", "resume", missing.id, "--start-if-free"] → ["lf", "session", "resume", "missing", "--start-if-free"])
+✘ Test "Explicit history-only reveal preserves Start recovery outside working Task initialization" failed after 7.449 seconds with 2 issues.
+✘ Test "Automatic preparations start selected first, stay bounded and honor Close" recorded an issue at SessionsStoreTests.swift:763:9: Expectation failed: (item(store, "b")?.state → .opening) == .prepared
+✔ Test "Fresh saved history clears an unavailable opening without starting it" passed after 7.449 seconds.
+✘ Test "A consumed first launch recovers with one Try again; refresh never repeats it" recorded an issue at SessionsStoreTests.swift:679:9: Expectation failed: (store.sessions.first?.state → .opening) == .prepared
+✔ Test "A new shell appears in its designated pane beside the golden split" passed after 7.449 seconds.
+✔ Test "Unavailable preparation preserves the pane identity" passed after 7.449 seconds.
+✔ Test "A store without a runtime prepares and shows but launches nothing" passed after 7.449 seconds.
+✔ Suite "Warm conversations start unmounted" passed after 7.453 seconds.
+✔ Test "Planning sync shows saves, uncertainty and retained losing edits, then clears settled work" passed after 7.449 seconds.
+✔ Test "Task actions offer primary selection for an already assigned Session" passed after 7.457 seconds.
+✘ Test "Retry after a transient failure only reveals and retains a newly observed holder" recorded an issue at SessionsStoreTests.swift:654:9: Expectation failed: (store.sessions.first?.state → .opening) == .elsewhere
+✔ Test "The run page names interactive review independently of completed runs" passed after 7.455 seconds.
+✔ Test "Recent unfinished Tasks stay warm; window Close ends viewers but keeps history" passed after 7.455 seconds.
+✔ Test wavePartsHideOnHoverAndTheBoardHeaderShowsThem() passed after 7.455 seconds.
+✔ Test "Task lifecycle controls remain available without a Workflow" with 3 test cases passed after 7.455 seconds.
+✔ Test "Nested panes contribute minimum size and small windows shrink both sides to fit" passed after 7.455 seconds.
+✘ Test "Retry after a transient failure only reveals and retains a newly observed holder" failed after 7.455 seconds with 1 issue.
+✔ Test "Drag snaps near either golden proportion and moves freely elsewhere" passed after 7.456 seconds.
+✔ Test "A Task lists available conversations before working ones, its primary leading each" passed after 7.455 seconds.
+✔ Test "Reopening a repository keeps twelve Work layouts and drafts before inventory arrives" passed after 7.456 seconds.
+✔ Test "The warm-conversation bound spans repository windows without sharing surfaces" passed after 7.455 seconds.
+✔ Test "The Workflow bar shows the interactive steps, what runs now and Auto-Ship, and opens to its step cells" passed after 7.456 seconds.
+✔ Test "A reopened scene preserves the shared repository identity learned before closing" passed after 7.456 seconds.
+✔ Test wavePartsZoomResizeAndTurnSectionsAsLfDesktopDoes() passed after 7.456 seconds.
+✔ Test "Restart restores bounded warm intent and preserves explicit Close" passed after 7.456 seconds.
+✔ Test "A page turn lets go of the last-ranked unvisited Tasks, never the freshest" passed after 7.456 seconds.
+✔ Test "A board larger than its page warms sixteen Tasks and the page; a turn opens the next page" passed after 7.456 seconds.
+✔ Test peopleAppearOnceTwoPeopleShareTheWave() passed after 7.456 seconds.
+✔ Test "Run history preserves nested positions, repeated nodes and failed exits" passed after 7.456 seconds.
+✔ Test "Repository windows retain separate surface pools and Work" passed after 7.456 seconds.
+✔ Test columnsAreRustSections() passed after 7.456 seconds.
+✔ Test oneEmailIsOnePersonAndANameAloneJoinsIt() passed after 7.456 seconds.
+✔ Test "A working Task shown as a tile stays warm after the Dashboard leaves" passed after 7.461 seconds.
+✔ Test "An unplaced Task and its CLI comment thread decode without a display" passed after 7.461 seconds.
+✔ Test repositoryPageIsTheSameBoardOverEveryRepositoryTask() passed after 7.461 seconds.
+✔ Test "Retained review feedback stays visible" passed after 7.460 seconds.
+✔ Test "Ended Session output survives a fresh inventory without relaunch" passed after 7.461 seconds.
+✔ Test "an unfinished persisted Process without a live command remains unknown" passed after 7.461 seconds.
+✔ Test "Saved unfinished Tasks fill spare warmth without evicting working Tasks" with 2 test cases passed after 7.461 seconds.
+✔ Test boardRendersHeaderColumnsAndMetrics() passed after 7.462 seconds.
+✔ Test "Filtered refresh retains Sessions without creating local terminals" passed after 7.462 seconds.
+✔ Test "Repository and Wave primaries stay warm beside the Task bound; Close releases until a deliberate visit" passed after 7.462 seconds.
+✔ Test "Reset restarts the same Session with a fresh launch" passed after 7.461 seconds.
+✔ Test "Both sides keep their minimum size; snapping cannot override it" passed after 7.462 seconds.
+✔ Suite "Pane resizing" passed after 7.466 seconds.
+✔ Test startsFromTheCurrentAddressWithRenameDisabled() passed after 7.462 seconds.
+✔ Test "Closing every Work preserves hidden panes when a repository window reopens" passed after 7.462 seconds.
+✔ Test doneWindowCountsWholeDaysBackFromNow() passed after 7.462 seconds.
+✔ Test "Warm visits are bounded; completed departure and Close release without refresh reopening" passed after 7.462 seconds.
+✔ Test "A shipping Task says what shipping is doing and cannot be shipped again" passed after 7.462 seconds.
+✔ Test leftoversStayOpenWithTheRustLinesAndADoneButton() passed after 7.462 seconds.
+✔ Test failureKeepsTheNameAndShowsTheError() passed after 7.462 seconds.
+✔ Suite "Wave standup" passed after 7.466 seconds.
+✔ Test "An unresolved restored locator cannot mount a retained registry" passed after 7.462 seconds.
+✔ Suite "Rename Wave sheet" passed after 7.466 seconds.
+✔ Test "A refused provider change preserves the original Session presentation" passed after 7.462 seconds.
+✔ Test "The existing full-Task consumer keeps pane focus, Session context and controls" passed after 7.599 seconds.
+✘ Test "Load initializes working Task and repository conversations without a Start click" recorded an issue with 1 argument prepared → true at BuiltLf.swift:33:13: Expectation failed: (FileManager.default → <NSFileManager: 0x10099f060>).isExecutableFile(atPath: path → "/Users/jack/src/loopflow.loo-895-fix-or-delete/target/debug/lf")
+↳ Build with cargo build -p loopflow --bin lf
+✘ Test "Load initializes working Task and repository conversations without a Start click" with 2 test cases failed after 6.991 seconds with 2 issues.
+◇ Test taskLifecycleUpdatesOpenSidebar(action:) started.
+◇ Test case passing 1 argument action → "complete" to taskLifecycleUpdatesOpenSidebar(action:) started.
+✔ Test "Loading, unavailable, empty and selected Work have distinct content" passed after 7.642 seconds.
+✔ Test "A failed Task conversation shows its reason beside Retry" passed after 7.641 seconds.
+✔ Test "Live clients and unknown readings omit activity; shared Available remains visible" passed after 7.641 seconds.
+✔ Test "Stored links are separate from retained conversation navigation" passed after 7.641 seconds.
+✔ Test "Every Task pane hides on hover and the header's Show… restores it" passed after 7.641 seconds.
+✔ Test "A finished Task nobody owns reveals its conversation into visible panes" passed after 7.641 seconds.
+✔ Test "A finished Task without history shows its record, never a Start or Open placeholder" passed after 7.641 seconds.
+✔ Test "Unknown and live-client-only rows omit status; read failures stay inspectable" passed after 7.641 seconds.
+✔ Test "Session actions use the main repository for a linked worktree" passed after 7.642 seconds.
+✔ Test "A Wave view part's hover buttons clear the tile's rounded corner in light and dark" with 2 test cases passed after 7.641 seconds.
+✔ Test "A single visible Session keeps Refresh available" passed after 7.641 seconds.
+✔ Test "Validated reports win over runtime inference" with 5 test cases passed after 7.641 seconds.
+✔ Test "Selection preserves reported failure and shared Available semantics" passed after 7.641 seconds.
+✔ Suite "Desktop polish" passed after 7.646 seconds.
+✔ Test "Headers name known providers and leave arbitrary shell titles as context" passed after 7.641 seconds.
+✔ Test "Rows name the owner and Machine, or say the Task is unowned" passed after 7.641 seconds.
+✔ Test "Different terminals retain independent report ids and source attribution" passed after 7.641 seconds.
+✔ Test "Task identifiers remain visible without an external issue URL" passed after 7.641 seconds.
+✔ Test "Saved readings cannot resurrect program reports or Available" passed after 7.641 seconds.
+✔ Test "Cleared reporter records do not revive inferred activity or Available" passed after 7.641 seconds.
+✔ Test togglesRetainShellTabsAndFileDrafts() passed after 7.641 seconds.
+✔ Suite "Sidebar Task metadata" passed after 7.646 seconds.
+◇ Test scopeNavigationCannotAllocateTools(kind:) started.
+◇ Test case passing 1 argument kind → .repository to scopeNavigationCannotAllocateTools(kind:) started.
+✔ Test theConnectionRowNamesTheObservedForkAndDatesSourceLiveness() passed after 7.641 seconds.
+✔ Test customizeOpensTheEditorInPlaceAndRevertRestoresTheBuiltin() passed after 7.642 seconds.
+✔ Test "Collapsed panes offer Open conversation when the named Session isn't held" passed after 7.641 seconds.
+✔ Test "connected waves keep only this repo's rows" passed after 7.641 seconds.
+✔ Test goldenSlotsMatchJacksLayoutAndFocusGrowsInPlace() passed after 7.641 seconds.
+✔ Suite ProviderTransitionTests passed after 7.647 seconds.
+✔ Test failureKeepsThePreviewAndOffersRetry() passed after 7.641 seconds.
+✔ Test inlineEditingAppliesCancelsAndRemembersRange() passed after 7.641 seconds.
+✔ Test leftoversStayOpenWithTheRustLinesAndADoneButton() passed after 7.641 seconds.
+✔ Test "waves hold one stable alphabetical order, not a status regrouping" passed after 7.641 seconds.
+✔ Test settingsDecodeTheMachinesConfiguration() passed after 7.641 seconds.
+✔ Test settledMissingCheckoutDoesNotBypassHistoryWindow() passed after 7.641 seconds.
+✔ Test rollingDurationCrossesDSTWithoutCalendarDayArithmetic() passed after 7.641 seconds.
+◇ Test editedSlotsKeepAFixedCountAndFocusStillGrowsInPlace() started.
+✔ Test "Explicit repository choices resolve to their own roots" passed after 7.641 seconds.
+◇ Test chooserFiltersEachPickerToItsAppearanceAndWritesTheChoice() started.
+✔ Test closedPagesJoinOpenTasksOnceAndReachTheirRange() passed after 7.641 seconds.
+✔ Test rollingBoundariesAndValidation() passed after 7.641 seconds.
+✔ Test previewRendersRustSentencesAndEnablesRemove() passed after 7.641 seconds.
+✔ Test "a renamed Wave keeps its plan; a replacement at its old address does not inherit it" passed after 7.641 seconds.
+✔ Suite "Remove Wave sheet" passed after 7.647 seconds.
+✔ Test "A Task workspace holds its three designated panes; tools start hidden" passed after 7.632 seconds.
+✔ Test numberGlyphsSuffixAndCheckboxDoNotMoveWhenEditing() passed after 7.641 seconds.
+✔ Test "Opening a conversation switches the session pane in place" passed after 7.632 seconds.
+✔ Suite "Portfolio Repo State" passed after 7.647 seconds.
+✔ Test desktopCodeContainsOnlyTheMachineAddress() passed after 7.641 seconds.
+✔ Test "Browser tabs open once; tab changes keep the occurrence and missing evidence keeps the owner" passed after 7.632 seconds.
+✔ Test "Toggling both tools away keeps conversation entry in the session pane" passed after 7.642 seconds.
+✔ Test loopflowUsesNeutralWorkSelection() passed after 7.641 seconds.
+✔ Suite "Retained workspace panes" passed after 7.647 seconds.
+✔ Suite MobilePairingTests passed after 7.647 seconds.
+◇ Test catalogueIsTwelveLightAndTwelveDarkWithQuietCompanions() started.
+✔ Test unresolvedGraphAndRetainedSessionSurviveHiddenHistory() passed after 7.641 seconds.
+✔ Suite "Task history" passed after 7.647 seconds.
+✔ Test "Moving, zooming and resizing rearrange the same three panes" passed after 7.633 seconds.
+✔ Test "Focus and close follow split geometry instead of tree order" passed after 7.633 seconds.
+✔ Test "Close hides a pane and Undo shows it again; the last visible pane stays" passed after 7.633 seconds.
+✔ Test "A portable layout restores the same panes, tabs and visibility" passed after 7.633 seconds.
+✔ Test "Row shows wave display name" passed after 7.632 seconds.
+✔ Test "Row is one keyboard-operable selection control" passed after 7.632 seconds.
+✔ Test "Shell tabs accumulate in one pane; the last one closing hides it" passed after 7.633 seconds.
+✔ Test "Row shows open-task count only when nonzero" passed after 7.632 seconds.
+✔ Test "Row renders an operational lens" passed after 7.632 seconds.
+✔ Suite "Multiplexer store" passed after 7.648 seconds.
+✔ Suite "Wave Row View" passed after 7.648 seconds.
+✔ Test "A first launch has one loading message" passed after 7.643 seconds.
+✔ Test "Only the most recently saved repositories are kept" passed after 7.647 seconds.
+✔ Test "Absent, corrupt and incompatible files load as nothing and are removed" passed after 7.647 seconds.
+✘ Test "The window modifier follows preview, Cancel and Apply" recorded an issue with 1 argument theme → .darkImport at BuiltLf.swift:33:13: Expectation failed: (FileManager.default → <NSFileManager: 0x10099f060>).isExecutableFile(atPath: path → "/Users/jack/src/loopflow.loo-895-fix-or-delete/target/debug/lf")
+↳ Build with cargo build -p loopflow --bin lf
+◇ Test case passing 1 argument theme → .bundled to "The window modifier follows preview, Cancel and Apply" started.
+✔ Test "Changing repository clears cached Sessions" passed after 7.663 seconds.
+✔ Test "Abandoning the open Task drops its row and opens the next one before the command returns; a refusal puts it back" passed after 7.664 seconds.
+✔ Test "Session refresh reads Task GraphSteps" passed after 7.667 seconds.
+✘ Test "Retry stays non-replacing while another client holds input" recorded an issue at SessionsStoreTests.swift:713:9: Expectation failed: try #require(await reads.all.last).contains("--start-if-free")
+✘ Test "Retry stays non-replacing while another client holds input" failed after 7.667 seconds with 1 issue.
+✘ Test "Automatic preparations start selected first, stay bounded and honor Close" failed after 7.667 seconds with 1 issue.
+✘ Test "A consumed first launch recovers with one Try again; refresh never repeats it" recorded an issue at SessionsStoreTests.swift:680:24: Expectation failed: await reads.all.first → nil
+✔ Test emptyFilesRetainTheirRecordedLocation() passed after 7.493 seconds.
+◇ Test creationReceiptsAndBackgroundTargetsKeepTheirShell() started.
+✘ Test "A consumed first launch recovers with one Try again; refresh never repeats it" failed after 7.667 seconds with 2 issues.
+✔ Test "Same-name definitions keep separate destinations and a failed refresh retains visible stale data" passed after 7.670 seconds.
+✘ Test taskLifecycleUpdatesOpenSidebar(action:) recorded an issue with 1 argument action → "complete" at BuiltLf.swift:33:13: Expectation failed: (FileManager.default → <NSFileManager: 0x10099f060>).isExecutableFile(atPath: path → "/Users/jack/src/loopflow.loo-895-fix-or-delete/target/debug/lf")
+↳ Build with cargo build -p loopflow --bin lf
+◇ Test case passing 1 argument action → "abandon" to taskLifecycleUpdatesOpenSidebar(action:) started.
+✘ Test chooserFiltersEachPickerToItsAppearanceAndWritesTheChoice() recorded an issue at BuiltLf.swift:33:13: Expectation failed: (FileManager.default → <NSFileManager: 0x10099f060>).isExecutableFile(atPath: path → "/Users/jack/src/loopflow.loo-895-fix-or-delete/target/debug/lf")
+↳ Build with cargo build -p loopflow --bin lf
+✘ Test chooserFiltersEachPickerToItsAppearanceAndWritesTheChoice() failed after 0.046 seconds with 1 issue.
+◇ Test chooserExplainsAMismatchedImportAndKeepsApplyDisabled() started.
+✔ Test "A taskless exact link selects its conversation without enumerating history" with 2 test cases passed after 7.687 seconds.
+◇ Test taskEntryOpensConversationThenRetainsWorkspace(standalone:) started.
+◇ Test case passing 1 argument standalone → false to taskEntryOpensConversationThenRetainsWorkspace(standalone:) started.
+✘ Test "The window modifier follows preview, Cancel and Apply" recorded an issue with 1 argument theme → .bundled at BuiltLf.swift:33:13: Expectation failed: (FileManager.default → <NSFileManager: 0x10099f060>).isExecutableFile(atPath: path → "/Users/jack/src/loopflow.loo-895-fix-or-delete/target/debug/lf")
+↳ Build with cargo build -p loopflow --bin lf
+✘ Test "The window modifier follows preview, Cancel and Apply" with 5 test cases failed after 7.697 seconds with 5 issues.
+◇ Test "System light/dark changes reach the window integration" started.
+◇ Test case passing 1 argument dark → false to "System light/dark changes reach the window integration" started.
+✔ Test "Workflow loading, unavailable and absent readings remain distinct" passed after 7.768 seconds.
+✔ Test "Presentation and repo changes preserve selection, viewport and terminal splits" passed after 7.892 seconds.
+✔ Test "In-place navigation, resizing, collapse and history preserve Work and drafts" passed after 7.897 seconds.
+✔ Test "Session rename is scoped to its draft without a second breadcrumb" passed after 7.902 seconds.
+✔ Test "A dropped Task row takes its place before the order is written" passed after 7.902 seconds.
+✔ Test "Repository scope filters one shared snapshot and clears outside selection" passed after 7.902 seconds.
+✔ Test "A delayed historical reference cannot replace newer navigation" with 3 test cases passed after 7.902 seconds.
+✔ Test "Navigation selects one destination and retains each Task's panes" passed after 7.913 seconds.
+✔ Test "Attention opens the exact retained conversation and Back returns to interrupted Work" with 2 test cases passed after 7.917 seconds.
+✔ Test "Current chapter source references navigate directly to the Wave" passed after 7.917 seconds.
+✔ Test "Refresh failure preserves last-good evidence and exposes the reason" passed after 7.918 seconds.
+✔ Test "Cancellation after preparation cannot create a late viewer" passed after 7.917 seconds.
+✔ Test "Eviction fences a preparation that returns after release" passed after 7.917 seconds.
+✔ Test "Selected Task survives a chapter transfer with temporarily absent membership" passed after 7.919 seconds.
+✘ Test taskLifecycleUpdatesOpenSidebar(action:) recorded an issue with 1 argument action → "abandon" at BuiltLf.swift:33:13: Expectation failed: (FileManager.default → <NSFileManager: 0x10099f060>).isExecutableFile(atPath: path → "/Users/jack/src/loopflow.loo-895-fix-or-delete/target/debug/lf")
+↳ Build with cargo build -p loopflow --bin lf
+✘ Test taskLifecycleUpdatesOpenSidebar(action:) with 2 test cases failed after 0.318 seconds with 2 issues.
+◇ Test "Standalone membership moves reach the retained workspace through the CLI stream" started.
+✔ Test filePaneRoutesWithoutLinkedSessionPrimingAndRetainsDrafts() passed after 6.341 seconds.
+◇ Test releasingFilesStoreEndsRemoteObservation() started.
+✔ Test "Each breadcrumb's › lists what is inside it and searches that scope; ⌘K keeps Find Work" passed after 8.050 seconds.
+✔ Test "Breadcrumb navigation and sidebar toggling retain panes and width" passed after 8.059 seconds.
+✔ Test "An unstarted Task's Session slot offers Start; showing it starts nothing" passed after 8.113 seconds.
+✔ Test "Task briefs and the Wave standup board share the current snapshot" passed after 8.221 seconds.
+✔ Test "Selecting Work closes Find Work and preserves the sidebar preference" with 2 test cases passed after 8.222 seconds.
+✔ Test "Work outside the plan remains explained in Wave details" passed after 8.303 seconds.
+✔ Test "The Machine control reads the current Work's Machine from planning; unstarted Tasks and the repository have none" passed after 8.311 seconds.
+✔ Test "The sheet follows the scope's reported workflow, names whose default it is, and waits for a request" passed after 0.934 seconds.
+✔ Suite "New Task" passed after 8.357 seconds.
+✔ Test "A rejected rename keeps the typed name and error on that Session only" passed after 8.354 seconds.
+✔ Test "A late Activity query cannot replace evidence for a newer selection" passed after 8.354 seconds.
+✔ Test "A Task's first conversation brings Files into view once; closing hides it and toggling returns it" passed after 0.905 seconds.
+◇ Test "Companion switches retain the shell and file draft; Close releases the shell" started.
+✔ Test "The repository roadmap reads Git planning through the ordinary query" passed after 8.361 seconds.
+✔ Test "Reset leaves the Session live while preparing and keeps updates when it fails" with 2 test cases passed after 8.361 seconds.
+✔ Test legacyImportRequiresAnUnconfiguredSharedSelection() passed after 8.364 seconds.
+◇ Test case passing 1 argument kind → .wave to scopeNavigationCannotAllocateTools(kind:) started.
+✘ Test "Standalone membership moves reach the retained workspace through the CLI stream" recorded an issue at BuiltLf.swift:33:13: Expectation failed: (FileManager.default → <NSFileManager: 0x10099f060>).isExecutableFile(atPath: path → "/Users/jack/src/loopflow.loo-895-fix-or-delete/target/debug/lf")
+↳ Build with cargo build -p loopflow --bin lf
+✘ Test "Standalone membership moves reach the retained workspace through the CLI stream" failed after 0.442 seconds with 1 issue.
+◇ Test canonical_ids_desktop_cli_transport_accepts_any_casing() started.
+✔ Test "A client reads state, gets typed errors, and receives the first change frame" passed after 8.362 seconds.
+✔ Test editedSlotsKeepAFixedCountAndFocusStillGrowsInPlace() passed after 0.719 seconds.
+✔ Suite "Desktop socket API" passed after 8.366 seconds.
+◇ Test sidebarAndGridShareTheOrderTheRustWriterReturns() started.
+✔ Test catalogueIsTwelveLightAndTwelveDarkWithQuietCompanions() passed after 0.719 seconds.
+◇ Test builtinFilesAreCompleteAndRoundTrip() started.
+✔ Test "A workspace saved under another Machine is dropped" passed after 8.393 seconds.
+✔ Test "Saved text never claims a live process or a legal mutation" passed after 8.394 seconds.
+✔ Test "A returning launch restores its cache before any read finishes" passed after 8.395 seconds.
+✔ Test openingWaitsForNativeReadinessAndRecoversInPlace() passed after 8.443 seconds.
+◇ Test providerTransitionSurvivesTheStatusStreamAndWaitsForNativeReadiness() started.
+✔ Test "A late Session refresh cannot cross repository scope" passed after 8.598 seconds.
+✔ Test creationReceiptsAndBackgroundTargetsKeepTheirShell() passed after 0.946 seconds.
+◇ Test higherLevelShellRequestsMutateNothing() started.
+✔ Test "A failed transfer retains concurrent Session updates and can retry" passed after 8.613 seconds.
+✔ Suite "Sessions store" passed after 8.617 seconds.
+✘ Test canonical_ids_desktop_cli_transport_accepts_any_casing() recorded an issue at BuiltLf.swift:33:13: Expectation failed: (FileManager.default → <NSFileManager: 0x10099f060>).isExecutableFile(atPath: path → "/Users/jack/src/loopflow.loo-895-fix-or-delete/target/debug/lf")
+↳ Build with cargo build -p loopflow --bin lf
+✘ Test canonical_ids_desktop_cli_transport_accepts_any_casing() failed after 0.251 seconds with 1 issue.
+✘ Suite "CLI to retained Work sidebar" failed after 8.618 seconds with 7 issues.
+↳ /// Real CLI writes and the production stream/projection; no provider or display.
+✔ Test chooserExplainsAMismatchedImportAndKeepsApplyDisabled() passed after 0.924 seconds.
+✘ Suite "Retained work through theme preview" failed after 8.618 seconds with 1 issue.
+◇ Test case passing 1 argument standalone → true to taskEntryOpensConversationThenRetainsWorkspace(standalone:) started.
+✔ Test "Another window in the same process opens from the workspace already held" passed after 8.617 seconds.
+✔ Test "A saved launch repository opens without git and is checked afterwards" passed after 8.618 seconds.
+◇ Test case passing 1 argument dark → true to "System light/dark changes reach the window integration" started.
+✔ Test "leaving a Wave does not cancel its activation or replace another Wave's feedback" passed after 8.706 seconds.
+✔ Test "activation failure belongs to its Wave and retry preserves planning" passed after 8.706 seconds.
+✔ Test "A Session read that finishes after a repository switch saves nothing" passed after 8.798 seconds.
+✔ Test "Repository and Wave primaries open on load beside the Task bound, before any selection" passed after 8.805 seconds.
+✔ Test "An assigned non-primary Session offers primary selection through binding" passed after 8.810 seconds.
+✔ Test "An unchanged poll writes nothing" passed after 8.807 seconds.
+✔ Test "Unscoped Sessions remain in history without navigation entries" passed after 8.841 seconds.
+✔ Test "Repository conversation reuses its exact pane without selecting another Work" passed after 8.885 seconds.
+✔ Test "A late rename cannot dismiss a newer draft for the same Session" passed after 8.886 seconds.
+✔ Test "the portfolio shows pending activation alongside retained planning" passed after 8.885 seconds.
+✔ Suite "Project activation" passed after 8.888 seconds.
+✔ Test "Stable Work selection resolves against the latest snapshot" passed after 8.885 seconds.
+✔ Test releasingFilesStoreEndsRemoteObservation() passed after 0.945 seconds.
+✔ Test "Companion switches retain the shell and file draft; Close releases the shell" passed after 0.531 seconds.
+◇ Test remoteEventsReconcileRetainedDraftsAndRejectLostOrStaleOwners(ending:) started.
+◇ Test "Navigation selects as the window's controls do; receipts match the next reading" started.
+◇ Test case passing 1 argument ending → "disconnect" to remoteEventsReconcileRetainedDraftsAndRejectLostOrStaleOwners(ending:) started.
+✔ Test scopeNavigationCannotAllocateTools(kind:) with 2 test cases passed after 1.242 seconds.
+✔ Test mutationWaitsForPendingReading() passed after 8.887 seconds.
+✔ Test builtinFilesAreCompleteAndRoundTrip() passed after 0.521 seconds.
+◇ Test previewsExpireAndNeverCombineOtherSessionStatus() started.
+◇ Test ghosttyMappingUsesAnsiAndSelectionBeyondBackgroundAndForeground() started.
+✔ Test "Known repository entry presents its scene before admitting a new link" with 6 test cases passed after 8.888 seconds.
+✔ Test "Returning to a repository retains its last-good Sessions when refresh fails" passed after 8.895 seconds.
+✔ Test "Slow planning does not gate Session reading or navigation" passed after 8.896 seconds.
+✔ Test "A refused bind keeps its exact confirmation for safe same-target retry" passed after 9.010 seconds.
+✔ Test higherLevelShellRequestsMutateNothing() passed after 0.422 seconds.
+✔ Suite "Retained Task tool tabs" passed after 9.041 seconds.
+✔ Test "A queued or failed primary shows opening or its failure with Retry, never an Open gate" passed after 9.058 seconds.
+✔ Test taskEntryOpensConversationThenRetainsWorkspace(standalone:) with 2 test cases passed after 1.371 seconds.
+◇ Test "Sidebar initializes missing history without taking a competing claim" started.
+◇ Test case passing 1 argument occupied → false to "Sidebar initializes missing history without taking a competing claim" started.
+◇ Test case passing 1 argument outcome → .unreadable to "Directive updates keep their Task target and distinguish rejected writes from unavailable refreshed planning" started.
+✔ Test "System light/dark changes reach the window integration" with 2 test cases passed after 1.415 seconds.
+✘ Suite "Headless window appearance" failed after 9.115 seconds with 5 issues.
+✔ Test "Reopened content stays visible while resolution stalls or fails" with 2 test cases passed after 9.113 seconds.
+✔ Suite "Application workspace retention" passed after 9.117 seconds.
+✔ Test "Task inspection retains Available links without a Session inventory" passed after 9.122 seconds.
+✔ Test "Incomplete planning preserves the repository's selected Task" with 2 test cases passed after 9.182 seconds.
+✔ Test "Work selection becomes one server-side Activity filter" passed after 9.182 seconds.
+✔ Suite "Work model" passed after 9.186 seconds.
+✔ Test providerTransitionSurvivesTheStatusStreamAndWaitsForNativeReadiness() passed after 0.755 seconds.
+◇ Test brokenStatusStreamPausesInputAndFreshStreamRestoresIt() started.
+✔ Test mountedPresentationRetiresNormalAndPromotedResults(resource:) with 2 test cases passed after 9.248 seconds.
+✔ Test sidebarAndGridShareTheOrderTheRustWriterReturns() passed after 0.888 seconds.
+◇ Test workingTasksOpensOnlyTheTasksItsGridShows() started.
+✔ Test "A delayed New session failure stays with its Task across Task and repository navigation" passed after 9.254 seconds.
+✔ Test "Failed reads keep last-good work and exact Sessions with a visible error" passed after 9.260 seconds.
+✔ Test "Navigation selects as the window's controls do; receipts match the next reading" passed after 0.485 seconds.
+◇ Test actionRegistryMatchesTheFixture() started.
+✔ Test previewsExpireAndNeverCombineOtherSessionStatus() passed after 0.510 seconds.
+✔ Test ghosttyMappingUsesAnsiAndSelectionBeyondBackgroundAndForeground() passed after 0.510 seconds.
+◇ Test settledReportsUseSummary(state:) started.
+◇ Test case passing 1 argument state → .idle to settledReportsUseSummary(state:) started.
+◇ Test loopflowKeysOverrideDerivedAppRoles() started.
+✔ Test coldRecoveryAndFailedRemovalRepeatOnlyPresentationAndLookup() passed after 9.411 seconds.
+✔ Suite CreationSubmissionTests passed after 9.416 seconds.
+✔ Test "A failed load Start shows its failure, never a Start offer" passed after 9.413 seconds.
+◇ Test case passing 1 argument occupied → true to "Sidebar initializes missing history without taking a competing claim" started.
+✔ Test workingTasksOpensOnlyTheTasksItsGridShows() passed after 0.223 seconds.
+✔ Test "A delayed same-path Session read cannot populate a replacement Machine" passed after 9.473 seconds.
+◇ Test droppingTileCOnAMovesItThroughTheSharedOrderCommand() started.
+✔ Test "A refresh that finishes after a selection change keeps the newer selection" passed after 9.473 seconds.
+✔ Test "Restoring twelve Sessions prepares only attachments, then switches without preparation" passed after 9.477 seconds.
+✘ Suite "Workspace Session lifecycle" failed after 9.481 seconds with 9 issues.
+✔ Test "A slow provider keeps the saved workspace usable under Updating…" passed after 9.486 seconds.
+✔ Test actionRegistryMatchesTheFixture() passed after 0.165 seconds.
+◇ Test "Each action changes the model as its key does" started.
+◇ Test case passing 1 argument state → .done to settledReportsUseSummary(state:) started.
+✔ Test loopflowKeysOverrideDerivedAppRoles() passed after 0.152 seconds.
+◇ Test applyChangesOnlyTheThemeAndCancelLeavesTheFileUntouched() started.
+✔ Test "Close and a failure keep a person's next action" passed after 9.551 seconds.
+✔ Test "A failed refresh keeps the saved workspace under one truthful status" passed after 9.605 seconds.
+✔ Test staleSurfaceAndClosedCallbacksCannotPublish() passed after 2.187 seconds.
+◇ Test "A later status event recovers a refused observer without replacing the Session" started.
+✔ Test "A preparation reply behind its Session frame leaves the person's focus alone" passed after 9.605 seconds.
+✘ Test applyChangesOnlyTheThemeAndCancelLeavesTheFileUntouched() recorded an issue at BuiltLf.swift:33:13: Expectation failed: (FileManager.default → <NSFileManager: 0x10099f060>).isExecutableFile(atPath: path → "/Users/jack/src/loopflow.loo-895-fix-or-delete/target/debug/lf")
+↳ Build with cargo build -p loopflow --bin lf
+✘ Test applyChangesOnlyTheThemeAndCancelLeavesTheFileUntouched() failed after 0.062 seconds with 1 issue.
+✔ Test mutationsPublishSharedReadingAndFailureRetainsMembership() passed after 9.613 seconds.
+✘ Suite PortfolioServiceTests failed after 9.615 seconds with 1 issue.
+◇ Test absentConfigMeansLoopflowLightAndDarkAndIsCreatedOnApply() started.
+✔ Test "Standalone Tasks keep their workspace and draft across Wave moves" passed after 9.642 seconds.
+✔ Test "Preview is inert; confirmation uses exact Task and fences an older poll" passed after 9.650 seconds.
+✔ Test "Sidebar initializes missing history without taking a competing claim" with 2 test cases passed after 0.586 seconds.
+◇ Test "Close and eviction discard a late sidebar preparation" started.
+◇ Test case passing 1 argument evicted → false to "Close and eviction discard a late sidebar preparation" started.
+✔ Test droppingTileCOnAMovesItThroughTheSharedOrderCommand() passed after 0.229 seconds.
+◇ Test slotPagesHoldSevenTasksInOrder() started.
+✘ Test absentConfigMeansLoopflowLightAndDarkAndIsCreatedOnApply() recorded an issue at BuiltLf.swift:33:13: Expectation failed: (FileManager.default → <NSFileManager: 0x10099f060>).isExecutableFile(atPath: path → "/Users/jack/src/loopflow.loo-895-fix-or-delete/target/debug/lf")
+↳ Build with cargo build -p loopflow --bin lf
+✘ Test absentConfigMeansLoopflowLightAndDarkAndIsCreatedOnApply() failed after 0.094 seconds with 1 issue.
+◇ Test outsideEditsReloadAndUnknownNamesKeepTheLastGoodTheme() started.
+✔ Test "Failed or truncated planning retains saved rows, selection, panes and cache" passed after 2.292 seconds.
+◇ Test "Task Workflow survives planning failure and becomes stale when its reader disconnects" started.
+✔ Test "Restart keeps the selected Task but does not retain stale completion or location" with 2 test cases passed after 9.709 seconds.
+✔ Test settledReportsUseSummary(state:) with 2 test cases passed after 0.319 seconds.
+✔ Test "Each action changes the model as its key does" passed after 0.180 seconds.
+◇ Test summaryUsesFirstLineOfBrief() started.
+◇ Test "Session targets use captured location, never the enclosing workspace" started.
+✔ Test "Fresh restart prepares the saved conversations and honors saved Close" with 2 test cases passed after 9.714 seconds.
+✘ Test outsideEditsReloadAndUnknownNamesKeepTheLastGoodTheme() recorded an issue at BuiltLf.swift:33:13: Expectation failed: (FileManager.default → <NSFileManager: 0x10099f060>).isExecutableFile(atPath: path → "/Users/jack/src/loopflow.loo-895-fix-or-delete/target/debug/lf")
+↳ Build with cargo build -p loopflow --bin lf
+✘ Test outsideEditsReloadAndUnknownNamesKeepTheLastGoodTheme() failed after 0.010 seconds with 1 issue.
+◇ Test customizingABuiltinWritesYourCopyAndDeletingRevertsIt() started.
+✔ Test "Unchanged offline refresh stays quiet while new errors and recovery remain visible" passed after 9.724 seconds.
+◇ Test "Overlapping refreshes await one complete enumeration and retain its failure" started.
+✘ Test customizingABuiltinWritesYourCopyAndDeletingRevertsIt() recorded an issue at BuiltLf.swift:33:13: Expectation failed: (FileManager.default → <NSFileManager: 0x10099f060>).isExecutableFile(atPath: path → "/Users/jack/src/loopflow.loo-895-fix-or-delete/target/debug/lf")
+↳ Build with cargo build -p loopflow --bin lf
+✘ Test customizingABuiltinWritesYourCopyAndDeletingRevertsIt() failed after 0.007 seconds with 1 issue.
+✔ Test "Creation and binding keep the selected conversation and change its Work without launching" passed after 9.725 seconds.
+✔ Suite SessionControlsTests passed after 9.728 seconds.
+◇ Test importAcceptsOnlyThePickersAppearance() started.
+✔ Test "A Task's work, comments and pending delivery arrive from the stream, with no lf read" passed after 9.737 seconds.
+✔ Test slotPagesHoldSevenTasksInOrder() passed after 0.033 seconds.
+◇ Test renderedGoldenSlotsFitTheirBoundsUnfocusedAndFocused() started.
+✘ Test importAcceptsOnlyThePickersAppearance() recorded an issue at BuiltLf.swift:33:13: Expectation failed: (FileManager.default → <NSFileManager: 0x10099f060>).isExecutableFile(atPath: path → "/Users/jack/src/loopflow.loo-895-fix-or-delete/target/debug/lf")
+↳ Build with cargo build -p loopflow --bin lf
+✘ Test importAcceptsOnlyThePickersAppearance() failed after 0.015 seconds with 1 issue.
+✔ Test summaryUsesFirstLineOfBrief() passed after 0.023 seconds.
+◇ Test ghosttyThemesResolveAfterYoursAndBuiltinsAndStayReadOnly() started.
+✔ Suite "Console retained tools" passed after 9.743 seconds.
+✔ Test renderedGoldenSlotsFitTheirBoundsUnfocusedAndFocused() passed after 0.027 seconds.
+◇ Test dashboardsReuseWorkAndKeepRepositoryNavigation() started.
+✔ Test "Session targets use captured location, never the enclosing workspace" passed after 0.050 seconds.
+◇ Test literalTextDoesNotInterpretEscapesOrAcceptControlKeys() started.
+✔ Test "A held rename publishes Rust's name; an older poll cannot restore the old one" passed after 9.768 seconds.
+✔ Suite SessionRenameTests passed after 9.771 seconds.
+✔ Test "Directive updates keep their Task target and distinguish rejected writes from unavailable refreshed planning" with 2 test cases passed after 9.767 seconds.
+◇ Test "Description blocks come from the Markdown parser without losing source text" started.
+✔ Test brokenStatusStreamPausesInputAndFreshStreamRestoresIt() passed after 0.599 seconds.
+◇ Test fragmentedReadingsWaitAndMalformedReadingsRevokeInput() started.
+✘ Test ghosttyThemesResolveAfterYoursAndBuiltinsAndStayReadOnly() recorded an issue at BuiltLf.swift:33:13: Expectation failed: (FileManager.default → <NSFileManager: 0x10099f060>).isExecutableFile(atPath: path → "/Users/jack/src/loopflow.loo-895-fix-or-delete/target/debug/lf")
+↳ Build with cargo build -p loopflow --bin lf
+✘ Test ghosttyThemesResolveAfterYoursAndBuiltinsAndStayReadOnly() failed after 0.056 seconds with 1 issue.
+◇ Test yourRetiredWaitingRoleMigratesToWarning() started.
+✔ Test "A working Task behind both preparation slots shows opening, never Open conversation" passed after 9.797 seconds.
+✔ Test dashboardsReuseWorkAndKeepRepositoryNavigation() passed after 0.066 seconds.
+✔ Test literalTextDoesNotInterpretEscapesOrAcceptControlKeys() passed after 0.065 seconds.
+◇ Test refreshedPlansDoNotReplaceOrUnhideRetainedPrimaryPanes() started.
+✔ Test "Description blocks come from the Markdown parser without losing source text" passed after 0.037 seconds.
+◇ Test inputRequiresAnExistingTerminalAndNeverAllocatesOrFollowsFocus() started.
+◇ Test "A polling response started before Save cannot restore the old directive" started.
+◇ Test case passing 1 argument evicted → true to "Close and eviction discard a late sidebar preparation" started.
+✔ Test yourRetiredWaitingRoleMigratesToWarning() passed after 0.036 seconds.
+◇ Test invalidFilesAreReportedAndDoNotHideOtherThemes() started.
+✔ Test "Bound Sessions retain ancestry and panes across planning loss and return" with 3 test cases passed after 9.834 seconds.
+✔ Suite "Unified Work and Session navigation" passed after 9.837 seconds.
+✘ Test invalidFilesAreReportedAndDoNotHideOtherThemes() recorded an issue at BuiltLf.swift:33:13: Expectation failed: (FileManager.default → <NSFileManager: 0x10099f060>).isExecutableFile(atPath: path → "/Users/jack/src/loopflow.loo-895-fix-or-delete/target/debug/lf")
+↳ Build with cargo build -p loopflow --bin lf
+✘ Test invalidFilesAreReportedAndDoNotHideOtherThemes() failed after 0.003 seconds with 1 issue.
+◇ Test unreadableEditsKeepTheLastAppearanceAndDisableApply() started.
+◇ Test case passing 1 argument ending → "stale" to remoteEventsReconcileRetainedDraftsAndRejectLostOrStaleOwners(ending:) started.
+✔ Test refreshedPlansDoNotReplaceOrUnhideRetainedPrimaryPanes() passed after 0.007 seconds.
+✔ Test inputRequiresAnExistingTerminalAndNeverAllocatesOrFollowsFocus() passed after 0.007 seconds.
+◇ Test dashboardFocusPreservesQueryGeometryAndRetainedWork() started.
+◇ Test "Shell observation and exit use the pane's location, not the workspace path" started.
+✔ Test unreadableEditsKeepTheLastAppearanceAndDisableApply() passed after 0.007 seconds.
+◇ Test unchangedDiffRecolorsWithoutReplacingSelection() started.
+✔ Test dashboardFocusPreservesQueryGeometryAndRetainedWork() passed after 0.015 seconds.
+✔ Test "Shell observation and exit use the pane's location, not the workspace path" passed after 0.015 seconds.
+◇ Test liveQueriesUseDashboardsWithoutAcquiringWork(saved:) started.
+◇ Test passiveReadKeepsMissingSurfaceDistinctAndDoesNotFollowFocus(region:) started.
+◇ Test case passing 1 argument saved → true to liveQueriesUseDashboardsWithoutAcquiringWork(saved:) started.
+◇ Test case passing 1 argument region → .screen to passiveReadKeepsMissingSurfaceDistinctAndDoesNotFollowFocus(region:) started.
+✔ Test unchangedDiffRecolorsWithoutReplacingSelection() passed after 0.020 seconds.
+◇ Test boundedImportRetainsColorsAndReportsOmissions() started.
+✔ Test "Close and eviction discard a late sidebar preparation" with 2 test cases passed after 0.214 seconds.
+◇ Test "New Task creates through one lf command, then shows its conversation" started.
+◇ Test case passing 1 argument saved → false to liveQueriesUseDashboardsWithoutAcquiringWork(saved:) started.
+✔ Test "Overlapping refreshes await one complete enumeration and retain its failure" passed after 0.144 seconds.
+✔ Suite "Session refresh" passed after 9.870 seconds.
+◇ Test case passing 1 argument region → .scrollback to passiveReadKeepsMissingSurfaceDistinctAndDoesNotFollowFocus(region:) started.
+✔ Test liveQueriesUseDashboardsWithoutAcquiringWork(saved:) with 2 test cases passed after 0.038 seconds.
+◇ Test delayedRestoreRetainsNewTabsAndDraftsAndStaleSaveDoesNotReplaceThem() started.
+✔ Test boundedImportRetainsColorsAndReportsOmissions() passed after 0.035 seconds.
+◇ Test defaultConfigurationLoadsAfterInitialAppearance() started.
+◇ Test case passing 1 argument region → .selection to passiveReadKeepsMissingSurfaceDistinctAndDoesNotFollowFocus(region:) started.
+✔ Test defaultConfigurationLoadsAfterInitialAppearance() passed after 0.006 seconds.
+◇ Test compiledOverlayOverridesPersonalColors() started.
+✔ Test passiveReadKeepsMissingSurfaceDistinctAndDoesNotFollowFocus(region:) with 3 test cases passed after 0.092 seconds.
+◇ Test readRejectsStaleWindowContentAndByteLimitsWithoutChangingWorkspace() started.
+✔ Test "A polling response started before Save cannot restore the old directive" passed after 0.149 seconds.
+✔ Suite "Task directive editing" passed after 9.985 seconds.
+✔ Test compiledOverlayOverridesPersonalColors() passed after 0.081 seconds.
+◇ Test validationRejectsEachConflictingCompiledColor(key:) started.
+◇ Test case passing 1 argument key → "background" to validationRejectsEachConflictingCompiledColor(key:) started.
+✔ Test "Task Workflow survives planning failure and becomes stale when its reader disconnects" passed after 0.275 seconds.
+◇ Test "Peer status updates independently, preserves failures and rejects old scopes" started.
+✔ Test readRejectsStaleWindowContentAndByteLimitsWithoutChangingWorkspace() passed after 0.038 seconds.
+➜ Test exactInputCombinesDraftAtCursorWithoutFollowingFocusOrSubmitting() skipped: "Optional display-session diagnostic"
+➜ Test boundedReadPreservesRegionsSelectionAndExitedSurfaceUntilReplacement() skipped: "Optional display-session diagnostic"
+◇ Test sameTerminalIdOnAnotherMachineKeepsItsOwnViewAndLifetime() started.
+✔ Test "New Task creates through one lf command, then shows its conversation" passed after 0.123 seconds.
+◇ Test "New Task selects the new Task before the window's other readings confirm" started.
+✔ Test delayedRestoreRetainsNewTabsAndDraftsAndStaleSaveDoesNotReplaceThem() passed after 0.093 seconds.
+◇ Test coldRestorationSavesLaterEditsWithoutLaunchingShells() started.
+◇ Test case passing 1 argument key → "foreground" to validationRejectsEachConflictingCompiledColor(key:) started.
+✔ Test sameTerminalIdOnAnotherMachineKeepsItsOwnViewAndLifetime() passed after 0.025 seconds.
+◇ Test companionsRetainDraftsAndDoNotFollowFocusOrReplaceContent() started.
+◇ Test case passing 1 argument key → "cursor-color" to validationRejectsEachConflictingCompiledColor(key:) started.
+✔ Test fragmentedReadingsWaitAndMalformedReadingsRevokeInput() passed after 0.229 seconds.
+◇ Test moveAndRetryAreDeliberateAndNeverReplayed() started.
+✔ Test companionsRetainDraftsAndDoNotFollowFocusOrReplaceContent() passed after 0.014 seconds.
+◇ Test "Web page Back, Forward and Reload act on the browser tab's retained page" started.
+◇ Test case passing 1 argument key → "cursor-text" to validationRejectsEachConflictingCompiledColor(key:) started.
+◇ Test case passing 1 argument key → "selection-background" to validationRejectsEachConflictingCompiledColor(key:) started.
+✔ Test "New Task selects the new Task before the window's other readings confirm" passed after 0.147 seconds.
+◇ Test "An earlier creation reply keeps later navigation and a newer New Task sheet" started.
+◇ Test case passing 2 arguments unknownOutcome → false, departure → .newerTaskSheet to "An earlier creation reply keeps later navigation and a newer New Task sheet" started.
+◇ Test case passing 1 argument key → "selection-foreground" to validationRejectsEachConflictingCompiledColor(key:) started.
+✔ Test "Fresh repository load prefetches working Tasks without saved visits and honors Close" with 2 test cases passed after 10.141 seconds.
+◇ Test case passing 1 argument ending → "changed-owner" to remoteEventsReconcileRetainedDraftsAndRejectLostOrStaleOwners(ending:) started.
+◇ Test case passing 1 argument key → "search-background" to validationRejectsEachConflictingCompiledColor(key:) started.
+◇ Test case passing 1 argument key → "search-foreground" to validationRejectsEachConflictingCompiledColor(key:) started.
+◇ Test case passing 1 argument key → "search-selected-background" to validationRejectsEachConflictingCompiledColor(key:) started.
+✔ Test "Focusing a tile past the bound starts its conversation, as selection does" passed after 10.177 seconds.
+✔ Test "A board past the bound opens its page; a turn opens the arriving tile and no other" passed after 10.177 seconds.
+◇ Test case passing 1 argument key → "search-selected-foreground" to validationRejectsEachConflictingCompiledColor(key:) started.
+◇ Test case passing 2 arguments unknownOutcome → false, departure → .newerSheetSameDestination to "An earlier creation reply keeps later navigation and a newer New Task sheet" started.
+◇ Test case passing 1 argument key → "palette" to validationRejectsEachConflictingCompiledColor(key:) started.
+✔ Test "A started Task replaces its refused reveal with an automatic Start" passed after 10.191 seconds.
+✔ Test "A link's reveal refused after its Task started leaves no offer and starts" passed after 10.192 seconds.
+✔ Test "A Wave named after another Wave's ID keeps its own primary without repeated preparation" passed after 10.193 seconds.
+✔ Test validationRejectsEachConflictingCompiledColor(key:) with 11 test cases passed after 0.211 seconds.
+◇ Test unresolvedCompiledColorCannotPassValidation(value:) started.
+◇ Test case passing 1 argument value → "cell-foreground" to unresolvedCompiledColorCannotPassValidation(value:) started.
+✔ Test "Every working tile on the page opens with no click, two preparations at a time" passed after 10.199 seconds.
+✔ Test "A reveal refused after its Task started leaves no offer and starts" passed after 10.199 seconds.
+✔ Suite "Work cache" passed after 10.205 seconds.
+◇ Test case passing 1 argument value → "cell-background" to unresolvedCompiledColorCannotPassValidation(value:) started.
+◇ Test case passing 1 argument value → "" to unresolvedCompiledColorCannotPassValidation(value:) started.
+◇ Test case passing 2 arguments unknownOutcome → false, departure → .newerRepositorySheet to "An earlier creation reply keeps later navigation and a newer New Task sheet" started.
+✔ Test unresolvedCompiledColorCannotPassValidation(value:) with 3 test cases passed after 0.008 seconds.
+◇ Test weakDimTextKeepsTheThemeAsImported() started.
+✘ Test weakDimTextKeepsTheThemeAsImported() recorded an issue at BuiltLf.swift:33:13: Expectation failed: (FileManager.default → <NSFileManager: 0x10099f060>).isExecutableFile(atPath: path → "/Users/jack/src/loopflow.loo-895-fix-or-delete/target/debug/lf")
+↳ Build with cargo build -p loopflow --bin lf
+✘ Test weakDimTextKeepsTheThemeAsImported() failed after 0.001 seconds with 1 issue.
+✘ Suite "Whole-app themes" failed after 10.211 seconds with 8 issues.
+◇ Test case passing 2 arguments unknownOutcome → false, departure → .navigationAway to "An earlier creation reply keeps later navigation and a newer New Task sheet" started.
+◇ Test case passing 2 arguments unknownOutcome → false, departure → .navigationRoundTrip to "An earlier creation reply keeps later navigation and a newer New Task sheet" started.
+◇ Test case passing 2 arguments unknownOutcome → false, departure → .dismissed to "An earlier creation reply keeps later navigation and a newer New Task sheet" started.
+✔ Test "A workflow is drawn as a graph: circles, described interactive steps, a loop arc and an arrow per run" passed after 10.217 seconds.
+◇ Test case passing 2 arguments unknownOutcome → false, departure → .repositoryRoundTrip to "An earlier creation reply keeps later navigation and a newer New Task sheet" started.
+◇ Test case passing 2 arguments unknownOutcome → true, departure → .newerTaskSheet to "An earlier creation reply keeps later navigation and a newer New Task sheet" started.
+◇ Test case passing 2 arguments unknownOutcome → true, departure → .newerSheetSameDestination to "An earlier creation reply keeps later navigation and a newer New Task sheet" started.
+◇ Test case passing 2 arguments unknownOutcome → true, departure → .newerRepositorySheet to "An earlier creation reply keeps later navigation and a newer New Task sheet" started.
+◇ Test case passing 2 arguments unknownOutcome → true, departure → .navigationAway to "An earlier creation reply keeps later navigation and a newer New Task sheet" started.
+◇ Test case passing 2 arguments unknownOutcome → true, departure → .navigationRoundTrip to "An earlier creation reply keeps later navigation and a newer New Task sheet" started.
+◇ Test case passing 2 arguments unknownOutcome → true, departure → .dismissed to "An earlier creation reply keeps later navigation and a newer New Task sheet" started.
+◇ Test case passing 2 arguments unknownOutcome → true, departure → .repositoryRoundTrip to "An earlier creation reply keeps later navigation and a newer New Task sheet" started.
+✔ Test "An earlier creation reply keeps later navigation and a newer New Task sheet" with 14 test cases passed after 0.119 seconds.
+◇ Test "A submitted creation with an uncertain answer leaves the sheet for recovery" started.
+✔ Test "A submitted creation with an uncertain answer leaves the sheet for recovery" passed after 0.001 seconds.
+◇ Test "New Task keeps the sheet when nothing was filed" started.
+✔ Test "New Task keeps the sheet when nothing was filed" passed after 0.001 seconds.
+◇ Test "A tile whose opening failed says Retry, like its pane, and attaches in place" started.
+✔ Test moveAndRetryAreDeliberateAndNeverReplayed() passed after 0.312 seconds.
+◇ Test closingSurfaceDropsStatusAndIgnoresQueuedReadings() started.
+✔ Test "A tile whose opening failed says Retry, like its pane, and attaches in place" passed after 0.081 seconds.
+◇ Test "A repository page tile whose opening failed retries in place and the page stays" started.
+✔ Test closingSurfaceDropsStatusAndIgnoresQueuedReadings() passed after 0.061 seconds.
+✔ Suite ServerConnectionTests passed after 10.404 seconds.
+✔ Test "A repository page tile whose opening failed retries in place and the page stays" passed after 0.084 seconds.
+◇ Test "A finished tile without history offers Rust's Start after its refused reveal, in place" started.
+✔ Test "Web page Back, Forward and Reload act on the browser tab's retained page" passed after 0.421 seconds.
+◇ Test remoteShellRefusalPreservesTheWorkspace() started.
+✔ Test coldRestorationSavesLaterEditsWithoutLaunchingShells() passed after 0.470 seconds.
+✔ Test remoteShellRefusalPreservesTheWorkspace() passed after 0.009 seconds.
+◇ Test hideRestoreRetainsContentAndIgnoresLaterFocus() started.
+✔ Suite "Dashboard workspace integration" passed after 10.463 seconds.
+✔ Test hideRestoreRetainsContentAndIgnoresLaterFocus() passed after 0.001 seconds.
+◇ Test arrangementRetainsDocumentsSurfacesSelectionAndContentOccurrences() started.
+✔ Test arrangementRetainsDocumentsSurfacesSelectionAndContentOccurrences() passed after 0.001 seconds.
+◇ Test staleSourceRejectsEveryActionWithoutChangingTheCurrentFocus() started.
+✔ Test staleSourceRejectsEveryActionWithoutChangingTheCurrentFocus() passed after 0.001 seconds.
+◇ Test invalidSecondTargetsAndRatiosLeaveBothPanesUntouched() started.
+✔ Test invalidSecondTargetsAndRatiosLeaveBothPanesUntouched() passed after 0.001 seconds.
+◇ Test focusingAHiddenPaneRevealsItWithoutChangingItsContent() started.
+✔ Test focusingAHiddenPaneRevealsItWithoutChangingItsContent() passed after 0.001 seconds.
+◇ Test samePaneAndSessionAfterReplacementDoesNotReviveOldTarget() started.
+✔ Test samePaneAndSessionAfterReplacementDoesNotReviveOldTarget() passed after 0.001 seconds.
+◇ Test "⌘W then ⇧⌘T returns the ended shell identity, by key and by Apple event" started.
+✔ Test "⌘W then ⇧⌘T returns the ended shell identity, by key and by Apple event" passed after 0.015 seconds.
+◇ Test "close closes the tab it names, not the selected one" started.
+✔ Test "close closes the tab it names, not the selected one" passed after 0.001 seconds.
+◇ Test wrongMachineAndReplacedWindowNeverChangeOrAllocateWorkspaces() started.
+✔ Test wrongMachineAndReplacedWindowNeverChangeOrAllocateWorkspaces() passed after 0.001 seconds.
+✔ Suite "Exact Desktop pane arrangement" passed after 10.483 seconds.
+✔ Test "A finished tile without history offers Rust's Start after its refused reveal, in place" passed after 0.092 seconds.
+◇ Test "Task entry exposes Take back without taking over the external terminal" started.
+◇ Test case passing 1 argument explicitSession → false to "Task entry exposes Take back without taking over the external terminal" started.
+◇ Test case passing 1 argument explicitSession → true to "Task entry exposes Take back without taking over the external terminal" started.
+✔ Test "Task entry exposes Take back without taking over the external terminal" with 2 test cases passed after 0.015 seconds.
+◇ Test openingInstallsItsPreparedPaneWithoutPreparingAgain(unprepared:) started.
+◇ Test case passing 1 argument unprepared → false to openingInstallsItsPreparedPaneWithoutPreparingAgain(unprepared:) started.
+◇ Test case passing 1 argument unprepared → true to openingInstallsItsPreparedPaneWithoutPreparingAgain(unprepared:) started.
+✔ Test "A Task's Workflow shows its running run, offers a stopped one again, continues after an interactive step, and starts from any step" passed after 10.546 seconds.
+✔ Suite "Desktop without a display" passed after 10.550 seconds.
+✔ Test openingInstallsItsPreparedPaneWithoutPreparingAgain(unprepared:) with 2 test cases passed after 0.016 seconds.
+◇ Test "Open conversation opens whatever the pane names, held or not, even while native mount is pending" started.
+✔ Test "Open conversation opens whatever the pane names, held or not, even while native mount is pending" passed after 0.003 seconds.
+◇ Test conversationHandedToAnotherRepositoryLeavesNoOpeningHere() started.
+✔ Test conversationHandedToAnotherRepositoryLeavesNoOpeningHere() passed after 0.001 seconds.
+◇ Test ensuredTaskOpeningRetainsOtherSessionsAndValidation(outcome:) started.
+◇ Test case passing 1 argument outcome → "valid" to ensuredTaskOpeningRetainsOtherSessionsAndValidation(outcome:) started.
+◇ Test case passing 1 argument outcome → "updated-inventory" to ensuredTaskOpeningRetainsOtherSessionsAndValidation(outcome:) started.
+◇ Test case passing 1 argument outcome → "unavailable-inventory" to ensuredTaskOpeningRetainsOtherSessionsAndValidation(outcome:) started.
+◇ Test case passing 1 argument outcome → "foreign-session" to ensuredTaskOpeningRetainsOtherSessionsAndValidation(outcome:) started.
+◇ Test case passing 1 argument outcome → "missing-task" to ensuredTaskOpeningRetainsOtherSessionsAndValidation(outcome:) started.
+◇ Test case passing 1 argument outcome → "unavailable-plan" to ensuredTaskOpeningRetainsOtherSessionsAndValidation(outcome:) started.
+✔ Test ensuredTaskOpeningRetainsOtherSessionsAndValidation(outcome:) with 6 test cases passed after 0.013 seconds.
+◇ Test failedTaskConversationRetainsItsReasonWithoutADuplicateAlert() started.
+✔ Test failedTaskConversationRetainsItsReasonWithoutADuplicateAlert() passed after 0.001 seconds.
+◇ Test "A failed automatic Start shows its failure, never a Start offer" started.
+✔ Test "A failed automatic Start shows its failure, never a Start offer" passed after 0.001 seconds.
+◇ Test "A requested reveal stays reveal on a working Task and may offer Start" started.
+✔ Test "A requested reveal stays reveal on a working Task and may offer Start" passed after 0.001 seconds.
+◇ Test bareTaskOpeningDoesNotAcquireASession(remote:) started.
+◇ Test case passing 1 argument remote → false to bareTaskOpeningDoesNotAcquireASession(remote:) started.
+◇ Test case passing 1 argument remote → true to bareTaskOpeningDoesNotAcquireASession(remote:) started.
+✔ Test bareTaskOpeningDoesNotAcquireASession(remote:) with 2 test cases passed after 0.001 seconds.
+◇ Test remoteOpeningKeepsLocalPlanningAndRetainedDrafts(outcome:) started.
+◇ Test case passing 1 argument outcome → "recorded" to remoteOpeningKeepsLocalPlanningAndRetainedDrafts(outcome:) started.
+[90m◇[0m Test run started.
+[90m↳ Testing Library Version: 1501[0m
+[90m↳ Target Platform: arm64e-apple-macos14.0[0m
+[90m◇[0m Suite "Work destinations" started.
+[90m◇[0m Test remoteOpeningKeepsLocalPlanningAndRetainedDrafts(outcome:) started.
+[90m◇[0m Test case passing 1 argument outcome → "recorded" to remoteOpeningKeepsLocalPlanningAndRetainedDrafts(outcome:) started.
+[90m◇[0m Test case passing 1 argument outcome → "stale" to remoteOpeningKeepsLocalPlanningAndRetainedDrafts(outcome:) started.
+[90m◇[0m Test case passing 1 argument outcome → "unavailable" to remoteOpeningKeepsLocalPlanningAndRetainedDrafts(outcome:) started.
+[90m◇[0m Test case passing 1 argument outcome → "unrecorded" to remoteOpeningKeepsLocalPlanningAndRetainedDrafts(outcome:) started.
+[90m◇[0m Test case passing 1 argument outcome → "wrong-checkout" to remoteOpeningKeepsLocalPlanningAndRetainedDrafts(outcome:) started.
+[92m✔[0m Test remoteOpeningKeepsLocalPlanningAndRetainedDrafts(outcome:) with 5 test cases passed after 0.098 seconds.
+[92m✔[0m Suite "Work destinations" passed after 0.099 seconds.
+[92m✔[0m Test run with 1 test in 1 suite passed after 0.099 seconds.
+
+◇ Test case passing 1 argument outcome → "stale" to remoteOpeningKeepsLocalPlanningAndRetainedDrafts(outcome:) started.
+✔ Test remoteEventsReconcileRetainedDraftsAndRejectLostOrStaleOwners(ending:) with 3 test cases passed after 2.098 seconds.
+◇ Test chooserFiltersScratchAndParentChangesAndPreservesDrafts() started.
+✔ Test chooserFiltersScratchAndParentChangesAndPreservesDrafts() passed after 0.004 seconds.
+◇ Test presentOrdinaryDocsRetainsEditsAndReusesTheFileTab() started.
+◇ Test case passing 1 argument outcome → "unavailable" to remoteOpeningKeepsLocalPlanningAndRetainedDrafts(outcome:) started.
+✔ Test presentOrdinaryDocsRetainsEditsAndReusesTheFileTab() passed after 0.001 seconds.
+◇ Test scratchPageWritesTakeOnlyStaleAttention() started.
+◇ Test case passing 1 argument outcome → "unrecorded" to remoteOpeningKeepsLocalPlanningAndRetainedDrafts(outcome:) started.
+✔ Test scratchPageWritesTakeOnlyStaleAttention() passed after 0.002 seconds.
+◇ Test readModeRendersHTMLAsAPageAndMarkdownAsBlocks() started.
+✔ Test readModeRendersHTMLAsAPageAndMarkdownAsBlocks() passed after 0.007 seconds.
+◇ Test diskWinsOverlapKeepsOtherLocalEditsAndUndoNeverRevertsDisk() started.
+◇ Test case passing 1 argument outcome → "wrong-checkout" to remoteOpeningKeepsLocalPlanningAndRetainedDrafts(outcome:) started.
+✔ Test diskWinsOverlapKeepsOtherLocalEditsAndUndoNeverRevertsDisk() passed after 0.002 seconds.
+◇ Test sameRevisionAccessChangePreservesDraftSelectionAndUndo() started.
+✔ Test "A later status event recovers a refused observer without replacing the Session" passed after 1.412 seconds.
+◇ Test "A restored question reaches the first Session reading without leaking to its replacement" started.
+✔ Test sameRevisionAccessChangePreservesDraftSelectionAndUndo() passed after 0.019 seconds.
+◇ Test symlinkAccessCancelsQueuedAutosaveAndManualSave(parentLink:) started.
+◇ Test case passing 1 argument parentLink → false to symlinkAccessCancelsQueuedAutosaveAndManualSave(parentLink:) started.
+✔ Test remoteOpeningKeepsLocalPlanningAndRetainedDrafts(outcome:) with 5 test cases passed after 0.450 seconds.
+◇ Test resolvingTaskKeepsTheWorkspaceVisible() started.
+✔ Test resolvingTaskKeepsTheWorkspaceVisible() passed after 0.012 seconds.
+◇ Test reopeningLoadedTaskPreservesItsSessionWithoutAnotherRead(runtimeSelection:) started.
+◇ Test case passing 1 argument runtimeSelection → false to reopeningLoadedTaskPreservesItsSessionWithoutAnotherRead(runtimeSelection:) started.
+◇ Test case passing 1 argument runtimeSelection → true to reopeningLoadedTaskPreservesItsSessionWithoutAnotherRead(runtimeSelection:) started.
+✔ Test reopeningLoadedTaskPreservesItsSessionWithoutAnotherRead(runtimeSelection:) with 2 test cases passed after 0.007 seconds.
+◇ Test refreshedPlanningDoesNotReuseAnOldLinkResult() started.
+✔ Test refreshedPlanningDoesNotReuseAnOldLinkResult() passed after 0.050 seconds.
+◇ Test taskLinkReusesConversationAfterInventoryLoadsLaterPages() started.
+✔ Test taskLinkReusesConversationAfterInventoryLoadsLaterPages() passed after 0.012 seconds.
+◇ Test composedOpeningRetainsTheExactSessionAndChangesPane() started.
+✔ Test composedOpeningRetainsTheExactSessionAndChangesPane() passed after 0.006 seconds.
+◇ Test composedOpeningWaitsForNativeSessionAndComparison(outcome:) started.
+◇ Test case passing 1 argument outcome → "usable" to composedOpeningWaitsForNativeSessionAndComparison(outcome:) started.
+◇ Test case passing 1 argument outcome → "connection" to composedOpeningWaitsForNativeSessionAndComparison(outcome:) started.
+◇ Test case passing 1 argument outcome → "surface" to composedOpeningWaitsForNativeSessionAndComparison(outcome:) started.
+✔ Test "Silence after the first frame expires a reader that must speak, not a subscription" passed after 11.102 seconds.
+✘ Suite "Workspace subscription transport" failed after 11.157 seconds with 3 issues.
+↳ /// A window's subscriptions, served by stand-ins or by a private Loopflow server.
+↳ /// Every window starts with the plan and the live-process subscription.
+◇ Test case passing 1 argument outcome → "comparison" to composedOpeningWaitsForNativeSessionAndComparison(outcome:) started.
+◇ Test case passing 1 argument outcome → "closed" to composedOpeningWaitsForNativeSessionAndComparison(outcome:) started.
+◇ Test case passing 1 argument outcome → "hidden" to composedOpeningWaitsForNativeSessionAndComparison(outcome:) started.
+◇ Test case passing 1 argument outcome → "zoomed" to composedOpeningWaitsForNativeSessionAndComparison(outcome:) started.
+◇ Test case passing 1 argument outcome → "replaced" to composedOpeningWaitsForNativeSessionAndComparison(outcome:) started.
+✔ Test composedOpeningWaitsForNativeSessionAndComparison(outcome:) with 8 test cases passed after 0.242 seconds.
+✔ Test "Peer status updates independently, preserves failures and rejects old scopes" passed after 1.366 seconds.
+◇ Test "Frames update planning in place and an older frame cannot replace a newer one" started.
+◇ Test "Repeating a failed opening retries the same Session in its retained pane" started.
+✔ Test "Repeating a failed opening retries the same Session in its retained pane" passed after 0.093 seconds.
+◇ Test "A conversation held elsewhere never confirms local attachment" started.
+✔ Test "A conversation held elsewhere never confirms local attachment" passed after 0.007 seconds.
+◇ Test unavailableWorkspaceMachineDoesNotConnect() started.
+✔ Test unavailableWorkspaceMachineDoesNotConnect() passed after 0.002 seconds.
+◇ Test canceledComparisonCannotSettleNewOpening() started.
+✔ Test canceledComparisonCannotSettleNewOpening() passed after 0.019 seconds.
+◇ Test canceledOpeningCannotBecomeUsableFromALateSurface() started.
+✔ Test canceledOpeningCannotBecomeUsableFromALateSurface() passed after 0.008 seconds.
+◇ Test delayedPrimarySessionPreparationDoesNotOpenChangesInAnotherTask(conversation:) started.
+◇ Test case passing 1 argument conversation → false to delayedPrimarySessionPreparationDoesNotOpenChangesInAnotherTask(conversation:) started.
+◇ Test case passing 1 argument conversation → true to delayedPrimarySessionPreparationDoesNotOpenChangesInAnotherTask(conversation:) started.
+✔ Test delayedPrimarySessionPreparationDoesNotOpenChangesInAnotherTask(conversation:) with 2 test cases passed after 0.009 seconds.
+◇ Test paletteBindingTargetsOnlyTheSelectedUnassignedSession() started.
+✔ Test paletteBindingTargetsOnlyTheSelectedUnassignedSession() passed after 0.005 seconds.
+◇ Test taskLinkOpensExactSessionFromLaterPage() started.
+✔ Test taskLinkOpensExactSessionFromLaterPage() passed after 0.005 seconds.
+◇ Test exactSessionOpeningDoesNotWaitForUnrelatedHistory() started.
+✔ Test exactSessionOpeningDoesNotWaitForUnrelatedHistory() passed after 0.003 seconds.
+◇ Test exactSessionOpensWhilePlanningIsStillSaved() started.
+✔ Test exactSessionOpensWhilePlanningIsStillSaved() passed after 0.008 seconds.
+◇ Test historicalTaskSurvivesCurrentPlanRefresh() started.
+✔ Test historicalTaskSurvivesCurrentPlanRefresh() passed after 0.008 seconds.
+◇ Test historicalRecentSurvivesLeavingItsPageAndRefresh() started.
+✔ Test "Frames update planning in place and an older frame cannot replace a newer one" passed after 0.179 seconds.
+◇ Test "Another Machine replaces what the previous Machine showed" started.
+✔ Test historicalRecentSurvivesLeavingItsPageAndRefresh() passed after 0.012 seconds.
+◇ Test recentTaskReadbackPreservesIdentityAndWorkspace() started.
+✔ Test recentTaskReadbackPreservesIdentityAndWorkspace() passed after 0.013 seconds.
+◇ Test paletteSearchIncludesUnstartedTasksAndRanksExactIDs() started.
+✔ Test paletteSearchIncludesUnstartedTasksAndRanksExactIDs() passed after 0.010 seconds.
+◇ Test historicalTaskWithoutPlanningHasNoDeadEndGraphAction() started.
+✔ Test historicalTaskWithoutPlanningHasNoDeadEndGraphAction() passed after 0.003 seconds.
+◇ Test ambiguousAndUnavailableLinksPreserveTheWorkspace() started.
+✔ Test ambiguousAndUnavailableLinksPreserveTheWorkspace() passed after 0.018 seconds.
+◇ Test inspectionForwardsTaskControlIndependentlyOfSessionFailure() started.
+✔ Test inspectionForwardsTaskControlIndependentlyOfSessionFailure() passed after 0.001 seconds.
+◇ Test inspectionUsesTheRepositoryInventoryForBothTaskIdentities() started.
+✔ Test inspectionUsesTheRepositoryInventoryForBothTaskIdentities() passed after 0.001 seconds.
+◇ Test inspectionKeepsStaleDatesButNeverHistoricalActions() started.
+✔ Test inspectionKeepsStaleDatesButNeverHistoricalActions() passed after 0.001 seconds.
+◇ Test inspectionForwardsSessionActionsThenWithdrawsThemOnReadFailure() started.
+✔ Test inspectionForwardsSessionActionsThenWithdrawsThemOnReadFailure() passed after 0.003 seconds.
+◇ Test inspectionDoesNotOfferActionsFromAnIncompleteSessionEnumeration() started.
+✔ Test inspectionDoesNotOfferActionsFromAnIncompleteSessionEnumeration() passed after 0.006 seconds.
+◇ Test plainTaskPageWaitsForItsOwnContent(outcome:) started.
+◇ Test case passing 1 argument outcome → "usable" to plainTaskPageWaitsForItsOwnContent(outcome:) started.
+◇ Test case passing 1 argument outcome → "failed" to plainTaskPageWaitsForItsOwnContent(outcome:) started.
+◇ Test case passing 1 argument outcome → "canceled" to plainTaskPageWaitsForItsOwnContent(outcome:) started.
+✔ Test plainTaskPageWaitsForItsOwnContent(outcome:) with 3 test cases passed after 0.014 seconds.
+◇ Test repositoryLookupFailureIsInspectableWithoutAWindow() started.
+✔ Test repositoryLookupFailureIsInspectableWithoutAWindow() passed after 0.001 seconds.
+◇ Test remoteTaskLinksReuseTheLocalRepositoryWindow() started.
+✔ Test "Another Machine replaces what the previous Machine showed" passed after 0.098 seconds.
+✔ Test "A restored question reaches the first Session reading without leaking to its replacement" passed after 0.611 seconds.
+◇ Test "A Task completed elsewhere leaves the working set and stays under Completed" started.
+◇ Test labelRendersProgramTextLiterally() started.
+✔ Test labelRendersProgramTextLiterally() passed after 0.001 seconds.
+✘ Suite "Program Status" failed after 11.637 seconds with 1 issue.
+✔ Test "A Task completed elsewhere leaves the working set and stays under Completed" passed after 0.023 seconds.
+◇ Test "Refresh returns when a planning frame answers it" started.
+✔ Test remoteTaskLinksReuseTheLocalRepositoryWindow() passed after 0.109 seconds.
+◇ Test batchedAddressesOpenInArrivalOrderAndRaiseOnlyTheLatest() started.
+✔ Test "Refresh returns when a planning frame answers it" passed after 0.096 seconds.
+◇ Test "Plan changes invalidate an open catalogue without unrelated reloads" started.
+✔ Test batchedAddressesOpenInArrivalOrderAndRaiseOnlyTheLatest() passed after 0.112 seconds.
+◇ Test plainRepositoryWaitsForRegistrationAndReusesTheWindow() started.
+✔ Test "Plan changes invalidate an open catalogue without unrelated reloads" passed after 0.097 seconds.
+◇ Test "A late catalogue failure cannot replace a newer successful read" started.
+✔ Test "A late catalogue failure cannot replace a newer successful read" passed after 0.001 seconds.
+◇ Test "A mutation waits for its checkpoint without asking for broad refresh" started.
+✔ Test "A mutation waits for its checkpoint without asking for broad refresh" passed after 0.045 seconds.
+◇ Test "A successful Task update stops waiting despite unrelated frames, and a late checkpoint is harmless" started.
+✔ Test plainRepositoryWaitsForRegistrationAndReusesTheWindow() passed after 0.065 seconds.
+◇ Test obsoleteRepositoryLookupCannotOpenOrSettleANewerRequest(outcome:) started.
+◇ Test case passing 1 argument outcome → "success" to obsoleteRepositoryLookupCannotOpenOrSettleANewerRequest(outcome:) started.
+◇ Test case passing 1 argument outcome → "failure" to obsoleteRepositoryLookupCannotOpenOrSettleANewerRequest(outcome:) started.
+◇ Test case passing 1 argument outcome → "cancellation" to obsoleteRepositoryLookupCannotOpenOrSettleANewerRequest(outcome:) started.
+✔ Test obsoleteRepositoryLookupCannotOpenOrSettleANewerRequest(outcome:) with 3 test cases passed after 0.214 seconds.
+◇ Test obsoleteSceneValidationCannotSettleNewRepositoryRequest(outcome:) started.
+◇ Test case passing 1 argument outcome → "success" to obsoleteSceneValidationCannotSettleNewRepositoryRequest(outcome:) started.
+◇ Test case passing 1 argument outcome → "failure" to obsoleteSceneValidationCannotSettleNewRepositoryRequest(outcome:) started.
+◇ Test case passing 1 argument outcome → "cancellation" to obsoleteSceneValidationCannotSettleNewRepositoryRequest(outcome:) started.
+✔ Test obsoleteSceneValidationCannotSettleNewRepositoryRequest(outcome:) with 3 test cases passed after 0.419 seconds.
+◇ Test requestArrivingBetweenValidationAndRegistrationUsesTheRetainedShell() started.
+✔ Test requestArrivingBetweenValidationAndRegistrationUsesTheRetainedShell() passed after 0.093 seconds.
+◇ Test sceneValidationFailureRemainsFailedAfterDelayedRegistration() started.
+✔ Test sceneValidationFailureRemainsFailedAfterDelayedRegistration() passed after 0.064 seconds.
+◇ Test repositoryAssociationRetainsDraftsPanesAndInFlightDelivery() started.
+✔ Test repositoryAssociationRetainsDraftsPanesAndInFlightDelivery() passed after 0.176 seconds.
+◇ Test associationBeforeRegistrationKeepsOneSceneAndRejectsLateLookup() started.
+✔ Test associationBeforeRegistrationKeepsOneSceneAndRejectsLateLookup() passed after 0.240 seconds.
+◇ Test restoredAliasCannotUndoBindingBackToTheSamePlan(registered:) started.
+◇ Test case passing 1 argument registered → false to restoredAliasCannotUndoBindingBackToTheSamePlan(registered:) started.
+◇ Test case passing 1 argument parentLink → true to symlinkAccessCancelsQueuedAutosaveAndManualSave(parentLink:) started.
+◇ Test case passing 1 argument registered → true to restoredAliasCannotUndoBindingBackToTheSamePlan(registered:) started.
+✔ Test restoredAliasCannotUndoBindingBackToTheSamePlan(registered:) with 2 test cases passed after 0.330 seconds.
+◇ Test delayedLocatorOpenCannotUndoRepositoryAssociation(alreadyOpen:) started.
+◇ Test case passing 1 argument alreadyOpen → false to delayedLocatorOpenCannotUndoRepositoryAssociation(alreadyOpen:) started.
+◇ Test case passing 1 argument alreadyOpen → true to delayedLocatorOpenCannotUndoRepositoryAssociation(alreadyOpen:) started.
+✔ Test delayedLocatorOpenCannotUndoRepositoryAssociation(alreadyOpen:) with 2 test cases passed after 0.965 seconds.
+◇ Test repositoryMoveRetainsWindowAndSessionStore() started.
+✔ Test repositoryMoveRetainsWindowAndSessionStore() passed after 0.561 seconds.
+◇ Test inspectionIncludesOnlyRegisteredWindowIncarnationsWithoutFocusing() started.
+✔ Test inspectionIncludesOnlyRegisteredWindowIncarnationsWithoutFocusing() passed after 0.001 seconds.
+◇ Test coldRepositoriesRegisterInReverseOrderWithoutLosingDestinations() started.
+✔ Test coldRepositoriesRegisterInReverseOrderWithoutLosingDestinations() passed after 0.001 seconds.
+◇ Test samePlanReusesItsRetainedWorkspaceRegardlessOfFocusOrLocator() started.
+✔ Test samePlanReusesItsRetainedWorkspaceRegardlessOfFocusOrLocator() passed after 0.001 seconds.
+◇ Test lateWindowRemovalDoesNotRemoveItsReplacement() started.
+✔ Test lateWindowRemovalDoesNotRemoveItsReplacement() passed after 0.001 seconds.
+◇ Test delayedDeliveryKeepsOneQueueAcrossReceiverReplacement() started.
+✔ Test delayedDeliveryKeepsOneQueueAcrossReceiverReplacement() passed after 0.001 seconds.
+◇ Test reattachingTheSameReceiverDoesNotLetItsCanceledReadClearTheNewQueue() started.
+✔ Test reattachingTheSameReceiverDoesNotLetItsCanceledReadClearTheNewQueue() passed after 0.001 seconds.
+◇ Test closedWindowDoesNotPublishDelayedOpening(fails:) started.
+◇ Test case passing 1 argument fails → false to closedWindowDoesNotPublishDelayedOpening(fails:) started.
+◇ Test case passing 1 argument fails → true to closedWindowDoesNotPublishDelayedOpening(fails:) started.
+✔ Test closedWindowDoesNotPublishDelayedOpening(fails:) with 2 test cases passed after 0.003 seconds.
+◇ Test repositoryNavigationLeavesTheOriginSelectionAndDraftWorkspaceAlone() started.
+✔ Test repositoryNavigationLeavesTheOriginSelectionAndDraftWorkspaceAlone() passed after 0.001 seconds.
+◇ Test overlappingLinksRespectLaterNavigation(navigateAway:) started.
+◇ Test case passing 1 argument navigateAway → false to overlappingLinksRespectLaterNavigation(navigateAway:) started.
+◇ Test case passing 1 argument navigateAway → true to overlappingLinksRespectLaterNavigation(navigateAway:) started.
+✔ Test overlappingLinksRespectLaterNavigation(navigateAway:) with 2 test cases passed after 0.011 seconds.
+✔ Suite "Work destinations" passed after 14.992 seconds.
+✔ Test symlinkAccessCancelsQueuedAutosaveAndManualSave(parentLink:) with 2 test cases passed after 4.505 seconds.
+◇ Test mergePreservesUnicodeLineEndingsAndSeveralSeparatedEdits() started.
+✔ Test mergePreservesUnicodeLineEndingsAndSeveralSeparatedEdits() passed after 0.001 seconds.
+◇ Test compositionDefersIncomingChangesAndSave() started.
+✔ Test compositionDefersIncomingChangesAndSave() passed after 0.091 seconds.
+➜ Test filesystemEventsFollowReplacementRapidWritesDeletionAndBothSaveModes() skipped: "Optional display-session diagnostic"
+◇ Test observationReleasesOutsideMainActorWithPendingEvents() started.
+✔ Test stalledHandshakeFailsWithinTheBoundAndTheNextRequestReopens() passed after 10.122 seconds.
+◇ Test delayedBulkReadingKeepsItsPlaceWithoutBlockingOtherRequests() started.
+✔ Test delayedBulkReadingKeepsItsPlaceWithoutBlockingOtherRequests() passed after 0.050 seconds.
+◇ Test bulkAnswersAndOversizeRequestsTravelByTicket() started.
+✔ Test observationReleasesOutsideMainActorWithPendingEvents() passed after 0.337 seconds.
+◇ Test taskBrowserSwitchesViewsWithoutLosingItsFileSelection() started.
+✔ Test taskBrowserSwitchesViewsWithoutLosingItsFileSelection() passed after 0.024 seconds.
+◇ Test taskWorkspaceUsesRecordedCheckoutAndLeavesGenericWorkspaceIntact() started.
+✔ Test taskWorkspaceUsesRecordedCheckoutAndLeavesGenericWorkspaceIntact() passed after 0.001 seconds.
+◇ Test wirePreservesExactBaseAndLosslessText() started.
+✔ Test wirePreservesExactBaseAndLosslessText() passed after 0.001 seconds.
+◇ Test patchTintsHunkChangesAndLeavesFileHeadersPlain() started.
+✔ Test patchTintsHunkChangesAndLeavesFileHeadersPlain() passed after 0.001 seconds.
+◇ Test lateFileReadCannotReplaceAnotherSelection() started.
+✔ Test lateFileReadCannotReplaceAnotherSelection() passed after 0.001 seconds.
+◇ Test filesystemEventsRefreshDiffForFileNeverOpened() started.
+✔ Test bulkAnswersAndOversizeRequestsTravelByTicket() passed after 0.493 seconds.
+◇ Test oversizedControlResponseIsRefusedEvenWhenItsLastReadContainsTheNewline() started.
+✔ Test oversizedControlResponseIsRefusedEvenWhenItsLastReadContainsTheNewline() passed after 0.024 seconds.
+◇ Test eventWatchReconnectsWithAFreshBaseline() started.
+✔ Test eventWatchReconnectsWithAFreshBaseline() passed after 0.132 seconds.
+◇ Test eventRecoveryEndsOnlyEventConsumers(gap:) started.
+◇ Test case passing 1 argument gap → false to eventRecoveryEndsOnlyEventConsumers(gap:) started.
+◇ Test case passing 1 argument gap → true to eventRecoveryEndsOnlyEventConsumers(gap:) started.
+✔ Test eventRecoveryEndsOnlyEventConsumers(gap:) with 2 test cases passed after 0.003 seconds.
+◇ Test serverEndingASubscriptionFailsItAlone() started.
+✔ Test serverEndingASubscriptionFailsItAlone() passed after 0.001 seconds.
+◇ Test failedSetupDoesNotRegisterOnWorkRefresh(unreadyReply:) started.
+◇ Test case passing 1 argument unreadyReply → false to failedSetupDoesNotRegisterOnWorkRefresh(unreadyReply:) started.
+✘ Test failedSetupDoesNotRegisterOnWorkRefresh(unreadyReply:) recorded an issue with 1 argument unreadyReply → false at BuiltLf.swift:33:13: Expectation failed: (FileManager.default → <NSFileManager: 0x10099f060>).isExecutableFile(atPath: path → "/Users/jack/src/loopflow.loo-895-fix-or-delete/target/debug/lf")
+↳ Build with cargo build -p loopflow --bin lf
+◇ Test case passing 1 argument unreadyReply → true to failedSetupDoesNotRegisterOnWorkRefresh(unreadyReply:) started.
+✘ Test failedSetupDoesNotRegisterOnWorkRefresh(unreadyReply:) recorded an issue with 1 argument unreadyReply → true at BuiltLf.swift:33:13: Expectation failed: (FileManager.default → <NSFileManager: 0x10099f060>).isExecutableFile(atPath: path → "/Users/jack/src/loopflow.loo-895-fix-or-delete/target/debug/lf")
+↳ Build with cargo build -p loopflow --bin lf
+✘ Test failedSetupDoesNotRegisterOnWorkRefresh(unreadyReply:) with 2 test cases failed after 0.001 seconds with 2 issues.
+✘ Suite ServerClientTests failed after 16.343 seconds with 2 issues.
+✔ Test filesystemEventsRefreshDiffForFileNeverOpened() passed after 0.490 seconds.
+◇ Test commitInLinkedWorktreeRereadsTheComparison() started.
+✔ Test commitInLinkedWorktreeRereadsTheComparison() passed after 0.400 seconds.
+◇ Test ignoredWritesFromReadsNeverScheduleAnotherRead() started.
+✔ Test ignoredWritesFromReadsNeverScheduleAnotherRead() passed after 5.613 seconds.
+◇ Test saveKeepsTypingAndUndoWhileAdvancingOnlyTheSubmittedBaseline() started.
+✔ Test saveKeepsTypingAndUndoWhileAdvancingOnlyTheSubmittedBaseline() passed after 0.003 seconds.
+◇ Test incomingReadDuringSaveRereadsTheSettledDiskName() started.
+✔ Test incomingReadDuringSaveRereadsTheSettledDiskName() passed after 0.002 seconds.
+◇ Test rejectedSaveReconcilesDiskAndDisclosesRecovery() started.
+✔ Test "A successful Task update stops waiting despite unrelated frames, and a late checkpoint is harmless" passed after 10.601 seconds.
+◇ Test "Only the requested checkpoint confirms a write, including an unchanged result" started.
+✔ Test rejectedSaveReconcilesDiskAndDisclosesRecovery() passed after 0.002 seconds.
+➜ Test draftsKeepUndoSelectionExternalChangesAndGhostty() skipped: "Optional display-session diagnostic"
+✔ Suite "TaskFiles" passed after 22.501 seconds.
+✔ Test "Only the requested checkpoint confirms a write, including an unchanged result" passed after 0.168 seconds.
+◇ Test "A failed confirmation retains content and reports failure" started.
+◇ Test case passing 1 argument readerEnds → false to "A failed confirmation retains content and reports failure" started.
+◇ Test case passing 1 argument readerEnds → true to "A failed confirmation retains content and reports failure" started.
+✔ Test "A failed confirmation retains content and reports failure" with 2 test cases passed after 0.221 seconds.
+◇ Test "Successful frames before repeated failures retain backoff, and cancellation stops retries" started.
+✔ Test "Successful frames before repeated failures retain backoff, and cancellation stops retries" passed after 3.278 seconds.
+◇ Test "New turns clear previews and an ended reader recovers without reviving old output" started.
+✔ Test "New turns clear previews and an ended reader recovers without reviving old output" passed after 1.407 seconds.
+✘ Suite "Work observation stream" failed after 27.578 seconds with 1 issue.
+✔ Test "a stalled CLI request times out and reaps its child" passed after 30.068 seconds.
+✔ Suite "Local wave launcher" passed after 30.074 seconds.
+✘ Test run with 813 tests in 102 suites failed after 30.075 seconds with 41 issues.
+end 21:46:00

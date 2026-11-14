@@ -1,0 +1,74 @@
+start 21:45:32
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Work cache" started.
+◇ Test "A working Task behind both preparation slots shows opening, never Open conversation" started.
+◇ Test "A workspace saved under another Machine is dropped" started.
+◇ Test "A saved launch repository opens without git and is checked afterwards" started.
+◇ Test "Every working tile on the page opens with no click, two preparations at a time" started.
+◇ Test "Fresh repository load prefetches working Tasks without saved visits and honors Close" started.
+◇ Test "Restart keeps the selected Task but does not retain stale completion or location" started.
+◇ Test "Another window in the same process opens from the workspace already held" started.
+◇ Test "A preparation reply behind its Session frame leaves the person's focus alone" started.
+◇ Test "A refresh that finishes after a selection change keeps the newer selection" started.
+◇ Test "A failed load Start shows its failure, never a Start offer" started.
+◇ Test "A first launch has one loading message" started.
+◇ Test "A started Task replaces its refused reveal with an automatic Start" started.
+◇ Test "A reveal refused after its Task started leaves no offer and starts" started.
+◇ Test "Absent, corrupt and incompatible files load as nothing and are removed" started.
+◇ Test "A delayed same-path Session read cannot populate a replacement Machine" started.
+◇ Test "Focusing a tile past the bound starts its conversation, as selection does" started.
+◇ Test "A returning launch restores its cache before any read finishes" started.
+◇ Test "Saved text never claims a live process or a legal mutation" started.
+◇ Test "A slow provider keeps the saved workspace usable under Updating…" started.
+◇ Test "Close and a failure keep a person's next action" started.
+◇ Test "A Wave named after another Wave's ID keeps its own primary without repeated preparation" started.
+◇ Test "Fresh restart prepares the saved conversations and honors saved Close" started.
+◇ Test "A failed refresh keeps the saved workspace under one truthful status" started.
+◇ Test "A link's reveal refused after its Task started leaves no offer and starts" started.
+◇ Test "A queued or failed primary shows opening or its failure with Retry, never an Open gate" started.
+◇ Test case passing 1 argument machineUnavailable → true to "Restart keeps the selected Task but does not retain stale completion or location" started.
+◇ Test "Only the most recently saved repositories are kept" started.
+◇ Test "A Session read that finishes after a repository switch saves nothing" started.
+◇ Test case passing 1 argument closed → false to "Fresh repository load prefetches working Tasks without saved visits and honors Close" started.
+◇ Test case passing 1 argument closed → false to "Fresh restart prepares the saved conversations and honors saved Close" started.
+◇ Test "Repository and Wave primaries open on load beside the Task bound, before any selection" started.
+◇ Test case passing 1 argument machineUnavailable → false to "Restart keeps the selected Task but does not retain stale completion or location" started.
+◇ Test "An unchanged poll writes nothing" started.
+◇ Test case passing 1 argument closed → true to "Fresh restart prepares the saved conversations and honors saved Close" started.
+◇ Test "A board past the bound opens its page; a turn opens the arriving tile and no other" started.
+◇ Test case passing 1 argument closed → true to "Fresh repository load prefetches working Tasks without saved visits and honors Close" started.
+✔ Test "A first launch has one loading message" passed after 0.161 seconds.
+✔ Test "Absent, corrupt and incompatible files load as nothing and are removed" passed after 0.162 seconds.
+✔ Test "Only the most recently saved repositories are kept" passed after 0.162 seconds.
+✔ Test "A workspace saved under another Machine is dropped" passed after 0.180 seconds.
+✔ Test "A saved launch repository opens without git and is checked afterwards" passed after 0.185 seconds.
+✔ Test "Saved text never claims a live process or a legal mutation" passed after 0.206 seconds.
+✔ Test "A returning launch restores its cache before any read finishes" passed after 0.212 seconds.
+✔ Test "Another window in the same process opens from the workspace already held" passed after 0.212 seconds.
+✔ Test "A Session read that finishes after a repository switch saves nothing" passed after 0.321 seconds.
+✔ Test "Repository and Wave primaries open on load beside the Task bound, before any selection" passed after 0.323 seconds.
+✔ Test "An unchanged poll writes nothing" passed after 0.334 seconds.
+✔ Test "A queued or failed primary shows opening or its failure with Retry, never an Open gate" passed after 0.410 seconds.
+✔ Test "A refresh that finishes after a selection change keeps the newer selection" passed after 0.464 seconds.
+✔ Test "A failed load Start shows its failure, never a Start offer" passed after 0.465 seconds.
+✔ Test "A delayed same-path Session read cannot populate a replacement Machine" passed after 0.465 seconds.
+✔ Test "A slow provider keeps the saved workspace usable under Updating…" passed after 0.497 seconds.
+✔ Test "Close and a failure keep a person's next action" passed after 0.500 seconds.
+✔ Test "A preparation reply behind its Session frame leaves the person's focus alone" passed after 0.502 seconds.
+✔ Test "A failed refresh keeps the saved workspace under one truthful status" passed after 0.503 seconds.
+✔ Test "Restart keeps the selected Task but does not retain stale completion or location" with 2 test cases passed after 0.504 seconds.
+✔ Test "Fresh restart prepares the saved conversations and honors saved Close" with 2 test cases passed after 0.505 seconds.
+✔ Test "A working Task behind both preparation slots shows opening, never Open conversation" passed after 0.549 seconds.
+✔ Test "Fresh repository load prefetches working Tasks without saved visits and honors Close" with 2 test cases passed after 0.800 seconds.
+✔ Test "Focusing a tile past the bound starts its conversation, as selection does" passed after 0.816 seconds.
+✔ Test "A board past the bound opens its page; a turn opens the arriving tile and no other" passed after 0.830 seconds.
+✔ Test "A reveal refused after its Task started leaves no offer and starts" passed after 0.832 seconds.
+✔ Test "A Wave named after another Wave's ID keeps its own primary without repeated preparation" passed after 0.833 seconds.
+✔ Test "A link's reveal refused after its Task started leaves no offer and starts" passed after 0.833 seconds.
+✔ Test "A started Task replaces its refused reveal with an automatic Start" passed after 0.837 seconds.
+✔ Test "Every working tile on the page opens with no click, two preparations at a time" passed after 0.846 seconds.
+✔ Suite "Work cache" passed after 0.846 seconds.
+✔ Test run with 30 tests in 1 suite passed after 0.846 seconds.
+end 21:45:33

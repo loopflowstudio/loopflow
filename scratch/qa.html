@@ -1,0 +1,64 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>LOO-895 QA: WorkCacheTests without a clock</title>
+<style>
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:900px;margin:2em auto;padding:0 1em;color:#222}
+code,pre{font:13px ui-monospace,Menlo,monospace}pre{background:#f5f5f5;padding:.7em;overflow-x:auto;white-space:pre-wrap}
+table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:.35em .6em;text-align:left;vertical-align:top}
+.ok{color:#1a7f37}.bad{color:#cf222e}
+</style></head><body>
+<h1>LOO-895 QA: WorkCacheTests waits on events, not a clock</h1>
+<p>The change is test-only (<code>swift/LoopflowTests/WorkCacheTests.swift</code>), so the people it is for are developers running the suite.
+Every run below had <code>LF_*</code>/<code>REX_*</code> unset and stdin closed. Logs are in <code>scratch/qa/</code>.</p>
+
+<h2>1. Run it the way a developer does</h2>
+<pre>swift test --package-path swift --parallel --filter WorkCacheTests
+✔ Test run with 30 tests in 1 suite passed after 0.876 seconds.</pre>
+<p class="ok">Passes. A fresh build plus the run took a few minutes; the test run itself takes under a second.</p>
+
+<h2>2. Break the product on purpose</h2>
+<p>One <code>sed</code> on <code>swift/LoopflowMac/Views/SessionsView.swift</code>, then the filter, then <code>git checkout --</code>. Each break was restored before the next; <code>git status</code> was clean after every run.</p>
+<table>
+<tr><th>Break</th><th>Result</th></tr>
+<tr><td><b>D.</b> Wave primary prepared by its <i>name</i> instead of its ID (<code>key.id</code> → <code>workspace.title</code>). This is #1874's bug, which the colliding-Wave test was written for.</td>
+<td class="ok">Fails in <b>0.716 s</b>, through the <code>count &lt; 8</code> exit. The checks name the problem: <code>retained(second)…sessionId → "primary-wave:wave-1"</code>, <code>preparedPrimaries.count == 3</code>, <code>preparationCount → 2</code>.</td></tr>
+<tr><td><b>A.</b> The queue never refills after a preparation finishes (the <code>openWarmConversations</code> call in the opening's <code>defer</code> is commented out). The third primary never arrives.</td>
+<td class="ok">Fails <b>by name</b> after 64 s: <code>Time limit was exceeded: 60.000 seconds</code> at the test's line, then <code>retained(second)…sessionId → nil</code> and the exact-list check. With the old 5 s deadline, the same break showed only the list mismatch, which looks the same as a flake.</td></tr>
+<tr><td><b>B.</b> An existing closed primary always reopens (<code>guard true || existing.opensAutomatically…</code>).</td>
+<td class="ok">Fails by name with the time limit. Two openings stay in flight (<code>preparationCount → 2</code>).</td></tr>
+<tr><td><b>C.</b> B, plus the reopen sent through <code>session resume</code>, to try to trigger the <code>count &lt; 8</code> escape.</td>
+<td>Same as B. A diagnostic print showed <code>["repository", "wave:wave-1"] 2 cancelled=true</code>: the two openings never finish, so this is a stall, not a runaway, and the time limit catches it. Break D is the case that triggers the escape.</td></tr>
+</table>
+<p>The cost of dropping the clock: a stalled event now fails after the 60 s suite limit, not after 5 s. That is a minute of wall time, and the failure says "time limit" instead of looking like a product bug.</p>
+
+<h2>3. 20 runs in a row under parallel load</h2>
+<p class="bad"><b>Found:</b> two <code>swift test</code> processes do not run at the same time. The second prints
+<code>Another instance of SwiftPM (PID: …) is already running using '…/swift/.build', waiting until that process has finished execution...</code>
+even with <code>--skip-build</code>. My first two attempts (and, by the same mechanism, the implement step's "×20 beside a concurrent full <code>swift test</code>") therefore ran one after the other, unloaded. In the timestamps, each filtered run ended about a second after a full-suite run ended.</p>
+<p>Fix: build once, then call the built bundle directly with the toolchain's <code>swiftpm-testing-helper</code> (<code>scratch/qa/run-bundle.sh</code>). That path takes no <code>.build</code> lock. A loop of full-suite runs went in the background while 20 filtered runs went in the foreground:</p>
+<pre>full suite #1  21:44:59 → 21:45:29   (Work cache passed after 10.148 s inside it)
+full suite #2  21:45:29 → 21:46:00   (Work cache passed after 10.205 s inside it)
+filtered #1    21:45:02 → 21:45:03   0.824 s
+filtered #5    21:45:11 → 21:45:12   1.002 s
+filtered #10   21:45:21 → 21:45:22   1.014 s
+filtered #15   21:45:32 → 21:45:33   0.846 s
+filtered #20   21:45:42 → 21:45:43   0.880 s
+pass=20/20</pre>
+<p class="ok">20/20, every run overlapping a full-suite run. Run times rose only from about 0.82 s to 1.01 s, so this Mac under this load is much less contended than a hosted macOS runner.</p>
+
+<h2>What I changed</h2>
+<ul>
+<li><code>.lf/skills/qa.md</code>, Test-only changes: records the SwiftPM lock trap and the direct-bundle command for a real parallel-load check.</li>
+<li><code>scratch/loo-895-workcache-flake.md</code>, Checks: corrects the load claim and adds the break results.</li>
+<li>No test or production code changed. Nothing broke that the change is responsible for.</li>
+</ul>
+
+<h2>Where it stands</h2>
+<p><b>Works:</b> the suite passes; it catches #1874's regression in under a second; a missing event fails by name with "time limit exceeded"; 20 runs passed under real overlapping load.</p>
+<p><b>Not reached:</b> hosted macOS CI under its own load. That is the environment where the original 0.151 s ordering failure happened, and #1923's <code>sorted()</code> fixes it. Only CI on this branch and later main pushes can confirm it there.</p>
+<p><b>Still wrong (outside this Task):</b></p>
+<ol>
+<li>The full suite run from the bundle fails 12 suites. They are built-CLI suites (no <code>target/debug/lf</code> in this run) plus display and theme suites that <code>scripts/test_desktop.sh</code> normally sets up. None are in the Work cache suite. They are noise for this check, not regressions.</li>
+<li><code>SessionsStoreTests</code> and <code>ProgramStatusTests</code> use the same deadline-then-assert pattern (already in <code>scratch/questions.md</code> as a follow-up).</li>
+<li>The colliding test's <code>count &lt; 8</code> exit only covers runaways that go through Source's resume. A runaway through <code>store.select</code> would hit the time limit instead. It still fails by name, just slower.</li>
+</ol>
+</body></html>

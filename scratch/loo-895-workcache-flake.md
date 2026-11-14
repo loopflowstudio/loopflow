@@ -67,7 +67,8 @@ condition already waits on the event.
 
 ## Checks
 
-- `swift test --package-path swift --parallel --filter WorkCacheTests` ×20 beside a concurrent full `swift test --parallel`: 20/20 after the change (base 20/20 unloaded). Work cache also passed inside the full run.
+- `WorkCacheTests` ×20 run from the built bundle (`swiftpm-testing-helper … --parallel --filter WorkCacheTests`, see `scratch/qa/run-bundle.sh`) while two full-suite runs overlap it (timestamps in `scratch/qa.html`): 20/20 (QA). Two `swift test` processes do not overlap: the second waits on the `.build` lock, so the earlier "beside a concurrent full run" 20/20 ran unloaded.
+- Breaks of `SessionsView.swift`: Wave primary prepared by name (#1874's bug) fails the colliding test in 0.7 s; a stalled preparation queue fails it by name with "Time limit was exceeded: 60.000 seconds" plus the missing-pane checks (QA).
 - Same full run, outside scope: built-CLI suites fail without `target/debug/lf`; SessionsStoreTests (`.opening` vs `.prepared`, lines 549–763) and ProgramStatusTests:243 fail when their deadlines run out under load. Same pattern, separate Task.
 
 ## Docs

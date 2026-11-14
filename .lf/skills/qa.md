@@ -669,3 +669,15 @@ family, plus one Clap → ops wiring break (e.g. drop `worktree` in
 A break no test notices is a missing row; add it, then repeat the break.
 Edit only from one shell, one cargo command at a time, so no other build
 compiles the mutated source.
+
+A Swift "passes under parallel load" check can't use two `swift test`
+processes: the second waits on the `.build` lock ("Another instance of
+SwiftPM … waiting"), even with `--skip-build`, so the runs never overlap.
+Build once, then run the bundle directly for one side:
+`swiftpm-testing-helper --test-bundle-path
+swift/.build/debug/LoopflowSwiftPackageTests.xctest/Contents/MacOS/LoopflowSwiftPackageTests
+--testing-library swift-testing --parallel [--filter …]` from `swift/`, with
+`DYLD_FRAMEWORK_PATH` set to the MacOSX platform's `Library/Frameworks` and
+`Library/PrivateFrameworks`, and `DYLD_LIBRARY_PATH` to its `usr/lib`. The
+helper is in the Xcode toolchain's `usr/libexec/swift/pm/`. Timestamp each
+run to show the overlap.

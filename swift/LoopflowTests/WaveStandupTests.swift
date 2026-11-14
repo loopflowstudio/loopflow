@@ -34,7 +34,7 @@ struct WaveStandupTests {
         row["next_move"] = ["owner": "task", "reason": reason]
         let key = email ?? owner.map { "\($0.lowercased().replacingOccurrences(of: " ", with: "."))@example.com" }
         let ownerJSON: Any = owner.map { person -> Any in
-            ["person": person, "person_key": key.map { $0 as Any } ?? NSNull(),
+            ["person": person, "person_id": NSNull(), "person_key": key.map { $0 as Any } ?? NSNull(),
              "machine": ["id": NSNull(), "label": NSNull()]] as [String: Any]
         } ?? NSNull()
         row["runtime"] = (status ?? owner.map { _ in "moving" }).map { status -> Any in

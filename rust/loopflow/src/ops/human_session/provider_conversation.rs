@@ -210,9 +210,12 @@ pub(crate) async fn select(
     id: &str,
     account: Option<&ProviderAccountId>,
 ) -> Result<LfSession> {
-    // A fresh Wave primary reserves no input until it connects.
+    // A fresh Wave primary reserves no input until it connects; a conversation
+    // that comes back to this Machine published its input before it left.
     let session = if session.captured.is_none() {
         append_input(store, session.clone()).await?
+    } else if session.input_published {
+        session.clone()
     } else {
         publish_prepared_input(
             &store.sqlite,

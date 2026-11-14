@@ -296,17 +296,13 @@ fn admit_ci_fix(
                     "Task is unassigned; CI repair waits for `lf task claim`",
                 ));
             }
-            let local = store.local_machine().await.map_err(repair_error)?;
-            let machine = store
+            if store
                 .sqlite
                 .task_checkout(task_id)
                 .map_err(repair_error)?
-                .and_then(|checkout| checkout.machine_id)
-                .ok_or_else(|| repair_error("Task checkout Machine is unknown"))?;
-            if machine != local.id {
-                return Err(repair_error(format!(
-                    "Task checkout belongs to Machine {machine}"
-                )));
+                .is_none()
+            {
+                return Err(repair_error("Task is not checked out on this Machine"));
             }
         }
         // Live work in the checkout, such as the Task's own open Session,

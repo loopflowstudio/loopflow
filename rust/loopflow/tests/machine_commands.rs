@@ -1199,7 +1199,7 @@ fn task_run_open_resolves_remote_selectors_before_opening_locally() {
     )
     .unwrap();
     db.execute(
-        "UPDATE tasks SET primary_session_id='remote-selected-primary' WHERE id=?1",
+        "INSERT OR REPLACE INTO task_primary_sessions(task_id,session_id) VALUES(?1,'remote-selected-primary')",
         [target.task.id.as_str()],
     )
     .unwrap();
@@ -1624,7 +1624,7 @@ fn task_ownership_follows_claim_handoff_and_unassign_through_the_writer() {
     };
     assert_eq!(
         kinds(&plan.remote),
-        [OwnershipKind::Claim, OwnershipKind::Handoff]
+        [OwnershipKind::Claim, OwnershipKind::Claim]
     );
     plan.to_local();
     assert_eq!(
@@ -1650,7 +1650,7 @@ fn task_ownership_follows_claim_handoff_and_unassign_through_the_writer() {
             kinds(store),
             [
                 OwnershipKind::Claim,
-                OwnershipKind::Handoff,
+                OwnershipKind::Claim,
                 OwnershipKind::Unassign
             ]
         );
@@ -2173,6 +2173,616 @@ fn task_move_carries_ownership_graph_and_session() {
 }
 
 #[test]
+fn a_move_that_did_not_arrive_shows_in_status_and_the_same_command_delivers_it() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::cloned(&fixture);
+    let mini = plan.remote.local_machine().unwrap().id;
+    let (task, worktree) = placed_task(&plan, "retry-move");
+    at_explore(&fixture.root.path().join("local/loopflow.db"), &task);
+    let session = claude_conversation(&fixture, &worktree, "0199a213-81c0-7800-8aa1-bbab2a035a58");
+    fs::write(worktree.join("notes.txt"), "sent once\n").unwrap();
+    // Mini answers the check, then falls over receiving what was sent.
+    let remote_lf = fixture.root.path().join("remote/.local/bin/lf");
+    let working = fs::read_to_string(&remote_lf).unwrap();
+    executable(
+        &remote_lf,
+        &working.replacen(
+            "#!/bin/sh\n",
+            "#!/bin/sh\ncase \"$*\" in *'session receive'*) case \"$*\" in *--check*) ;; *) echo 'mini fell over' >&2; exit 1;; esac;; esac\n",
+            1,
+        ),
+    );
+
+    let failed = fixture
+        .command(&["task", "move", task.as_str(), "--machine", "mini"])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert!(!failed.status.success());
+    let stderr = String::from_utf8_lossy(&failed.stderr);
+    let name = plan.local.task(&task).unwrap().unwrap().identifier;
+    let retry = format!("lf task move {name} --machine mini");
+    assert!(stderr.contains(&retry), "{stderr}");
+    let take_back = format!("take back: lf task claim {name}");
+    assert!(stderr.contains(&take_back), "{stderr}");
+
+    let status = fixture
+        .command(&["task", "status", task.as_str()])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&status);
+    let status = String::from_utf8_lossy(&status.stdout);
+    assert!(status.contains("Moving to mini since"), "{status}");
+    assert!(status.contains("sent, not arrived"), "{status}");
+    assert!(status.contains(&format!("retry: {retry}")), "{status}");
+    assert!(status.contains(&take_back), "{status}");
+    // The lists read the move the same way, not as a Task that runs on mini.
+    for args in [&["task", "list"][..], &["machine", "list"][..]] {
+        let listed = fixture
+            .command(args)
+            .current_dir(&plan.local_path)
+            .output()
+            .unwrap();
+        assert_success(&listed);
+        let listed = String::from_utf8_lossy(&listed.stdout);
+        let row = listed
+            .lines()
+            .find(|line| line.contains(&name))
+            .unwrap_or_else(|| panic!("{name} missing from:\n{listed}"));
+        assert!(row.contains("Moving to mini since"), "{row}");
+        assert!(row.contains("sent, not arrived"), "{row}");
+    }
+
+    // The retry delivers what was sent: nothing is committed or pushed again.
+    executable(&remote_lf, &working);
+    fs::write(worktree.join("notes.txt"), "edited after sending\n").unwrap();
+    let retried = fixture
+        .command(&["task", "move", task.as_str(), "--machine", "mini"])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&retried);
+    let stderr = String::from_utf8_lossy(&retried.stderr);
+    assert!(stderr.contains("move to mini"), "{stderr}");
+    assert!(!stderr.contains("Committed and pushed"), "{stderr}");
+    assert_eq!(
+        git(
+            plan._repos[0].bare_path(),
+            &["show", "retry-move:notes.txt"]
+        ),
+        "sent once"
+    );
+    let owner = plan.remote.task_ownership(&task).unwrap().owner.unwrap();
+    assert_eq!(owner.machine.id, Some(mini));
+    assert!(plan.local.task_move_in_flight(&task).unwrap().is_none());
+    // The conversation that left with the first send arrived with the retry.
+    let arrived = plan.remote.session(&session).unwrap().unwrap();
+    assert!(arrived.completed_at.is_none());
+    assert_eq!(arrived.task_id.as_ref(), Some(&task));
+    let status = fixture
+        .command(&["task", "status", task.as_str()])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    let status = String::from_utf8_lossy(&status.stdout);
+    assert!(status.contains("Runs on mini since"), "{status}");
+}
+
+#[test]
+fn a_failed_conversation_import_keeps_the_move_available_for_retry() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::cloned(&fixture);
+    let mini = plan.remote.local_machine().unwrap().id;
+    let (task, worktree) = placed_task(&plan, "retry-conversation");
+    let conversation = "0199a213-81c0-7800-8aa1-bbab2a035a60";
+    let session = claude_conversation(&fixture, &worktree, conversation);
+    let blocked = fixture.root.path().join("remote/.claude");
+    fs::write(&blocked, "blocks the transcript directory").unwrap();
+
+    let failed = fixture
+        .command(&["task", "move", task.as_str(), "--machine", "mini"])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert!(!failed.status.success());
+    assert!(plan.remote.task(&task).unwrap().unwrap().worktree.is_some());
+    assert!(!plan.remote.task_move_arrived_on(&task, &mini).unwrap());
+
+    fs::remove_file(&blocked).unwrap();
+    let retried = fixture
+        .command(&["task", "move", task.as_str(), "--machine", "mini"])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&retried);
+    assert!(plan.remote.task_move_arrived_on(&task, &mini).unwrap());
+    let arrived = plan.remote.session(&session).unwrap().unwrap();
+    let project = fixture
+        .root
+        .path()
+        .join("remote/.claude/projects")
+        .join(claude_project(&arrived.cwd));
+    assert!(project.join(format!("{conversation}.jsonl")).is_file());
+}
+
+/// Mini never took the Task it was sent, and the laptop claims it back: the
+/// move is over, so status shows none and moving it again begins a new move
+/// instead of delivering the old one.
+#[test]
+fn claiming_a_task_back_ends_a_move_that_never_arrived() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::cloned(&fixture);
+    let mini = plan.remote.local_machine().unwrap().id;
+    let (task, worktree) = placed_task(&plan, "claimed-back");
+    fs::write(worktree.join("notes.txt"), "sent once\n").unwrap();
+    let remote_lf = fixture.root.path().join("remote/.local/bin/lf");
+    let working = fs::read_to_string(&remote_lf).unwrap();
+    executable(
+        &remote_lf,
+        &working.replacen(
+            "#!/bin/sh\n",
+            "#!/bin/sh\ncase \"$*\" in *'session receive'*) case \"$*\" in *--check*) ;; *) echo 'mini fell over' >&2; exit 1;; esac;; esac\n",
+            1,
+        ),
+    );
+    let failed = fixture
+        .command(&["task", "move", task.as_str(), "--machine", "mini"])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert!(!failed.status.success());
+
+    let claimed = fixture
+        .command(&["task", "claim", task.as_str()])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&claimed);
+    let status = fixture
+        .command(&["task", "status", task.as_str()])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&status);
+    let status = String::from_utf8_lossy(&status.stdout);
+    assert!(!status.contains("Moving to mini"), "{status}");
+
+    executable(&remote_lf, &working);
+    fs::write(worktree.join("notes.txt"), "edited after claiming\n").unwrap();
+    let moved = fixture
+        .command(&["task", "move", task.as_str(), "--machine", "mini"])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&moved);
+    assert_eq!(
+        git(
+            plan._repos[0].bare_path(),
+            &["show", "claimed-back:notes.txt"]
+        ),
+        "edited after claiming"
+    );
+    let owner = plan.remote.task_ownership(&task).unwrap().owner.unwrap();
+    assert_eq!(owner.machine.id, Some(mini));
+    assert!(plan.local.task_move_in_flight(&task).unwrap().is_none());
+}
+
+/// Mini took the Task in, but its answer never reached the laptop, which
+/// still holds the move as sent. Claiming it back on the laptop asks mini
+/// first: it arrived, so the claim is mini's to write, and the Task stays on
+/// mini alone rather than running on both.
+#[test]
+fn claiming_back_a_task_whose_arrival_answer_was_lost_leaves_it_on_its_target() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::cloned(&fixture);
+    let mini = plan.remote.local_machine().unwrap().id;
+    let (task, _worktree) = placed_task(&plan, "answer-lost");
+    let remote_lf = fixture.root.path().join("remote/.local/bin/lf");
+    let working = fs::read_to_string(&remote_lf).unwrap();
+    executable(
+        &remote_lf,
+        &working.replacen(
+            "exec ",
+            "case \"$*\" in *'session receive') \"$LF_BIN\" \"$@\" >/dev/null || exit 1; echo 'connection dropped' >&2; exit 1;; esac\nexec ",
+            1,
+        ),
+    );
+    let failed = fixture
+        .command(&["task", "move", task.as_str(), "--machine", "mini"])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert!(!failed.status.success());
+    assert!(plan.remote.task_move_arrived_on(&task, &mini).unwrap());
+    assert!(plan.local.task_move_in_flight(&task).unwrap().is_some());
+
+    executable(&remote_lf, &working);
+    let claimed = fixture
+        .command(&["task", "claim", task.as_str()])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&claimed);
+    let owner = plan.remote.task_ownership(&task).unwrap().owner.unwrap();
+    assert_eq!(owner.machine.id, Some(mini.clone()));
+    let local = plan.local.task_ownership(&task).unwrap().owner.unwrap();
+    assert_eq!(local.machine.id, Some(mini));
+    assert!(plan.local.task_move_in_flight(&task).unwrap().is_none());
+    let status = fixture
+        .command(&["task", "status", task.as_str()])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&status);
+    let status = String::from_utf8_lossy(&status.stdout);
+    assert!(status.contains("Runs on mini since"), "{status}");
+    assert!(!status.contains("Moving to mini"), "{status}");
+}
+
+/// The laptop sent the Task and mini fell over receiving it. The same move
+/// addressed to mini from the laptop (`lf --machine mini task move X --machine
+/// mini`) runs on the laptop, which holds what it sent, and delivers it.
+#[test]
+fn a_sent_move_forwarded_to_its_target_delivers_what_was_sent() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::cloned(&fixture);
+    let mini = plan.remote.local_machine().unwrap().id;
+    let (task, worktree) = placed_task(&plan, "forwarded-retry");
+    at_explore(&fixture.root.path().join("local/loopflow.db"), &task);
+    fs::write(worktree.join("notes.txt"), "sent once\n").unwrap();
+    let remote_lf = fixture.root.path().join("remote/.local/bin/lf");
+    let working = fs::read_to_string(&remote_lf).unwrap();
+    executable(
+        &remote_lf,
+        &working.replacen(
+            "#!/bin/sh\n",
+            "#!/bin/sh\ncase \"$*\" in *'session receive'*) case \"$*\" in *--check*) ;; *) echo 'mini fell over' >&2; exit 1;; esac;; esac\n",
+            1,
+        ),
+    );
+    let failed = fixture
+        .command(&["task", "move", task.as_str(), "--machine", "mini"])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert!(!failed.status.success());
+    executable(&remote_lf, &working);
+
+    fs::write(worktree.join("notes.txt"), "edited after sending\n").unwrap();
+    let retried = fixture
+        .command(&[
+            "--machine",
+            "mini",
+            "task",
+            "move",
+            task.as_str(),
+            "--machine",
+            "mini",
+        ])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&retried);
+    let stderr = String::from_utf8_lossy(&retried.stderr);
+    assert!(stderr.contains("move to mini"), "{stderr}");
+    assert!(!stderr.contains("Committed and pushed"), "{stderr}");
+    assert_eq!(
+        git(
+            plan._repos[0].bare_path(),
+            &["show", "forwarded-retry:notes.txt"]
+        ),
+        "sent once"
+    );
+    let owner = plan.remote.task_ownership(&task).unwrap().owner.unwrap();
+    assert_eq!(owner.machine.id, Some(mini));
+    assert!(plan.local.task_move_in_flight(&task).unwrap().is_none());
+}
+
+/// The laptop began moving the Task and was killed before sending it. The same
+/// move addressed to mini from the laptop runs on the laptop, which holds the
+/// move, and carries it on.
+#[test]
+fn a_leaving_move_forwarded_to_its_target_carries_on() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::cloned(&fixture);
+    let mini = plan.remote.local_machine().unwrap().id;
+    let (task, worktree) = placed_task(&plan, "forwarded-leaving");
+    plan.local.begin_task_move(&task, &mini).unwrap();
+    fs::write(worktree.join("notes.txt"), "halfway\n").unwrap();
+
+    let retried = fixture
+        .command(&[
+            "--machine",
+            "mini",
+            "task",
+            "move",
+            task.as_str(),
+            "--machine",
+            "mini",
+        ])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&retried);
+    let stderr = String::from_utf8_lossy(&retried.stderr);
+    assert!(stderr.contains("Carrying on"), "{stderr}");
+    assert_eq!(
+        git(
+            plan._repos[0].bare_path(),
+            &["show", "forwarded-leaving:notes.txt"]
+        ),
+        "halfway"
+    );
+    let owner = plan.remote.task_ownership(&task).unwrap().owner.unwrap();
+    assert_eq!(owner.machine.id, Some(mini));
+    assert!(plan.local.task_move_in_flight(&task).unwrap().is_none());
+}
+
+/// The move reached mini's check but never arrived. Mini remembers which
+/// Machine the move comes from, so the same command run on mini asks the
+/// laptop for it and delivers it there.
+#[test]
+fn a_move_retried_on_its_target_asks_the_machine_it_comes_from() {
+    checked_move_on_target(false);
+}
+
+#[test]
+fn a_move_checked_on_its_target_stays_a_past_check_after_source_claim_back() {
+    checked_move_on_target(true);
+}
+
+fn checked_move_on_target(claim_back: bool) {
+    let fixture = preview_machines();
+    let plan = SharedPlan::cloned(&fixture);
+    let mini = plan.remote.local_machine().unwrap().id;
+    let (task, worktree) = placed_task(&plan, "retry-on-mini");
+    // Mini reaches the laptop over its own SSH.
+    let local = fixture.root.path().join("local");
+    fs::create_dir_all(local.join(".local/bin")).unwrap();
+    executable(
+        &local.join(".local/bin/lf"),
+        &format!(
+            "#!/bin/sh\nexport LF_HOME='{}' LF_BIN='{}'\nexec '{}' \"$@\"\n",
+            local.display(),
+            env!("CARGO_BIN_EXE_lf"),
+            env!("CARGO_BIN_EXE_lf"),
+        ),
+    );
+    executable(
+        &fixture.root.path().join("remote/.local/bin/ssh"),
+        &format!(
+            "#!/bin/sh\nfor arg in \"$@\"; do remote_command=\"$arg\"; done\ncd '{}' || exit 1\nexec env -i HOME='{}' PATH=/usr/bin:/bin bash -c \"$remote_command\"\n",
+            local.display(),
+            local.display()
+        ),
+    );
+    // A person at mini runs lf there.
+    let remote = fixture.root.path().join("remote");
+    let on_mini = |args: &[&str]| {
+        Command::new(remote.join(".local/bin/lf"))
+            .env_clear()
+            .env("HOME", &remote)
+            .env(
+                "PATH",
+                format!("{}:/usr/bin:/bin", remote.join(".local/bin").display()),
+            )
+            .current_dir(&plan.remote_path)
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    assert_success(&on_mini(&["machine", "add", "laptop"]));
+
+    at_explore(&fixture.root.path().join("local/loopflow.db"), &task);
+    fs::write(worktree.join("notes.txt"), "sent once\n").unwrap();
+    let remote_lf = fixture.root.path().join("remote/.local/bin/lf");
+    let working = fs::read_to_string(&remote_lf).unwrap();
+    executable(
+        &remote_lf,
+        &working.replacen(
+            "#!/bin/sh\n",
+            "#!/bin/sh\ncase \"$*\" in *'session receive'*) case \"$*\" in *--check*) ;; *) echo 'mini fell over' >&2; exit 1;; esac;; esac\n",
+            1,
+        ),
+    );
+    let failed = fixture
+        .command(&["task", "move", task.as_str(), "--machine", "mini"])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert!(!failed.status.success());
+    executable(&remote_lf, &working);
+
+    let check = plan.remote.task_move_check(&task).unwrap().unwrap();
+    assert_eq!(
+        check.from_machine_id,
+        plan.local.local_machine().unwrap().id
+    );
+    let status = on_mini(&["task", "status", task.as_str()]);
+    assert_success(&status);
+    let status = String::from_utf8(status.stdout).unwrap();
+    let checked_line = format!(
+        "Checked move from laptop at {}",
+        chrono::DateTime::from_timestamp(check.at, 0)
+            .unwrap()
+            .with_timezone(&chrono::Local)
+            .format("%b %-d %H:%M")
+    );
+    assert!(status.contains(&checked_line), "{status}");
+    assert!(status.contains("Unowned"), "{status}");
+    assert!(status.contains("Not checked out on "), "{status}");
+    assert!(!status.contains("Moving to"), "{status}");
+    let retry = status
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("retry: lf "))
+        .unwrap_or_else(|| panic!("{status}"));
+    let identifier = plan.remote.task(&task).unwrap().unwrap().identifier;
+    assert!(
+        retry.starts_with(&format!("task move {identifier} --machine ")),
+        "{status}"
+    );
+    if claim_back {
+        let claimed = fixture
+            .command(&["task", "claim", task.as_str()])
+            .current_dir(&plan.local_path)
+            .output()
+            .unwrap();
+        assert_success(&claimed);
+        assert_eq!(
+            plan.local
+                .task_ownership(&task)
+                .unwrap()
+                .owner
+                .unwrap()
+                .machine
+                .id,
+            Some(plan.local.local_machine().unwrap().id)
+        );
+        let after = on_mini(&["task", "status", task.as_str()]);
+        assert_success(&after);
+        let after = String::from_utf8(after.stdout).unwrap();
+        assert!(after.contains(&checked_line), "{after}");
+        assert!(after.contains(retry), "{after}");
+        assert!(after.contains("Unowned"), "{after}");
+        assert!(after.contains("Not checked out on "), "{after}");
+        assert!(!after.contains("Moving to"), "{after}");
+        assert!(plan.remote.task_ownership(&task).unwrap().owner.is_none());
+        return;
+    }
+    // The laptop's retry line names mini by the laptop's label; on mini the
+    // refusal prints the check and the command that works there.
+    let laptop_line = on_mini(&["task", "move", task.as_str(), "--machine", "mini"]);
+    assert!(!laptop_line.status.success());
+    let refusal = String::from_utf8_lossy(&laptop_line.stderr);
+    assert!(refusal.contains(&checked_line), "{refusal}");
+    assert!(refusal.contains(retry), "{refusal}");
+    let retried = on_mini(&retry.split(' ').collect::<Vec<_>>());
+    assert_success(&retried);
+    let stderr = String::from_utf8_lossy(&retried.stderr);
+    assert!(stderr.contains("move to"), "{stderr}");
+    let owner = plan.remote.task_ownership(&task).unwrap().owner.unwrap();
+    assert_eq!(owner.machine.id, Some(mini));
+    assert_eq!(plan.remote.task_move_check(&task).unwrap(), None);
+    let arrived_status = on_mini(&["task", "status", task.as_str()]);
+    assert_success(&arrived_status);
+    assert!(!String::from_utf8_lossy(&arrived_status.stdout).contains("Checked move from"));
+    // The laptop heard it arrived.
+    assert!(plan.local.task_move_in_flight(&task).unwrap().is_none());
+    assert_eq!(
+        git(
+            plan._repos[0].bare_path(),
+            &["show", "retry-on-mini:notes.txt"]
+        ),
+        "sent once"
+    );
+}
+
+/// Mini sends the Task back to the laptop, and its reply never arrives. Mini
+/// recorded what it sent, so the same command delivers the conversation
+/// that left with the first send.
+#[test]
+fn a_task_sent_without_its_reply_delivers_its_conversation_when_repeated() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::cloned(&fixture);
+    let laptop_id = plan.local.local_machine().unwrap().id;
+    let (task, worktree) = placed_task(&plan, "lost-reply");
+    at_explore(&fixture.root.path().join("local/loopflow.db"), &task);
+    let session = claude_conversation(&fixture, &worktree, "0199a213-81c0-7800-8aa1-bbab2a035a59");
+    let move_to = |machine: &str| {
+        fixture
+            .command(&["task", "move", task.as_str(), "--machine", machine])
+            .current_dir(&plan.local_path)
+            .output()
+            .unwrap()
+    };
+    assert_success(&move_to("mini"));
+    assert!(plan
+        .remote
+        .session(&session)
+        .unwrap()
+        .unwrap()
+        .completed_at
+        .is_none());
+
+    // Mini sends, then its reply is lost on the way back.
+    let remote_lf = fixture.root.path().join("remote/.local/bin/lf");
+    let working = fs::read_to_string(&remote_lf).unwrap();
+    let lf = env!("CARGO_BIN_EXE_lf");
+    executable(
+        &remote_lf,
+        &working.replacen(
+            "\nexec ",
+            &format!("\ncase \"$*\" in *'session send'*--to*) case \"$*\" in *--arrived*) ;; *) '{lf}' \"$@\" >/dev/null; echo 'connection reset' >&2; exit 255;; esac;; esac\nexec "),
+            1,
+        ),
+    );
+    let laptop = gethostname::gethostname().to_string_lossy().into_owned();
+    let laptop = laptop.split('.').next().unwrap().to_string();
+    let lost = move_to(&laptop);
+    assert!(!lost.status.success());
+    let sent = plan.remote.task_move_in_flight(&task).unwrap().unwrap();
+    assert_eq!(sent.to_machine_id, laptop_id);
+    // The conversation left mini with that send.
+    assert!(plan
+        .remote
+        .session(&session)
+        .unwrap()
+        .unwrap()
+        .completed_at
+        .is_some());
+
+    executable(&remote_lf, &working);
+    let delivered = move_to(&laptop);
+    assert_success(&delivered);
+    let stderr = String::from_utf8_lossy(&delivered.stderr);
+    assert!(stderr.contains("its Session moved with it"), "{stderr}");
+    // The conversation is open here again.
+    assert!(plan
+        .local
+        .session(&session)
+        .unwrap()
+        .unwrap()
+        .completed_at
+        .is_none());
+    assert_eq!(
+        plan.local.task_execution_route(&task).unwrap().machine_id,
+        laptop_id
+    );
+    // Mini heard it arrived: nothing is in flight there any more.
+    assert!(plan.remote.task_move_in_flight(&task).unwrap().is_none());
+}
+
+#[test]
+fn a_machine_without_the_checkout_shows_no_path_for_it() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::new(&fixture);
+    let (task, worktree) = placed_task(&plan, "laptop-only");
+    plan.to_remote();
+    let output = fixture
+        .command(&["--machine", "mini", "task", "status", task.as_str()])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&output);
+    let status = String::from_utf8_lossy(&output.stdout);
+    assert!(status.contains("Not checked out on "), "{status}");
+    assert!(
+        !status.contains(worktree.to_str().unwrap()),
+        "mini shows the laptop's path:\n{status}"
+    );
+    // The laptop still has it.
+    let here = fixture
+        .command(&["task", "status", task.as_str()])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&here);
+    let here = String::from_utf8_lossy(&here.stdout);
+    assert!(!here.contains("Not checked out on "), "{here}");
+}
+
+#[test]
 fn the_laptop_says_where_a_moved_task_runs_and_prunes_its_checkout() {
     let fixture = preview_machines();
     let plan = SharedPlan::cloned(&fixture);
@@ -2303,31 +2913,6 @@ fn task_move_refuses_a_mid_merge_worktree() {
     assert!(stderr.contains("mid-merge"), "{stderr}");
     assert_eq!(git(&worktree, &["rev-parse", "HEAD"]), head);
     assert_eq!(plan.local.task_ownership(&task).unwrap().log.len(), before);
-}
-
-#[test]
-fn a_repeated_task_send_carries_the_conversation_that_already_left() {
-    let fixture = preview_machines();
-    let plan = SharedPlan::cloned(&fixture);
-    let (task, worktree) = placed_task(&plan, "resend-task");
-    let session = claude_conversation(&fixture, &worktree, "0199a213-81c0-7800-8aa1-bbab2a035a58");
-    let send = || {
-        let output = fixture
-            .command(&["session", "send", "--task", task.as_str(), "--to", "mini"])
-            .current_dir(&plan.local_path)
-            .output()
-            .unwrap();
-        assert_success(&output);
-        serde_json::from_slice::<Value>(&output.stdout).unwrap()
-    };
-
-    // The first receive failed; sending again carries the same conversation.
-    assert_eq!(send()["session"]["id"], session.as_str());
-    let again = send();
-    assert_eq!(again["session"]["id"], session.as_str());
-    assert!(again["history"]["files"]
-        .as_array()
-        .is_some_and(|files| !files.is_empty()));
 }
 
 #[test]
@@ -2693,6 +3278,93 @@ fn task_move_leaves_a_live_graph_running_on_mini() {
     assert_eq!(first_steps, 0, "mini ran the route's first step again");
 }
 
+/// A move killed after it stopped the Graph, before it pushed: the laptop's
+/// claim names mini and the move is leaving, with the step it stopped. Status
+/// says so, and the same command carries the move on: the checkpoint is
+/// pushed and the Graph continues on mini at the stopped step.
+#[test]
+fn a_move_killed_while_leaving_shows_in_status_and_the_same_command_carries_it_on() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::cloned(&fixture);
+    let lf = env!("CARGO_BIN_EXE_lf");
+    let local_home = fixture.root.path().join("local");
+    let remote_home = fixture.root.path().join("remote/store");
+    let _laptop = loopflow_test_support::MachineServer::start(lf, &local_home);
+    let _mini = loopflow_test_support::MachineServer::start(lf, &remote_home);
+    let _ended = EndRecorded(vec![local_home.clone(), remote_home.clone()]);
+    let mini = plan.remote.local_machine().unwrap().id;
+    let (task, worktree) = placed_task(&plan, "leaving-task");
+    let mut run = start_hold_run(&fixture, &task, &worktree);
+    let step = format!("task wait {task} --timeout 120s");
+    plan.local.begin_task_move(&task, &mini).unwrap();
+    loopflow_test_support::end_recorded_processes(&local_home, Path::new(lf));
+    assert!(
+        exits_within_ten_seconds(&mut run),
+        "the laptop's run outlived its stop"
+    );
+    plan.local
+        .record_move_stopped(&task, &serde_json::json!({"step": step}).to_string())
+        .unwrap();
+    fs::write(worktree.join("step-edit.txt"), "halfway\n").unwrap();
+
+    let name = plan.local.task(&task).unwrap().unwrap().identifier;
+    let retry = format!("lf task move {name} --machine mini");
+    let status = fixture
+        .command(&["task", "status", task.as_str()])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&status);
+    let status = String::from_utf8_lossy(&status.stdout);
+    assert!(status.contains("Moving to mini since"), "{status}");
+    assert!(status.contains(": not sent"), "{status}");
+    assert!(status.contains(&format!("retry: {retry}")), "{status}");
+
+    let moved = fixture
+        .command(&["task", "move", task.as_str(), "--machine", "mini"])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&moved);
+    let stderr = String::from_utf8_lossy(&moved.stderr);
+    for stage in [
+        "Carrying on".to_string(),
+        format!("Arrived on mini (Graph at `{step}`)"),
+        "Running on mini as Graph process".into(),
+    ] {
+        assert!(stderr.contains(&stage), "{stage:?} missing from:\n{stderr}");
+    }
+    assert_eq!(
+        git(
+            plan._repos[0].bare_path(),
+            &["show", "leaving-task:step-edit.txt"]
+        ),
+        "halfway"
+    );
+    assert_eq!(plan.local.task_move_in_flight(&task).unwrap(), None);
+    let owner = plan.remote.task_ownership(&task).unwrap().owner.unwrap();
+    assert_eq!(owner.machine.id, Some(mini));
+    let mini_status = fixture
+        .command(&[
+            "--machine",
+            "mini",
+            "task",
+            "status",
+            task.as_str(),
+            "--json",
+        ])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&mini_status);
+    let mini_status: Value = serde_json::from_slice(&mini_status.stdout).unwrap();
+    assert_eq!(
+        mini_status["graph_processes"][0]["step"],
+        step.as_str(),
+        "{mini_status}"
+    );
+}
+
 /// Back is the same act: the laptop runs `lf task move X --machine laptop`
 /// while mini owns the Task, and mini's Graph continues on the laptop.
 #[test]
@@ -2887,12 +3559,12 @@ fn wait_step_live(db: &Path) -> bool {
 }
 
 #[test]
-fn resume_task_follows_a_task_session_moved_alone() {
+fn resuming_a_task_conversation_on_mini_moves_its_task() {
     let fixture = preview_machines();
     let plan = SharedPlan::cloned(&fixture);
     let mini = plan.remote.local_machine().unwrap().id;
     let laptop = plan.local.local_machine().unwrap().id;
-    let (task, worktree) = placed_task(&plan, "alone-task");
+    let (task, worktree) = placed_task(&plan, "conversation-task");
     let session = claude_conversation(&fixture, &worktree, "0199a213-81c0-7800-8aa1-bbab2a035a56");
 
     let moved = fixture
@@ -2908,11 +3580,47 @@ fn resume_task_follows_a_task_session_moved_alone() {
         .output()
         .unwrap();
     assert_success(&moved);
-    // The conversation went; the Task stayed.
+    // The conversation took its Task along: both Machines say it runs on mini.
     assert_eq!(
         plan.local.task_execution_route(&task).unwrap().machine_id,
-        laptop
+        mini
     );
+    assert_eq!(
+        plan.remote.task_execution_route(&task).unwrap().machine_id,
+        mini
+    );
+    let status = fixture
+        .command(&["task", "status", task.as_str()])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&status);
+    let status = String::from_utf8_lossy(&status.stdout);
+    assert!(status.contains("Runs on mini since"), "{status}");
+    let arrived = plan.remote.session(&session).unwrap().unwrap();
+    assert_eq!(arrived.task_id.as_ref(), Some(&task));
+    // The move was sent from the laptop and arrived on mini.
+    assert!(plan.local.task_move_in_flight(&task).unwrap().is_none());
+    for db in ["local/loopflow.db", "remote/store/loopflow.db"] {
+        let moves: Vec<(String, String, String)> =
+            rusqlite::Connection::open(fixture.root.path().join(db))
+                .unwrap()
+                .prepare(
+                    "SELECT from_machine_id,to_machine_id,state FROM task_moves WHERE task_id=?1",
+                )
+                .unwrap()
+                .query_map([task.as_str()], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                })
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+        assert_eq!(
+            moves,
+            [(laptop.to_string(), mini.to_string(), "arrived".to_string())],
+            "{db}"
+        );
+    }
     let resumed = fixture
         .command(&["resume", "--task", task.as_str(), "--prepare", "--json"])
         .current_dir(&plan.local_path)
@@ -2922,6 +3630,94 @@ fn resume_task_follows_a_task_session_moved_alone() {
     let resumed: Value = serde_json::from_slice(&resumed.stdout).unwrap();
     assert_eq!(resumed["id"], session.as_str());
     assert_eq!(resumed["workspace"]["machine_id"], mini.as_str());
+}
+
+/// Mini is a rental that ends while it holds the Task: the Task comes back to
+/// the laptop, and so does resuming its conversation, which never forwards to
+/// the Machine it last moved to.
+#[test]
+fn a_handed_back_tasks_conversation_resumes_here() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::cloned(&fixture);
+    let mini = plan.remote.local_machine().unwrap().id;
+    let laptop = plan.local.local_machine().unwrap().id;
+    let (task, worktree) = placed_task(&plan, "handed-back");
+    let session = claude_conversation(&fixture, &worktree, "0199a213-81c0-7800-8aa1-bbab2a035a5c");
+    let moved = fixture
+        .command(&[
+            "--machine",
+            "mini",
+            "resume",
+            &session,
+            "--prepare",
+            "--json",
+        ])
+        .current_dir(&worktree)
+        .output()
+        .unwrap();
+    assert_success(&moved);
+    assert!(plan.local.session_moved_to(&session).unwrap().is_none());
+
+    let rental = loopflow::rental::RentalId::new();
+    rusqlite::Connection::open(fixture.root.path().join("local/loopflow.db"))
+        .unwrap()
+        .execute(
+            "INSERT INTO rentals(id,ondemand,provider,provider_name,by_hand,hardware,
+                usd_per_hour,cap_usd,deadline,state,created_at,machine_id)
+             VALUES(?1,'code','daytona',?1,0,
+                '{\"vcpus\":4,\"memory_gb\":8,\"disk_gb\":10,\"gpu\":null,\"spot\":false}',
+                '0.24','1.00',4000000000,'running',1,?2)",
+            [rental.as_str(), mini.as_str()],
+        )
+        .unwrap();
+    let (_, returned) = plan
+        .local
+        .set_rental_state(&rental, loopflow::rental::RentalState::Ended)
+        .unwrap();
+    assert_eq!(returned, std::slice::from_ref(&task));
+    assert_eq!(
+        plan.local.task_execution_route(&task).unwrap().machine_id,
+        laptop
+    );
+
+    let resumed = fixture
+        .command(&["resume", &session, "--prepare", "--json"])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&resumed);
+    let resumed: Value = serde_json::from_slice(&resumed.stdout).unwrap();
+    assert_eq!(resumed["id"], session.as_str());
+    assert_eq!(resumed["workspace"]["machine_id"], laptop.as_str());
+}
+
+/// A Task with two conversations: resuming the one that is not its primary
+/// on mini moves the Task with that one, and mini resumes it.
+#[test]
+fn resuming_a_tasks_other_conversation_on_mini_carries_that_one() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::cloned(&fixture);
+    let mini = plan.remote.local_machine().unwrap().id;
+    let (task, worktree) = placed_task(&plan, "two-conversations");
+    let first = claude_conversation(&fixture, &worktree, "0199a213-81c0-7800-8aa1-bbab2a035a5a");
+    let other = claude_conversation(&fixture, &worktree, "0199a213-81c0-7800-8aa1-bbab2a035a5b");
+    assert_ne!(first, other);
+
+    let resumed = fixture
+        .command(&["--machine", "mini", "resume", &other, "--prepare", "--json"])
+        .current_dir(&worktree)
+        .output()
+        .unwrap();
+    assert_success(&resumed);
+    let resumed: Value = serde_json::from_slice(&resumed.stdout).unwrap();
+    assert_eq!(resumed["id"], other.as_str());
+    assert_eq!(
+        plan.remote.task_execution_route(&task).unwrap().machine_id,
+        mini
+    );
+    let there = plan.remote.session(&other).unwrap().unwrap();
+    assert!(there.completed_at.is_none());
+    assert_eq!(there.task_id.as_ref(), Some(&task));
 }
 
 #[test]

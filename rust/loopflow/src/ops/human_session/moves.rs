@@ -5,8 +5,9 @@
 //! same provider conversation resumes there.
 //!
 //! A Task moves the same way with its ownership and Graph: `send_task`
-//! stops its Graph, checkpoints its worktree, takes its conversation along and
-//! hands it off; `receive` takes in the handoff before checking it out.
+//! claims it for the target, stops its Graph, checkpoints its worktree and
+//! takes its conversation along; `receive` takes in that claim before
+//! checking it out.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -16,7 +17,7 @@ use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 
 use super::{provider_conversation, session_by_id, session_not_found};
-use crate::durable::{MachineId, OwnershipKind, RepositoryId, TaskId, TaskOwnershipEntry, WorkRef};
+use crate::durable::{MachineId, RepositoryId, TaskId, TaskOwnershipEntry, WorkRef};
 use crate::harness::HarnessKind;
 use crate::id::{AgentSessionId, LfSessionId, WaveId};
 use crate::journal::ProcessIdentityEvidence;
@@ -24,7 +25,8 @@ use crate::process::Departure;
 use crate::provider_auth::Provider;
 use crate::repository::CanonicalRepo;
 use crate::session::{LfSession, PrimaryScope, TitleSource, WorkSource};
-use crate::store::sqlite::task_work::TaskGraphRecord;
+use crate::store::sqlite::task_moves::{MoveInFlight, MoveStage};
+use crate::store::sqlite::task_work::{ShipApproval, TaskGraphRecord};
 use crate::store::sqlite::SqliteStore;
 use crate::store::SharedStore;
 use crate::transcript::{Located, Source};
@@ -49,13 +51,15 @@ pub(crate) struct Move {
 pub(crate) struct MovedTask {
     pub task_id: TaskId,
     pub identifier: String,
-    /// The handoff, as the marked comment planning would deliver later.
+    /// The move's claim, as the marked comment planning would deliver later.
     pub ownership_marker: String,
     /// Absent before the Task takes up a Graph.
     pub graph: Option<TaskGraphRecord>,
     /// Absent unless the move stopped a running Graph, which continues where
     /// the Task arrives.
     pub stopped: Option<StoppedGraph>,
+    /// The standing Auto-Ship approval; absent when the Task was not shipping.
+    pub approval: Option<ShipApproval>,
 }
 
 /// A Graph the move stopped.
@@ -114,11 +118,15 @@ pub(crate) struct MovedFile {
 
 /// Commit and push the Session's branch, stop its agent, read its transcript
 /// and complete it here as moved to `to`. Repeating it after a failed receive
-/// reads the same Session again.
+/// reads the same Session again. A Task's conversation moves only with its
+/// Task, so it sends the Task.
 pub(crate) async fn send(store: &SharedStore, id: &str, to: &MachineId) -> Result<Move> {
     let session = session_by_id(store, id)
         .await?
         .ok_or_else(|| session_not_found(id))?;
+    if let Some(task) = conversation_task(&store.sqlite, &session.id)? {
+        return send_task(store, task.as_str(), to, Some(session.id.as_str())).await;
+    }
     let name = &session.title;
     let root = crate::git::worktree_root(&session.cwd).map_err(|_| {
         anyhow!(
@@ -146,15 +154,53 @@ pub(crate) async fn send(store: &SharedStore, id: &str, to: &MachineId) -> Resul
     })
 }
 
-/// Hand the Task off to `to`, then stop its Graph, commit and push its
-/// worktree and take its conversation. A failure in those steps hands it back
-/// here; repeating it after a failed receive reuses the handoff.
-pub(crate) async fn send_task(store: &SharedStore, issue: &str, to: &MachineId) -> Result<Move> {
+/// The Task whose conversation `session` is: the Task it is the primary
+/// Session of, else the one Task it belongs to.
+pub(crate) fn conversation_task(store: &SqliteStore, session: &str) -> Result<Option<TaskId>> {
+    if let Some(PrimaryScope::Task(task)) = store.primary_scope(session)? {
+        return Ok(Some(task));
+    }
+    Ok(match store.session_task_ids(session)?.as_slice() {
+        [task] => Some(task.clone()),
+        _ => None,
+    })
+}
+
+/// Claim the Task for `to`, then stop its Graph, commit and push its
+/// worktree and take `conversation` (the Task's own conversation when `None`).
+/// From its claim until it is sent the move is leaving: a repeat naming the
+/// same Machine carries on from there, with the Graph it stopped. A failure
+/// in those steps hands it back here. The move is recorded as sent before it
+/// returns, so a repeat returns what was sent, even when the first reply never
+/// reached the caller.
+pub(crate) async fn send_task(
+    store: &SharedStore,
+    issue: &str,
+    to: &MachineId,
+    conversation: Option<&str>,
+) -> Result<Move> {
     let task = store
         .get_task_by_issue(issue)
         .await?
         .ok_or_else(|| anyhow!("no Task {issue} on this Machine"))?;
     let name = &task.identifier;
+    let moving = store.sqlite.task_move_in_flight(&task.id)?;
+    if let Some(MoveInFlight {
+        to_machine_id,
+        stage: MoveStage::Sent { payload },
+        ..
+    }) = &moving
+    {
+        if to_machine_id == to {
+            let moved: Move = serde_json::from_str(payload).context("read the sent move")?;
+            if let Some(session) = &moved.session {
+                store
+                    .sqlite
+                    .complete_task_conversation(&session.id, &task.id)?;
+            }
+            return Ok(moved);
+        }
+    }
     let worktree = task.worktree.clone().filter(|path| path.exists());
     if let Some(root) = &worktree {
         refuse_mid_operation(root, name)?;
@@ -162,29 +208,47 @@ pub(crate) async fn send_task(store: &SharedStore, issue: &str, to: &MachineId) 
     // Owned by `to` from here, so nothing on this Machine (recovery restarting
     // a ship process, a run waiting out a limit) starts the Task again while
     // the move stops it. If it cannot leave, it is handed back.
-    let sent_before = store
-        .sqlite
-        .task_ownership(&task.id)?
-        .owner
-        .and_then(|owner| owner.machine.id)
-        .as_ref()
-        == Some(to);
-    let handoff = hand_off(&store.sqlite, &task.id, to)?;
+    let (claim, stopped) = match moving {
+        Some(MoveInFlight {
+            to_machine_id,
+            stage: MoveStage::Leaving { claim_id, stopped },
+            ..
+        }) if &to_machine_id == to => {
+            let claim = store
+                .sqlite
+                .task_ownership(&task.id)?
+                .log
+                .into_iter()
+                .find(|entry| entry.id == claim_id)
+                .ok_or_else(|| anyhow!("{name}'s move claim {claim_id} is gone"))?;
+            let stopped = stopped
+                .map(|stopped| serde_json::from_str(&stopped))
+                .transpose()
+                .context("read the stopped Graph")?;
+            (claim, stopped)
+        }
+        Some(
+            leaving @ MoveInFlight {
+                stage: MoveStage::Leaving { .. },
+                ..
+            },
+        ) => bail!(
+            "{}",
+            crate::ops::task_ownership::describe_move(&store.sqlite, name, &leaving)?
+        ),
+        _ => (claim_for(&store.sqlite, &task, to)?, None),
+    };
     let (stopped, checkout, conversation, taken) =
-        match leave(store, &task, worktree.as_deref(), to).await {
+        match leave(store, &task, worktree.as_deref(), to, conversation, stopped).await {
             Ok(left) => left,
-            Err(error) if sent_before => return Err(error),
             Err(error) => {
-                store.sqlite.hand_back(&task.id, &handoff)?;
+                store.sqlite.hand_back(&task.id, &claim)?;
                 return Err(error);
             }
         };
-    if let Some(session) = &conversation {
-        store.sqlite.complete_moved_session(&session.id, to)?;
-    }
     let (session, history) =
         taken.map_or((None, None), |(session, history)| (Some(session), history));
-    Ok(Move {
+    let moved = Move {
         from_machine_id: store.sqlite.local_machine()?.id,
         session,
         checkout,
@@ -192,11 +256,35 @@ pub(crate) async fn send_task(store: &SharedStore, issue: &str, to: &MachineId) 
         task: Some(MovedTask {
             task_id: task.id.clone(),
             identifier: task.identifier.clone(),
-            ownership_marker: crate::store::sqlite::task_ownership::marker(&handoff)?,
+            ownership_marker: crate::store::sqlite::task_ownership::marker(&claim)?,
             graph: store.sqlite.task_graph_record(&task.id)?,
             stopped,
+            approval: store.sqlite.task_ship_approval(&task.id)?,
         }),
-    })
+    };
+    store
+        .sqlite
+        .record_move_sent(&task.id, &serde_json::to_string(&moved)?)?;
+    if let Some(session) = &conversation {
+        store
+            .sqlite
+            .complete_task_conversation(&session.id, &task.id)?;
+    }
+    Ok(moved)
+}
+
+/// The Task this Machine sent to `to` arrived there: nothing is in flight.
+pub(crate) async fn sent_task_arrived(
+    store: &SharedStore,
+    issue: &str,
+    to: &MachineId,
+) -> Result<()> {
+    let task = store
+        .get_task_by_issue(issue)
+        .await?
+        .ok_or_else(|| anyhow!("no Task {issue} on this Machine"))?;
+    let here = store.sqlite.local_machine()?.id;
+    Ok(store.sqlite.record_move_arrived(&task.id, &here, to)?)
 }
 
 type Left = (
@@ -207,25 +295,37 @@ type Left = (
 );
 
 /// What leaves with the Task: its stopped Graph, its pushed checkpoint and
-/// its stopped conversation.
+/// its stopped conversation, `conversation` or else the Task's own. A Graph
+/// stopped by an earlier attempt of this move is `stopped`: nothing of it is
+/// left running to stop again.
 async fn leave(
     store: &SharedStore,
     task: &Task,
     worktree: Option<&Path>,
     to: &MachineId,
+    conversation: Option<&str>,
+    stopped: Option<StoppedGraph>,
 ) -> Result<Left> {
     let name = &task.identifier;
-    let stopped = stop_graphs(store, task).await?;
+    let stopped = match stop_graphs(store, task).await? {
+        Some(now) => {
+            store
+                .sqlite
+                .record_move_stopped(&task.id, &serde_json::to_string(&now)?)?;
+            Some(now)
+        }
+        None => stopped,
+    };
     let checkout = worktree
         .map(|root| checkpoint(&store.sqlite, root, name, to))
         .transpose()?;
-    let conversation = match super::primary::task_conversation(store, &task.id).await? {
-        Some(session) => Some(session),
-        // Repeated after a failed receive: the conversation already left for `to`.
-        None => match store.sqlite.task_conversation_moved_to(&task.id)? {
-            Some((id, machine)) if machine == *to => session_by_id(store, &id).await?,
-            _ => None,
-        },
+    let conversation = match conversation {
+        Some(id) => Some(
+            session_by_id(store, id)
+                .await?
+                .ok_or_else(|| session_not_found(id))?,
+        ),
+        None => super::primary::task_conversation(store, &task.id).await?,
     };
     let taken = match conversation.as_ref() {
         Some(session) => {
@@ -294,25 +394,18 @@ fn take(
     ))
 }
 
-/// The handoff to `to`: this Machine's claim moves there. An unowned Task is
-/// claimed first; one already handed to `to` reuses that entry.
-fn hand_off(store: &SqliteStore, task: &TaskId, to: &MachineId) -> Result<TaskOwnershipEntry> {
-    let ownership = store.task_ownership(task)?;
-    let owner = ownership
+/// The claim naming `to`, written here with the move leaving: this Machine's
+/// claim moves there. An unowned Task is claimed first; one `to` already owns
+/// has nothing to send.
+fn claim_for(store: &SqliteStore, task: &Task, to: &MachineId) -> Result<TaskOwnershipEntry> {
+    let owner = store
+        .task_ownership(&task.id)?
         .owner
-        .as_ref()
-        .and_then(|owner| owner.machine.id.as_ref());
-    if owner == Some(to) {
-        if let Some(entry) = ownership.log.iter().rev().find(|entry| {
-            entry.kind == OwnershipKind::Handoff && entry.machine_id.as_ref() == Some(to)
-        }) {
-            return Ok(entry.clone());
-        }
+        .and_then(|owner| owner.machine.id);
+    if owner.as_ref() == Some(to) {
+        bail!("{} already runs on {to}", task.identifier);
     }
-    if owner.is_none() {
-        store.claim_task(task)?;
-    }
-    Ok(store.handoff_moving_task(task, to)?)
+    Ok(store.begin_task_move(&task.id, to)?)
 }
 
 /// Interrupt the Task so nothing starts again, then end each Graph still
@@ -534,9 +627,23 @@ pub(crate) async fn arriving_task(
 
 /// Check out the moved branch in a worktree of this repository, admit the
 /// same Session there and place its transcript where its provider resumes it.
-/// A moved Task is taken in first: its handoff, its checkout on the carried
+/// A moved Task is taken in first: its claim, its checkout on the carried
 /// branch and its Graph. Returns the Session, when one moved.
 pub(crate) async fn receive(store: &SharedStore, moved: Move) -> Result<Option<LfSession>> {
+    let task = moved.task.as_ref().map(|task| task.task_id.clone());
+    let from = moved.from_machine_id.clone();
+    let received = receive_move(store, moved).await?;
+    // Arrival acknowledges the conversation as well as the checkout. A failed
+    // transcript import must leave the checked move available for retry.
+    if let Some(task) = task {
+        store
+            .sqlite
+            .record_move_arrived(&task, &from, &store.sqlite.local_machine()?.id)?;
+    }
+    Ok(received)
+}
+
+async fn receive_move(store: &SharedStore, moved: Move) -> Result<Option<LfSession>> {
     let repo = repository(store, &moved).await?;
     let main = crate::git::worktrees::main_repo_root(&repo)?;
     let task = match &moved.task {
@@ -645,7 +752,7 @@ pub(crate) fn checkout_of(
     let path = root.join(name);
     anyhow::ensure!(
         !path.exists(),
-        "{} exists but is not repository {repository} here; run `lf repo --bind {repository}` in it, then move again",
+        "{} exists but is not repository {repository} here; run `lf config repo --bind {repository}` in it, then move again",
         path.display()
     );
     fs::create_dir_all(&root)?;
@@ -656,8 +763,8 @@ pub(crate) fn checkout_of(
     Ok(path.canonicalize()?)
 }
 
-/// This Machine owns the Task from here: the handoff, then its checkout of
-/// the carried branch, then its Graph where it stood.
+/// This Machine owns the Task from here: the move's claim, then its checkout of
+/// the carried branch, then its Graph where it stood and its Auto-Ship approval.
 async fn take_in_task(
     store: &SharedStore,
     main: &Path,
@@ -692,6 +799,11 @@ async fn take_in_task(
             graph,
             crate::journal::current_lf_process_id().as_ref(),
         )?;
+    }
+    if let Some(approval) = &moved.approval {
+        store
+            .sqlite
+            .take_in_ship_approval(&moved.task_id, approval)?;
     }
     store
         .get_task(&moved.task_id)

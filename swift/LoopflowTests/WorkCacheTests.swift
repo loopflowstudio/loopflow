@@ -928,7 +928,7 @@ private actor Source {
             runtime["status"] = state
             runtime["updated_at"] = String(format: "2026-11-04T10:00:%02dZ", index)
             runtime["owner"] = index == states.count - 1 ? NSNull() : [
-                "person": "Jack Heart", "person_key": "jack@loopflow.studio",
+                "person": "Jack Heart", "person_id": NSNull(), "person_key": "jack@loopflow.studio",
                 "machine": ["id": "home-a", "label": "laptop"]
             ] as [String: Any]
             row["runtime"] = runtime

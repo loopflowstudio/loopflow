@@ -21,28 +21,20 @@ Demo: the settle step of the next red macOS-on-main run shows
 
 ## Approach
 
-The remaining logic is two branches of shell, so it moves into the workflow
-step and the script goes away.
+The remaining logic is two branches of shell, so it lives in the workflow's
+`settle` step and `scripts/macos_main.py` with its test is deleted.
 
-- Delete `scripts/macos_main.py` and `python/tests/test_macos_main.py`
-  (bisection, dispatch, revert, `_known_revert`, `failed_jobs`, `macos-revert/`
-  prefix; nothing else imports them).
-- `macos-main.yml`:
-  - `on.workflow_dispatch` with no inputs (manual rerun of current main).
-  - drop the bisect `run-name` and `inputs.request` from `concurrency.group`
-    (`${{ github.workflow }}`).
-  - `select` loses the dispatch branch: `SHA: ${{ github.sha }}`, always reads
-    `last-green` and runs `macos_inputs.py`.
-  - `settle`: runs for `push` and `workflow_dispatch`; drop
-    `timeout-minutes: 340`, `actions: write`, `pull-requests: write`; keep
-    `contents: write` for the tag push. Inline step:
-    success|skipped → `git push --force origin "$SHA:refs/tags/last-green"`
-    and summary `last-green → $SHA`; otherwise summary line above, `exit 1`.
-    A full checkout is no longer needed beyond the push (keep `actions/checkout`
-    default depth; pushing a SHA the remote has needs no history).
-  - header comment: red is reported, not bisected.
-- `.github/CI.md`: "Green moves `last-green`; red leaves it, fails the run and
-  is reported in its summary. Nothing reverts automatically."
+`macos-main.yml` triggers on `push` to main only. No `workflow_dispatch`: a
+dispatch runs on whatever ref starts it, so `--ref <branch>` would force-move
+`last-green` (`SHA: ${{ github.sha }}`) to a commit not on main. The next push
+retests from the same `last-green`; `gh run rerun <id>` retests a red run on its
+own commit. A rerun of a superseded run can only move `last-green` backward,
+which widens the next batch.
+
+`settle` keeps only `contents: write` for the tag push; success|skipped
+force-pushes `last-green`, anything else writes the summary line and exits 1.
+`.github/CI.md` documents the summary line (must match `settle`) and
+`gh run rerun <id>`.
 
 ## Open revert branches on origin (2026-11-13)
 
@@ -67,28 +59,13 @@ repair of `WorkCacheTests`.
 - A red macOS-on-main run fails with the summary line and opens nothing.
 - `grep -rn "macos_main\|macos-revert\|find_culprit\|macOS bisect" .` finds nothing outside git history.
 
-## Docs
-
-- `.github/CI.md` (macOS-on-main paragraph, written ahead of the workflow change). Summary line format there must match the settle step.
-
 ## Status
 
-Implemented: workflow inlined, script and test deleted, CI.md updated.
-
-## Next implement direction (concept review)
-
-Drop `workflow_dispatch` from `macos-main.yml` and the `gh workflow run` line
-from `.github/CI.md`. Dispatch runs on whatever ref it is started from, so
-`gh workflow run macos-main.yml --ref <branch>` would force-move `last-green`
-to a commit that isn't on main. Nothing needs dispatch: the next push to main
-retests the batch from the same `last-green`, and `gh run rerun <id>` retests a
-red run on its own commit. A rerun of a superseded run can only move
-`last-green` backward, which widens the next batch and tests more, never less.
-CI.md's manual-rerun sentence becomes: "To retest a red run without a new push:
-`gh run rerun <id>`."
+Implemented: push-only workflow with inline settle, script and test deleted,
+CI.md updated. Done-when grep is clean.
 
 ## Checks
 
-- `actionlint .github/workflows/macos-main.yml` — passed locally.
+- `actionlint .github/workflows/macos-main.yml` — passed locally after dropping dispatch.
 - `uv run pytest python/tests` collection still passes without the deleted test — gate.
 - Real red/green settle — CI on main after merge.

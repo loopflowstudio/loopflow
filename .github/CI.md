@@ -67,8 +67,8 @@ macOS failure on 286889bbec; last-green stays at 9206f321d9.
 
 Nothing reverts automatically. The next push to main tests the batch again from
 the same `last-green`, so a flake clears on its own and a real regression stays
-red until someone fixes or reverts it. To rerun the current main by hand:
-`gh workflow run macos-main.yml`.
+red until someone fixes or reverts it. To retest a red run without a new push:
+`gh run rerun <id>`.
 
 ## Rust and Swift caches
 

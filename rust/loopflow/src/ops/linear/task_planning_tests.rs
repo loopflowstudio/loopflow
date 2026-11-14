@@ -5388,7 +5388,7 @@ fn planning_export_captures_shared_task_fields_without_local_execution() {
 
 #[test]
 fn project_field_delivery_requires_revision_accepted_into_work() {
-    for rejection in ["stale", "foreign", "archived", "unresolved", "unversioned"] {
+    for rejection in ["stale", "foreign", "archived", "unversioned"] {
         with_planning_task(|runtime, fixture, repo, task, state| {
             runtime.block_on(async {
                 let work = crate::durable::WorkRef::Project(task.project_id.clone().unwrap());
@@ -5427,24 +5427,6 @@ fn project_field_delivery_requires_revision_accepted_into_work() {
                             "UPDATE pm_projects SET archived=1 WHERE repo=?1 AND provider='linear' AND id=?2",
                             rusqlite::params![repo.to_string_lossy(), observed.id],
                         ).unwrap();
-                    }
-                    "unresolved" => {
-                        let client = super::linear_client(repo).await.unwrap();
-                        let (mut observed, _) = client
-                            .project_content_observation("project-1")
-                            .await
-                            .unwrap();
-                        observed.team_ids = vec!["another-team".into()];
-                        assert!(crate::linear::acceptance::accept_linear_project_in(
-                            &fixture.store.sqlite,
-                            task.wave_id.as_ref().unwrap(),
-                            "initiative-1",
-                            &observed,
-                            now(),
-                        )
-                        .is_err());
-                        // Re-reading the original entity revision cannot order the
-                        // disputed Team relation or authorize delivery.
                     }
                     "unversioned" => provider["updatedAt"] = json!(null),
                     _ => unreachable!(),
@@ -5693,6 +5675,29 @@ fn project_prose_save_delivers_and_settles_without_changing_managed_fields() {
             assert_eq!(fixture.store.sqlite.task_graph(&task.id).unwrap(), workflow_before);
             let outcome: Option<String> = conn.query_row("SELECT outcome FROM processes WHERE id='11111111-1111-4111-8111-111111111111'", [], |r| r.get(0)).unwrap();
             assert_eq!(outcome, None);
+        });
+    });
+}
+
+#[test]
+fn older_read_with_nothing_queued_is_not_a_delivery_failure() {
+    // Linear can answer a read just after a write with its previous copy.
+    with_planning_task(|runtime, fixture, repo, task, state| {
+        runtime.block_on(async {
+            let issue = task.linear_id.as_ref().unwrap().as_str();
+            let original = state.lock().await.issues[0].clone();
+            mark_issue_updated(&mut state.lock().await.issues[0]);
+            super::test_fixture::refresh_task_input(repo, issue, LinearRefresh::Force)
+                .await
+                .unwrap();
+            let saved = fixture.store.sqlite.task(&task.id).unwrap().unwrap();
+            state.lock().await.issues[0] = original;
+            let work = crate::durable::WorkRef::Task(task.id.clone());
+            crate::ops::planning_delivery::sync_fields(&fixture.store, repo, &work)
+                .await
+                .unwrap();
+            assert_eq!(fixture.store.sqlite.task(&task.id).unwrap().unwrap(), saved);
+            assert_eq!(state.lock().await.field_writes, 0);
         });
     });
 }

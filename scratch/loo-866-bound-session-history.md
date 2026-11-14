@@ -199,6 +199,30 @@ finished-arm half of `windowed`. That is a store-model change beyond this Task.
 Open: whether to file it. The two runs disagree on 1d finished-included:
 gate ~5× (1.89→0.37 s), QA ~3.5× (10.2→2.9 s), both at load avg 150+.
 
+## Next implement direction (concept review, Nov 13)
+
+One Task, one id. `pending_inputs` binds `?3` to the id `resolve_task_id`
+returns, and the Task arms already match `task_id=?3`. The `eligible` filter
+still re-resolves it: `task_id IN (SELECT id FROM tasks WHERE id=?3 OR
+issue_identifier=?3 OR external_issue_id=?3)`, twice (input and `started`
+origin). That is the `tasks` MULTI-INDEX OR read left in the drill plan. Make
+both `task_id=?3`, matching the arms; the statement then reads no `tasks` row
+for a drill. Only change: an unresolved selector that equals a `task_id` with
+no `tasks` row now returns those rows instead of none, same as the arms
+already find them. `task_history_reads_every_row_naming_the_task` and
+`session_history_reads_plan_by_window` cover it. Selector resolution itself
+(`resolve_task_id_in`, `scratch/questions.md`) stays out of this Task.
+
+Open, not blocking Done when (record answers here):
+
+1. Wide windows regress: 30d finished-included 0.55–0.78 → 0.8–1.5 s, whole
+   store 2.5 → 8.7 s in QA. `context_cost` reads from `FIRST_WEEK_START`
+   (~2 months, finished excluded) on every report. Is that cost acceptable, or
+   does a wide unscoped read need main's direct walk (a second statement,
+   against "One query")?
+2. Recording an input's end as one appended event would remove the three
+   `ended` sources and half of `windowed`. File it as its own Task or not.
+
 ## Exclusions
 
 - Per-input cost inside the window (`ended`/`latest` subqueries for every

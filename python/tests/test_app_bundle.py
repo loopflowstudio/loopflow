@@ -77,7 +77,8 @@ def test_bare_swiftpm_binary_in_a_bundle_cannot_load_sparkle(tmp_path: Path) -> 
     build_dir = tmp_path / "build"
     _swiftpm_build(build_dir)
     # Copied as builders did before embedding: the executable alone.
-    executable = tmp_path / "Loopflow.app/Contents/MacOS/Loopflow"
+    # Give the deliberate dyld abort a test-only name in macOS crash reports.
+    executable = tmp_path / "BareSwiftPM.app/Contents/MacOS/BareSwiftPM"
     executable.parent.mkdir(parents=True)
     shutil.copy(build_dir / "LoopflowMac", executable)
 

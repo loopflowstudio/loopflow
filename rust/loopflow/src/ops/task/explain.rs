@@ -231,3 +231,6 @@ pub(super) async fn read_local_task(
     }
     Ok(task)
 }
+
+#[cfg(test)]
+mod tests;

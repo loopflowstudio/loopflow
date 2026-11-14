@@ -1475,7 +1475,7 @@ fn completed_task_cleanup_ends_its_held_shell_and_settles_jobs() {
         .spawn()
         .unwrap();
     fixture.wait_file("ready");
-    let owner = fixture.shell_terminal("cleanup-shell");
+    let owner = fixture.wait_shell_terminal("cleanup-shell");
     // The launch attaches after the shell starts; take over only from it.
     fixture.wait_held_controlled(&owner);
     let mut viewer = fixture.held_viewer(&owner, true);
@@ -1565,14 +1565,24 @@ impl Fixture {
         machine
     }
 
-    fn shell_terminal(&self, id: &str) -> String {
-        self.sql()
-            .query_row(
-                "SELECT terminal_id FROM desktop_shells WHERE id=?1",
-                [id],
-                |r| r.get(0),
-            )
-            .unwrap()
+    fn wait_shell_terminal(&self, id: &str) -> String {
+        // The shell can write its ready file before the launcher binds its terminal.
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let terminal: Option<String> = self
+                .sql()
+                .query_row(
+                    "SELECT terminal_id FROM desktop_shells WHERE id=?1",
+                    [id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            if let Some(terminal) = terminal {
+                return terminal;
+            }
+            assert!(Instant::now() < deadline, "{id} terminal was never bound");
+            std::thread::sleep(Duration::from_millis(20));
+        }
     }
 
     /// Wait until the server confirms an ended shell left no jobs.
@@ -1683,7 +1693,7 @@ fn shell_reconnects_and_settles(integrated: bool) {
         fixture.wait_file("launches").trim(),
         "$(literal); spaced argument"
     );
-    let owner = fixture.shell_terminal("desktop-shell");
+    let owner = fixture.wait_shell_terminal("desktop-shell");
     fixture.wait_held_controlled(&owner);
     let mut viewer = fixture.held_viewer(&owner, true);
     launch.wait().unwrap();
@@ -1813,7 +1823,7 @@ fn desktop_shell_repeated_lifecycles_leave_no_jobs() {
             .spawn()
             .unwrap();
         fixture.wait_file("cycle-ready");
-        let owner = fixture.shell_terminal(&id);
+        let owner = fixture.wait_shell_terminal(&id);
         fixture.wait_held_controlled(&owner);
         let mut viewer = fixture.held_viewer(&owner, true);
         launch.wait().unwrap();

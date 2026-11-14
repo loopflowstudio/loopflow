@@ -439,7 +439,7 @@ fn ssh_shell_lifecycles_reconnect_and_settle_processes_ptys_and_sockets() {
         ]);
         let mut pane = Pane::spawn(command);
         pane.until("remote-ready");
-        let owner = fixture.destination.shell_terminal(&id);
+        let owner = fixture.destination.wait_shell_terminal(&id);
         pane.input("export RETAINED=destination; sleep 300 & printf '%s %s\\n' $$ $! > \"$HOME/pids\"; printf 'where:%s\\n' \"$PWD\"; tty\r");
         pane.until(&format!(
             "where:{}",
@@ -489,7 +489,7 @@ fn ssh_shell_lifecycles_reconnect_and_settle_processes_ptys_and_sockets() {
         fixture.destination.wait_held_controlled(&owner);
         returning.input("printf 'retained:%s:%s\\n' \"$RETAINED\" $$\r");
         returning.until(&format!("retained:destination:{shell}"));
-        assert_eq!(fixture.destination.shell_terminal(&id), owner);
+        assert_eq!(fixture.destination.wait_shell_terminal(&id), owner);
         assert_eq!(
             fixture.destination.wait_file("launches").lines().count(),
             cycle + 1

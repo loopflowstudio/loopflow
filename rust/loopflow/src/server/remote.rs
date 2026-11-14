@@ -458,7 +458,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send> Carrier for Messages<S> {
     type Failure = anyhow::Error;
 }
 
-/// A plain byte copy between the owner and the WebSocket's binary frames.
+/// A plain byte copy between the held terminal and the WebSocket's binary frames.
 /// Closing either side releases the owner claim.
 async fn bridge<S>(socket: WebSocketStream<S>, mut destination: UnixStream) -> Result<()>
 where
@@ -517,7 +517,6 @@ mod tests {
         ClientIdentity, ClientMessage, Hello, Operation, ServerMessage, ServerOperation,
         MAX_MESSAGE, MIN_REVISION, REVISION,
     };
-    use crate::transport::Host;
     use futures_util::{SinkExt, StreamExt};
     use std::sync::Arc;
     use std::time::Duration;
@@ -550,7 +549,7 @@ mod tests {
             "An idle stream must answer liveness checks"
         );
         machine.write_all(b"last screen").await.unwrap();
-        // The Machine may keep its read half alive while the owner has ended.
+        // The Machine may keep its read half alive while the held terminal has ended.
         machine.shutdown().await.unwrap();
         let last = client.next().await.unwrap().unwrap();
         assert_eq!(last.into_data(), b"last screen"[..]);
@@ -703,14 +702,13 @@ mod tests {
                 "{answer:?}"
             );
         }
-        // A Session without an owner is refused without starting a provider.
+        // A Session without a held terminal is refused without starting a provider.
         client
             .send(text(&ClientMessage::Request {
                 select: None,
                 id: "terminal".into(),
                 operation: Operation::Server(ServerOperation::SessionAttach {
                     session: crate::id::LfSessionId::from("session_missing"),
-                    owner_lf_process_id: None,
                     terminal_id: None,
                 }),
             }))
@@ -803,33 +801,37 @@ mod tests {
                     node: "phone".into(),
                     user: 1,
                 };
-                let owner = crate::id::LfProcessId::new();
+                let held = crate::id::TerminalId::new();
                 let listener =
-                    tokio::net::UnixListener::bind(crate::transport::endpoint(&owner).unwrap())
+                    tokio::net::UnixListener::bind(crate::transport::registry::entrance().unwrap())
                         .unwrap();
+                let entrance = tokio::spawn(async move {
+                    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                    let (mut stream, _) = listener.accept().await.unwrap();
+                    while stream.read_u8().await.unwrap() != b'\n' {}
+                    let answer = format!(
+                        "{{\"answer\":\"hosted\",\"revision\":{}}}\n",
+                        crate::transport::registry::REVISION
+                    );
+                    stream.write_all(answer.as_bytes()).await.unwrap();
+                    stream
+                });
                 let attach = |ticket: String| text(&ClientMessage::Attach { ticket });
-                let ticket =
-                    tickets.issue(phone.clone(), Purpose::Terminal(Host::Owner(owner.clone())));
+                let ticket = tickets.issue(phone.clone(), Purpose::Terminal(held.clone()));
                 let mut terminal = connect(&tickets, true, "/v1/ticket", false).await.unwrap();
                 terminal.send(attach(ticket.clone())).await.unwrap();
                 assert!(matches!(
                     receive(&mut terminal).await.unwrap(),
-                    ServerMessage::Bridged { owner_lf_process_id: Some(of), .. } if of == owner
+                    ServerMessage::Bridged { terminal_id } if terminal_id == held
                 ));
-                let _owned = listener.accept().await.unwrap();
+                let _held = entrance.await.unwrap();
                 // Replay, another node and a local ticket are refused and spent.
                 let laptop = Admission::Remote {
                     node: "laptop".into(),
                     user: 1,
                 };
-                let foreign = tickets.issue(
-                    laptop.clone(),
-                    Purpose::Terminal(Host::Owner(owner.clone())),
-                );
-                let local = tickets.issue(
-                    Admission::Local,
-                    Purpose::Terminal(Host::Owner(owner.clone())),
-                );
+                let foreign = tickets.issue(laptop.clone(), Purpose::Terminal(held.clone()));
+                let local = tickets.issue(Admission::Local, Purpose::Terminal(held.clone()));
                 for presented in [ticket, foreign.clone(), local.clone()] {
                     let mut refused = connect(&tickets, true, "/v1/ticket", false).await.unwrap();
                     refused.send(attach(presented)).await.unwrap();

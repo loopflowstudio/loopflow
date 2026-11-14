@@ -549,7 +549,7 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: DesktopCommand,
     },
-    /// Live Loopflow processes: call trees, Graphs that ran, rollover and pruning
+    /// Live Loopflow processes: call trees, Graphs that ran and pruning
     Process {
         #[command(subcommand)]
         cmd: commands::process::ProcessCommand,
@@ -1272,8 +1272,7 @@ impl SessionCommand {
             Self::History { cmd, .. } => cmd.as_ref().is_some_and(|cmd| cmd.changes_work()),
             Self::Steers { .. } => false,
             Self::Bind { dry_run, .. } => !dry_run,
-            Self::Serve { .. }
-            | Self::Resume { .. }
+            Self::Resume { .. }
             | Self::New { .. }
             | Self::Rename { .. }
             | Self::Move { .. }
@@ -1793,15 +1792,6 @@ pub enum SessionCommand {
         all: bool,
         #[arg(long)]
         json: bool,
-    },
-    /// Run the process a Session lives in while terminals come and go
-    Serve {
-        /// Relay the execution to an attached terminal
-        #[arg(long)]
-        terminal: bool,
-        /// The command this process executes
-        #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
-        argv: Vec<String>,
     },
     /// See which steers a Session has read and which wait
     Steers {

@@ -1,17 +1,15 @@
 //! What crosses a viewer connection: length-prefixed frames, JSON requests and
 //! replies, and events riding inside the terminal stream as nonce-tagged APC
-//! sequences. The stream an owner's viewer counts and the owner spools is the
-//! bytes of its snapshot, out and err frames, in order. A held terminal's
-//! viewer counts PTY bytes instead: its out frames are exactly the PTY's
-//! output, a position frame says where a snapshot or a skipped stretch leaves
-//! it, and lf's own reports and events travel in aside frames it writes but
-//! does not count.
+//! sequences. A held terminal's viewer counts PTY bytes: its out frames are
+//! exactly the PTY's output, a position frame says where a snapshot or a
+//! skipped stretch leaves it, and lf's own reports and events travel in aside
+//! frames it writes but does not count.
 
 use std::io;
 
 use serde::{Deserialize, Serialize};
 
-/// The largest stream frame the owner emits.
+/// The largest stream frame a host emits.
 pub(super) const CHUNK: usize = 64 * 1024;
 /// The largest payload either side accepts.
 pub(super) const MAX_PAYLOAD: usize = 4 * 1024 * 1024;
@@ -24,7 +22,7 @@ const HEADER: usize = 5;
 pub(super) enum Tag {
     /// JSON answering one request.
     Reply = 0x01,
-    /// The owner's terminal snapshot, in whatever format the owner has.
+    /// The terminal's snapshot, in whatever format the host has.
     Snapshot = 0x02,
     /// Stream 1: PTY output, or stdout for a piped command.
     Out = 0x03,
@@ -168,15 +166,12 @@ pub(super) enum Request {
         /// from before positions leave it out.
         from: Option<u64>,
     },
-    /// Continue a dropped viewer's stream, no snapshot.
-    Resume(Resume),
     Resize {
         rows: u16,
         cols: u16,
     },
-    EndInput,
-    /// Cleanup is ending this execution; deliver the reason and retain its final
-    /// screen. A held terminal ends on it; an owner is signalled next.
+    /// Cleanup is ending this execution; deliver the reason and retain its
+    /// final screen. The held terminal ends on it.
     CloseNotice {
         text: String,
     },
@@ -224,11 +219,11 @@ pub(super) enum Request {
     /// On an attached connection this also refreshes the viewer's liveness.
     Controlled {
         /// A viewer acknowledges Return on its existing heartbeat protocol.
-        /// Retained owners from before this field ignore it across helper upgrades.
+        /// A holder from an earlier build ignores it.
         #[serde(skip_serializing_if = "Option::is_none")]
         ready: Option<String>,
     },
-    /// Transfer the direct child's exit recording to its owner before exec.
+    /// Transfer the direct child's exit recording to its host before exec.
     ExitRecord {
         key: String,
         pid: u32,
@@ -238,17 +233,6 @@ pub(super) enum Request {
     DropExitRecord {
         key: String,
     },
-}
-
-/// A dropped viewer's connection asking to continue from byte `received`.
-#[derive(Debug, Serialize, Deserialize)]
-pub(super) struct Resume {
-    pub reconnect: String,
-    pub received: u64,
-    pub control: bool,
-    pub own: Option<Own>,
-    pub rows: u16,
-    pub cols: u16,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -266,20 +250,16 @@ pub(super) struct Outgoing {
 pub(super) enum Reply {
     Attached {
         viewer: String,
-        reconnect: String,
         nonce: String,
         /// The input claim, when this connection may type.
         token: Option<String>,
         terminal: bool,
-        grace_ms: u64,
         owner: Option<String>,
     },
     Busy,
-    /// The spool no longer holds the requested byte; attach afresh.
-    ReconnectRequired,
     Controlled {
         held: bool,
-        /// None means the retained owner cannot report native readiness.
+        /// None means a holder from an earlier build cannot report native readiness.
         ready: Option<bool>,
     },
     NativeEnded,
@@ -292,7 +272,7 @@ pub(super) enum Reply {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub(super) enum Event {
-    /// Validated display evidence from the owner's terminal parser. No action authority.
+    /// Validated display evidence from the host's terminal parser. No action authority.
     ProgramStatus {
         status: crate::program_status::Records,
     },
@@ -311,7 +291,7 @@ pub(super) enum Event {
     },
     /// Input control changed hands. A recipient with `held: false` restores
     /// its terminal, prints `notice` and leaves: another viewer took control,
-    /// or the owner is ending.
+    /// or the terminal is ending.
     Control {
         held: bool,
         notice: Option<String>,
@@ -328,7 +308,7 @@ pub(super) enum Event {
         detach: String,
     },
     /// The execution's directory. Hosts read a terminal's foreground process as
-    /// well as its reports, so the viewer enters it: owner and viewer share a
+    /// well as its reports, so the viewer enters it: host and viewer share a
     /// Machine, and the two sources must not disagree.
     Directory {
         cwd: std::path::PathBuf,
@@ -456,11 +436,9 @@ mod tests {
                 seq: 0,
                 reply: super::Reply::Attached {
                     viewer: "mobile-viewer".into(),
-                    reconnect: "test-reconnect".into(),
                     nonce: "fixture-nonce".into(),
                     token: None,
                     terminal: true,
-                    grace_ms: 60_000,
                     owner: Some("desktop-viewer".into()),
                 },
             })

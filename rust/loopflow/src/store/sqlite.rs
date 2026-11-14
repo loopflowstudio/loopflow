@@ -63,7 +63,6 @@ pub(crate) mod task_moves;
 mod task_retirement;
 mod transport;
 pub(crate) use task_retirement::{TaskRetirement, ViewerHold, WORKSPACE_GRACE};
-pub(crate) use transport::Transport;
 pub(crate) mod task_history;
 pub(crate) mod task_state_delivery;
 pub(crate) mod task_work;

@@ -353,7 +353,13 @@ fn terminal_launch_and_resume_use_current_policy_and_preserve_native_identity() 
     for provider in ["claude", "codex", "opencode"] {
         let fixture = Fixture::new(provider);
         fixture.settings(provider, true, true);
-        let first = fixture.run(&["-i", ":", "--", "--- keep spaces and 雪"]);
+        // A bare Codex launch runs plain `codex`; behind its app-server it is Work.
+        let mut launch = vec!["-i", ":", "--", "--- keep spaces and 雪"];
+        if provider == "codex" {
+            fixture.create_wave();
+            launch.splice(1..1, ["--wave", "fixture"]);
+        }
+        let first = fixture.run(&launch);
         bypass(&first, provider, true);
         assert_eq!(
             Path::new(first["cwd"].as_str().unwrap())
@@ -661,11 +667,14 @@ fn native_codex_failed_bootstrap_preserves_account_and_pending_input() {
     let fixture = Fixture::new("codex");
     let machine = fixture.home.path().join("machine");
     support::register_codex_account(&machine);
+    fixture.create_wave();
     fs::write(machine.join("fail-terminal"), "").unwrap();
     let failed = fixture
         .command()
         .args([
             "-i",
+            "--wave",
+            "fixture",
             "--only-account",
             "fixture@example.com",
             "--yolo",
@@ -697,9 +706,18 @@ fn a_codex_terminal_moved_to_another_login_ends_and_says_where_it_went() {
     let idling = machine.join("idling");
     // The one idle client ignores losing its server, as Codex 0.164 does.
     fs::write(machine.join("idle-terminal"), "").unwrap();
+    fixture.create_wave();
     let mut first = fixture
         .command()
-        .args(["-i", "--account", "fixture@example.com", ":", "hello"])
+        .args([
+            "-i",
+            "--wave",
+            "fixture",
+            "--account",
+            "fixture@example.com",
+            ":",
+            "hello",
+        ])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -957,6 +975,13 @@ fn linked_worktree_metadata_is_accessible_on_launch_and_resume() {
         let fixture = Fixture::new(provider);
         fixture.repo.stage_all();
         fixture.repo.commit("fixture config");
+        // Codex reaches its app-server as Work.
+        let launch: &[&str] = if provider == "codex" {
+            fixture.create_wave();
+            &["-i", "--wave", "fixture", ":", "--", "--- literal prompt"]
+        } else {
+            &["-i", ":", "--", "--- literal prompt"]
+        };
         let worktree = fixture.home.path().join("work tree with spaces");
         success(
             &Command::new("git")
@@ -970,7 +995,7 @@ fn linked_worktree_metadata_is_accessible_on_launch_and_resume() {
             &fixture
                 .command()
                 .current_dir(&worktree)
-                .args(["-i", ":", "--", "--- literal prompt"])
+                .args(launch)
                 .output()
                 .unwrap(),
         );
@@ -1115,11 +1140,12 @@ fn live_taskless_provider_switch_preserves_identity_and_accepts_terminal_input()
     let _ = first.kill();
     first.wait().unwrap();
     success(&switched);
+    // A bare Codex launch is plain `codex`: the import rides its opening prompt.
     let imported = fixture.received();
     assert!(
-        imported["turns"][0]
-            .to_string()
-            .contains("Preserve the original design"),
+        args(&imported)
+            .iter()
+            .any(|arg| arg.contains("Preserve the original design")),
         "{imported}"
     );
     assert_eq!(fixture.session(), session);
@@ -1738,13 +1764,15 @@ fn pi_public_headless_skill_delivers_context() {
 #[test]
 fn pi_native_callbacks_retain_identity_final_output_and_usage() {
     let fixture = pi_fixture();
+    // Pi's callbacks carry provider context only for a managed launch.
+    fixture.create_wave();
     let output = fixture
         .command()
         .env(
             "PI_FIXTURE_RECORD",
             fixture.home.path().join("received.json"),
         )
-        .args(["-i", ":", "Native Pi input"])
+        .args(["-i", "--wave", "fixture", ":", "Native Pi input"])
         .output()
         .unwrap();
     success(&output);
@@ -1793,10 +1821,17 @@ fn pi_native_callbacks_retain_identity_final_output_and_usage() {
 #[test]
 fn pi_native_crash_keeps_the_paid_step_and_interrupts_the_turn() {
     let fixture = pi_fixture();
+    fixture.create_wave();
     let output = fixture
         .command()
         .env("PI_FIXTURE_CRASH", "1")
-        .args(["-i", ":", "Crash after a paid model step"])
+        .args([
+            "-i",
+            "--wave",
+            "fixture",
+            ":",
+            "Crash after a paid model step",
+        ])
         .output()
         .unwrap();
     assert!(!output.status.success());
@@ -1820,12 +1855,13 @@ fn pi_native_crash_keeps_the_paid_step_and_interrupts_the_turn() {
 #[test]
 fn pi_native_failed_start_reopens_without_replacing_the_loopflow_session() {
     let fixture = pi_fixture();
+    fixture.create_wave();
     let provider = fixture.home.path().join("bin/pi");
     let original = fs::read(&provider).unwrap();
     fs::write(&provider, "#!/bin/sh\nexit 9\n").unwrap();
     let failed = fixture
         .command()
-        .args(["-i", ":", "Initial input"])
+        .args(["-i", "--wave", "fixture", ":", "Initial input"])
         .output()
         .unwrap();
     assert!(!failed.status.success());

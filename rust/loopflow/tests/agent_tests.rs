@@ -724,6 +724,12 @@ fn direct_native_codex_launch_preserves_account_policy_and_literal_input() {
         std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(&path))).unwrap(),
     );
     support::register_codex_account(home.path());
+    // A bare Codex runs as plain `codex`; the app-server belongs to Work,
+    // which starts beside the Machine server.
+    let _server = loopflow_test_support::MachineServer::start(
+        loopflow_test_support::lf_binary(),
+        home.path(),
+    );
     let launch = AgentConfig {
         agent: Some("codex:model".into()),
         system_prompt: "Keep these instructions".into(),
@@ -731,8 +737,7 @@ fn direct_native_codex_launch_preserves_account_policy_and_literal_input() {
         cwd: Some(home.path().into()),
         skip_permissions: true,
         provider_account_id: Some(ProviderAccountId::parse("fixture").unwrap()),
-        // A bare Codex runs as plain `codex`; the app-server belongs to a held Session.
-        holder: loopflow::session::Holder::Owner,
+        holder: loopflow::session::Holder::Server,
         ..Default::default()
     };
     let result = run_agent(&launch, &ProcessConfig::default()).unwrap();

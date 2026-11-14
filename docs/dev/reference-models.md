@@ -221,12 +221,14 @@ A recorded AgentProcess alone decides whether its Session is active: completed
 means closed; otherwise exact PID/birth evidence is live, dead or unknown. Unknown
 is never Available and never ages into replacement or checkout-cleanup authority.
 Every owned launch records an AgentProcess before exec, including native terminals.
-Sessions without one remain unknown; client files are not read. The Session's
-`transport_lf_process_id` names its detached terminal owner. The
-execution child owns capture settlement and the frozen provider attachment;
-viewers receive separate revocable input tokens. Passive viewing takes no claim.
-Saved sockets are offered only for live records; a live endpoint's connection
-failure is an error, not permission to start another agent. Input completion uses
+Sessions without one remain unknown; client files are not read. A held
+Session names its terminal in `held_terminal_id`; `transport_lf_process_id`
+names an owner only for a conversation an earlier build started, which
+`lf resume` restarts held. The execution child owns capture settlement and the
+frozen provider attachment; viewers receive separate revocable input tokens.
+Passive viewing takes no claim. A view is offered only for a live held
+terminal; a connection failure is an error, not permission to start another
+agent. Input completion uses
 its latest turn's LfProcess completion (the capture owner before any turn), not
 attachment exit events. Events retain
 turn outcomes and history, not process liveness.

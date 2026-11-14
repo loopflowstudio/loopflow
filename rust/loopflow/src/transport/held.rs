@@ -195,10 +195,9 @@ impl Source {
                 Frame::Out(bytes) => {
                     self.at += bytes.len() as u64;
                     chunks.push(Chunk {
-                        stream: 1,
                         bytes,
                         raw: self.raw,
-                        end: Some(self.at),
+                        end: self.at,
                     });
                 }
                 Frame::Mode(mode) => self.raw = mode.raw,
@@ -274,10 +273,6 @@ impl Source {
             }
         }
         pending.forward(&mut Input(self));
-    }
-
-    pub fn close_input(&mut self) {
-        self.input = None;
     }
 
     pub fn resize(&mut self, rows: u16, cols: u16) {

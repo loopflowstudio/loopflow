@@ -3882,24 +3882,40 @@ fn served_ownership_routes_to_its_writer_and_never_falls_back_locally() {
 }
 
 /// The held terminal of `owner` under `home`, as the owner names its socket.
-fn owner_socket(home: &Path, owner: &str) -> std::path::PathBuf {
+fn server_socket(home: &Path, name: &str) -> std::path::PathBuf {
     use sha2::Digest;
     let digest = hex::encode(sha2::Sha256::digest(
         home.canonicalize().unwrap().as_os_str().as_encoded_bytes(),
     ));
     // SAFETY: geteuid has no preconditions.
     std::path::PathBuf::from(format!(
-        "/tmp/lf-{}-{}/{owner}.sock",
+        "/tmp/lf-{}-{}/{name}.sock",
         unsafe { libc::geteuid() },
         &digest[..16]
     ))
 }
 
-/// Watch `owner`'s terminal as a viewer without input control until its
-/// stream shows `line`, returning everything it showed.
-fn watch_for(socket: &Path, line: String) -> std::thread::JoinHandle<String> {
+/// Watch held `terminal` through the server's entrance as a viewer without
+/// input control until its stream shows `line`, returning everything it showed.
+fn watch_for(home: &Path, terminal: &str, line: String) -> std::thread::JoinHandle<String> {
     use std::io::Read;
-    let mut socket = std::os::unix::net::UnixStream::connect(socket).unwrap();
+    let mut socket = std::os::unix::net::UnixStream::connect(server_socket(home, "held")).unwrap();
+    socket
+        .write_all(
+            format!(
+                "{}\n",
+                serde_json::json!({"terminal": terminal, "revision": 1})
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+    let mut answer = Vec::new();
+    let mut byte = [0];
+    while socket.read(&mut byte).unwrap() == 1 && byte[0] != b'\n' {
+        answer.push(byte[0]);
+    }
+    let answer: serde_json::Value = serde_json::from_slice(&answer).unwrap();
+    assert_eq!(answer["answer"], "hosted", "{terminal}: {answer}");
     let request = serde_json::json!({"id":1,"kind":"attach","control":false,"replace":true,"rows":24,"cols":80})
         .to_string();
     let mut frame = vec![0x11];
@@ -3924,13 +3940,14 @@ fn watch_for(socket: &Path, line: String) -> std::thread::JoinHandle<String> {
                 Err(error) => panic!("viewer read failed: {error}"),
             }
             // Frames: a tag, a big-endian length, the payload. 0x02 and 0x03
-            // carry terminal bytes.
+            // carry terminal bytes; 0x06 carries lf's own lines, such as a
+            // departure notice.
             while buffer.len() >= 5 {
                 let length = u32::from_be_bytes(buffer[1..5].try_into().unwrap()) as usize;
                 if buffer.len() < 5 + length {
                     break;
                 }
-                if matches!(buffer[0], 0x02 | 0x03) {
+                if matches!(buffer[0], 0x02 | 0x03 | 0x06) {
                     shown.extend_from_slice(&buffer[5..5 + length]);
                 }
                 buffer.drain(..5 + length);
@@ -3984,54 +4001,55 @@ printf 'ready\r\n'
 read -r answer < /dev/tty
 "#,
     );
-    let mut owner = fixture
-        .command(&[
-            "session",
-            "serve",
-            "--terminal",
-            "--",
-            lf,
-            "-i",
-            "-a",
-            "claude",
-            ":",
-            "keep going",
-        ])
-        .current_dir(&worktree)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::from(
-            fs::File::create(fixture.root.path().join("owner.log")).unwrap(),
-        ))
-        .spawn()
-        .unwrap();
-    let mut acknowledged = String::new();
-    std::io::BufRead::read_line(
-        &mut std::io::BufReader::new(owner.stdout.take().unwrap()),
-        &mut acknowledged,
-    )
-    .unwrap();
-    let owner_id = acknowledged.trim().to_string();
-    assert!(
-        !owner_id.is_empty(),
-        "owner ended before acknowledging: {}",
-        fs::read_to_string(fixture.root.path().join("owner.log")).unwrap_or_default()
+    // The conversation runs in a held terminal, as a Task conversation a
+    // terminal views does.
+    let path = format!(
+        "{}:/usr/bin:/bin",
+        fixture.root.path().join("bin").display()
     );
+    let started =
+        loopflow::server::client::Connection::open_at(&server_socket(&local_home, "machine"))
+            .unwrap()
+            .request(loopflow::server::wire::Operation::Server(
+                loopflow::server::wire::ServerOperation::SessionStart {
+                    session: None,
+                    request: uuid::Uuid::new_v4().to_string(),
+                    argv: [lf, "-i", "-a", "claude", ":", "keep going"]
+                        .iter()
+                        .map(|arg| arg.to_string())
+                        .collect(),
+                    cwd: worktree.clone(),
+                    env: [
+                        ("HOME", local_home.to_str().unwrap()),
+                        ("LF_HOME", local_home.to_str().unwrap()),
+                        ("LF_BIN", lf),
+                        ("PATH", path.as_str()),
+                        ("RUST_LOG", "off"),
+                    ]
+                    .iter()
+                    .map(|(name, value)| (name.to_string(), value.to_string()))
+                    .collect(),
+                    rows: 24,
+                    cols: 80,
+                    placement: None,
+                },
+            ))
+            .unwrap();
+    let terminal = started.result["terminal_id"].as_str().unwrap().to_owned();
     let args = local_home.join("claude-args");
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     while fs::read_to_string(&args).map_or(true, |text| text.is_empty()) {
         assert!(
             std::time::Instant::now() < deadline,
-            "Claude never started: {}",
-            fs::read_to_string(fixture.root.path().join("owner.log")).unwrap_or_default()
+            "Claude never started in {terminal}"
         );
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
     let local_db = rusqlite::Connection::open(local_home.join("loopflow.db")).unwrap();
     let (session, task_of): (String, Option<String>) = local_db
         .query_row(
-            "SELECT id,task_id FROM agent_sessions WHERE transport_lf_process_id=?1",
-            [&owner_id],
+            "SELECT id,task_id FROM agent_sessions WHERE held_terminal_id=?1",
+            [&terminal],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .unwrap();
@@ -4065,7 +4083,7 @@ read -r answer < /dev/tty
     )
     .unwrap();
     let notice = format!("This conversation moved to mini: lf resume --task {identifier}");
-    let viewer = watch_for(&owner_socket(&local_home, &owner_id), notice.clone());
+    let viewer = watch_for(&local_home, &terminal, notice.clone());
 
     let moved = fixture
         .command(&["task", "move", task.as_str(), "--machine", "mini"])
@@ -4073,8 +4091,6 @@ read -r answer < /dev/tty
         .output()
         .unwrap();
     let shown = viewer.join().unwrap();
-    let _ = owner.kill();
-    let _ = owner.wait();
 
     assert_success(&moved);
     assert!(shown.contains(&notice), "{notice:?} missing from:\n{shown}");

@@ -23,7 +23,7 @@ pub(crate) struct Foreground {
 }
 
 /// Make `command`'s child its own process group and the foreground of the
-/// terminal on lf's stdin. None when an owner holds the launch, stdin is no
+/// terminal on lf's stdin. None inside a held terminal, when stdin is no
 /// terminal, or lf is not in the terminal's foreground itself.
 pub(crate) fn hand_to(command: &mut Command) -> Option<Foreground> {
     if crate::transport::current().is_some() {

@@ -467,30 +467,26 @@ mod tests {
     }
 
     /// A Stop whose snapshot still names a background watch or a scheduled
-    /// wakeup keeps the turn holding its owner, and so does a Stop that names
+    /// wakeup keeps the turn holding its terminal, and so does a Stop that names
     /// neither list; only an empty snapshot settles it.
     #[test]
     fn a_turn_end_settles_only_once_no_watch_or_wakeup_remains() {
-        use crate::store::sqlite::sessions::OwnerRetention::LiveTurn;
+        use crate::store::sqlite::sessions::TerminalRetention::LiveTurn;
         let (_home, store, adapter, delivery) = fixture();
-        let owner = store
-            .session_attachment("session")
-            .unwrap()
-            .unwrap()
-            .lf_process_id
-            .unwrap();
+        let terminal = crate::id::TerminalId::new();
+        store.create_terminal(&terminal, "build").unwrap();
         store
             .conn
             .lock()
             .unwrap()
             .execute(
-                "UPDATE agent_sessions SET interactive=1,transport_lf_process_id=?1",
-                [&owner],
+                "UPDATE agent_sessions SET interactive=1,held_terminal_id=?1",
+                [&terminal],
             )
             .unwrap();
         let hook = |moment, callback: serde_json::Value| {
             answer(&store, &boundary(moment, &adapter, &delivery, callback)).unwrap();
-            store.owner_retention(&owner).unwrap()
+            store.terminal_retention(&terminal).unwrap()
         };
         let stop = |tasks: serde_json::Value, crons: serde_json::Value| {
             let mut callback = serde_json::json!({"session_id":"native","hook_event_name":"Stop"});

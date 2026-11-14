@@ -1095,16 +1095,16 @@ fn a_task_identifier_connects_and_a_viewerless_terminal_reads_detached() {
     assert!(!missing.status.success());
     assert!(String::from_utf8_lossy(&missing.stderr).contains("Session NOPE-185 was not found"));
 
-    // Its execution owner keeps running after the last viewer's terminal closed.
-    let owner = loopflow::id::LfProcessId::new();
+    // Its held terminal keeps running after the last viewer's terminal closed.
+    let terminal = loopflow::id::TerminalId::new();
     db.execute(
-        "INSERT INTO processes(id,trace_id,started_at,viewed) VALUES(?1,'fixture',1,0)",
-        [&owner],
+        "INSERT INTO held_terminals(id,holder_build,created_at,viewed) VALUES(?1,'fixture',1,0)",
+        [&terminal],
     )
     .unwrap();
     db.execute(
-        "UPDATE agent_sessions SET transport_lf_process_id=?2 WHERE id=?1",
-        rusqlite::params![primary, owner],
+        "UPDATE agent_sessions SET held_terminal_id=?2 WHERE id=?1",
+        rusqlite::params![primary, terminal],
     )
     .unwrap();
     let listed = |state: &str| {
@@ -1128,12 +1128,14 @@ fn a_task_identifier_connects_and_a_viewerless_terminal_reads_detached() {
     assert_eq!(detached["terminal_ids"], serde_json::json!([]));
     assert_eq!(detached["actions"][0]["label"], "Reconnect");
     assert!(detached["actions"][0]["unavailable_reason"].is_null());
-    assert_eq!(detached["actions"][1]["kind"], "reveal");
-    assert!(detached["actions"][1]["unavailable_reason"].is_null());
-    assert_eq!(detached["actions"].as_array().unwrap().len(), 2);
+    // A held terminal takes any number of views: opening is the one action.
+    assert_eq!(detached["actions"].as_array().unwrap().len(), 1);
 
-    db.execute("UPDATE processes SET viewed=1 WHERE id=?1", [&owner])
-        .unwrap();
+    db.execute(
+        "UPDATE held_terminals SET viewed=1 WHERE id=?1",
+        [&terminal],
+    )
+    .unwrap();
     let viewed = listed("active");
     assert_eq!(viewed["terminal_ids"], serde_json::json!(["cmux:WS-1"]));
 }
@@ -2397,8 +2399,8 @@ fn failed_attachment_returns_failure_and_the_same_command_can_retry() {
         .as_str()
         .unwrap()
         .contains("provider launch failed"));
-    // A provider configuration error can leave a reservation after its
-    // transport removes the socket. That retired owner cannot block a retry.
+    // A provider configuration error can leave a reservation behind. That
+    // retired launch cannot block a retry.
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     let session: String = db
         .query_row("SELECT id FROM agent_sessions", [], |row| row.get(0))
@@ -2414,11 +2416,6 @@ fn failed_attachment_returns_failure_and_the_same_command_can_retry() {
     store
         .claim_session_attachment(&session, None, &owner, true)
         .unwrap();
-    db.execute(
-        "UPDATE agent_sessions SET transport_lf_process_id=?2 WHERE id=?1",
-        rusqlite::params![session, owner],
-    )
-    .unwrap();
     let focus = lf(
         home.path(),
         repo.path(),

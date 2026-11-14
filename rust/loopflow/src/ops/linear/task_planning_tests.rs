@@ -1644,13 +1644,19 @@ fn assert_native_runner_is_quiet_until_its_turn_ends(agent: &str, auto: bool, ta
             }),
             ..Default::default()
         };
+        // A bare Codex runs as plain `codex` with no turn observer; the
+        // app-server and its turn boundaries belong to Work, beside the server.
+        let _server = (agent == "codex").then(|| {
+            loopflow_test_support::MachineServer::start(
+                loopflow_test_support::lf_binary(),
+                fixture.directory.path(),
+            )
+        });
         let launch = crate::agent::AgentConfig {
             agent: Some(agent.into()),
             cwd: Some(repo.to_path_buf()),
-            // A bare Codex runs as plain `codex` with no turn observer; the
-            // app-server and its turn boundaries belong to a held Session.
             holder: if agent == "codex" {
-                crate::session::Holder::Owner
+                crate::session::Holder::Server
             } else {
                 crate::session::Holder::Caller
             },

@@ -1,251 +1,57 @@
-//! One hosted execution: its viewers, who may type and who sizes it, the
-//! retained screen, queued input, the native client's return line and exit
-//! settlement. `serve` hosts one in an owner process; the execution itself is
-//! behind [`Child`].
+//! One held terminal's execution as the Machine server hosts it: its viewers,
+//! who may type and who sizes it, the retained screen, queued input, the
+//! native client's return line and exit settlement. The execution itself is
+//! behind [`Source`], the holder's socket.
 
-use std::fs::File;
-use std::io::{self, Read};
-use std::os::fd::{AsRawFd, RawFd};
+use std::io;
+use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
-use std::process::ExitStatus;
-use std::sync::{mpsc, Arc};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Result};
 
 use crate::harness::native_exit::NativeExit;
+use crate::id::TerminalId;
 
+use super::held::Source;
 use super::input::PendingInput;
-use super::wire::{Event, Incoming, Own, Reply, Request, Tag};
+use super::wire::{Event, Incoming, Reply, Request, Tag};
 use super::{
     deliver, dimensions, end_viewers, lifetime, native, output, place_events, provider_exit_code,
-    publish_reports, release_viewer_hold, selected_directory, snapshot, survive, viewer_hold,
-    Connection, Host, Ownership, Settling, Span, Viewer, GRACE, HEARTBEAT_TIMEOUT, LIMIT,
+    publish_reports, release_viewer_hold, selected_directory, snapshot, viewer_hold, Ownership,
+    Settling, Span, Viewer, HEARTBEAT_TIMEOUT, LIMIT,
 };
 use crate::store::sqlite::ViewerHold;
 
-/// Output read from the execution, with the line discipline it was written under.
+/// PTY output read from the holder, with the line discipline it was written under.
 pub(super) struct Chunk {
-    pub stream: u8,
     pub bytes: Vec<u8>,
     /// The terminal was raw (no line editing) when this was read.
     pub raw: bool,
-    /// The PTY position after these bytes, for a held terminal.
-    pub end: Option<u64>,
+    /// The PTY position after these bytes.
+    pub end: u64,
 }
 
-/// The execution a host relays: where its output comes from, where input and
-/// size go, and how its end is learned.
-pub(super) enum Child {
-    /// A child of this process on its own PTY or pipes.
-    Local(Local),
-    /// A child a holder keeps on a PTY, reached through the holder's socket.
-    Held(super::held::Source),
-}
-
-pub(super) struct Local {
-    pub readers: Vec<(u8, File)>,
-    pub input: Option<File>,
-    /// The PTY's modes before any client ran.
-    pub cooked: Option<libc::termios>,
-    pub exit: mpsc::Receiver<io::Result<ExitStatus>>,
-    pub pid: u32,
-    pub shell_jobs: Option<crate::os_process::TerminalJobs>,
-}
-
-impl Child {
-    fn pid(&self) -> u32 {
-        match self {
-            Self::Local(local) => local.pid,
-            Self::Held(source) => source.pid(),
-        }
+/// End what a Desktop shell left running in its terminal's session, off the
+/// host's loop: stragglers get up to three seconds.
+fn end_jobs(source: &Source, terminal: &TerminalId) -> Result<()> {
+    if !crate::journal::process_ledger()?.is_shell_terminal(terminal)? {
+        return Ok(());
     }
-
-    /// Resize the terminal and ask its foreground program to repaint.
-    fn resize(&mut self, rows: u16, cols: u16) -> io::Result<()> {
-        match self {
-            Self::Local(local) => {
-                let fd = local
-                    .input
-                    .as_ref()
-                    .expect("terminal input stays open")
-                    .as_raw_fd();
-                super::resize_foreground(fd, rows, cols)
-            }
-            Self::Held(source) => {
-                source.resize(rows, cols);
-                Ok(())
-            }
+    // The holder made the shell its session's leader.
+    let jobs = crate::os_process::TerminalJobs::new(source.pid());
+    let terminal = terminal.clone();
+    std::thread::spawn(move || {
+        let settled = jobs
+            .terminate()
+            .map_err(anyhow::Error::from)
+            .and_then(|()| Ok(crate::journal::process_ledger()?.settle_shell_jobs(&terminal)?));
+        if let Err(error) = settled {
+            tracing::error!(%terminal, %error, "Shell job cleanup remains pending");
         }
-    }
-
-    fn forward(&mut self, pending: &mut PendingInput) {
-        match self {
-            Self::Local(local) => {
-                if let Some(input) = local.input.as_mut() {
-                    pending.forward(input);
-                }
-            }
-            Self::Held(source) => source.forward(pending),
-        }
-    }
-
-    fn close_input(&mut self) {
-        match self {
-            Self::Local(local) => {
-                local.input.take();
-            }
-            Self::Held(source) => source.close_input(),
-        }
-    }
-
-    /// Output that is ready, at most `passes` buffers per stream, so control
-    /// stays responsive under continuous output.
-    fn read(&mut self, passes: usize) -> io::Result<Vec<Chunk>> {
-        match self {
-            Self::Local(local) => {
-                let mut chunks = Vec::new();
-                let mut drained = Vec::new();
-                for (stream, reader) in &mut local.readers {
-                    let mut bytes = [0; 16384];
-                    for _ in 0..passes {
-                        let n = match reader.read(&mut bytes) {
-                            Ok(0) => {
-                                drained.push(*stream);
-                                break;
-                            }
-                            Ok(n) => n,
-                            Err(e) if e.raw_os_error() == Some(libc::EIO) => {
-                                drained.push(*stream);
-                                break;
-                            }
-                            Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
-                            Err(e) => return Err(e),
-                        };
-                        chunks.push(Chunk {
-                            stream: *stream,
-                            bytes: bytes[..n].to_vec(),
-                            raw: super::is_raw(reader.as_raw_fd()),
-                            end: None,
-                        });
-                    }
-                }
-                local
-                    .readers
-                    .retain(|(stream, _)| !drained.contains(stream));
-                Ok(chunks)
-            }
-            Self::Held(source) => Ok(source.read(passes)),
-        }
-    }
-
-    /// The PTY position everything read so far ends at, for a held terminal.
-    fn position(&self) -> Option<u64> {
-        match self {
-            Self::Local(_) => None,
-            Self::Held(source) => Some(source.position()),
-        }
-    }
-
-    /// Read the output a view missed from `from` on; `None` paints it afresh.
-    fn catch_up(&self, from: u64) -> Option<super::held::CatchUp> {
-        match self {
-            Self::Local(_) => None,
-            Self::Held(source) => source.catch_up(from),
-        }
-    }
-
-    /// Whether every output stream has ended.
-    fn drained(&self) -> bool {
-        match self {
-            Self::Local(local) => local.readers.is_empty(),
-            Self::Held(source) => source.drained(),
-        }
-    }
-
-    fn is_raw(&self) -> bool {
-        match self {
-            Self::Local(local) => local
-                .readers
-                .first()
-                .is_some_and(|(_, reader)| super::is_raw(reader.as_raw_fd())),
-            Self::Held(source) => source.is_raw(),
-        }
-    }
-
-    /// Return a terminal a client left raw to the modes it had before.
-    fn restore_modes(&mut self) {
-        match self {
-            Self::Local(local) => {
-                if let (Some((_, reader)), Some(cooked)) = (local.readers.first(), &local.cooked) {
-                    // SAFETY: restores attributes read from this terminal before the client ran.
-                    unsafe {
-                        libc::tcsetattr(reader.as_raw_fd(), libc::TCSANOW, cooked);
-                    }
-                }
-            }
-            Self::Held(source) => source.restore_modes(),
-        }
-    }
-
-    /// The execution's exit, reported once.
-    fn exited(&mut self) -> io::Result<Option<ExitStatus>> {
-        match self {
-            Self::Local(local) => local.exit.try_recv().ok().transpose(),
-            Self::Held(source) => Ok(source.exited().map(|ended| ended.status())),
-        }
-    }
-
-    /// End what the execution left running in its terminal.
-    fn end_jobs(&self, owner: &Host) -> Result<()> {
-        match self {
-            Self::Local(local) => {
-                if let (Some(jobs), Some(owner)) = (&local.shell_jobs, owner.owner()) {
-                    jobs.terminate()?;
-                    crate::journal::process_ledger()?.settle_shell_jobs(owner)?;
-                }
-                Ok(())
-            }
-            Self::Held(_) => Ok(()),
-        }
-    }
-
-    /// End the execution because nobody needs it any longer.
-    fn retire(&self) {
-        match self {
-            // The owner process is the execution's whole lifetime.
-            Self::Local(_) => crate::platform::kill_process(std::process::id()),
-            // The holder reports the exit; this host ends when it arrives.
-            Self::Held(source) => source.retire(),
-        }
-    }
-
-    fn poll(&self, input: bool, fds: &mut Vec<libc::pollfd>) {
-        let pollfd = |fd: RawFd, events: libc::c_short| libc::pollfd {
-            fd,
-            events,
-            revents: 0,
-        };
-        match self {
-            Self::Local(local) => {
-                for (_, reader) in &local.readers {
-                    fds.push(pollfd(reader.as_raw_fd(), libc::POLLIN));
-                }
-                if let Some(writer) = local.input.as_ref().filter(|_| input) {
-                    fds.push(pollfd(writer.as_raw_fd(), libc::POLLOUT));
-                }
-            }
-            Self::Held(source) => source.poll(input, fds),
-        }
-    }
-
-    /// When a lost connection to the execution is tried again.
-    fn retry_at(&self) -> Option<Instant> {
-        match self {
-            Self::Local(_) => None,
-            Self::Held(source) => source.retry_at(),
-        }
-    }
+    });
+    Ok(())
 }
 
 /// What one pass over a hosted execution came to.
@@ -257,8 +63,7 @@ pub(super) enum Pass {
 }
 
 pub(super) struct Hosted {
-    id: Host,
-    terminal: bool,
+    id: TerminalId,
     /// What the execution's own control requests present.
     control_key: String,
     viewers: Vec<Viewer>,
@@ -267,7 +72,6 @@ pub(super) struct Hosted {
     ownership: Ownership,
     size: (u16, u16),
     pending_input: PendingInput,
-    end_input: bool,
     output: output::Output,
     exit: Option<(u8, Instant)>,
     detach: bool,
@@ -277,8 +81,6 @@ pub(super) struct Hosted {
     announced: bool,
     attached: bool,
     viewing: lifetime::Viewing,
-    /// A Desktop shell's explicit Close.
-    closing: mpsc::Receiver<()>,
     /// Task cleanup's notice: the viewer that asked, its request and the text.
     close_notice: Option<(String, u64, String)>,
     /// Wakes the host's descriptor wait from another thread.
@@ -295,7 +97,7 @@ pub(super) struct Hosted {
     kept: Option<std::path::PathBuf>,
     execution_directory_reported: bool,
     planning: Option<crate::ops::planning_sync::PlanningSync>,
-    title: Option<crate::terminal_title::OutputTitle>,
+    title: crate::terminal_title::OutputTitle,
     /// The Program Status viewers were last sent.
     reported_status: Option<crate::program_status::Records>,
     /// A taken-up terminal's output through this PTY position is replayed
@@ -304,8 +106,8 @@ pub(super) struct Hosted {
     replayed_through: u64,
 }
 
-/// The threads every execution a host serves shares: viewing records and
-/// Session-name reads. The Machine server's held terminals share one set.
+/// The threads the Machine server's held terminals share: viewing records
+/// and Session-name reads.
 #[derive(Debug)]
 pub(super) struct Watchers {
     lifetime: lifetime::Watcher,
@@ -323,32 +125,26 @@ impl Watchers {
 
 impl Hosted {
     /// Host the execution known as `id`. `waker` wakes the host's wait when
-    /// a shell's Close or a settlement has something for it.
+    /// a settlement or a moved client has something for it.
     pub fn new(
-        id: Host,
-        terminal: bool,
-        shell: Option<String>,
+        id: TerminalId,
         control_key: String,
         waker: UnixStream,
         watchers: &Watchers,
     ) -> Result<Self> {
         let attachment = Arc::new(lifetime::Client::default());
-        let (viewing, closing) = watchers.lifetime.watch(
-            id.clone(),
-            shell.is_some(),
-            waker.try_clone()?,
-            Arc::clone(&attachment),
-        );
+        let viewing =
+            watchers
+                .lifetime
+                .watch(id.clone(), waker.try_clone()?, Arc::clone(&attachment));
         Ok(Self {
-            terminal,
             control_key,
             viewers: Vec::new(),
             control: None,
             ownership: Ownership::default(),
             size: (24, 80),
             pending_input: PendingInput::default(),
-            end_input: false,
-            output: output::Output::new(terminal)?,
+            output: output::Output::new(true)?,
             exit: None,
             detach: false,
             client: None,
@@ -357,7 +153,6 @@ impl Hosted {
             announced: false,
             attached: false,
             viewing,
-            closing,
             close_notice: None,
             waker,
             settling: None,
@@ -368,7 +163,7 @@ impl Hosted {
             kept: None,
             execution_directory_reported: false,
             planning: None,
-            title: terminal.then(|| crate::terminal_title::OutputTitle::new(&id, &watchers.titles)),
+            title: crate::terminal_title::OutputTitle::new(&id, &watchers.titles),
             reported_status: None,
             replayed_through: 0,
             id,
@@ -413,11 +208,7 @@ impl Hosted {
 
     /// A connection that may become a viewer or carry the execution's requests.
     pub fn admit(&mut self, socket: UnixStream) {
-        let mut viewer = Viewer::new(socket);
-        if matches!(self.id, Host::Terminal(_)) {
-            viewer.position = Some(0);
-        }
-        self.viewers.push(viewer);
+        self.viewers.push(Viewer::new(socket));
     }
 
     /// The Program Status the execution's output reported, once it has a screen.
@@ -428,8 +219,7 @@ impl Hosted {
     }
 
     /// Serve every connection, move input and output, and judge the ending.
-    pub fn pass(&mut self, child: &mut Child) -> Result<Pass> {
-        let terminal = self.terminal;
+    pub fn pass(&mut self, child: &mut Source) -> Result<Pass> {
         let child_pid = child.pid();
         let mut replaced = Vec::new();
         let mut owner_change = false;
@@ -439,11 +229,7 @@ impl Hosted {
         // Observe every connection before admitting claims. A viewer earlier
         // in the list must not see Busy for a controller whose EOF is ready.
         self.viewers.retain_mut(|viewer| {
-            viewer.expire_heartbeat(Instant::now());
-            match viewer.read() {
-                Ok(()) => !viewer.connection.expired(),
-                Err(error) => survive(viewer, &error),
-            }
+            !viewer.heartbeat_expired(Instant::now()) && viewer.read().is_ok()
         });
         owner_change |= self.ownership.settle(&self.viewers);
         self.release_lost_control();
@@ -458,7 +244,6 @@ impl Hosted {
                 control_key,
                 ownership,
                 pending_input,
-                end_input,
                 output,
                 detach,
                 client,
@@ -480,8 +265,7 @@ impl Hosted {
                         let request = match tag {
                             Tag::Input => {
                                 // Stale and passive viewers cannot write.
-                                if viewer.token.is_some() && viewer.token == *control && !*end_input
-                                {
+                                if viewer.token.is_some() && viewer.token == *control {
                                     anyhow::ensure!(
                                         pending_input.push(&payload),
                                         "Provider input is busy"
@@ -515,7 +299,7 @@ impl Hosted {
                                 key,
                                 exit,
                                 detach: line,
-                            } if key == *control_key && terminal => {
+                            } if key == *control_key => {
                                 *returning = Some(Event::Return {
                                     detach: line.clone(),
                                 });
@@ -607,8 +391,7 @@ impl Hosted {
                                 *attached = true;
                                 viewer.size = dimensions(rows, cols);
                                 viewer.name = name;
-                                // Only a held terminal's viewer counts PTY positions.
-                                viewer.from = from.filter(|_| viewer.position.is_some());
+                                viewer.from = from;
                                 if wants_control {
                                     // A view continuing its screen showed the hint already.
                                     *hint_due |= viewer.from.is_none();
@@ -630,10 +413,7 @@ impl Hosted {
                                 viewer.heartbeat_at = Instant::now();
                                 attaching.push(viewer.id.clone());
                                 owner_change |= ownership.claim(own, viewer);
-                                viewer.reply(
-                                    answers,
-                                    viewer.attached_reply(ownership.id(), terminal),
-                                );
+                                viewer.reply(answers, viewer.attached_reply(ownership.id(), true));
                                 // Binding selects a directory for later connections;
                                 // the running provider keeps its own.
                                 if let Some(cwd) = exit_record
@@ -648,16 +428,6 @@ impl Hosted {
                                         cwd: cwd.to_path_buf(),
                                     });
                                 }
-                            }
-                            Request::Resume(resume) => {
-                                viewer.resuming = Some((answers, resume));
-                            }
-                            Request::EndInput
-                                if !terminal
-                                    && viewer.token.is_some()
-                                    && viewer.token == *control =>
-                            {
-                                *end_input = true;
                             }
                             Request::Resize { rows, cols } => {
                                 viewer.size = dimensions(rows, cols);
@@ -679,62 +449,8 @@ impl Hosted {
                     viewer.flush()?;
                     Ok(())
                 })();
-                match result {
-                    Ok(()) => !viewer.leaving,
-                    Err(error) => error
-                        .downcast_ref()
-                        .is_some_and(|error| survive(viewer, error)),
-                }
+                result.is_ok() && !viewer.leaving
             });
-        }
-        // Release dropped connections' claims before a same-pass resume asks
-        // for them again; reconnecting restores the stream, not its old claims.
-        self.viewers.retain(|viewer| !viewer.connection.expired());
-        owner_change |= self.ownership.settle(&self.viewers);
-        self.release_lost_control();
-        // A resume moves its connection onto the dropped viewer's stream.
-        for index in 0..self.viewers.len() {
-            let Some((answers, resume)) = self.viewers[index].resuming.take() else {
-                continue;
-            };
-            let target = self.viewers.iter().position(|viewer| {
-                viewer.id != self.viewers[index].id
-                    && viewer.reconnect == resume.reconnect
-                    && viewer.spool.holds(resume.received)
-            });
-            let Some(target) = target else {
-                self.viewers[index].reply(answers, Reply::ReconnectRequired);
-                let _ = self.viewers[index].flush();
-                continue;
-            };
-            self.viewers[index].leaving = true;
-            // A resuming peer that already closed has nothing to continue on.
-            let Connection::Open(socket) = std::mem::replace(
-                &mut self.viewers[index].connection,
-                Connection::Dropped(Instant::now()),
-            ) else {
-                continue;
-            };
-            let viewer = &mut self.viewers[target];
-            viewer.size = dimensions(resume.rows, resume.cols);
-            size_change |= self.ownership.held_by(viewer);
-            if resume.control && self.control.is_none() {
-                let token = uuid::Uuid::new_v4().to_string();
-                self.control = Some(token.clone());
-                viewer.token = Some(token);
-                self.hint_due = true;
-            }
-            // Recovery can reclaim free geometry, never displace a newer viewer.
-            owner_change |= self
-                .ownership
-                .claim(resume.own.map(|_| Own::Request), viewer);
-            viewer.resume(
-                socket,
-                answers,
-                resume.received,
-                self.ownership.id(),
-                terminal,
-            );
         }
         self.viewers.retain(|viewer| !viewer.leaving);
         owner_change |= self.ownership.settle(&self.viewers);
@@ -750,10 +466,8 @@ impl Hosted {
             .and_then(|viewer| viewer.theme.clone());
         if let Some((rows, cols)) = new_size {
             self.size = (rows, cols);
-            if terminal {
-                child.resize(rows, cols)?;
-                self.output.resize(rows, cols)?;
-            }
+            child.resize(rows, cols);
+            self.output.resize(rows, cols)?;
         }
         for viewer in self.viewers.iter_mut().filter(|viewer| viewer.attached) {
             // Fresh streams and ownership changes share the same appearance.
@@ -764,7 +478,7 @@ impl Hosted {
                 let from = viewer.from.take();
                 viewer.catch_up = from.and_then(|from| child.catch_up(from));
                 if let (Some(from), Some(_)) = (from, &viewer.catch_up) {
-                    viewer.position = Some(from);
+                    viewer.position = from;
                     viewer.catching_up = true;
                 } else {
                     // Select the new owner's dimensions before painting its first
@@ -858,14 +572,11 @@ impl Hosted {
             .viewers
             .iter()
             .any(|v| v.token.is_some() && v.token == self.control && !v.catching_up);
-        if let Some(name) = self.title.as_mut().and_then(|title| title.tick()) {
+        if let Some(name) = self.title.tick() {
             self.output.title(&name);
         }
         child.forward(&mut self.pending_input);
-        if self.end_input && self.pending_input.is_empty() {
-            child.close_input();
-        }
-        for chunk in child.read(16)? {
+        for chunk in child.read(16) {
             // An exec handoff announces before exec. The provider's first
             // output establishes that it reached its configured directory.
             if !self.execution_directory_reported {
@@ -883,22 +594,24 @@ impl Hosted {
                     }
                 }
             }
-            let answering = answering && chunk.end.is_none_or(|end| end > self.replayed_through);
-            let pty = chunk.end.map(|end| Span::Pty {
-                start: end - chunk.bytes.len() as u64,
-                end,
-            });
-            let aside = Span::Aside { through: chunk.end };
-            let (ready, span) = match self.client.as_mut().filter(|_| terminal) {
+            let answering = answering && chunk.end > self.replayed_through;
+            let pty = Span::Pty {
+                start: chunk.end - chunk.bytes.len() as u64,
+                end: chunk.end,
+            };
+            let aside = Span::Aside {
+                through: Some(chunk.end),
+            };
+            let (ready, span) = match self.client.as_mut() {
                 Some(client) => {
                     // A native client that changed the output sends lf's text.
                     let ready = client.accept(chunk.raw, &chunk.bytes);
-                    let span = pty.filter(|_| ready == chunk.bytes).unwrap_or(aside);
+                    let span = if ready == chunk.bytes { pty } else { aside };
                     (ready, span)
                 }
-                None => (chunk.bytes, pty.unwrap_or(aside)),
+                None => (chunk.bytes, pty),
             };
-            self.deliver(chunk.stream, &ready, answering, span);
+            self.deliver(1, &ready, answering, span);
         }
         self.catch_up(child)?;
         // After the reads: a provider that prints once and waits wakes nothing further.
@@ -917,7 +630,7 @@ impl Hosted {
         }
         // The child wait reports once. A returning launcher announces its
         // client's end; an exec'd launcher leaves that announcement to our wait.
-        let status = child.exited()?;
+        let status = child.exited().map(|ended| ended.status());
         if let Some(moved) = self.attachment.take_departure() {
             self.departure = Some(moved);
             if status.is_none() {
@@ -946,7 +659,7 @@ impl Hosted {
             }
         }
         if let Some(status) = status {
-            child.end_jobs(&self.id)?;
+            end_jobs(child, &self.id)?;
             if let Some(record) = self.exit_record.take() {
                 self.settling = Some(Settling::spawn(
                     record,
@@ -1012,8 +725,8 @@ impl Hosted {
                 end_viewers(&mut self.viewers, Event::ChildExited { code });
                 self.announced = true;
             }
-            // Once viewers have received the final output, release execution
-            // locks with the owner. Only never-viewed starts need a replay window.
+            // Once viewers have received the final output, end the held
+            // terminal and release its execution locks. Only never-viewed starts need a replay window.
             if self.announced
                 && (at.elapsed() > Duration::from_secs(2)
                     || (self.attached
@@ -1050,24 +763,8 @@ impl Hosted {
                 viewer.reply(answers, Reply::Accepted);
                 let _ = viewer.flush();
             }
-            // An owner's caller signals it next; a held terminal has no
-            // process to signal, so the notice ends it.
-            if matches!(self.id, Host::Terminal(_)) {
-                release_viewer_hold(&self.id, self.observed_hold);
-                child.retire();
-            }
-        }
-        if self.closing.try_recv().is_ok() {
-            child.end_jobs(&self.id)?;
-            end_viewers(
-                &mut self.viewers,
-                Event::Control {
-                    held: false,
-                    notice: Some("Shell closed".into()),
-                },
-            );
+            // A held terminal has no process to signal: the notice ends it.
             release_viewer_hold(&self.id, self.observed_hold);
-            snapshot::leave(&self.id, &self.output);
             child.retire();
         }
         Ok(Pass::Continue)
@@ -1099,14 +796,10 @@ impl Hosted {
     /// Bring views that continued from a position to the live stream with
     /// PTY bytes from the holder's ring. One that reaches it receives the
     /// current state again; one the ring no longer reaches is painted afresh.
-    fn catch_up(&mut self, child: &Child) -> Result<()> {
-        let Some(live) = child.position() else {
-            return Ok(());
-        };
+    fn catch_up(&mut self, child: &Source) -> Result<()> {
+        let live = child.position();
         for viewer in self.viewers.iter_mut().filter(|v| v.catching_up) {
-            let at = viewer
-                .position
-                .expect("a catching-up viewer counts positions");
+            let at = viewer.position;
             if at > live {
                 // Ahead of a screen still being rebuilt from the ring: the
                 // stream reaches it in time.
@@ -1124,7 +817,7 @@ impl Hosted {
                 match caught {
                     Ok(bytes) => {
                         viewer.stream(Tag::Out, &bytes)?;
-                        viewer.position = Some(at + bytes.len() as u64);
+                        viewer.position = at + bytes.len() as u64;
                     }
                     Err(error) => {
                         tracing::debug!(%error, viewer = %viewer.id, "view cannot continue from its position; painting it afresh");
@@ -1135,7 +828,7 @@ impl Hosted {
                     }
                 }
             }
-            if viewer.position == Some(live) {
+            if viewer.position == live {
                 viewer.catch_up = None;
                 viewer.catching_up = false;
                 viewer.stream(Tag::Aside, &self.output.state())?;
@@ -1149,15 +842,15 @@ impl Hosted {
     fn finish_client(
         &mut self,
         mut ended: native::NativeClient,
-        child: &mut Child,
+        child: &mut Source,
         answering: bool,
     ) {
-        if let Ok(chunks) = child.read(LIMIT / 16384) {
-            for chunk in chunks {
-                let ready = ended.accept(chunk.raw, &chunk.bytes);
-                let span = Span::Aside { through: chunk.end };
-                self.deliver(chunk.stream, &ready, answering, span);
-            }
+        for chunk in child.read(LIMIT / 16384) {
+            let ready = ended.accept(chunk.raw, &chunk.bytes);
+            let span = Span::Aside {
+                through: Some(chunk.end),
+            };
+            self.deliver(1, &ready, answering, span);
         }
         let raw = child.is_raw();
         let exit = ended.finish(raw, || child.restore_modes());
@@ -1165,8 +858,8 @@ impl Hosted {
     }
 
     /// When this execution next needs a pass with no descriptor ready: held
-    /// output, the exit announcement or a disconnected viewer's grace.
-    pub fn deadline(&self, child: &Child) -> Option<Instant> {
+    /// output, the exit announcement or a viewer's heartbeat.
+    pub fn deadline(&self, child: &Source) -> Option<Instant> {
         let deadline = match self.exit {
             Some((_, at)) if self.announced => Some(at + Duration::from_secs(2)),
             Some((_, at)) if child.drained() => Some(at + Duration::from_millis(50)),
@@ -1177,33 +870,26 @@ impl Hosted {
         };
         self.viewers
             .iter()
-            .filter_map(|viewer| match viewer.connection {
-                Connection::Dropped(at) => Some(at + GRACE),
-                Connection::Open(_) | Connection::Draining(_) if viewer.live() => {
-                    Some(viewer.heartbeat_at + HEARTBEAT_TIMEOUT)
-                }
-                Connection::Open(_) | Connection::Draining(_) => None,
-            })
+            .filter(|viewer| viewer.live())
+            .map(|viewer| viewer.heartbeat_at + HEARTBEAT_TIMEOUT)
             .chain(deadline)
             .chain(Some(Instant::now() + Duration::from_secs(10)))
             .chain(child.retry_at())
-            .chain(self.title.as_ref().map(|title| title.deadline()))
+            .chain(Some(self.title.deadline()))
             .chain(self.settling.as_ref().and_then(Settling::deadline))
             .min()
     }
 
     /// The descriptors whose readiness means this execution has work.
-    pub fn poll(&self, child: &Child, fds: &mut Vec<libc::pollfd>) {
+    pub fn poll(&self, child: &Source, fds: &mut Vec<libc::pollfd>) {
         for viewer in &self.viewers {
-            let (socket, events) = match &viewer.connection {
-                Connection::Open(socket) if !viewer.output.is_empty() => {
-                    (socket, libc::POLLIN | libc::POLLOUT)
-                }
-                Connection::Open(socket) | Connection::Draining(socket) => (socket, libc::POLLIN),
-                Connection::Dropped(_) => continue,
+            let events = if viewer.draining || viewer.output.is_empty() {
+                libc::POLLIN
+            } else {
+                libc::POLLIN | libc::POLLOUT
             };
             fds.push(libc::pollfd {
-                fd: socket.as_raw_fd(),
+                fd: viewer.socket.as_raw_fd(),
                 events,
                 revents: 0,
             });
@@ -1221,7 +907,9 @@ impl Hosted {
 
 fn start_planning(cwd: &std::path::Path) -> Option<crate::ops::planning_sync::PlanningSync> {
     crate::ops::planning_sync::PlanningSync::start_for_directory(cwd)
-        .inspect_err(|error| tracing::warn!(%error, "planning sync unavailable to this owner"))
+        .inspect_err(
+            |error| tracing::warn!(%error, "planning sync unavailable to this held terminal"),
+        )
         .ok()
 }
 
@@ -1268,9 +956,9 @@ pub(super) fn remove_kept(file: &std::path::Path) {
     }
 }
 
-/// Paint `viewer` the retained screen; a held terminal's viewer then stands
-/// at the PTY position that screen covers.
-fn paint(output: &output::Output, child: &Child, viewer: &mut Viewer) -> Result<()> {
+/// Paint `viewer` the retained screen; it then stands at the PTY position
+/// that screen covers.
+fn paint(output: &output::Output, child: &Source, viewer: &mut Viewer) -> Result<()> {
     if let Some(snapshot) = output.snapshot()? {
         viewer.stream(Tag::Snapshot, &snapshot)?;
     }
@@ -1278,12 +966,6 @@ fn paint(output: &output::Output, child: &Child, viewer: &mut Viewer) -> Result<
         viewer.stream(Tag::stream(stream), bytes)?;
     }
     viewer.catching_up = false;
-    if let (Some(at), Some(_)) = (child.position(), viewer.position) {
-        viewer.place(at);
-    }
+    viewer.place(child.position());
     Ok(())
 }
-
-#[cfg(test)]
-#[path = "host_tests.rs"]
-mod host_tests;

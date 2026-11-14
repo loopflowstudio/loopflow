@@ -307,29 +307,56 @@ impl Drop for HeldGraph {
     }
 }
 
-/// A held Graph step: an ordinary owned execution running this script, which
-/// optionally announces `ready` in the home and waits there for `release`.
-fn hold_script(home: &Path, announce: bool) -> PathBuf {
-    let script = home.join("hold.py");
-    let ready = if announce {
-        "(home / 'ready.tmp').write_text('ready')\n(home / 'ready.tmp').replace(home / 'ready')\n"
-    } else {
-        ""
-    };
-    fs::write(
-        &script,
-        format!(
-            "import os\nfrom pathlib import Path\nimport time\nhome = Path(os.environ['LF_HOME'])\n{ready}while not (home / 'release').exists():\n    time.sleep(.02)\n"
-        ),
-    )
+/// A Claude stand-in for a held Graph step: it announces `ready` in LF_HOME,
+/// then waits there for `release` before it answers.
+pub(crate) const HOLDING_CLAUDE: &str = r#"#!/usr/bin/python3
+import json, os, sys, time
+if '--version' in sys.argv:
+    print('fixture')
+    sys.exit(0)
+home = os.environ['LF_HOME']
+streamed = '--input-format' in sys.argv
+message = json.loads(sys.stdin.readline()) if streamed else None
+with open(os.path.join(home, 'ready'), 'w') as ready:
+    ready.write('ready')
+if streamed:
+    with open(os.path.join(home, 'stream-ready'), 'w') as ready:
+        ready.write('ready')
+while not os.path.exists(os.path.join(home, 'release')):
+    time.sleep(0.02)
+if not streamed:
+    sys.exit(0)
+message['session_id'] = 'stand-in'
+print(json.dumps(message), flush=True)
+print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'stand-in'}), flush=True)
+print(json.dumps({'type': 'assistant', 'message': {'content': [{'type': 'text', 'text': 'Held.'}]}}), flush=True)
+print(json.dumps({'type': 'result', 'uuid': 'stand-in-result', 'session_id': 'stand-in', 'subtype': 'success', 'is_error': False, 'result': 'Held.'}), flush=True)
+for line in sys.stdin:
+    pass
+"#;
+
+/// The skill step `holding_task`'s stand-in holds until `release`.
+const HOLD_STEP: &str = "- step: {name: hold}\n";
+const HOLD_SKILL: (&str, &str) = (".lf/skills/hold.md", "Hold.");
+
+/// The fixture with a `hold` skill whose provider holds its step open until
+/// the test writes `release` in the home.
+fn holding_task() -> GraphTask {
+    let task = GraphTask::with_tools(&[("claude", HOLDING_CLAUDE)]);
+    connect_fixture_claude(task.home.path(), &task.registered.store);
+    crate::config::files::update(&task.home.path().join("config.yaml"), |value| {
+        value["agent"] = "claude".into();
+        Ok(())
+    })
     .unwrap();
-    script
+    task.repo.create_file(HOLD_SKILL.0, HOLD_SKILL.1);
+    task
 }
 
 #[test]
 fn running_graphs_belong_to_the_target_checkout_and_retain_their_caller() {
     for launch in ["task", "direct", "checkout", "alias", "wt"] {
-        let task = GraphTask::new();
+        let task = holding_task();
         // A real sibling checkout, managed through the public placement command.
         task.ok(&["wt", "create", "caller"]);
         // Worktree discovery is read-only and does not select an ambient Home.
@@ -345,11 +372,7 @@ fn running_graphs_belong_to_the_target_checkout_and_retain_their_caller() {
         let alias = alias_root.path().join("target");
         #[cfg(unix)]
         std::os::unix::fs::symlink(task.repo.path(), &alias).unwrap();
-        let hold = hold_script(task.home.path(), true);
-        task.repo.create_file(
-            ".lf/graphs/proof.yaml",
-            &format!("- cmd: session serve -- python3 {}\n", hold.display()),
-        );
+        task.repo.create_file(".lf/graphs/proof.yaml", HOLD_STEP);
         let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
         // The checkout already claimed the Task; inspection and Graphs add no entry.
         let entries = || {
@@ -414,7 +437,20 @@ fn running_graphs_belong_to_the_target_checkout_and_retain_their_caller() {
             std::thread::sleep(Duration::from_millis(20));
         }
         assert_eq!(entries(), claimed, "{launch}");
-        let status = task.status();
+        // The Task's background conversation runs the same stand-in, so `ready`
+        // can arrive before the Graph's step; wait for the Graph itself.
+        let status = loop {
+            let status = task.status();
+            if !status["work"]["graph_processes"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+                || Instant::now() >= deadline
+            {
+                break status;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        };
         let graphs = status["work"]["graph_processes"].as_array().unwrap();
         assert_eq!(graphs.len(), 1, "{launch}: {status}");
         assert_eq!(graphs[0]["state"], "current");
@@ -497,16 +533,12 @@ fn task_run_open_attachment_failure_leaves_the_graph_running() {
 }
 
 fn task_run_open_while_running(fail_open: bool) {
-    let task = GraphTask::new();
+    let task = holding_task();
     let lf = task.open_fixture();
     if fail_open {
         fs::write(task.home.path().join("open-fails"), "").unwrap();
     }
-    let hold = hold_script(task.home.path(), false);
-    task.repo.create_file(
-        ".lf/graphs/held.yaml",
-        &format!("- cmd: session serve -- python3 {}\n", hold.display()),
-    );
+    task.repo.create_file(".lf/graphs/held.yaml", HOLD_STEP);
     task.repo.create_file(
         ".lf/graphs/held-flow.yaml",
         "- graph: held\n- interactive: {name: demo, id: review}\n",
@@ -563,9 +595,12 @@ fn task_run_open_while_running(fail_open: bool) {
         "current"
     );
     let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+    // Besides the conversation a selected agent starts beside a checked-out
+    // Task, opening made none.
     let count: i64 = db
         .query_row(
-            "SELECT count(*) FROM agent_sessions WHERE task_id=?1 AND interactive=1",
+            "SELECT count(*) FROM agent_sessions WHERE task_id=?1 AND interactive=1
+             AND skill IS NOT 'task-session'",
             [task.registered.task.id.as_str()],
             |row| row.get(0),
         )
@@ -584,15 +619,11 @@ fn task_run_open_while_running(fail_open: bool) {
 #[test]
 fn task_run_open_waits_for_foreground_runs() {
     for mode in ["-b", "-i"] {
-        let task = GraphTask::new();
+        let task = holding_task();
         let lf = task.open_fixture();
-        let hold = hold_script(task.home.path(), true);
         task.repo.create_file(
             ".lf/graphs/foreground.yaml",
-            &format!(
-                "- cmd: session serve -- python3 {}\n- cmd: task sync --plan\n",
-                hold.display(),
-            ),
+            &format!("{HOLD_STEP}- cmd: task sync --plan\n"),
         );
         let out = task.home.path().join("foreground.out");
         let log = fs::File::create(&out).unwrap();
@@ -774,14 +805,10 @@ fn task_run_open_opens_the_selected_waiting_task() {
 
 #[test]
 fn task_run_returns_while_its_graph_keeps_running() {
-    let task = GraphTask::new();
-    let hold = hold_script(task.home.path(), false);
+    let task = holding_task();
     task.repo.create_file(
         ".lf/graphs/held.yaml",
-        &format!(
-            "- cmd: session serve -- python3 {}\n- cmd: task sync --plan\n",
-            hold.display()
-        ),
+        &format!("{HOLD_STEP}- cmd: task sync --plan\n"),
     );
     task.repo.create_file(
         ".lf/graphs/held-flow.yaml",
@@ -869,7 +896,7 @@ fn task_run_returns_while_its_graph_keeps_running() {
         )
         .unwrap();
     assert!(steps >= 2, "the second step never ran: {steps}");
-    // The owner writes the arrival after its Graph exits.
+    // The carrier writes the arrival after its Graph exits.
     let deadline = Instant::now() + Duration::from_secs(30);
     while task.graph()["position"] != at("review") {
         assert!(Instant::now() < deadline, "{}", task.graph());
@@ -909,7 +936,7 @@ fn a_refused_bare_task_run_returns_its_refusal() {
 
 /// A headless Task requires an account record even when the provider is a
 /// stand-in. Its synthetic credential never leaves the network sandbox.
-fn connect_fixture_claude(home: &Path, store: &loopflow::store::Store) {
+pub(crate) fn connect_fixture_claude(home: &Path, store: &loopflow::store::Store) {
     connect_claude_account(home, store, "fixture");
 }
 
@@ -2569,7 +2596,7 @@ fn unmerged_completion_in_graph_is_retryable_without_replaying_it() {
 
 #[test]
 fn provider_completion_preserves_a_live_run_and_its_graph_process_records_the_arrival() {
-    let task = GraphTask::new();
+    let task = holding_task();
     let worktree = tokio::runtime::Runtime::new()
         .unwrap()
         .block_on(task.registered.store.get_task(&task.registered.task.id))
@@ -2583,13 +2610,10 @@ fn provider_completion_preserves_a_live_run_and_its_graph_process_records_the_ar
         fs::write(path, content).unwrap();
     };
     write(".lf/graphs/live-graph.yaml", "- graph: live\n");
-    let hold = hold_script(task.home.path(), true);
+    write(HOLD_SKILL.0, HOLD_SKILL.1);
     write(
         ".lf/graphs/live.yaml",
-        &format!(
-            "- cmd: session serve -- python3 {}\n- cmd: task complete INF-123\n",
-            hold.display()
-        ),
+        &format!("{HOLD_STEP}- cmd: task complete INF-123\n"),
     );
     // The run names the checkout's graph file; no Wave selection is needed.
     let log_path = task.home.path().join("live.log");
@@ -2608,7 +2632,9 @@ fn provider_completion_preserves_a_live_run_and_its_graph_process_records_the_ar
         caller: task.home.path().join("unused"),
     };
     let deadline = Instant::now() + Duration::from_secs(30);
-    while !task.home.path().join("ready").exists() {
+    // The native Task conversation also writes `ready`. Wait for the Graph's
+    // headless provider before moving the Task out of its launch Wave.
+    while !task.home.path().join("stream-ready").exists() {
         assert!(
             held.child.try_wait().unwrap().is_none() && Instant::now() < deadline,
             "{}",

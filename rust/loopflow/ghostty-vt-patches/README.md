@@ -25,8 +25,8 @@ already holds instead of uploading over it.
 
 Build flags: `-Demit-lib-vt -Dsimd=false -Dcpu=baseline -Dstrip=true
 -Dvt-features=-all,+snapshot,+formatter,+selection`. No SIMD keeps C++ out of the
-archive; baseline CPU keeps it portable; the feature set is what the Session owner
-uses (`src/ghostty_vt.rs`). Desktop's GhosttyKit is built separately from the same
+archive; baseline CPU keeps it portable; the feature set is what held terminals
+use (`src/ghostty_vt.rs`). Desktop's GhosttyKit is built separately from the same
 revision with `swift/GhosttyKitPatches`; it exports none of the `ghostty_terminal_*`
 symbols, so both link into the app.
 

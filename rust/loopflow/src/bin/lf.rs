@@ -1482,7 +1482,7 @@ fn checkout_task(directory: &Path, wave: Option<&str>) -> anyhow::Result<Option<
 fn run() -> anyhow::Result<()> {
     // A terminal relay is exec'd by the process that resolved its connection.
     // The relay avoids the command tree. A passive reveal records its terminal
-    // association only after the owner acknowledges input control.
+    // association only after the held terminal acknowledges input control.
     let mut raw_args: Vec<String> = std::env::args().collect();
     if raw_args
         .get(1..4)
@@ -1500,7 +1500,7 @@ fn run() -> anyhow::Result<()> {
         journal::continue_after_exec()?;
         ctrlc::set_handler(|| loopflow::agent::exit_on_interrupt())
             .expect("failed to set Ctrl+C handler");
-        loopflow::transport::relay(&relay.owner, relay.session.as_ref(), relay.moved)?;
+        loopflow::transport::relay(&relay.terminal, relay.session.as_ref(), relay.moved)?;
         // JSON return opens the ordinary projection after relaying ends.
         if let Some(session) = relay.json_session {
             loopflow::lf::commands::session::print_returned(&session)?;
@@ -1513,7 +1513,7 @@ fn run() -> anyhow::Result<()> {
         .is_some_and(|args| args == ["session", "attach"])
     {
         anyhow::bail!(
-            "lf session attach names an owner LfProcess id or `--terminal TERMINAL_ID`; got {:?}",
+            "lf session attach names `--terminal TERMINAL_ID`; got {:?}",
             &raw_args[3..]
         );
     }
@@ -1725,6 +1725,15 @@ fn run() -> anyhow::Result<()> {
 
     let mut cli = match Cli::try_parse_from(args.clone()).and_then(Cli::checked) {
         Ok(cli) => cli,
+        // A hook an earlier lf installed may name a value this build removed;
+        // it must not fail its turn (Claude reads exit 2 at Stop as "keep working").
+        Err(_) if args.get(1).is_some_and(|arg| arg.starts_with("__")) => {
+            eprintln!(
+                "lf: ignoring `{}`, a hook from an earlier lf; restart the Session to refresh its hooks",
+                args[1]
+            );
+            return Ok(());
+        }
         Err(error) => {
             let code = u8::try_from(error.exit_code()).expect("Clap exit status fits a byte");
             let _ = error.print();
@@ -1836,10 +1845,7 @@ fn run() -> anyhow::Result<()> {
                     }
             )
         )
-        || matches!(
-            &cli.command,
-            Some(Commands::Session { cmd }) if !matches!(cmd, loopflow::lf::SessionCommand::Serve { .. })
-        );
+        || matches!(&cli.command, Some(Commands::Session { .. }));
     if reads_work
         && !cli.context
         && !cli.explain
@@ -2523,7 +2529,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
     {
         return Ok(());
     }
-    // Only the operation a launcher started reports; an execution owner in
+    // Only the operation a launcher started reports; a held terminal in
     // between passes the handoff on untouched.
     if matches!(
         cli.command,

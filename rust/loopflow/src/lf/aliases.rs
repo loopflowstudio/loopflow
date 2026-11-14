@@ -99,7 +99,6 @@ pub const MOVED: &[Moved] = &[
     moved(&["monitor"], &[], &["process", "list"]),
     moved(&["monitor"], &["ps"], &["process", "list"]),
     moved(&["monitor"], &["top"], &["process", "top"]),
-    moved(&["monitor"], &["rollover"], &["process", "rollover"]),
     moved(&["monitor"], &["prune"], &["process", "prune"]),
     moved(&["ps"], &[], &["process", "list"]),
     moved(&["graph", "show"], &["--processes"], &["process", "show"]),

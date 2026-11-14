@@ -36,7 +36,7 @@ pub fn run(
     let issue = task.identifier.clone();
     let process = crate::journal::current_lf_process_id()
         .expect("a ship that began has a registered Process");
-    let letting_go = !cli.batch && !cli.interactive && crate::transport::current().is_some();
+    let letting_go = super::graph::lets_launcher_go(cli);
     let log = letting_go
         .then(|| super::graph::PendingLog::open(&format!("ship-{issue}")))
         .transpose()?;

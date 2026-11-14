@@ -15,11 +15,11 @@ use crate::program_status::{Kind, Records, Report, State};
 /// The Ghostty revision the linked library was built from.
 pub const REVISION: &str = env!("LOOPFLOW_GHOSTTY_REVISION");
 
-/// How much of the program's unfinished escape sequence the owner retains for
+/// How much of the program's unfinished escape sequence a held terminal retains for
 /// a reconnecting viewer.
 const CONTINUATION_LIMIT: usize = 64 * 1024;
 
-/// Scrollback the owner keeps. Ghostty prunes whole pages of about 400 KiB.
+/// Scrollback a held terminal keeps. Ghostty prunes whole pages of about 400 KiB.
 const SCROLLBACK_LIMIT: usize = 8 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -206,7 +206,7 @@ impl Terminal {
         Ok(terminal)
     }
 
-    /// Callbacks and limits every owner terminal uses, including one restored
+    /// Callbacks and limits every held terminal uses, including one restored
     /// from a snapshot.
     fn configure(&mut self) -> Result<(), Error> {
         let userdata: *mut Effects = &mut *self.effects;
@@ -431,8 +431,8 @@ impl Terminal {
         )
     }
 
-    /// `restore` adds the escape sequences that put a terminal in the owner's
-    /// state (cursor, styles, hyperlinks, keyboard, charsets, modes, scrolling
+    /// `restore` adds the escape sequences that put a terminal in the held
+    /// terminal's state (cursor, styles, hyperlinks, keyboard, charsets, modes, scrolling
     /// region, tabstops, pwd) around the formatted rows.
     fn format(&self, emit: i32, range: Range, restore: bool) -> Result<Vec<u8>, Error> {
         let (cols, rows) = self.size();
@@ -546,7 +546,7 @@ impl Terminal {
         }
     }
 
-    /// A terminal restored from a snapshot stream, with the owner's callbacks and limits.
+    /// A terminal restored from a snapshot stream, with a held terminal's callbacks and limits.
     pub fn decode(snapshot: &[u8]) -> Result<Self, Error> {
         let mut decoder: ffi::SnapshotDecoder = std::ptr::null_mut();
         let mut raw: ffi::Terminal = std::ptr::null_mut();
@@ -562,7 +562,7 @@ impl Terminal {
                     snapshot.len(),
                 ),
             )?;
-            // Keep the unfinished input the owner had, as a live terminal would.
+            // Keep the unfinished input the held terminal had, as a live terminal would.
             let retain = true;
             let result = (|| {
                 check(
@@ -651,7 +651,7 @@ fn drop_pwd_nul(repaint: &mut Vec<u8>) {
     }
 }
 
-/// The subset of `include/ghostty/vt/*.h` the owner uses. Enums are `int`
+/// The subset of `include/ghostty/vt/*.h` held terminals use. Enums are `int`
 /// (`GHOSTTY_ENUM_TYPED`); structs carry their size first where the header does.
 mod ffi {
     use std::ffi::c_void;

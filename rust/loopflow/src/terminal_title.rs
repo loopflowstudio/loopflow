@@ -1,4 +1,4 @@
-//! Session names projected into their attached terminal. The transport owner
+//! Session names projected into their attached terminal. The held terminal
 //! serializes OSC renames between complete provider sequences; direct launches
 //! write OSC only before spawning, while they still own terminal output.
 //! cmux and tmux have separate control channels for their workspace, tab and
@@ -277,11 +277,11 @@ impl TerminalTitle {
         title.host.is_some().then_some(title)
     }
 
-    fn viewing(owner: &crate::transport::Host) -> Option<Self> {
+    fn viewing(held: &crate::id::TerminalId) -> Option<Self> {
         let load = || -> anyhow::Result<Option<Self>> {
             let store =
                 SqliteStore::open_processes_read_only(&crate::store::database_path_from_env()?)?;
-            let Some(id) = store.transport_session(owner.transport())? else {
+            let Some(id) = store.terminal_session(held)? else {
                 return Ok(None);
             };
             let Some(session) = store.session(&id)? else {
@@ -389,14 +389,14 @@ impl Drop for TerminalTitle {
 /// link its Session after the viewer attaches, so the viewer keeps looking.
 #[derive(Debug)]
 pub(crate) struct ViewerTitle {
-    owner: crate::transport::Host,
+    held: crate::id::TerminalId,
     title: Option<TerminalTitle>,
     /// Until when to look; executions without a Session never get one.
     looking: Option<Instant>,
     checked: Option<Instant>,
 }
 
-/// One worker reading Session names for every owner a host serves; store reads
+/// One worker reading Session names for every terminal a host serves; store reads
 /// must never hold up provider output or terminal input. It ends once its
 /// handle and every `OutputTitle` made from it are gone.
 #[derive(Debug, Clone)]
@@ -406,7 +406,7 @@ pub(crate) struct TitleReader {
 
 #[derive(Debug)]
 struct TitleRequest {
-    owner: crate::transport::Host,
+    held: crate::id::TerminalId,
     answer: mpsc::SyncSender<String>,
 }
 
@@ -425,7 +425,7 @@ impl TitleReader {
                     if store.is_none() {
                         store = Some(SqliteStore::open_processes_read_only(&path)?);
                     }
-                    output_title(store.as_ref().expect("opened above"), &request.owner)
+                    output_title(store.as_ref().expect("opened above"), &request.held)
                 };
                 if let Ok(Some(name)) = read()
                     .inspect_err(|error| tracing::debug!(%error, "cannot read output Session name"))
@@ -438,11 +438,11 @@ impl TitleReader {
     }
 }
 
-/// The serving owner's Session name, sent through its serialized terminal stream.
+/// The held terminal's Session name, sent through its serialized terminal stream.
 /// Host-specific names remain with each viewer, including remote viewers.
 #[derive(Debug)]
 pub(crate) struct OutputTitle {
-    owner: crate::transport::Host,
+    held: crate::id::TerminalId,
     reader: TitleReader,
     answer: mpsc::SyncSender<String>,
     names: mpsc::Receiver<String>,
@@ -450,10 +450,10 @@ pub(crate) struct OutputTitle {
 }
 
 impl OutputTitle {
-    pub(crate) fn new(owner: &crate::transport::Host, reader: &TitleReader) -> Self {
+    pub(crate) fn new(held: &crate::id::TerminalId, reader: &TitleReader) -> Self {
         let (answer, names) = mpsc::sync_channel(1);
         Self {
-            owner: owner.clone(),
+            held: held.clone(),
             reader: reader.clone(),
             answer,
             names,
@@ -468,7 +468,7 @@ impl OutputTitle {
         {
             self.checked = Some(Instant::now());
             let _ = self.reader.requests.try_send(TitleRequest {
-                owner: self.owner.clone(),
+                held: self.held.clone(),
                 answer: self.answer.clone(),
             });
         }
@@ -482,9 +482,9 @@ impl OutputTitle {
 
 fn output_title(
     store: &SqliteStore,
-    owner: &crate::transport::Host,
+    held: &crate::id::TerminalId,
 ) -> anyhow::Result<Option<String>> {
-    let Some(id) = store.transport_session(owner.transport())? else {
+    let Some(id) = store.terminal_session(held)? else {
         return Ok(None);
     };
     let Some(session) = store.session(&id)? else {
@@ -501,9 +501,9 @@ fn output_title(
 }
 
 impl ViewerTitle {
-    pub(crate) fn new(owner: &crate::transport::Host) -> Self {
+    pub(crate) fn new(held: &crate::id::TerminalId) -> Self {
         Self {
-            owner: owner.clone(),
+            held: held.clone(),
             title: None,
             looking: HostNames::current().map(|_| Instant::now() + Duration::from_secs(10)),
             checked: None,
@@ -523,7 +523,7 @@ impl ViewerTitle {
             return;
         }
         self.checked = Some(Instant::now());
-        self.title = TerminalTitle::viewing(&self.owner);
+        self.title = TerminalTitle::viewing(&self.held);
     }
 }
 
@@ -629,11 +629,13 @@ mod tests {
         let attachment = store
             .claim_session_attachment(&session.id, None, &process, true)
             .unwrap();
+        let terminal = crate::id::TerminalId::new();
+        store.create_terminal(&terminal, "build").unwrap();
         rusqlite::Connection::open(&path)
             .unwrap()
             .execute(
-                "UPDATE agent_sessions SET transport_lf_process_id=?1 WHERE id=?2",
-                rusqlite::params![process, session.id],
+                "UPDATE agent_sessions SET held_terminal_id=?1 WHERE id=?2",
+                rusqlite::params![terminal, session.id],
             )
             .unwrap();
         let title = TerminalTitle {
@@ -661,11 +663,7 @@ mod tests {
             Some("Release notes".to_string())
         );
         assert_eq!(
-            super::output_title(
-                &title.store,
-                &crate::transport::Host::Owner(process.clone())
-            )
-            .unwrap(),
+            super::output_title(&title.store, &terminal).unwrap(),
             Some("Release notes".into())
         );
         title

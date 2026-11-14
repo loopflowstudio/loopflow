@@ -61,7 +61,7 @@ An unavailable connection does not mean the Session has ended. Agents run in a
 holder beside the server, not in it, so a stopped or crashed server leaves
 every turn running; [Keep working through an update](sessions.md#keep-working-through-an-update)
 says what each kind of interruption costs. Closing Desktop
-leaves the server and existing execution owners independent of the window.
+leaves the server, its holders and running Graphs independent of the window.
 Conversations stay running while their scope is open, even without a viewer.
 Completed-Task cleanup waits for pending requests, active turns, running Graphs
 and the Task's viewing grace, even without a checkout. See

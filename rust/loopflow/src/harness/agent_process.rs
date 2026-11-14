@@ -140,10 +140,8 @@ pub(crate) fn require_server() -> Result<()> {
 
 /// Capture identity in the launch's delivery file and give the launch its
 /// steer capability. A launch the Machine server holds starts beside it and
-/// presents the capability to that server. So does a conversation an owner
-/// holds, without the server check: its hooks say when it can take a reply
-/// and acknowledge typed input. A bare launch reaches no server: its hook
-/// presents the capability to the store.
+/// presents the capability to that server. A bare launch reaches no server:
+/// its hook presents the capability to the store.
 fn context_environment(
     command: &mut std::process::Command,
     owner: &AttachmentOwner,
@@ -162,7 +160,6 @@ fn context_environment(
     }
     let capability_env = match holder {
         Holder::Caller => crate::steer::BARE_STEER_ENV,
-        Holder::Owner => crate::steer::PROVIDER_CONTEXT_ENV,
         Holder::Server => {
             require_server()?;
             crate::steer::PROVIDER_CONTEXT_ENV
@@ -1560,10 +1557,9 @@ mod tests {
         );
     }
 
-    /// A bare conversation in its terminal takes no steers; one an owner
-    /// holds carries the capability its hooks present.
+    /// A bare conversation reads steers without reporting to a server.
     #[test]
-    fn only_a_held_interactive_launch_carries_a_steer_capability() {
+    fn a_bare_launch_carries_only_a_store_steer_capability() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
         let capability = |holder: crate::session::Holder| {
@@ -1577,8 +1573,9 @@ mod tests {
             command.env_clear().args([
                 "-c",
                 &format!(
-                    "printf %s \"${{{}:-}}\" > {}",
+                    "printf '%s\\n%s' \"${{{}:-}}\" \"${{{}:-}}\" > {}",
                     crate::steer::PROVIDER_CONTEXT_ENV,
+                    crate::steer::BARE_STEER_ENV,
                     seen.display()
                 ),
             ]);
@@ -1589,8 +1586,11 @@ mod tests {
                 .unwrap();
             std::fs::read_to_string(seen).unwrap()
         };
-        assert_eq!(capability(Holder::Caller), "");
-        assert!(capability(Holder::Owner).contains("agent_process_id"));
+        let output = capability(Holder::Caller);
+        let (server, bare) = output.split_once('\n').unwrap();
+        assert_eq!(server, "");
+        let adapter: crate::steer::SteerAdapter = serde_json::from_str(bare).unwrap();
+        assert_eq!(adapter.session, "Caller");
     }
 
     #[test]

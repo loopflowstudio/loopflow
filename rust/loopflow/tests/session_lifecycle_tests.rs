@@ -127,13 +127,14 @@ impl Fixture {
     /// Start `lf` and return once the stand-in has recorded one more launch.
     fn attach(&self, args: &[&str]) -> (Child, String) {
         let before = self.launches().len();
-        let mut child = self
-            .command(args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
+        // Its own process group, as a terminal's foreground job has.
+        let mut child =
+            std::os::unix::process::CommandExt::process_group(&mut self.command(args), 0)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap();
         let deadline = Instant::now() + PATIENCE;
         while self.launches().len() == before
             && Instant::now() < deadline
@@ -857,13 +858,9 @@ fn sigint_records_session_interruption_and_retires_the_orphan() {
     let fixture = Fixture::new(true);
     let (mut child, input) = fixture.attach(&LAUNCH);
     let (id, ..) = fixture.session_row(&input);
-    let executor: i32 = fixture.db().query_row(
-        "SELECT p.pid FROM processes p JOIN session_events e ON e.lf_process_id=p.id WHERE e.kind='captured' AND e.receipt_key=?1",
-        [&input], |row| row.get(0),
-    ).unwrap();
-    // SAFETY: the owner starts the captured executor in its own process group.
-    // Terminal Ctrl+C reaches that whole group, including the native provider.
-    assert_eq!(unsafe { libc::kill(-executor, libc::SIGINT) }, 0);
+    // SAFETY: the launch leads its own process group. Terminal Ctrl+C reaches
+    // that whole group: the lf typed there and its provider.
+    assert_eq!(unsafe { libc::kill(-(child.id() as i32), libc::SIGINT) }, 0);
     let deadline = Instant::now() + PATIENCE;
     loop {
         if let Some(status) = child.try_wait().unwrap() {
@@ -1872,8 +1869,7 @@ fn malformed_caller_cannot_use_library_agent_admission() {
             .unwrap();
         assert_eq!(output.status.code(), Some(1), "{output:?}");
         assert!(
-            String::from_utf8_lossy(&output.stderr)
-                .contains("Execution requires an admitted invocation"),
+            String::from_utf8_lossy(&output.stderr).contains("requires an admitted invocation"),
             "{output:?}"
         );
         assert!(
@@ -1913,7 +1909,7 @@ fn unavailable_store_starts_no_provider() {
         let output = launch.output().unwrap();
         assert!(!output.status.success(), "{output:?}");
         assert!(
-            String::from_utf8_lossy(&output.stderr).contains("Cannot open execution transport log"),
+            String::from_utf8_lossy(&output.stderr).contains("unable to open database file"),
             "{output:?}"
         );
         assert!(

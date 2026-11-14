@@ -352,7 +352,7 @@ fn admit_ci_fix(
             (crate::lf::WORK_DECLARATION_ENV, work.as_str()),
             ("LF_USER_NAME", ""),
         ];
-        let owner = crate::os_process::start_lf_session(
+        let worker = crate::os_process::detached::start_lf(
             &landing.worktree,
             &argv,
             &environment,
@@ -366,7 +366,7 @@ fn admit_ci_fix(
         .map_err(repair_error)?;
         if !store
             .sqlite
-            .handoff_repair(&incident.identity, &launcher, &owner)
+            .handoff_repair(&incident.identity, &launcher, &worker)
             .map_err(repair_error)?
         {
             return Err(repair_error("repair reservation changed during startup"));
@@ -465,12 +465,8 @@ fn settle_repairs(store: &SharedStore, repo: &str, pr_number: u32) -> OpsResult<
         {
             continue;
         }
-        // The run's Session names the owner that served it.
-        let session = match store
-            .sqlite
-            .transport_session(&owner)
-            .map_err(repair_error)?
-        {
+        // The Session the run's agent ran in.
+        let session = match store.sqlite.process_session(&owner).map_err(repair_error)? {
             Some(id) => store.sqlite.session(&id).map_err(repair_error)?,
             None => None,
         };
@@ -488,7 +484,7 @@ fn settle_repairs(store: &SharedStore, repo: &str, pr_number: u32) -> OpsResult<
             (None, _) => (
                 None,
                 Some(format!(
-                    "ci-fix run {owner} exited before opening a Session; inspect transport.log"
+                    "ci-fix run {owner} exited before opening a Session; inspect logs/detached.log"
                 )),
             ),
             (Some(session), None) => (

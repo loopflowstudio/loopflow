@@ -1,6 +1,6 @@
 //! A native client's exit text names its own resume commands, which bypass lf
 //! and, for a remote Codex client, a server that no longer exists. While a client
-//! runs, the owner withholds what it prints after restoring the terminal and
+//! runs, the held terminal withholds what it prints after restoring the terminal and
 //! shows lf's return line instead. A client that ends without restoring its
 //! terminal (Codex on SIGTERM) gets it restored here, before that line.
 
@@ -79,7 +79,7 @@ impl NativeClient {
     }
 
     /// The client exited: keep its terminal restoration, replace its text.
-    /// The replaced text goes to the owner's log, so a provider's last error
+    /// The replaced text goes to the held terminal's log, so a provider's last error
     /// is never lost. A client that died leaving its terminal `raw` has it
     /// put back by `restore` first.
     pub fn finish(self, raw: bool, restore: impl FnOnce()) -> Vec<u8> {

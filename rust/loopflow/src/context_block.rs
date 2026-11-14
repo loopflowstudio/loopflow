@@ -33,11 +33,6 @@ pub enum ContextMoment {
     /// (whose changes become steers for the next boundary) and applies a
     /// pending Session move.
     Stop,
-    /// Retired: Task updates ride the boundary answer. Hooks installed in
-    /// conversations that started before then still name it; it does nothing.
-    /// TODO(LOO-838): delete it once no
-    /// conversation started before this build is live.
-    TaskUpdates,
     /// A native turn ended on a usage limit: start `RecordLimit` and return.
     Limit,
     /// Started by a limit hook: record the limit and move the shared login to
@@ -297,9 +292,9 @@ impl ContextDelivery {
     /// The provider hooks of one launch. Every launch prints its context
     /// block at session start and after a compaction, and reads its own
     /// steers and Task update from the store after a tool call and at a
-    /// prompt. A launch an owner or the Machine server holds
-    /// (`Holder::reports_turns`) also reports its starts, prompts and turn
-    /// ends to the server, which records them.
+    /// prompt. A launch the Machine server holds (`Holder::reports_turns`)
+    /// also reports its starts, prompts and turn ends to the server, which
+    /// records them.
     pub fn hook_settings(
         &self,
         holder: crate::session::Holder,

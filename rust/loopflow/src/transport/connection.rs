@@ -272,7 +272,7 @@ impl Status {
                 let delay = if initial && attempt == 0 {
                     Duration::ZERO
                 } else {
-                    Duration::from_millis(100 << attempt.min(5))
+                    super::pace().backoff * (1 << attempt.min(5))
                 };
                 let until = Instant::now() + delay;
                 while Instant::now() < until {

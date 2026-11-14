@@ -1,9 +1,7 @@
 WITH windowed(seq) AS (
                 SELECT seq FROM session_events WHERE kind='captured' AND receipt_key=?7
-                UNION SELECT CASE scoped.kind WHEN 'captured' THEN scoped.seq ELSE scoped.captured_event END
-                    FROM tasks t CROSS JOIN session_events scoped ON scoped.task_id=t.id
-                    WHERE ?7 IS NULL AND (t.id=?3 OR t.issue_identifier=?3 OR t.external_issue_id=?3)
-                    AND scoped.kind IN ('captured','observed','started')
+                UNION SELECT CASE kind WHEN 'captured' THEN seq ELSE captured_event END FROM session_events
+                    WHERE ?7 IS NULL AND task_id=?3 AND kind IN ('captured','observed','started')
                 UNION SELECT +seq FROM session_events WHERE ?7 IS NULL AND ?3 IS NULL AND kind='captured' AND observed_at>=?5
                 UNION SELECT +c.seq FROM session_events o CROSS JOIN session_events c ON c.kind='captured'
                     AND c.receipt_key=substr(o.receipt_key,1,length(o.receipt_key)-14)
@@ -25,10 +23,8 @@ WITH windowed(seq) AS (
                 UNION SELECT +ran.session_id,+ran.provider_thread,+ran.provider_turn
                     FROM processes exited CROSS JOIN session_events ran ON ran.lf_process_id=exited.id
                     WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND exited.completed_at>=?5 AND ran.kind='started' AND ran.captured_event IS NULL
-                UNION SELECT +scoped.session_id,+scoped.provider_thread,+scoped.provider_turn
-                    FROM tasks t CROSS JOIN session_events scoped ON scoped.task_id=t.id
-                    WHERE ?7 IS NULL AND (t.id=?3 OR t.issue_identifier=?3 OR t.external_issue_id=?3)
-                    AND scoped.kind='started' AND scoped.captured_event IS NULL),
+                UNION SELECT +session_id,+provider_thread,+provider_turn FROM session_events
+                    WHERE ?7 IS NULL AND task_id=?3 AND kind='started' AND captured_event IS NULL),
             inputs AS (
                 SELECT i.seq AS captured,i.receipt_key AS input_id,i.session_id,json_extract(i.payload,'$.caller_key') AS caller_input_id,
                     COALESCE(m.observed_at,i.observed_at) AS started,

@@ -102,7 +102,9 @@ or turn.
   `?3` set. With `?3` set the time arms are off and one Task arm reads every
   `session_events` row naming the Task through `session_events_task`
   (capture, manifest, `started` origin → `captured_event`); `turns` gets the
-  native `started` rows. The exact `?3` filter stays.
+  native `started` rows. The arms match `task_id=?3` directly:
+  `pending_inputs` already binds the id `resolve_task_id` returns. The exact
+  `?3` filter stays.
 - Binding assigns future work only (`bind_session`): an input captured before
   the bind carries no `task_id` and is not in the Task's history, on main and
   here. `task_history_reads_every_row_naming_the_task` pins it.
@@ -125,7 +127,8 @@ most attributed rows and the 10th. Load avg 600–680, best of 5:
 
 Warm, at load ~415: 3.8–4.5 s → 0.08–0.10 s and 3.0–4.1 s → 0.02–0.06 s.
 `same` rows on every row. Plan reads `tasks` by MULTI-INDEX OR and
-`session_events_task`; no history scan.
+`session_events_task`; no history scan. (Measured before compress dropped
+the arms' `tasks` join; the outer `?3` filter still reads `tasks` that way.)
 
 Unscoped whole store (`bind_attribution`, `context_cost` from
 `FIRST_WEEK_START`) is still slower than main. Same run, 3 tries each,
@@ -217,6 +220,7 @@ gate ~5× (1.89→0.37 s), QA ~3.5× (10.2→2.9 s), both at load avg 150+.
 - After sync `65be402161`: `cargo test -p loopflow --lib -- store::query_plans:: store::sqlite::session server::boundary::` 51 pass; fmt and clippy clean.
 - QA Nov 13 (load avg 200–250, `scratch/qa.html`): `same` all six windows on a `VACUUM INTO` copy; 1d 10.2→2.9 s and 4.5→0.6 s; 7d 6.0→5.0 s, 7.5→5.7 s; 30d 3.9→7.1 s; whole 2.5→8.7 s. Real Task conversation, steer and exit read back through branch `lf session history`; main and branch statements agree on that store. 1d finished-included still below 4×.
 - Gate Nov 13 (load avg 150–290; `scripts/test.py` stopped at resource preflight on a `du` deadline with 46.9 GiB free, plan run by hand): architecture, inventory, `cargo fmt --check`, clippy, website (73), swift boundaries pass. Nextest `query_plans`, `sqlite::session*`, `server::boundary`, session_history/activity/context_cost/bind_attribution, `documented_commands`, `session_cli_tests`, `two_people`, `transport_tests`: 212/218. Six provider-startup tests missed their 30 s launch deadline; four pass on rerun, `resume_refuses_a_graph_step_and_leaves_it_running` and `session_cli_tests::terminal_titles_follow_session_rename_and_reconnect_without_provider_accounts` failed again at load 236 ("launched missing", "codex/failure failed to start"). No launch or resume path calls `pending_inputs`; CI owns them. Swift: `ThemeTests.ghosttyThemesResolveAfterYoursAndBuiltinsAndStayReadOnly` failed (theme files; no Swift in this diff); CI owns it.
+- Compress after Task arms: arms match `task_id=?3` (the resolved id) instead of joining `tasks`. `cargo test -p loopflow --lib -- store::query_plans:: store::sqlite::session` 39/39 (load ~230); drill on the store copy, 689 rows, `same` as main; plan searches `session_events_task` directly. fmt clean.
 - Compress after sync: no code cut; `session_turn_events` still serves the grouped turn lookup (EXPLAIN on the store copy), `session_capture_caller` still serves selector resolution.
 - Hosted CI on `cf1c165096`: green, with the Rust, Python and macOS suites
   deferred while `scratch/` holds files; they run once submit clears it.

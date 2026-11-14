@@ -79,6 +79,9 @@ Task storage changes also run `binary(session_lifecycle_tests)`: creation and
 promotion cover absent checkouts and primary Sessions. When moving nullable
 columns into separate tables, update fixture reads to handle absent rows and
 direct SQL writes and shared fixture lookups to use the new tables. Run
+`test(server::service::tests::a_plan_watch_refreshes_and_a_task_view_resolves_its_primary_session)`
+for primary Session storage changes: the served watch fixture writes the
+association directly before resolving the Task's conversation. Run
 `scripts/test_desktop.sh --filter 'TaskRowMetadataTests|WaveStandupTests|DTOFixtureTests'`
 when changing Task ownership DTOs; inline Swift fixtures must include required
 nullable keys alongside the shared JSON fixtures. Run

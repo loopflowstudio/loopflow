@@ -36,6 +36,11 @@ pub enum SubscriptionError {
     NeedsLogin(String),
     #[error("{0}")]
     Unavailable(String),
+    #[error("{message}; outcome unconfirmed")]
+    Unconfirmed {
+        message: String,
+        reset_id: Option<String>,
+    },
 }
 
 /// Provider-neutral reset entitlements. Missing details are not an empty list.
@@ -67,8 +72,8 @@ pub struct Reset {
     pub usable_now: bool,
     #[serde(deserialize_with = "Option::deserialize")]
     pub unavailable_reason: Option<String>,
-    pub clears: Vec<String>,
-    pub gives_back_weekly: bool,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub clears: Option<Vec<String>>,
     #[serde(deserialize_with = "Option::deserialize")]
     pub expires_at: Option<i64>,
 }
@@ -136,7 +141,10 @@ async fn poll_claude(home: &Path) -> Result<SubscriptionUsage, SubscriptionError
         Ok(SubscriptionUsage {
             windows: claude_windows(&body),
             plan: None,
-            resets: claude_resets(&body)?,
+            resets: claude_resets(&body).unwrap_or_else(|error| {
+                tracing::warn!(%error, "Claude reset information unavailable");
+                None
+            }),
             identity: request_claude_identity(
                 &client,
                 token.expose_secret(),
@@ -615,8 +623,7 @@ fn claude_resets(body: &Value) -> Result<Option<Resets>, SubscriptionError> {
                 total: Some(grant["resets_total"].as_u64().ok_or_else(invalid)?),
                 usable_now,
                 unavailable_reason,
-                clears,
-                gives_back_weekly,
+                clears: Some(clears),
                 expires_at,
             })
         })
@@ -662,9 +669,9 @@ fn select_reset<'a>(
             .and_then(|r| r.resets.as_ref())
             .and_then(|rs| rs.iter().find(|r| Some(r.id.as_str()) == reset_id)));
     }
-    let resets = resets.ok_or_else(|| fail("resets not reported; nothing sent".into()))?;
+    let resets = resets.ok_or_else(|| fail("resets not reported".into()))?;
     if let Some(reason) = &resets.unavailable {
-        return Err(fail(format!("resets unavailable ({reason}); nothing sent")));
+        return Err(fail(format!("resets unavailable ({reason})")));
     }
     let details = resets
         .resets
@@ -677,7 +684,7 @@ fn select_reset<'a>(
         .collect::<std::collections::BTreeSet<_>>();
     if claude && scope.is_none() && reset_id.is_none() && scopes.len() > 1 {
         return Err(fail(format!(
-            "choose --scope {}; nothing sent",
+            "choose --scope {}",
             scopes.into_iter().collect::<Vec<_>>().join(", ")
         )));
     }
@@ -687,7 +694,7 @@ fn select_reset<'a>(
         .map(Some)
         .ok_or_else(|| {
             fail(format!(
-                "no usable reset matches; usable scopes: {}; resets: {}; nothing sent",
+                "no usable reset matches; usable scopes: {}; resets: {}",
                 scopes.into_iter().collect::<Vec<_>>().join(", "),
                 details
                     .iter()
@@ -733,31 +740,12 @@ pub(crate) fn reset_usage_text(windows: &[AccountLimitWindow]) -> String {
         .join(" · ")
 }
 
-fn print_reset_attempt(
-    key: &str,
-    reset_id: Option<&str>,
-    scope: Option<&str>,
-    before: &SubscriptionUsage,
-) {
-    let selected = format!(
-        "{} · {} · {}",
-        scope.unwrap_or("provider choice"),
-        reset_id.unwrap_or("provider choice"),
-        reset_usage_text(&before.windows)
-    );
-    let retry = format!(
-        "Reset attempt {key}; retry with --idempotency-key {key}{}",
-        reset_id
-            .map(|id| format!(" --reset-id {id}"))
-            .unwrap_or_default()
-    );
-    if crate::lf::commands::account::is_served() {
-        tracing::info!("{selected}");
-        tracing::info!("{retry}");
-    } else {
-        eprintln!("{selected}");
-        eprintln!("{retry}");
-    }
+#[derive(Debug)]
+pub(crate) struct ResetAttempt<'a> {
+    pub key: &'a str,
+    pub reset_id: Option<&'a str>,
+    pub scope: Option<&'a str>,
+    pub before: &'a SubscriptionUsage,
 }
 
 pub(crate) async fn redeem_claude_reset(
@@ -767,6 +755,7 @@ pub(crate) async fn redeem_claude_reset(
     reset_id: Option<&str>,
     scope: Option<&str>,
     retry: bool,
+    announce: impl FnOnce(&ResetAttempt<'_>),
 ) -> Result<ResetRedemption, SubscriptionError> {
     let home = claude_credential_home(
         account
@@ -790,9 +779,7 @@ pub(crate) async fn redeem_claude_reset(
         crate::provider_account::identity::validate_identity(account, &identity, accounts)
             .map_err(SubscriptionError::NeedsLogin)?;
         let organization = organization.filter(|s| !s.is_empty()).ok_or_else(|| {
-            SubscriptionError::Unavailable(
-                "Claude profile did not report organization UUID; nothing sent".into(),
-            )
+            SubscriptionError::Unavailable("Claude profile did not report organization UUID".into())
         })?;
         let usage = read_claude_reset_usage(
             &client,
@@ -818,10 +805,15 @@ pub(crate) async fn redeem_claude_reset(
         .or_else(|| scope.map(str::to_owned));
     if !valid_reset_key(&id, 40, false) {
         return Err(SubscriptionError::Unavailable(
-            "invalid Claude reset ID; nothing sent".into(),
+            "invalid Claude reset ID".into(),
         ));
     }
-    print_reset_attempt(key, Some(&id), scope.as_deref(), &before);
+    announce(&ResetAttempt {
+        key,
+        reset_id: Some(&id),
+        scope: scope.as_deref(),
+        before: &before,
+    });
     ensure_claude_credential_unchanged(&home, credential.expose_secret())?;
     #[cfg(test)]
     let base =
@@ -838,10 +830,14 @@ pub(crate) async fn redeem_claude_reset(
             .json(&json!({"program":"cedar_ember","grant_id":id,"request_id":key}))
             .send()
     };
+    let unconfirmed = |message: String| SubscriptionError::Unconfirmed {
+        message,
+        reset_id: Some(id.clone()),
+    };
     let attempt = async {
-        let mut response = send(token.expose_secret().to_owned()).await.map_err(|_| {
-            SubscriptionError::Unavailable("Claude reset request failed or timed out".into())
-        })?;
+        let mut response = send(token.expose_secret().to_owned())
+            .await
+            .map_err(|_| unconfirmed("Claude reset request failed or timed out".into()))?;
         if response.status() == reqwest::StatusCode::UNAUTHORIZED && !refreshed {
             (token, credential, _) = fresh_claude_token(&client, &home, true, None).await?;
             let (new_identity, new_org) =
@@ -855,9 +851,9 @@ pub(crate) async fn redeem_claude_reset(
                 ));
             }
             ensure_claude_credential_unchanged(&home, credential.expose_secret())?;
-            response = send(token.expose_secret().to_owned()).await.map_err(|_| {
-                SubscriptionError::Unavailable("Claude reset request failed or timed out".into())
-            })?;
+            response = send(token.expose_secret().to_owned())
+                .await
+                .map_err(|_| unconfirmed("Claude reset request failed or timed out".into()))?;
         }
         if response.status() == reqwest::StatusCode::FORBIDDEN {
             return Err(SubscriptionError::NeedsLogin(
@@ -865,15 +861,23 @@ pub(crate) async fn redeem_claude_reset(
             ));
         }
         if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            return Err(SubscriptionError::Unavailable(
-                "Claude reset rate limited (HTTP 429)".into(),
+            return Err(unconfirmed("Claude reset rate limited (HTTP 429)".into()));
+        }
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(SubscriptionError::NeedsLogin(
+                "reset rejected credentials (HTTP 401)".into(),
             ));
         }
-        classify_http_status(response.status(), "reset")?;
+        if !response.status().is_success() {
+            return Err(unconfirmed(format!(
+                "Claude reset returned HTTP {}",
+                response.status()
+            )));
+        }
         let result: Value = response
             .json()
             .await
-            .map_err(|_| SubscriptionError::Unavailable("invalid Claude reset response".into()))?;
+            .map_err(|_| unconfirmed("invalid Claude reset response".into()))?;
         let outcome = result["result"]
             .as_str()
             .filter(|s| {
@@ -887,19 +891,11 @@ pub(crate) async fn redeem_claude_reset(
                         | "unavailable"
                 )
             })
-            .ok_or_else(|| SubscriptionError::Unavailable("unknown Claude reset outcome".into()))?
+            .ok_or_else(|| unconfirmed("unknown Claude reset outcome".into()))?
             .to_owned();
         Ok((outcome, result["reason"].as_str().map(str::to_owned)))
     }
-    .await
-    .map_err(|error| match error {
-        SubscriptionError::NeedsLogin(message) => SubscriptionError::NeedsLogin(format!(
-            "{message}; retry with --idempotency-key {key} --reset-id {id}"
-        )),
-        other => SubscriptionError::Unavailable(format!(
-            "{other}; outcome unconfirmed; retry with --idempotency-key {key} --reset-id {id}"
-        )),
-    })?;
+    .await?;
     let after = read_claude_reset_usage(
         &client,
         &home,
@@ -975,8 +971,7 @@ fn codex_resets(value: &Value) -> Result<Resets, SubscriptionError> {
                         total: None,
                         usable_now: status == "available",
                         unavailable_reason: (status != "available").then(|| status.into()),
-                        clears: Vec::new(),
-                        gives_back_weekly: false,
+                        clears: None,
                         expires_at: credit["expiresAt"].as_i64(),
                     })
                 })
@@ -1098,6 +1093,7 @@ pub(crate) async fn redeem_codex_reset(
     reset_id: Option<&str>,
     scope: Option<&str>,
     retry: bool,
+    announce: impl FnOnce(&ResetAttempt<'_>),
 ) -> Result<ResetRedemption, SubscriptionError> {
     let access = crate::provider_account::codex_access::resolve(account, None).await?;
     crate::provider_account::identity::validate_identity(account, &access.usage.identity, accounts)
@@ -1113,7 +1109,12 @@ pub(crate) async fn redeem_codex_reset(
     let scope = selected
         .map(|r| r.scope.clone())
         .or_else(|| scope.map(str::to_owned));
-    print_reset_attempt(key, reset_id.as_deref(), scope.as_deref(), &before);
+    announce(&ResetAttempt {
+        key,
+        reset_id: reset_id.as_deref(),
+        scope: scope.as_deref(),
+        before: &before,
+    });
     let result = codex_request(
         &mut connection,
         "account/rateLimitResetCredit/consume",
@@ -1122,13 +1123,10 @@ pub(crate) async fn redeem_codex_reset(
     .await
     .map_err(|error| match error {
         error @ SubscriptionError::NeedsLogin(_) => error,
-        error => SubscriptionError::Unavailable(format!(
-            "{error}; reset outcome unconfirmed; retry only with --idempotency-key {key}{}",
-            reset_id
-                .as_ref()
-                .map(|id| format!(" --reset-id {id}"))
-                .unwrap_or_default()
-        )),
+        error => SubscriptionError::Unconfirmed {
+            message: error.to_string(),
+            reset_id: reset_id.clone(),
+        },
     })?;
     let outcome = result["outcome"]
         .as_str()
@@ -1138,11 +1136,9 @@ pub(crate) async fn redeem_codex_reset(
                 "reset" | "alreadyRedeemed" | "nothingToReset" | "noCredit"
             )
         })
-        .ok_or_else(|| {
-            SubscriptionError::Unavailable(
-                "codex returned an unknown reset outcome; retry only with the same idempotency key"
-                    .into(),
-            )
+        .ok_or_else(|| SubscriptionError::Unconfirmed {
+            message: "codex returned an unknown reset outcome".into(),
+            reset_id: reset_id.clone(),
         })?
         .to_string();
     let after = async {

@@ -77,8 +77,7 @@
             "total": null,
             "usable_now": true,
             "unavailable_reason": null,
-            "clears": [],
-            "gives_back_weekly": false,
+            "clears": null,
             "expires_at": 1800100000
           }
         ]

@@ -179,7 +179,14 @@ pub fn redeem_reset(
         reset_id,
         scope,
     ))
-    .map_err(|error| Error::outcome_unknown(&error))
+    .map_err(
+        |error| match error.downcast_ref::<crate::subscription::SubscriptionError>() {
+            Some(crate::subscription::SubscriptionError::Unconfirmed { .. }) => {
+                Error::outcome_unknown(&error)
+            }
+            _ => Error::refused(&error, ErrorCode::Invalid),
+        },
+    )
 }
 
 /// Hold a login on this Machine, or release holds with `auto`.

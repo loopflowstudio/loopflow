@@ -456,8 +456,8 @@ async fn managed_rows(
                     diagnostic = Some(reason);
                     Verification::Rejected
                 }
-                Err(crate::subscription::SubscriptionError::Unavailable(reason)) => {
-                    diagnostic = Some(reason);
+                Err(error) => {
+                    diagnostic = Some(error.to_string());
                     Verification::Unavailable
                 }
             }
@@ -858,13 +858,10 @@ fn row_lines(row: &AccountRow, now: i64) -> Vec<String> {
                             reset.unavailable_reason.as_deref().unwrap_or("unavailable")
                         }
                     ));
-                    if reset.gives_back_weekly {
-                        line.push_str(" · returns what Fable used to the weekly limit");
-                    } else if !reset.clears.is_empty() {
+                    if let Some(clears) = &reset.clears {
                         line.push_str(" · clears ");
                         line.push_str(
-                            &reset
-                                .clears
+                            &clears
                                 .iter()
                                 .map(|name| {
                                     let window = row.windows.iter().find(|w| w.window == *name);
@@ -879,6 +876,9 @@ fn row_lines(row: &AccountRow, now: i64) -> Vec<String> {
                                 .collect::<Vec<_>>()
                                 .join(", "),
                         );
+                    }
+                    if reset.scope == "fable" {
+                        line.push_str(" · returns it to the weekly limit");
                     }
                     if let Some(expiry) = reset.expires_at {
                         line.push_str(&format!(" · ends {}", timestamp(expiry)));
@@ -1126,6 +1126,11 @@ mod tests {
             row.provider = provider;
             row.verification = super::Verification::Accepted;
             row.windows[0].window = "seven_day".into();
+            let mut fable = row.windows[0].clone();
+            fable.window = "seven_day_fable".into();
+            fable.used_percent = 100;
+            row.windows.truncate(1);
+            row.windows.push(fable);
             row.resets = Some(Resets {
                 usable: 1,
                 unavailable: None,
@@ -1138,8 +1143,7 @@ mod tests {
                         total: Some(1),
                         usable_now: true,
                         unavailable_reason: None,
-                        clears: vec!["seven_day".into()],
-                        gives_back_weekly: false,
+                        clears: Some(vec!["seven_day".into()]),
                         expires_at: Some(1794614400),
                     },
                     Reset {
@@ -1150,8 +1154,7 @@ mod tests {
                         total: Some(1),
                         usable_now: false,
                         unavailable_reason: Some("unavailable".into()),
-                        clears: vec!["seven_day_fable".into()],
-                        gives_back_weekly: true,
+                        clears: Some(vec!["seven_day_fable".into()]),
                         expires_at: None,
                     },
                 ]),
@@ -1160,7 +1163,7 @@ mod tests {
             for expected in [
                 "resets: 1 usable (live)",
                 "1 of 1 left · usable now · clears weekly (12% used)",
-                "0 of 1 left · unavailable · returns what Fable used to the weekly limit",
+                "0 of 1 left · unavailable · clears weekly:fable (100% used) · returns it to the weekly limit",
             ] {
                 assert!(text.contains(expected), "{text}");
             }

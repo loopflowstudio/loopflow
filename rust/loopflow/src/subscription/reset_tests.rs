@@ -36,7 +36,7 @@ fn claude_reset_entitlements_and_selection() {
     let details = resets.resets.as_ref().unwrap();
     assert_eq!(details[0].scope, "weekly");
     assert_eq!(details[1].scope, "fable");
-    assert_eq!(details[1].clears, ["seven_day_fable"]);
+    assert_eq!(details[1].clears.as_deref().unwrap(), ["seven_day_fable"]);
     assert!(!details[2].usable_now);
     assert!(select_reset(Some(&resets), None, None, false, true)
         .unwrap_err()
@@ -215,6 +215,12 @@ async fn claude_reset_scoped_outcomes_and_retry_keep_request_identity() {
             retry.then_some("fable-reset"),
             Some("fable"),
             retry,
+            |attempt| {
+                assert_eq!(attempt.key, "same-key");
+                assert_eq!(attempt.reset_id, Some("fable-reset"));
+                assert_eq!(attempt.scope, Some("fable"));
+                assert_eq!(attempt.before.windows[1].used_percent, 100);
+            },
         )
         .await
         .unwrap();
@@ -255,17 +261,22 @@ async fn claude_reset_errors_do_not_claim_recovery_or_repeat_a_spend() {
             None,
             Some("fable"),
             false,
+            |_| {},
         )
         .await
-        .unwrap_err()
-        .to_string();
+        .unwrap_err();
+        if status == 403 {
+            assert!(matches!(error, super::SubscriptionError::NeedsLogin(_)));
+        } else {
+            assert!(
+                matches!(&error, super::SubscriptionError::Unconfirmed { reset_id, .. } if reset_id.as_deref() == Some("fable-reset"))
+            );
+        }
+        let error = error.to_string();
         if status == 429 {
             assert!(error.contains("rate limited"), "{error}");
         }
-        assert!(
-            error.contains("--idempotency-key lost-key --reset-id fable-reset"),
-            "{error}"
-        );
+        assert!(!error.contains("--idempotency-key"), "{error}");
         post(&server.await.unwrap());
     }
     let (_endpoints, server) = serve(
@@ -285,6 +296,7 @@ async fn claude_reset_errors_do_not_claim_recovery_or_repeat_a_spend() {
         None,
         Some("fable"),
         false,
+        |_| {},
     )
     .await
     .unwrap();
@@ -295,6 +307,7 @@ async fn claude_reset_errors_do_not_claim_recovery_or_repeat_a_spend() {
         json!({"cedar_ember":null}),
         json!({"cedar_ember":{"eligible":true,"grants":[]}}),
         usage(100),
+        json!({"limits":[],"cedar_ember":{"eligible":"changed"}}),
     ] {
         let (_endpoints, server) = serve(vec![(200, profile()), (200, body)], |_| {}).await;
         assert!(redeem_claude_reset(
@@ -303,7 +316,8 @@ async fn claude_reset_errors_do_not_claim_recovery_or_repeat_a_spend() {
             "key",
             None,
             None,
-            false
+            false,
+            |_| {},
         )
         .await
         .is_err());
@@ -348,6 +362,57 @@ async fn claude_reset_command_reconciles_routing_and_keeps_newer_rejection() {
     let store = crate::provider_account::open_account_store().await.unwrap();
     store.upsert_provider_account(&account).await.unwrap();
     seed_limits(&store, &account, 100).await;
+    let missing = tokio::task::spawn_blocking(|| {
+        crate::engine::account::redeem_reset("claude", "missing@", None, None, Some("fable"))
+    })
+    .await
+    .unwrap()
+    .unwrap_err();
+    assert_eq!(missing.code, crate::engine::ErrorCode::Invalid);
+    assert!(missing.message.contains("no managed claude login matches"));
+    assert!(!missing.message.contains("retry"));
+    let (_endpoints, server) = serve(vec![(200, profile()), (200, usage(100))], |_| {}).await;
+    let refused = tokio::task::spawn_blocking(|| {
+        crate::engine::account::redeem_reset("claude", "reset@", None, None, None)
+    })
+    .await
+    .unwrap()
+    .unwrap_err();
+    assert_eq!(refused.code, crate::engine::ErrorCode::Invalid);
+    assert!(refused.message.contains("choose --scope fable, weekly"));
+    assert_eq!(refused.message.matches("nothing sent").count(), 1);
+    assert!(!refused.message.contains("retry"));
+    assert_eq!(server.await.unwrap().len(), 2);
+    for (status, code) in [
+        (500, crate::engine::ErrorCode::OutcomeUnknown),
+        (403, crate::engine::ErrorCode::Invalid),
+    ] {
+        let (_endpoints, server) = serve(
+            vec![(200, profile()), (200, usage(100)), (status, json!({}))],
+            |_| {},
+        )
+        .await;
+        let error = tokio::task::spawn_blocking(|| {
+            crate::engine::account::redeem_reset("claude", "reset@", None, None, Some("fable"))
+        })
+        .await
+        .unwrap()
+        .unwrap_err();
+        assert_eq!(error.code, code);
+        let requests = server.await.unwrap();
+        let payload = post(&requests);
+        let key = payload["request_id"].as_str().unwrap();
+        assert_eq!(
+            error
+                .message
+                .matches(&format!("--idempotency-key {key} --reset-id fable-reset"))
+                .count(),
+            1,
+            "{}",
+            error.message
+        );
+    }
+
     assert!(resolve_provider_account_exact(
         Provider::Claude,
         None,
@@ -533,6 +598,7 @@ async fn claude_reset_authentication_refreshes_once_and_reuses_the_same_attempt(
             None,
             Some("fable"),
             false,
+            |_| {},
         )
         .await;
         if rejected_again {
@@ -572,7 +638,8 @@ async fn claude_reset_identity_and_credential_changes_send_nothing() {
         "key",
         None,
         Some("fable"),
-        false
+        false,
+        |_| {},
     )
     .await
     .is_err());
@@ -595,6 +662,7 @@ async fn claude_reset_identity_and_credential_changes_send_nothing() {
         None,
         Some("fable"),
         false,
+        |_| {},
     )
     .await
     .unwrap_err();
@@ -647,9 +715,36 @@ async fn claude_reset_usage_rejection_refreshes_before_spending() {
         None,
         Some("weekly"),
         false,
+        |_| {},
     )
     .await
     .unwrap();
     assert_eq!(result.scope.as_deref(), Some("weekly"));
     assert_eq!(post(&server.await.unwrap())["grant_id"], "weekly-reset");
+}
+
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn claude_reset_malformed_entitlements_keep_poll_windows() {
+    let _env = crate::journal::test_env_lock();
+    let root = tempfile::tempdir().unwrap();
+    let account = account(root.path());
+    let mut body = usage(100);
+    body["cedar_ember"]["grants"] = json!("changed shape");
+    let (_endpoints, server) = serve(vec![(200, body), (200, profile())], |_| {}).await;
+    let usage = super::poll_account(&account).await.unwrap();
+    assert_eq!(usage.windows.len(), 2);
+    assert_eq!(usage.windows[1].used_percent, 100);
+    assert!(usage.resets.is_none());
+    assert_eq!(server.await.unwrap().len(), 2);
+}
+
+#[test]
+fn codex_reset_unknown_clears_are_null() {
+    let resets = super::codex_resets(&json!({"availableCount":1,"credits":[{"id":"credit","resetType":"weekly","status":"available","expiresAt":null}]})).unwrap();
+    let reset = &resets.resets.as_ref().unwrap()[0];
+    assert!(reset.clears.is_none());
+    let wire = serde_json::to_value(reset).unwrap();
+    assert!(wire["clears"].is_null());
+    assert!(wire.get("gives_back_weekly").is_none());
 }

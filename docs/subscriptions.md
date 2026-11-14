@@ -548,8 +548,8 @@ $ lf account claude=personal@
   weekly:fable: 100% used, 0% left · live · resets 2026-11-18T20:00:00Z
   resets: 2 usable (live)
     weekly  full-reset-2611        1 of 1 left · usable now · clears weekly (70% used), weekly:fable (100% used) · ends 2026-12-10
-    fable   launch-2610-fable-6mo  1 of 1 left · usable now · returns what Fable used to the weekly limit · ends 2027-03-09
-    fable   launch-2610-fable      0 of 1 left · unavailable
+    fable   launch-2610-fable-6mo  1 of 1 left · usable now · clears weekly:fable (100% used) · returns it to the weekly limit · ends 2027-03-09
+    fable   launch-2610-fable      0 of 1 left · unavailable · clears weekly:fable (100% used) · returns it to the weekly limit · ends 2027-03-09
 
 $ lf account redeem-reset claude=personal@ --scope fable
 fable · launch-2610-fable-6mo · weekly 70% · weekly:fable 100%
@@ -591,7 +591,8 @@ Loopflow doesn't manage, and Claude API keys, have no resets line.
 `lf account --json` carries the same record for both providers in each row's
 `resets`: `usable`, `unavailable`, and `resets[]` with `id`, `scope`, `label`,
 `left`, `total`, `usable_now`, `unavailable_reason`, `clears`,
-`gives_back_weekly` and `expires_at`. `clears` uses the window names of the
+and `expires_at`. `clears` is null when the provider does not report it
+(Codex); otherwise it uses the window names of the
 row's `windows` (`seven_day`, `seven_day_fable`). A null `resets` is unknown.
 
 ### Spend one

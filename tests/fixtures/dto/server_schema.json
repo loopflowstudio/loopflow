@@ -9154,7 +9154,10 @@
           "items": {
             "type": "string"
           },
-          "type": "array"
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "expires_at": {
           "format": "int64",
@@ -9162,9 +9165,6 @@
             "integer",
             "null"
           ]
-        },
-        "gives_back_weekly": {
-          "type": "boolean"
         },
         "id": {
           "type": "string"
@@ -9213,7 +9213,6 @@
         "usable_now",
         "unavailable_reason",
         "clears",
-        "gives_back_weekly",
         "expires_at"
       ],
       "type": "object"

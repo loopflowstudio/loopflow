@@ -15,7 +15,7 @@ $ lf account claude=jack@
   resets: 2 usable (live)
     weekly  full-reset-2611        1 of 1 left · usable now · clears weekly (70% used), weekly:fable (18% used) · ends 2026-12-10
     fable   launch-2610-fable-6mo  1 of 1 left · usable now · clears weekly:fable (18% used) · returns it to the weekly limit · ends 2027-03-09
-    fable   launch-2610-fable      0 of 1 left · unavailable
+    fable   launch-2610-fable      0 of 1 left · unavailable · clears weekly:fable (18% used) · returns it to the weekly limit · ends 2027-03-09
 $ lf account redeem-reset claude=jack@ --scope fable
 fable · launch-2610-fable-6mo · weekly 70% · weekly:fable 100%
 Reset attempt 4b0e…; retry with --idempotency-key 4b0e… --reset-id launch-2610-fable-6mo
@@ -24,9 +24,6 @@ reset · fable · launch-2610-fable-6mo
   after   weekly 61% · weekly:fable 0%
 $ lf --account claude=jack@ -m fable …      # routes to the login again
 ```
-
-The Fable line is the target of direction 3 below; today it prints
-"returns what Fable used to the weekly limit" in place of `clears`.
 
 ## What Claude offers (established 2026-11-14)
 
@@ -138,8 +135,8 @@ pub struct Reset {
     pub id: String, pub scope: String,          // claude: session|weekly|fable|full; codex: its reset_type
     pub label: Option<String>, pub left: Option<u64>, pub total: Option<u64>,
     pub usable_now: bool, pub unavailable_reason: Option<String>,
-    pub clears: Vec<String>,                    // lf window names (seven_day_fable, not …overage_included)
-    pub gives_back_weekly: bool, pub expires_at: Option<i64>,
+    pub clears: Option<Vec<String>>,            // lf window names; null when unknown (Codex)
+    pub expires_at: Option<i64>,
 }
 ```
 
@@ -175,76 +172,51 @@ pub struct Reset {
 - No early-use refusal: naming the login and scope is the decision. The
   before-usage and the grant's `clears` percentages print before the request.
 
-## Next implement direction (concept review, 2026-11-14)
+## Concept review contract (2026-11-14)
 
-The built change matches the Target except where noted here. None of the six
-is built yet (checked 2026-11-14 against `4840fed886`). Each item is a change
-to make; the first two are what a person would notice.
+- Ordinary Claude polling retains windows when `cedar_ember` cannot decode,
+  reports resets unknown, and warns once per malformed response. Redemption
+  decodes strictly before any spend.
+- `SubscriptionError::Unconfirmed { message, reset_id }` covers transport,
+  429/5xx, unreadable replies and unknown outcomes after dispatch. The command
+  formats retry flags from the selected ID and key. Pre-send refusals do not
+  suggest retrying an attempt. Served errors distinguish `OutcomeUnknown`
+  from `Invalid`; 401/403 remain login refusals with retry flags after selection.
+- Fable status shows `clears weekly:fable (N% used)` and adds
+  `returns it to the weekly limit`.
+- `Reset` carries scope once; the private Claude decoder derives it from
+  provider `gives_back_weekly`. Unknown `clears` is null for Codex; Claude
+  supplies a list.
+- Providers call `announce(&ResetAttempt)` after selection, before dispatch;
+  only the command chooses terminal or served diagnostics.
 
-1. **A reset block lf can't decode must not cost the usage read.** Every
-   Claude poll now sends `?cedar_ember=1&skip_spend=1` (one read; the
-   "at-rejection poll keeps the plain URL" line above is dropped), and
-   `poll_claude` ends `resets: claude_resets(&body)?`. A shape change in this
-   private, undocumented block would make every Claude usage poll
-   `Unavailable`: status, routing and the at-rejection poll lose their
-   windows. In `poll_claude`, a block that fails to decode is `resets: None`
-   with one `tracing::warn!`; windows still return. Redemption keeps the
-   strict decode: there, an unreadable block is an error and nothing is sent.
-   Test: a usage body with valid `limits` and a malformed `cedar_ember`
-   returns the windows.
+Codex still lets the provider select when no scope is supplied. Claude stops
+when usable resets span several scopes.
 
-2. **"Unconfirmed" is one typed thing, not three strings.** Today the retry
-   instruction is added in three places: inside `redeem_claude_reset`
-   (`…outcome unconfirmed; retry with --idempotency-key K --reset-id ID`),
-   inside `redeem_codex_reset`, and again by the `with_context` in
-   `account.rs::redeem_reset`. The outer one wraps every error, so a refusal
-   that sent nothing ("choose --scope fable, weekly; nothing sent") reads
-   `reset attempt K; retry only with --idempotency-key K`, and for Claude it
-   omits the `--reset-id` a retry requires because it formats the flag the
-   person passed, not the grant lf chose. Served, `engine::account::redeem_reset`
-   maps all of them to `OutcomeUnknown` ("inspect the affected work before
-   retrying"), including a mistyped login.
-   - Add `SubscriptionError::Unconfirmed { message, reset_id: Option<String> }`,
-     returned only once the request has left (timeout, 429, 5xx, unknown
-     `result`, unreadable body). Everything before the send stays
-     `Unavailable` / `NeedsLogin` and says "nothing sent" once.
-   - `account.rs::redeem_reset` formats the retry command in one place, from
-     the key and the variant's `reset_id`; delete the `with_context` and both
-     inner `map_err` suffixes.
-   - `engine::account::redeem_reset`: `Unconfirmed` → `Error::outcome_unknown`;
-     any other failure → `Error::refused(.., ErrorCode::Invalid)`.
-   - A 401/403 answer is the provider refusing the login, so nothing was
-     spent: `NeedsLogin`, with the retry command appended by the same
-     formatter.
+The six points above are in the working tree (second review, 2026-11-14).
 
-3. **The Fable line shows what it clears.** `row_lines` prints either
-   "returns what Fable used to the weekly limit" or the `clears` list, so the
-   one number that decides a Fable spend (`weekly:fable 100% used`) is missing
-   from its own line. Always print `clears … (N% used)`; a `fable` reset adds
-   `· returns it to the weekly limit`. Update the demo above and
-   `docs/subscriptions.md` to match.
+### Next implement direction (unbuilt)
 
-4. **Drop `gives_back_weekly` from `Reset`.** Scope is derived from it
-   (`gives_back_weekly` → `fable`), so the wire carries the same fact twice
-   and Codex fills a Claude-only bool with `false`. Status text keys off
-   `scope == "fable"`. Remove it from the struct, fixtures, schema and the
-   doc's field list.
-
-5. **`clears` is `Option<Vec<String>>`.** Codex doesn't say what a credit
-   clears; `[]` on the wire reads as "clears nothing". Null for Codex, a list
-   for Claude, the same unknown-is-not-empty rule `Resets.resets` follows.
-
-6. **The command announces the attempt.** `subscription.rs::print_reset_attempt`
-   reaches up into `lf::commands::account::is_served()` and uses `eprintln!`.
-   `redeem_claude_reset` / `redeem_codex_reset` take
-   `announce: impl FnOnce(&ResetAttempt)` (key, reset ID, scope, before-usage),
-   called after selection and before the request; `account.rs` owns the
-   served/terminal switch with `diagnose!` as it did before this change.
-
-Considered and left: `select_reset(.., claude: bool)`. One rule for both
-providers ("several usable scopes and no selection: stop") would change Codex,
-which today lets the provider choose, and Codex redemption behaviour must
-survive.
+1. **A confirmed outcome is never reported as a refusal.** In
+   `lf/commands/account.rs::redeem_reset`, a failed
+   `reconcile_provider_account_capacity` after the provider answered returns
+   an error today; `engine::account::redeem_reset` maps it to
+   `ErrorCode::Invalid`, so a spent grant reads as "refused" and the
+   before/after lines are lost. Treat it like the failed after-read row
+   below: return the `Redemption` with the outcome, `after: null` and the
+   save failure in `refresh_error`. Nothing was recorded, so
+   `newer_observation_kept` stays false. Test: a `reset` outcome whose save
+   fails still returns the outcome.
+2. **One rule for the error tail, keyed on dispatch.** Before `announce`:
+   `; nothing sent`. After it, for `NeedsLogin` and `Unavailable` alike:
+   `; nothing spent; retry with …`. Today `Unavailable` after `announce`
+   (credential changed before the POST, or a failed refresh after a 401 the
+   POST already received) says "nothing sent" and drops the retry flags the
+   attempt line just printed.
+3. **Unconfirmed reads in order.** The message ends with the command to run:
+   `<what happened>; outcome unconfirmed; retry with --idempotency-key …`.
+   Today the retry flags sit before "outcome unconfirmed" because the
+   command appends to `message` inside the variant's `Display`.
 
 ## Absent and error states
 
@@ -256,7 +228,7 @@ survive.
 | scope has no usable grant | — | error naming usable scopes, nothing sent |
 | provider says `not_limited` / `cooldown` | — | outcome printed, exit 0 in `--json`, no capacity change claimed |
 | reply lost | — | error with key + reset ID to retry |
-| after-read fails | — | outcome kept, `after: null`, `refresh_error` |
+| after-read fails, or its save fails | — | outcome kept, `after: null`, `refresh_error` |
 | non-managed or API-key Claude login | no resets line | `no managed Claude login matches …` |
 
 ## Delete — do not maintain
@@ -268,6 +240,8 @@ survive.
 - The Codex-only `ensure!` in `redeem_reset` and the `banked resets:` /
   `Provider::Codex` branch in status text.
 - `--credit-id` / `credit_id` / Swift `creditId`.
+- `Reset.gives_back_weekly`, empty Codex `clears`, subscription-owned
+  `print_reset_attempt`, and string-based provider retry suffixes.
 
 Must survive: Codex redemption behaviour and its tests in
 `rust/loopflow/tests/auth_tests.rs` (reshaped to the new fields), the
@@ -307,8 +281,8 @@ key-before-request line, `served_reads.rs` spelling test.
 
 ## Checks (2026-11-14)
 
-- `cargo nextest run -p loopflow --lib -E 'test(subscription::reset_tests::) | test(lf::commands::account::account_status::tests::reset_status_) | test(lf::commands::account::account_status::tests::claude_usage_reconciliation_account_handlers_refresh_both_logins) | test(lf::commands::write::tests::) | test(server::schema::tests::)'` — 21 passed; scoped redemption, retry, authentication, failed after-read, exhaustion, newer rejection, status, DTOs.
-- `cargo nextest run -p loopflow --test integration -E 'test(auth_tests::banked_resets_require_explicit_redemption_and_reuse_attempt_identity) | test(documented_commands::)'` — 5 passed; Codex CLI regression took 62.914 s.
+- `cargo nextest run -p loopflow --lib -E 'test(subscription::reset_tests::) | test(lf::commands::account::account_status::tests::reset_status_) | test(lf::commands::write::tests::) | test(server::schema::tests::)'` — 22 passed; includes malformed entitlement polling, typed served refusals/unconfirmed attempts, selected-ID retry flags, Fable percentages and null Codex clears. Nextest reported one leaky schema test; macOS linker warned about the large unwind section.
+- `cargo nextest run -p loopflow --test integration -E 'test(auth_tests::banked_resets_require_explicit_redemption_and_reuse_attempt_identity) | test(documented_commands::)'` — 5 passed; Codex CLI regression took 72.618 s.
 - `cargo clippy --all-targets -- -D warnings` — passed on the final Rust tree.
 - `cargo fmt --all -- --check` — passed.
 - `uv run python scripts/check_architecture.py` — passed.

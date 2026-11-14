@@ -709,28 +709,62 @@ pub(crate) async fn redeem_reset(
     let revision = store
         .provider_account_capacity_revision(&account.provider, &account.account_id)
         .await?;
+    let mut announced_id = None;
+    let mut announced = false;
+    let announce = |attempt: &crate::subscription::ResetAttempt<'_>| {
+        announced = true;
+        announced_id = attempt.reset_id.map(str::to_owned);
+        diagnose!(
+            "{} · {} · {}",
+            attempt.scope.unwrap_or("provider choice"),
+            attempt.reset_id.unwrap_or("provider choice"),
+            crate::subscription::reset_usage_text(&attempt.before.windows)
+        );
+        diagnose!(
+            "Reset attempt {}; {}",
+            attempt.key,
+            reset_retry_command(attempt.key, attempt.reset_id)
+        );
+    };
     let redemption = match provider {
         Provider::Claude => {
             crate::subscription::redeem_claude_reset(
-                account, &accounts, &key, reset_id, scope, retry,
+                account, &accounts, &key, reset_id, scope, retry, announce,
             )
             .await
         }
         Provider::Codex => {
             crate::subscription::redeem_codex_reset(
-                account, &accounts, &key, reset_id, scope, retry,
+                account, &accounts, &key, reset_id, scope, retry, announce,
             )
             .await
         }
         _ => unreachable!("parse_managed_provider accepts only Claude and Codex"),
     }
-    .with_context(|| {
-        format!(
-            "reset attempt {key}; retry only with --idempotency-key {key}{}",
-            reset_id
-                .map(|id| format!(" --reset-id {id}"))
-                .unwrap_or_default()
-        )
+    .map_err(|error| {
+        use crate::subscription::SubscriptionError;
+        match error {
+            SubscriptionError::Unconfirmed { message, reset_id } => {
+                SubscriptionError::Unconfirmed {
+                    message: format!(
+                        "{message}; {}",
+                        reset_retry_command(&key, reset_id.as_deref())
+                    ),
+                    reset_id,
+                }
+            }
+            SubscriptionError::NeedsLogin(message) => SubscriptionError::NeedsLogin(if announced {
+                format!(
+                    "{message}; nothing spent; {}",
+                    reset_retry_command(&key, announced_id.as_deref())
+                )
+            } else {
+                format!("{message}; nothing sent")
+            }),
+            SubscriptionError::Unavailable(message) => {
+                SubscriptionError::Unavailable(format!("{message}; nothing sent"))
+            }
+        }
     })?;
     // Only the post-request observation can establish recovered capacity.
     let mut newer_observation_kept = false;
@@ -763,6 +797,15 @@ pub(crate) async fn redeem_reset(
         after: redemption.after.as_ref().ok().map(snapshot),
         refresh_error: redemption.after.as_ref().err().map(ToString::to_string),
     })
+}
+
+fn reset_retry_command(key: &str, reset_id: Option<&str>) -> String {
+    format!(
+        "retry with --idempotency-key {key}{}",
+        reset_id
+            .map(|id| format!(" --reset-id {id}"))
+            .unwrap_or_default()
+    )
 }
 
 fn print_reset_usage(label: &str, usage: &crate::engine::account::UsageSnapshot) {

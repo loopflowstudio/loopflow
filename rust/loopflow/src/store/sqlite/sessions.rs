@@ -1585,22 +1585,6 @@ impl SqliteStore {
         })
     }
 
-    /// Choose the agent of an unpublished capture. A published capture keeps
-    /// the provider it launched with.
-    pub fn retarget_unpublished_capture(
-        &self,
-        artifact_key: &str,
-        provider: &str,
-        model: Option<&str>,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "UPDATE agent_sessions SET provider=?2, model=?3 WHERE current_capture=?1 AND input_published=0",
-            params![capture_seq_in(&conn,artifact_key)?, provider, model],
-        )?;
-        Ok(())
-    }
-
     /// Assign future work without changing earlier attribution. Closed Sessions bind too.
     pub fn bind_session(
         &self,
@@ -1963,16 +1947,6 @@ fn require_current_actor_in(conn: &Connection, id: &str) -> StoreResult<()> {
 
 /// Append capture evidence before publication; an existing artifact key must
 /// retain its original conversation and caller.
-pub(super) fn capture_seq_in(conn: &Connection, artifact: &str) -> StoreResult<i64> {
-    conn.query_row(
-        "SELECT seq FROM session_events WHERE kind='captured' AND receipt_key=?1",
-        [artifact],
-        |row| row.get(0),
-    )
-    .optional()?
-    .ok_or(StoreError::NotFound)
-}
-
 fn capture_in(
     conn: &Connection,
     session: &LfSession,

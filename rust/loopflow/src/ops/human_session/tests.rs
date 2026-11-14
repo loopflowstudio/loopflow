@@ -1469,6 +1469,59 @@ fn recovery_refresh_recognizes_imported_history_before_attachment() {
 }
 
 #[test]
+fn a_session_switched_to_another_provider_resumes_on_it() {
+    let _lock = crate::journal::test_env_lock();
+    let home = SessionHome::new();
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let store = home.store().await;
+        let repo = loopflow_test_support::TestRepo::new();
+        let (record, _) = {
+            let _claude = crate::config::settings::select_invocation(
+                serde_yaml_ng::from_str("agent: claude").unwrap(),
+            );
+            super::primary::ensure(&store, repo.path(), None)
+                .await
+                .unwrap()
+        };
+        let session = store.session(&record.id).await.unwrap().unwrap();
+        assert_eq!(session.provider.as_deref(), Some("claude"));
+
+        // `lf -a codex resume`: the input it appends runs on Codex.
+        let switched = {
+            let _codex = crate::config::settings::select_invocation(
+                serde_yaml_ng::from_str("agent: codex").unwrap(),
+            );
+            super::append_input(&store, session).await.unwrap()
+        };
+        assert_eq!(switched.provider.as_deref(), Some("codex"));
+        let (_, manifest) = crate::session_record::resolve_manifest(
+            &crate::store::lf_home_dir(),
+            switched.input_key().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(manifest.harness, "codex");
+        let observation = crate::session_record::provider_session_observation(
+            &switched,
+            switched.input_key().unwrap(),
+            &"codex-thread".into(),
+            None,
+        );
+        store
+            .sqlite
+            .retain_session_observation(&switched, &observation)
+            .unwrap();
+
+        // A plain resume stays on Codex, in Codex's conversation.
+        let resumed = store.session(&record.id).await.unwrap().unwrap();
+        assert_eq!(resumed.provider.as_deref(), Some("codex"));
+        let config =
+            crate::agent::resolve_session_config(&resumed, &crate::lf::Cli::default()).unwrap();
+        assert_eq!(config.agent().unwrap(), "codex");
+        assert_eq!(config.resume_token, Some("codex-thread".into()));
+    });
+}
+
+#[test]
 fn opening_any_primary_without_a_request_only_reads() {
     let opening = super::first_turn(None);
     assert!(opening.contains("change no Work"));

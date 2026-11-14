@@ -646,3 +646,16 @@ move, `lf machine add` and `lf config repo --bind` minted mini's own planning
 key, and the move's check then refused; start mini's home over. A marker file the
 stand-in checks per host (exit 255, "Connection refused") makes either side
 unreachable without touching the other's store.
+
+## Test-only changes
+
+When the change moves or cuts tests, the people it is for are developers
+running them. Run each filter exactly as `rust/loopflow/tests/README.md`
+prints it, with `LF_*`/`REX_*` unset and stdin closed. Then break the
+production decision on purpose: one `sed` on the line the rows claim to
+check, run that family's filter, `git checkout -- <file>`. Do one for each
+family, plus one Clap → ops wiring break (e.g. drop `worktree` in
+`lf/commands/task_create.rs`) run against the kept full-Machine filter.
+A break no test notices is a missing row; add it, then repeat the break.
+Edit only from one shell, one cargo command at a time, so no other build
+compiles the mutated source.

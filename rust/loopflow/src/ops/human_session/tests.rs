@@ -273,14 +273,14 @@ use crate::session::LfSession;
 use crate::store::{open_ephemeral_store, SharedStore, StorageConfig};
 use crate::work::task::TaskId;
 
-pub(super) struct SessionHome {
+pub(crate) struct SessionHome {
     home: tempfile::TempDir,
     previous: Vec<(&'static str, Option<OsString>)>,
     _ambient: crate::test_ambient::EnvGuard,
 }
 
 impl SessionHome {
-    pub(super) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let ambient = crate::test_ambient::EnvGuard::new();
         let home = tempfile::tempdir().unwrap();
         let previous = ["LF_HOME", "LF_BIN"]
@@ -300,7 +300,11 @@ impl SessionHome {
         }
     }
 
-    pub(super) async fn store(&self) -> SharedStore {
+    pub(crate) fn path(&self) -> &std::path::Path {
+        self.home.path()
+    }
+
+    pub(crate) async fn store(&self) -> SharedStore {
         std::sync::Arc::new(
             open_ephemeral_store(&StorageConfig::sqlite(self.home.path().join("loopflow.db")))
                 .await

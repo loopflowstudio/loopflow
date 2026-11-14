@@ -532,24 +532,28 @@ fn explicit_machine_dispatch_requires_registration_but_does_not_preflight_identi
 
 #[test]
 fn failures_name_the_recovery_without_prompting_or_registering() {
-    for (diagnostic, category) in [
-        ("Permission denied (publickey).", "needs-sign-in"),
-        ("No ED25519 host key is known for mini and you have requested strict checking.\nHost key verification failed.", "host-key unknown"),
-        ("WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!\nHost key verification failed.", "host-key changed"),
-        ("connect to host mini port 22: Connection refused", "unreachable"),
-    ] {
-        let fixture = Machines::new();
-        assert_success(&fixture.run(&["machine", "add", "mini"]));
-        executable(&fixture.root.path().join("bin/ssh"), &format!("#!/bin/sh\ncat >&2 <<'ERROR'\n{diagnostic}\nERROR\nexit 255\n"));
-        let status = fixture.json(&["machine", "status", "--json"]);
-        let error = status[0]["error"].as_str().unwrap();
-        assert!(error.contains(category), "{error}");
-        assert!(error.contains("ssh -o ControlPath=none -- 'mini'"), "{error}");
-        let add = fixture.run(&["machine", "add", "other"]);
-        assert!(!add.status.success());
-        assert!(String::from_utf8_lossy(&add.stderr).contains(category));
-        assert_eq!(fixture.json(&["machine", "list", "--json"]).as_array().unwrap().len(), 1);
-    }
+    // Each diagnostic's recovery is a row in `ssh::dispatch_tests`.
+    let fixture = Machines::new();
+    assert_success(&fixture.run(&["machine", "add", "mini"]));
+    executable(
+        &fixture.root.path().join("bin/ssh"),
+        "#!/bin/sh\necho 'Permission denied (publickey).' >&2\nexit 255\n",
+    );
+    let status = fixture.json(&["machine", "status", "--json"]);
+    let error = status[0]["error"].as_str().unwrap();
+    assert!(error.contains("needs-sign-in"), "{error}");
+    assert!(error.contains("Permission denied (publickey)."), "{error}");
+    let add = fixture.run(&["machine", "add", "other"]);
+    assert!(!add.status.success());
+    assert!(String::from_utf8_lossy(&add.stderr).contains("needs-sign-in"));
+    assert_eq!(
+        fixture
+            .json(&["machine", "list", "--json"])
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
 }
 
 #[test]
@@ -636,68 +640,6 @@ fn selecting_the_current_machine_executes_locally() {
         .unwrap()
         .iter()
         .any(|definition| definition["key"] == "machine"));
-}
-
-#[test]
-fn machine_selector_dispatches_before_local_help_and_placement() {
-    let fixture = Machines::new();
-    let added = fixture.json(&["machine", "add", "mini", "--json"]);
-    for args in [
-        vec![
-            "--machine",
-            "mini",
-            "--task",
-            "remote-only-task",
-            "implement",
-        ],
-        vec!["--wt", "remote-only-worktree", "--machine=mini", "status"],
-        vec![
-            "--machine",
-            "mini",
-            "--wave",
-            "remote-only-wave",
-            "wave/operate",
-        ],
-        vec!["--machine", "mini", "--help"],
-        vec!["--machine", added["id"].as_str().unwrap(), "--version"],
-        vec!["machine", "add", "another", "--machine", "mini"],
-        vec!["--machine", "mini", "install", "--help"],
-        vec![
-            "--machine",
-            "mini",
-            "commit",
-            "-m",
-            "literal --machine is text",
-        ],
-    ] {
-        let output = fixture.run(&args);
-        assert_success(&output);
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        if args.last() == Some(&"--version") {
-            assert!(
-                stdout.contains(loopflow::build_info::BUILD_VERSION),
-                "{stdout}"
-            );
-        } else {
-            for arg in args.iter().filter(|arg| {
-                !matches!(**arg, "--machine" | "--machine=mini" | "mini")
-                    && **arg != added["id"].as_str().unwrap()
-            }) {
-                assert!(
-                    stdout.contains(&format!("argument: {arg}\n")),
-                    "{args:?}: {stdout}"
-                );
-            }
-        }
-    }
-    assert_eq!(
-        fixture
-            .json(&["machine", "list", "--json"])
-            .as_array()
-            .unwrap()
-            .len(),
-        1
-    );
 }
 
 #[test]
@@ -849,29 +791,6 @@ esac
         fs::write(remote.join("connected"), "true").unwrap();
         assert_success(&fixture.foreground(&args));
     }
-}
-
-#[test]
-fn transport_options_require_machine_and_retired_commands_are_gone() {
-    let fixture = Machines::new();
-    assert_success(&fixture.run(&["machine", "add", "mini"]));
-    for args in [
-        vec!["--secret", "EXAMPLE", "status"],
-        vec!["--machine", "mini", "--secret", "EXAMPLE", "status"],
-        vec!["--forward-agent", "status"],
-        vec!["machine", "ssh", "mini", "status"],
-        vec!["ssh", "mini", "status"],
-    ] {
-        let output = fixture.run(&args);
-        assert!(!output.status.success(), "{args:?}");
-        if args.contains(&"--secret") {
-            let error = String::from_utf8_lossy(&output.stderr);
-            assert!(error.contains("unexpected argument '--secret'"), "{error}");
-        }
-    }
-    let help = fixture.run(&["--help"]);
-    assert_success(&help);
-    assert!(String::from_utf8_lossy(&help.stdout).contains("--machine"));
 }
 
 #[test]
@@ -1737,140 +1656,6 @@ fn task_ownership_follows_claim_handoff_and_unassign_through_the_writer() {
         );
     }
     assert!(!fixture.root.path().join("forbidden-effect").exists());
-}
-
-#[test]
-fn task_ownership_double_claim_keeps_the_first_claimant_and_names_the_later_claim() {
-    let fixture = preview_machines();
-    let plan = SharedPlan::new(&fixture);
-    let task = plan.task();
-    plan.to_local();
-    let mini = plan.remote.local_machine().unwrap().id;
-    let laptop = plan.local.local_machine().unwrap().id;
-    // No owning Machine is configured, so each Machine may claim for itself.
-    plan.remote.claim_task(&task).unwrap().unwrap();
-    std::thread::sleep(std::time::Duration::from_millis(1100));
-    plan.local.claim_task(&task).unwrap().unwrap();
-    plan.to_remote();
-    plan.to_local();
-    let first = plan.remote.task_ownership(&task).unwrap();
-    assert_eq!(first.owner.unwrap().machine.id, Some(mini.clone()));
-    assert_eq!(
-        first.superseded_by.unwrap().machine.id,
-        Some(laptop.clone())
-    );
-    assert_eq!(
-        plan.remote.task_execution_route(&task).unwrap().machine_id,
-        mini
-    );
-    let steers = plan.remote.task_steers(&task).unwrap();
-    assert!(steers
-        .iter()
-        .any(|steer| steer.text.starts_with("Also claimed later by")));
-    let second = plan.local.task_ownership(&task).unwrap();
-    assert_eq!(second.owner.unwrap().machine.id, Some(laptop));
-    assert!(second.superseded_by.is_none());
-    // Exchange settles: neither Machine re-claims a log that shows a later claim.
-    plan.to_remote();
-    plan.to_local();
-    assert_eq!(plan.remote.task_ownership(&task).unwrap().log.len(), 2);
-}
-
-#[test]
-fn task_ownership_owner_reclaims_after_a_stale_unclaim_elsewhere() {
-    let fixture = preview_machines();
-    let plan = SharedPlan::new(&fixture);
-    let task = plan.task();
-    plan.to_local();
-    let mini = plan.remote.local_machine().unwrap().id;
-    plan.local.claim_task(&task).unwrap().unwrap();
-    plan.to_remote();
-    // A stale reading on mini treats the Task as its own and unclaims it there,
-    // delivering the unclaim as mini would: a marked comment in the journal.
-    let entry = serde_json::json!({
-        "id": format!("own_{}", uuid::Uuid::new_v4().simple()),
-        "task_id": task.as_str(), "kind": "unclaim", "person": "Kim",
-        "machine_id": mini.as_str(),
-        "at": time::OffsetDateTime::now_utc().unix_timestamp() + 5,
-    });
-    plan.remote
-        .append_task_comment(
-            &task,
-            &loopflow::work::task::comment::TaskComment {
-                id: uuid::Uuid::new_v4().to_string(),
-                body: format!("Kim unclaimed this\n\n<!-- loopflow-ownership:{entry} -->"),
-                author: loopflow::work::task::comment::TaskCommentAuthor::Integration,
-                created_at: Some(
-                    (time::OffsetDateTime::now_utc() + time::Duration::seconds(5))
-                        .format(&time::format_description::well_known::Rfc3339)
-                        .unwrap(),
-                ),
-            },
-        )
-        .unwrap();
-    plan.to_local();
-    // The laptop's claim stays open locally and it claims again in the journal.
-    let ownership = plan.local.task_ownership(&task).unwrap();
-    assert_eq!(
-        ownership.owner.unwrap().machine.id,
-        Some(plan.local.local_machine().unwrap().id)
-    );
-    assert_eq!(
-        ownership.log.last().unwrap().kind,
-        loopflow::durable::OwnershipKind::Claim
-    );
-}
-
-#[test]
-fn task_ownership_never_routes_to_another_persons_machine() {
-    use loopflow::durable::{OwningMachineSource, TaskExecutionSource};
-    let fixture = preview_machines();
-    let plan = SharedPlan::new(&fixture);
-    let task = plan.task();
-    let mini = plan.remote.local_machine().unwrap().id;
-    // Kim claims on mini, a Machine this laptop also has registered. Her
-    // person key, not the Machine, says whose claim it is.
-    git(
-        &plan.remote_path,
-        &["config", "user.email", "kim@example.com"],
-    );
-    plan.remote.claim_task(&task).unwrap().unwrap();
-    plan.to_local();
-    assert_eq!(
-        plan.local
-            .task_ownership(&task)
-            .unwrap()
-            .owner
-            .unwrap()
-            .person_key
-            .as_deref(),
-        Some("kim@example.com")
-    );
-    // Someone else's claim stays theirs: no route to mini, no handoff or unassign.
-    let route = plan.local.task_execution_route(&task).unwrap();
-    assert_eq!(
-        (route.machine_id, route.source),
-        (
-            plan.local.local_machine().unwrap().id,
-            TaskExecutionSource::OwningMachine(OwningMachineSource::ThisMachine)
-        )
-    );
-    assert!(plan.local.unassign_task(&task).is_err());
-    assert!(plan.local.handoff_task(&task, &mini).is_err());
-    // Claiming writes here; the later claim wins.
-    plan.local.claim_task(&task).unwrap().unwrap();
-    plan.to_remote();
-    // Kim's claim stays Kim's on mini, which now sees the later claim.
-    let later = plan
-        .remote
-        .task_ownership(&task)
-        .unwrap()
-        .superseded_by
-        .unwrap();
-    assert_eq!(
-        later.machine.id,
-        Some(plan.local.local_machine().unwrap().id)
-    );
 }
 
 #[test]

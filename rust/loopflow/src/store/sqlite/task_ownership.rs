@@ -992,11 +992,14 @@ impl SqliteStore {
 mod tests {
     use super::{local_label, log_in, read_log, Reading, Row};
     use crate::durable::{
-        MachineId, MachineRef, OwnershipEntryId, OwnershipKind, TaskId, TaskOwner,
-        TaskOwnershipEntry,
+        MachineId, MachineRef, OwnershipEntryId, OwnershipKind, OwningMachineSource, RepositoryId,
+        TaskExecutionSource, TaskId, TaskOwner, TaskOwnershipEntry,
     };
+    use crate::planning_git::PlanningDestination;
     use crate::store::sqlite::SqliteStore;
+    use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
     use crate::work::task::NewTask;
+    use loopflow_test_support::TestRepo;
 
     fn published_bodies(store: &SqliteStore, task: &TaskId) -> Vec<String> {
         let conn = store.conn.lock().unwrap();
@@ -1163,5 +1166,228 @@ mod tests {
         assert!(bodies
             .iter()
             .all(|body| !body.contains("kims-basement-mini")));
+    }
+
+    /// One Machine's store and checkout of the shared repository.
+    struct Side {
+        store: SqliteStore,
+        repo: TestRepo,
+        path: String,
+    }
+
+    /// A laptop and mini sharing one Task's planning; `to_laptop`/`to_mini`
+    /// exchange the planning journal.
+    struct Pair {
+        laptop: Side,
+        mini: Side,
+        destination: PlanningDestination,
+        task: TaskId,
+        _dir: tempfile::TempDir,
+    }
+
+    impl Pair {
+        /// mini creates the Task; the laptop has not seen it yet.
+        fn new() -> Self {
+            let dir = tempfile::tempdir().unwrap();
+            let repository = RepositoryId::new();
+            let destination =
+                PlanningDestination::new("/unused/fixture", "refs/loopflow/planning/shared/owners")
+                    .unwrap();
+            let side = |name: &str| {
+                let store = SqliteStore::open_ephemeral(&dir.path().join(name)).unwrap();
+                let repo = TestRepo::new();
+                let path = repo.path().canonicalize().unwrap();
+                let path = path.to_str().unwrap().to_owned();
+                store.bind_repository(&path, &repository).unwrap();
+                store.bind_peer_planning(&path, &destination).unwrap();
+                Side { store, repo, path }
+            };
+            let (laptop, mini) = (side("laptop.db"), side("mini.db"));
+            let project = mini
+                .store
+                .ensure_wave_project(&mini.path, "owners")
+                .unwrap();
+            let task = mini
+                .store
+                .create_task(&NewTask {
+                    repository_id: mini.store.ensure_repository(&mini.path).unwrap(),
+                    id: TaskId::new(),
+                    project_id: Some(project.id),
+                    title: "Ownership demo".into(),
+                    description: String::new(),
+                    due_date: None,
+                })
+                .unwrap()
+                .id;
+            Self {
+                laptop,
+                mini,
+                destination,
+                task,
+                _dir: dir,
+            }
+        }
+
+        fn exchange(&self, from: &Side, to: &Side) {
+            let destination = self.destination.id();
+            let journal = from
+                .store
+                .export_peer_planning(&from.path, &destination)
+                .unwrap();
+            to.store
+                .import_peer_planning(
+                    &to.path,
+                    &destination,
+                    &uuid::Uuid::new_v4().to_string(),
+                    &journal,
+                )
+                .unwrap();
+        }
+
+        fn to_laptop(&self) {
+            self.exchange(&self.mini, &self.laptop);
+        }
+
+        fn to_mini(&self) {
+            self.exchange(&self.laptop, &self.mini);
+        }
+    }
+
+    #[test]
+    fn a_double_claim_keeps_the_first_claimant_and_names_the_later_claim() {
+        let pair = Pair::new();
+        let task = &pair.task;
+        pair.to_laptop();
+        let mini = pair.mini.store.local_machine().unwrap().id;
+        let laptop = pair.laptop.store.local_machine().unwrap().id;
+        // No owning Machine is configured, so each Machine may claim for itself.
+        pair.mini.store.claim_task(task).unwrap().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        pair.laptop.store.claim_task(task).unwrap().unwrap();
+        pair.to_mini();
+        pair.to_laptop();
+        let first = pair.mini.store.task_ownership(task).unwrap();
+        assert_eq!(first.owner.unwrap().machine.id, Some(mini.clone()));
+        assert_eq!(
+            first.superseded_by.unwrap().machine.id,
+            Some(laptop.clone())
+        );
+        assert_eq!(
+            pair.mini
+                .store
+                .task_execution_route(task)
+                .unwrap()
+                .machine_id,
+            mini
+        );
+        assert!(pair
+            .mini
+            .store
+            .task_steers(task)
+            .unwrap()
+            .iter()
+            .any(|steer| steer.text.starts_with("Also claimed later by")));
+        let second = pair.laptop.store.task_ownership(task).unwrap();
+        assert_eq!(second.owner.unwrap().machine.id, Some(laptop));
+        assert!(second.superseded_by.is_none());
+        // Exchange settles: neither Machine re-claims a log that shows a later claim.
+        pair.to_mini();
+        pair.to_laptop();
+        assert_eq!(pair.mini.store.task_ownership(task).unwrap().log.len(), 2);
+    }
+
+    #[test]
+    fn the_owner_reclaims_after_a_stale_unclaim_elsewhere() {
+        let pair = Pair::new();
+        let task = &pair.task;
+        pair.to_laptop();
+        let mini = pair.mini.store.local_machine().unwrap().id;
+        pair.laptop.store.claim_task(task).unwrap().unwrap();
+        pair.to_mini();
+        // A stale reading on mini treats the Task as its own and unclaims it there,
+        // delivering the unclaim as mini would: a marked comment in the journal.
+        let later = time::OffsetDateTime::now_utc() + time::Duration::seconds(5);
+        let entry = serde_json::json!({
+            "id": format!("own_{}", uuid::Uuid::new_v4().simple()),
+            "task_id": task.as_str(), "kind": "unclaim", "person": "Kim",
+            "machine_id": mini.as_str(),
+            "at": later.unix_timestamp(),
+        });
+        pair.mini
+            .store
+            .append_task_comment(
+                task,
+                &TaskComment {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    body: format!("Kim unclaimed this\n\n<!-- loopflow-ownership:{entry} -->"),
+                    author: TaskCommentAuthor::Integration,
+                    created_at: Some(
+                        later
+                            .format(&time::format_description::well_known::Rfc3339)
+                            .unwrap(),
+                    ),
+                },
+            )
+            .unwrap();
+        pair.to_laptop();
+        // The laptop's claim stays open locally and it claims again in the journal.
+        let ownership = pair.laptop.store.task_ownership(task).unwrap();
+        assert_eq!(
+            ownership.owner.unwrap().machine.id,
+            Some(pair.laptop.store.local_machine().unwrap().id)
+        );
+        assert_eq!(ownership.log.last().unwrap().kind, OwnershipKind::Claim);
+    }
+
+    #[test]
+    fn another_persons_claim_never_routes_work_to_their_machine() {
+        let pair = Pair::new();
+        let task = &pair.task;
+        let mini = pair.mini.store.local_machine().unwrap().id;
+        let laptop = pair.laptop.store.local_machine().unwrap().id;
+        // Kim claims on mini, a Machine this laptop also has registered. Her
+        // person key, not the Machine, says whose claim it is.
+        assert!(std::process::Command::new("git")
+            .args(["config", "user.email", "kim@example.com"])
+            .current_dir(pair.mini.repo.path())
+            .status()
+            .unwrap()
+            .success());
+        pair.mini.store.claim_task(task).unwrap().unwrap();
+        pair.to_laptop();
+        assert_eq!(
+            pair.laptop
+                .store
+                .task_ownership(task)
+                .unwrap()
+                .owner
+                .unwrap()
+                .person_key
+                .as_deref(),
+            Some("kim@example.com")
+        );
+        // Someone else's claim stays theirs: no route to mini, no handoff or unassign.
+        let route = pair.laptop.store.task_execution_route(task).unwrap();
+        assert_eq!(
+            (route.machine_id, route.source),
+            (
+                laptop.clone(),
+                TaskExecutionSource::OwningMachine(OwningMachineSource::ThisMachine)
+            )
+        );
+        assert!(pair.laptop.store.unassign_task(task).is_err());
+        assert!(pair.laptop.store.handoff_task(task, &mini).is_err());
+        // Claiming writes here; the later claim wins.
+        pair.laptop.store.claim_task(task).unwrap().unwrap();
+        pair.to_mini();
+        // Kim's claim stays Kim's on mini, which now sees the later claim.
+        let later = pair
+            .mini
+            .store
+            .task_ownership(task)
+            .unwrap()
+            .superseded_by
+            .unwrap();
+        assert_eq!(later.machine.id, Some(laptop));
     }
 }

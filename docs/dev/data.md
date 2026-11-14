@@ -193,8 +193,10 @@ While a write transaction is open, every other writer on the Machine waits:
 - Never hold one across an `await`, a request or a provider call.
 
 `store::query_plans` traces what a hot path executes on a fixture store, then
-plans each statement twice: unanalyzed, and with `sqlite_stat1` measured on a
-Machine at that size. A `SCAN` of a growing table fails the test, and so does
+plans each statement as prepared, parameters unbound, twice: unanalyzed, and
+with `sqlite_stat1` measured on a Machine at that size. Planning the prepared
+text keeps a branch whose guard is `?N AND …` in the plan; inlining a `0` would
+fold it to `WHERE 0`. A `SCAN` of a growing table fails the test, and so does
 a walk of a partial index on one that holds 1,000 or more rows in the measured
 statistics:
 
@@ -206,10 +208,13 @@ analyzed: SCAN session_events USING INDEX session_observation_receipt (176447 ro
 A partial index over a live subset (`processes_unfinished`, `open_sessions`)
 stays small because concurrency bounds it, so walking it passes. One over
 history grows with the table and gets an index on the filtered column like any
-other scan. Every partial index on a growing table needs a row in the measured
-statistics, or the test fails: fixture `ANALYZE` sees a handful of rows and
-would wave any walk through. When you add one, copy its `sqlite_stat1` row from
-a Machine store into `MEASURED` in `store/query_plans.rs`.
+other scan. A partial index filtered by kind, such as captured inputs or turn
+events, is history: a read over a time window range-scans it by `observed_at`
+(`session_capture_window`, `session_turn_window`). Every partial index on a
+growing table needs a row in the measured statistics, or the test fails:
+fixture `ANALYZE` sees a handful of rows and would wave any walk through. When
+you add one, copy its `sqlite_stat1` row from a Machine store into `MEASURED`
+in `store/query_plans.rs`.
 
 A new hot path gets a test there (`server::boundary` uses the same helpers).
 Foreign-key checks never appear in `EXPLAIN QUERY PLAN`: deleting a parent row

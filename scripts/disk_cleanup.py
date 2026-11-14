@@ -82,7 +82,7 @@ class OpenPath:
 class Activity:
     processes: dict[int, Process]
     files: tuple[OpenPath, ...]
-    agents: frozenset[int] = frozenset()
+    agents: frozenset[int]
 
     def _under_agent(self, pid: int) -> bool:
         # pid 0 (kernel_task) is its own parent.

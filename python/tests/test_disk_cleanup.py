@@ -20,7 +20,7 @@ def _activity(paths=(), builders=()):
     processes = {999999: cleanup.Process(999999, 1, os.getuid(), "fixture", "cargo")}
     files = tuple(cleanup.OpenPath(999999, "txt", path) for path in paths)
     files += tuple(cleanup.OpenPath(999999, "cwd", path) for path in builders)
-    return cleanup.Activity(processes, files)
+    return cleanup.Activity(processes, files, frozenset())
 
 
 def _write(path: Path, age_days: float, size: int = 4096) -> None:
@@ -806,6 +806,7 @@ def test_activity_identifies_candidate_owner_not_repository_neighbor(cleaner, de
             cleanup.OpenPath(123, descriptor, candidate.path / "binary"),
             cleanup.OpenPath(456, "cwd", cleaner.home),
         ),
+        frozenset(),
     )
     assert activity.owners(candidate) == {123}
 
@@ -928,6 +929,7 @@ def test_owner_teardown_failure_preserves_output(cleaner, monkeypatch, failure) 
     activity = cleanup.Activity(
         {process.pid: process} if failure != "unknown" else {},
         (cleanup.OpenPath(process.pid, "txt", artifact),),
+        frozenset(),
     )
     monkeypatch.setattr(cleaner, "_activity", lambda: activity)
     changed = cleanup.Process(process.pid, 1, os.getuid(), "changed", "sleeper")
@@ -1056,6 +1058,7 @@ def test_project_owned_state_preserves_its_output_owner(cleaner, monkeypatch) ->
             cleanup.OpenPath(process.pid, "txt", repo / "target/debug/output"),
             cleanup.OpenPath(process.pid, "3u", reserved / "experiment.db"),
         ),
+        frozenset(),
     )
     monkeypatch.setattr(cleaner, "_activity", lambda: activity)
     assert cleaner.run() == 1
@@ -1138,6 +1141,7 @@ def test_protected_process_owner_prevents_reclamation(cleaner, monkeypatch, owne
     activity = cleanup.Activity(
         {process.pid: process},
         (cleanup.OpenPath(process.pid, "txt", repo / "target/debug/output"),),
+        frozenset(),
     )
     monkeypatch.setattr(cleaner, "_activity", lambda: activity)
     assert cleaner.run() == 1

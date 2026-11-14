@@ -259,12 +259,10 @@ struct TaskPatchLine: Equatable, Sendable {
         let source = patch as NSString
         source.enumerateSubstrings(in: NSRange(location: 0, length: source.length), options: .byLines) { line, range, _, _ in
             guard let line else { return }
-            if line.hasPrefix("@@") {
-                inHunk = true
-            } else if line.hasPrefix("diff ") {
-                inHunk = false
-            } else if inHunk, line.hasPrefix("+") || line.hasPrefix("-") {
-                lines.append(TaskPatchLine(range: range, added: line.hasPrefix("+")))
+            switch PatchLineKind.next(line, inHunk: &inHunk) {
+            case .added: lines.append(TaskPatchLine(range: range, added: true))
+            case .removed: lines.append(TaskPatchLine(range: range, added: false))
+            case .header, .hunk, .context: break
             }
         }
         return lines
@@ -279,6 +277,7 @@ final class TaskFilesStore {
         case pullRequest = "PR"
         case files = "Files"
     }
+    var comparison = ChangeComparison.workingTree(base: "parent")
     let pullRequest = PullRequestStore()
     var page = Page.files
     enum Navigator { case closed, dropdown, pinned }
@@ -343,6 +342,12 @@ final class TaskFilesStore {
     func noteInteraction() {
         lastInteraction = .now
         autoSelected = false
+    }
+
+    func presentFile(_ path: String) {
+        _ = document(path)
+        observation?.watch(path)
+        follow(path)
     }
 
     private func follow(_ path: String) {
@@ -578,7 +583,7 @@ final class TaskFilesStore {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = ["git", "-C", checkout, "check-ignore", "--stdin", "-z"]
-        let input = Pipe(), output = Pipe(), errors = Pipe()
+        let input = Pipe.uninherited(), output = Pipe.uninherited(), errors = Pipe.uninherited()
         process.standardInput = input
         process.standardOutput = output
         process.standardError = errors
@@ -655,7 +660,7 @@ final class TaskFilesStore {
         isRefreshingChanges = true
         defer { if generation == refreshGeneration { isRefreshingChanges = false } }
         do {
-            let changes = try await query.taskChanges(issue: issue, base: "parent")
+            let changes = try await query.taskChanges(issue: issue, base: comparison.base, head: comparison.head)
             guard !Task.isCancelled, generation == refreshGeneration else { return }
             self.changes = changes
             if selection == nil, let first = changes.scratch.first ?? changes.files.first?.path {
@@ -699,21 +704,22 @@ final class TaskFilesStore {
         observation?.watch(path)
         let document = selectedDocument
         let version = document?.editVersion
+        let target = comparison
         do {
             // Debounce edits; identity checks also protect transports that finish after cancellation.
             if document?.dirty == true { try await Task.sleep(for: .milliseconds(180)) }
-            let next = try await query.taskDiff(issue: issue, path: path, base: base,
-                                               draft: document?.dirty == true ? document?.text : nil)
+            let next = try await query.taskDiff(issue: issue, path: path, base: base, head: target.head,
+                                               draft: target.head == nil && document?.dirty == true ? document?.text : nil)
             let lines = await Task.detached(priority: .userInitiated) {
                 TaskPatchLine.changes(in: next.patch)
             }.value
-            guard !Task.isCancelled, generation == diffGeneration, selection == path, changes?.baseCommit == base,
+            guard !Task.isCancelled, generation == diffGeneration, selection == path, changes?.baseCommit == base, comparison == target,
                   selectedDocument?.editVersion == version else { return }
             patchLines = lines
             diff = next
             changesError = nil
         } catch {
-            guard !Task.isCancelled, generation == diffGeneration, selection == path, changes?.baseCommit == base else { return }
+            guard !Task.isCancelled, generation == diffGeneration, selection == path, changes?.baseCommit == base, comparison == target else { return }
             changesError = error.localizedDescription
         }
     }

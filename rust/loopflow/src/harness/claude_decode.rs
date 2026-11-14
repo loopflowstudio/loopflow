@@ -75,7 +75,6 @@ impl ClaudeDecoder {
                 }
             }
         }
-        let start = out.len();
         let ended = process_line(&value, turn_id, &mut out, &mut self.state);
         // Backgrounded tasks still running: Claude starts its own turn when
         // they finish, and that turn's result answers the last request.
@@ -93,27 +92,6 @@ impl ClaudeDecoder {
                 out.push(output_fact(turn, json!({"text": text})));
             }
         }
-        // The turn's one usage row carries the numbers the live view showed:
-        // each assistant response updates it, and the result makes it final.
-        let usage = out[start..].iter().find_map(|decoded| match decoded {
-            Decoded::Display(ConversationEvent::UsageCheckpoint {
-                usage,
-                final_receipt,
-                ..
-            }) => Some((usage.clone(), *final_receipt)),
-            _ => None,
-        });
-        if let (Some((usage, final_receipt)), Some(owner)) =
-            (usage, turn.as_ref().or(self.pending.front()))
-        {
-            out.push(
-                ProviderFact::Usage {
-                    turn: owner.clone(),
-                    receipt: json!({"provider":"claude","usage":usage,"final":final_receipt}),
-                }
-                .into(),
-            );
-        }
         if deferred {
             self.state = ReaderState::default();
         } else if result || ended.is_some() {
@@ -127,6 +105,10 @@ impl ClaudeDecoder {
                         "result_id": value["uuid"],
                         "errors": value["errors"],
                         "subtype": value["subtype"],
+                        // The process's running cost under Claude's name, so
+                        // no reader sums it as one turn's: the transcript,
+                        // which writes the turn's usage row, gives none.
+                        "total_cost_usd": value["total_cost_usd"],
                     }),
                 }
                 .into(),
@@ -441,15 +423,18 @@ fn rate_limit_signal(value: &Value) -> Option<RateLimitSignal> {
     let reason = rate_type
         .map(|rate_type| format!("{status}: {rate_type}"))
         .unwrap_or_else(|| status.to_string());
-    // The stream event carries one window at a time; name it so the stored
-    // observation lands on the same key an on-demand poll would update.
+    let model = rate_type.and_then(claude_limit_model).map(str::to_owned);
+    // The stream event carries one window at a time, named as Claude names
+    // it, so the stored observation lands on the key a poll would update.
     let windows = utilization_percent
         .map(|used_percent| {
             vec![crate::store::AccountLimitWindow {
-                window: claude_window_name(rate_type).to_string(),
+                window: rate_type.unwrap_or("five_hour").to_string(),
                 used_percent,
                 resets_at,
                 plan: None,
+                model: model.clone(),
+                limited_until: None,
             }]
         })
         .unwrap_or_default();
@@ -459,14 +444,21 @@ fn rate_limit_signal(value: &Value) -> Option<RateLimitSignal> {
         limited,
         reason,
         windows,
+        model,
+        // `seven_day_overage_included`: the launched model needs usage
+        // credits, and they ran out.
+        credits: rate_type.is_some_and(|rate_type| rate_type.contains("overage")),
     })
 }
 
-fn claude_window_name(rate_type: Option<&str>) -> &'static str {
-    match rate_type {
-        Some(kind) if kind.contains("seven") || kind.contains("week") => "weekly",
-        _ => "session",
-    }
+/// The model a Claude limit is scoped to, when its type names one lf can
+/// launch (`seven_day_opus`). Other suffixes are not models and limit the
+/// whole account.
+fn claude_limit_model(rate_type: &str) -> Option<&str> {
+    let suffix = rate_type.rsplit('_').next()?;
+    crate::config::CLAUDE_MODEL_FAMILIES
+        .contains(&suffix)
+        .then_some(suffix)
 }
 
 fn parse_reset_timestamp(value: &Value) -> Option<i64> {
@@ -985,58 +977,42 @@ mod tests {
                 "Activity Working",
                 "Activity Yielded(true)",
                 r#"Output sess_claude_normal/request {"text":"done"}"#,
-                "Usage sess_claude_normal/request",
                 "TurnCompleted sess_claude_normal/request Completed",
             ]
         );
     }
 
     #[test]
-    fn each_turn_usage_fact_matches_the_live_receipt() {
+    fn a_turn_leaves_its_usage_row_to_the_transcript_and_keeps_its_cost() {
         let mut decoder = ClaudeDecoder::default();
         decoder.outbound("request");
         let lines = [
             json!({"type":"user","uuid":"request","session_id":"thread"}),
             json!({"type":"assistant","session_id":"thread","message":{"id":"msg_1","model":"claude-sonnet-4","content":[],
                 "usage":{"input_tokens":10,"output_tokens":4,"cache_read_input_tokens":20}}}),
-            json!({"type":"assistant","session_id":"thread","message":{"id":"msg_2","model":"claude-sonnet-4","content":[],
-                "usage":{"input_tokens":3,"output_tokens":2,"cache_creation_input_tokens":5}}}),
             json!({"type":"result","uuid":"result","session_id":"thread","subtype":"success","result":"done",
                 "model":"claude-sonnet-4","total_cost_usd":0.25,
-                "usage":{"input_tokens":13,"output_tokens":6,"cache_read_input_tokens":20,"cache_creation_input_tokens":5},
+                "usage":{"input_tokens":10,"output_tokens":4,"cache_read_input_tokens":20},
                 "modelUsage":{"claude-sonnet-4":{"contextWindow":200000}}}),
         ];
         let decoded: Vec<_> = lines
             .iter()
             .flat_map(|line| decoder.decode(&line.to_string(), "turn").unwrap())
             .collect();
-        let receipts: Vec<_> = decoded
-            .iter()
-            .filter_map(|decoded| match decoded.fact() {
-                Some(ProviderFact::Usage { turn, receipt }) => {
-                    assert_eq!(turn.turn, "request");
-                    Some(receipt.clone())
-                }
-                _ => None,
-            })
-            .collect();
-        let live = decoded.iter().rev().find_map(|decoded| match decoded {
-            Decoded::Display(ConversationEvent::UsageCheckpoint {
-                usage,
-                final_receipt: true,
-                ..
-            }) => Some(usage.clone()),
+        let facts: Vec<_> = decoded.iter().filter_map(Decoded::fact).collect();
+        let cost = facts.iter().find_map(|fact| match fact {
+            ProviderFact::TurnCompleted { detail, .. } => Some(detail["total_cost_usd"].clone()),
             _ => None,
         });
-        assert_eq!(receipts.len(), 3);
-        assert_eq!(receipts[1]["final"], false);
-        assert_eq!(receipts[1]["usage"]["total_input_tokens"], 38);
-        assert_eq!(receipts[2]["final"], true);
-        let recorded: TurnUsage = serde_json::from_value(receipts[2]["usage"].clone()).unwrap();
-        assert_eq!(Some(&recorded), live.as_ref());
-        assert_eq!(recorded.cost_usd, Some(0.25));
-        assert_eq!(recorded.peak_input_tokens, Some(30));
-        assert_eq!(recorded.context_window_tokens, Some(200000));
+        assert_eq!(cost, Some(json!(0.25)));
+        // The live view still shows the turn's numbers.
+        assert!(decoded.iter().any(|decoded| matches!(
+            decoded,
+            Decoded::Display(ConversationEvent::UsageCheckpoint {
+                final_receipt: true,
+                ..
+            })
+        )));
     }
 
     #[test]
@@ -1197,6 +1173,42 @@ mod tests {
         assert_eq!(signal.utilization_percent, Some(100));
         assert_eq!(signal.resets_at, Some(1_900_000_000));
         assert!(signal.reason.contains("five_hour"));
+    }
+
+    /// The event that started the November 2 failures.
+    #[test]
+    fn a_rejected_overage_is_a_credits_limit_naming_no_model() {
+        let signal = rate_limit(
+            r#"{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","rate_limit_type":"seven_day_overage_included","utilization":1.0,"resets_at":1900000000}}"#,
+        );
+        assert!(signal.limited);
+        assert!(signal.credits);
+        assert_eq!(signal.model, None);
+        assert_eq!(signal.windows[0].window, "seven_day_overage_included");
+        assert!(!rate_limit(
+            r#"{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","rate_limit_type":"seven_day","utilization":1.0}}"#,
+        )
+        .credits);
+    }
+
+    /// A limit on one model leaves the account's other models usable.
+    #[test]
+    fn a_model_scoped_limit_names_its_model_and_keeps_claude_s_window_name() {
+        let signal = rate_limit(
+            r#"{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","rate_limit_type":"seven_day_opus","utilization":1.0,"resets_at":1900000000}}"#,
+        );
+        assert!(signal.limited);
+        assert_eq!(signal.model.as_deref(), Some("opus"));
+        assert_eq!(signal.windows[0].window, "seven_day_opus");
+        assert_eq!(signal.windows[0].model.as_deref(), Some("opus"));
+        // Suffixes that are not models limit every model.
+        for kind in ["seven_day_oauth_apps", "seven_day_omelette", "five_hour"] {
+            let signal = rate_limit(&format!(
+                r#"{{"type":"rate_limit_event","rate_limit_info":{{"status":"rejected","rate_limit_type":"{kind}","utilization":1.0}}}}"#
+            ));
+            assert_eq!(signal.model, None, "{kind}");
+            assert_eq!(signal.windows[0].window, kind);
+        }
     }
 
     #[test]
@@ -1448,18 +1460,10 @@ mod tests {
                     turn: turn("request"),
                     answer: json!({"value": value})
                 },
-                ProviderFact::Usage {
-                    turn: turn("request"),
-                    receipt: json!({
-                        "provider":"claude",
-                        "usage":{"input_tokens":1,"total_input_tokens":1},
-                        "final":true
-                    })
-                },
                 ProviderFact::TurnCompleted {
                     turn: Some(turn("request")),
                     status: Lifecycle::Completed,
-                    detail: json!({"status":"completed","result_id":"result","errors":null,"subtype":"success"})
+                    detail: json!({"status":"completed","result_id":"result","errors":null,"subtype":"success","total_cost_usd":null})
                 },
             ]
         );

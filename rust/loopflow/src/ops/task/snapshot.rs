@@ -8,8 +8,6 @@ use super::{
     TaskFileSnapshot, TaskFileState, TaskSnapshot, TaskWorkspace,
 };
 use std::collections::BTreeMap;
-use std::fs::File;
-use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
@@ -108,25 +106,17 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         task.worktree.as_deref().unwrap_or(&repo),
         wave.as_ref().map(|w| w.slug()),
         &personal,
-        task.agent.as_deref(),
         None,
     );
-    let (provider, _) = parse_agent(&agent);
-    let machine_id = store
-        .task_checkout(&task.id)
-        .await
-        .map_err(task_error)?
-        .and_then(|row| row.machine_id);
+    let provider = agent.ok().map(|agent| parse_agent(&agent).0);
+    // A Task's worktree is its checkout on this Machine.
     let local_machine = store.local_machine().await.map_err(task_error)?;
+    let machine_id = task.worktree.is_some().then(|| local_machine.id.clone());
     let worktree = task.worktree.as_ref().map(|path| {
-        if machine_id.as_ref() == Some(&local_machine.id) {
-            crate::git::worktree_root(path)
-                .ok()
-                .and_then(|root| root.canonicalize().ok())
-                .unwrap_or_else(|| path.clone())
-        } else {
-            path.clone()
-        }
+        crate::git::worktree_root(path)
+            .ok()
+            .and_then(|root| root.canonicalize().ok())
+            .unwrap_or_else(|| path.clone())
     });
     let completion_pending = completion_pending(store, &task)?;
     let starter = |process: Option<&crate::id::LfProcessId>| {
@@ -155,7 +145,12 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         .sqlite
         .task_ship_stop(&task.id)
         .map_err(task_error)?
-        .map(|stop| mark(stop.at, stop.by.as_ref()))
+        .map(|stop| {
+            Ok::<_, OpsError>(super::ShipMark {
+                at: stop.at,
+                by: super::ship::stopper(&store.sqlite, &repo, &stop).map_err(task_error)?,
+            })
+        })
         .transpose()?;
     Ok(TaskSnapshot {
         machine_id,
@@ -180,7 +175,6 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         workspace_slug: task.workspace_slug,
         branch: task.worktree.as_ref().map(|_| task.branch.clone()),
         base_commit: task.worktree.as_ref().map(|_| task.base_commit.clone()),
-        agent: task.agent,
         provider,
         pr,
         latest_event,
@@ -197,11 +191,15 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
 /// Maximum byte length for Task file content, drafts and returned patches.
 pub const MAX_FILE_BYTES: usize = 1_000_000;
 
-pub fn task_changes(issue: &str, base: &str) -> OpsResult<TaskChangesSnapshot> {
+pub fn task_changes(issue: &str, base: &str, head: Option<&str>) -> OpsResult<TaskChangesSnapshot> {
     let (checkout, base) = comparison_context(issue, base)?;
+    let head = head
+        .map(|head| resolve_file_base(&checkout.worktree, &base, head))
+        .transpose()?;
     changes_snapshot(TaskComparison {
         checkout: TaskWorkspace::from(&checkout),
         base_commit: &base,
+        head_commit: head.as_deref(),
     })
 }
 
@@ -213,38 +211,51 @@ pub(super) fn changes_snapshot(workspace: TaskComparison<'_>) -> OpsResult<TaskC
             "diff",
             "--name-only",
             "-z",
-            &format!("{}..HEAD", workspace.base_commit),
+            &format!(
+                "{}..{}",
+                workspace.base_commit,
+                workspace.head_commit.unwrap_or("HEAD")
+            ),
         ],
         &mut files,
         |file| file.committed = true,
     )?;
-    record_changed_paths(
+    if workspace.head_commit.is_none() {
+        record_changed_paths(
+            workspace.checkout.worktree,
+            &["diff", "--cached", "--name-only", "-z"],
+            &mut files,
+            |file| file.staged = true,
+        )?;
+        record_changed_paths(
+            workspace.checkout.worktree,
+            &["diff", "--name-only", "-z"],
+            &mut files,
+            |file| file.unstaged = true,
+        )?;
+        record_changed_paths(
+            workspace.checkout.worktree,
+            &["ls-files", "--others", "--exclude-standard", "-z"],
+            &mut files,
+            |file| file.untracked = true,
+        )?;
+    }
+    let head_commit = git_output(
         workspace.checkout.worktree,
-        &["diff", "--cached", "--name-only", "-z"],
-        &mut files,
-        |file| file.staged = true,
-    )?;
-    record_changed_paths(
-        workspace.checkout.worktree,
-        &["diff", "--name-only", "-z"],
-        &mut files,
-        |file| file.unstaged = true,
-    )?;
-    record_changed_paths(
-        workspace.checkout.worktree,
-        &["ls-files", "--others", "--exclude-standard", "-z"],
-        &mut files,
-        |file| file.untracked = true,
-    )?;
-    let head_commit = git_output(workspace.checkout.worktree, &["rev-parse", "HEAD"])?
-        .trim()
-        .to_string();
+        &["rev-parse", workspace.head_commit.unwrap_or("HEAD")],
+    )?
+    .trim()
+    .to_string();
     let net = net_changed_paths(workspace)?;
     files.retain(|path, file| {
         file.old_path = net.get(path).cloned().flatten();
         net.contains_key(path) || file.untracked
     });
-    let (scratch, scratch_truncated) = scratch_paths(workspace.checkout.worktree)?;
+    let (scratch, scratch_truncated) = if workspace.head_commit.is_none() {
+        scratch_paths(workspace.checkout.worktree)?
+    } else {
+        (Vec::new(), false)
+    };
     let recovery = file_save::recovery_directory(workspace.checkout)?;
     Ok(TaskChangesSnapshot {
         recovery_directory: recovery
@@ -264,12 +275,22 @@ pub fn task_diff(
     issue: &str,
     path: Option<&str>,
     base: &str,
+    head: Option<&str>,
     draft: Option<&str>,
 ) -> OpsResult<TaskDiffSnapshot> {
     let (checkout, base) = comparison_context(issue, base)?;
+    if head.is_some() && draft.is_some() {
+        return Err(task_error(
+            "A commit comparison cannot include a working-tree draft",
+        ));
+    }
+    let head = head
+        .map(|head| resolve_file_base(&checkout.worktree, &base, head))
+        .transpose()?;
     let workspace = TaskComparison {
         checkout: TaskWorkspace::from(&checkout),
         base_commit: &base,
+        head_commit: head.as_deref(),
     };
     match draft {
         Some(draft) => draft_snapshot(
@@ -290,13 +311,9 @@ pub(super) fn diff_snapshot(
         Some(path) => net_changed_paths(workspace)?.remove(path).flatten(),
         None => None,
     };
-    let mut args = vec![
-        "diff",
-        "--no-ext-diff",
-        "--no-color",
-        workspace.base_commit,
-        "--",
-    ];
+    let mut args = vec!["diff", "--no-ext-diff", "--no-color", workspace.base_commit];
+    args.extend(workspace.head_commit);
+    args.push("--");
     // Both sides of a rename are needed for Git to preserve its identity.
     if let Some(old) = &old_path {
         args.push(old);
@@ -305,18 +322,20 @@ pub(super) fn diff_snapshot(
         args.push(path);
     }
     let mut patch = git_output_bytes(workspace.checkout.worktree, &args)?;
-    let untracked = untracked_paths(workspace.checkout.worktree)?;
+    let untracked = if workspace.head_commit.is_none() {
+        untracked_paths(workspace.checkout.worktree)?
+    } else {
+        Vec::new()
+    };
     let include_untracked = untracked
         .into_iter()
         .filter(|candidate| relative.as_ref().is_none_or(|path| path == candidate));
     for path in include_untracked {
-        let output = Command::new("git")
-            .current_dir(workspace.checkout.worktree)
-            .args(["diff", "--no-index", "--no-color", "--", "/dev/null", &path])
-            .output()
-            .map_err(|error| {
-                task_error(format!("failed to diff untracked file {path}: {error}"))
-            })?;
+        let output = crate::observe::git(
+            workspace.checkout.worktree,
+            &["diff", "--no-index", "--no-color", "--", "/dev/null", &path],
+        )
+        .map_err(|error| task_error(format!("failed to diff untracked file {path}: {error}")))?;
         if !output.status.success() && output.status.code() != Some(1) {
             return Err(task_error(format!(
                 "failed to diff untracked file {path}: {}",
@@ -331,6 +350,13 @@ pub(super) fn diff_snapshot(
 pub(crate) fn task_workspace_context(task: &Task) -> OpsResult<String> {
     const MAX_PATCH_TOKENS: usize = 15_000;
 
+    if !crate::git::commit_exists(task.worktree()?, &task.base_commit)? {
+        return Ok(format!(
+            "The recorded Task comparison base {} is unavailable in {}. The saved checkout and its edits remain the working copy. Inspect Git history and the actual files, recover the comparison base through managed sync, and do not treat the missing diff as an empty change.",
+            task.base_commit,
+            task.worktree()?.display()
+        ));
+    }
     let workspace = TaskComparison::new(task)?;
     let changes = changes_snapshot(workspace)?;
     let diff = diff_snapshot(workspace, None)?;
@@ -431,12 +457,9 @@ pub(super) fn file_snapshot(
     {
         snapshot.read_only_reason = Some("Git metadata is read-only.".into());
     }
-    let file = File::open(&absolute)
+    let (size, bytes) = crate::observe::file_bytes(&absolute, MAX_FILE_BYTES + 1)
         .map_err(|error| task_error(format!("cannot read Task file {relative:?}: {error}")))?;
-    snapshot.size_bytes = file.metadata()?.len();
-    let mut bytes = Vec::new();
-    file.take(MAX_FILE_BYTES as u64 + 1)
-        .read_to_end(&mut bytes)?;
+    snapshot.size_bytes = size;
     snapshot.state = if bytes.len() > MAX_FILE_BYTES {
         TaskFileState::Truncated
     } else if bytes.contains(&0) {
@@ -475,18 +498,17 @@ pub(super) fn resolve_file_base(
 }
 
 fn net_changed_paths(workspace: TaskComparison<'_>) -> OpsResult<BTreeMap<String, Option<String>>> {
-    let output = git_output_bytes(
-        workspace.checkout.worktree,
-        &[
-            "diff",
-            "--name-status",
-            "--no-ext-diff",
-            "--find-renames",
-            "-z",
-            workspace.base_commit,
-            "--",
-        ],
-    )?;
+    let mut args = vec![
+        "diff",
+        "--name-status",
+        "--no-ext-diff",
+        "--find-renames",
+        "-z",
+        workspace.base_commit,
+    ];
+    args.extend(workspace.head_commit);
+    args.push("--");
+    let output = git_output_bytes(workspace.checkout.worktree, &args)?;
     let entries = nul_paths(&output);
     let mut entries = entries.into_iter();
     let mut paths = BTreeMap::new();
@@ -559,6 +581,7 @@ fn patch_snapshot(
         issue_identifier: workspace.checkout.issue_identifier.to_string(),
         task_id: workspace.checkout.task_id.to_string(),
         base_commit: workspace.base_commit.to_string(),
+        head_commit: workspace.head_commit.map(str::to_owned),
         path,
         patch,
         binary,
@@ -687,10 +710,7 @@ pub(super) fn git_output(worktree: &Path, args: &[&str]) -> OpsResult<String> {
 }
 
 pub(super) fn git_output_bytes(worktree: &Path, args: &[&str]) -> OpsResult<Vec<u8>> {
-    let output = Command::new("git")
-        .current_dir(worktree)
-        .args(args)
-        .output()
+    let output = crate::observe::git(worktree, args)
         .map_err(|error| task_error(format!("failed to run git {}: {error}", args.join(" "))))?;
     if !output.status.success() {
         return Err(task_error(format!(

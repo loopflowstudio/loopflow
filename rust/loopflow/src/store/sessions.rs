@@ -82,9 +82,10 @@ impl Store {
         &self,
         expected_capture: Option<i64>,
         session: LfSession,
+        creation: Option<String>,
     ) -> StoreResult<LfSession> {
         run_sqlite(&self.sqlite, move |store| {
-            store.replace_session_input(expected_capture, session)
+            store.replace_session_input(expected_capture, session, creation.as_deref())
         })
         .await
     }

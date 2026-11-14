@@ -1,54 +1,82 @@
-//! Review requests and reads stay on the existing provider PR. No local review state.
+//! The text form of `lf pr reviews`. Reads and requests go through
+//! `engine::pr`; inline threads stay on GitHub.
 
-use std::process::Command;
+use crate::engine::pr::Reviews;
 
-use anyhow::Result;
-
-use crate::lf::commands::util::find_repo_root;
-use crate::process::CommandExit;
-
-pub(super) fn request(pr: Option<&str>, reviewers: &[String]) -> Result<()> {
-    let mut command = Command::new("gh");
-    command.args(["pr", "edit"]);
-    if let Some(pr) = pr {
-        command.arg(pr);
+/// Render the review report the way `lf pr reviews` prints it: the review
+/// commit is kept so an old approval never reads as one of the current head.
+pub(super) fn render(reviews: &Reviews) -> String {
+    let mut out = format!(
+        "PR #{}  {}\nHead: {}\n",
+        reviews.number,
+        reviews.url,
+        reviews.head.as_deref().unwrap_or_default()
+    );
+    if reviews.draft {
+        out.push_str("Draft\n");
     }
-    for reviewer in reviewers {
-        command.arg("--add-reviewer").arg(reviewer);
+    let decision = reviews.decision.as_deref().unwrap_or_default();
+    out.push_str(&format!(
+        "Review decision: {}\n",
+        if decision.is_empty() {
+            "not reported"
+        } else {
+            decision
+        }
+    ));
+    out.push_str("Requested reviewers:");
+    if reviews.requested.is_empty() {
+        out.push_str(" none");
     }
-    run(command)
+    for request in &reviews.requested {
+        out.push(' ');
+        out.push_str(
+            request
+                .login
+                .as_deref()
+                .or(request.name.as_deref())
+                .unwrap_or_default(),
+        );
+    }
+    out.push_str("\nReview submissions (inline discussion on GitHub):\n");
+    if reviews.reviews.is_empty() {
+        out.push_str("  none\n");
+    }
+    for review in &reviews.reviews {
+        let author = review.author.as_ref().map_or("", |author| &author.login);
+        out.push_str(&format!("  {author}: {}", review.state));
+        if let Some(commit) = &review.commit {
+            out.push_str(&format!(" at {}", commit.oid));
+        }
+        out.push('\n');
+        if !review.body.is_empty() {
+            out.push_str(&review.body);
+            out.push('\n');
+        }
+    }
+    out
 }
 
-pub(super) fn show(pr: Option<&str>, json: bool) -> Result<()> {
-    let mut command = Command::new("gh");
-    command.args(["pr", "view"]);
-    if let Some(pr) = pr {
-        command.arg(pr);
-    }
-    // Preserve the provider's review commit instead of interpreting an old
-    // approval as an approval of the current head. Inline threads stay on GitHub.
-    command.args([
-        "--json",
-        "number,url,headRefOid,isDraft,reviewDecision,reviewRequests,reviews",
-    ]);
-    if !json {
-        command.args(["--template", REVIEW_TEMPLATE]);
-    }
-    run(command)
-}
+#[cfg(test)]
+mod tests {
+    use super::render;
 
-const REVIEW_TEMPLATE: &str = r##"{{printf "PR #%v  %s\nHead: %s\n" .number .url .headRefOid}}{{if .isDraft}}Draft
-{{end}}Review decision: {{if .reviewDecision}}{{.reviewDecision}}{{else}}not reported{{end}}
-Requested reviewers:{{range .reviewRequests}} {{if .login}}{{.login}}{{else}}{{.name}}{{end}}{{else}} none{{end}}
-Review submissions (inline discussion on GitHub):
-{{range .reviews}}{{printf "  %s: %s" .author.login .state}}{{if .commit}}{{printf " at %s" .commit.oid}}{{end}}{{printf "\n"}}{{if .body}}{{printf "%s\n" .body}}{{end}}{{else}}  none
-{{end}}"##;
-
-fn run(mut command: Command) -> Result<()> {
-    let status = command.current_dir(find_repo_root()?).status()?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(CommandExit(status.code().unwrap_or(1) as u8).into())
+    #[test]
+    fn renders_the_review_report_with_its_commits() {
+        let reviews = serde_json::from_value(serde_json::json!({
+            "number": 42, "url": "https://example.com/pull/42", "headRefOid": "new-head",
+            "isDraft": false, "reviewDecision": "",
+            "reviewRequests": [{"__typename": "User", "login": "alice"},
+                               {"__typename": "Team", "name": "platform", "slug": "platform"}],
+            "reviews": [{"id": "r1", "author": {"login": "maya"}, "state": "APPROVED", "body": "",
+                         "submittedAt": "2026-11-05T00:00:00Z", "commit": {"oid": "older-head"}}]
+        }))
+        .unwrap();
+        assert_eq!(
+            render(&reviews),
+            "PR #42  https://example.com/pull/42\nHead: new-head\nReview decision: not reported\n\
+             Requested reviewers: alice platform\nReview submissions (inline discussion on GitHub):\n\
+             \x20 maya: APPROVED at older-head\n"
+        );
     }
 }

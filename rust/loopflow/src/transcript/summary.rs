@@ -11,7 +11,6 @@ use serde::{Deserialize, Serialize};
 use super::{conversation_home, scan, ExpiryPolicy, Indexed, RetentionState};
 use crate::harness::HarnessKind;
 use crate::id::AgentSessionId;
-use crate::provider_auth::Provider;
 use crate::store::sqlite::SqliteStore;
 use crate::store::ProviderAccountId;
 
@@ -31,7 +30,7 @@ pub struct RetainedSession {
     pub account: Option<ProviderAccountId>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RetentionSummary {
     pub generated_at: i64,
     pub sessions: u64,
@@ -43,7 +42,7 @@ pub struct RetentionSummary {
     pub homes: Vec<HomeRetention>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct HarnessRetention {
     pub harness: String,
     pub provider: u64,
@@ -52,7 +51,7 @@ pub struct HarnessRetention {
     pub next_expiry: Option<i64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RetentionGroup {
     pub harness: String,
     pub account: Option<ProviderAccountId>,
@@ -62,7 +61,9 @@ pub struct RetentionGroup {
 }
 
 /// Time since a Session's transcript was last written, or its last activity.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum AgeBucket {
     UnderWeek,
@@ -91,7 +92,7 @@ impl AgeBucket {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Expiring {
     pub session_id: String,
     pub title: String,
@@ -100,7 +101,7 @@ pub struct Expiring {
     pub after: i64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct HomeRetention {
     pub harness: String,
     pub home: String,
@@ -132,11 +133,8 @@ pub fn summarize(store: &SqliteStore, now: i64) -> Result<RetentionSummary> {
                 None => (RetentionState::Facts, None, None),
             },
             (HarnessKind::Claude | HarnessKind::Codex, Some(thread)) => {
-                let provider = match harness {
-                    HarnessKind::Claude => Provider::Claude,
-                    _ => Provider::Codex,
-                };
-                match conversation_home(store, provider, thread, session.account.as_ref())? {
+                let provider = harness.provider().expect("Claude and Codex have providers");
+                match conversation_home(store, provider, thread)? {
                     None => (RetentionState::Facts, None, None),
                     Some(home) => {
                         let home = homes
@@ -233,6 +231,7 @@ pub fn summarize(store: &SqliteStore, now: i64) -> Result<RetentionSummary> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::provider_auth::Provider;
     use crate::session::SessionEventKind;
     use crate::transcript::session_transcript;
     use std::fs;
@@ -287,14 +286,8 @@ mod tests {
             "claude" => Provider::Claude,
             _ => Provider::Codex,
         };
-        store
-            .pin_provider_session_route(
-                route,
-                &thread.into(),
-                &ProviderAccountId::parse(provider).unwrap(),
-                true,
-            )
-            .unwrap();
+        // It ran in the account's own home, before every launch shared one.
+        store.record_account_home_conversation(route, thread, provider);
         for (kind, payload) in [
             (SessionEventKind::Started, serde_json::json!({})),
             (
@@ -393,7 +386,7 @@ mod tests {
             Some("claude")
         );
         assert_eq!(
-            conversation.turns[0].request.as_ref().unwrap().text,
+            conversation.turns[0].requests().next().unwrap().text,
             "Fix the parser"
         );
 

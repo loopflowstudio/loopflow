@@ -8,20 +8,36 @@ use crate::store::{ProviderAccountId, StoreError, StoreResult};
 
 use super::SqliteStore;
 
+/// A Session's current provider conversation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CurrentConversation {
+    pub provider: String,
+    pub thread: AgentSessionId,
+}
+
 impl SqliteStore {
     pub(crate) fn input_provider_session(
         &self,
         input: &str,
     ) -> StoreResult<Option<ProviderSessionRef>> {
-        let Some(session) = self.session_for_artifact(input)? else {
-            return Ok(None);
-        };
-        crate::session_record::provider_session_from_history(
-            self.summary_for_input(&session.id, input)?
-                .into_iter()
-                .map(|event| event.payload),
-        )
-        .map_err(|error| StoreError::InvalidData(error.to_string()))
+        // Only the input's own observations, keyed `<input>:<source>`, name its
+        // provider session; a Session switching conversation reads these at a
+        // turn boundary, so read that key range rather than its whole history.
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let payloads = conn
+            .prepare(
+                "SELECT payload FROM session_events INDEXED BY session_observation_receipt
+                 WHERE session_id=(SELECT session_id FROM session_events
+                     WHERE kind='captured' AND receipt_key=?1)
+                 AND kind='observed' AND receipt_key>?1||':' AND receipt_key<?1||';'
+                 ORDER BY seq",
+            )?
+            .query_map([input], |row| row.get::<_, String>(0))?
+            .map(|payload| Ok(serde_json::from_str(&payload?)?))
+            .collect::<StoreResult<Vec<Value>>>()?;
+        drop(conn);
+        crate::session_record::provider_session_from_history(payloads)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))
     }
 
     /// What the store kept of each provider conversation `session` used, in
@@ -133,6 +149,72 @@ impl SqliteStore {
                 .and_then(|account| ProviderAccountId::parse(&account).ok());
         }
         Ok(threads)
+    }
+
+    /// `session`'s current provider conversation; `None` when it has none.
+    pub(crate) fn current_conversation(
+        &self,
+        session: &str,
+    ) -> StoreResult<Option<CurrentConversation>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT provider,provider_thread FROM agent_sessions
+                 WHERE id=?1 AND provider IS NOT NULL AND provider_thread IS NOT NULL",
+                [session],
+                |row| {
+                    Ok(CurrentConversation {
+                        provider: row.get(0)?,
+                        thread: row.get(1)?,
+                    })
+                },
+            )
+            .optional()?)
+    }
+
+    /// When turn `turn` of `thread` was recorded complete, and its status.
+    pub(crate) fn recorded_turn_end(
+        &self,
+        session: &str,
+        thread: &AgentSessionId,
+        turn: &str,
+    ) -> StoreResult<Option<(i64, Option<String>)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let end = conn
+            .query_row(
+                "SELECT observed_at,payload FROM session_events
+                 WHERE session_id=?1 AND provider_thread=?2 AND provider_turn=?3
+                   AND kind='completed'
+                 ORDER BY seq DESC LIMIT 1",
+                params![session, thread, turn],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?;
+        end.map(|(at, payload)| {
+            let payload: Value = serde_json::from_str(&payload)?;
+            Ok((at, payload["status"].as_str().map(str::to_owned)))
+        })
+        .transpose()
+    }
+
+    /// The newest Session whose current provider conversation each of
+    /// `threads` is.
+    pub(crate) fn sessions_of_provider_threads(
+        &self,
+        threads: &[String],
+    ) -> StoreResult<std::collections::HashMap<String, String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare_cached(
+            "SELECT id FROM agent_sessions WHERE provider_thread=?1
+             ORDER BY created_at DESC LIMIT 1",
+        )?;
+        let mut sessions = std::collections::HashMap::new();
+        for thread in threads {
+            if let Some(session) = query.query_row([thread], |row| row.get(0)).optional()? {
+                sessions.insert(thread.clone(), session);
+            }
+        }
+        Ok(sessions)
     }
 
     /// Every Session with its current provider conversation and the account
@@ -247,6 +329,33 @@ impl SqliteStore {
         Ok(None)
     }
 
+    /// One `store-gap` observation for boundaries missed from `first_miss` to
+    /// `last_miss`.
+    pub(crate) fn record_recording_gap(
+        &self,
+        session: &str,
+        first_miss: i64,
+        last_miss: i64,
+    ) -> StoreResult<()> {
+        let session = self.session(session)?.ok_or(StoreError::NotFound)?;
+        let input = session
+            .input_key()
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?
+            .clone();
+        self.retain_session_observation(
+            &session,
+            &crate::session::SessionObservation {
+                artifact_key: input,
+                source: format!("store-gap:{first_miss}:{last_miss}"),
+                observed_at: first_miss,
+                task_id: session.task_id.clone(),
+                wave_id: session.wave_id.clone(),
+                payload: serde_json::json!({"source":"store-gap",
+                    "first_miss":first_miss,"last_miss":last_miss}),
+            },
+        )
+    }
+
     pub(crate) fn retain_session_observation(
         &self,
         session: &crate::session::LfSession,
@@ -280,37 +389,6 @@ impl SqliteStore {
                 wave_id: session.wave_id.clone(),
             },
         )
-    }
-
-    /// Keep initiating failures without unbounded growth during reconnect storms.
-    pub(crate) fn retain_codex_relay_failure(
-        &self,
-        input: &str,
-        attachment: Option<&crate::process::SessionAttachment>,
-        payload: &Value,
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let captured = super::sessions::capture_seq_in(&tx, input)?;
-        let count: i64 = tx.query_row(
-            "SELECT COUNT(*) FROM session_events WHERE captured_event=?1 AND kind='observed'
-             AND json_extract(payload,'$.source')='codex_relay'",
-            [captured],
-            |row| row.get(0),
-        )?;
-        if count < 16 {
-            tx.execute(
-                "INSERT INTO session_events(session_id,kind,receipt_key,agent_process_id,lf_process_id,
-                 task_id,wave_id,observed_at,payload,captured_event)
-                 SELECT session_id,'observed',?2,?3,?4,task_id,wave_id,?5,?6,seq
-                 FROM session_events WHERE seq=?1",
-                params![captured,format!("{input}:codex_relay:{count}"),
-                    attachment.map(|a| &a.agent_process_id),attachment.and_then(|a| a.lf_process_id.as_ref()),
-                    time::OffsetDateTime::now_utc().unix_timestamp(),serde_json::to_string(payload)?],
-            )?;
-        }
-        tx.commit()?;
-        Ok(())
     }
 
     /// Replace the Session's reading with its current attachment's.
@@ -390,8 +468,14 @@ impl SqliteStore {
         payload: &Value,
     ) -> StoreResult<i64> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let payload = serde_json::to_string(payload)?;
+        // Providers replay receipts they have sent before; a retained one
+        // answers without the write lock.
+        if let Some(seq) = retained_event_in(&conn, session, thread, turn, kind, &payload)? {
+            return Ok(seq);
+        }
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let seq = record_event_in(&tx, session, thread, turn, kind, payload)?;
+        let seq = record_event_in(&tx, session, thread, turn, kind, &payload)?;
         tx.commit()?;
         Ok(seq)
     }
@@ -414,6 +498,78 @@ impl SqliteStore {
             )
             .optional()?
             .is_some())
+    }
+
+    /// Each completion recorded in `thread`: its turn and when it was observed.
+    pub(crate) fn session_completions(
+        &self,
+        session: &str,
+        thread: &AgentSessionId,
+    ) -> StoreResult<Vec<(String, i64)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare_cached(
+            "SELECT provider_turn,observed_at FROM session_events
+             WHERE session_id=?1 AND provider_thread=?2 AND kind='completed'
+               AND provider_turn IS NOT NULL",
+        )?;
+        let rows = query.query_map(params![session, thread], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?;
+        rows.map(|row| row.map_err(StoreError::from)).collect()
+    }
+
+    /// Record `turn`'s usage as its provider's transcript shows it, dated
+    /// `at`. A turn keeps the usage row it has; returns whether one was written.
+    pub(crate) fn record_turn_usage(
+        &self,
+        session: &str,
+        thread: &AgentSessionId,
+        turn: &str,
+        at: i64,
+        usage: &Value,
+    ) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let written = conn.execute(
+            "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,observed_at,payload)
+             SELECT ?1,?2,?3,'usage',?4,?5,?6 WHERE NOT EXISTS(
+                SELECT 1 FROM session_events
+                WHERE session_id=?1 AND provider_thread=?2 AND provider_turn=?3 AND kind='usage')",
+            params![
+                session,
+                thread,
+                turn,
+                "",
+                at,
+                serde_json::to_string(usage)?
+            ],
+        )?;
+        Ok(written > 0)
+    }
+
+    /// Record `turn`'s completion as its provider's transcript shows it,
+    /// dated `at`, when the turn ended.
+    pub(crate) fn record_turn_completion(
+        &self,
+        session: &str,
+        thread: &AgentSessionId,
+        turn: &str,
+        at: i64,
+        completed: &Value,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            INSERT_NATIVE_EVENT,
+            params![
+                session,
+                thread,
+                turn,
+                SessionEventKind::Completed.as_str(),
+                "",
+                at,
+                serde_json::to_string(completed)?
+            ],
+        )?;
+        Ok(())
     }
 
     /// Freeze the request's attribution while its attachment still owns dispatch.
@@ -466,7 +622,7 @@ impl SqliteStore {
             thread,
             turn,
             SessionEventKind::Started,
-            &serde_json::json!({}),
+            "{}",
         )?;
         // An uncorrelated observation can acquire its origin once. Repeated
         // evidence must match every field, including an explicitly absent bind.
@@ -516,14 +672,6 @@ impl SqliteStore {
     }
 
     /// Keep usage, provenance and unknown evidence; transcript payloads belong to detail.
-    pub(crate) fn summary_for_input(
-        &self,
-        session: &str,
-        input: &str,
-    ) -> StoreResult<Vec<SessionEvent>> {
-        self.read_history(session, 0, 0, Some(input), (None, None, None), None)
-    }
-
     pub(super) fn summary_for_input_matching(
         &self,
         session: &str,
@@ -572,7 +720,7 @@ impl SqliteStore {
                  (?5 IS NULL OR (CASE WHEN e.kind IN ('observed','captured') THEN e.wave_id ELSE origin.wave_id END)
                      IN (SELECT id FROM wave_addresses WHERE id=?12 OR slug=?5))
                  AND (?6 IS NULL OR (CASE WHEN e.kind IN ('observed','captured') THEN e.task_id ELSE origin.task_id END)
-                     IN (SELECT t.id FROM tasks t JOIN projects p ON p.id=t.project_id
+                     IN (SELECT t.id FROM projects p CROSS JOIN tasks t ON t.project_id=p.id
                          WHERE p.id=?13 OR p.project_slug=?6 OR p.external_project_id=?14))
                  AND (?7 IS NULL OR (CASE WHEN e.kind IN ('observed','captured') THEN e.task_id ELSE origin.task_id END)
                      IN (SELECT id FROM tasks WHERE id=?15 OR issue_identifier=?16 OR external_issue_id=?17))))
@@ -660,77 +808,59 @@ impl SqliteStore {
     }
 }
 
+const INSERT_NATIVE_EVENT: &str = "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,observed_at,payload)
+    VALUES(?1,?2,?3,?4,?5,?6,?7)";
+
 /// Insert only the observation. Work and capture require correlated origin evidence.
+/// The retained receipt's sequence, or an error when it says something else.
+fn retained_event_in(
+    conn: &rusqlite::Connection,
+    session: &str,
+    thread: &AgentSessionId,
+    turn: &str,
+    kind: SessionEventKind,
+    payload: &str,
+) -> StoreResult<Option<i64>> {
+    let existing: Option<(i64, String)> = conn
+        .query_row(
+            "SELECT seq,payload FROM session_events
+             WHERE session_id=?1 AND provider_thread=?2 AND provider_turn=?3 AND kind=?4 AND receipt_key=''",
+            params![session, thread, turn, kind.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    match existing {
+        None => Ok(None),
+        Some((seq, saved)) if saved == payload => Ok(Some(seq)),
+        Some(_) => Err(StoreError::InvalidData(format!(
+            "Conflicting {} receipt for conversation {session}, turn {turn}",
+            kind.as_str()
+        ))),
+    }
+}
+
 fn record_event_in(
     tx: &rusqlite::Transaction<'_>,
     session: &str,
     thread: &AgentSessionId,
     turn: &str,
     kind: SessionEventKind,
-    payload: &Value,
+    payload: &str,
 ) -> StoreResult<i64> {
-    let saved = |receipt: &str| -> StoreResult<Option<(i64, String)>> {
-        Ok(tx.query_row(
-            "SELECT seq,payload FROM session_events
-             WHERE session_id=?1 AND provider_thread=?2 AND provider_turn=?3 AND kind=?4 AND receipt_key=?5",
-            params![session,thread,turn,kind.as_str(),receipt],
-            |row| Ok((row.get(0)?,row.get(1)?)),
-        ).optional()?)
-    };
-    let mut receipt = if kind == SessionEventKind::Usage {
-        crate::session_record::native_usage_key(payload)
-    } else {
-        String::new()
-    };
-    let mut existing = saved(&receipt)?;
-    if kind == SessionEventKind::Usage {
-        // The next turn's baseline reads this turn's usage from before it
-        // started; a receipt arriving later keeps its own row after that start.
-        if let Some((seq, _)) = &existing {
-            let next: Option<i64> = tx.query_row(
-                "SELECT max(seq) FROM session_events WHERE session_id=?1 AND provider_thread=?2
-                 AND provider_turn!=?3 AND kind='started' AND seq>?4",
-                params![session, thread, turn, seq],
-                |row| row.get(0),
-            )?;
-            if let Some(next) = next {
-                receipt = crate::session_record::late_usage_key(&receipt, next);
-                existing = saved(&receipt)?;
-            }
-        }
-    }
-    let mut payload = serde_json::to_string(payload)?;
-    if let Some((seq, saved)) = existing {
-        if saved == payload {
-            return Ok(seq);
-        }
-        if kind != SessionEventKind::Usage {
-            return Err(StoreError::InvalidData(format!(
-                "Conflicting {} receipt for conversation {session}, turn {turn}",
-                kind.as_str()
-            )));
-        }
-        // One usage row per turn: a later receipt replaces it.
-        let merged = crate::session_record::merge_native_usage(
-            &serde_json::from_str(&saved)?,
-            &serde_json::from_str(&payload)?,
-        );
-        payload = serde_json::to_string(&merged)?;
-        tx.execute(
-            "UPDATE session_events SET payload=?2, observed_at=?3 WHERE seq=?1",
-            params![
-                seq,
-                payload,
-                time::OffsetDateTime::now_utc().unix_timestamp()
-            ],
-        )?;
+    if let Some(seq) = retained_event_in(tx, session, thread, turn, kind, payload)? {
         return Ok(seq);
     }
     tx.execute(
-        "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,observed_at,payload)
-         VALUES(?1,?2,?3,?4,?5,?6,?7)",
-        params![session,thread,turn,kind.as_str(),receipt,
-            time::OffsetDateTime::now_utc().unix_timestamp(),payload],
+        INSERT_NATIVE_EVENT,
+        params![
+            session,
+            thread,
+            turn,
+            kind.as_str(),
+            "",
+            time::OffsetDateTime::now_utc().unix_timestamp(),
+            payload
+        ],
     )?;
     Ok(tx.last_insert_rowid())
 }
@@ -739,7 +869,157 @@ fn record_event_in(
 mod tests {
     use crate::session::SessionEventKind;
     use crate::store::sqlite::SqliteStore;
+    use crate::store::RecordingGap;
     use serde_json::json;
+
+    #[test]
+    fn native_event_preparation_stays_bounded_and_keeps_identity_checks() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        store.test_session("conversation", &crate::session_record::new_artifact_key());
+        {
+            let conn = store.conn.lock().unwrap();
+            // Count the real writer's compiled program, including all triggers.
+            // The incident expanded this to over 41,000 instructions per receipt
+            // while BEGIN IMMEDIATE held every other writer outside the store.
+            let mut explain = conn
+                .prepare(&format!("EXPLAIN {}", super::INSERT_NATIVE_EVENT))
+                .unwrap();
+            let instructions = explain
+                .query_map(
+                    rusqlite::params!["conversation", "thread", "turn", "started", "", 1, "{}"],
+                    |_| Ok(()),
+                )
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            assert!(
+                instructions.len() < 2_000,
+                "native INSERT compiled {} instructions",
+                instructions.len()
+            );
+        }
+        for turn in 0..100 {
+            let turn = turn.to_string();
+            let payload = json!({"text": "native output", "opaque": "ABCDEF"});
+            let seq = store
+                .record_session_event(
+                    "conversation",
+                    &"Provider-Thread".into(),
+                    &turn,
+                    SessionEventKind::Output,
+                    &payload,
+                )
+                .unwrap();
+            assert_eq!(
+                seq,
+                store
+                    .record_session_event(
+                        "conversation",
+                        &"Provider-Thread".into(),
+                        &turn,
+                        SessionEventKind::Output,
+                        &payload
+                    )
+                    .unwrap()
+            );
+        }
+        let invalid =
+            json!({"type": "legacy_flow", "flow_id": "ABCDEFAB-1234-5678-ABCD-ABCDEFABCDEF"});
+        assert!(store
+            .record_session_event(
+                "conversation",
+                &"thread".into(),
+                "invalid",
+                SessionEventKind::Output,
+                &invalid
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("canonical identity"));
+        let valid =
+            json!({"type": "legacy_flow", "flow_id": "abcdefab-1234-5678-abcd-abcdefabcdef"});
+        store
+            .record_session_event(
+                "conversation",
+                &"thread".into(),
+                "valid",
+                SessionEventKind::Output,
+                &valid,
+            )
+            .unwrap();
+        let events = store.session_history("conversation", 0, 0).unwrap();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.kind == SessionEventKind::Output)
+                .count(),
+            101
+        );
+    }
+
+    /// What a hook and the server do together: the hook sends its span, the
+    /// server records it, and the hook clears its marker.
+    fn close(store: &SqliteStore, gap: &mut RecordingGap) {
+        if let Some(span) = gap.span() {
+            store
+                .record_recording_gap("session", span.first_miss, span.last_miss)
+                .unwrap();
+        }
+        gap.recovered();
+    }
+
+    /// A boundary lf could not record enters the Session's history as unknown
+    /// at the next one that succeeds (Jack Heart, 2026-11-05).
+    #[test]
+    fn a_recovered_gap_enters_the_sessions_history_once() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        store.test_session("session", &crate::session_record::new_artifact_key());
+        let marker = home.path().join("thread.store-gap");
+        let gap = || RecordingGap::marked(marker.clone());
+        let observations = || -> i64 {
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT COUNT(*) FROM session_events WHERE session_id='session'
+                     AND kind='observed' AND json_extract(payload,'$.source')='store-gap'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        };
+        // A boundary that records with no gap open writes nothing extra.
+        close(&store, &mut gap());
+        assert_eq!(observations(), 0);
+        // Two hook processes miss the store; the next one that reaches it records
+        // the hole once, and later boundaries have nothing left to say.
+        gap().note("turn evidence", &"database is locked");
+        gap().note("steers", &"database is locked");
+        let mut open = gap();
+        let span = open.span().unwrap().clone();
+        close(&store, &mut open);
+        assert!(open.span().is_none());
+        assert_eq!(observations(), 1);
+        let payload: String = store
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT payload FROM session_events WHERE kind='observed'
+                 AND json_extract(payload,'$.source')='store-gap'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let payload: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        assert_eq!(payload["first_miss"], span.first_miss);
+        assert_eq!(payload["last_miss"], span.last_miss);
+        close(&store, &mut gap());
+        assert_eq!(observations(), 1);
+    }
 
     fn record_captured_start(store: &SqliteStore, session: &str, turn: &str) -> i64 {
         let attachment = store
@@ -790,7 +1070,7 @@ mod tests {
             .unwrap();
             conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", rusqlite::params![project.as_str(),wave]).unwrap();
             conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
-            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,issue_title,issue_description,workspace_slug,worktree,created_at,updated_at) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1','Proof','','',NULL,1,1)", rusqlite::params![task.as_str(),project.as_str()]).unwrap();
+            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,issue_title,issue_description,workspace_slug,created_at,updated_at) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1','Proof','','',1,1)", rusqlite::params![task.as_str(),project.as_str()]).unwrap();
         }
         let attachment = store
             .claim_session_attachment(&session.id, None, &process, false)
@@ -1410,7 +1690,7 @@ mod tests {
                     .claim_session_attachment(&session.id, Some(&original), &second, false)
                     .unwrap();
                 assert!(matches!(
-                    crate::session_record::finish_session_attachment(
+                    crate::process::finish_session_attachment(
                         &store,
                         &session.id,
                         &original,
@@ -1424,13 +1704,8 @@ mod tests {
             } else {
                 original
             };
-            crate::session_record::finish_session_attachment(
-                &store,
-                &session.id,
-                &current,
-                "completed",
-            )
-            .unwrap();
+            crate::process::finish_session_attachment(&store, &session.id, &current, "completed")
+                .unwrap();
             // Close leaves reaping to the parent; an unreaped zombie is dead.
             assert_eq!(
                 crate::journal::process_identity_evidence(child.id(), started),
@@ -1452,7 +1727,8 @@ mod tests {
     }
 
     #[test]
-    fn session_exit_retires_orphans_but_preserves_primary_and_task_conversations() {
+    fn session_exit_retires_orphans_and_headless_runs_but_preserves_primary_and_task_conversations()
+    {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         let wave = crate::id::WaveId::new();
@@ -1475,10 +1751,12 @@ mod tests {
                 rusqlite::params![task.as_str(), project.as_str()],
             ).unwrap();
         }
-        for (id, primary, retired) in [
-            ("orphan", None, true),
-            ("primary", Some("repository"), false),
-            ("task", None, false),
+        for (id, primary, outcome, retired) in [
+            ("orphan", None, "interrupted", true),
+            ("primary", Some("repository"), "interrupted", false),
+            ("task", None, "interrupted", false),
+            ("task-run", None, "interrupted", true),
+            ("task-failed-run", None, "failed", true),
         ] {
             let session = store.test_session(id, &crate::session_record::new_artifact_key());
             let process = crate::id::LfProcessId::new();
@@ -1494,10 +1772,10 @@ mod tests {
                     rusqlite::params![id, primary],
                 )
                 .unwrap();
-                if id == "task" {
+                if id.starts_with("task") {
                     conn.execute(
-                        "UPDATE agent_sessions SET task_id=?2,wave_id=?3 WHERE id=?1",
-                        rusqlite::params![id, task.as_str(), wave],
+                        "UPDATE agent_sessions SET task_id=?2,wave_id=?3,interactive=?4 WHERE id=?1",
+                        rusqlite::params![id, task.as_str(), wave, id == "task"],
                     )
                     .unwrap();
                 }
@@ -1506,7 +1784,7 @@ mod tests {
                 .claim_session_attachment(id, None, &process, true)
                 .unwrap();
             store
-                .finish_session_attachment(id, &attachment, "interrupted", None, || Ok(false))
+                .finish_session_attachment(id, &attachment, outcome, None, || Ok(false))
                 .unwrap();
             let saved = store.session(id).unwrap().unwrap();
             assert_eq!(saved.completed_at.is_some(), retired);
@@ -1515,7 +1793,7 @@ mod tests {
             assert!(history
                 .iter()
                 .any(|event| event.payload["type"] == "attachment_exit"
-                    && event.payload["outcome"] == "interrupted"));
+                    && event.payload["outcome"] == outcome));
             assert!(!history
                 .iter()
                 .any(|event| event.kind == SessionEventKind::Completed));
@@ -1525,6 +1803,37 @@ mod tests {
             .unwrap()
             .iter()
             .any(|session| session.id == "orphan"));
+
+        // Another turn on the finished run reopens it until that turn exits.
+        let process = crate::id::LfProcessId::new();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',2)",
+                [process.as_str()],
+            )
+            .unwrap();
+        let expected = store.session_attachment("task-run").unwrap();
+        let turn = store
+            .claim_session_attachment("task-run", expected.as_ref(), &process, true)
+            .unwrap();
+        assert!(store
+            .session("task-run")
+            .unwrap()
+            .unwrap()
+            .completed_at
+            .is_none());
+        store
+            .finish_session_attachment("task-run", &turn, "completed", None, || Ok(true))
+            .unwrap();
+        assert!(store
+            .session("task-run")
+            .unwrap()
+            .unwrap()
+            .completed_at
+            .is_some());
     }
 
     /// `lf history` reads inputs by this bound and stops early, so an input
@@ -1733,31 +2042,22 @@ mod tests {
             json!({"inputTokens":input,"outputTokens":output,
             "cachedInputTokens":2,"reasoningOutputTokens":1})
         };
-        store
-            .record_session_event(
-                &session.id,
-                &"thread".into(),
-                "turn",
-                SessionEventKind::Usage,
-                &json!({"total":counts(12,3),"last":counts(12,3)}),
-            )
-            .unwrap();
         let mut replacement = session.clone();
         replacement.artifact_key = Some(crate::session_record::new_artifact_key());
         store
-            .replace_session_input(session.captured, replacement.clone())
+            .replace_session_input(session.captured, replacement.clone(), None)
             .unwrap();
         store
             .claim_session_attachment(&session.id, Some(&attachment), &second, true)
             .unwrap();
-        // The replacement AgentProcess observes the first one's surviving turn. The recorder never saw its usage.
+        // The replacement AgentProcess observes the first one's surviving turn.
         store
             .record_session_event(
                 &session.id,
                 &"thread".into(),
                 "turn",
                 SessionEventKind::Usage,
-                &json!({"total":counts(20,5),"last":counts(8,2)}),
+                &json!({"total":counts(20,5),"last":counts(20,5)}),
             )
             .unwrap();
         store
@@ -1769,15 +2069,21 @@ mod tests {
                 &json!({"status":"completed"}),
             )
             .unwrap();
-        // Start, one usage row for both receipts, and completion.
-        let history = store.summary_for_input(&session.id, &first_input).unwrap();
+        // Start, usage and completion.
+        let history = store
+            .summary_for_input_matching(&session.id, &first_input, (None, None, None))
+            .unwrap();
         assert_eq!(history.len(), 3);
         assert!(history.iter().all(
             |event| event.lf_process_id.as_deref() == Some(first.as_str())
                 && event.agent_process_id.as_deref() == Some(attachment.agent_process_id.as_str())
         ));
         assert!(store
-            .summary_for_input(&session.id, replacement.input_key().unwrap())
+            .summary_for_input_matching(
+                &session.id,
+                replacement.input_key().unwrap(),
+                (None, None, None)
+            )
             .unwrap()
             .is_empty());
         let old = store.input_history(&first_input).unwrap();
@@ -1821,7 +2127,11 @@ mod tests {
             )
             .unwrap();
         assert!(store
-            .summary_for_input(&session.id, replacement.input_key().unwrap())
+            .summary_for_input_matching(
+                &session.id,
+                replacement.input_key().unwrap(),
+                (None, None, None)
+            )
             .unwrap()
             .is_empty());
         assert_eq!(
@@ -1850,117 +2160,26 @@ mod tests {
         assert_eq!(partial.usage.total_input_tokens, Some(10));
         assert_eq!(partial.usage.output_tokens, Some(5));
         assert!(partial.usage.gaps > 0);
-        record_captured_start(&store, &session.id, "decrease");
-        for (total, last) in [(20, 20), (40, 20), (30, 10)] {
-            store.record_session_event(&session.id,&"thread".into(),"decrease",SessionEventKind::Usage,
-                &json!({"total":{"inputTokens":total,"outputTokens":0,"cachedInputTokens":0,"reasoningOutputTokens":0},
-                    "last":{"inputTokens":last,"outputTokens":0,"cachedInputTokens":0,"reasoningOutputTokens":0}})).unwrap();
-        }
-        let decreased = store
-            .input_history(replacement.input_key().unwrap().as_str())
-            .unwrap();
-        assert_eq!(
-            decreased.usage.total_input_tokens,
-            Some(50),
-            "retain 40 observed tokens plus the separate 10-token partial turn"
-        );
-        // The turn keeps one row; the regression survives as an evidence gap.
-        assert!(decreased.evidence_gaps > partial.evidence_gaps);
-        store
-            .record_session_event(
-                &session.id,
-                &"thread".into(),
-                "decrease",
-                SessionEventKind::Completed,
-                &json!({"status":"completed"}),
-            )
-            .unwrap();
-        record_captured_start(&store, &session.id, "next");
-        // Reconnect missed one request: 60 lifetime minus the retained 40 peak,
-        // not merely this final request's 10 tokens or the regressed 30 baseline.
-        store.record_session_event(&session.id,&"thread".into(),"next",SessionEventKind::Usage,
-            &json!({"total":{"inputTokens":60,"outputTokens":0,"cachedInputTokens":0,"reasoningOutputTokens":0},
-                "last":{"inputTokens":10,"outputTokens":0,"cachedInputTokens":0,"reasoningOutputTokens":0}})).unwrap();
-        assert_eq!(
-            store
-                .input_history(replacement.input_key().unwrap().as_str())
-                .unwrap()
-                .usage
-                .total_input_tokens,
-            Some(70)
-        );
     }
 
     #[test]
-    fn native_usage_keeps_one_row_per_turn_until_the_next_turn_starts() {
+    fn a_second_usage_receipt_for_a_turn_conflicts() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("conversation", &crate::session_record::new_artifact_key());
-        let usage = |turn: &str, total: u64| {
-            let counts = json!({"inputTokens":total,"outputTokens":0});
-            store
-                .record_session_event(
-                    "conversation",
-                    &"thread".into(),
-                    turn,
-                    SessionEventKind::Usage,
-                    &json!({"total":counts,"last":counts}),
-                )
-                .unwrap();
-        };
-        record_captured_start(&store, "conversation", "a");
-        usage("a", 10);
-        usage("a", 20);
-        record_captured_start(&store, "conversation", "b");
-        // Late receipts for "a" stay after "b" began, where they arrived.
-        usage("a", 30);
-        usage("a", 40);
-        let keys: Vec<String> = store
-            .conn
-            .lock()
-            .unwrap()
-            .prepare("SELECT receipt_key FROM session_events WHERE kind='usage' ORDER BY seq")
-            .unwrap()
-            .query_map([], |row| row.get(0))
-            .unwrap()
-            .collect::<Result<_, _>>()
-            .unwrap();
-        assert_eq!(keys.len(), 2);
-        assert_eq!(keys[0], "");
-        assert!(keys[1].starts_with(":after:"));
-    }
-
-    #[test]
-    fn a_later_usage_receipt_replaces_its_row_in_place() {
-        let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
-        store.test_session("conversation", &crate::session_record::new_artifact_key());
-        record_captured_start(&store, "conversation", "a");
         let usage = |total: u64| {
             let counts = json!({"inputTokens":total,"outputTokens":0});
-            store
-                .record_session_event(
-                    "conversation",
-                    &"thread".into(),
-                    "a",
-                    SessionEventKind::Usage,
-                    &json!({"total":counts,"last":counts}),
-                )
-                .unwrap()
-        };
-        let first = usage(10);
-        assert_eq!(usage(20), first);
-        let payload: String = store
-            .conn
-            .lock()
-            .unwrap()
-            .query_row(
-                "SELECT payload FROM session_events WHERE seq=?1",
-                [first],
-                |row| row.get(0),
+            store.record_session_event(
+                "conversation",
+                &"thread".into(),
+                "a",
+                SessionEventKind::Usage,
+                &json!({"total":counts,"last":counts}),
             )
-            .unwrap();
-        assert!(payload.contains("20"));
+        };
+        let first = usage(10).unwrap();
+        assert_eq!(usage(10).unwrap(), first);
+        assert!(usage(20).is_err());
     }
 
     #[test]

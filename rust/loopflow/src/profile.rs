@@ -8,10 +8,10 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::provider_auth::Provider;
-use crate::repository::RepoId;
+use crate::repository::CanonicalRepo;
 use crate::store::ProviderAccountId;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(transparent)]
 pub struct ProfileId(String);
 
@@ -41,7 +41,7 @@ impl fmt::Display for ProfileId {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(schemars::JsonSchema, Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct EmailAddress(String);
 
@@ -74,7 +74,9 @@ impl fmt::Display for EmailAddress {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct LocalChromeProfile {
     pub directory: String,
     pub name: String,
@@ -176,7 +178,9 @@ fn chrome_local_state_path() -> Result<PathBuf, String> {
     Err("Chrome profile discovery is currently supported on macOS only".to_string())
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct AccessProfile {
     pub id: ProfileId,
     pub chrome_directory: String,
@@ -185,7 +189,9 @@ pub struct AccessProfile {
     pub updated_at: i64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct AuthBrowserBinding {
     pub provider: Provider,
     pub account_id: Option<ProviderAccountId>,
@@ -198,7 +204,7 @@ pub struct AuthBrowserBinding {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum RouteScope {
     Wave(crate::id::WaveId),
-    Repo(RepoId),
+    Repo(CanonicalRepo),
     Default,
 }
 
@@ -214,7 +220,10 @@ impl RouteScope {
     pub fn id(&self) -> &str {
         match self {
             Self::Wave(wave_id) => wave_id.as_str(),
-            Self::Repo(repo_id) => repo_id.as_str(),
+            Self::Repo(repo_id) => repo_id
+                .as_path()
+                .to_str()
+                .expect("repository path is UTF-8"),
             Self::Default => "",
         }
     }

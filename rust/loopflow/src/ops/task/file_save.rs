@@ -13,14 +13,18 @@ use super::{
 };
 use crate::ops::error::OpsResult;
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct TaskFileRecovery {
     pub directory: String,
     pub changed: bool,
     pub message: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct TaskFileSave {
     pub file: TaskFileSnapshot,
     pub published: bool,

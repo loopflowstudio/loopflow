@@ -64,6 +64,9 @@ impl TaskSource {
 }
 
 pub(crate) fn source_for_task(issue: &str) -> OpsResult<Option<TaskSource>> {
+    if crate::journal::request::active() {
+        return Ok(None);
+    }
     let Some(value) = std::env::var_os(crate::lf::TASK_SOURCE_ENV) else {
         return Ok(None);
     };

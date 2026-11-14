@@ -20,12 +20,14 @@ use std::process::Command;
 use anyhow::{anyhow, bail, Context, Result};
 use serde::Serialize;
 
+use crate::durable::TaskId;
 use crate::graph::compiled::CompiledGraph;
 use crate::graph::ConcreteStep;
 use crate::id::{LfProcessId, TraceId};
 use crate::ops::human_session::provider_conversation;
 use crate::ops::task::TaskRunSelection;
-use crate::process::{LfProcess, ProcessKind};
+use crate::portfolio::{self, PortfolioCommand};
+use crate::process::LfProcess;
 use crate::provider_auth::Provider;
 use crate::session::TitleSource;
 use crate::store::{SharedStore, StorageConfig};
@@ -46,7 +48,7 @@ const PERSON: &str = "Demo";
 /// (`GUIProcessEnvironment.enrichedPath` in
 /// `swift/LoopflowMac/Services/ProcessEnvironment.swift`). Listing them after
 /// the World's `bin` leaves Desktop nothing to prepend ahead of its `gh`.
-const DESKTOP_PATH: [&str; 6] = [
+pub(crate) const DESKTOP_PATH: [&str; 6] = [
     "~/.local/bin",
     "/opt/homebrew/bin",
     "/opt/homebrew/sbin",
@@ -148,8 +150,10 @@ pub enum PrSurface {
 
 /// The world's `claude`. `--resume <id>` prints `resumed <id>: <n> lines`
 /// after reading the world transcript (exit 1 when there is none), then answers
-/// each input line with `reply <id>: <line>` until `quit` or EOF. A new
-/// conversation (`--session-id <id>`) echoes the same way. Transcripts are
+/// each input line with `reply <id>: <line>` until `quit` or EOF. When stdin
+/// is not the terminal it holds the opening turn, as for Claude: after it the
+/// stand-in reads its terminal. A new conversation (`--session-id <id>`)
+/// echoes the same way. Transcripts are
 /// never written. It needs only `sh` and `grep`, which the Desktop benchmark's
 /// exec policy allows.
 pub const STUB_CLAUDE: &str = r#"#!/bin/sh
@@ -176,10 +180,15 @@ if [ -z "$new" ]; then
 else
   echo "started $id"
 fi
-while IFS= read -r input; do
-  [ "$input" = quit ] && exit 0
-  echo "reply $id: $input"
-done
+answer() {
+  while IFS= read -r input; do
+    [ "$input" = quit ] && exit 0
+    echo "reply $id: $input"
+  done
+}
+answer
+# Like Claude: an opening turn arrives on stdin, then keys come from the terminal.
+if [ -t 1 ] && [ ! -t 0 ]; then exec < /dev/tty; answer; fi
 "#;
 
 /// How a recorded Graph ended: every step succeeded, or the step at this
@@ -289,10 +298,13 @@ impl World {
         let repo = dir.join("repo");
         create_repo(&repo, &dir.join("origin.git"))?;
         // Manual membership: folder mode would scan the person's own ~/src.
-        crate::portfolio::change(&crate::portfolio::PortfolioCommand::Manual)?;
-        crate::portfolio::change(&crate::portfolio::PortfolioCommand::Add {
-            paths: vec![repo.clone()],
-        })?;
+        portfolio::change(&PortfolioCommand::Manual, &repo)?;
+        portfolio::change(
+            &PortfolioCommand::Add {
+                paths: vec![repo.clone()],
+            },
+            &repo,
+        )?;
         crate::ops::planning_sync::defer_exchange(true);
         Ok(Self {
             dir,
@@ -337,7 +349,9 @@ impl World {
     /// Commit everything under `.lf/` (Wave goals, Graphs, config) and push it.
     pub fn push_authored(&self, message: &str) -> Result<()> {
         git(Some(&self.repo), &["add", ".lf"])?;
-        git(Some(&self.repo), &["commit", "-m", message])?;
+        if !git(Some(&self.repo), &["diff", "--cached", "--name-only"])?.is_empty() {
+            git(Some(&self.repo), &["commit", "-m", message])?;
+        }
         git(Some(&self.repo), &["push", "origin", "main"])?;
         Ok(())
     }
@@ -371,12 +385,14 @@ impl World {
         for (name, value) in env.vars() {
             std::env::set_var(name, value);
         }
-        let registered = crate::portfolio::change(&crate::portfolio::PortfolioCommand::Manual)
-            .and_then(|_| {
-                crate::portfolio::change(&crate::portfolio::PortfolioCommand::Add {
+        let registered = portfolio::change(&PortfolioCommand::Manual, &repo).and_then(|_| {
+            portfolio::change(
+                &PortfolioCommand::Add {
                     paths: vec![repo.clone()],
-                })
-            });
+                },
+                &repo,
+            )
+        });
         for (name, value) in self.env.vars() {
             std::env::set_var(name, value);
         }
@@ -388,10 +404,10 @@ impl World {
         Ok(env)
     }
 
-    /// Ensure a Wave and its current Project.
+    /// Add a Wave and its current Project, as `lf wave add` does.
     pub fn wave(&self, name: &str) -> Result<()> {
         self.runtime
-            .block_on(crate::ops::project::ensure(&self.repo, name))?;
+            .block_on(crate::ops::wave_lifecycle::add(&self.repo, name, None))?;
         Ok(())
     }
 
@@ -479,6 +495,7 @@ impl World {
             wave,
             Some(title.to_string()),
             Some(report.to_string()),
+            crate::ops::task::TaskAdoptionOptions::default(),
             None,
         )?)
     }
@@ -603,7 +620,7 @@ impl World {
             bail!("nothing remains of {requested}; complete the Task instead");
         };
         // The run's Graph records the steps up to the next interactive one.
-        let steps: Vec<ConcreteStep> = captured.steps[start.cursor().index..]
+        let steps: Vec<ConcreteStep> = captured.steps[start.cursor.index..]
             .iter()
             .enumerate()
             .take_while(|(offset, step)| {
@@ -612,7 +629,7 @@ impl World {
             .map(|(_, step)| step.clone())
             .collect();
         let stops_at = captured
-            .after(&start)
+            .after(&start.place)
             .and_then(|next| captured.next_interactive(&next))
             .unwrap_or(END)
             .to_owned();
@@ -635,7 +652,7 @@ impl World {
         if !store.sqlite.start_task_graph_run(
             &task.id,
             &row,
-            &start.cursor(),
+            &start.cursor,
             &run.id,
             stops_at == END,
         )? {
@@ -644,7 +661,8 @@ impl World {
         let name = captured.name.clone();
         let argv = vec!["lf", "--task", issue, "graph", "run"];
         self.graph(
-            &store, &trace, &run.id, &checkout, argv, &name, &steps, started, minutes, outcome,
+            &store, &task.id, &trace, &run.id, &checkout, argv, &name, &steps, started, minutes,
+            outcome,
         )?;
         if outcome == Outcome::Succeeded {
             store
@@ -693,6 +711,7 @@ impl World {
     fn graph(
         &self,
         store: &SharedStore,
+        task: &TaskId,
         trace: &TraceId,
         parent: &LfProcessId,
         cwd: &Path,
@@ -735,7 +754,9 @@ impl World {
         }
         // Its steps finish while it runs, so exit forgets none of them.
         store.sqlite.record_process(&graph)?;
-        store.sqlite.record_graph_process(&graph.id, &compiled)?;
+        store
+            .sqlite
+            .record_graph_process(&graph.id, &compiled, Some(task))?;
         for (process, key) in records {
             store.sqlite.record_process(&process)?;
             store
@@ -766,7 +787,7 @@ impl World {
         let store = self.store()?;
         let session = self
             .runtime
-            .block_on(provider_conversation::admit(&store, &id))?
+            .block_on(provider_conversation::admit(&store, &id, &cwd))?
             .ok_or_else(|| anyhow!("Claude conversation {id} was not found after writing it"))?;
         let session_id = session.id.to_string();
         if let Some(task) = task {
@@ -789,13 +810,13 @@ impl World {
         Ok(session_id)
     }
 
-    /// Comment on a Task the way `lf task comment` does.
+    /// Post to a Task's thread the way `lf task report` does.
     pub fn comment(&self, task: &Task, message: &str) -> Result<()> {
         crate::ops::task::task_comment(&self.repo, &task.identifier, None, Some(message), false)?;
         Ok(())
     }
 
-    /// Open `wave`'s ongoing conversation the way `lf wave session` does and
+    /// Open `wave`'s ongoing conversation the way `lf --wave W session connect` does and
     /// give it `turns` as its Claude history.
     pub fn wave_conversation(
         &self,
@@ -1103,8 +1124,6 @@ impl World {
         LfProcess {
             id: LfProcessId::new(),
             pid: None,
-            kind: ProcessKind::Lf,
-            agent_session_id: None,
             os_started_at: None,
             trace_id: trace.clone(),
             parent_lf_process_id: parent.cloned(),

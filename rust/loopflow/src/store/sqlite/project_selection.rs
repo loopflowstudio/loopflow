@@ -110,14 +110,6 @@ impl SqliteStore {
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let project = bind_in(&tx, wave, project)?;
         let candidate = super::children::project_in(&tx, &project)?;
-        let competing: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM project_transitions WHERE wave_id=?1 AND settled_at IS NULL
-            AND (successor_id NOT IN (?2,?3) OR predecessor_id IS NOT NULL OR reset_name IS NOT NULL))",
-            params![wave,project.as_str(),candidate.linear_id.as_ref().map(|id| id.as_str()).unwrap_or(project.as_str())],|row|row.get(0))?;
-        if competing {
-            return Err(StoreError::InvalidAuthority(
-                "an unfinished Project transition owns selection".into(),
-            ));
-        }
         match readiness_in(&tx,wave)?.state {
             ProjectReadinessState::Unavailable | ProjectReadinessState::Terminal => return Err(StoreError::InvalidAuthority(
                 "Project is terminal or has unresolved provider evidence; selection is unchanged".into())),
@@ -288,7 +280,9 @@ impl SqliteStore {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ProjectReadinessState {
     Unconfigured,
@@ -298,7 +292,7 @@ pub enum ProjectReadinessState {
     Terminal,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct ProjectReadiness {
     pub state: ProjectReadinessState,
     pub project_id: Option<String>,
@@ -307,7 +301,7 @@ pub struct ProjectReadiness {
     pub activation: Option<ProjectActivation>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct ProjectActivation {
     pub lf_process_id: String,
     pub completed_at: Option<i64>,

@@ -19,6 +19,7 @@ pub(crate) fn generated_session_title(
         !matches!(
             *skill,
             "session"
+                | "default"
                 | "operate"
                 | "repo-session"
                 | "wave-session"
@@ -220,6 +221,10 @@ mod tests {
         let cwd = std::path::Path::new("/repo/terminal-titles");
         let context =
             crate::trace::PreparedTurnContext::from_prompts("# Loopflow operating guide", "");
+        assert_eq!(
+            super::generated_session_title(Some(&context), Some("default"), None, cwd),
+            "terminal-titles"
+        );
         assert_eq!(
             super::generated_session_title(
                 Some(&context),

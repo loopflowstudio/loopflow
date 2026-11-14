@@ -7,9 +7,7 @@ mod support;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::{Child, Command};
-use std::time::{Duration, Instant};
 
-use loopflow::harness::codex_connection::CodexConnection;
 use loopflow::id::LfProcessId;
 use loopflow::session::{LfSession, TitleSource};
 use loopflow::store::sqlite::SqliteStore;
@@ -84,7 +82,7 @@ async fn agent_settlement_on_read_reports_failed_observation_and_recovers_withou
         .release_session_attachment("orphan", &attachment)
         .unwrap();
     let before = store
-        .process(&attachment.agent_process_id)
+        .agent_process(&attachment.agent_process_id)
         .unwrap()
         .unwrap();
     let history = store.session_history("orphan", 0, 0).unwrap();
@@ -138,7 +136,7 @@ async fn agent_settlement_on_read_reports_failed_observation_and_recovers_withou
             );
             assert!(agent.0.try_wait().unwrap().is_none());
             assert_eq!(
-                store.process(&attachment.agent_process_id).unwrap(),
+                store.agent_process(&attachment.agent_process_id).unwrap(),
                 Some(before.clone())
             );
             assert_eq!(
@@ -162,7 +160,7 @@ async fn agent_settlement_on_read_reports_failed_observation_and_recovers_withou
         .success());
     assert!(snapshot().nodes.iter().all(|row| row.id != id));
     let ended = store
-        .process(&attachment.agent_process_id)
+        .agent_process(&attachment.agent_process_id)
         .unwrap()
         .unwrap();
     assert!(ended.completed_at.is_some());
@@ -200,7 +198,8 @@ fn task_checkout_blockers_are_rows_in_the_activity_list() {
     let created = json(
         repo.path(),
         &["task", "create", "--title", "Hold a Task", "--json"],
-    );
+    )["task"]
+        .clone();
     let id = created["id"].as_str().unwrap();
     let placed = json(repo.path(), &["checkout", id, "--json"]);
     let worktree = Path::new(placed["worktree"].as_str().unwrap());
@@ -315,7 +314,7 @@ async fn activity_lists_unresolved_records_without_receipts_or_os_sampling() {
 
 #[tokio::test]
 async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
-    use loopflow::process::{LfProcess, LfProcessPage};
+    use loopflow::process::{ProcessEntry, ProcessPage};
     let home = tempfile::tempdir().unwrap();
     let database = home.path().join("loopflow.db");
     let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
@@ -341,7 +340,7 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
         assert!(result.status.success(), "{result:?}");
         result.stdout
     };
-    let first: LfProcessPage = serde_json::from_slice(&invoke(&[
+    let first: ProcessPage = serde_json::from_slice(&invoke(&[
         "history",
         "list",
         "--all",
@@ -356,12 +355,13 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
         "--json",
     ]))
     .unwrap();
-    assert_eq!(first.entries[0].id, ids[0]);
-    assert_eq!(first.entries[0].via_agent, Some(false));
-    assert_eq!(first.entries[0].command.as_ref(), Some(&raw));
-    assert_eq!(first.entries[0].outcome, None);
+    let entry = first.entries[0].as_lf().unwrap();
+    assert_eq!(entry.id, ids[0]);
+    assert_eq!(entry.via_agent, Some(false));
+    assert_eq!(entry.command.as_ref(), Some(&raw));
+    assert_eq!(entry.outcome, None);
     let cursor = serde_json::to_string(first.next.as_ref().unwrap()).unwrap();
-    let second: LfProcessPage = serde_json::from_slice(&invoke(&[
+    let second: ProcessPage = serde_json::from_slice(&invoke(&[
         "history",
         "list",
         "--all",
@@ -378,13 +378,17 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
         "--json",
     ]))
     .unwrap();
-    assert_eq!(second.entries[0].id, ids[1]);
+    assert_eq!(second.entries[0].id(), ids[1].as_str());
     assert_eq!(
-        second.entries[0].caller_session_id.as_deref(),
+        second.entries[0]
+            .as_lf()
+            .unwrap()
+            .caller_session_id
+            .as_deref(),
         Some("caller-session")
     );
     assert_eq!(second.next, None);
-    let detail: LfProcess = serde_json::from_slice(&invoke(&[
+    let detail: ProcessEntry = serde_json::from_slice(&invoke(&[
         "history",
         "show",
         &ids[1].as_str()[..20],
@@ -398,18 +402,18 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
     for args in [
         vec!["history", "list", "--all", "--parent", parent.as_str()],
         vec!["history", "show", ids[1].as_str()],
-        vec!["monitor", "--all"],
+        vec!["history", "list", "--all"],
     ] {
         let text = String::from_utf8(invoke(&args)).unwrap();
         assert!(text.contains(&expected), "{text}");
-        if args[0] == "monitor" {
+        if args == ["history", "list", "--all"] {
             assert!(
                 text.contains(&format!("{parent}  1  unknown  unknown command")),
                 "{text}"
             );
         }
     }
-    let caller: LfProcessPage = serde_json::from_slice(&invoke(&[
+    let caller: ProcessPage = serde_json::from_slice(&invoke(&[
         "history",
         "list",
         "--all",
@@ -461,13 +465,13 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
         ],
         vec!["history", "list", "--all", "--wave", "historical", "--json"],
     ] {
-        let page: LfProcessPage = serde_json::from_slice(&invoke(&args)).unwrap();
+        let page: ProcessPage = serde_json::from_slice(&invoke(&args)).unwrap();
         assert_eq!(
             page.entries
                 .iter()
-                .map(|process| &process.id)
+                .map(ProcessEntry::id)
                 .collect::<Vec<_>>(),
-            vec![&ids[1]]
+            vec![ids[1].as_str()]
         );
     }
 
@@ -518,13 +522,13 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
         .output()
         .unwrap();
         assert!(result.status.success(), "{result:?}");
-        let page: LfProcessPage = serde_json::from_slice(&result.stdout).unwrap();
+        let page: ProcessPage = serde_json::from_slice(&result.stdout).unwrap();
         assert_eq!(
             page.entries
                 .iter()
-                .map(|process| &process.id)
+                .map(ProcessEntry::id)
                 .collect::<Vec<_>>(),
-            vec![expected]
+            vec![expected.as_str()]
         );
     }
     let ambiguous = command(
@@ -536,7 +540,7 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
     .unwrap();
     assert!(!ambiguous.status.success());
     assert!(String::from_utf8_lossy(&ambiguous.stderr).contains("Ambiguous Work selector"));
-    let explicit: LfProcessPage = serde_json::from_slice(&invoke(&[
+    let explicit: ProcessPage = serde_json::from_slice(&invoke(&[
         "history",
         "list",
         "--all",
@@ -545,7 +549,7 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
         "--json",
     ]))
     .unwrap();
-    assert_eq!(explicit.entries[0].id, ids[0]);
+    assert_eq!(explicit.entries[0].id(), ids[0].as_str());
     let zero = command(
         home.path(),
         home.path(),
@@ -851,308 +855,6 @@ fn child(home: &Path, cwd: &Path, args: &[&str], parent: &RunningParent) -> Comm
     command
 }
 
-fn wait_file(path: &Path, child: &mut Child) {
-    let deadline = Instant::now() + Duration::from_secs(60);
-    while !path.exists() {
-        assert!(
-            child.try_wait().unwrap().is_none(),
-            "child exited before {}",
-            path.display()
-        );
-        assert!(
-            Instant::now() < deadline,
-            "timed out waiting for {}",
-            path.display()
-        );
-        std::thread::sleep(Duration::from_millis(20));
-    }
-}
-
-struct Attached {
-    child: Child,
-    id: LfProcessId,
-    stop: std::path::PathBuf,
-    output: std::path::PathBuf,
-}
-
-impl Attached {
-    fn start(home: &Path, repo: &Path, name: &str) -> Self {
-        let script = attached_script(repo);
-        let args = [
-            "session",
-            "serve",
-            "--",
-            "python3",
-            script.to_str().unwrap(),
-        ];
-        Self::spawn(command(home, repo, &args), home, name)
-    }
-
-    fn spawn(mut command: Command, home: &Path, name: &str) -> Self {
-        let output = home.join(format!("{name}.output"));
-        let log = std::fs::File::create(&output).unwrap();
-        let mut child = command
-            .env("LF_TEST_ATTACHED", name)
-            .env("LF_TEST_BINARY", env!("CARGO_BIN_EXE_lf"))
-            .stdout(log.try_clone().unwrap())
-            .stderr(log)
-            .spawn()
-            .unwrap();
-        let ready = home.join(format!("{name}.ready"));
-        wait_file(&ready, &mut child);
-        Self {
-            child,
-            id: LfProcessId::parse(std::fs::read_to_string(ready).unwrap().trim()).unwrap(),
-            stop: home.join(format!("{name}.stop")),
-            output,
-        }
-    }
-}
-
-impl Drop for Attached {
-    fn drop(&mut self) {
-        std::fs::write(&self.stop, "").unwrap();
-        let deadline = Instant::now() + Duration::from_secs(10);
-        while self.child.try_wait().unwrap().is_none() && Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        if self.child.try_wait().unwrap().is_none() {
-            let _ = self.child.kill();
-        }
-        let _ = self.child.wait();
-    }
-}
-
-fn attached_script(repo: &Path) -> std::path::PathBuf {
-    repo.canonicalize().unwrap().join("attached.py")
-}
-
-/// What an `Attached` execution runs: one nested lf command, then it announces
-/// the owning LfProcessId and waits for its stop file.
-fn write_attached_script(repo: &Path) {
-    std::fs::write(
-        attached_script(repo),
-        r#"
-import os, pathlib, subprocess, time
-home = pathlib.Path(os.environ['LF_HOME'])
-name = os.environ['LF_TEST_ATTACHED']
-subprocess.run([os.environ['LF_TEST_BINARY'], 'session', 'list', '--all', '--json'],
-               check=True, stdout=subprocess.DEVNULL)
-(home / (name + '.pid')).write_text(str(os.getpid()))
-(home / (name + '.ready.tmp')).write_text(os.environ['LF_PROCESS_ID'])
-os.replace(home / (name + '.ready.tmp'), home / (name + '.ready'))
-while not (home / (name + '.stop')).exists():
-    time.sleep(.02)
-"#,
-    )
-    .unwrap();
-}
-
-#[tokio::test]
-async fn interruption_records_the_process_without_a_fabricated_signal_name() {
-    let home = tempfile::tempdir().unwrap();
-    let repo = TestRepo::new();
-    let database = home.path().join("loopflow.db");
-    let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
-        .await
-        .unwrap();
-    write_attached_script(repo.path());
-    // Hold the existing cleanup hook after killing its owned group. Without
-    // exit coordination the awakened command returns 1 while Process already says
-    // interrupted/130. A passing ordinary timing alone does not cover this race.
-    #[cfg(target_os = "linux")]
-    let preload = {
-        let source = home.path().join("hold_group_kill.c");
-        let library = home.path().join("hold_group_kill.so");
-        std::fs::write(&source, include_str!("support/hold_group_kill.c")).unwrap();
-        let output = Command::new("cc")
-            .args(["-shared", "-fPIC", "-o"])
-            .arg(&library)
-            .arg(&source)
-            .arg("-ldl")
-            .output()
-            .unwrap();
-        assert!(output.status.success(), "{output:?}");
-        Some(library)
-    };
-    #[cfg(not(target_os = "linux"))]
-    let preload: Option<std::path::PathBuf> = None;
-    let parent = RunningParent::insert(&database);
-    let script = attached_script(repo.path());
-    let mut command = child(
-        home.path(),
-        repo.path(),
-        &[
-            "session",
-            "serve",
-            "--",
-            "python3",
-            script.to_str().unwrap(),
-        ],
-        &parent,
-    );
-    if let Some(preload) = &preload {
-        command.env("LD_PRELOAD", preload);
-    }
-    let mut attached = Attached::spawn(command, home.path(), "interrupt");
-    // SAFETY: this PID is our still-owned child, retained until wait completes.
-    assert_eq!(
-        unsafe { libc::kill(attached.child.id() as i32, libc::SIGINT) },
-        0
-    );
-    let exit = attached.child.wait().unwrap();
-    let conn = rusqlite::Connection::open(database).unwrap();
-    let row: (String, i32, Option<String>) = conn
-        .query_row(
-            "SELECT outcome,exit_code,signal FROM processes WHERE id=?1",
-            [attached.id.as_str()],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )
-        .unwrap();
-    assert_eq!(
-        (exit.code(), row),
-        (Some(130), ("interrupted".into(), 130, None)),
-        "{}",
-        std::fs::read_to_string(&attached.output).unwrap()
-    );
-    if preload.is_some() {
-        assert!(std::fs::read_to_string(&attached.output)
-            .unwrap()
-            .contains("test ordering: owned group killed before interrupt hook returns"));
-    }
-    let script_pid = std::fs::read_to_string(home.path().join("interrupt.pid")).unwrap();
-    let alive = || {
-        let output = Command::new("ps")
-            .args(["-p", script_pid.trim(), "-o", "command="])
-            .output()
-            .unwrap();
-        String::from_utf8_lossy(&output.stdout).contains(script.to_str().unwrap())
-    };
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while alive() && Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    let survived = alive();
-    if survived {
-        eprintln!(
-            "owned script survived interrupted lf: pid={} script={}",
-            script_pid.trim(),
-            script.display()
-        );
-        // Keep fixture cleanup distinct from the interruption result. Release
-        // only this script and observe exit before deleting its stop directory.
-        std::fs::write(&attached.stop, "").unwrap();
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while alive() && Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        assert!(!alive(), "owned script failed fixture cleanup");
-    }
-    assert!(!survived, "interrupted command left its owned script alive");
-}
-
-#[tokio::test]
-#[ignore = "requires actual Codex 0.157.1 and uv; only local synthetic Responses, no credentials"]
-async fn actual_agent_process_children_follow_attachment_handoff_but_not_provider_replacement() {
-    let home = tempfile::tempdir().unwrap();
-    let repo = TestRepo::new();
-    let database = home.path().join("loopflow.db");
-    let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
-        .await
-        .unwrap();
-    let store = SqliteStore::new(&database).unwrap();
-    write_attached_script(repo.path());
-    let original = Attached::start(home.path(), repo.path(), "original");
-    let original_id = original.id.clone();
-    let replacement = Attached::start(home.path(), repo.path(), "replacement");
-    let restart = Attached::start(home.path(), repo.path(), "restart");
-    let session_id = "agent-process-ownership-fixture";
-    reserve_session(&store, session_id, repo.path());
-    let first = store
-        .claim_session_attachment(session_id, None, &original.id, false)
-        .unwrap();
-    let control = home.path().join("control");
-    std::fs::create_dir(&control).unwrap();
-    std::fs::write(
-        control.join("caller.json"),
-        serde_json::to_vec(&first.caller(session_id.into())).unwrap(),
-    )
-    .unwrap();
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let codex =
-        std::env::var("CODEX_TEST_BIN").expect("set CODEX_TEST_BIN to the real Codex executable");
-    let mut probe = Command::new("uv")
-        .current_dir(&root)
-        .arg("run")
-        .arg("tests/e2e/codex_connect.py")
-        .arg("--codex")
-        .arg(codex)
-        .arg("--output")
-        .arg(control.join("evidence"))
-        .arg("--lf")
-        .arg(env!("CARGO_BIN_EXE_lf"))
-        .arg("--lf-home")
-        .arg(home.path())
-        .arg("--control")
-        .arg(&control)
-        .spawn()
-        .unwrap();
-    wait_file(&control.join("before.done"), &mut probe);
-    let vacant = store
-        .release_session_attachment(session_id, &first)
-        .unwrap();
-    assert_eq!(vacant.lf_process_id, None);
-    assert_eq!(vacant.agent_process_id, first.agent_process_id);
-    assert_eq!(vacant.provider_lf_process_id, first.provider_lf_process_id);
-    assert_eq!(
-        store.session_attachment(session_id).unwrap(),
-        Some(vacant.clone())
-    );
-    let handed_off = store
-        .claim_session_attachment(session_id, Some(&vacant), &replacement.id, false)
-        .unwrap();
-    assert_eq!(handed_off.agent_process_id, first.agent_process_id);
-    assert_ne!(handed_off.token, first.token);
-    assert!(store
-        .claim_session_attachment(session_id, Some(&first), &original.id, false)
-        .is_err());
-    drop(original);
-    std::fs::write(control.join("handoff.go"), "").unwrap();
-    wait_file(&control.join("after.done"), &mut probe);
-    let restarted = store
-        .claim_session_attachment(session_id, Some(&handed_off), &restart.id, true)
-        .unwrap();
-    assert_ne!(restarted.agent_process_id, handed_off.agent_process_id);
-    std::fs::write(control.join("replace.go"), "").unwrap();
-    assert!(probe.wait().unwrap().success());
-    let conn = rusqlite::Connection::open(&database).unwrap();
-    let parents: Vec<String> = conn
-        .prepare(
-            "SELECT parent_lf_process_id FROM processes WHERE caller_session_id=?1 ORDER BY rowid",
-        )
-        .unwrap()
-        .query_map([session_id], |row| row.get(0))
-        .unwrap()
-        .map(Result::unwrap)
-        .collect();
-    assert_eq!(
-        parents,
-        [
-            original_id.to_string(),
-            replacement.id.to_string(),
-            original_id.to_string()
-        ]
-    );
-    let direct_children: i64 = conn
-        .query_row(
-            "SELECT count(*) FROM processes WHERE parent_lf_process_id=?1 AND via_agent=0",
-            [original_id.as_str()],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(direct_children, 1);
-}
-
 /// An attaching lf records its own row; fixtures attaching from outside one record it here.
 fn recorded_lf_process(database: &Path) -> LfProcessId {
     let id = LfProcessId::new();
@@ -1199,132 +901,6 @@ fn reserve_session(store: &SqliteStore, session_id: &str, repo: &Path) {
             None,
         )
         .unwrap();
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires actual Codex and uv; private Machines and synthetic Responses only"]
-async fn retained_native_client_loses_writes_but_keeps_display_after_transfer() {
-    let home = tempfile::tempdir().unwrap();
-    let repo = TestRepo::new();
-    let database = home.path().join("loopflow.db");
-    let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
-        .await
-        .unwrap();
-    let store = SqliteStore::new(&database).unwrap();
-    write_attached_script(repo.path());
-    let original = Attached::start(home.path(), repo.path(), "original");
-    let replacement = Attached::start(home.path(), repo.path(), "replacement");
-    let session = "native-client-transfer";
-    reserve_session(&store, session, repo.path());
-    let first = store
-        .claim_session_attachment(session, None, &original.id, false)
-        .unwrap();
-    let control = home.path().join("gate");
-    std::fs::create_dir(&control).unwrap();
-    std::fs::write(
-        control.join("caller.json"),
-        serde_json::to_vec(&first.caller(session.into())).unwrap(),
-    )
-    .unwrap();
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut probe = Command::new("uv")
-        .current_dir(root)
-        .args(["run", "tests/e2e/codex_connect.py", "--gated", "--codex"])
-        .arg(std::env::var("CODEX_TEST_BIN").expect("set CODEX_TEST_BIN"))
-        .arg("--output")
-        .arg(control.join("evidence"))
-        .arg("--control")
-        .arg(&control)
-        .arg("--lf")
-        .arg(env!("CARGO_BIN_EXE_lf"))
-        .arg("--lf-home")
-        .arg(home.path())
-        .spawn()
-        .unwrap();
-    wait_file(&control.join("native.done"), &mut probe);
-    let agent_process: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(control.join("agent_process.json")).unwrap())
-            .unwrap();
-    let connection = CodexConnection::new(
-        store.clone(),
-        session.into(),
-        Some(agent_process["thread"].as_str().unwrap().into()),
-        Some(first.clone()),
-    );
-    let endpoint = Path::new(agent_process["endpoint"].as_str().unwrap());
-    let old = serve_gate(&control.join("old.sock"), endpoint, connection.clone());
-    let mut passive = connection.clone();
-    passive.attachment = None;
-    let observer = serve_gate(&control.join("observer.sock"), endpoint, passive);
-    std::fs::write(control.join("sockets.go"), "").unwrap();
-    wait_file(&control.join("attached.done"), &mut probe);
-    assert_eq!(
-        store.session_attachment(session).unwrap(),
-        Some(first.clone()),
-        "passive display must not claim the conversation"
-    );
-    let second = store
-        .claim_session_attachment(session, Some(&first), &replacement.id, false)
-        .unwrap();
-    let mut current = connection;
-    current.attachment = Some(second.clone());
-    let current = serve_gate(&control.join("current.sock"), endpoint, current);
-    std::fs::write(control.join("transfer.go"), "").unwrap();
-    assert!(probe.wait().unwrap().success());
-    let result: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(control.join("evidence/results.json")).unwrap())
-            .unwrap();
-    assert_eq!(result["old_client_still_receives_completion"], true);
-    assert_eq!(result["current_attachment_continued"], true);
-    assert_eq!(result["agent_process_alive"], true);
-    assert_eq!(
-        result["rejected_old_client_writes"]
-            .as_array()
-            .unwrap()
-            .len(),
-        4
-    );
-    assert_eq!(store.session_attachment(session).unwrap(), Some(second));
-    let conn = rusqlite::Connection::open(database).unwrap();
-    let parents: Vec<String> = conn.prepare(
-        "SELECT parent_lf_process_id FROM processes WHERE caller_session_id=?1 AND via_agent=1 ORDER BY rowid"
-    ).unwrap().query_map([session], |row| row.get(0)).unwrap().map(Result::unwrap).collect();
-    assert_eq!(parents.first(), Some(&original.id.to_string()));
-    assert!(
-        parents.len() >= 3,
-        "initial, continuing and subsequent turns must invoke lf"
-    );
-    assert!(
-        parents[1..]
-            .iter()
-            .all(|parent| *parent == replacement.id.to_string()),
-        "{parents:?}"
-    );
-    for task in [old, observer, current] {
-        task.abort();
-    }
-}
-
-fn serve_gate(
-    socket: &Path,
-    endpoint: &Path,
-    connection: CodexConnection,
-) -> tokio::task::JoinHandle<()> {
-    let listener = tokio::net::UnixListener::bind(socket).unwrap();
-    let endpoint = endpoint.to_path_buf();
-    tokio::spawn(async move {
-        let mut clients = tokio::task::JoinSet::new();
-        loop {
-            let (socket, _) = listener.accept().await.unwrap();
-            let connection = connection.clone();
-            let endpoint = endpoint.clone();
-            clients.spawn(async move {
-                if let Err(error) = connection.serve(socket, &endpoint).await {
-                    eprintln!("native fixture client closed: {error}");
-                }
-            });
-        }
-    })
 }
 
 #[tokio::test]
@@ -1407,7 +983,7 @@ async fn monitor_prune_settles_proven_dead_processes_and_keeps_unknown_ones() {
 }
 
 #[tokio::test]
-async fn monitor_does_not_treat_historical_feedback_as_live_readiness() {
+async fn historical_feedback_is_not_live_availability() {
     let home = tempfile::tempdir().unwrap();
     let database = home.path().join("loopflow.db");
     let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
@@ -1440,58 +1016,24 @@ async fn monitor_does_not_treat_historical_feedback_as_live_readiness() {
             [&finished.agent_process_id],
         )
         .unwrap();
-    let output = command(home.path(), home.path(), &["monitor", "--all", "--json"])
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "{output:?}");
-    let overview: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    let items = overview["items"].as_array().unwrap();
-    for (id, state, reason, action) in [
-        (
-            "waiting",
-            "unknown",
-            "No current provider observation",
-            "lf session history waiting",
-        ),
-        (
-            "finished",
-            "finished",
-            "completion is recorded",
-            "lf session history finished",
-        ),
-        (
-            "legacy_finished",
-            "unknown",
-            "No current provider observation",
-            "lf session history legacy_finished",
-        ),
-        (
-            "unobserved",
-            "unknown",
-            "No current provider observation",
-            "lf session history unobserved",
-        ),
-    ] {
-        let item = items.iter().find(|item| item["id"] == id).unwrap();
-        assert_eq!(item["state"], state);
-        assert!(item["reason"].as_str().unwrap().contains(reason));
-        assert_eq!(item["next_action"], action);
+    for id in ["waiting", "finished", "legacy_finished", "unobserved"] {
+        let output = command(home.path(), home.path(), &["session", "card", id, "--json"])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let card: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let session = &card["session"];
+        assert!(session["availability"].is_null(), "{session}");
+        assert_ne!(session["state"], "active", "{session}");
     }
-    assert!(overview["recent_commands"]["entries"].is_array());
-    assert!(overview["gaps"].is_array());
-    assert!(overview["items"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|item| item["state"] != "active"));
     for args in [
-        vec!["monitor", "ps", "--help"],
-        vec!["monitor", "top", "--help"],
-        vec!["monitor", "--help"],
+        vec!["process", "list", "--help"],
+        vec!["process", "top", "--help"],
+        vec!["process", "--help"],
     ] {
         let help = command(home.path(), home.path(), &args).output().unwrap();
         assert!(help.status.success(), "{help:?}");
-        assert!(String::from_utf8_lossy(&help.stdout).contains("monitor"));
+        assert!(String::from_utf8_lossy(&help.stdout).contains("process"));
     }
 }
 

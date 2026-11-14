@@ -1,4 +1,4 @@
-//! Stream installs (green main builds and published releases) and the optional
+//! Stream installs (green main builds and published releases) and the
 //! machine-local schedule that follows the recorded stream.
 
 use std::fs;
@@ -21,10 +21,6 @@ const RELEASES: &str = "https://github.com/loopflowstudio/loopflow/releases";
 const MAIN_PACKAGES: &str = "main-packages.yml";
 /// The artifact holding that run's signed, notarized Loopflow.dmg.
 const MAIN_APP: &str = "Loopflow-dmg";
-/// The reader floors a release's build opens (`lf self install reader-catalog`).
-const READER_CATALOG: &str = "reader-catalog.txt";
-/// Starts Loopflow.app's own update check (`LoopflowApp.handleDeepLink`).
-const APP_UPDATE_LINK: &str = "loopflow://update";
 
 /// The build line an install follows (`release/README.md`, Streams).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,15 +65,17 @@ pub fn install(switch: Option<Stream>) -> Result<()> {
         }
         None => recorded_stream(&home)?.unwrap_or(Stream::Stable),
     };
+    super::recover_switch(None)?;
+    let directory = install_dir()?;
+    let app = app_destination(&directory.join("lf"));
     if stream == Stream::Dev {
-        return main_build();
+        main_build(&directory, app.as_deref())?;
+    } else {
+        let client = http_client()?;
+        let tag = stream_release(&client, stream)?;
+        install_release(&client, stream, &tag, &directory, app.as_deref())?;
     }
-    if cfg!(target_os = "macos") {
-        finish_adoption(&applications_dir())?;
-    }
-    let client = http_client()?;
-    let tag = stream_release(&client, stream)?;
-    install_release(&client, stream, &tag)
+    schedule(None)
 }
 
 /// The release a release stream is at: preview's newest, or stable's GitHub Latest.
@@ -101,47 +99,25 @@ fn stream_release(client: &Client, stream: Stream) -> Result<String> {
     release_tag(latest.url().path())
 }
 
-fn install_release(client: &Client, stream: Stream, tag: &str) -> Result<()> {
-    let directory = install_dir()?;
-    let applications = applications_dir();
+fn install_release(
+    client: &Client,
+    stream: Stream,
+    tag: &str,
+    directory: &Path,
+    app: Option<&Path>,
+) -> Result<()> {
     let stream = stream.as_str();
-    if is_current(
-        &directory,
-        tag,
-        installs_app().then_some(applications.as_path()),
-    ) {
+    if is_current(directory, tag, app) {
+        // Matching files can still have an interrupted receipt or a stale gate.
+        // Let the same promotion owner reconcile them before reporting success.
+        promote_build(&directory.join("lf"), directory, app.map(|app| (app, app)))?;
         println!("{stream} {tag} is already installed.");
         return Ok(());
     }
     let manifest = release_manifest(client, tag)?;
-    if !release_opens_store(client, tag, &manifest)? {
-        println!(
-            "{stream} is at {tag}, which cannot open this Machine's store: a newer lf migrated it. \
-             Keeping the installed lf; `lf install` moves to {stream} once it reaches a build that opens the store."
-        );
-        return Ok(());
-    }
-    let app = applications.join("Loopflow.app");
-    if installs_app() && updates_itself(&app) && app_is_running(&app)? {
-        // Replacing a running bundle under it is Sparkle's job, not ours.
-        let status = Command::new("/usr/bin/open")
-            .args(["-g", APP_UPDATE_LINK])
-            .status()
-            .context("ask Loopflow.app to update")?;
-        if !status.success() {
-            bail!(
-                "could not ask {} to update ({status}); quit it and rerun `lf install`",
-                app.display()
-            );
-        }
-        println!(
-            "{stream} is at {tag}; Loopflow.app is running, so it installs the update and `lf` follows it."
-        );
-        return Ok(());
-    }
     let installer = release_asset(client, tag, "install.sh")?;
     let temporary = tempfile::tempdir()?;
-    run_verified_installer(&directory, temporary.path(), tag, &manifest, &installer)?;
+    run_verified_installer(directory, app, temporary.path(), tag, &manifest, &installer)?;
     println!(
         "{stream}: {tag}\ninstalled: {}",
         directory.join("lf").display()
@@ -154,7 +130,7 @@ fn install_release(client: &Client, stream: Stream, tag: &str) -> Result<()> {
 /// files. The app's first launch runs this through its own bundled `lf`.
 pub fn adopt() -> Result<()> {
     let current = fs::canonicalize(std::env::current_exe()?)?;
-    let app = applications_dir().join("Loopflow.app");
+    let app = super::installed_app(&current);
     if fs::canonicalize(app.join("Contents/MacOS/lf")).ok() != Some(current.clone()) {
         println!(
             "{} is not {}'s lf; nothing to adopt",
@@ -172,54 +148,22 @@ pub fn adopt() -> Result<()> {
         },
         true,
         false,
-    )
+    )?;
+    schedule(None)
 }
 
-/// Adopt Loopflow.app when Sparkle replaced it and its first launch hasn't run
-/// yet: the app's `lf` is ahead of the store, so every terminal `lf` refuses
-/// until something migrates it. Moves no files.
-fn finish_adoption(applications: &Path) -> Result<()> {
-    let lf = applications.join("Loopflow.app/Contents/MacOS/lf");
-    if preflight_verdict(&lf).as_deref() != Some("promote_and_migrate") {
-        return Ok(());
-    }
-    let status = Command::new(&lf)
-        .args(["install", "adopt"])
-        .status()
-        .with_context(|| format!("adopt {}", lf.display()))?;
-    if !status.success() {
-        bail!(
-            "adopting the updated {} failed ({status}); fix the error above and rerun `lf install`",
-            lf.display()
-        );
-    }
-    Ok(())
-}
-
-/// Loopflow.app installs beside `lf` on a Mac unless `LF_INSTALL_CLI_ONLY=1`.
-fn installs_app() -> bool {
-    cfg!(target_os = "macos") && std::env::var("LF_INSTALL_CLI_ONLY").as_deref() != Ok("1")
-}
-
-fn applications_dir() -> PathBuf {
-    std::env::var_os("LF_APPLICATIONS_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/Applications"))
-}
-
-/// Succeed only when release `tag` can open this Machine's store; Loopflow.app's
-/// updater asks before installing a release.
-pub fn can_open(tag: &str) -> Result<()> {
-    let client = http_client()?;
-    let manifest = release_manifest(&client, tag)?;
-    if !release_opens_store(&client, tag, &manifest)? {
-        bail!(
-            "{tag} cannot open this Machine's store: a newer lf migrated it. \
-             Loopflow stays on this build until its stream reaches one that opens the store."
-        );
-    }
-    println!("{tag} opens this Machine's store");
-    Ok(())
+/// CLI-only omits initial Desktop setup; an existing app stays in the installation.
+fn app_destination(cli: &Path) -> Option<PathBuf> {
+    let installed = super::installed_app(cli);
+    let app = std::env::var_os("LF_APPLICATIONS_DIR")
+        .filter(|value| !value.is_empty())
+        .map(|directory| PathBuf::from(directory).join("Loopflow.app"))
+        .unwrap_or_else(|| installed.clone());
+    (cfg!(target_os = "macos")
+        && (std::env::var("LF_INSTALL_CLI_ONLY").as_deref() != Ok("1")
+            || installed.exists()
+            || app.exists()))
+    .then_some(app)
 }
 
 fn http_client() -> Result<Client> {
@@ -247,20 +191,6 @@ fn release_manifest(client: &Client, tag: &str) -> Result<String> {
     )?)?)
 }
 
-/// Whether release `tag` opens the store, from its digest-checked reader catalog.
-fn release_opens_store(client: &Client, tag: &str, manifest: &str) -> Result<bool> {
-    // Releases before v0.16 publish no catalog; promotion still refuses them.
-    if manifest_digest(manifest, READER_CATALOG).is_none() {
-        return Ok(true);
-    }
-    let catalog = release_asset(client, tag, READER_CATALOG)?;
-    verify_asset(manifest, READER_CATALOG, &catalog)?;
-    opens_store(
-        &crate::store::production_database_path(),
-        &String::from_utf8_lossy(&catalog),
-    )
-}
-
 /// The newest published release in the GitHub releases list, which is newest first.
 fn newest_release(json: &str) -> Result<String> {
     #[derive(serde::Deserialize)]
@@ -277,28 +207,10 @@ fn newest_release(json: &str) -> Result<String> {
         .ok_or_else(|| anyhow!("no published Loopflow release"))
 }
 
-/// Whether a build with this reader catalog opens the store. An absent store opens.
-fn opens_store(store: &Path, catalog: &str) -> Result<bool> {
-    if !store.exists() {
-        return Ok(true);
-    }
-    let conn = rusqlite::Connection::open_with_flags(
-        store,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )?;
-    let catalog: Vec<String> = catalog
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(str::to_string)
-        .collect();
-    Ok(crate::store::migrations::can_open(&conn, &catalog)?)
-}
-
 /// The stream recorded in `home`'s config.yaml.
 fn recorded_stream(home: &Path) -> Result<Option<Stream>> {
     let config = home.join("config.yaml");
-    let Some(name) = crate::config::read_global_config_at(&config)?
+    let Some(name) = crate::config::files::read(&config)?
         .get("stream")
         .and_then(|value| value.as_str().map(str::to_string))
     else {
@@ -313,7 +225,7 @@ fn recorded_stream(home: &Path) -> Result<Option<Stream>> {
 }
 
 fn record_stream(home: &Path, stream: Stream) -> Result<()> {
-    crate::config::update_global_config_at(home, |config| {
+    crate::config::files::update(&home.join("config.yaml"), |config| {
         config["stream"] = stream.as_str().into();
         Ok(())
     })
@@ -322,7 +234,7 @@ fn record_stream(home: &Path, stream: Stream) -> Result<()> {
 /// Install the package CI built for the newest green main commit, with its
 /// Loopflow.app on a Mac. GitHub keeps those artifacts behind authentication,
 /// so this uses the `gh` login.
-fn main_build() -> Result<()> {
+fn main_build(directory: &Path, app: Option<&Path>) -> Result<()> {
     let target =
         package_target().ok_or_else(|| anyhow!("no main package is built for this platform"))?;
     let runs = gh(&[
@@ -356,38 +268,42 @@ fn main_build() -> Result<()> {
         bail!("could not unpack {} ({status})", archive.display());
     }
     let candidate = temporary.path().join("lf");
-    let directory = install_dir()?;
-    let mut promote = Command::new(&candidate);
-    promote
-        .args(["self", "install", "promote", "--cli-target"])
-        .arg(directory.join("lf"))
-        .arg("--sync-skills");
     // Mounted until promotion has copied the app out of it.
-    let image = installs_app()
-        .then(|| DiskImage::download(run, temporary.path()))
+    let image = app
+        .map(|_| DiskImage::download(run, temporary.path()))
         .transpose()?;
-    if let Some(image) = &image {
-        let applications = applications_dir();
-        // Promotion quits a running app, replaces it and reopens it.
-        promote
-            .arg("--app-source")
-            .arg(image.app())
-            .arg("--app-target")
-            .arg(applications.join("Loopflow.app"))
-            .arg("--legacy-app-target")
-            .arg(applications.join("Concerto.app"));
-    }
-    let status = promote
-        .status()
-        .context("start the main build's promotion")?;
-    if !status.success() {
-        bail!("installing main {revision} failed ({status}); fix the error above and rerun `lf install --dev`");
-    }
+    let source = image.as_ref().map(DiskImage::app);
+    promote_build(&candidate, directory, source.as_deref().zip(app))?;
     println!(
         "main: {revision}\ninstalled: {}",
         directory.join("lf").display()
     );
-    schedule(None)
+    Ok(())
+}
+
+fn promote_build(candidate: &Path, directory: &Path, app: Option<(&Path, &Path)>) -> Result<()> {
+    let mut promote = Command::new(candidate);
+    super::isolate_candidate_command(&mut promote);
+    promote
+        .args(["install", "promote", "--cli-target"])
+        .arg(directory.join("lf"))
+        .arg("--sync-skills");
+    if let Some((source, target)) = app {
+        promote
+            .arg("--app-source")
+            .arg(source)
+            .arg("--app-target")
+            .arg(target)
+            .arg("--legacy-app-target")
+            .arg(target.with_file_name("Concerto.app"));
+    }
+    let status = promote.status().context("start installation promotion")?;
+    if !status.success() {
+        bail!(
+            "installation promotion failed ({status}); fix the error above and rerun `lf install`"
+        );
+    }
+    Ok(())
 }
 
 /// The signed, notarized Loopflow.dmg a main packages run built, mounted
@@ -545,24 +461,23 @@ fn install_dir() -> Result<PathBuf> {
     Ok(home.join(".local/bin"))
 }
 
-fn is_current(directory: &Path, tag: &str, applications: Option<&Path>) -> bool {
+fn is_current(directory: &Path, tag: &str, app: Option<&Path>) -> bool {
     let version = tag.trim_start_matches('v');
-    let lf = directory.join("lf");
-    let installed = inspect(&lf, &["--version"]).is_some_and(|output| {
+    let Ok(lf) = fs::canonicalize(directory.join("lf")) else {
+        return false;
+    };
+    // The public entry must name the bundled helper. Once paired, one preflight
+    // checks their shared build and store compatibility; promotion reconciles receipts.
+    if app.is_some_and(|app| !has_release_app(app, version, &lf)) {
+        return false;
+    }
+    inspect(&lf, &["--version"]).is_some_and(|output| {
         output.status.success()
             && String::from_utf8_lossy(&output.stdout).trim() == format!("lf {version}")
-    });
-    installed
-        && preflight_verdict(&lf).as_deref() == Some("promote")
-        && applications.is_none_or(|root| has_release_app(root, version))
-}
-
-/// What `lf install preflight` says installing `lf` would do to the store.
-fn preflight_verdict(lf: &Path) -> Option<String> {
-    let output = inspect(lf, &["install", "preflight", "--json"])
-        .filter(|output| output.status.success())?;
-    let preview: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
-    preview["verdict"]["kind"].as_str().map(str::to_string)
+    }) && inspect(&lf, &["install", "preflight", "--json"])
+        .filter(|output| output.status.success())
+        .and_then(|output| serde_json::from_slice::<super::BinaryPreflight>(&output.stdout).ok())
+        .is_some_and(|preflight| preflight.verdict == super::Verdict::Promote)
 }
 
 // Installed binaries can be stale or broken; update detection must not hang.
@@ -572,10 +487,12 @@ fn inspect(program: &Path, args: &[&str]) -> Option<Output> {
         .build()
         .ok()?;
     runtime.block_on(async {
+        let mut command = Command::new(program);
+        super::isolate_candidate_command(&mut command);
+        command.args(args);
         tokio::time::timeout(
             Duration::from_secs(30),
-            tokio::process::Command::new(program)
-                .args(args)
+            tokio::process::Command::from(command)
                 .kill_on_drop(true)
                 .output(),
         )
@@ -600,27 +517,14 @@ pub(super) fn app_info(app: &Path) -> Option<serde_json::Value> {
     .and_then(|output| serde_json::from_slice(&output.stdout).ok())
 }
 
-fn has_release_app(applications: &Path, version: &str) -> bool {
-    let app = applications.join("Loopflow.app");
-    app_info(&app).is_some_and(|info| {
+fn has_release_app(app: &Path, version: &str, resolved_cli: &Path) -> bool {
+    let helper = app.join("Contents/MacOS/lf");
+    app_info(app).is_some_and(|info| {
         info["CFBundleShortVersionString"] == version && info["CFBundleVersion"] == version
     }) && ["Loopflow", "lf"].iter().all(|name| {
         fs::metadata(app.join("Contents/MacOS").join(name))
             .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
-    })
-}
-
-/// An app built with Sparkle's signing key installs its own updates.
-fn updates_itself(app: &Path) -> bool {
-    app_info(app).is_some_and(|info| {
-        info["SUPublicEDKey"]
-            .as_str()
-            .is_some_and(|key| !key.is_empty())
-    })
-}
-
-fn app_is_running(app: &Path) -> Result<bool> {
-    Ok(!super::running_app_processes(&[app.join("Contents/MacOS/Loopflow")])?.is_empty())
+    }) && fs::canonicalize(&helper).is_ok_and(|path| path == resolved_cli)
 }
 
 fn manifest_digest<'a>(manifest: &'a str, name: &str) -> Option<&'a str> {
@@ -643,6 +547,7 @@ fn verify_asset(manifest: &str, name: &str, bytes: &[u8]) -> Result<()> {
 
 fn run_verified_installer(
     directory: &Path,
+    app: Option<&Path>,
     temporary: &Path,
     tag: &str,
     manifest: &str,
@@ -651,12 +556,19 @@ fn run_verified_installer(
     verify_asset(manifest, "install.sh", installer)?;
     let path = temporary.join("install.sh");
     fs::write(&path, installer)?;
-    let status = Command::new("/bin/sh")
+    let mut command = Command::new("/bin/sh");
+    command
         .arg(path)
         .args(["--version", tag])
         .env("LF_INSTALL_DIR", directory)
-        .status()
-        .context("start the published installer")?;
+        .env("LF_INSTALL_CLI_ONLY", if app.is_some() { "0" } else { "1" });
+    if let Some(app) = app {
+        command.env(
+            "LF_APPLICATIONS_DIR",
+            app.parent().context("app destination has no parent")?,
+        );
+    }
+    let status = command.status().context("start the published installer")?;
     if !status.success() {
         bail!(
             "published installation failed ({status}); fix the error above and rerun `lf install`"
@@ -672,9 +584,11 @@ pub fn schedule(frequency: Option<InstallFrequency>) -> Result<()> {
     let home = dirs::home_dir().context("cannot determine the installation home")?;
     // launchd and cron schedule for the whole account; a disposable HOME
     // (release smoke tests) must not replace the account's job.
-    if home != crate::installation::account_home()? {
+    if home != crate::installation::account_home()?
+        || crate::store::lf_home_dir() != home.join(".lf")
+    {
         println!(
-            "Not scheduling installation: HOME {} is not this account's home",
+            "Not scheduling installation or cleanup for disposable home {}",
             home.display()
         );
         return Ok(());
@@ -683,11 +597,22 @@ pub fn schedule(frequency: Option<InstallFrequency>) -> Result<()> {
     let logs = crate::store::lf_home_dir().join("logs");
     fs::create_dir_all(&logs)?;
     if cfg!(target_os = "macos") {
-        launchd_schedule(&home, &binary, &logs, frequency)
+        launchd_schedule(&home, &binary, &logs, frequency)?;
+        launchd_cleanup(&home, &binary, &logs)?;
+        launchd_renewal(&home, &binary, &logs)
+    } else if cfg!(target_os = "linux") {
+        cron_schedule(&home, &binary, &logs, frequency)?;
+        cron_renewal(&home, &binary, &logs)
     } else {
-        cron_schedule(&home, &binary, &logs, frequency)
+        bail!("automatic cleanup needs launchd on macOS or cron on Linux")
     }
 }
+
+/// Rental Claude logins renew every 2 hours: an access token lasts about 8,
+/// and is resent once within 2 of expiry.
+const RENEWAL_SECONDS: u32 = 2 * 60 * 60;
+const RENEWAL_LABEL: &str = "com.loopflow.rental-renewal";
+const RENEWAL_CRON_MARKER: &str = "# loopflow rental renewal";
 
 /// The frequency whose rendered schedule is already installed, else daily.
 fn installed_frequency(installed: impl Fn(InstallFrequency) -> bool) -> InstallFrequency {
@@ -714,48 +639,21 @@ fn launchd_schedule(
     frequency: Option<InstallFrequency>,
 ) -> Result<()> {
     let path = home.join("Library/LaunchAgents/com.loopflow.refresh.plist");
-    fs::create_dir_all(path.parent().expect("launch agent has a parent"))?;
     let current = fs::read_to_string(&path).ok();
     let frequency = frequency.unwrap_or_else(|| {
         installed_frequency(|frequency| {
-            current.as_deref() == Some(&schedule_plist(home, binary, logs, frequency))
+            current.as_deref().is_some_and(|current| {
+                current.contains(&format!(
+                    "<key>StartCalendarInterval</key>{}",
+                    schedule_calendar(frequency)
+                ))
+            })
         })
     });
     let payload = schedule_plist(home, binary, logs, frequency);
-    let uid = Command::new("id")
-        .arg("-u")
-        .output()
-        .context("read launchd user")?;
-    if !uid.status.success() {
-        bail!("cannot determine launchd user");
-    }
-    let domain = format!("gui/{}", String::from_utf8_lossy(&uid.stdout).trim());
-    let label = format!("{domain}/com.loopflow.refresh");
-    let loaded = Command::new("launchctl")
-        .args(["print", &label])
-        .output()?
-        .status
-        .success();
-    if loaded && current.as_deref() == Some(payload.as_str()) {
+    if !install_launchd(home, "com.loopflow.refresh", &payload)? {
         println!("Installation already scheduled: {}", path.display());
         return Ok(());
-    }
-    if loaded
-        && !Command::new("launchctl")
-            .args(["bootout", &label])
-            .status()?
-            .success()
-    {
-        bail!("could not unload the previous installation schedule; rerun `lf install schedule`");
-    }
-    fs::write(&path, payload)?;
-    if !Command::new("launchctl")
-        .args(["bootstrap", &domain])
-        .arg(&path)
-        .status()?
-        .success()
-    {
-        bail!("could not load the installation schedule; rerun `lf install schedule`");
     }
     println!(
         "Installation scheduled at login and {}: {}; logs: {}",
@@ -764,6 +662,117 @@ fn launchd_schedule(
         logs.join("refresh.log").display()
     );
     Ok(())
+}
+
+/// Write and (re)load the LaunchAgent `name` unless `payload` is already loaded;
+/// `true` when it changed.
+fn install_launchd(home: &Path, name: &str, payload: &str) -> Result<bool> {
+    let path = home.join(format!("Library/LaunchAgents/{name}.plist"));
+    fs::create_dir_all(path.parent().expect("launch agent has a parent"))?;
+    let current = fs::read_to_string(&path).ok();
+    let uid = Command::new("id")
+        .arg("-u")
+        .output()
+        .context("read launchd user")?;
+    if !uid.status.success() {
+        bail!("cannot determine launchd user");
+    }
+    let domain = format!("gui/{}", String::from_utf8_lossy(&uid.stdout).trim());
+    let label = format!("{domain}/{name}");
+    let loaded = Command::new("launchctl")
+        .args(["print", &label])
+        .output()?
+        .status
+        .success();
+    if loaded && current.as_deref() == Some(payload) {
+        return Ok(false);
+    }
+    if loaded
+        && !Command::new("launchctl")
+            .args(["bootout", &label])
+            .status()?
+            .success()
+    {
+        bail!("could not unload the previous {name} schedule; rerun `lf install schedule`");
+    }
+    fs::write(&path, payload)?;
+    if !Command::new("launchctl")
+        .args(["bootstrap", &domain])
+        .arg(&path)
+        .status()?
+        .success()
+    {
+        bail!("could not load the {name} schedule; rerun `lf install schedule`");
+    }
+    Ok(true)
+}
+
+/// `lf task retire` every minute, separate from the update schedule.
+fn launchd_cleanup(home: &Path, binary: &Path, logs: &Path) -> Result<()> {
+    let payload = cleanup_plist(home, binary, logs);
+    if install_launchd(home, "com.loopflow.cleanup", &payload)? {
+        println!(
+            "Cleanup scheduled every minute; logs: {}",
+            logs.join("workspace-retirement.log").display()
+        );
+    }
+    Ok(())
+}
+
+/// `lf machine credentials renew` every 2 hours. The rental logins are files
+/// under `~/.lf/accounts`, so the job reads no Keychain item.
+fn launchd_renewal(home: &Path, binary: &Path, logs: &Path) -> Result<()> {
+    let payload = renewal_plist(home, binary, logs);
+    if install_launchd(home, RENEWAL_LABEL, &payload)? {
+        println!(
+            "Rental logins renew every 2 hours; logs: {}",
+            logs.join("rental-renewal.log").display()
+        );
+    }
+    Ok(())
+}
+
+fn renewal_plist(home: &Path, binary: &Path, logs: &Path) -> String {
+    launch_agent_plist(
+        RENEWAL_LABEL,
+        home,
+        binary,
+        &["machine", "credentials", "renew"],
+        &logs.join("rental-renewal.log"),
+        &format!("<key>StartInterval</key><integer>{RENEWAL_SECONDS}</integer>"),
+    )
+}
+
+const CLEANUP_CRON_MARKER: &str = "# loopflow cleanup schedule";
+
+fn cleanup_plist(home: &Path, binary: &Path, logs: &Path) -> String {
+    let binary = plist_path(binary);
+    let machine = plist_path(&home.join(".lf"));
+    let log = plist_path(&logs.join("workspace-retirement.log"));
+    let home = plist_path(home);
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+<key>Label</key><string>com.loopflow.cleanup</string>
+<key>ProgramArguments</key><array><string>{binary}</string><string>task</string><string>retire</string></array>
+<key>EnvironmentVariables</key><dict><key>LF_HOME</key><string>{machine}</string><key>HOME</key><string>{home}</string><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
+<key>WorkingDirectory</key><string>{machine}</string>
+<key>RunAtLoad</key><true/>
+<key>StartInterval</key><integer>60</integer>
+<key>StandardOutPath</key><string>{log}</string><key>StandardErrorPath</key><string>{log}</string>
+</dict></plist>
+"#
+    )
+}
+
+fn cleanup_cron_line(home: &Path, binary: &Path, logs: &Path) -> String {
+    format!(
+        "* * * * * cd {} && LF_HOME={} {} task retire >> {} 2>&1 {CLEANUP_CRON_MARKER}",
+        cron_quote(&home.join(".lf").to_string_lossy()),
+        cron_quote(&home.join(".lf").to_string_lossy()),
+        cron_quote(&binary.to_string_lossy()),
+        cron_quote(&logs.join("workspace-retirement.log").to_string_lossy())
+    )
 }
 
 /// Marks the one crontab line `lf install schedule` owns.
@@ -775,26 +784,54 @@ fn cron_schedule(
     logs: &Path,
     frequency: Option<InstallFrequency>,
 ) -> Result<()> {
-    let listed = Command::new("crontab").arg("-l").output().context(
-        "automatic installation uses cron; install it, or run `lf install` to update manually",
-    )?;
-    // `crontab -l` fails when the user has no crontab yet.
-    let current = if listed.status.success() {
-        String::from_utf8(listed.stdout)?
-    } else {
-        String::new()
-    };
+    let current = read_crontab()?;
     let frequency = frequency.unwrap_or_else(|| {
         installed_frequency(|frequency| {
             let line = cron_line(home, binary, logs, frequency);
-            current.lines().any(|entry| entry == line)
+            current.lines().any(|entry| {
+                entry.ends_with(CRON_MARKER)
+                    && entry
+                        .split_whitespace()
+                        .take(5)
+                        .eq(line.split_whitespace().take(5))
+            })
         })
     });
-    let table = cron_table(&current, &cron_line(home, binary, logs, frequency));
+    let table = cron_table(
+        &cron_table(
+            &current,
+            CRON_MARKER,
+            &cron_line(home, binary, logs, frequency),
+        ),
+        CLEANUP_CRON_MARKER,
+        &cleanup_cron_line(home, binary, logs),
+    );
     if table == current {
-        println!("Installation already scheduled in your crontab");
+        println!("Installation and cleanup already scheduled in your crontab");
         return Ok(());
     }
+    write_crontab(&table)?;
+    println!(
+        "Installation scheduled {} in your crontab; logs: {}",
+        cadence(frequency),
+        logs.join("refresh.log").display()
+    );
+    Ok(())
+}
+
+fn read_crontab() -> Result<String> {
+    let listed = Command::new("crontab").arg("-l").output().context(
+        "automatic installation and cleanup need cron; install it and rerun `lf install schedule`",
+    )?;
+    // `crontab -l` fails when the user has no crontab yet.
+    Ok(if listed.status.success() {
+        String::from_utf8(listed.stdout)?
+    } else {
+        String::new()
+    })
+}
+
+fn write_crontab(table: &str) -> Result<()> {
     let mut child = Command::new("crontab")
         .arg("-")
         .stdin(std::process::Stdio::piped())
@@ -805,14 +842,37 @@ fn cron_schedule(
         table.as_bytes(),
     )?;
     if !child.wait()?.success() {
-        bail!("could not install the installation schedule; rerun `lf install schedule`");
+        bail!("could not install the schedules; rerun `lf install schedule`");
     }
-    println!(
-        "Installation scheduled {} in your crontab; logs: {}",
-        cadence(frequency),
-        logs.join("refresh.log").display()
-    );
     Ok(())
+}
+
+fn cron_renewal(home: &Path, binary: &Path, logs: &Path) -> Result<()> {
+    let current = read_crontab()?;
+    let table = cron_table(
+        &current,
+        RENEWAL_CRON_MARKER,
+        &renewal_cron_line(home, binary, logs),
+    );
+    if table != current {
+        write_crontab(&table)?;
+        println!(
+            "Rental logins renew every 2 hours in your crontab; logs: {}",
+            logs.join("rental-renewal.log").display()
+        );
+    }
+    Ok(())
+}
+
+fn renewal_cron_line(home: &Path, binary: &Path, logs: &Path) -> String {
+    cron_entry(
+        "0 */2 * * *",
+        home,
+        binary,
+        "machine credentials renew",
+        &logs.join("rental-renewal.log"),
+        RENEWAL_CRON_MARKER,
+    )
 }
 
 fn cron_line(home: &Path, binary: &Path, logs: &Path, frequency: InstallFrequency) -> String {
@@ -822,22 +882,50 @@ fn cron_line(home: &Path, binary: &Path, logs: &Path, frequency: InstallFrequenc
         InstallFrequency::Hourly => "0 * * * *",
         InstallFrequency::FiveMinutes => "*/5 * * * *",
     };
-    let bin = binary.parent().expect("installation binary has a parent");
-    format!(
-        "{when} LF_INSTALL_DIR='{}' PATH='{}:{}/.cargo/bin:/usr/local/bin:/usr/bin:/bin' '{}' install >> '{}' 2>&1 {CRON_MARKER}",
-        bin.display(),
-        bin.display(),
-        home.display(),
-        binary.display(),
-        logs.join("refresh.log").display()
+    cron_entry(
+        when,
+        home,
+        binary,
+        "install",
+        &logs.join("refresh.log"),
+        CRON_MARKER,
     )
 }
 
-/// `current` with its Loopflow line replaced by `line`; other entries stay.
-fn cron_table(current: &str, line: &str) -> String {
+/// One crontab line running the installed `lf <command>` with its install
+/// directory and PATH, appending to `log`, owned by `marker`.
+fn cron_entry(
+    when: &str,
+    home: &Path,
+    binary: &Path,
+    command: &str,
+    log: &Path,
+    marker: &str,
+) -> String {
+    let bin = binary.parent().expect("installation binary has a parent");
+    format!(
+        "{when} LF_INSTALL_DIR={} PATH={} {} {command} >> {} 2>&1 {marker}",
+        cron_quote(&bin.to_string_lossy()),
+        cron_quote(&format!(
+            "{}:{}/.cargo/bin:/usr/local/bin:/usr/bin:/bin",
+            bin.display(),
+            home.display()
+        )),
+        cron_quote(&binary.to_string_lossy()),
+        cron_quote(&log.to_string_lossy())
+    )
+}
+
+fn cron_quote(value: &str) -> String {
+    // Cron consumes percent escapes before the shell parses its quoted words.
+    format!("'{}'", value.replace('\'', "'\"'\"'")).replace('%', "\\%")
+}
+
+/// `current` with its `marker` line replaced by `line`; other entries stay.
+fn cron_table(current: &str, marker: &str, line: &str) -> String {
     let mut table: String = current
         .lines()
-        .filter(|entry| !entry.ends_with(CRON_MARKER))
+        .filter(|entry| !entry.ends_with(marker))
         .map(|entry| format!("{entry}\n"))
         .collect();
     table.push_str(line);
@@ -845,18 +933,8 @@ fn cron_table(current: &str, line: &str) -> String {
     table
 }
 
-fn schedule_plist(home: &Path, binary: &Path, logs: &Path, frequency: InstallFrequency) -> String {
-    let escape = |path: &Path| {
-        path.to_string_lossy()
-            .replace('&', "&amp;")
-            .replace('<', "&lt;")
-            .replace('>', "&gt;")
-    };
-    let binary_path = escape(binary);
-    let bin = escape(binary.parent().expect("installation binary has a parent"));
-    let home = escape(home);
-    let log = escape(&logs.join("refresh.log"));
-    let calendar = match frequency {
+fn schedule_calendar(frequency: InstallFrequency) -> String {
+    match frequency {
         InstallFrequency::Weekly => "<dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>".to_string(),
         InstallFrequency::Daily => "<dict><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>".to_string(),
         InstallFrequency::Hourly => "<dict><key>Minute</key><integer>0</integer></dict>".to_string(),
@@ -866,16 +944,55 @@ fn schedule_plist(home: &Path, binary: &Path, logs: &Path, frequency: InstallFre
                 "<dict><key>Minute</key><integer>{minute}</integer></dict>"
             )).collect::<String>()
         ),
-    };
+    }
+}
+
+fn plist_path(path: &Path) -> String {
+    path.to_string_lossy()
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+fn schedule_plist(home: &Path, binary: &Path, logs: &Path, frequency: InstallFrequency) -> String {
+    launch_agent_plist(
+        "com.loopflow.refresh",
+        home,
+        binary,
+        &["install"],
+        &logs.join("refresh.log"),
+        &format!(
+            "<key>RunAtLoad</key><true/>\n<key>StartCalendarInterval</key>{}",
+            schedule_calendar(frequency)
+        ),
+    )
+}
+
+/// A LaunchAgent running the installed `lf args…` with its install directory
+/// and PATH, logging to `log`; `timing` holds its schedule keys.
+fn launch_agent_plist(
+    label: &str,
+    home: &Path,
+    binary: &Path,
+    args: &[&str],
+    log: &Path,
+    timing: &str,
+) -> String {
+    let program: String = std::iter::once(plist_path(binary))
+        .chain(args.iter().map(|arg| arg.to_string()))
+        .map(|arg| format!("<string>{arg}</string>"))
+        .collect();
+    let bin = plist_path(binary.parent().expect("installation binary has a parent"));
+    let home = plist_path(home);
+    let log = plist_path(log);
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-<key>Label</key><string>com.loopflow.refresh</string>
-<key>ProgramArguments</key><array><string>{binary_path}</string><string>install</string></array>
+<key>Label</key><string>{label}</string>
+<key>ProgramArguments</key><array>{program}</array>
 <key>EnvironmentVariables</key><dict><key>LF_INSTALL_DIR</key><string>{bin}</string><key>PATH</key><string>{bin}:{home}/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
-<key>RunAtLoad</key><true/>
-<key>StartCalendarInterval</key>{calendar}
+{timing}
 <key>StandardOutPath</key><string>{log}</string>
 <key>StandardErrorPath</key><string>{log}</string>
 </dict></plist>
@@ -886,11 +1003,11 @@ fn schedule_plist(home: &Path, binary: &Path, logs: &Path, frequency: InstallFre
 #[cfg(test)]
 mod tests {
     #[cfg(target_os = "macos")]
-    use super::{checked, updates_itself, DiskImage};
+    use super::{checked, launchd_schedule, DiskImage};
     use super::{
-        cron_table, finish_adoption, is_current, newest_release, newest_run, opens_store,
-        package_target, record_stream, recorded_stream, release_tag, run_verified_installer,
-        Stream, CRON_MARKER,
+        cron_table, is_current, newest_release, newest_run, package_target, record_stream,
+        recorded_stream, release_tag, run_verified_installer, InstallFrequency, Stream,
+        CRON_MARKER,
     };
     use sha2::{Digest, Sha256};
     use std::fs;
@@ -900,10 +1017,284 @@ mod tests {
     use std::process::Command;
 
     fn binary(path: &Path, name: &str) {
+        let candidate =
+            serde_json::to_string(&crate::lf::commands::install::CandidateIdentity::current())
+                .unwrap();
         fs::write(path, format!(
-            "#!/bin/sh\ncase \"$*\" in\n  --version) echo '{name} 9.9.9' ;;\n  'install preflight --json') echo '{{\"candidate\":{{}},\"verdict\":{{\"kind\":\"promote\"}}}}' ;;\n  *) exit 2 ;;\nesac\n"
+            "#!/bin/sh\ncase \"$*\" in\n  --version) echo '{name} 9.9.9' ;;\n  'install preflight --json') echo '{{\"candidate\":{candidate},\"verdict\":{{\"kind\":\"promote\"}}}}' ;;\n  *) exit 2 ;;\nesac\n"
         )).unwrap();
         fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn scheduling_preserves_existing_cadence_when_install_location_changes() {
+        let _lock = crate::journal::test_env_lock();
+        let _restore = crate::test_ambient::EnvGuard::clear(&["PATH"]);
+        let temp = tempfile::tempdir().unwrap();
+        let bin = temp.path().join("bin");
+        fs::create_dir(&bin).unwrap();
+        std::os::unix::fs::symlink("/usr/bin/id", bin.join("id")).unwrap();
+        let launchctl = bin.join("launchctl");
+        fs::write(&launchctl, "#!/bin/sh\n[ \"$1\" != print ]\n").unwrap();
+        fs::set_permissions(&launchctl, fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("PATH", &bin);
+        let path = temp
+            .path()
+            .join("Library/LaunchAgents/com.loopflow.refresh.plist");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let payload = super::schedule_plist(
+            temp.path(),
+            &bin.join("lf"),
+            temp.path(),
+            crate::lf::InstallFrequency::Hourly,
+        );
+        fs::write(
+            &path,
+            payload.replace(&bin.display().to_string(), "/previous/bin"),
+        )
+        .unwrap();
+        super::launchd_schedule(temp.path(), &bin.join("lf"), temp.path(), None).unwrap();
+        assert_eq!(fs::read_to_string(path).unwrap(), payload);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn schedule_is_independent_of_checkout_and_retains_its_cadence() {
+        use crate::lf::InstallFrequency;
+
+        let _lock = crate::journal::test_env_lock();
+        let _restore = crate::test_ambient::EnvGuard::clear(&["PATH"]);
+        let temp = tempfile::tempdir().unwrap();
+        let bin = temp.path().join("bin");
+        fs::create_dir(&bin).unwrap();
+        std::os::unix::fs::symlink("/usr/bin/id", bin.join("id")).unwrap();
+        let launchctl = bin.join("launchctl");
+        fs::write(&launchctl, "#!/bin/sh\nexit 0\n").unwrap();
+        fs::set_permissions(&launchctl, fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("PATH", &bin);
+        let binary = temp.path().join("installed & current/lf");
+        let path = temp
+            .path()
+            .join("Library/LaunchAgents/com.loopflow.refresh.plist");
+        for (frequency, expected) in [
+            (
+                InstallFrequency::Daily,
+                serde_json::json!({"Hour": 9, "Minute": 0}),
+            ),
+            (InstallFrequency::Hourly, serde_json::json!({"Minute": 0})),
+            (
+                InstallFrequency::Weekly,
+                serde_json::json!({"Weekday": 1, "Hour": 9, "Minute": 0}),
+            ),
+            (
+                InstallFrequency::FiveMinutes,
+                serde_json::json!([
+                    {"Minute": 0}, {"Minute": 5}, {"Minute": 10}, {"Minute": 15},
+                    {"Minute": 20}, {"Minute": 25}, {"Minute": 30}, {"Minute": 35},
+                    {"Minute": 40}, {"Minute": 45}, {"Minute": 50}, {"Minute": 55}
+                ]),
+            ),
+        ] {
+            super::launchd_schedule(temp.path(), &binary, temp.path(), Some(frequency)).unwrap();
+            let output = Command::new("/usr/bin/plutil")
+                .args(["-convert", "json", "-o", "-"])
+                .arg(&path)
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+            let plist: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(plist["StartCalendarInterval"], expected);
+            assert_eq!(
+                plist["EnvironmentVariables"]["LF_INSTALL_DIR"],
+                binary.parent().unwrap().to_str().unwrap()
+            );
+            assert_eq!(
+                plist["ProgramArguments"],
+                serde_json::json!([binary, "install"])
+            );
+            assert!(plist.get("WorkingDirectory").is_none());
+            assert_eq!(plist["RunAtLoad"], true);
+            let modified = fs::metadata(&path).unwrap().modified().unwrap();
+            super::launchd_schedule(temp.path(), &binary, temp.path(), None).unwrap();
+            assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), modified);
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn schedule_renews_rental_logins_every_two_hours() {
+        let _lock = crate::journal::test_env_lock();
+        let _restore = crate::test_ambient::EnvGuard::clear(&["PATH"]);
+        let temp = tempfile::tempdir().unwrap();
+        let bin = temp.path().join("bin");
+        fs::create_dir(&bin).unwrap();
+        std::os::unix::fs::symlink("/usr/bin/id", bin.join("id")).unwrap();
+        let launchctl = bin.join("launchctl");
+        fs::write(&launchctl, "#!/bin/sh\nexit 0\n").unwrap();
+        fs::set_permissions(&launchctl, fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("PATH", &bin);
+        let agents = temp.path().join("Library/LaunchAgents");
+        fs::create_dir_all(&agents).unwrap();
+        super::launchd_renewal(temp.path(), &bin.join("lf"), temp.path()).unwrap();
+        let output = Command::new("/usr/bin/plutil")
+            .args(["-convert", "json", "-o", "-"])
+            .arg(agents.join("com.loopflow.rental-renewal.plist"))
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let plist: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(plist["StartInterval"], 7200);
+        assert_eq!(
+            plist["ProgramArguments"],
+            serde_json::json!([bin.join("lf"), "machine", "credentials", "renew"])
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn cli_only_skips_setup_but_keeps_an_existing_app() {
+        let _lock = crate::journal::test_env_lock();
+        let _restore =
+            crate::test_ambient::EnvGuard::clear(&["LF_INSTALL_CLI_ONLY", "LF_APPLICATIONS_DIR"]);
+        let temp = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_INSTALL_CLI_ONLY", "1");
+        std::env::set_var("LF_APPLICATIONS_DIR", temp.path());
+        assert!(super::app_destination(&temp.path().join("lf")).is_none());
+        let payload =
+            b"#!/bin/sh\nprintf '%s' \"$LF_INSTALL_CLI_ONLY\" > \"$LF_INSTALL_DIR/mode\"\n";
+        let manifest = format!("{:x}  install.sh\n", Sha256::digest(payload));
+        run_verified_installer(temp.path(), None, temp.path(), "v9.9.9", &manifest, payload)
+            .unwrap();
+        assert_eq!(fs::read_to_string(temp.path().join("mode")).unwrap(), "1");
+        fs::create_dir(temp.path().join("Loopflow.app")).unwrap();
+        let app = super::app_destination(&temp.path().join("lf"));
+        assert!(app.is_some());
+        run_verified_installer(
+            temp.path(),
+            app.as_deref(),
+            temp.path(),
+            "v9.9.9",
+            &manifest,
+            payload,
+        )
+        .unwrap();
+        assert_eq!(fs::read_to_string(temp.path().join("mode")).unwrap(), "0");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn ordinary_and_scheduled_updates_pass_the_custom_destination_to_older_installers() {
+        let _lock = crate::journal::test_env_lock();
+        let _restore = crate::test_ambient::EnvGuard::clear(&[
+            "LF_INSTALL_CLI_ONLY",
+            "LF_APPLICATIONS_DIR",
+            "LF_INSTALL_DIR",
+        ]);
+        let temp = tempfile::tempdir().unwrap();
+        let directory = temp.path().join("bin");
+        fs::create_dir(&directory).unwrap();
+        let app = temp.path().join("Custom Tools/Loopflow.app");
+        let helper = app.join("Contents/MacOS/lf");
+        fs::create_dir_all(helper.parent().unwrap()).unwrap();
+        fs::write(&helper, "old helper").unwrap();
+        std::os::unix::fs::symlink(
+            "../Custom Tools/Loopflow.app/Contents/MacOS/lf",
+            directory.join("lf"),
+        )
+        .unwrap();
+        let app = app.canonicalize().unwrap();
+        // An older installer only understands its environment, not link discovery.
+        let payload = br##"#!/bin/sh
+set -eu
+[ "$LF_INSTALL_CLI_ONLY" = 0 ]
+printf updated > "$LF_APPLICATIONS_DIR/Loopflow.app/Contents/MacOS/lf"
+"##;
+        let manifest = format!("{:x}  install.sh\n", Sha256::digest(payload));
+        let plist = temp.path().join("schedule.plist");
+        fs::write(
+            &plist,
+            super::schedule_plist(
+                temp.path(),
+                &directory.join("lf"),
+                temp.path(),
+                crate::lf::InstallFrequency::Daily,
+            ),
+        )
+        .unwrap();
+        let output = Command::new("/usr/bin/plutil")
+            .args(["-convert", "json", "-o", "-"])
+            .arg(&plist)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let schedule: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        for scheduled in [false, true] {
+            for cli_only in ["0", "1"] {
+                std::env::set_var(
+                    "LF_INSTALL_DIR",
+                    if scheduled {
+                        schedule["EnvironmentVariables"]["LF_INSTALL_DIR"]
+                            .as_str()
+                            .unwrap()
+                    } else {
+                        directory.to_str().unwrap()
+                    },
+                );
+                std::env::set_var("LF_INSTALL_CLI_ONLY", cli_only);
+                let directory = super::install_dir().unwrap();
+                let destination = super::app_destination(&directory.join("lf"));
+                assert_eq!(destination.as_deref(), Some(app.as_path()));
+                fs::write(&helper, "old helper").unwrap();
+                run_verified_installer(
+                    &directory,
+                    destination.as_deref(),
+                    temp.path(),
+                    "v9.9.9",
+                    &manifest,
+                    payload,
+                )
+                .unwrap();
+                assert_eq!(fs::read_to_string(&helper).unwrap(), "updated");
+                assert_eq!(
+                    directory.join("lf").canonicalize().unwrap(),
+                    helper.canonicalize().unwrap()
+                );
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn explicit_destination_wins_without_splitting_an_existing_cli_only_install() {
+        let _lock = crate::journal::test_env_lock();
+        let _restore =
+            crate::test_ambient::EnvGuard::clear(&["LF_INSTALL_CLI_ONLY", "LF_APPLICATIONS_DIR"]);
+        let temp = tempfile::tempdir().unwrap();
+        let installed = temp.path().join("Old/Loopflow.app/Contents/MacOS/lf");
+        fs::create_dir_all(installed.parent().unwrap()).unwrap();
+        fs::write(&installed, "old helper").unwrap();
+        let cli = temp.path().join("lf");
+        std::os::unix::fs::symlink(&installed, &cli).unwrap();
+        let destination = temp.path().join("New/Loopflow.app");
+        std::env::set_var("LF_INSTALL_CLI_ONLY", "1");
+        std::env::set_var("LF_APPLICATIONS_DIR", destination.parent().unwrap());
+        assert_eq!(super::app_destination(&cli), Some(destination.clone()));
+        // A detached public entry still discovers an explicitly located app.
+        fs::remove_file(&cli).unwrap();
+        fs::write(&cli, "detached").unwrap();
+        fs::create_dir_all(&destination).unwrap();
+        assert_eq!(super::app_destination(&cli), Some(destination));
+    }
+
+    #[test]
+    fn an_installed_build_cannot_report_success_when_promotion_fails() {
+        let temp = tempfile::tempdir().unwrap();
+        let cli = temp.path().join("lf");
+        fs::write(&cli, "#!/bin/sh\nexit 23\n").unwrap();
+        fs::set_permissions(&cli, fs::Permissions::from_mode(0o755)).unwrap();
+        let error = super::promote_build(&cli, temp.path(), None).unwrap_err();
+        assert!(error.to_string().contains("installation promotion failed"));
     }
 
     #[test]
@@ -921,21 +1312,193 @@ mod tests {
         assert!(!is_current(temp.path(), "v9.9.9", None));
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn launchd_schedule_preserves_frequency_and_reuses_its_job() {
+        use crate::lf::commands::graph::EnvVarGuard;
+        use std::os::unix::fs::symlink;
+
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let bin = home.path().join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        symlink("/usr/bin/id", bin.join("id")).unwrap();
+        let launchctl = bin.join("launchctl");
+        fs::write(&launchctl, "#!/bin/sh\ncase $1 in\nprint) test -f \"$HOME/loaded\";;\nbootstrap) : > \"$HOME/loaded\";;\nbootout) /bin/rm \"$HOME/loaded\";;\nesac\n").unwrap();
+        fs::set_permissions(&launchctl, fs::Permissions::from_mode(0o755)).unwrap();
+        let _home = EnvVarGuard::set("HOME", home.path().to_str().unwrap());
+        let _path = EnvVarGuard::set("PATH", bin.to_str().unwrap());
+        let binary = home.path().join("installed & current/lf");
+        let logs = home.path().join("logs");
+        let path = home
+            .path()
+            .join("Library/LaunchAgents/com.loopflow.refresh.plist");
+        let run = |frequency| launchd_schedule(home.path(), &binary, &logs, frequency).unwrap();
+        let read_plist = || -> serde_json::Value {
+            let output = Command::new("/usr/bin/plutil")
+                .args(["-convert", "json", "-o", "-"])
+                .arg(&path)
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+            serde_json::from_slice(&output.stdout).unwrap()
+        };
+        run(None);
+        let plist = read_plist();
+        assert_eq!(
+            plist["ProgramArguments"],
+            serde_json::json!([binary, "install"])
+        );
+        assert!(plist.get("WorkingDirectory").is_none());
+        assert_eq!(plist["RunAtLoad"], true);
+        assert_eq!(
+            plist["StartCalendarInterval"],
+            serde_json::json!({"Hour": 9, "Minute": 0})
+        );
+        for (frequency, expected) in [
+            (
+                InstallFrequency::Daily,
+                serde_json::json!({"Hour": 9, "Minute": 0}),
+            ),
+            (InstallFrequency::Hourly, serde_json::json!({"Minute": 0})),
+            (
+                InstallFrequency::FiveMinutes,
+                serde_json::json!([
+                    {"Minute": 0}, {"Minute": 5}, {"Minute": 10}, {"Minute": 15},
+                    {"Minute": 20}, {"Minute": 25}, {"Minute": 30}, {"Minute": 35},
+                    {"Minute": 40}, {"Minute": 45}, {"Minute": 50}, {"Minute": 55}
+                ]),
+            ),
+            (
+                InstallFrequency::Weekly,
+                serde_json::json!({"Weekday": 1, "Hour": 9, "Minute": 0}),
+            ),
+        ] {
+            run(Some(frequency));
+            assert_eq!(read_plist()["StartCalendarInterval"], expected);
+            assert!(home.path().join("loaded").exists());
+            let modified = fs::metadata(&path).unwrap().modified().unwrap();
+            run(None);
+            assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), modified);
+            fs::remove_file(home.path().join("loaded")).unwrap();
+            run(None);
+            assert!(home.path().join("loaded").exists());
+            assert_eq!(read_plist()["StartCalendarInterval"], expected);
+        }
+    }
+
+    #[test]
+    fn cleanup_schedule_never_provisions_a_disposable_home() {
+        use crate::lf::commands::graph::EnvVarGuard;
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home = EnvVarGuard::set("HOME", home.path().to_str().unwrap());
+        let _machine = EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        let _path = EnvVarGuard::set("PATH", home.path().to_str().unwrap());
+        super::schedule(None).unwrap();
+        assert_eq!(fs::read_dir(home.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn cleanup_schedule_keeps_one_minute_job_separate_from_updates() {
+        let home = Path::new("/home/person's % home");
+        let binary = home.join("bin/lf");
+        let logs = home.join(".lf/logs");
+        let update = super::cron_line(home, &binary, &logs, InstallFrequency::Daily);
+        let cleanup = super::cleanup_cron_line(home, &binary, &logs);
+        let current = "MAILTO=me\n0 0 * * * backup\n";
+        let table = |current: &str, update: &str| {
+            let updated = cron_table(current, CRON_MARKER, update);
+            cron_table(&updated, super::CLEANUP_CRON_MARKER, &cleanup)
+        };
+        let first = table(current, &update);
+        assert_eq!(first, format!("{current}{update}\n{cleanup}\n"));
+        assert_eq!(table(&first, &update), first);
+        let hourly = super::cron_line(home, &binary, &logs, InstallFrequency::Hourly);
+        assert_eq!(
+            table(&first, &hourly),
+            format!("{current}{hourly}\n{cleanup}\n")
+        );
+        assert!(cleanup.starts_with("* * * * * "));
+        assert!(cleanup.contains(" task retire "));
+        assert!(cleanup.contains("LF_HOME="));
+        // Both commands quote paths for the shell after cron unescapes percent.
+        for line in [&update, &cleanup] {
+            assert!(line.contains("\\%"));
+            let words = shlex::split(&line.replace("\\%", "%")).unwrap();
+            assert!(words.contains(&binary.to_string_lossy().into_owned()));
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn cleanup_schedule_pins_machine_and_reloads_only_when_needed() {
+        use crate::lf::commands::graph::EnvVarGuard;
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let bin = home.path().join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        std::os::unix::fs::symlink("/usr/bin/id", bin.join("id")).unwrap();
+        fs::write(bin.join("launchctl"), "#!/bin/sh\ncase $1 in\nprint) test -f \"$HOME/loaded\";;\nbootstrap) : > \"$HOME/loaded\";;\nbootout) /bin/rm \"$HOME/loaded\";;\nesac\n").unwrap();
+        fs::set_permissions(bin.join("launchctl"), fs::Permissions::from_mode(0o755)).unwrap();
+        let _home = EnvVarGuard::set("HOME", home.path().to_str().unwrap());
+        let _path = EnvVarGuard::set("PATH", bin.to_str().unwrap());
+        let binary = home.path().join("installed & current/lf");
+        let payload = super::cleanup_plist(home.path(), &binary, &home.path().join(".lf/logs"));
+        let path = home
+            .path()
+            .join("Library/LaunchAgents/com.loopflow.cleanup.plist");
+        let run = || super::install_launchd(home.path(), "com.loopflow.cleanup", &payload).unwrap();
+        run();
+        let modified = fs::metadata(&path).unwrap().modified().unwrap();
+        for _ in 0..3 {
+            run();
+        }
+        assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), modified);
+        let output = Command::new("/usr/bin/plutil")
+            .args(["-convert", "json", "-o", "-"])
+            .arg(&path)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let plist: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            plist["ProgramArguments"],
+            serde_json::json!([binary, "task", "retire"])
+        );
+        assert_eq!(
+            plist["EnvironmentVariables"]["LF_HOME"],
+            home.path().join(".lf").to_str().unwrap()
+        );
+        assert_eq!(plist["StartInterval"], 60);
+        assert_eq!(plist["RunAtLoad"], true);
+        assert!(plist.get("KeepAlive").is_none());
+        fs::remove_file(home.path().join("loaded")).unwrap();
+        run();
+        assert!(home.path().join("loaded").exists());
+    }
+
     #[test]
     fn installer_verifies_bytes_and_passes_the_pinned_release() {
         let temp = tempfile::tempdir().unwrap();
         let payload = b"#!/bin/sh\nprintf '%s' \"$2\" > \"$LF_INSTALL_DIR/installed\"\n";
         let manifest = format!("{:x}  install.sh\n", Sha256::digest(payload));
         let tag = release_tag("/loopflowstudio/loopflow/releases/tag/v9.9.9").unwrap();
-        run_verified_installer(temp.path(), temp.path(), &tag, &manifest, payload).unwrap();
+        run_verified_installer(temp.path(), None, temp.path(), &tag, &manifest, payload).unwrap();
         assert_eq!(
             fs::read_to_string(temp.path().join("installed")).unwrap(),
             "v9.9.9"
         );
         fs::remove_file(temp.path().join("installed")).unwrap();
-        let error =
-            run_verified_installer(temp.path(), temp.path(), &tag, "00 install.sh", payload)
-                .unwrap_err();
+        let error = run_verified_installer(
+            temp.path(),
+            None,
+            temp.path(),
+            &tag,
+            "00 install.sh",
+            payload,
+        )
+        .unwrap_err();
         assert!(error.to_string().contains("digest mismatch"));
         assert!(!temp.path().join("installed").exists());
         assert!(release_tag("/loopflowstudio/loopflow/releases/latest").is_err());
@@ -1011,33 +1574,26 @@ mod tests {
     }
 
     #[test]
-    fn a_build_whose_catalog_lacks_the_stores_floor_cannot_open_it() {
-        let temp = tempfile::tempdir().unwrap();
-        let store = temp.path().join("loopflow.db");
-        assert!(opens_store(&store, "").unwrap());
-        let connection = rusqlite::Connection::open(&store).unwrap();
-        crate::store::migrations::apply_sqlite(&connection).unwrap();
-        drop(connection);
-        let current = crate::store::migrations::reader_catalog().join("\n");
-        assert!(opens_store(&store, &current).unwrap());
-        let older = crate::store::migrations::reader_catalog()
-            .split_last()
-            .unwrap()
-            .1
-            .join("\n");
-        assert!(!opens_store(&store, &older).unwrap());
-    }
-
-    #[test]
     fn the_cron_schedule_replaces_only_its_own_line() {
         let ours = format!("0 9 * * 1 lf install {CRON_MARKER}");
         let current = format!("MAILTO=me\n*/10 * * * * backup\n{ours}\n");
         let daily = format!("0 9 * * * lf install {CRON_MARKER}");
         assert_eq!(
-            cron_table(&current, &daily),
+            cron_table(&current, CRON_MARKER, &daily),
             format!("MAILTO=me\n*/10 * * * * backup\n{daily}\n")
         );
-        assert_eq!(cron_table("", &daily), format!("{daily}\n"));
+        assert_eq!(cron_table("", CRON_MARKER, &daily), format!("{daily}\n"));
+        let renewal = super::renewal_cron_line(
+            Path::new("/home/me"),
+            Path::new("/home/me/.local/bin/lf"),
+            Path::new("/home/me/.lf/logs"),
+        );
+        assert!(renewal.starts_with("0 */2 * * * "), "{renewal}");
+        assert!(renewal.contains("'/home/me/.local/bin/lf' machine credentials renew"));
+        assert_eq!(
+            cron_table(&format!("{daily}\n"), super::RENEWAL_CRON_MARKER, &renewal),
+            format!("{daily}\n{renewal}\n")
+        );
     }
 
     #[test]
@@ -1045,8 +1601,9 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let payload = b"#!/bin/sh\nexit 23\n";
         let manifest = format!("{:x} *install.sh\n", Sha256::digest(payload));
-        let error = run_verified_installer(temp.path(), temp.path(), "v9.9.9", &manifest, payload)
-            .unwrap_err();
+        let error =
+            run_verified_installer(temp.path(), None, temp.path(), "v9.9.9", &manifest, payload)
+                .unwrap_err();
         assert!(error.to_string().contains("published installation failed"));
     }
 
@@ -1056,61 +1613,54 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         binary(&temp.path().join("lf"), "lf");
         let applications = temp.path().join("Applications");
-        let current = || is_current(temp.path(), "v9.9.9", Some(&applications));
+        let current = || {
+            is_current(
+                temp.path(),
+                "v9.9.9",
+                Some(&applications.join("Loopflow.app")),
+            )
+        };
         assert!(!current());
         let contents = applications.join("Loopflow.app/Contents");
         fs::create_dir_all(contents.join("MacOS")).unwrap();
         for name in ["Loopflow", "lf"] {
             binary(&contents.join("MacOS").join(name), name);
         }
+        fs::remove_file(temp.path().join("lf")).unwrap();
+        std::os::unix::fs::symlink(contents.join("MacOS/lf"), temp.path().join("lf")).unwrap();
         for (version, expected) in [("9.9.8", false), ("9.9.9", true)] {
             fs::write(contents.join("Info.plist"), format!(
                 "<plist version=\"1.0\"><dict><key>CFBundleShortVersionString</key><string>{version}</string><key>CFBundleVersion</key><string>{version}</string></dict></plist>"
             )).unwrap();
             assert_eq!(current(), expected);
         }
+        let helper = contents.join("MacOS/lf");
+        let original = fs::read_to_string(&helper).unwrap();
+        fs::write(
+            &helper,
+            original.replace("\"promote\"", "\"reject\",\"reasons\":[\"newer store\"]"),
+        )
+        .unwrap();
+        assert!(!current());
+        fs::write(&helper, &original).unwrap();
+        // Same marketing version on an independently promoted CLI cannot hide
+        // a different build still installed in Desktop.
+        fs::remove_file(temp.path().join("lf")).unwrap();
+        binary(&temp.path().join("lf"), "lf");
+        let source = crate::lf::commands::install::CandidateIdentity::current().source_revision;
+        fs::write(&helper, original.replace(&source, "different-build")).unwrap();
+        assert!(!current());
+        fs::write(&helper, &original).unwrap();
+        assert!(
+            !current(),
+            "even matching independent files must repair the public link"
+        );
+        fs::remove_file(temp.path().join("lf")).unwrap();
+        std::os::unix::fs::symlink(&helper, temp.path().join("lf")).unwrap();
+        assert!(current());
         fs::remove_file(contents.join("MacOS/Loopflow")).unwrap();
         assert!(!current());
         fs::write(contents.join("Info.plist"), "invalid plist").unwrap();
         assert!(!current());
-    }
-
-    /// Between Sparkle's install-on-quit and the app's next launch, `lf install`
-    /// migrates the store through the app's own `lf` instead of downloading.
-    #[test]
-    fn an_app_ahead_of_the_store_is_adopted_in_place() {
-        let temp = tempfile::tempdir().unwrap();
-        let macos = temp.path().join("Loopflow.app/Contents/MacOS");
-        fs::create_dir_all(&macos).unwrap();
-        finish_adoption(temp.path()).unwrap();
-        let adopted = temp.path().join("adopted");
-        let app_lf = |verdict: &str| {
-            fs::write(macos.join("lf"), format!(
-                "#!/bin/sh\ncase \"$*\" in\n  'install preflight --json') echo '{{\"verdict\":{{\"kind\":\"{verdict}\"}}}}' ;;\n  'install adopt') touch '{}' ;;\n  *) exit 2 ;;\nesac\n",
-                adopted.display()
-            )).unwrap();
-            fs::set_permissions(macos.join("lf"), fs::Permissions::from_mode(0o755)).unwrap();
-        };
-        app_lf("promote");
-        finish_adoption(temp.path()).unwrap();
-        assert!(!adopted.exists());
-        app_lf("promote_and_migrate");
-        finish_adoption(temp.path()).unwrap();
-        assert!(adopted.exists());
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn only_an_app_with_a_sparkle_key_updates_itself() {
-        let temp = tempfile::tempdir().unwrap();
-        let app = temp.path().join("Loopflow.app");
-        assert!(!updates_itself(&app));
-        fs::create_dir_all(app.join("Contents")).unwrap();
-        for (key, expected) in [("", false), ("test-public-key", true)] {
-            fs::write(app.join("Contents/Info.plist"), format!(
-                "<plist version=\"1.0\"><dict><key>SUPublicEDKey</key><string>{key}</string></dict></plist>"
-            )).unwrap();
-            assert_eq!(updates_itself(&app), expected);
-        }
     }
 }

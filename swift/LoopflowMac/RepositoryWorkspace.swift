@@ -1,6 +1,8 @@
+import AppKit
 import Foundation
 import Loopflow
 import Observation
+import OSLog
 
 /// The initial plan identifies the scene; the path is only its local opening locator.
 /// The router retains that scene key across explicitly associated plan identities.
@@ -18,15 +20,73 @@ struct RepositoryWorkspace: Codable, Hashable, Sendable {
 final class RepositoryWorkspaces {
     private var repositories: [String: SessionsWorkspaceRegistry] = [:]
     private let localMachineId: String?
+    private var reconcilingWarmth = false
+    private var visibleWarmExceptions = 0
 
-    init(localMachineId: String? = nil) { self.localMachineId = localMachineId }
+    private let runtime: GhosttyManager?
+
+    /// `runtime` is the Ghostty this app starts prepared Sessions in before their
+    /// panes mount; headless uses have none and launch nothing.
+    init(localMachineId: String? = nil, runtime: GhosttyManager? = nil) {
+        self.localMachineId = localMachineId
+        self.runtime = runtime
+    }
+
+    /// Sends leave to every relay; `hasRunningRelays` reports which have not exited.
+    func detachViewersForQuit() {
+        for registry in repositories.values { registry.surfaces.detachForQuit() }
+    }
+
+    var hasRunningRelays: Bool {
+        repositories.values.contains { $0.surfaces.hasRunningRelays }
+    }
 
     func registry(for repository: String) -> SessionsWorkspaceRegistry {
         if let retained = repositories[repository] { return retained }
-        let registry = SessionsWorkspaceRegistry(localMachineId: localMachineId)
+        let registry = SessionsWorkspaceRegistry(localMachineId: localMachineId, runtime: runtime)
         repositories[repository] = registry
+        registry.onWarmthChanged = { [weak self] in self?.reconcileWarmth() }
+        registry.canPrepare = { [weak self] in
+            self?.repositories.values.reduce(0, { $0 + $1.preparationCount }) ?? 0 < SessionsWorkspaceRegistry.preparationLimit
+        }
+        registry.onPreparationFinished = { [weak self] in
+            guard let self else { return }
+            for registry in self.repositories.values { registry.continueOpenings() }
+        }
         return registry
     }
+
+    func prepareForQuit() {
+        for registry in repositories.values { registry.prepareForQuit() }
+    }
+
+    /// Repository pools own their views. The application bounds their combined
+    /// recent set without copying surfaces or duplicating the membership list.
+    private func reconcileWarmth() {
+        guard !reconcilingWarmth else { return }
+        reconcilingWarmth = true
+        defer { reconcilingWarmth = false }
+        let visible = Set(repositories.values.flatMap { $0.visibleWork.filter { $0.kind == .task } })
+        let exceptions = max(0, visible.count - SessionsWorkspaceRegistry.warmConversationLimit)
+        if visibleWarmExceptions != exceptions {
+            visibleWarmExceptions = exceptions
+            Logger(subsystem: "studio.loopflow", category: "sessions-latency")
+                .info("metric=visible_warm_exceptions count=\(exceptions)")
+        }
+        // Stalest first. Prefetched Tasks share a never-visited date, so the tail
+        // of `recentTasks` goes before its head, as in the registry's own bound.
+        let candidates = repositories.values.flatMap { registry in
+            registry.recentTasks.enumerated().map { rank, key in
+                (registry: registry, key: key, visited: registry.retained(key)?.lastVisit ?? .distantPast, rank: rank)
+            }
+        }.sorted { ($0.visited, $1.rank) < ($1.visited, $0.rank) }
+        var excess = Set(candidates.map(\.key)).union(visible).count - SessionsWorkspaceRegistry.warmConversationLimit
+        for (registry, key, _, _) in candidates where excess > 0 && !visible.contains(key) {
+            registry.evict(key)
+            excess -= 1
+        }
+    }
+
 }
 
 /// Queues are keyed before a window is requested. Registration order and focus
@@ -117,7 +177,7 @@ final class WorkLinkRouter {
         try Task.checkCancellation()
         let id = UUID()
         repositoryOpenings[path] = RepositoryOpening(id: id, repository: nil,
-            receipt: DesktopOpening(url: receipt, status: .opening, reason: nil))
+            receipt: DesktopOpening(revision: UUID().uuidString, url: receipt, status: .opening, reason: nil))
         let observed = workspaces
         let retained = openingScenes[path].flatMap { retainedWorkspace($0) }
         // A retained window comes forward now; resolution does not raise it again.
@@ -251,7 +311,7 @@ final class WorkLinkRouter {
     private func finishRepositoryOpening(_ path: String, id: UUID, status: DesktopOpening.Status, reason: String? = nil) {
         guard let request = repositoryOpenings[path], request.id == id,
               request.receipt.status == .opening else { return }
-        repositoryOpenings[path]?.receipt = DesktopOpening(url: request.receipt.url, status: status, reason: reason)
+        repositoryOpenings[path]?.receipt = DesktopOpening(revision: UUID().uuidString, url: request.receipt.url, status: status, reason: reason)
     }
 
     /// No focus change, reads, surface allocation, or provider launch.

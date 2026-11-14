@@ -3,7 +3,7 @@
 ```bash
 lf help --all
 lf help pr land
-lf monitor --json
+lf process list --json
 ```
 
 The command sections below are generated from the released `lf` when the website
@@ -24,8 +24,8 @@ limits this launch and its children. A Graph retains its provider selections;
 children check their destination's access before starting a provider.
 Account observations distinguish unavailable, expired and measured capacity.
 
-JSON readers emit one document; `monitor active --watch --json` emits NDJSON
-until stdin closes. Diagnostics go to stderr. Exit 0 means the requested
+JSON readers emit one document; a watched read such as
+`lf process list --watch --json` emits NDJSON until stdin closes. Diagnostics go to stderr. Exit 0 means the requested
 operation succeeded; 1 denotes an operational failure, 2 a syntax or lookup
 failure, and 130 interruption. A successful auto-merge request is not a merge.
 
@@ -33,7 +33,7 @@ failure, and 130 interruption. A successful auto-merge request is not a merge.
 
 ```bash
 lf task run EXP-12 pursue
-lf graph show GRAPH_ID --processes --json
+lf process show GRAPH_ID --json
 lf task interrupt EXP-12
 ```
 

@@ -1,0 +1,164 @@
+--- a/src/terminal/formatter.zig
++++ b/src/terminal/formatter.zig
+@@ -421,28 +421,12 @@
+         // simplicity we just emit them all before. If we make this more complex
+         // later we should add test cases for it.
+         if (self.opts.emit == .vt and self.extra.modes) {
+-            inline for (@typeInfo(modespkg.Mode).@"enum".fields) |field| {
+-                const mode: modespkg.Mode = @enumFromInt(field.value);
+-                const current = self.terminal.modes.get(mode);
+-                const default_val = @field(self.terminal.modes.default, field.name);
+-
+-                if (current != default_val) {
+-                    const tag: modespkg.ModeTag = @bitCast(@intFromEnum(mode));
+-                    const prefix = if (tag.ansi) "" else "?";
+-                    const suffix = if (current) "h" else "l";
+-                    try writer.print("\x1b[{s}{d}{s}", .{ prefix, tag.value, suffix });
+-                }
+-            }
++            try self.formatModes(writer);
+ 
+             // If we have a pin_map, add the bytes we wrote to map.
+             if (self.pin_map) |*m| {
+                 var discarding: std.Io.Writer.Discarding = .init(&.{});
+-                var extra_formatter: TerminalFormatter = self;
+-                extra_formatter.content = .none;
+-                extra_formatter.pin_map = null;
+-                extra_formatter.extra = .none;
+-                extra_formatter.extra.modes = true;
+-                try extra_formatter.format(&discarding.writer);
++                try self.formatModes(&discarding.writer);
+ 
+                 // Map all those bytes to the same pin. Use the top left to ensure
+                 // the node pointer is always properly initialized.
+@@ -557,14 +541,51 @@
+         // Emit extra screen state last because terminal state such
+         // as scrolling regions can move the cursor, so we have to set
+         // cursor last.
++        if (self.opts.emit == .vt and self.extra.modes and self.terminal.modes.get(.origin)) {
++            try writer.writeAll("\x1b[?6h");
++            if (self.pin_map) |*m| {
++                m.map.append(m.alloc, self.terminal.screens.active.pages.getTopLeft(.screen), 5) catch return error.WriteFailed;
++            }
++            screen_formatter.cursor_origin = .{
++                .x = self.terminal.scrolling_region.left,
++                .y = self.terminal.scrolling_region.top,
++            };
++        }
+         screen_formatter.content = .none;
+         screen_formatter.extra = self.extra.screen;
+         try screen_formatter.format(writer);
+     }
++
++    fn formatModes(self: TerminalFormatter, writer: *std.Io.Writer) std.Io.Writer.Error!void {
++        inline for (@typeInfo(modespkg.Mode).@"enum".fields) |field| {
++            const mode: modespkg.Mode = @enumFromInt(field.value);
++            if (mode == .origin) continue;
++            const current = self.terminal.modes.get(mode);
++            const default_val = @field(self.terminal.modes.default, field.name);
++            if (current != default_val) {
++                const tag: modespkg.ModeTag = @bitCast(@intFromEnum(mode));
++                try writer.print("\x1b[{s}{d}{s}", .{
++                    if (tag.ansi) "" else "?", tag.value, if (current) "h" else "l",
++                });
++            }
++        }
++        // Enter the selected screen first, then draw in screen coordinates.
++        // Restore margins and origin only after the content has been painted.
++        try writer.writeAll("\x1b[?6l");
++        if (self.extra.scrolling_region) {
++            try writer.writeAll("\x1b[r");
++            if (self.terminal.modes.get(.enable_left_and_right_margin)) {
++                try writer.print("\x1b[1;{d}s", .{self.terminal.cols});
++            }
++        }
++    }
+ };
+ 
+ /// Screen formatter formats a single terminal screen (e.g. primary vs alt).
+ pub const ScreenFormatter = struct {
++    /// Offset for CUP when the terminal restores origin-relative positioning.
++    cursor_origin: Coordinate = .{},
++
+     /// The screen to format.
+     screen: *const Screen,
+ 
+@@ -715,7 +736,7 @@
+ 
+             // If we don't have pending wrap, then we can just use CUP.
+             if (!cursor.pending_wrap or cursor.x != self.screen.pages.cols - 1) {
+-                try writer.print("\x1b[{d};{d}H", .{ cursor.y + 1, cursor.x + 1 });
++                try writer.print("\x1b[{d};{d}H", .{ cursor.y -| self.cursor_origin.y + 1, cursor.x -| self.cursor_origin.x + 1 });
+                 break :cursor;
+             }
+ 
+@@ -728,7 +749,7 @@
+             // Move cursor to the edge.
+             try writer.print(
+                 "\x1b[{d};{d}H",
+-                .{ cursor.y + 1, start_x + 1 },
++                .{ cursor.y -| self.cursor_origin.y + 1, start_x -| self.cursor_origin.x + 1 },
+             );
+ 
+             // Reformat the cell which sets the proper pending wrap state.
+@@ -778,10 +799,21 @@
+ 
+         // Emit Kitty keyboard protocol state using CSI = u
+         if (self.extra.kitty_keyboard) {
+-            const current_flags = self.screen.kitty_keyboard.current();
+-            if (current_flags.int() != kitty.KeyFlags.disabled.int()) {
+-                const flags = current_flags.int();
+-                try writer.print("\x1b[={d};1u", .{flags});
++            // Preserve the stack, not only its top: the program can pop a
++            // nested mode after reattachment without drawing again.
++            const stack = self.screen.kitty_keyboard;
++            try writer.writeAll("\x1b[<65535u");
++            var started = false;
++            for (0..stack.flags.len) |i| {
++                const index = (@as(usize, stack.idx) + 1 + i) % stack.flags.len;
++                const flags = stack.flags[index].int();
++                if (!started) {
++                    if (flags == 0) continue;
++                    try writer.print("\x1b[={d};1u", .{flags});
++                    started = true;
++                } else {
++                    try writer.print("\x1b[>{d}u", .{flags});
++                }
+             }
+         }
+ 
+@@ -7089,3 +7121,34 @@
+         try testing.expectEqual(expected_coord, point_map.items[i]);
+     }
+ }
++
++test "Terminal vt with origin and keyboard stack" {
++    const testing = std.testing;
++    const alloc = testing.allocator;
++    var t = try Terminal.init(testing.io, alloc, .{ .cols = 80, .rows = 24 });
++    defer t.deinit(alloc);
++    var s = t.vtStream();
++    defer s.deinit();
++    s.nextSlice("\x1b[5;20r\x1b[?6h\x1b[3;8Hinside\x1b[>5u\x1b[>1u");
++    var builder: std.Io.Writer.Allocating = .init(alloc);
++    defer builder.deinit();
++    var pin_map: PinMap.Map = .empty;
++    defer pin_map.deinit(alloc);
++    var formatter: TerminalFormatter = .init(&t, .vt);
++    formatter.extra = .all;
++    formatter.pin_map = .{ .alloc = alloc, .map = &pin_map };
++    try formatter.format(&builder.writer);
++    try testing.expectEqual(builder.writer.buffered().len, pin_map.count());
++    var restored = try Terminal.init(testing.io, alloc, .{ .cols = 80, .rows = 24 });
++    defer restored.deinit(alloc);
++    var viewer = restored.vtStream();
++    defer viewer.deinit();
++    viewer.nextSlice(builder.writer.buffered());
++    try testing.expectEqual(t.screens.active.cursor.x, restored.screens.active.cursor.x);
++    try testing.expectEqual(t.screens.active.cursor.y, restored.screens.active.cursor.y);
++    for (0..10) |_| {
++        try testing.expectEqual(t.screens.active.kitty_keyboard.current(), restored.screens.active.kitty_keyboard.current());
++        s.nextSlice("\x1b[<u");
++        viewer.nextSlice("\x1b[<u");
++    }
++}

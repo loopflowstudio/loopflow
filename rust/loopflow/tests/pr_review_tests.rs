@@ -69,9 +69,9 @@ esac
     let result = lf(&repo, &["pr", "reviews", "42", "--json"]);
     assert!(result.status.success());
     let read: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
-    assert_eq!(read["reviewRequests"].as_array().unwrap().len(), 2);
-    assert_eq!(read["reviewDecision"], "REVIEW_REQUIRED");
-    assert_eq!(read["headRefOid"], "new-head");
+    assert_eq!(read["requested"].as_array().unwrap().len(), 2);
+    assert_eq!(read["decision"], "REVIEW_REQUIRED");
+    assert_eq!(read["head"], "new-head");
     assert_eq!(read["reviews"][0]["commit"]["oid"], "older-head");
     assert_eq!(repo.head_sha(), head, "reviewing never creates a commit");
 }

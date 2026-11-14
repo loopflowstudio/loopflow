@@ -1,0 +1,2 @@
+source "$GHOSTTY_RESOURCES_DIR/shell-integration/bash/ghostty.bash"
+if [[ -n $LF_BIN ]]; then export PATH="${LF_BIN%/*}:$PATH"; fi

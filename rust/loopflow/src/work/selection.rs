@@ -6,7 +6,8 @@ use std::collections::{BTreeMap, BTreeSet};
 mod panes;
 mod query;
 pub use panes::{
-    BrowserTab, FileDraft, FileTab, PaneIntent, PaneKind, PaneTree, ShellTab, WorkPaneLayout,
+    BrowserTab, ChangeComparison, FileDraft, FileTab, PaneIntent, PaneKind, PaneTree, ShellTab,
+    TaskLayoutTemplate, WorkPaneLayout,
 };
 
 #[derive(
@@ -120,7 +121,10 @@ pub enum SelectionState {
     Active,
     Moving,
     Shipping,
+    /// Board axis: the Task's `TaskSection`.
     Backlog,
+    Working,
+    Autonomous,
     Done,
 }
 
@@ -220,6 +224,21 @@ impl Selection {
                 items[0].referenced_query()
             }
             _ => None,
+        }
+    }
+
+    /// Every Wave the expression scopes to, however deeply nested: an ID, or
+    /// the ID or name a `wave:` filter matches.
+    pub fn waves(&self) -> Vec<&str> {
+        match &self.expression {
+            SelectionExpression::Wave { wave } => vec![wave.as_str()],
+            SelectionExpression::Filter {
+                filter: SelectionFilter::Wave(wave),
+            } => vec![wave.as_str()],
+            SelectionExpression::Compose { items } | SelectionExpression::Intersect { items } => {
+                items.iter().flat_map(Selection::waves).collect()
+            }
+            _ => Vec::new(),
         }
     }
 
@@ -376,17 +395,10 @@ impl Selection {
                                     .unavailable
                                     .push(format!("Task {} state is unavailable", item.name));
                             }
-                            // The repository and a Wave list Working Tasks: idle,
-                            // active or moving. Unstarted Tasks live on the Wave
-                            // board's Backlog; Shipping Tasks leave for `state:shipping`.
-                            in_scope
-                                && [
-                                    SelectionState::Idle,
-                                    SelectionState::Active,
-                                    SelectionState::Moving,
-                                ]
-                                .iter()
-                                .any(|state| item.states.contains(state))
+                            // The repository and a Wave list the board's Working
+                            // section; the others are `state:backlog`, `state:autonomous`
+                            // and `state:done`.
+                            in_scope && item.states.contains(&SelectionState::Working)
                         }
                     };
                     if included {
@@ -697,6 +709,7 @@ impl SlotLayout {
 /// A custom view with its own identity; members reference existing Work workspaces.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Dashboard {
+    #[serde(rename = "repo")]
     pub repository: String,
     pub id: DashboardId,
     pub revision: i64,
@@ -722,7 +735,11 @@ pub struct ViewPlan {
     pub name: Option<String>,
     pub pinned: bool,
     pub dashboard_id: Option<DashboardId>,
+    #[serde(rename = "repo")]
     pub repository: String,
+    /// The repository's canonical path on this Machine; its last component is
+    /// the name people see.
+    pub repo_path: String,
     pub selection: Selection,
     pub saved_revision: Option<i64>,
     pub resolution: SelectionResolution,
@@ -740,6 +757,8 @@ pub struct ViewContent {
     pub work: WorkWorkspaceKey,
     pub title: String,
     pub states: BTreeSet<SelectionState>,
+    /// A Task's short name, as people say it: `LOO-809`.
+    pub identifier: Option<String>,
     pub primary_session: Option<String>,
     pub location: Option<ViewLocation>,
     /// An explicit connect command, never a fallback shell or provider launch argv.

@@ -24,7 +24,7 @@ use crate::session::{
     SessionActivity, SessionEventKind, SessionPreview, SessionTurnOrigin, TurnContext,
 };
 use crate::store::sqlite::SqliteStore;
-use crate::store::StoreResult;
+use crate::store::{RecordingGap, StoreResult};
 
 /// Origins frozen when Loopflow sent each request, keyed by request id. The
 /// sending side fills it; the reader's writer takes each one once.
@@ -175,9 +175,6 @@ impl FactWriter {
             ProviderFact::Output { turn, answer } => {
                 event(turn, SessionEventKind::Output, answer)?;
             }
-            ProviderFact::Usage { turn, receipt } => {
-                event(turn, SessionEventKind::Usage, receipt)?;
-            }
             ProviderFact::TurnCompleted { turn, detail, .. } => {
                 // A replayed completion keeps its receipt and leaves the live
                 // turn's tally alone.
@@ -293,7 +290,9 @@ struct SessionActivityTracker {
     pending_input: BTreeSet<String>,
     yielded: bool,
     failed: bool,
+    /// The reading the store holds; marked only by a successful write.
     saved: Option<SessionActivity>,
+    failure: RecordingGap,
     preview: Option<SessionPreview>,
 }
 
@@ -351,7 +350,7 @@ impl SessionActivityTracker {
     }
 
     /// The reading to save, when it changed or the saved one has aged.
-    fn reading(&mut self, now: i64) -> Option<SessionActivity> {
+    fn reading(&self, now: i64) -> Option<SessionActivity> {
         let reading = SessionActivity {
             preview: self.preview.clone(),
             observed_at: now,
@@ -369,11 +368,11 @@ impl SessionActivityTracker {
         if unchanged {
             return None;
         }
-        self.saved = Some(reading.clone());
         Some(reading)
     }
 
-    /// Activity is display evidence: a failed save never fails the turn.
+    /// Activity is display evidence: a failed save never fails the turn. The
+    /// reading waits for the next signal.
     fn record_at(
         &mut self,
         store: &SqliteStore,
@@ -387,8 +386,26 @@ impl SessionActivityTracker {
         }
         if let Some(reading) = self.reading(now) {
             report(&reading, false);
-            if let Err(error) = store.record_session_activity(session, attachment, &reading) {
-                tracing::warn!(%error, session, "failed to save Session activity");
+            let _ = self.save(store, session, attachment, reading);
+        }
+    }
+
+    fn save(
+        &mut self,
+        store: &SqliteStore,
+        session: &str,
+        attachment: &SessionAttachment,
+        reading: SessionActivity,
+    ) -> StoreResult<()> {
+        match store.record_session_activity(session, attachment, &reading) {
+            Ok(()) => {
+                self.saved = Some(reading);
+                self.failure.recovered();
+                Ok(())
+            }
+            Err(error) => {
+                self.failure.note("Session activity", &error);
+                Err(error)
             }
         }
     }
@@ -708,11 +725,13 @@ mod tests {
     fn an_unchanged_reading_is_saved_only_as_it_ages() {
         let mut activity = SessionActivityTracker::default();
         assert!(activity.apply(vec![Signal::Working], 10));
-        assert!(activity.reading(10).is_some());
+        activity.saved = activity.reading(10);
+        assert!(activity.saved.is_some());
         activity.apply(vec![Signal::Working], 12);
         assert!(activity.reading(12).is_none());
         activity.apply(vec![Signal::ToolStarted("call".into())], 12);
-        assert_eq!(activity.reading(12).unwrap().open_tools, 1);
+        activity.saved = activity.reading(12);
+        assert_eq!(activity.saved.as_ref().unwrap().open_tools, 1);
         activity.apply(vec![Signal::Working], 17);
         assert_eq!(activity.reading(17).unwrap().observed_at, 17);
     }
@@ -801,7 +820,7 @@ mod tests {
         let mut next = original.clone();
         next.artifact_key = Some(crate::session_record::new_artifact_key());
         let next = store
-            .replace_session_input(original.captured, next)
+            .replace_session_input(original.captured, next, None)
             .unwrap();
         hear(
             &mut decoder,
@@ -824,6 +843,7 @@ mod tests {
         assert_eq!(
             events[2].payload,
             json!({"status":"completed","result_id":"result","errors":null,"subtype":"success",
+                "total_cost_usd":null,
                 "context":{"first_request_tokens":null,"peak_request_tokens":null,"tool_results":0,
                     "tool_output_tokens":0,"compactions":0,"compaction_tokens":null}})
         );
@@ -1106,7 +1126,7 @@ mod tests {
             let mut next = original.clone();
             next.artifact_key = Some(crate::session_record::new_artifact_key());
             let next = store
-                .replace_session_input(original.captured, next)
+                .replace_session_input(original.captured, next, None)
                 .unwrap();
             let current = store
                 .claim_session_attachment("conversation", Some(&middle), &a, false)
@@ -1136,11 +1156,16 @@ mod tests {
                 hear(&mut decoder, &mut writer_for(&current), message);
             }
             assert_eq!(store.session_history("conversation", 0, 0).unwrap(), before);
-            hear(
-                &mut decoder,
-                &mut writer_for(&first),
-                json!({"method":"thread/tokenUsage/updated","params":{"threadId":"thread","turnId":"late","tokenUsage":{"total":{"inputTokens":12},"last":{"inputTokens":12}}}}),
-            );
+            // The turn's usage row comes from its rollout, under the same id.
+            store
+                .record_turn_usage(
+                    "conversation",
+                    &"thread".into(),
+                    "late",
+                    0,
+                    &json!({"total":{"inputTokens":12},"last":{"inputTokens":12}}),
+                )
+                .unwrap();
             hear(
                 &mut decoder,
                 &mut writer_for(&first),
@@ -1182,6 +1207,14 @@ mod tests {
     #[test]
     fn codex_resumed_or_broadcast_turns_do_not_claim_this_clients_origin() {
         let (_home, store, attachment) = attached(false);
+        let turns = || {
+            store
+                .session_history("conversation", 0, 0)
+                .unwrap()
+                .into_iter()
+                .filter(|event| event.provider_turn.is_some())
+                .collect::<Vec<_>>()
+        };
         for (turn, reply_first) in [("notification-first", false), ("reply-first", true)] {
             let mut writer = writer(&store, &attachment);
             let mut decoder = CodexDecoder::default();
@@ -1201,7 +1234,7 @@ mod tests {
             for message in messages {
                 hear(&mut decoder, &mut writer, message);
             }
-            let before = store.session_history("conversation", 0, 0).unwrap();
+            let before = turns();
             assert_eq!(
                 before.last().unwrap().lf_process_id,
                 attachment.lf_process_id.as_ref().map(ToString::to_string)
@@ -1224,7 +1257,7 @@ mod tests {
                 &mut writer,
                 json!({"id":2,"result":{"turn":{"id":turn}}}),
             );
-            assert_eq!(store.session_history("conversation", 0, 0).unwrap(), before);
+            assert_eq!(turns(), before);
         }
         let mut writer = writer(&store, &attachment);
         let mut current = CodexDecoder::default();
@@ -1258,13 +1291,6 @@ mod tests {
     #[test]
     fn opencode_steers_share_execution_but_keep_the_initiating_capture_after_handoff() {
         let (home, store, attachment) = attached(false);
-        let input = store
-            .session("conversation")
-            .unwrap()
-            .unwrap()
-            .input_key()
-            .unwrap()
-            .clone();
         let sql = rusqlite::Connection::open(home.path().join("facts.db")).unwrap();
         let mut writer = writer(&store, &attachment);
         let mut decoder = OpenCodeDecoder::new("native".into(), None);
@@ -1276,7 +1302,7 @@ mod tests {
         let mut next = previous.clone();
         next.artifact_key = Some(crate::session_record::new_artifact_key());
         store
-            .replace_session_input(previous.captured, next.clone())
+            .replace_session_input(previous.captured, next.clone(), None)
             .unwrap();
         let replacement = LfProcessId::new();
         sql.execute(
@@ -1307,16 +1333,5 @@ mod tests {
         let completion: Value = serde_json::from_str(&completion).unwrap();
         assert_eq!(completion["status"], "completed");
         assert!(completion["error"].is_null());
-        let usage = store.input_history(input.as_str()).unwrap().usage;
-        assert_eq!(usage.input_tokens, Some(30));
-        assert_eq!(usage.output_tokens, Some(10));
-        assert_eq!(
-            store
-                .input_history(next.input_key().unwrap().as_str())
-                .unwrap()
-                .usage
-                .input_tokens,
-            None
-        );
     }
 }

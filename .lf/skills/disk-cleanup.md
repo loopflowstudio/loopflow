@@ -1,42 +1,37 @@
-Reclaim disk on this Machine across every repository under `~/src`, then
-report what was freed and what was left alone.
+Run `scripts/disk-cleanup.sh`, then report its results. This requires an explicit
+local machine opt-in; do not install or enable a schedule implicitly. Launchd runs this same
+mechanical script hourly; this skill is available for an on-demand explanation.
 
-Cron runs this hourly from the main checkout (`scripts/disk-cleanup.sh install`).
-No one is watching: never ask, and never remove anything this skill does not
-name below.
+The runner has a 30-minute wall-clock budget. Wait for its exit. A skipped run
+means another resource cleanup holds the lock; report that and stop.
 
-## 1. Run the mechanical cleanup
+Read `~/Library/Logs/loopflow-disk-cleanup.json` for the latest observation:
+free bytes before and after, allocated bytes removed, candidate decisions,
+failures and exit status. The text log is beside it; individual removals also
+appear in `~/.lf/logs/disk.log`. Distinguish measured free-space change from
+removed allocation: other processes and APFS sharing affect the former.
 
-```bash
-scripts/disk-cleanup.sh
-```
+Check `dry_run` and timestamps; identify previews as previews. Report remaining
+target shortfall separately from failures. If the receipt is missing or predates
+this invocation, report the invocation's exit and log evidence without
+attributing the older receipt to it.
 
-It can take half an hour; run it in the background and wait for it to exit.
-Whichever checkout or lf build launched it, this is a complete run: report
-what it did, without caveats about how it was launched.
-It logs to `~/Library/Logs/loopflow-disk-cleanup.log` and appends every
-removal to `~/.lf/logs/disk.log`. "skipped: another cleanup holds" means a run
-is in progress: report that and stop.
+Report the largest retained outputs with their reasons and any incomplete
+steps. Never describe a nonzero exit or an inspection failure as successful
+cleanup. `scripts/disk-cleanup.sh --dry-run` inventories without deleting.
 
-## 2. Report
+The mechanical runner owns generated-output deletion and verified owner teardown.
+Read its private usage history for comparable growth and visible measurement
+failures; unknown measurements are not zero. General app data, Trash, source and
+durable history are observation-only. Chrome-copy cleanup requires a separate
+machine opt-in and never terminates Chrome. Do not remove anything
+else, change retained source or history, or edit the removal log.
 
-The script does all the deleting, including idle build output in every
-checkout once nothing has written to it for 4 hours. You only read
-its output and the repositories, and report:
+Successful disposable evidence retains 24h; failed or unknown evidence retains
+seven days. Preserve `.cleanup-keep` and explicitly saved evidence. Native cache
+caps are private machine configuration: uv 8 GiB per cache, sccache 10 GiB,
+local Docker build cache 8 GiB. Preserve active cache users, Docker volumes,
+containers, unpublished images and remote engines. Reinstall the same runner
+after changes; never enable this utility through product packaging.
 
-- one line per repository with what it freed, from the script's `freed` lines;
-- free space before and after, from its first and `done:` lines;
-- each linked worktree (`git worktree list`) still holding uncommitted or
-  unpushed work (`git status --porcelain`, `git log @{u}..`);
-- each checkout whose build output was kept, with the reason the script gave
-  (`kept … (held open)` or `kept … (written in the last 4 hours)`);
-- each failed step with its error.
-
-## Never
-
-- Remove anything yourself: no `rm`, no worktree, branch, source file or
-  `~/.lf` change, no disk.log line. `lf wt prune` and the script own deletion.
-- Touch a checkout with uncommitted or unpushed work, or any path a live
-  process holds.
-- Remove anything to make the numbers look better: an uncertain case is kept
-  and reported.
+Disposable demos have two roots and a release marker; `scripts/disk-cleanup.md` owns that contract.

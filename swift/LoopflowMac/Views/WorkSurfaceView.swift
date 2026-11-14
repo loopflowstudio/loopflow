@@ -110,9 +110,7 @@ struct WorkSurfaceView: View {
             let sessions = model.sessions.value.map { _ in
                 model.visibleSessions.filter { record in
                     guard record.primaryScope == nil else { return false }
-                    return task.runtime.map {
-                        record.taskIds.contains($0.workId) || record.workspace?.taskId == $0.workId
-                    } ?? false
+                    return task.runtime.map { record.names(task: $0.workId) } ?? false
                 }
             }
             scrollingDetail(identifier: "loopflow-detail-task") {

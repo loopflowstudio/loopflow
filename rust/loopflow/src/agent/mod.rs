@@ -6,7 +6,7 @@
 mod session;
 pub(crate) use session::{
     build_session_command, native_connection_command, resolve_session_config, session_environment,
-    NativeConnection, ProviderInvocation, SessionCommand,
+    ProviderInvocation, SessionCommand,
 };
 
 use crate::id::AgentSessionId;
@@ -21,17 +21,17 @@ use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::config::{default_agent, parse_agent};
+use crate::config::parse_agent;
 use crate::error::CoreError;
 use crate::os_process::wait_for_exit;
 use crate::platform::kill_process;
+use crate::process::LfProcessRuntime;
 use crate::prompt::structured_reply::{render_structured_reply_guidance, StructuredReply};
 use crate::provider_account::{
     resolve_provider_account_exact_blocking, resolve_recorded_provider_account_blocking,
     ProviderAccountRoute,
 };
 use crate::provider_auth::Provider;
-use crate::session_record::CaptureHandle;
 use crate::store::ProviderAccountId;
 
 /// PID of the current child agent process. The Ctrl+C handler sends SIGTERM
@@ -75,7 +75,10 @@ fn interrupt_hooks() -> &'static Mutex<Vec<Box<dyn Fn() + Send>>> {
 }
 
 /// Register a cleanup to run on interrupt (SIGINT/SIGTERM/SIGHUP), before
-/// the process exits.
+/// the process exits. Cleanups run in reverse registration order, as
+/// destructors would: the Process record registered at startup completes
+/// only after later work (a shell's jobs, a Session attachment) has settled,
+/// so whoever waits for the Process to end reads settled state.
 pub fn register_interrupt_cleanup(f: impl Fn() + Send + 'static) {
     interrupt_hooks()
         .lock()
@@ -86,9 +89,11 @@ pub fn register_interrupt_cleanup(f: impl Fn() + Send + 'static) {
 /// Finish interruption while excluding the command's ordinary return path.
 /// Killing a child can wake that path before the remaining hooks finish.
 pub fn exit_on_interrupt() -> ! {
+    // Before taking the hooks lock: the command's own return waits on it.
+    crate::os_process::foreground::end_leader();
     let hooks = INTERRUPT_HOOKS.get().and_then(|hooks| hooks.lock().ok());
     if let Some(hooks) = &hooks {
-        for hook in hooks.iter() {
+        for hook in hooks.iter().rev() {
             hook();
         }
     }
@@ -163,9 +168,12 @@ pub(crate) fn checkout_execution_boundary(
     Ok(AgentExecutionBoundary { writable_roots })
 }
 
-pub(crate) const EXECUTION_IDENTITY_ENV: [&str; 9] = [
+pub(crate) const EXECUTION_IDENTITY_ENV: [&str; 12] = [
     crate::steer::PROVIDER_CONTEXT_ENV,
+    crate::steer::BARE_STEER_ENV,
     crate::steer::STEER_SEEN_ENV,
+    crate::steer::STEER_SESSION_ENV,
+    crate::steer::STEER_TASK_ENV,
     crate::context_block::CONTEXT_DELIVERY_ENV,
     crate::process::AGENT_CALLER_ENV,
     crate::journal::LF_TRACE_ID_ENV,
@@ -177,12 +185,20 @@ pub(crate) const EXECUTION_IDENTITY_ENV: [&str; 9] = [
 
 #[derive(Clone, Default)]
 pub struct AgentConfig {
-    /// Chrome integration for Claude terminal and stream sessions.
-    pub chrome: bool,
+    /// Claude Chrome integration. `None` sends no flag so Claude's own
+    /// configuration decides; an explicit choice sends `--chrome`/`--no-chrome`.
+    pub chrome: Option<bool>,
+    /// Initial Codex tier; omission leaves provider configuration in charge.
+    pub codex_service_tier: Option<crate::config::CodexServiceTier>,
+    /// Starting model for bare Claude selection; the authored agent stays bare for fallthrough.
+    pub claude_model: Option<String>,
     /// System/context prompt content.
     pub system_prompt: String,
     /// Saved sources for native startup and compaction hooks.
     pub conversation_context: Option<crate::context_block::ContextDelivery>,
+    /// Who holds the provider process, which decides its hooks, its server
+    /// check and its steers.
+    pub holder: crate::session::Holder,
     /// Task prompt content sent as the turn input.
     pub task_prompt: String,
     /// Native skill selection, kept separate from gathered reference context.
@@ -191,6 +207,10 @@ pub struct AgentConfig {
     pub output_schema: Option<serde_json::Value>,
     /// Agent string (for example: "claude:opus" or "codex").
     pub agent: Option<String>,
+    /// Agents a Graph step moves to when a usage limit or unavailable model
+    /// refuses `agent`: the rest of the configured order (`default_agent`,
+    /// then `agents`). Empty when the agent was an explicit choice.
+    pub fallback_agents: Vec<String>,
     /// Max turn budget when supported by the harness.
     pub max_turns: Option<u32>,
     /// Opaque provider continuation token for this launch.
@@ -226,16 +246,23 @@ impl AgentConfig {
     pub(crate) fn apply_agent_override(&mut self) {
         if let Some(agent) = crate::config::agent_override() {
             self.agent = Some(agent.clone());
-            self.env
-                .insert(crate::config::AGENT_OVERRIDE_ENV.into(), agent);
         }
     }
 
-    /// Return the selected agent or Loopflow's compiled default.
-    pub fn agent(&self) -> &str {
-        match self.agent.as_deref() {
-            Some(agent) => agent,
-            None => default_agent(),
+    /// Resolve the selected agent, or the sole installed harness.
+    ///
+    /// # Errors
+    /// Returns `AgentSelection` when no preference resolves and installation is ambiguous or absent.
+    pub fn agent(&self) -> Result<&str, crate::error::LoadError> {
+        crate::config::select_agent(self.agent.as_deref())
+    }
+
+    pub(crate) fn resolved_agent(&self) -> Result<String, crate::error::LoadError> {
+        let agent = self.agent()?;
+        let (harness, model) = parse_agent(agent);
+        match (harness.as_str(), model, self.claude_model.as_deref()) {
+            ("claude", None, Some(model)) => Ok(format!("claude:{model}")),
+            _ => Ok(agent.to_owned()),
         }
     }
 }
@@ -252,6 +279,9 @@ impl std::fmt::Debug for AgentConfig {
                 &format_args!("({} bytes)", self.task_prompt.len()),
             )
             .field("agent", &self.agent)
+            .field("codex_service_tier", &self.codex_service_tier)
+            .field("claude_model", &self.claude_model)
+            .field("fallback_agents", &self.fallback_agents)
             .field("max_turns", &self.max_turns)
             .field("resume_token", &self.resume_token)
             .field("provider_account_id", &self.provider_account_id)
@@ -272,30 +302,198 @@ impl std::fmt::Debug for AgentConfig {
 
 /// Select and pin a managed Claude/Codex account before publishing a capture.
 pub(crate) fn pin_provider_account_id_blocking(launch: &mut AgentConfig) -> Result<(), CoreError> {
-    let (harness, _) = parse_agent(launch.agent());
+    _pin_provider_account_id(launch).map_err(|attempt| attempt.into_error())
+}
+
+/// A Graph step that finds every account cooling launches unpinned: the
+/// retry loop falls through to another model or provider, or waits.
+fn _pin_provider_account_waiting(
+    launch: &mut AgentConfig,
+    process: &ProcessConfig,
+) -> Result<(), CoreError> {
+    match _pin_provider_account_id(launch) {
+        Ok(()) => Ok(()),
+        Err(AccountUnavailable {
+            retry_at: Some(_), ..
+        }) if process.wait_for_capacity => Ok(()),
+        Err(unavailable) => Err(unavailable.into_error()),
+    }
+}
+
+fn _pin_provider_account_id(launch: &mut AgentConfig) -> Result<(), AccountUnavailable> {
+    let agent = launch.agent().map_err(AccountUnavailable::terminal)?;
+    let (harness, _) = parse_agent(agent);
     let provider = match harness.as_str() {
         "claude" => Provider::Claude,
         "codex" => Provider::Codex,
         _ if launch.provider_account_id.is_some() => {
-            return Err(CoreError::ExecutionFailed(
-                "managed provider account IDs apply only to Claude and Codex".to_string(),
+            return Err(AccountUnavailable::terminal(
+                "managed provider account IDs apply only to Claude and Codex",
             ));
         }
         _ => return Ok(()),
     };
-    let route = resolve_account_route_blocking(provider, launch).map_err(|error| {
-        CoreError::ExecutionFailed(format!("failed to select provider account: {error}"))
-    })?;
+    let route = resolve_account_route_blocking(provider, launch)
+        .map_err(|error| AccountUnavailable::selecting("select", error))?;
     if let Some(route) = route {
         launch.provider_account_id = Some(route.account_id().clone());
     }
     Ok(())
 }
 
+/// No account can take this launch, and when one can, if that is known.
+#[derive(Debug)]
+struct AccountUnavailable {
+    error: String,
+    retry_at: Option<i64>,
+}
+
+impl AccountUnavailable {
+    fn terminal(error: impl ToString) -> Self {
+        Self {
+            error: error.to_string(),
+            retry_at: None,
+        }
+    }
+
+    fn selecting(verb: &str, error: crate::provider_account::ProviderAccountError) -> Self {
+        let retry_at = match &error {
+            crate::provider_account::ProviderAccountError::NoEligibleAccount {
+                retry_at, ..
+            } => *retry_at,
+            _ => None,
+        };
+        Self {
+            error: format!("failed to {verb} provider account: {error}"),
+            retry_at,
+        }
+    }
+
+    fn into_error(self) -> CoreError {
+        CoreError::ExecutionFailed(self.error)
+    }
+}
+
+/// One step's wait for capacity. Says so once per reset time, in the log and
+/// where Task status reads it.
+#[derive(Debug, Default)]
+struct CapacityWait {
+    announced: Option<i64>,
+}
+
+impl CapacityWait {
+    fn pause(&mut self, provider: &str, reason: &str, retry_at: i64) -> Duration {
+        if self.announced != Some(retry_at) {
+            self.announced = Some(retry_at);
+            eprintln!(
+                "Waiting for {provider} capacity until {}: {reason}",
+                crate::lf::output::format_time(retry_at)
+            );
+            _record_limit_recovery(provider, reason, Some(retry_at));
+        }
+        let left = retry_at - crate::store::rows::now_unix();
+        Duration::from_secs(left.clamp(1, CAPACITY_POLL_SECS) as u64)
+    }
+
+    /// Every account for this rung is held back, so the step tries `next`.
+    /// Once waiting, each poll walks the order again without saying so: the
+    /// wait already did, and a move would replace it where status reads.
+    fn fall_through(&self, provider: &str, reason: &str, next: &str) {
+        if self.announced.is_none() {
+            _record_agent_move(provider, reason, next);
+        }
+    }
+}
+
+/// Status only: a store that cannot say so never stops the recovery.
+fn _note_limit_recovery(
+    note: impl FnOnce(
+        &crate::store::sqlite::SqliteStore,
+        &crate::id::LfProcessId,
+    ) -> crate::store::StoreResult<()>,
+) {
+    let Some(process) = crate::journal::current_lf_process_id() else {
+        return;
+    };
+    let noted = || -> anyhow::Result<()> {
+        let path = crate::store::database_path_from_env()?;
+        Ok(note(
+            &crate::store::sqlite::SqliteStore::new(&path)?,
+            &process,
+        )?)
+    };
+    if let Err(error) = noted() {
+        tracing::warn!(%error, "could not note limit recovery");
+    }
+}
+
+fn _record_limit_recovery(provider: &str, reason: &str, retry_at: Option<i64>) {
+    _note_limit_recovery(|store, process| {
+        store.record_agent_limit_recovery(
+            process,
+            provider,
+            reason,
+            retry_at,
+            crate::config::agent_override().as_deref(),
+        )
+    });
+}
+
+/// The step left `provider` for the next agent in its order.
+fn _record_agent_move(provider: &str, reason: &str, next: &str) {
+    eprintln!("Continuing on {next}: {reason}");
+    _record_limit_recovery(
+        provider,
+        &format!("{reason}{}{next}", crate::ops::task_execution::MOVED_TO),
+        None,
+    );
+}
+
+/// A provider refused the step and no agent it may use is left: the stop
+/// and what would let it move, where Task status and `lf task run` read it.
+fn _record_limit_stop(provider: &str, reason: &str, launch: &AgentConfig, rungs: &[String]) {
+    let advice = _limit_stop_advice(provider, launch, rungs);
+    eprintln!("Stopped: {advice}");
+    _record_limit_recovery(
+        provider,
+        &format!("{reason}{}{advice}", crate::ops::task_execution::STOPPED),
+        None,
+    );
+}
+
+/// `rungs` is the whole order the step could walk; it stops after the last.
+fn _limit_stop_advice(provider: &str, launch: &AgentConfig, rungs: &[String]) -> String {
+    // Outside a Graph step, or replaying a recorded account, the order is one entry.
+    if let [only] = rungs {
+        if let Some(next) = launch.fallback_agents.iter().find(|a| *a != only) {
+            return format!(
+                "Only a Graph step moves through `agents`, and this run stayed on {only}. Run it again with `-a {next}`"
+            );
+        }
+    }
+    if !launch.fallback_agents.is_empty() {
+        return format!(
+            "Nothing is left in its order after {}; add another agent to `agents`",
+            rungs.join(", ")
+        );
+    }
+    let another = if provider == "claude" {
+        "codex"
+    } else {
+        "claude"
+    };
+    format!(
+        "No fallback remains. Change an `agent` or `-a` pin to select another model or provider, or remove it to allow fallbacks. If `agents` is missing or has only one entry, configure fallbacks with `lf set --global agents {provider},{another}`"
+    )
+}
+
 fn resolve_account_route_blocking(
     provider: Provider,
     launch: &AgentConfig,
 ) -> Result<Option<ProviderAccountRoute>, crate::provider_account::ProviderAccountError> {
+    let agent = launch.resolved_agent().map_err(|error| {
+        crate::provider_account::ProviderAccountError::Runtime(error.to_string())
+    })?;
     let route = match (
         launch.provider_account_id.clone(),
         launch.provider_account_authority_home.clone(),
@@ -312,6 +510,8 @@ fn resolve_account_route_blocking(
                 .get(crate::work::wave::context::WAVE_ID_ENV)
                 .and_then(|id| crate::id::WaveId::parse(id).ok())
                 .or_else(crate::work::wave::context::ambient_wave_id),
+            parse_agent(&agent).1,
+            launch.cwd.clone(),
         ),
         (None, Some(_)) => Err(crate::provider_account::ProviderAccountError::Runtime(
             "recorded account authority requires an account ID".to_string(),
@@ -321,6 +521,7 @@ fn resolve_account_route_blocking(
         return Err(crate::provider_account::ProviderAccountError::NoEligibleAccount {
             provider,
             accounts: "a connected managed account is required by this execution boundary; ambient credentials cannot satisfy it".to_string(),
+            retry_at: None,
         });
     }
     Ok(route)
@@ -375,27 +576,11 @@ pub struct ProcessConfig {
     pub context_file: Option<std::path::PathBuf>,
     /// Optional timeout for the subprocess.
     pub timeout: Option<Duration>,
-    /// Durable local capture for this harness launch.
-    pub capture: Option<AgentCapture>,
-}
-
-#[derive(Debug, Clone)]
-pub struct AgentCapture(CaptureHandle);
-
-impl From<CaptureHandle> for AgentCapture {
-    fn from(capture: CaptureHandle) -> Self {
-        Self(capture)
-    }
-}
-
-impl AgentCapture {
-    pub(crate) fn prepare_agent_process(
-        &self,
-        session: &str,
-        expected: &crate::process::SessionAttachment,
-    ) -> crate::store::StoreResult<crate::process::SessionAttachment> {
-        self.0.prepare_agent_process(session, expected)
-    }
+    /// Live resources for this lf invocation, retained across provider retries.
+    pub runtime: Option<LfProcessRuntime>,
+    /// A Graph step goes on after a limit resets. Everything else headless
+    /// (commit messages, PR text) has someone waiting on it and fails now.
+    pub wait_for_capacity: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -544,10 +729,14 @@ fn merge_codex_permission_config(
     }
 }
 
-/// App-server overrides for native and headless startup. None preserves vendor policy.
+/// App-server overrides. `None` preserves vendor policy. A headless run must
+/// write to the workspace and has nobody to answer an approval, so it gets at
+/// least `workspace-write` and `never`; an attended Session keeps Codex's own
+/// sandbox and approval configuration unless `yolo` or a managed boundary applies.
 fn codex_permission_policy(
     config: CodexPermissionConfig,
     launch: &AgentConfig,
+    headless: bool,
 ) -> CodexPermissionConfig {
     if launch.write_scope == AgentWriteScope::Worktree && launch.execution_boundary.is_none() {
         return CodexPermissionConfig {
@@ -560,6 +749,9 @@ fn codex_permission_policy(
             sandbox: Some(CodexSandboxMode::DangerFullAccess),
             approval: Some(CodexApprovalPolicy::Never),
         };
+    }
+    if !headless {
+        return CodexPermissionConfig::default();
     }
     CodexPermissionConfig {
         sandbox: (config.sandbox < Some(CodexSandboxMode::WorkspaceWrite))
@@ -609,6 +801,9 @@ fn parse_claude_permission_mode(contents: &str) -> Option<ClaudePermissionMode> 
         .and_then(ClaudePermissionMode::parse)
 }
 
+/// Explicit `yolo` always bypasses. Otherwise an attended Session keeps
+/// Claude's own permission mode, and only an unattended run bypasses: nobody
+/// is present to answer a prompt, so a prompt would stall the step.
 fn claude_skip_permissions(cwd: Option<&Path>, auto: bool, skip_permissions: bool) -> bool {
     if skip_permissions {
         return true;
@@ -636,12 +831,12 @@ fn claude_options(
     context_file: Option<&Path>,
     stream: bool,
 ) -> Vec<String> {
-    let mut args = vec![if config.chrome {
-        "--chrome"
-    } else {
-        "--no-chrome"
+    // Harness preferences (Chrome, model) pass through only when a Loopflow
+    // setting names them; Claude's own configuration decides the rest.
+    let mut args: Vec<String> = Vec::new();
+    if let Some(chrome) = config.chrome {
+        args.push(if chrome { "--chrome" } else { "--no-chrome" }.into());
     }
-    .into()];
     if let Some(model) = model {
         args.extend(["--model".into(), model.into()]);
     }
@@ -708,7 +903,6 @@ pub fn resolve_codex_model(model: &str) -> Option<String> {
     }
 }
 
-const CODEX_DEFAULT_SERVICE_TIER: &str = "default";
 const TRANSIENT_RETRY_DELAYS: [Duration; 4] = [
     Duration::from_secs(2),
     Duration::from_secs(5),
@@ -717,6 +911,15 @@ const TRANSIENT_RETRY_DELAYS: [Duration; 4] = [
 ];
 const RETRY_PROMPT: &str = "Continue the original task after the transient provider failure. Re-read the current workspace state, finish any interrupted work, and return the result.";
 const LIMIT_FAILOVER_PROMPT: &str = "Continue this task after the previous provider account reached its subscription limit. Re-read the current workspace state and finish any interrupted work.";
+const MODEL_FAILOVER_PROMPT: &str = "Continue this task after the previous model was unavailable. Re-read the current workspace state and finish any interrupted work.";
+const AGENT_FAILOVER_PROMPT: &str = "Continue this task on this provider. Re-read the current workspace state and finish any interrupted work.";
+/// How long a wait for capacity sleeps before looking again. Sleep stops the
+/// monotonic clock on a Mac; each look reads the wall clock and the accounts,
+/// so a cleared cooldown or a new login ends the wait early.
+const CAPACITY_POLL_SECS: i64 = 60;
+/// Accounts one step tries back to back before giving up: limits that land on
+/// a named account, or on none a cooldown can hold back, never spin.
+const MAX_ACCOUNT_FAILOVERS: usize = 4;
 const CREDENTIAL_FAILOVER_PROMPT: &str = "Continue this task after the previous provider account credential was revoked. Re-read the current workspace state and finish any interrupted work.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -731,6 +934,9 @@ pub enum AgentFailure {
     /// The provider reported temporary service unavailability.
     #[error("provider unavailable")]
     Unavailable,
+    /// The selected model is unavailable; another configured entry may work.
+    #[error("model unavailable")]
+    ModelUnavailable,
     /// The provider process reported a retryable connection failure.
     #[error("provider transport")]
     Transport,
@@ -740,17 +946,22 @@ pub enum AgentFailure {
     AccountSwitched,
     /// The selected managed account exhausted a subscription window.
     #[error("account subscription limit")]
-    AccountSubscriptionLimit { resets_at: Option<i64> },
+    AccountSubscriptionLimit,
     /// The selected managed account's credential was explicitly revoked.
     #[error("account credential invalidated")]
     AccountCredentialInvalidated,
 }
 
-/// Build `thread/start` params for Codex app-server sessions.
+/// Build `thread/start` params for Codex app-server sessions. `headless` runs
+/// get Loopflow's permission floor; attended Sessions keep Codex's own.
 pub fn build_codex_thread_start_params(
     launch: &AgentConfig,
+    headless: bool,
 ) -> serde_json::Map<String, serde_json::Value> {
     let mut params = serde_json::Map::new();
+    if let Some(tier) = launch.codex_service_tier {
+        params.insert("serviceTier".into(), tier.as_str().into());
+    }
     let instructions = system_prompt_with_structured_replies(launch);
     if !instructions.is_empty() {
         params.insert(
@@ -758,11 +969,6 @@ pub fn build_codex_thread_start_params(
             serde_json::Value::String(instructions),
         );
     }
-
-    params.insert(
-        "serviceTier".to_string(),
-        serde_json::Value::String(CODEX_DEFAULT_SERVICE_TIER.to_string()),
-    );
 
     if let Some(model) = launch.agent.as_deref().and_then(resolve_codex_model) {
         params.insert("model".to_string(), serde_json::Value::String(model));
@@ -775,8 +981,11 @@ pub fn build_codex_thread_start_params(
         );
     }
 
-    let policy =
-        codex_permission_policy(read_codex_permission_config(launch.cwd.as_deref()), launch);
+    let policy = codex_permission_policy(
+        read_codex_permission_config(launch.cwd.as_deref()),
+        launch,
+        headless,
+    );
     if let Some(sandbox) = policy.sandbox {
         params.insert("sandbox".into(), sandbox.as_str().into());
     }
@@ -785,6 +994,46 @@ pub fn build_codex_thread_start_params(
     }
 
     params
+}
+
+/// A bare Codex launch's options, as plain `codex` takes them: the thread
+/// settings an app-server launch would send, the writable roots and the two
+/// context hooks. Nothing else of lf's configuration rides along.
+pub(crate) fn codex_terminal_options(launch: &AgentConfig) -> anyhow::Result<Vec<String>> {
+    let params = build_codex_thread_start_params(launch, false);
+    let mut args = Vec::new();
+    if let Some(model) = params.get("model").and_then(serde_json::Value::as_str) {
+        args.extend(["--model".into(), model.into()]);
+    }
+    if let Some(sandbox) = params.get("sandbox").and_then(serde_json::Value::as_str) {
+        args.extend(["--sandbox".into(), sandbox.into()]);
+    }
+    if let Some(approval) = params
+        .get("approvalPolicy")
+        .and_then(serde_json::Value::as_str)
+    {
+        args.extend(["--ask-for-approval".into(), approval.into()]);
+    }
+    for dir in provider_writable_roots(launch) {
+        args.extend(["--add-dir".into(), dir.display().to_string()]);
+    }
+    let mut config = serde_json::Map::new();
+    for (param, key) in [
+        ("serviceTier", "service_tier"),
+        ("developerInstructions", "developer_instructions"),
+    ] {
+        if let Some(value) = params.get(param) {
+            config.insert(key.into(), value.clone());
+        }
+    }
+    if let Some(context) = &launch.conversation_context {
+        config.insert(
+            "hooks".into(),
+            crate::harness::context::codex_hooks(context, None, launch.holder)?,
+        );
+    }
+    args.extend(crate::harness::codex::config_overrides(&config.into())?);
+    Ok(args)
 }
 
 /// Extra workspace roots agents need for Git worktree metadata.
@@ -864,8 +1113,7 @@ fn run_admitted_agent(
     process: &ProcessConfig,
 ) -> Result<AgentProcessResult, CoreError> {
     let mut launch = launch.clone();
-    launch.apply_agent_override();
-    if process.auto && parse_agent(launch.agent()).0 != "claude" {
+    if process.auto && parse_agent(launch.agent()?).0 != "claude" {
         if launch.max_turns.is_some() {
             eprintln!("warning: Loopflow turn limits are supported only by Claude; this provider will run without a turn limit");
         }
@@ -874,16 +1122,16 @@ fn run_admitted_agent(
         }
     }
     if launch.resume_token.is_none() {
-        if let Some(capture) = &process.capture {
-            launch.resume_token = capture.0.conversation_resume_token().map_err(|error| {
+        if let Some(runtime) = &process.runtime {
+            launch.resume_token = runtime.conversation_resume_token().map_err(|error| {
                 CoreError::ExecutionFailed(format!("conversation recovery failed: {error}"))
             })?;
         }
     }
-    pin_provider_account_id_blocking(&mut launch)?;
-    let (harness, model) = parse_agent(launch.agent());
-    let implicit_capture = if process.capture.is_none() {
-        Some(_begin_implicit_capture(&launch, process, &harness, model)?)
+    _pin_provider_account_waiting(&mut launch, process)?;
+    let (harness, model) = parse_agent(&launch.resolved_agent()?);
+    let implicit_runtime = if process.runtime.is_none() {
+        Some(_begin_process_runtime(&launch, process, &harness, model)?)
     } else {
         None
     };
@@ -891,21 +1139,21 @@ fn run_admitted_agent(
     for name in EXECUTION_IDENTITY_ENV {
         launch.env.remove(name);
     }
-    if let Some(capture) = &implicit_capture {
-        process.capture = Some(capture.clone());
+    if let Some(runtime) = &implicit_runtime {
+        process.runtime = Some(runtime.clone());
     }
-    if let Some(capture) = &process.capture {
-        capture.0.claim_session_attachment().map_err(|error| {
+    if let Some(runtime) = &process.runtime {
+        runtime.claim_session_attachment().map_err(|error| {
             CoreError::ExecutionFailed(format!("conversation admission failed: {error}"))
         })?;
-        launch.session_attachment = capture.0.session_attachment();
+        launch.session_attachment = runtime.session_attachment();
         if launch.resume_token.is_none() {
-            launch.resume_token = capture.0.conversation_resume_token().map_err(|error| {
+            launch.resume_token = runtime.conversation_resume_token().map_err(|error| {
                 CoreError::ExecutionFailed(format!("conversation recovery failed: {error}"))
             })?;
         }
-        launch.env.extend(capture.0.environment());
-        capture.0.mark_spawn_requested();
+        launch.env.extend(runtime.environment());
+        runtime.mark_spawn_requested();
     }
     let directory = match &launch.cwd {
         Some(cwd) => cwd.clone(),
@@ -925,13 +1173,12 @@ fn run_admitted_agent(
     if let Err(error) = crate::ops::planning_sync::check_directory(&directory) {
         tracing::debug!(%error, "end-of-turn planning check pending");
     }
-    if let Some(capture) = implicit_capture {
+    if let Some(runtime) = implicit_runtime {
         let outcome = match &result {
             Ok(result) if result.exit_code == 0 => "completed",
             Ok(_) | Err(_) => "failed",
         };
-        capture
-            .0
+        runtime
             .finish(outcome)
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     }
@@ -944,7 +1191,7 @@ enum AgentAttempt {
         result: AgentProcessResult,
         can_failover: bool,
     },
-    AccountUnavailable(CoreError),
+    AccountUnavailable(AccountUnavailable),
 }
 
 fn _run_with_transient_retries(
@@ -954,103 +1201,256 @@ fn _run_with_transient_retries(
     mut run: impl FnMut(&AgentConfig, bool) -> Result<AgentAttempt, CoreError>,
     mut wait: impl FnMut(Duration),
 ) -> Result<AgentProcessResult, CoreError> {
+    let rungs = _fallthrough_rungs(launch, process)?;
+    let mut rung = 0;
+    // How the step stood when it began falling through; every rung starts
+    // from here, and the wait at the top of the ladder returns to it.
+    let mut origin: Option<(usize, AgentConfig)> = None;
+    let mut earliest_reset: Option<i64> = None;
     let mut attempt_config = launch.clone();
-    let mut attempt = 1;
-    let mut account_failure = None;
+    let mut launched = false;
+    let mut transient_failures = 0;
+    let mut failovers = 0;
+    let mut refusal: Option<AgentProcessResult> = None;
+    let mut capacity = CapacityWait::default();
 
     loop {
-        let (mut result, can_failover) = match run(&attempt_config, attempt > 1)? {
+        let provider = parse_agent(attempt_config.agent()?).0;
+        let retry = launched || attempt_config.agent != launch.agent;
+        let (result, failure, can_failover) = match run(&attempt_config, retry)? {
             AgentAttempt::Finished {
-                result,
+                mut result,
                 can_failover,
-            } => (result, can_failover),
-            AgentAttempt::AccountUnavailable(error) => {
-                let Some(result) = account_failure else {
-                    return Err(error);
+            } => {
+                launched = true;
+                origin = None;
+                capacity = CapacityWait::default();
+                result.failure = if process.auto {
+                    result.failure.or_else(|| _classify_agent_failure(&result))
+                } else {
+                    None
                 };
-                tracing::warn!(%error, "alternate provider account unavailable");
-                return Ok(result);
-            }
-        };
-        let failure = if process.auto {
-            result.failure.or_else(|| _classify_agent_failure(&result))
-        } else {
-            None
-        };
-        result.failure = failure;
-        // Pi and OpenCode cannot be resumed without adding a new
-        // model-visible input. Preserve failure; only explicit input starts more work.
-        if matches!(parse_agent(launch.agent()).0.as_str(), "opencode" | "pi") {
-            return Ok(result);
-        }
-        let Some(failure) = failure else {
-            return Ok(result);
-        };
-        if matches!(
-            failure,
-            AgentFailure::AccountSubscriptionLimit { .. }
-                | AgentFailure::AccountCredentialInvalidated
-        ) && !can_failover
-        {
-            return Ok(result);
-        }
-        let Some(transient_delay) = retry_delays.get(attempt - 1).copied() else {
-            return Ok(result);
-        };
-        let limit_resets_at = match &failure {
-            AgentFailure::AccountSubscriptionLimit { resets_at } => *resets_at,
-            _ => None,
-        };
-
-        attempt_config = launch.clone();
-        let (delay, failover) = match &failure {
-            AgentFailure::AccountSubscriptionLimit { .. } => {
-                account_failure = Some(result.clone());
-                attempt_config.provider_account_id = None;
-                attempt_config.resume_token = None;
-                attempt_config.task_prompt = format!(
-                    "{LIMIT_FAILOVER_PROMPT}\n\nOriginal task:\n\n{}",
-                    launch.task_prompt
-                );
-                (Duration::ZERO, true)
-            }
-            AgentFailure::AccountCredentialInvalidated => {
-                account_failure = Some(result.clone());
-                attempt_config.provider_account_id = None;
-                attempt_config.resume_token = None;
-                attempt_config.task_prompt = format!(
-                    "{CREDENTIAL_FAILOVER_PROMPT}\n\nOriginal task:\n\n{}",
-                    launch.task_prompt
-                );
-                (Duration::ZERO, true)
-            }
-            _ => {
-                account_failure = None;
-                if let Some(resume_token) =
-                    result.agent_session.clone().or(launch.resume_token.clone())
-                {
-                    attempt_config.resume_token = Some(resume_token);
-                    attempt_config.task_prompt = RETRY_PROMPT.to_string();
-                    attempt_config.skill_invocation = None;
+                // Pi and OpenCode own retries; resuming adds model-visible input.
+                if matches!(provider.as_str(), "opencode" | "pi") {
+                    return Ok(result);
                 }
-                (transient_delay, false)
+                let Some(failure) = result.failure else {
+                    return Ok(result);
+                };
+                attempt_config = launch.clone();
+                attempt_config.agent = Some(rungs[rung].clone());
+                // A route chooses again; an exact pin would hold the spent account.
+                if can_failover {
+                    attempt_config.provider_account_id = None;
+                }
+                let prompt = match failure {
+                    AgentFailure::AccountSubscriptionLimit => LIMIT_FAILOVER_PROMPT,
+                    AgentFailure::AccountCredentialInvalidated => CREDENTIAL_FAILOVER_PROMPT,
+                    AgentFailure::ModelUnavailable => MODEL_FAILOVER_PROMPT,
+                    _ => RETRY_PROMPT,
+                };
+                if let Some(thread) = result.agent_session.clone().or(launch.resume_token.clone()) {
+                    attempt_config.resume_token = Some(thread);
+                    attempt_config.task_prompt = prompt.to_string();
+                    attempt_config.skill_invocation = None;
+                } else if matches!(
+                    failure,
+                    AgentFailure::AccountSubscriptionLimit
+                        | AgentFailure::AccountCredentialInvalidated
+                        | AgentFailure::ModelUnavailable
+                ) {
+                    attempt_config.task_prompt = _with_original_task(prompt, launch);
+                }
+                (result, failure, can_failover)
+            }
+            AgentAttempt::AccountUnavailable(AccountUnavailable {
+                error,
+                retry_at: Some(retry_at),
+            }) if process.wait_for_capacity => {
+                failovers = 0;
+                let reset = earliest_reset.map_or(retry_at, |at| at.min(retry_at));
+                let (origin_rung, origin) =
+                    origin.get_or_insert_with(|| (rung, attempt_config.clone()));
+                rung += 1;
+                if rung == rungs.len() {
+                    rung = *origin_rung;
+                    earliest_reset = None;
+                    wait(capacity.pause(&provider, &error, reset));
+                    attempt_config = origin.clone();
+                } else {
+                    earliest_reset = Some(reset);
+                    let next = &rungs[rung];
+                    tracing::warn!(error, agent = %next, "every account held back; falling through");
+                    capacity.fall_through(&provider, &error, next);
+                    attempt_config = _climb(origin, next, process, launch);
+                }
+                continue;
+            }
+            AgentAttempt::AccountUnavailable(unavailable) => {
+                let Some(result) = refusal.as_ref() else {
+                    return Err(unavailable.into_error());
+                };
+                // A thread that left no transcript cannot move. The step starts
+                // over on the checkout rather than ending on a limit.
+                if attempt_config.resume_token.take().is_some() {
+                    tracing::warn!(error = unavailable.error, "conversation could not move");
+                    attempt_config.task_prompt =
+                        _with_original_task(&attempt_config.task_prompt, launch);
+                    attempt_config.skill_invocation = launch.skill_invocation.clone();
+                    continue;
+                }
+                tracing::warn!(
+                    error = unavailable.error,
+                    "alternate provider account unavailable"
+                );
+                // Keep the continuation without restoring a thread we gave up.
+                // Account exhaustion and a provider refusal take the same path.
+                (
+                    result.clone(),
+                    result.failure.expect("saved refusal is classified"),
+                    false,
+                )
+            }
+        };
+        let delay = match failure {
+            AgentFailure::AccountSubscriptionLimit | AgentFailure::AccountCredentialInvalidated
+                if can_failover && failovers < MAX_ACCOUNT_FAILOVERS =>
+            {
+                let reason = _failure_reason(&result, failure);
+                failovers += 1;
+                refusal = Some(result);
+                _record_limit_recovery(&provider, &reason, None);
+                Duration::ZERO
+            }
+            AgentFailure::AccountSubscriptionLimit | AgentFailure::ModelUnavailable => {
+                let reason = _failure_reason(&result, failure);
+                let Some(next) = rungs.get(rung + 1) else {
+                    _record_limit_stop(&provider, &reason, launch, &rungs);
+                    return Ok(result);
+                };
+                rung += 1;
+                failovers = 0;
+                // Keep the refusal if the next entry has no eligible account.
+                refusal = Some(result);
+                _record_agent_move(&provider, &reason, next);
+                attempt_config = _climb(&attempt_config, next, process, launch);
+                Duration::ZERO
+            }
+            AgentFailure::AccountCredentialInvalidated => return Ok(result),
+            _ => {
+                let Some(delay) = retry_delays.get(transient_failures).copied() else {
+                    return Ok(result);
+                };
+                transient_failures += 1;
+                refusal = None;
+                delay
             }
         };
 
         tracing::warn!(
             failure = %failure,
-            attempt,
-            next_attempt = attempt + 1,
-            max_attempts = retry_delays.len() + 1,
+            transient_failures,
+            failovers,
             delay_ms = delay.as_millis(),
             resumed = attempt_config.resume_token.is_some(),
-            account_failover = failover,
-            limit_resets_at,
             "recoverable agent failure; retrying"
         );
         wait(delay);
-        attempt += 1;
     }
+}
+
+fn _with_original_task(prompt: &str, launch: &AgentConfig) -> String {
+    format!("{prompt}\n\nOriginal task:\n\n{}", launch.task_prompt)
+}
+
+/// The agents a Graph step tries after a usage limit or unavailable model.
+/// With an order to move through (`default_agent`, then `agents`) it is that order
+/// as written, a bare harness on its configured model. With none, a bare
+/// harness tries its other models and an explicit `harness:model` stays put.
+/// A replay of a recorded account and anything outside a Graph step never moves.
+fn _fallthrough_rungs(
+    launch: &AgentConfig,
+    process: &ProcessConfig,
+) -> Result<Vec<String>, CoreError> {
+    let first = launch.agent()?.to_owned();
+    if !process.wait_for_capacity || launch.provider_account_authority_home.is_some() {
+        return Ok(vec![first]);
+    }
+    let configured = |agent: &str| match (agent, &launch.claude_model) {
+        ("claude", Some(model)) => format!("claude:{model}"),
+        _ => agent.to_owned(),
+    };
+    let mut order: Vec<String> = std::iter::once(first.as_str())
+        .chain(launch.fallback_agents.iter().map(String::as_str))
+        .map(configured)
+        .collect();
+    // With no order to move through, a bare Claude tries its other models.
+    if launch.fallback_agents.is_empty() && first == "claude" {
+        order.extend(crate::config::CLAUDE_MODEL_RUNGS.map(|model| format!("claude:{model}")));
+    }
+    let mut rungs: Vec<String> = Vec::new();
+    for rung in order {
+        if !rungs.contains(&rung) {
+            rungs.push(rung);
+        }
+    }
+    Ok(rungs)
+}
+
+/// Put the step on `agent`, starting from how it stood before it began falling
+/// through. The thread moves within its provider; another provider reads the
+/// conversation so far and begins its own.
+fn _climb(
+    origin: &AgentConfig,
+    agent: &str,
+    process: &ProcessConfig,
+    launch: &AgentConfig,
+) -> AgentConfig {
+    let mut next = origin.clone();
+    next.agent = Some(agent.to_owned());
+    next.provider_account_id = None;
+    let same_provider = origin
+        .agent
+        .as_deref()
+        .is_some_and(|from| parse_agent(from).0 == parse_agent(agent).0);
+    if !same_provider {
+        next.resume_token = None;
+        next.skill_invocation = None;
+        next.task_prompt = _history_import(process)
+            .unwrap_or_else(|| _with_original_task(AGENT_FAILOVER_PROMPT, launch));
+    }
+    next
+}
+
+/// The conversation so far as the next provider's first turn, through the same
+/// import `lf session new -a` uses. None when the step has no Session or its
+/// transcript cannot be read yet; the task then starts over on the checkout.
+fn _history_import(process: &ProcessConfig) -> Option<String> {
+    let (session_id, _) = process.runtime.as_ref()?.session_attachment()?;
+    let imported = (|| -> anyhow::Result<String> {
+        let store =
+            crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
+        let session = store
+            .session(&session_id)?
+            .ok_or_else(|| anyhow::anyhow!("Session {session_id} is not recorded"))?;
+        crate::ops::human_session::conversation_log::continuation(&store, &session)
+    })();
+    match imported {
+        Ok(turn) => Some(turn),
+        Err(error) => {
+            tracing::warn!(%error, "conversation could not move providers; the task starts over");
+            None
+        }
+    }
+}
+
+/// The provider's own words for a failure, when it gave any.
+fn _failure_reason(result: &AgentProcessResult, failure: AgentFailure) -> String {
+    result
+        .stderr
+        .lines()
+        .next()
+        .map_or_else(|| failure.to_string(), str::to_owned)
 }
 
 fn _classify_agent_failure(result: &AgentProcessResult) -> Option<AgentFailure> {
@@ -1060,10 +1460,31 @@ fn _classify_agent_failure(result: &AgentProcessResult) -> Option<AgentFailure> 
     if _find_provider_error(result, credential_invalidated_failure).is_some() {
         return Some(AgentFailure::AccountCredentialInvalidated);
     }
-    if _find_provider_error(result, _classify_subscription_limit).is_some() {
-        return Some(AgentFailure::AccountSubscriptionLimit { resets_at: None });
+    if _find_provider_error(result, subscription_limit_text).is_some() {
+        return Some(AgentFailure::AccountSubscriptionLimit);
+    }
+    if _find_provider_error(result, _model_unavailable).is_some() {
+        return Some(AgentFailure::ModelUnavailable);
     }
     _find_provider_error(result, classify_retryable_agent_failure)
+}
+
+fn _model_unavailable(text: &str) -> Option<()> {
+    let text = text.to_ascii_lowercase();
+    let names_model = text.contains("model")
+        || crate::config::CLAUDE_MODEL_FAMILIES
+            .iter()
+            .any(|model| text.contains(model));
+    (text.contains("model_not_found")
+        || (names_model
+            && [
+                "is unavailable",
+                "is currently unavailable",
+                "is not available",
+            ]
+            .iter()
+            .any(|phrase| text.contains(phrase))))
+    .then_some(())
 }
 
 pub(crate) fn credential_invalidated_failure(text: &str) -> Option<()> {
@@ -1091,7 +1512,10 @@ pub(crate) fn classify_retryable_agent_failure(text: &str) -> Option<AgentFailur
         || text.contains("application network policy is unavailable")
     {
         Some(AgentFailure::AccountSwitched)
-    } else if text.contains("at capacity") || text.contains("capacity temporarily unavailable") {
+    } else if text.contains("at capacity")
+        || text.contains("capacity temporarily unavailable")
+        || text.contains("capacity issue")
+    {
         Some(AgentFailure::Capacity)
     } else if text.contains("rate limit")
         || text.contains("rate_limit")
@@ -1124,9 +1548,15 @@ pub(crate) fn classify_retryable_agent_failure(text: &str) -> Option<AgentFailur
     }
 }
 
-fn _classify_subscription_limit(text: &str) -> Option<()> {
-    let text = text.to_ascii_lowercase();
-    (text.contains("you've hit your usage limit")
+/// A provider's line saying the account's quota is spent, from a step's stderr
+/// or the line a native Claude displayed. Claude's openers are its own list of
+/// usage-limit messages; its capacity, per-model and seat-type lines name no
+/// spent window.
+pub(crate) fn subscription_limit_text(line: &str) -> Option<SpentLimit> {
+    let text = line.to_ascii_lowercase();
+    (text.contains("you've hit your")
+        || text.contains("you've reached your")
+        || text.contains("you're out of usage credits")
         || text.contains("you have hit your usage limit")
         || text.contains("usage limit reached")
         || text.contains("usage limit has been reached")
@@ -1135,15 +1565,41 @@ fn _classify_subscription_limit(text: &str) -> Option<()> {
         || text.contains("quota exceeded")
         || text.contains("insufficient_quota")
         || text.contains("rate_limit_reached"))
-    .then_some(())
+    .then(|| SpentLimit {
+        reason: line.to_string(),
+        model: _limited_model(&text),
+        credits: text.contains("out of usage credits"),
+    })
 }
 
-fn _begin_implicit_capture(
+/// Spent quota a provider reported in words.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SpentLimit {
+    pub reason: String,
+    /// The model family the line names ("You've reached your Fable limit"),
+    /// as limit scopes spell it; `None` when the whole account is spent,
+    /// unless `credits`.
+    pub model: Option<String>,
+    /// "You're out of usage credits": the credits pay for the model the
+    /// launch ran, so only that model is spent.
+    pub credits: bool,
+}
+
+/// The model family named between "your" and "limit" in a lowercased line.
+fn _limited_model(text: &str) -> Option<String> {
+    let named = text.split_once("your ")?.1.split_once("limit")?.0;
+    named
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .find(|word| crate::config::CLAUDE_MODEL_FAMILIES.contains(word))
+        .map(str::to_string)
+}
+
+fn _begin_process_runtime(
     launch: &AgentConfig,
     process: &ProcessConfig,
     harness: &str,
     model: Option<String>,
-) -> Result<AgentCapture, CoreError> {
+) -> Result<LfProcessRuntime, CoreError> {
     let cwd = launch
         .cwd
         .clone()
@@ -1163,25 +1619,27 @@ fn _begin_implicit_capture(
         graph: crate::session_record::SessionGraphMembership::Independent,
         work: None,
     };
-    let capture = if process.auto {
-        CaptureHandle::begin_with_request(
+    let runtime = if process.auto {
+        crate::session_record::SessionRecorder::begin_with_request(
             spec,
-            crate::session_record::AgentProcessRequest::from_prepared(launch),
+            crate::session_record::AgentProcessRequest::from_prepared(launch)?,
         )
+        .map(crate::process::LfProcessRuntime::new)
     } else {
         let context = crate::trace::PreparedTurnContext::from_prompts(
             &system_prompt_with_structured_replies(launch),
             &launch.task_prompt,
         );
-        CaptureHandle::begin_with_context(
+        crate::session_record::SessionRecorder::begin_with_context(
             spec,
             &context,
             Some(crate::session_record::AgentProcessRequest::from_prepared(
                 launch,
-            )),
+            )?),
         )
+        .map(crate::process::LfProcessRuntime::new)
     };
-    capture.map(Into::into).map_err(|error| {
+    runtime.map_err(|error| {
         CoreError::ExecutionFailed(format!(
             "failed to publish Session capture manifest before agent launch: {error}"
         ))
@@ -1210,8 +1668,8 @@ fn _run_harness_once(
     use crate::chat::types::{ConversationEvent, Lifecycle};
     use crate::harness::ApprovalPolicy;
 
-    let capture = process.capture.as_ref().map(|capture| &capture.0);
-    let (provider, _) = parse_agent(launch.agent());
+    let runtime = process.runtime.as_ref();
+    let (provider, _) = parse_agent(launch.agent()?);
     let account_route = match match provider.as_str() {
         "codex" => resolve_account_route_blocking(Provider::Codex, launch),
         "claude" => resolve_account_route_blocking(Provider::Claude, launch),
@@ -1220,13 +1678,14 @@ fn _run_harness_once(
         Ok(route) => route,
         Err(error) => {
             return Ok(AgentAttempt::AccountUnavailable(
-                CoreError::ExecutionFailed(format!("failed to select provider account: {error}")),
+                AccountUnavailable::selecting("select", error),
             ));
         }
     };
+    _note_limit_recovery(|store, process| store.end_agent_limit_wait(process));
     if retry {
-        if let Some(capture) = capture {
-            capture
+        if let Some(runtime) = runtime {
+            runtime
                 .retry_agent_process(
                     provider.clone(),
                     model,
@@ -1240,11 +1699,11 @@ fn _run_harness_once(
     }
 
     let mut config = launch.clone();
-    if let Some(capture) = capture {
+    if let Some(runtime) = runtime {
         // A new harness gets the invocation owner's current snapshot. Existing
-        // dispatch/history operations never refresh theirs from the capture.
-        config.session_attachment = capture.session_attachment();
-        config.env.extend(capture.environment());
+        // dispatch/history operations never refresh theirs from the runtime.
+        config.session_attachment = runtime.session_attachment();
+        config.env.extend(runtime.environment());
     }
     let prompt = std::mem::take(&mut config.task_prompt);
     let launch_worktree = config.cwd.clone().or_else(|| std::env::current_dir().ok());
@@ -1252,11 +1711,11 @@ fn _run_harness_once(
         crate::ops::git_operation::prepare_agent_process(cwd)
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     }
-    let runtime = tokio::runtime::Builder::new_current_thread()
+    let executor = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-    let result = runtime.block_on(async {
+    let result = executor.block_on(async {
         let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut harness = crate::harness::default_create_harness(
             &provider,
@@ -1270,14 +1729,14 @@ fn _run_harness_once(
                 .map(|route| route.account_id().clone()),
         );
         harness.set_agent_session(launch.resume_token.clone());
-        harness.set_capture(process.capture.clone());
+        harness.set_runtime(process.runtime.clone());
         harness
             .start(&config)
             .await
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
         let agent_session = harness.agent_session();
-        if let Some(capture) = capture {
-            capture.observe_provider(agent_session.clone(), harness.provider_account_id());
+        if let Some(runtime) = runtime {
+            runtime.observe_provider(agent_session.clone(), harness.provider_account_id());
         }
         let can_failover = account_route.is_some()
             && launch.provider_account_authority_home.is_none();
@@ -1290,6 +1749,7 @@ fn _run_harness_once(
             let mut stdout = String::new();
             let mut stderr = String::new();
             let mut exit_code = None;
+            let mut limited = false;
             let mut input_tick = tokio::time::interval(Duration::from_millis(250));
             input_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             let mut activity_tick = tokio::time::interval(crate::session_record::activity::SAMPLE_INTERVAL);
@@ -1301,8 +1761,8 @@ fn _run_harness_once(
                             .poll(harness.as_mut()).await
                             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
                     }
-                    _ = activity_tick.tick(), if capture.is_some() => {
-                        if let Some(capture) = capture { capture.observe_activity(harness.pid()).await; }
+                    _ = activity_tick.tick(), if runtime.is_some() => {
+                        if let Some(runtime) = runtime { runtime.observe_activity(harness.pid()).await; }
                     }
                     event = event_rx.recv() => {
                         let Some(event) = event else {
@@ -1310,9 +1770,9 @@ fn _run_harness_once(
                             exit_code = Some(1);
                             continue;
                         };
-                        if let Some(capture) = capture {
-                            capture.observe_provider(harness.agent_session(), harness.provider_account_id());
-                            capture.record_conversation(event.clone());
+                        if let Some(runtime) = runtime {
+                            runtime.observe_provider(harness.agent_session(), harness.provider_account_id());
+                            runtime.record_conversation(event.clone());
                         }
                         match event {
                             ConversationEvent::TextDelta { content, .. } => {
@@ -1324,6 +1784,7 @@ fn _run_harness_once(
                             }
                             ConversationEvent::Error { code, message, .. } => {
                                 stderr.push_str(&format!("{code}: {message}\n"));
+                                limited |= code == "provider_rate_limited";
                                 if crate::harness::is_terminal_harness_error(&code)
                                     || matches!(code.as_str(), "codex_dispatch_rejected" | "provider_rate_limited")
                                 {
@@ -1343,7 +1804,7 @@ fn _run_harness_once(
                 }
             }
             while let Ok(event) = event_rx.try_recv() {
-                if let Some(capture) = capture { capture.record_conversation(event.clone()); }
+                if let Some(runtime) = runtime { runtime.record_conversation(event.clone()); }
                 if let ConversationEvent::Error { code, message, .. } = event {
                     stderr.push_str(&format!("{code}: {message}\n"));
                 }
@@ -1356,7 +1817,7 @@ fn _run_harness_once(
                 stdout,
                 stderr,
                 agent_session: harness.agent_session(),
-                failure: None,
+                failure: limited.then_some(AgentFailure::AccountSubscriptionLimit),
             })
         };
         let result = match process.timeout {
@@ -1386,6 +1847,15 @@ fn _run_harness_once(
             route
                 .pin_session_blocking(result.agent_session.clone())
                 .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+            // A limit only the provider's words reported has no stream
+            // observation: cool the account so the next choice can differ.
+            if result.exit_code != 0 && result.failure.is_none() {
+                if let Some(limit) = _find_provider_error(result, subscription_limit_text) {
+                    route
+                        .record_limit_blocking(limit)
+                        .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+                }
+            }
         }
     }
 
@@ -1398,7 +1868,7 @@ fn _run_agent_once(
     retry: bool,
 ) -> Result<AgentAttempt, CoreError> {
     let start = Instant::now();
-    let (harness, model) = parse_agent(launch.agent());
+    let (harness, model) = parse_agent(&launch.resolved_agent()?);
     if process.auto {
         return _run_harness_once(launch, process, model, retry);
     }
@@ -1417,9 +1887,12 @@ fn _run_agent_once(
     };
     let command = build_session_command(launch, invocation, process.context_file.as_deref())
         .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-    let hooks =
-        crate::harness::context::native_args(&harness, launch.conversation_context.as_ref())
-            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+    let hooks = crate::harness::context::native_args(
+        &harness,
+        launch.conversation_context.as_ref(),
+        launch.holder,
+    )
+    .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     let program = &command.program;
     tracing::debug!(
         elapsed_ms = start.elapsed().as_millis(),
@@ -1483,7 +1956,7 @@ fn _run_agent_once(
         Ok(route) => route.flatten(),
         Err(error) => {
             return Ok(AgentAttempt::AccountUnavailable(
-                CoreError::ExecutionFailed(format!("failed to select provider account: {error}")),
+                AccountUnavailable::selecting("select", error),
             ));
         }
     };
@@ -1499,9 +1972,7 @@ fn _run_agent_once(
             Ok(activation) => activation,
             Err(error) => {
                 return Ok(AgentAttempt::AccountUnavailable(
-                    CoreError::ExecutionFailed(format!(
-                        "failed to activate provider account: {error}"
-                    )),
+                    AccountUnavailable::selecting("activate", error),
                 ));
             }
         };
@@ -1510,10 +1981,10 @@ fn _run_agent_once(
         crate::harness::claude_trust::accept_created_worktree(&cmd);
     }
     cmd.args(hooks).args(&command.args);
-    let capture = process.capture.as_ref().map(|capture| &capture.0);
+    let runtime = process.runtime.as_ref();
     if retry {
-        if let Some(capture) = capture {
-            capture
+        if let Some(runtime) = runtime {
+            runtime
                 .retry_agent_process(
                     harness.clone(),
                     model.clone(),
@@ -1526,8 +1997,8 @@ fn _run_agent_once(
         }
     }
 
-    if let Some(capture) = capture {
-        capture.observe_provider(
+    if let Some(runtime) = runtime {
+        runtime.observe_provider(
             None,
             account_route
                 .as_ref()
@@ -1535,10 +2006,17 @@ fn _run_agent_once(
         );
     }
 
-    let admitted_capture = capture.ok_or_else(|| {
-        CoreError::ExecutionFailed("AgentProcess launch has no admitted capture".into())
+    let admitted_runtime = runtime.ok_or_else(|| {
+        CoreError::ExecutionFailed("AgentProcess launch has no admitted runtime".into())
     })?;
-    let result = run_interactive(cmd, process.timeout, admitted_capture, activation, title);
+    let result = run_interactive(
+        cmd,
+        process.timeout,
+        admitted_runtime,
+        activation,
+        title,
+        launch.holder,
+    );
     result.map(|result| AgentAttempt::Finished {
         result,
         can_failover: false,
@@ -1549,36 +2027,47 @@ fn _run_agent_once(
 /// released once the provider process exists.
 fn spawn_agent_child(
     cmd: Command,
-    capture: &CaptureHandle,
+    runtime: &LfProcessRuntime,
     activation: Option<std::fs::File>,
+    holder: crate::session::Holder,
 ) -> Result<(Child, crate::process::SessionAttachment), CoreError> {
-    let child = capture
-        .spawn_native_agent(cmd)
+    let child = runtime
+        .spawn_native_agent(cmd, holder)
         .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     drop(activation);
     Ok(child)
 }
 
 fn run_interactive(
-    cmd: Command,
+    mut cmd: Command,
     timeout: Option<Duration>,
-    capture: &CaptureHandle,
+    runtime: &LfProcessRuntime,
     activation: Option<std::fs::File>,
     mut title: Option<crate::terminal_title::TerminalTitle>,
+    holder: crate::session::Holder,
 ) -> Result<AgentProcessResult, CoreError> {
     let start = Instant::now();
-    let (mut child, attachment) = spawn_agent_child(cmd, capture, activation)?;
-    let _pid_guard = ChildPidGuard::new(child.id());
+    let program = cmd.get_program().to_string_lossy().into_owned();
+    let foreground = crate::os_process::foreground::hand_to(&mut cmd);
+    let (mut child, attachment) = spawn_agent_child(cmd, runtime, activation, holder)?;
+    let pid = child.id();
+    let _pid_guard = ChildPidGuard::new(pid);
+    if let Some(foreground) = &foreground {
+        foreground.lead(pid);
+    }
     tracing::debug!(
         elapsed_ms = start.elapsed().as_millis(),
         "agent spawned (interactive)"
     );
     let (status, timed_out) = wait_for_exit(&mut child, timeout, || {
+        if let Some(foreground) = &foreground {
+            foreground.follow_stop(pid);
+        }
         if let Some(title) = title.as_mut() {
             title.refresh();
         }
     })?;
-    capture
+    runtime
         .record_native_agent_exit(&attachment)
         .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     tracing::debug!(
@@ -1591,8 +2080,21 @@ fn run_interactive(
             format_timeout(timeout)
         )));
     }
+    let exit_code = if holder == crate::session::Holder::Caller {
+        crate::lf::commands::util::SessionCommandOutcome {
+            status,
+            interrupted: foreground
+                .as_ref()
+                .is_some_and(|foreground| foreground.interrupted(&status)),
+            moved: None,
+        }
+        .bare_exit_code(&program)
+        .into()
+    } else {
+        status.code().unwrap_or(1)
+    };
     Ok(AgentProcessResult {
-        exit_code: status.code().unwrap_or(1),
+        exit_code,
         stdout: String::new(),
         stderr: String::new(),
         agent_session: None,
@@ -1755,6 +2257,7 @@ trust_level = "trusted"
                     approval: None,
                 },
                 &AgentConfig::default(),
+                true,
             );
             assert_eq!(
                 policy.sandbox,
@@ -1772,8 +2275,32 @@ trust_level = "trusted"
                 approval: Some(CodexApprovalPolicy::Never),
             },
             &AgentConfig::default(),
+            true,
         );
         assert_eq!(policy, CodexPermissionConfig::default());
+    }
+
+    #[test]
+    fn attended_codex_keeps_its_own_policy_unless_yolo_or_a_boundary_applies() {
+        let restrictive = CodexPermissionConfig {
+            sandbox: Some(CodexSandboxMode::ReadOnly),
+            approval: Some(CodexApprovalPolicy::OnRequest),
+        };
+        assert_eq!(
+            codex_permission_policy(restrictive, &AgentConfig::default(), false),
+            CodexPermissionConfig::default()
+        );
+        let yolo = AgentConfig {
+            skip_permissions: true,
+            ..AgentConfig::default()
+        };
+        assert_eq!(
+            codex_permission_policy(restrictive, &yolo, false),
+            CodexPermissionConfig {
+                sandbox: Some(CodexSandboxMode::DangerFullAccess),
+                approval: Some(CodexApprovalPolicy::Never),
+            }
+        );
     }
 
     #[test]
@@ -1809,7 +2336,7 @@ trust_level = "trusted"
             skip_permissions: true,
             ..default_launch()
         };
-        let thread = build_codex_thread_start_params(&launch);
+        let thread = build_codex_thread_start_params(&launch, false);
         assert_eq!(thread["sandbox"], "danger-full-access");
         assert_eq!(thread["approvalPolicy"], "never");
         assert!(thread.get("config").is_none());
@@ -1837,8 +2364,7 @@ trust_level = "trusted"
             match provider {
                 "claude" => assert_arg_pair(&args, "--append-system-prompt", "Fixed additions."),
                 "codex" => {
-                    let params = build_codex_thread_start_params(&launch);
-                    assert_eq!(params["serviceTier"], "default");
+                    let params = build_codex_thread_start_params(&launch, true);
                     assert_eq!(params["developerInstructions"], "Fixed additions.");
                 }
                 _ => {}
@@ -1872,7 +2398,7 @@ trust_level = "trusted"
             ..default_launch()
         };
 
-        let params = build_codex_thread_start_params(&launch);
+        let params = build_codex_thread_start_params(&launch, true);
         assert_eq!(
             params.get("model"),
             Some(&serde_json::Value::String("o3".to_string()))
@@ -1881,10 +2407,7 @@ trust_level = "trusted"
             params.get("cwd"),
             Some(&serde_json::Value::String("/tmp/repo".to_string()))
         );
-        assert_eq!(
-            params.get("serviceTier"),
-            Some(&serde_json::Value::String("default".to_string()))
-        );
+        assert!(!params.contains_key("serviceTier"));
     }
 
     #[test]
@@ -1895,15 +2418,11 @@ trust_level = "trusted"
             ..default_launch()
         };
 
-        let params = build_codex_thread_start_params(&launch);
+        let params = build_codex_thread_start_params(&launch, true);
         assert!(!params.contains_key("model"));
         assert_eq!(
             params.get("cwd"),
             Some(&serde_json::Value::String("/tmp/repo".to_string()))
-        );
-        assert_eq!(
-            params.get("serviceTier"),
-            Some(&serde_json::Value::String("default".to_string()))
         );
     }
 
@@ -2028,6 +2547,91 @@ trust_level = "trusted"
     }
 
     #[test]
+    fn claude_temporary_capacity_rejection_is_capacity_not_spent_quota() {
+        assert_eq!(
+            classify_retryable_agent_failure(
+                "Request rejected (429) · this may be a temporary capacity issue"
+            ),
+            Some(AgentFailure::Capacity)
+        );
+    }
+
+    #[test]
+    fn model_unavailable_is_a_provider_refusal_not_spent_quota_or_answer_prose() {
+        for message in [
+            "claude_result: Fable 5 is currently unavailable. Switch to another model.",
+            "claude_result: Selected model is not available.",
+            "codex_error: model_not_found",
+        ] {
+            assert_eq!(
+                _classify_agent_failure(&failed_result(message)),
+                Some(AgentFailure::ModelUnavailable)
+            );
+            assert!(subscription_limit_text(message).is_none());
+            let prose = AgentProcessResult {
+                exit_code: 1,
+                stdout: message.into(),
+                ..Default::default()
+            };
+            assert_eq!(_classify_agent_failure(&prose), None);
+        }
+        for message in [
+            "service unavailable",
+            "model service temporarily unavailable",
+        ] {
+            assert_eq!(
+                _classify_agent_failure(&failed_result(message)),
+                Some(AgentFailure::Unavailable)
+            );
+        }
+    }
+
+    #[test]
+    fn model_unavailable_skips_logins_and_keeps_the_configured_order() {
+        let launch = AgentConfig {
+            agent: Some("claude:fable".into()),
+            fallback_agents: vec!["claude:opus".into(), "codex".into()],
+            task_prompt: "finish the operation".into(),
+            ..Default::default()
+        };
+        let mut attempts = Vec::new();
+        let result = _run_with_transient_retries(
+            &launch,
+            &ProcessConfig {
+                wait_for_capacity: true,
+                ..auto_process()
+            },
+            &[],
+            |config, _| {
+                attempts.push(config.clone());
+                Ok(if config.agent.as_deref() == Some("codex") {
+                    done()
+                } else {
+                    managed_attempt(AgentProcessResult {
+                        agent_session: Some("thread".into()),
+                        ..failed_result("claude_result: Selected model is unavailable")
+                    })
+                })
+            },
+            |delay| assert_eq!(delay, Duration::ZERO),
+        )
+        .unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(
+            attempts
+                .iter()
+                .map(|c| c.agent.as_deref().unwrap())
+                .collect::<Vec<_>>(),
+            ["claude:fable", "claude:opus", "codex"]
+        );
+        assert_eq!(attempts[1].resume_token, Some("thread".into()));
+        assert_eq!(attempts[1].task_prompt, MODEL_FAILOVER_PROMPT);
+        assert_eq!(attempts[2].resume_token, None);
+        assert!(attempts[2].task_prompt.ends_with("finish the operation"));
+        assert!(!attempts[2].task_prompt.contains("subscription limit"));
+    }
+
+    #[test]
     fn transient_capacity_failure_resumes_and_finishes() {
         let launch = AgentConfig {
             agent: Some("codex".to_string()),
@@ -2126,7 +2730,7 @@ trust_level = "trusted"
         };
         assert!(matches!(
             _classify_agent_failure(&failure),
-            Some(AgentFailure::AccountSubscriptionLimit { resets_at: None })
+            Some(AgentFailure::AccountSubscriptionLimit)
         ));
         let mut results = vec![
             failure,
@@ -2156,14 +2760,438 @@ trust_level = "trusted"
 
         assert_eq!(result.exit_code, 0);
         assert_eq!(attempts.len(), 2);
-        assert_eq!(attempts[1].resume_token, None);
-        assert!(attempts[1].task_prompt.starts_with(LIMIT_FAILOVER_PROMPT));
-        assert!(attempts[1].task_prompt.contains("compress the branch"));
+        assert_eq!(attempts[1].resume_token, Some("session-123".into()));
+        assert_eq!(attempts[1].task_prompt, LIMIT_FAILOVER_PROMPT);
+        assert_eq!(waits, vec![Duration::ZERO]);
+    }
+
+    fn limited_result() -> AgentProcessResult {
+        AgentProcessResult {
+            exit_code: 1,
+            agent_session: Some("thread".into()),
+            failure: Some(AgentFailure::AccountSubscriptionLimit),
+            ..failed_result("provider_rate_limited: rejected: seven_day_overage_included")
+        }
+    }
+
+    fn done() -> AgentAttempt {
+        managed_attempt(AgentProcessResult {
+            exit_code: 0,
+            ..Default::default()
+        })
+    }
+
+    fn cooling(retry_at: Option<i64>) -> AgentAttempt {
+        AgentAttempt::AccountUnavailable(AccountUnavailable {
+            error: "no eligible managed claude account".to_string(),
+            retry_at,
+        })
+    }
+
+    /// November 2: this event read as a generic rate limit, kept the thread on
+    /// the old terms and died in retry_agent_process.
+    #[test]
+    fn a_limit_event_moves_the_step_and_its_thread_without_spending_transient_retries() {
+        let launch = AgentConfig {
+            agent: Some("claude".to_string()),
+            provider_account_id: Some(ProviderAccountId::parse("primary").unwrap()),
+            task_prompt: "implement the plan".to_string(),
+            ..Default::default()
+        };
+        let mut attempts = Vec::new();
+        let result = _run_with_transient_retries(
+            &launch,
+            &auto_process(),
+            &[],
+            |config, _| {
+                attempts.push(config.clone());
+                Ok(if attempts.len() == 1 {
+                    managed_attempt(limited_result())
+                } else {
+                    done()
+                })
+            },
+            |_| {},
+        )
+        .unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(attempts[1].provider_account_id, None);
+        assert_eq!(attempts[1].resume_token, Some("thread".into()));
+        assert_eq!(attempts[1].task_prompt, LIMIT_FAILOVER_PROMPT);
+        assert!(attempts[1].skill_invocation.is_none());
+    }
+
+    /// November 7, as it ran: bare `claude` (Fable) ran out of usage credits;
+    /// the account still had room for Opus. The step goes on there, on the
+    /// same account, in the same thread.
+    #[test]
+    fn a_credits_limit_goes_on_with_another_model_in_the_same_thread() {
+        let launch = AgentConfig {
+            agent: Some("claude".to_string()),
+            task_prompt: "compress the branch".to_string(),
+            ..Default::default()
+        };
+        let retry_at = crate::store::rows::now_unix() + 3 * 24 * 3600;
+        let mut scripted = vec![
+            managed_attempt(AgentProcessResult {
+                exit_code: 1,
+                agent_session: Some("thread".into()),
+                failure: Some(AgentFailure::AccountSubscriptionLimit),
+                ..failed_result("You're out of usage credits. Switch to another model to continue.")
+            }),
+            // Bare `claude` is Fable, held on every account until its reset.
+            cooling(Some(retry_at)),
+            done(),
+        ]
+        .into_iter();
+        let mut attempts = Vec::new();
+        let mut waits = Vec::new();
+        let result = _run_with_transient_retries(
+            &launch,
+            &ProcessConfig {
+                wait_for_capacity: true,
+                ..auto_process()
+            },
+            &[],
+            |config, retry| {
+                assert_eq!(retry, !attempts.is_empty());
+                attempts.push(config.clone());
+                Ok(scripted.next().expect("scripted attempt"))
+            },
+            |delay| waits.push(delay),
+        )
+        .unwrap();
+        assert_eq!(result.exit_code, 0);
+        let opus = &attempts[2];
+        assert_eq!(opus.agent.as_deref(), Some("claude:opus"));
+        assert_eq!(opus.resume_token, Some("thread".into()));
+        assert_eq!(opus.task_prompt, LIMIT_FAILOVER_PROMPT);
         assert_eq!(waits, vec![Duration::ZERO]);
     }
 
     #[test]
-    fn revoked_credential_fails_over_without_resuming_the_account_session() {
+    fn with_every_account_cooling_the_step_waits_and_goes_on_in_the_same_thread() {
+        // An explicit model has nowhere to fall through to.
+        let launch = AgentConfig {
+            agent: Some("claude:opus".to_string()),
+            task_prompt: "implement the plan".to_string(),
+            ..Default::default()
+        };
+        let retry_at = crate::store::rows::now_unix() + 3_600;
+        let mut scripted = vec![
+            managed_attempt(limited_result()),
+            cooling(Some(retry_at)),
+            cooling(Some(retry_at)),
+            done(),
+        ]
+        .into_iter();
+        let mut threads = Vec::new();
+        let mut waits = Vec::new();
+        let result = _run_with_transient_retries(
+            &launch,
+            &ProcessConfig {
+                wait_for_capacity: true,
+                ..auto_process()
+            },
+            &[],
+            |config, _| {
+                threads.push(config.resume_token.clone());
+                Ok(scripted.next().expect("scripted attempt"))
+            },
+            |delay| waits.push(delay),
+        )
+        .unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(threads[3], Some("thread".into()));
+        let poll = Duration::from_secs(CAPACITY_POLL_SECS as u64);
+        assert_eq!(waits, vec![Duration::ZERO, poll, poll]);
+    }
+
+    #[test]
+    fn a_bare_harness_tries_its_other_models_before_waiting() {
+        let launch = AgentConfig {
+            agent: Some("claude".to_string()),
+            ..Default::default()
+        };
+        let retry_at = crate::store::rows::now_unix() + 3_600;
+        let mut scripted = vec![
+            cooling(Some(retry_at)),
+            cooling(Some(retry_at + 60)),
+            cooling(Some(retry_at)),
+            cooling(Some(retry_at)),
+            cooling(Some(retry_at)),
+            done(),
+        ]
+        .into_iter();
+        let mut agents = Vec::new();
+        let mut waits = Vec::new();
+        let result = _run_with_transient_retries(
+            &launch,
+            &ProcessConfig {
+                wait_for_capacity: true,
+                ..auto_process()
+            },
+            &[],
+            |config, _| {
+                agents.push(config.agent.clone().unwrap());
+                Ok(scripted.next().expect("scripted attempt"))
+            },
+            |delay| waits.push(delay),
+        )
+        .unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(
+            agents,
+            [
+                "claude",
+                "claude:opus",
+                "claude:sonnet",
+                "claude:haiku",
+                "claude",
+                "claude:opus"
+            ]
+        );
+        // One wait for the earliest reset once every rung is held back.
+        assert_eq!(waits, vec![Duration::from_secs(CAPACITY_POLL_SECS as u64)]);
+    }
+
+    #[test]
+    fn a_preference_list_moves_the_step_to_the_next_provider_with_its_task() {
+        let launch = AgentConfig {
+            agent: Some("claude:opus".to_string()),
+            fallback_agents: vec!["codex".to_string()],
+            task_prompt: "implement the plan".to_string(),
+            ..Default::default()
+        };
+        let retry_at = crate::store::rows::now_unix() + 3_600;
+        let mut scripted = vec![
+            managed_attempt(limited_result()),
+            cooling(Some(retry_at)),
+            done(),
+        ]
+        .into_iter();
+        let mut attempts = Vec::new();
+        _run_with_transient_retries(
+            &launch,
+            &ProcessConfig {
+                wait_for_capacity: true,
+                ..auto_process()
+            },
+            &[],
+            |config, retry| {
+                attempts.push((config.clone(), retry));
+                Ok(scripted.next().expect("scripted attempt"))
+            },
+            |_| {},
+        )
+        .unwrap();
+        let agents: Vec<_> = attempts
+            .iter()
+            .map(|(c, _)| c.agent.clone().unwrap())
+            .collect();
+        assert_eq!(agents, ["claude:opus", "claude:opus", "codex"]);
+        let (codex, retry) = &attempts[2];
+        assert!(retry);
+        // Claude's thread stays behind; without a Session to read, Codex gets
+        // the whole task.
+        assert_eq!(codex.resume_token, None);
+        assert!(codex.task_prompt.starts_with(AGENT_FAILOVER_PROMPT));
+        assert!(codex.task_prompt.ends_with("implement the plan"));
+    }
+
+    #[test]
+    fn exhausted_accounts_without_a_reset_move_to_the_next_agent() {
+        for (first, next, thread) in [
+            ("codex", "claude", None),
+            ("codex", "claude", Some("thread")),
+            ("claude:opus", "claude:sonnet", Some("thread")),
+        ] {
+            let launch = AgentConfig {
+                agent: Some(first.to_string()),
+                fallback_agents: vec![next.to_string()],
+                provider_account_id: Some(ProviderAccountId::parse("primary").unwrap()),
+                task_prompt: "implement the plan".to_string(),
+                ..Default::default()
+            };
+            let process = ProcessConfig {
+                wait_for_capacity: true,
+                ..auto_process()
+            };
+            let mut attempts = Vec::new();
+            let result = _run_with_transient_retries(
+                &launch,
+                &process,
+                &[],
+                |config, _| {
+                    attempts.push(config.clone());
+                    Ok(if attempts.len() == 1 {
+                        managed_attempt(AgentProcessResult {
+                            agent_session: thread.map(Into::into),
+                            ..failed_result("You've hit your usage limit")
+                        })
+                    } else if config.agent.as_deref() == Some(first) {
+                        AgentAttempt::AccountUnavailable(AccountUnavailable::terminal(
+                            "no eligible managed account",
+                        ))
+                    } else {
+                        done()
+                    })
+                },
+                |delay| assert_eq!(delay, Duration::ZERO),
+            )
+            .unwrap();
+
+            assert_eq!(result.exit_code, 0);
+            assert_eq!(attempts.len(), if thread.is_some() { 4 } else { 3 });
+            let continued = attempts.last().unwrap();
+            assert_eq!(continued.agent.as_deref(), Some(next));
+            assert_eq!(continued.provider_account_id, None);
+            assert_eq!(continued.resume_token, None);
+            assert!(continued.task_prompt.ends_with("implement the plan"));
+        }
+    }
+
+    #[test]
+    fn an_unavailable_fallback_keeps_walking_after_a_usage_refusal() {
+        let launch = AgentConfig {
+            agent: Some("codex".into()),
+            fallback_agents: vec!["claude:opus".into(), "claude:sonnet".into()],
+            task_prompt: "compress the diff".into(),
+            ..Default::default()
+        };
+        let mut attempts = Vec::new();
+        let result = _run_with_transient_retries(
+            &launch,
+            &ProcessConfig {
+                wait_for_capacity: true,
+                ..auto_process()
+            },
+            &[],
+            |config, _| {
+                let agent = config.agent.as_deref().unwrap();
+                attempts.push(agent.to_owned());
+                Ok(match agent {
+                    "codex" => AgentAttempt::Finished {
+                        result: failed_result("You've hit your usage limit"),
+                        can_failover: false,
+                    },
+                    "claude:opus" => cooling(None),
+                    "claude:sonnet" => done(),
+                    _ => panic!("unexpected agent {agent}"),
+                })
+            },
+            |_| {},
+        )
+        .unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(attempts, ["codex", "claude:opus", "claude:sonnet"]);
+    }
+
+    #[test]
+    fn a_fallback_wait_keeps_its_place_in_the_order() {
+        let launch = AgentConfig {
+            agent: Some("codex".into()),
+            fallback_agents: vec!["claude:opus".into()],
+            ..Default::default()
+        };
+        let refused = || AgentAttempt::Finished {
+            result: failed_result("You've hit your usage limit"),
+            can_failover: false,
+        };
+        let mut scripted = [
+            refused(),
+            cooling(Some(crate::store::rows::now_unix() + 3600)),
+            refused(),
+        ]
+        .into_iter();
+        let mut attempts = Vec::new();
+        let result = _run_with_transient_retries(
+            &launch,
+            &ProcessConfig {
+                wait_for_capacity: true,
+                ..auto_process()
+            },
+            &[],
+            |config, _| {
+                attempts.push(config.agent.clone().unwrap());
+                Ok(scripted.next().expect("the last refusal stops the step"))
+            },
+            |_| {},
+        )
+        .unwrap();
+        assert_eq!(result.failure, Some(AgentFailure::AccountSubscriptionLimit));
+        assert_eq!(attempts, ["codex", "claude:opus", "claude:opus"]);
+    }
+
+    #[test]
+    fn nothing_that_will_free_up_ends_the_step_with_its_limit_failure() {
+        let launch = AgentConfig {
+            agent: Some("claude:opus".to_string()),
+            ..Default::default()
+        };
+        // The thread is given up first in case only it stood in the way.
+        let mut scripted = vec![
+            managed_attempt(limited_result()),
+            cooling(None),
+            cooling(None),
+        ]
+        .into_iter();
+        let result = _run_with_transient_retries(
+            &launch,
+            &ProcessConfig {
+                wait_for_capacity: true,
+                ..auto_process()
+            },
+            &[],
+            |_, _| Ok(scripted.next().expect("scripted attempt")),
+            |_| {},
+        )
+        .unwrap();
+        assert_eq!(result.failure, Some(AgentFailure::AccountSubscriptionLimit));
+    }
+
+    #[test]
+    fn limits_that_no_account_choice_escapes_stop_rather_than_spin() {
+        let launch = AgentConfig {
+            agent: Some("claude".to_string()),
+            ..Default::default()
+        };
+        let mut attempts = 0;
+        let result = _run_with_transient_retries(
+            &launch,
+            &auto_process(),
+            &[],
+            |_, _| {
+                attempts += 1;
+                Ok(managed_attempt(limited_result()))
+            },
+            |_| {},
+        )
+        .unwrap();
+        assert_eq!(attempts, MAX_ACCOUNT_FAILOVERS + 1);
+        assert_eq!(result.exit_code, 1);
+    }
+
+    #[test]
+    fn only_a_graph_step_waits_for_capacity() {
+        let launch = AgentConfig {
+            agent: Some("claude".to_string()),
+            ..Default::default()
+        };
+        let retry_at = crate::store::rows::now_unix() + 3_600;
+        let error = _run_with_transient_retries(
+            &launch,
+            &auto_process(),
+            &[],
+            |_, _| Ok(cooling(Some(retry_at))),
+            |_| panic!("only a Graph step sits waiting"),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("no eligible managed"));
+    }
+
+    #[test]
+    fn revoked_credential_with_no_thread_fails_over_with_its_whole_task() {
         let launch = AgentConfig {
             agent: Some("codex".to_string()),
             task_prompt: "open the pull request".to_string(),
@@ -2227,7 +3255,7 @@ trust_level = "trusted"
                 attempts += 1;
                 if attempts > 1 {
                     return Ok(AgentAttempt::AccountUnavailable(
-                        CoreError::ExecutionFailed("no eligible account".to_string()),
+                        AccountUnavailable::terminal("no eligible account"),
                     ));
                 }
                 Ok(managed_attempt(failed_result(
@@ -2240,7 +3268,7 @@ trust_level = "trusted"
 
         assert!(matches!(
             result.failure,
-            Some(AgentFailure::AccountSubscriptionLimit { .. })
+            Some(AgentFailure::AccountSubscriptionLimit)
         ));
         assert_eq!(attempts, 2);
     }
@@ -2267,8 +3295,61 @@ trust_level = "trusted"
 
         assert!(matches!(
             result.failure,
-            Some(AgentFailure::AccountSubscriptionLimit { .. })
+            Some(AgentFailure::AccountSubscriptionLimit)
         ));
+    }
+
+    #[test]
+    fn claude_spent_lines_read_as_subscription_limits() {
+        for line in [
+            "You've hit your session limit \u{b7} resets 3pm",
+            "You've hit your weekly limit \u{b7} resets Wed 12:00",
+            "You've reached your Fable limit. Switch to another model to continue.",
+            "You're out of usage credits. /model to switch models.",
+        ] {
+            assert!(subscription_limit_text(line).is_some(), "{line}");
+        }
+    }
+
+    #[test]
+    fn a_spent_line_naming_a_model_scopes_its_limit() {
+        let model = |line: &str| subscription_limit_text(line).unwrap().model;
+        assert_eq!(
+            model("You've reached your Fable limit. Switch to another model to continue."),
+            Some("fable".to_string())
+        );
+        assert_eq!(
+            model("You've hit your weekly Opus limit \u{b7} resets Wed 12:00"),
+            Some("opus".to_string())
+        );
+        assert_eq!(
+            model("You've hit your weekly limit \u{b7} resets Wed 12:00"),
+            None
+        );
+        assert_eq!(
+            model("You're out of usage credits. /model to switch models."),
+            None
+        );
+        let credits = |line: &str| subscription_limit_text(line).unwrap().credits;
+        assert!(credits(
+            "You're out of usage credits. /model to switch models."
+        ));
+        assert!(!credits(
+            "You've hit your weekly limit \u{b7} resets Wed 12:00"
+        ));
+    }
+
+    #[test]
+    fn claude_lines_naming_no_spent_window_are_not_subscription_limits() {
+        for line in [
+            "API Error: Request rejected (429) \u{b7} this may be a temporary capacity issue.",
+            "API Error: Usage credits required for 1M context \u{b7} run /model to switch to standard context",
+            "Fable 5 is currently unavailable. Learn more: https://www.anthropic.com/news/",
+            "Fable 5 requires usage credits. Switch to another model to continue.",
+            "Your seat type doesn't include usage credits",
+        ] {
+            assert_eq!(subscription_limit_text(line), None, "{line}");
+        }
     }
 
     #[test]
@@ -2377,5 +3458,211 @@ trust_level = "trusted"
         .unwrap()
         .args;
         assert_arg_pair(&claude, "--resume", "session-123");
+    }
+
+    #[test]
+    fn saved_claude_model_reaches_terminal_stream_and_recording() {
+        for (agent, saved, expected) in [
+            ("claude", None, None),
+            ("claude", Some("opus"), Some("opus")),
+            ("claude:fable", Some("opus"), Some("fable")),
+        ] {
+            let launch = AgentConfig {
+                agent: Some(agent.into()),
+                claude_model: saved.map(str::to_owned),
+                skip_permissions: true,
+                ..default_launch()
+            };
+            for invocation in [
+                ProviderInvocation::Terminal { session_id: None },
+                ProviderInvocation::ClaudeStream { session_id: None },
+            ] {
+                let command = build_session_command(&launch, invocation, None).unwrap();
+                let model = command
+                    .args
+                    .windows(2)
+                    .find(|pair| pair[0] == "--model")
+                    .map(|pair| pair[1].as_str());
+                assert_eq!(model, expected);
+            }
+            let request =
+                crate::session_record::AgentProcessRequest::from_prepared(&launch).unwrap();
+            assert_eq!(parse_agent(&request.agent).1.as_deref(), expected);
+        }
+        let codex = AgentConfig {
+            agent: Some("codex".into()),
+            claude_model: Some("opus".into()),
+            ..default_launch()
+        };
+        assert_eq!(codex.resolved_agent().unwrap(), "codex");
+    }
+
+    #[test]
+    fn an_order_is_tried_as_written_with_a_bare_entry_on_its_saved_model() {
+        let launch = AgentConfig {
+            agent: Some("claude".into()),
+            claude_model: Some("opus".into()),
+            fallback_agents: vec!["codex".into()],
+            ..default_launch()
+        };
+        let mut attempted = Vec::new();
+        let result = _run_with_transient_retries(
+            &launch,
+            &ProcessConfig {
+                wait_for_capacity: true,
+                ..auto_process()
+            },
+            &[],
+            |config, _| {
+                let agent = config.resolved_agent().unwrap();
+                attempted.push(agent.clone());
+                Ok(if agent == "codex" {
+                    done()
+                } else {
+                    cooling(Some(crate::store::rows::now_unix() + 3600))
+                })
+            },
+            |_| panic!("Codex still has capacity"),
+        )
+        .unwrap();
+        assert_eq!(result.exit_code, 0);
+        // The list carries the model order; nothing is tried that it lacks.
+        assert_eq!(attempted, ["claude:opus", "codex"]);
+    }
+
+    #[test]
+    fn a_lone_bare_claude_tries_its_other_models() {
+        // `agents: [claude]` leaves nothing behind the first entry.
+        let launch = AgentConfig {
+            agent: Some("claude".into()),
+            claude_model: Some("fable".into()),
+            ..default_launch()
+        };
+        let mut attempted = Vec::new();
+        let result = _run_with_transient_retries(
+            &launch,
+            &ProcessConfig {
+                wait_for_capacity: true,
+                ..auto_process()
+            },
+            &[],
+            |config, _| {
+                let agent = config.resolved_agent().unwrap();
+                attempted.push(agent.clone());
+                Ok(if agent == "claude:haiku" {
+                    done()
+                } else {
+                    cooling(Some(crate::store::rows::now_unix() + 3600))
+                })
+            },
+            |_| panic!("Haiku still has capacity"),
+        )
+        .unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(
+            attempted,
+            [
+                "claude:fable",
+                "claude:opus",
+                "claude:sonnet",
+                "claude:haiku"
+            ]
+        );
+    }
+
+    /// November 12: compress on Codex was refused at launch with no routed
+    /// account, and three Graph retries each relaunched the same agent.
+    #[test]
+    fn a_launch_refused_by_a_usage_limit_moves_to_the_next_agent() {
+        let launch = AgentConfig {
+            agent: Some("codex".into()),
+            fallback_agents: vec!["claude:fable".into(), "claude:opus".into()],
+            task_prompt: "compress the diff".into(),
+            ..Default::default()
+        };
+        let refused = || AgentAttempt::Finished {
+            result: failed_result("codex_error: You've hit your usage limit"),
+            can_failover: false,
+        };
+        let mut scripted = vec![
+            refused(),
+            AgentAttempt::Finished {
+                result: limited_result(),
+                can_failover: false,
+            },
+            done(),
+        ]
+        .into_iter();
+        let mut attempts = Vec::new();
+        let result = _run_with_transient_retries(
+            &launch,
+            &ProcessConfig {
+                wait_for_capacity: true,
+                ..auto_process()
+            },
+            &[],
+            |config, _| {
+                attempts.push(config.clone());
+                Ok(scripted.next().expect("scripted attempt"))
+            },
+            |_| {},
+        )
+        .unwrap();
+        assert_eq!(result.exit_code, 0);
+        let agents: Vec<_> = attempts.iter().map(|c| c.agent.clone().unwrap()).collect();
+        assert_eq!(agents, ["codex", "claude:fable", "claude:opus"]);
+        // Another provider starts on the whole task; another model of the
+        // same provider keeps the thread.
+        assert!(attempts[1].task_prompt.ends_with("compress the diff"));
+        assert_eq!(attempts[1].resume_token, None);
+        assert_eq!(attempts[2].resume_token, Some("thread".into()));
+        assert_eq!(attempts[2].task_prompt, LIMIT_FAILOVER_PROMPT);
+    }
+
+    #[test]
+    fn a_pinned_agent_refused_at_launch_fails_with_its_limit() {
+        let launch = AgentConfig {
+            agent: Some("codex".into()),
+            ..Default::default()
+        };
+        let mut attempts = 0;
+        let result = _run_with_transient_retries(
+            &launch,
+            &ProcessConfig {
+                wait_for_capacity: true,
+                ..auto_process()
+            },
+            &[],
+            |_, _| {
+                attempts += 1;
+                Ok(AgentAttempt::Finished {
+                    result: failed_result("codex_error: You've hit your usage limit"),
+                    can_failover: false,
+                })
+            },
+            |_| {},
+        )
+        .unwrap();
+        assert_eq!(attempts, 1);
+        assert_eq!(result.failure, Some(AgentFailure::AccountSubscriptionLimit));
+        // What it records names the way out; with an order, what was tried.
+        let advice = _limit_stop_advice("codex", &launch, &["codex".into()]);
+        assert_eq!(
+            advice,
+            "No fallback remains. Change an `agent` or `-a` pin to select another model or provider, or remove it to allow fallbacks. If `agents` is missing or has only one entry, configure fallbacks with `lf set --global agents codex,claude`"
+        );
+        let ordered = AgentConfig {
+            fallback_agents: vec!["claude".into()],
+            ..launch
+        };
+        assert_eq!(
+            _limit_stop_advice("claude", &ordered, &["codex".into(), "claude".into()]),
+            "Nothing is left in its order after codex, claude; add another agent to `agents`"
+        );
+        // A direct `lf -b <skill>` has an order but never walks it.
+        assert_eq!(
+            _limit_stop_advice("codex", &ordered, &["codex".into()]),
+            "Only a Graph step moves through `agents`, and this run stayed on codex. Run it again with `-a claude`"
+        );
     }
 }

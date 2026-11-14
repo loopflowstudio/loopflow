@@ -67,6 +67,7 @@ public struct TaskChangesSnapshot: Decodable, Sendable, Hashable {
 
 public struct TaskDiffSnapshot: Decodable, Sendable, Hashable {
     public let baseCommit: String
+    public let headCommit: String?
     public let issueIdentifier: String
     public let taskId: String
     public let path: String?
@@ -77,6 +78,7 @@ public struct TaskDiffSnapshot: Decodable, Sendable, Hashable {
     enum CodingKeys: String, CodingKey {
         case path, patch, binary, truncated
         case baseCommit = "base_commit"
+        case headCommit = "head_commit"
         case issueIdentifier = "issue_identifier"
         case taskId = "task_id"
     }
@@ -85,6 +87,34 @@ public struct TaskDiffSnapshot: Decodable, Sendable, Hashable {
 public enum TaskFileState: String, Decodable, Sendable {
     case text, binary, truncated, missing
     case unsupportedEncoding = "unsupported_encoding"
+
+    /// What a person sees in place of a file that cannot be shown as text.
+    public var title: String {
+        switch self {
+        case .text: "File"
+        case .binary: "Binary file"
+        case .missing: "File no longer exists"
+        case .truncated: "File exceeds 1 MB · preview unavailable"
+        case .unsupportedEncoding: "Unsupported text encoding"
+        }
+    }
+}
+
+/// How one line of a unified patch reads.
+public enum PatchLineKind: Equatable, Sendable {
+    case header, hunk, added, removed, context
+
+    /// The kind of `line`, the next line of a patch. `inHunk` carries across
+    /// lines: only lines inside a hunk are added or removed, so a file header
+    /// such as `+++ b/path` stays a header and a removed `-- comment` is removed.
+    public static func next(_ line: some StringProtocol, inHunk: inout Bool) -> PatchLineKind {
+        if line.hasPrefix("@@") { inHunk = true; return .hunk }
+        if line.hasPrefix("diff ") { inHunk = false; return .header }
+        guard inHunk else { return .header }
+        if line.hasPrefix("+") { return .added }
+        if line.hasPrefix("-") { return .removed }
+        return .context
+    }
 }
 
 public struct TaskFileRecovery: Decodable, Sendable, Hashable, Identifiable {

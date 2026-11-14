@@ -72,7 +72,7 @@ A Task gets its own worktree, branch and pull request. Start one and walk away:
 ```bash
 lf task create --title "add a divide-by-zero error"   # prints the Task ID
 lf task run <ID> code                                 # its own worktree; publishes a PR, then waits for you
-lf comment <ID> "raise ValueError, not ZeroDivisionError"   # reaches the run before its next step
+lf steer <ID> "raise ValueError, not ZeroDivisionError"   # reaches the run before its next step
 ```
 
 `code` is the built-in Graph: build until it holds and publish the PR, stop for
@@ -88,7 +88,7 @@ While it runs:
 
 ```bash
 lf task status <ID>              # where it is, and why
-lf ps                            # live lf call trees: each Graph, its steps, their agents
+lf process list                            # live lf call trees: each Graph, its steps, their agents
 ```
 
 ## 4. Pick up the conversation
@@ -101,18 +101,19 @@ lf resume --task <ID>            # from any terminal, on whatever agent it ran
 ```
 
 Ask for changes there. Close the window; the conversation is still there next
-week. After a crash or reboot, `lf resume --all` brings back every conversation
-it interrupted.
+week. After a crash or reboot, use the same command to reopen its saved history.
 
 ## 5. Land it
 
 ```bash
 lf ship <ID>                     # the remaining steps, then merge; repairs failing CI until it lands
-lf ship <ID> --stop              # withdraw it; disarms the auto-merge it armed
+lf task hold <ID>                # withdraw it; disarms the auto-merge it armed
 ```
 
 `lf ship` stands in for you at each remaining interactive step and runs `deliver`: `gate`,
-then `lf land --wait-and-fix`. It returns once the Task is shipping (`-b` waits);
+then `lf land --wait-and-fix`. `gate` publishes the PR first, so CI is already
+running while it [reviews the change](ops.md#review-while-ci-runs). `lf ship`
+returns once the Task is shipping (`-b` waits);
 `lf task status` follows it. The Task completes when the PR merges, and its
 worktree is cleaned up later by `lf wt prune`.
 
@@ -135,7 +136,10 @@ lf doctor                        # installation, store and process health
 
 Prefer cargo? `cargo install --git https://github.com/loopflowstudio/loopflow --bin lf`.
 The Mac app, [`Loopflow-latest.dmg`](https://downloads.loopflow.studio/Loopflow-latest.dmg),
-bundles `lf`.
+bundles `lf` and its local client server. Installation prepares Desktop's
+connection automatically. Check it with `lf server status`; use `lf install` for
+updates. Machine commands still select where work runs. [Connect clients](server.md)
+explains the distinction and what happens during a connection loss.
 
 | Flag | What it does |
 |---|---|

@@ -13,14 +13,27 @@ use time::OffsetDateTime;
 use super::{run_planning_write, run_sqlite, Store, StoreResult};
 
 impl Store {
-    pub(crate) async fn create_task(
+    #[allow(clippy::too_many_arguments)] // These effects share the promotion transaction.
+    pub(crate) async fn promote_task(
         &self,
-        input: &crate::work::task::NewTask,
+        task_id: &TaskId,
+        creation: Option<crate::work::task::NewTask>,
+        placement: Option<(std::path::PathBuf, TaskPr)>,
+        session: Option<crate::session::LfSession>,
+        destination: Option<std::path::PathBuf>,
         acquisition: Option<Arc<super::PlanningLocks>>,
+        receipt: Option<super::sqlite::creation::CreationIdentity>,
     ) -> StoreResult<Task> {
-        let input = input.clone();
+        let task_id = task_id.clone();
         run_planning_write(&self.sqlite, acquisition, move |store| {
-            store.create_task(&input)
+            store.promote_task(
+                &task_id,
+                creation.as_ref(),
+                placement.as_ref(),
+                session.as_ref(),
+                destination.as_deref(),
+                receipt.as_ref(),
+            )
         })
         .await
     }
@@ -80,15 +93,6 @@ impl Store {
         .await
     }
 
-    pub async fn set_task_agent(&self, task_id: &TaskId, agent: &str) -> StoreResult<()> {
-        let task_id = task_id.clone();
-        let agent = agent.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.set_task_agent(&task_id, &agent)
-        })
-        .await
-    }
-
     pub(crate) async fn complete_task(&self, task: &Task, request: i64) -> StoreResult<bool> {
         let task = task.clone();
         run_sqlite(&self.sqlite, move |store| {
@@ -128,11 +132,17 @@ impl Store {
         .await
     }
 
-    pub async fn stack_task_placement(&self, task: &Task, parent: &TaskPrId) -> StoreResult<()> {
+    pub async fn stack_task_placement(
+        &self,
+        task: &Task,
+        parent: &TaskPrId,
+        base_commit: &str,
+    ) -> StoreResult<()> {
         let task = task.clone();
         let parent = parent.clone();
+        let base_commit = base_commit.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.stack_task_placement(&task, &parent)
+            store.stack_task_placement(&task, &parent, &base_commit)
         })
         .await
     }
@@ -284,10 +294,11 @@ impl Store {
         task_id: &TaskId,
         observation: crate::linear::LinearIssueObservation,
         observed_at: OffsetDateTime,
+        planning_connected: bool,
     ) -> StoreResult<LinearObservationOutcome> {
         let task_id = task_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.apply_linear_observation(&task_id, &observation, observed_at)
+            store.apply_linear_observation(&task_id, &observation, observed_at, planning_connected)
         })
         .await
     }

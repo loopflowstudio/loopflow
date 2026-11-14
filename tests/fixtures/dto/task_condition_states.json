@@ -10,7 +10,6 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": null,
-      "regressed_in": null,
       "sync": {
         "connected": false,
         "changes": []
@@ -20,7 +19,7 @@
         "state": "available",
         "observed_at": null
       },
-      "repository_id": "repo_00000000000040008000000000000001",
+      "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
       "project_id": null,
       "wave_id": null
@@ -34,7 +33,7 @@
       "owner": "wave",
       "reason": "Task is ready to start"
     },
-    "section": "not_started",
+    "section": "backlog",
     "actions": {
       "recommended": null,
       "reason": "Task is ready to start"
@@ -70,7 +69,7 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": "task"
+    "graph_source": null
   },
   "completed": {
     "task": {
@@ -83,7 +82,6 @@
       "state": "completed",
       "completed_at": null,
       "due_date": null,
-      "regressed_in": null,
       "sync": {
         "connected": false,
         "changes": []
@@ -93,7 +91,7 @@
         "state": "available",
         "observed_at": null
       },
-      "repository_id": "repo_00000000000040008000000000000001",
+      "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
       "project_id": null,
       "wave_id": null
@@ -119,6 +117,7 @@
       "provider": "codex",
       "owner": {
         "person": "Jack Heart",
+        "person_id": null,
         "person_key": "jack@loopflow.studio",
         "machine": {
           "id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b",
@@ -130,7 +129,7 @@
       "owner": "wave",
       "reason": "Linear Task is complete"
     },
-    "section": "later",
+    "section": "done",
     "actions": {
       "recommended": "no_action",
       "reason": "Task is completed"
@@ -356,7 +355,7 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": "task"
+    "graph_source": null
   },
   "stale": {
     "task": {
@@ -369,7 +368,6 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": null,
-      "regressed_in": null,
       "sync": {
         "connected": false,
         "changes": []
@@ -379,7 +377,7 @@
         "state": "available",
         "observed_at": null
       },
-      "repository_id": "repo_00000000000040008000000000000001",
+      "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
       "project_id": null,
       "wave_id": null
@@ -405,6 +403,7 @@
       "provider": "codex",
       "owner": {
         "person": "Jack Heart",
+        "person_id": null,
         "person_key": "jack@loopflow.studio",
         "machine": {
           "id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b",
@@ -416,7 +415,7 @@
       "owner": "task",
       "reason": "implementing"
     },
-    "section": "waiting",
+    "section": "working",
     "actions": {
       "recommended": "run",
       "reason": "resume the parked Task"
@@ -616,7 +615,7 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": "task"
+    "graph_source": null
   },
   "unavailable": {
     "task": {
@@ -629,7 +628,6 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": null,
-      "regressed_in": null,
       "sync": {
         "connected": false,
         "changes": []
@@ -639,7 +637,7 @@
         "state": "available",
         "observed_at": null
       },
-      "repository_id": "repo_00000000000040008000000000000001",
+      "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
       "project_id": null,
       "wave_id": null
@@ -665,6 +663,7 @@
       "provider": "codex",
       "owner": {
         "person": "Jack Heart",
+        "person_id": null,
         "person_key": "jack@loopflow.studio",
         "machine": {
           "id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b",
@@ -676,7 +675,7 @@
       "owner": "task",
       "reason": "implementing"
     },
-    "section": "waiting",
+    "section": "backlog",
     "actions": {
       "recommended": "run",
       "reason": "resume the parked Task"
@@ -712,7 +711,7 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": "task"
+    "graph_source": null
   },
   "user_wait": {
     "task": {
@@ -725,7 +724,6 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": null,
-      "regressed_in": null,
       "sync": {
         "connected": false,
         "changes": []
@@ -735,7 +733,7 @@
         "state": "available",
         "observed_at": null
       },
-      "repository_id": "repo_00000000000040008000000000000001",
+      "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
       "project_id": null,
       "wave_id": null
@@ -761,6 +759,7 @@
       "provider": "codex",
       "owner": {
         "person": "Jack Heart",
+        "person_id": null,
         "person_key": "jack@loopflow.studio",
         "machine": {
           "id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b",
@@ -772,7 +771,7 @@
       "owner": "user",
       "reason": "choose the recovery boundary"
     },
-    "section": "waiting",
+    "section": "backlog",
     "actions": {
       "recommended": "no_action",
       "reason": "Waiting for your answer"
@@ -973,7 +972,7 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": "task"
+    "graph_source": null
   },
   "dirty": {
     "task": {
@@ -986,7 +985,6 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": null,
-      "regressed_in": null,
       "sync": {
         "connected": false,
         "changes": []
@@ -996,7 +994,7 @@
         "state": "available",
         "observed_at": null
       },
-      "repository_id": "repo_00000000000040008000000000000001",
+      "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
       "project_id": null,
       "wave_id": null
@@ -1022,6 +1020,7 @@
       "provider": "codex",
       "owner": {
         "person": "Jack Heart",
+        "person_id": null,
         "person_key": "jack@loopflow.studio",
         "machine": {
           "id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b",
@@ -1033,7 +1032,7 @@
       "owner": "task",
       "reason": "implementing"
     },
-    "section": "waiting",
+    "section": "backlog",
     "actions": {
       "recommended": "run",
       "reason": "resume the parked Task"
@@ -1069,7 +1068,7 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": "task"
+    "graph_source": null
   },
   "authored_commits": {
     "task": {
@@ -1082,7 +1081,6 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": null,
-      "regressed_in": null,
       "sync": {
         "connected": false,
         "changes": []
@@ -1092,7 +1090,7 @@
         "state": "available",
         "observed_at": null
       },
-      "repository_id": "repo_00000000000040008000000000000001",
+      "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
       "project_id": null,
       "wave_id": null
@@ -1118,6 +1116,7 @@
       "provider": "codex",
       "owner": {
         "person": "Jack Heart",
+        "person_id": null,
         "person_key": "jack@loopflow.studio",
         "machine": {
           "id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b",
@@ -1129,7 +1128,7 @@
       "owner": "user",
       "reason": "merge pull request head head-commits on GitHub"
     },
-    "section": "waiting",
+    "section": "backlog",
     "actions": {
       "recommended": "open_pr",
       "reason": "merge head head-commits on GitHub"
@@ -1355,6 +1354,6 @@
       "merge_commit": null,
       "abandoned_at": null
     },
-    "graph_source": "task"
+    "graph_source": null
   }
 }

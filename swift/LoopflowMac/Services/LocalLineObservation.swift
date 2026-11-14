@@ -4,16 +4,16 @@ import Foundation
 import Loopflow
 
 /// One owned `lf` reader speaking newline-delimited JSON over its pipes: a
-/// remote Task's file watch, which runs on another Machine. Local reads run in
-/// the app through `LoopflowLibrary`. All mutable state and pipe I/O belong to
+/// remote Task's file subscription, which runs on another Machine. Local reads run in
+/// the server through `ServerClient`. All mutable state and pipe I/O belong to
 /// queue. No callback touches AppKit.
 final class LocalLineObservation<Frame: Sendable>: @unchecked Sendable {
     private let queue: DispatchQueue
     private let name: String
     private let process: Process
-    private let input = Pipe()
-    private let output = Pipe()
-    private let diagnostics = Pipe()
+    private let input = Pipe.uninherited()
+    private let output = Pipe.uninherited()
+    private let diagnostics = Pipe.uninherited()
     private let continuation: AsyncThrowingStream<Frame, any Error>.Continuation
     private let configurationChanged: @Sendable () throws -> Bool
     /// Runs on `queue`; a throw ends the observation.
@@ -226,7 +226,7 @@ final class LocalLineObservation<Frame: Sendable>: @unchecked Sendable {
     private func fail(_ error: any Error) {
         guard stoppingAt == nil else { return }
         let detail = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
-        DesktopLog.home.warn("lf watch ended", ["watch": name,
+        DesktopLog.home.warn("lf subscription ended", ["subscribe": name,
                                                "error": String((detail.split(separator: "\n").first ?? "").prefix(200))])
         continuation.finish(throwing: error)
         stop()

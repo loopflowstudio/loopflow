@@ -6,7 +6,6 @@ struct OpenSourceLicensesTests {
     @Test func bundledNoticesAreReadableOffline() throws {
         let text = try OpenSourceLicenses.text(in: OpenSourceLicenses.resourceBundle)
         #expect(text.contains("SIL OPEN FONT LICENSE"))
-        #expect(text.contains("GNU LESSER GENERAL PUBLIC LICENSE"))
         #expect(text.contains("GNU GENERAL PUBLIC LICENSE"))
         #expect(text.contains("Mozilla Public License"))
         #expect(text.contains("FreeType"))

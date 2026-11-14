@@ -11,7 +11,6 @@ use crate::provider_auth::Provider;
 use crate::work::wave::{Wave, WaveLocator};
 mod canonical_ids;
 pub(crate) mod changes;
-mod chapters;
 mod children;
 pub(crate) mod ci_incidents;
 pub mod contention;
@@ -27,7 +26,10 @@ mod planning_peers;
 pub mod planning_sync;
 mod pr_landings;
 mod processes;
-pub(crate) mod project_transitions;
+mod project_adoption;
+#[cfg(test)]
+pub(crate) mod query_plans;
+mod recording_gap;
 mod repositories;
 pub mod rows;
 mod sessions;
@@ -35,9 +37,12 @@ pub mod sqlite;
 mod token_crypto;
 
 pub use planning_peers::{PeerPlanningStatus, PeerProjectionConflict, PlanningJournal};
+pub use recording_gap::{GapSpan, RecordingGap};
 
 /// Availability of retained planning facts, independent of execution permission.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum PlanningState {
@@ -49,7 +54,9 @@ pub enum PlanningState {
 }
 
 /// Acquisition evidence is independent of saved Work and outbound delivery.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct TaskAcquisition {
     pub state: PlanningState,
     pub observed_at: Option<i64>,
@@ -74,7 +81,6 @@ pub(crate) struct WaveLocatorUpdate {
     pub expected_repo: String,
     pub expected_slug: String,
     pub target: WaveLocator,
-    pub retire_collision: Option<WaveId>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -91,6 +97,9 @@ pub enum StoreError {
     Serde(#[from] serde_json::Error),
     #[error("not found")]
     NotFound,
+    /// A compare-and-swap named a revision that is no longer current.
+    #[error("{0}")]
+    Stale(String),
     #[error("invalid data: {0}")]
     InvalidData(String),
     #[error("unordered or conflicting {entity} facts for {id}; refresh planning")]
@@ -172,20 +181,6 @@ pub fn database_path_from_env() -> Result<PathBuf, std::io::Error> {
     // Schema compatibility, not build provenance, decides whether a CLI can
     // use this Machine. Ordinary opens still cannot advance its schema.
     Ok(default_db_path())
-}
-
-static IN_APP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-/// This process is an app serving Loopflow through its library: it opens only
-/// the store `lf` prepared at this build's schema, and never creates or
-/// migrates one. `lf` owns that, run once when the app starts. Set once by the
-/// app's library; never cleared.
-pub fn serve_in_app() {
-    IN_APP.store(true, std::sync::atomic::Ordering::Relaxed);
-}
-
-pub(crate) fn serves_in_app() -> bool {
-    IN_APP.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// Whether an open is the authorized owner of the shared migration frontier.
@@ -275,23 +270,18 @@ pub fn storage_config_from_env() -> Result<StorageConfig, std::io::Error> {
     Ok(StorageConfig::sqlite(database_path_from_env()?))
 }
 
-/// Planning and checkout locks retained by every queued writer using this acquisition.
+/// The Wave's planning lock, retained by every queued writer using this
+/// acquisition and released when the last one drops it.
 #[derive(Debug, Clone)]
 pub struct PlanningLocks {
-    locks: Vec<Arc<std::fs::File>>,
+    _wave: Arc<std::fs::File>,
 }
 
 impl PlanningLocks {
     pub(crate) fn new(wave: std::fs::File) -> Self {
         Self {
-            locks: vec![Arc::new(wave)],
+            _wave: Arc::new(wave),
         }
-    }
-
-    pub(crate) fn with_checkouts(&self, checkouts: &[Arc<std::fs::File>]) -> Self {
-        let mut locks = self.locks.clone();
-        locks.extend_from_slice(checkouts);
-        Self { locks }
     }
 }
 
@@ -306,7 +296,7 @@ where
     F: FnOnce(sqlite::SqliteStore) -> StoreResult<T> + Send + 'static,
 {
     let store = store.clone();
-    tokio::task::spawn_blocking(move || func(store))
+    crate::journal::request::spawn_blocking(move || func(store))
         .await
         .map_err(|err| StoreError::InvalidData(err.to_string()))?
 }
@@ -485,22 +475,6 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.relocate_waves(&updates)).await
     }
 
-    pub(crate) async fn wave_retirement_blockers(
-        &self,
-        wave_id: &WaveId,
-    ) -> StoreResult<Vec<String>> {
-        let wave_id = wave_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.wave_retirement_blockers(&wave_id)
-        })
-        .await
-    }
-
-    pub async fn delete_wave(&self, wave_id: &WaveId) -> StoreResult<()> {
-        let wave_id = wave_id.clone();
-        run_sqlite(&self.sqlite, move |store| store.delete_wave(&wave_id)).await
-    }
-
     pub(crate) async fn provider_auth_snapshot(
         &self,
         provider: Provider,
@@ -601,36 +575,6 @@ impl Store {
         let account_id = account_id.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.get_provider_account(&provider, &account_id)
-        })
-        .await
-    }
-
-    pub async fn set_long_lived_token(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-        token: &secrecy::SecretString,
-        minted_at: i64,
-    ) -> StoreResult<bool> {
-        let provider = provider.to_string();
-        let account_id = account_id.clone();
-        let token = token.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            use secrecy::ExposeSecret;
-            store.set_long_lived_token(&provider, &account_id, token.expose_secret(), minted_at)
-        })
-        .await
-    }
-
-    pub async fn long_lived_token(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-    ) -> StoreResult<Option<LongLivedToken>> {
-        let provider = provider.to_string();
-        let account_id = account_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.long_lived_token(&provider, &account_id)
         })
         .await
     }
@@ -846,24 +790,23 @@ impl Store {
         provider: Provider,
         agent_session: &AgentSessionId,
         account_id: &ProviderAccountId,
-        isolated: bool,
     ) -> StoreResult<()> {
         let agent_session = agent_session.clone();
         let account_id = account_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.pin_provider_session_route(provider, &agent_session, &account_id, isolated)
+            store.pin_provider_session_route(provider, &agent_session, &account_id)
         })
         .await
     }
 
-    pub async fn provider_session_isolated(
+    pub async fn provider_session_account(
         &self,
         provider: Provider,
         agent_session: &AgentSessionId,
-    ) -> StoreResult<Option<bool>> {
+    ) -> StoreResult<Option<ProviderAccountId>> {
         let agent_session = agent_session.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.provider_session_isolated(provider, &agent_session)
+            store.provider_session_account(provider, &agent_session)
         })
         .await
     }
@@ -892,28 +835,16 @@ impl Store {
         .await
     }
 
-    pub async fn provider_session_account(
-        &self,
-        provider: Provider,
-        agent_session: &AgentSessionId,
-    ) -> StoreResult<Option<ProviderAccountId>> {
-        let agent_session = agent_session.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.provider_session_account(provider, &agent_session)
-        })
-        .await
-    }
-
     pub async fn select_provider_account(
         &self,
         provider: Provider,
         candidates: &[ProviderAccountId],
-        agent_session: Option<&AgentSessionId>,
+        model: Option<&str>,
     ) -> StoreResult<Option<ProviderAccountSelection>> {
         let candidates = candidates.to_vec();
-        let agent_session = agent_session.cloned();
+        let model = model.map(str::to_owned);
         run_sqlite(&self.sqlite, move |store| {
-            store.select_provider_account(provider, &candidates, agent_session.as_ref())
+            store.select_provider_account(provider, &candidates, model.as_deref())
         })
         .await
     }
@@ -963,34 +894,6 @@ pub(crate) enum ProviderTokenReplacement {
     Missing,
 }
 
-/// A subscription token for machines that cannot refresh a login: Claude's
-/// `setup-token`, approved once and valid about a year.
-#[derive(Debug, Clone)]
-pub struct LongLivedToken {
-    pub token: secrecy::SecretString,
-    pub minted_at: i64,
-}
-
-impl LongLivedToken {
-    /// Anthropic honors a `setup-token` for a year. A token supplied by hand
-    /// is dated from when lf stored it, since lf cannot read its mint date.
-    const LIFETIME_SECONDS: i64 = 365 * 24 * 60 * 60;
-
-    pub fn expires_at(&self) -> i64 {
-        self.minted_at + Self::LIFETIME_SECONDS
-    }
-
-    pub fn expires_on(&self) -> time::Date {
-        time::OffsetDateTime::from_unix_timestamp(self.expires_at())
-            .expect("a year after a stored unix time is representable")
-            .date()
-    }
-
-    pub fn is_current(&self, now: i64) -> bool {
-        now < self.expires_at()
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderToken {
     pub provider: String,
@@ -1004,7 +907,16 @@ pub struct ProviderToken {
 }
 
 #[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+    schemars::JsonSchema,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
 )]
 #[serde(transparent)]
 pub struct ProviderAccountId(String);
@@ -1105,7 +1017,9 @@ impl CredentialState {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    schemars::JsonSchema, Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum RoutingState {
     Automatic,
@@ -1139,16 +1053,24 @@ pub struct ProviderAccountSelection {
 
 /// One observed subscription rate-limit window: how much of the plan's
 /// `session`/`weekly`/`weekly:<model>` window an account has consumed.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct AccountLimitWindow {
     pub window: String,
     pub used_percent: u8,
     pub resets_at: Option<i64>,
     pub plan: Option<String>,
+    /// The one model this window limits; `None` limits every model.
+    pub model: Option<String>,
+    /// Set while the window holds launches it affects back.
+    pub limited_until: Option<i64>,
 }
 
 /// A stored window observation for one managed account.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct AccountLimitRow {
     pub provider: String,
     pub account_id: ProviderAccountId,
@@ -1159,6 +1081,10 @@ pub struct AccountLimitRow {
     pub observed_at: i64,
     /// 'stream' when a running harness reported it; 'poll' when asked for.
     pub source: String,
+    /// The one model this window limits; `None` limits every model.
+    pub model: Option<String>,
+    /// Set while the window holds launches it affects back.
+    pub limited_until: Option<i64>,
 }
 
 pub async fn open_store(cfg: &StorageConfig) -> StoreResult<Store> {
@@ -1242,7 +1168,6 @@ mod tests {
     use crate::work::wave::Wave;
     use std::env;
     use std::path::PathBuf;
-    use std::sync::Arc;
     use time::OffsetDateTime;
 
     #[test]
@@ -1309,6 +1234,36 @@ mod tests {
     }
 
     #[test]
+    fn reads_released_task_placement_without_migrating_the_machine() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("released.db");
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        connection
+            .execute_batch(include_str!(
+                "../../tests/fixtures/migrations/task_placement_released.sql"
+            ))
+            .unwrap();
+        drop(connection);
+        let before = std::fs::read(&path).unwrap();
+        let mut ownership: Vec<_> = super::sqlite::read_task_worktree_ownership(&path)
+            .unwrap()
+            .into_iter()
+            .map(|owner| (owner.task, owner.completed, owner.unfinished))
+            .collect();
+        ownership.sort();
+        assert_eq!(
+            ownership,
+            vec![
+                ("local-done".into(), true, false),
+                ("remote-done".into(), false, false),
+                ("running".into(), false, true),
+                ("unknown".into(), false, true),
+            ]
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+    }
+
+    #[test]
     fn advancing_the_shared_frontier_is_exclusive_to_the_promotion_boundary() {
         use super::FrontierAdvance::{Authorized, Forbidden};
         let directory = tempfile::tempdir().unwrap();
@@ -1353,13 +1308,11 @@ mod tests {
             branch: format!("jack/task-{}", &id.as_str()[3..11]),
             base_commit: "deadbeef".to_string(),
             parent_pr_id: None,
-            agent: None,
             created_at: now,
             updated_at: now,
             rank: 0,
             assignee: None,
             due_date: None,
-            regressed_in: None,
             state: None,
             completed_at: None,
             observation: crate::work::task::Observation::NotRequired,
@@ -1599,6 +1552,7 @@ mod tests {
                         skill: crate::graph::Skill::named("review"),
                         id: None,
                         interactive: true,
+                        interactive_name: None,
                         returns: None,
                         sources: Vec::new(),
                     },
@@ -1989,63 +1943,6 @@ mod tests {
             assert!(store.task_owned(&task.id).await.unwrap());
             assert!(!directory.path().join("second").exists());
         }
-    }
-
-    #[tokio::test]
-    async fn cancelled_projection_retains_rotation_checkout_exclusion_through_commit() {
-        let (directory, store, wave) = planning_store().await;
-        let project = make_project(&wave);
-        store.create_project(&project).await.unwrap();
-        select_project(&store, &project);
-        let mut task = make_task(&store, &wave, &project);
-        task.worktree = Some(directory.path().join("checkout"));
-        store.seed_task(&task, &make_task_pr(&task)).await.unwrap();
-        let snapshot = task_planning_snapshot(&wave, &project, &task);
-        let checkouts = store
-            .lock_checkout_roots(vec![task.worktree.as_ref().unwrap().clone()])
-            .await
-            .unwrap();
-        let wave_lock = std::fs::File::create(directory.path().join("wave.lock")).unwrap();
-        fs2::FileExt::try_lock_exclusive(&wave_lock).unwrap();
-        let acquisition = Arc::new(super::PlanningLocks::new(wave_lock).with_checkouts(&checkouts));
-        drop(checkouts);
-        let entered = Arc::new(tokio::sync::Notify::new());
-        let (release, blocked) = std::sync::mpsc::channel();
-        let gate = (entered.clone(), Arc::new(std::sync::Mutex::new(blocked)));
-        let writer_store = super::Store::from_sqlite_for_test(store.sqlite.clone());
-        let writer = tokio::spawn(super::PLANNING_ACCEPTANCE_GATE.scope(gate, async move {
-            writer_store
-                .seed_inventory(snapshot, Some(acquisition))
-                .await
-        }));
-        tokio::time::timeout(std::time::Duration::from_secs(5), entered.notified())
-            .await
-            .unwrap();
-        writer.abort();
-        assert!(writer.await.unwrap_err().is_cancelled());
-        let excluded = store
-            .lock_checkout_roots(vec![task.worktree.as_ref().unwrap().clone()])
-            .await
-            .is_err();
-        release.send(()).unwrap();
-        let admitted = store
-            .lock_checkout_roots(vec![task.worktree.as_ref().unwrap().clone()])
-            .await
-            .unwrap();
-        assert!(
-            excluded,
-            "caller cancellation released checkout exclusion before commit"
-        );
-        assert_eq!(
-            store
-                .get_task(&task.id)
-                .await
-                .unwrap()
-                .unwrap()
-                .pm_snapshot_synced_at,
-            Some(1)
-        );
-        drop(admitted);
     }
 
     #[tokio::test]
@@ -2662,7 +2559,7 @@ mod tests {
             &[("commit -m work", Some("succeeded"))],
             None,
         );
-        assert!(store.chapter_task_evidence(&task.id).await.unwrap().begun);
+        assert!(store.task_begun(&task.id).await.unwrap());
         let graphs = store.sqlite.task_graphs(&task.id).unwrap();
         assert_eq!(graphs.len(), 1);
 
@@ -3542,13 +3439,6 @@ mod tests {
             "ordinary Wave updates cannot bypass relocation"
         );
         assert_eq!(loaded.name(), wave.name());
-
-        store.delete_wave(wave.id()).await.expect("delete wave");
-        assert!(store
-            .get_wave(wave.id())
-            .await
-            .expect("get deleted wave")
-            .is_none());
     }
 
     #[tokio::test]
@@ -3800,6 +3690,11 @@ mod tests {
 
         store.upsert_provider_account(&primary).await.unwrap();
         assert!(store.upsert_provider_account(&duplicate).await.is_err());
+        assert!(store
+            .get_provider_account("claude", &duplicate.account_id)
+            .await
+            .unwrap()
+            .is_none());
 
         duplicate.provider = "codex".to_string();
         store.upsert_provider_account(&duplicate).await.unwrap();

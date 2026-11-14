@@ -2,7 +2,6 @@
 // Uses NSViewRepresentable to bridge the Metal-rendered terminal surface.
 
 import SwiftUI
-import Synchronization
 import AppKit
 import OSLog
 import QuartzCore
@@ -86,10 +85,10 @@ struct GhosttyTerminalView: View {
     }
 
     private var shellCommand: String? {
-        if case .shell(let id, _) = terminal {
-            return buildWorkspaceShellCommand(id: id, argv: argv, env: env)
-        }
-        return buildGhosttyShellCommand(argv: argv, env: env)
+        let command = buildGhosttyShellCommand(argv: argv, env: env)
+        // An attachment with no command must never become a local login shell.
+        if case .shell = terminal { return command ?? "/usr/bin/false" }
+        return command
     }
 }
 
@@ -175,6 +174,7 @@ final class GhosttyTerminalMount: NSView {
         terminal.autoresizingMask = []
         addSubview(terminal)
         addSubview(terminal.searchBar)
+        addSubview(terminal.connectionBar)
         needsLayout = true
     }
 
@@ -182,7 +182,11 @@ final class GhosttyTerminalMount: NSView {
         super.layout()
         guard terminal.superview === self else { return }
         let searchHeight = terminal.searchBar.isHidden ? 0 : min(TerminalSearchBar.height, bounds.height)
+        // Connection feedback overlays the retained screen. Showing or clearing
+        // it must not resize the provider or move its cursor.
         terminal.frame = NSRect(x: 0, y: 0, width: bounds.width, height: max(0, bounds.height - searchHeight))
+        let connectionHeight: CGFloat = terminal.connectionBar.isHidden ? 0 : min(36, terminal.frame.height)
+        terminal.connectionBar.frame = NSRect(x: 8, y: terminal.frame.maxY - connectionHeight, width: max(0, bounds.width - 16), height: connectionHeight)
         terminal.searchBar.frame = NSRect(x: 0, y: terminal.frame.maxY, width: bounds.width, height: searchHeight)
     }
 }
@@ -190,9 +194,18 @@ final class GhosttyTerminalMount: NSView {
 /// Retains live terminal views for one repository across navigation and window
 /// closure. Its current window mounts the views; different repositories have
 /// separate pools because an NSView can only live in one view hierarchy.
+/// With a runtime, a Session's terminal can start before any pane mounts it;
+/// a pool without one (a headless store) only retains views mounts create.
 @MainActor @Observable
 final class GhosttySurfacePool {
     private var views: [TerminalIdentity: GhosttyMetalView] = [:]
+    @ObservationIgnored private let runtime: GhosttyManager?
+    /// The size mounts last gave a terminal; an unmounted start uses it so the
+    /// provider lays out for the pane it will appear in.
+    @ObservationIgnored var lastMountedSize: CGSize?
+    private static let unmountedSize = CGSize(width: 1100, height: 700)
+
+    init(runtime: GhosttyManager? = nil) { self.runtime = runtime }
 
     func view(for id: TerminalIdentity) -> GhosttyMetalView {
         if let existing = views[id] { return existing }
@@ -200,6 +213,33 @@ final class GhosttySurfacePool {
         view.pool = self
         views[id] = view
         return view
+    }
+
+    /// Start `argv` in a Session's terminal now, mounted or not. The view later
+    /// mounted for this identity adopts the running surface. Nothing starts without
+    /// a runtime, a command, or after this view's child exited.
+    @discardableResult
+    func start(_ id: TerminalIdentity, workingDirectory: String, argv: [String],
+               onSurfaceCreated: @escaping () -> Void, onSurfaceFailed: @escaping (String) -> Void) -> Bool {
+        guard let runtime, let command = buildGhosttyShellCommand(argv: argv, env: [:]) else { return false }
+        let view = view(for: id)
+        guard view.surface == nil, !view.childExited else { return false }
+        view.workingDirectory = workingDirectory
+        view.command = command
+        view.onSurfaceCreated = onSurfaceCreated
+        view.onSurfaceFailed = onSurfaceFailed
+        if case .uninitialized = runtime.state { runtime.initialize() }
+        switch runtime.state {
+        case .ready:
+            view.sizeDidChange(lastMountedSize ?? Self.unmountedSize)
+            view.createSurface(manager: runtime)
+            return view.surface != nil
+        case .failed(let reason):
+            onSurfaceFailed(reason)
+            return false
+        case .uninitialized, .initializing:
+            return false
+        }
     }
 
     /// Type `line` and Enter into a shell, as a person would: at once when its
@@ -261,6 +301,9 @@ final class GhosttySurfacePool {
         guard !view.childExited, !ghostty_surface_process_exited(surface) else {
             throw RegistryQueryError("The terminal child exited; no input was sent or client reopened.")
         }
+        guard view.connectionAcceptsInput else {
+            throw RegistryQueryError("Session input is paused or held by another viewer; no input was sent.")
+        }
         guard !view.hasMarkedText() else {
             throw RegistryQueryError("The terminal has an active input-method composition; finish it before sending input.")
         }
@@ -300,6 +343,10 @@ final class GhosttySurfacePool {
         return view.programStatus.incarnation == source
     }
 
+    func connectionReading(for id: TerminalIdentity) -> ServerConnectionReading? {
+        views[id]?.connectionReading
+    }
+
     func title(for id: TerminalIdentity) -> String? {
         views[id]?.terminalTitle
     }
@@ -324,8 +371,42 @@ final class GhosttySurfacePool {
         views.removeValue(forKey: view.terminal)
     }
 
+    func scrollToBottom(_ id: TerminalIdentity) {
+        guard let surface = views[id]?.surface else { return }
+        let action = "scroll_to_bottom"
+        action.withCString { _ = ghostty_surface_binding_action(surface, $0, UInt(action.utf8.count)) }
+    }
+
+    func screen(_ id: TerminalIdentity) -> String? {
+        guard let view = views[id], case .available(let text, _) = try? view.readText(region: .screen, maxBytes: 16384) else { return nil }
+        return text
+    }
+
+    /// Leaving a pane detaches its lf relay (Ctrl+]) before freeing the surface,
+    /// so the Session owner records a deliberate leave without waiting for
+    /// connection-loss detection across SSH.
     func release(_ id: TerminalIdentity) {
-        views.removeValue(forKey: id)?.destroySurface()
+        guard let view = views.removeValue(forKey: id) else { return }
+        guard view.detachRelay() else {
+            view.destroySurface()
+            return
+        }
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(500))
+            view.destroySurface()
+        }
+    }
+
+    /// Begin ordinary leave for every attached relay before the app exits.
+    func detachForQuit() {
+        for view in views.values { _ = view.detachRelay() }
+    }
+
+    var hasRunningRelays: Bool {
+        views.values.contains { view in
+            guard let surface = view.surface else { return false }
+            return !ghostty_surface_process_exited(surface)
+        }
     }
 
     func clearFocus() {
@@ -489,6 +570,45 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     private var lastCommandBlockRefresh: CFTimeInterval = 0
     private var focusRequested = false
     private var inputEnabled = true
+    private var serverConnection: ServerConnection?
+    private var connectionReadonly = false
+    var connectionReading: ServerConnectionReading? { serverConnection?.reading }
+    var connectionAcceptsInput: Bool { serverConnection?.reading.acceptsInput ?? true }
+    private let connectionLabel = NSTextField(labelWithString: "")
+    private lazy var retryConnection = NSButton(title: "Retry connection", target: self, action: #selector(retryServerConnection))
+    private lazy var moveConnection = NSButton(title: "Move here", target: self, action: #selector(moveServerConnection))
+    lazy var connectionBar: NSStackView = {
+        let bar = NSStackView(views: [connectionLabel, moveConnection, retryConnection])
+        bar.orientation = .horizontal
+        bar.spacing = 8
+        bar.isHidden = true
+        bar.wantsLayer = true
+        connectionLabel.lineBreakMode = .byTruncatingTail
+        connectionLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return bar
+    }()
+
+    @objc private func retryServerConnection() {
+        serverConnection?.retry()
+    }
+
+    @objc private func moveServerConnection() {
+        serverConnection?.moveHere()
+    }
+
+    private func showConnection(_ reading: ServerConnectionReading) {
+        let readonly = !reading.acceptsInput
+        if surface != nil, connectionReadonly != readonly {
+            performBinding("toggle_readonly")
+            connectionReadonly = readonly
+        }
+        connectionLabel.stringValue = reading.title ?? ""
+        connectionLabel.toolTip = reading.title
+        connectionBar.isHidden = reading.title == nil
+        retryConnection.isHidden = !(serverConnection?.canRetry ?? false)
+        moveConnection.isHidden = !reading.canMoveHere
+        superview?.needsLayout = true
+    }
     /// Last values sent to the current surface. SwiftUI calls updateNSView on every
     /// parent render; unchanged size, scale and feedback must not reach Ghostty.
     private nonisolated(unsafe) var appliedScale: (surface: ghostty_surface_t, scale: CGFloat)?
@@ -531,6 +651,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         appearance = NSAppearance(named: theme.isDark ? .darkAqua : .aqua)
         searchBar.applyTheme(theme)
         layer?.backgroundColor = theme.terminal.background.nsColor.cgColor
+        connectionBar.layer?.backgroundColor = theme.terminal.background.nsColor.cgColor
         dropHighlight?.layer?.borderColor = NSColor(theme.palette.keyboardFocus).cgColor
         dropHighlight?.layer?.backgroundColor = NSColor(theme.palette.keyboardFocus).withAlphaComponent(0.08).cgColor
         renderCommandBlocks()
@@ -542,7 +663,15 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
 
         let surfaceCommand: String?
         if case .session = terminal, let command {
-            let script = "export LF_TERMINAL_ID=\(shellEscape(terminalMarker)); export LF_TERMINAL_TTY=\"$(tty)\"; exec \(command)"
+            let connection = ServerConnection()
+            do {
+                try connection.start { [weak self] reading in self?.showConnection(reading) }
+            } catch {
+                onSurfaceFailed("Cannot open native connection status: \(error.localizedDescription)")
+                return
+            }
+            serverConnection = connection
+            let script = "export LF_SERVER_STATUS=\(shellEscape(connection.path)); export LF_SERVER=1; export LF_TERMINAL_ID=\(shellEscape(terminalMarker)); export LF_TERMINAL_TTY=\"$(tty)\"; exec \(command)"
             surfaceCommand = ["/bin/sh", "-c", script].map(shellEscape).joined(separator: " ")
         } else {
             surfaceCommand = command
@@ -556,6 +685,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         if surface != nil { pendingInput = nil }
 
         if surface != nil {
+            if let serverConnection { showConnection(serverConnection.reading) }
             updateContentScale()
             updateSurfaceSize()
             installCommandBlockOverlay()
@@ -565,6 +695,8 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             setupTrackingArea()
             onSurfaceCreated()
         } else {
+            serverConnection?.stop()
+            serverConnection = nil
             onSurfaceFailed("Could not create the native terminal surface.")
         }
     }
@@ -632,7 +764,20 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         return .available(text: text, truncated: truncated)
     }
 
+    /// Released by Desktop: the child's exit is our detach, not a closed pane.
+    private var detaching = false
+
+    /// Type the relay's detach key into a running child; false when none runs.
+    func detachRelay() -> Bool {
+        guard let surface, !childExited, !ghostty_surface_process_exited(surface) else { return false }
+        detaching = true
+        ghostty_surface_text(surface, "\u{1d}", 1)
+        return true
+    }
+
     func destroySurface() {
+        serverConnection?.stop()
+        serverConnection = nil
         copyDismissal?.cancel()
         publishCopyConfirmation(nil)
         retainedSearchBar?.end()
@@ -664,9 +809,12 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     /// UI can reclassify immediately instead of waiting for the next poll.
     func handleSurfaceClose() {
         guard surface != nil else { return }
+        if detaching {
+            destroySurface()
+            return
+        }
         var output: String?
-        if case .session = terminal,
-           case .available(let text, let truncated) = try? readText(region: .screen, maxBytes: 16384) {
+        if case .available(let text, let truncated) = try? readText(region: .screen, maxBytes: 16384) {
             let excerpt = text.trimmingCharacters(in: .whitespacesAndNewlines)
             output = excerpt.isEmpty ? nil : excerpt + (truncated ? "\n[Terminal output truncated]" : "")
         }
@@ -924,13 +1072,17 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
 
     private func updateSurfaceSize() {
         guard let surface else { return }
-        let backingSize = convertToBacking(bounds).size
+        // Unmounted, the view has no window to convert through; use the scale the
+        // surface was given so its grid matches the pane it will mount in.
+        let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0
+        let backingSize = CGSize(width: bounds.width * scale, height: bounds.height * scale)
         guard backingSize.width > 0, backingSize.height > 0 else { return }
         ghostty_surface_set_size(surface, UInt32(backingSize.width), UInt32(backingSize.height))
     }
 
     func sizeDidChange(_ newSize: CGSize) {
         guard newSize.width > 0, newSize.height > 0 else { return }
+        if window != nil { pool?.lastMountedSize = newSize }
         if frame.size != newSize { setFrameSize(newSize) }
         updateContentScale()
     }
@@ -963,12 +1115,17 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
 
         if !mods.contains(.command) { clearBlockSelection() }
 
+        guard connectionAcceptsInput else { return false }
         // Let other command shortcuts through to the terminal
         let key = translateKey(event)
         return ghostty_surface_key(surface, key)
     }
 
     override func keyDown(with event: NSEvent) {
+        // Ghostty uses a key to dismiss an exited child. An ended relay no
+        // longer accepts input, but must still let that local close happen.
+        let exited = surface.map { ghostty_surface_process_exited($0) } ?? false
+        guard connectionAcceptsInput || exited else { return }
         guard let surface else {
             super.keyDown(with: event)
             return
@@ -1003,6 +1160,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }
 
     override func keyUp(with event: NSEvent) {
+        guard connectionAcceptsInput else { return }
         guard let surface else {
             super.keyUp(with: event)
             return
@@ -1014,6 +1172,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }
 
     override func flagsChanged(with event: NSEvent) {
+        guard connectionAcceptsInput else { return }
         guard let surface else {
             super.flagsChanged(with: event)
             return
@@ -1048,6 +1207,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     // MARK: - NSTextInputClient
 
     func insertText(_ string: Any, replacementRange: NSRange) {
+        guard connectionAcceptsInput else { return }
         guard let surface else { return }
 
         let text: String
@@ -1076,6 +1236,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }
 
     func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
+        guard connectionAcceptsInput else { return }
         if let attrString = string as? NSAttributedString {
             _markedText = NSMutableAttributedString(attributedString: attrString)
         } else if let str = string as? String {
@@ -1306,6 +1467,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }
 
     @objc private func clearAction() {
+        guard connectionAcceptsInput else { return }
         guard let surface else { return }
         // Send clear screen sequence
         let clearCmd = "clear\n"
@@ -1371,6 +1533,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }
 
     private func pasteFromClipboard() -> Bool {
+        guard connectionAcceptsInput else { return false }
         if case .session = terminal,
            ghosttyPrefersImageShortcut(NSPasteboard.general) {
             return sendImagePasteShortcut()
@@ -1437,6 +1600,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }
 
     fileprivate func insertTerminalText(_ text: String) -> Bool {
+        guard connectionAcceptsInput else { return false }
         guard let surface else { return false }
         programStatus.receive(.interaction, incarnation: programStatus.incarnation)
         clearBlockSelection()
@@ -1447,6 +1611,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }
 
     fileprivate func sendTerminalKey(_ input: DesktopKey) {
+        guard connectionAcceptsInput else { return }
         guard let surface else { return }
         programStatus.receive(.interaction, incarnation: programStatus.incarnation)
         clearBlockSelection()
@@ -1560,6 +1725,11 @@ func terminalPasteText(from pasteboard: NSPasteboard) -> String? {
 // Stub view when GhosttyKit is not available
 @MainActor @Observable
 final class GhosttySurfacePool {
+    var lastMountedSize: CGSize?
+    init(runtime: GhosttyManager? = nil) {}
+    @discardableResult
+    func start(_ id: TerminalIdentity, workingDirectory: String, argv: [String],
+               onSurfaceCreated: @escaping () -> Void, onSurfaceFailed: @escaping (String) -> Void) -> Bool { false }
     func surfaceIncarnation(for id: TerminalIdentity) -> String? { nil }
     func readText(_ request: DesktopTextRequest, terminal: TerminalIdentity) throws -> DesktopTextResult {
         .unavailable(reason: .missingSurface)
@@ -1579,8 +1749,13 @@ final class GhosttySurfacePool {
     func programStatus(for id: TerminalIdentity) -> ProgramStatusSurface? { nil }
     func associateProgramStatus(_ records: [SessionRecord]) {}
     func ownsCopyConfirmation(_ notification: Notification, terminal: TerminalIdentity) -> Bool { false }
+    func connectionReading(for id: TerminalIdentity) -> ServerConnectionReading? { nil }
     func title(for id: TerminalIdentity) -> String? { nil }
+    func scrollToBottom(_ id: TerminalIdentity) {}
+    func screen(_ id: TerminalIdentity) -> String? { nil }
     func release(_ id: TerminalIdentity) {}
+    func detachForQuit() {}
+    var hasRunningRelays: Bool { false }
     func clearFocus() {}
     func focus(_ id: TerminalIdentity) {}
 }
@@ -1642,8 +1817,8 @@ struct GhosttyTerminalView: View {
 
 #endif
 
-// Block geometry and the header format stay outside the Ghostty build: the
-// shell bootstrap below names the header marker in every configuration.
+// Block geometry and the header format stay outside the Ghostty build.
+// GhosttyResources/task-zshenv prints the same marker in the shell prompt.
 
 /// The directory line above a command. The Loopflow prompt prints it as
 /// concealed terminal text, so it scrolls, reflows and survives with its rows;
@@ -1718,106 +1893,6 @@ func buildGhosttyShellCommand(argv: [String], env: [String: String]) -> String? 
     return ["env", envPrefix, command].joined(separator: " ")
 }
 
-/// zsh reads `ZDOTDIR/.zshenv` first. Loopflow's gives a shell still on the
-/// macOS default prompt a blank row, a header row holding the directory, and a
-/// command line, leaves every other prompt alone, then hands over to Ghostty's
-/// integration, which restores the user's own ZDOTDIR.
-///
-/// The header row is concealed text behind `GhosttyBlockHeader.marker`: the
-/// terminal keeps it as the directory at submission, and the overlay draws it
-/// in its own size and color.
-enum LoopflowZshBootstrap {
-    static let macOSDefaultPrompt = "%n@%m %1~ %# "
-
-    static let zshenv = """
-    if [[ -o interactive ]]; then
-        # Runs once, after the user's rc files have had their say.
-        _loopflow_prompt() {
-            precmd_functions=(${precmd_functions:#_loopflow_prompt})
-            # Login rc files may replace PATH. Keep this app's lf first for
-            # nested commands without changing the user's shell configuration.
-            if [[ -n $LF_BIN ]]; then export PATH="${LF_BIN:h}:$PATH"; fi
-            [[ $PROMPT == '\(macOSDefaultPrompt)' ]] || builtin return 0
-            PROMPT=$'\\n%{\\e[8m%}\(GhosttyBlockHeader.marker)%\(GhosttyBlockHeader.maxLength)<\u{2026}<%~%<<%{\\e[28m%}\\n%F{5}\u{276F}%f '
-            # The command is bold; zsh ends the highlight before output starts.
-            zle_highlight=(${zle_highlight:#default:*} default:bold)
-        }
-        builtin typeset -ga precmd_functions zle_highlight
-        precmd_functions+=(_loopflow_prompt)
-    fi
-    builtin source -- "$GHOSTTY_RESOURCES_DIR/shell-integration/zsh/.zshenv"
-
-    """
-
-
-    /// Writes the bootstrap and returns its directory. Rewritten per shell:
-    /// the system may clear temporary files while the app stays open, and a
-    /// ZDOTDIR without a `.zshenv` would skip the user's rc files.
-    static func install() -> String? {
-        install(contents: zshenv, name: ".zshenv")?.deletingLastPathComponent().path
-    }
-
-    static func installBash() -> String? {
-        install(contents: """
-        source "$GHOSTTY_RESOURCES_DIR/shell-integration/bash/ghostty.bash"
-        if [[ -n $LF_BIN ]]; then export PATH="${LF_BIN%/*}:$PATH"; fi
-        """, name: "bash-env")?.path
-    }
-
-    /// Files written this process. Shell panes build their command in `body`, so
-    /// installing writes once and later calls only confirm the file survives.
-    private static let installed = Mutex<[String: URL]>([:])
-
-    private static func install(contents: String, name: String) -> URL? {
-        if let file = installed.withLock({ $0[name] }), FileManager.default.fileExists(atPath: file.path) {
-            return file
-        }
-        let directory = terminalTemporaryDirectory()
-            .appendingPathComponent("loopflow-shell", isDirectory: true)
-        do {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let file = directory.appendingPathComponent(name)
-            try contents.write(to: file, atomically: true, encoding: .utf8)
-            installed.withLock { $0[name] = file }
-            return file
-        } catch {
-            return nil
-        }
-    }
-}
-
-/// Keep a real shell after the initial conversation exits or hands off to an
-/// app. The PTY marker lets successive manual lf launches find this terminal.
-func buildWorkspaceShellCommand(id: String, argv: [String], env: [String: String]) -> String {
-    let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-    let initial = buildGhosttyShellCommand(argv: argv, env: env).map { $0 + "\n" } ?? ""
-    let script = """
-    export LF_TERMINAL_ID=\(shellEscape(id))
-    export LF_TERMINAL_TTY="$(tty)"
-    \(initial)
-    if [ -n "$GHOSTTY_RESOURCES_DIR" ]; then
-        export GHOSTTY_SHELL_FEATURES="${GHOSTTY_SHELL_FEATURES-}"
-        case \(shellEscape(URL(fileURLWithPath: shell).lastPathComponent)) in
-            zsh)
-                if [ "${ZDOTDIR+x}" = x ]; then export GHOSTTY_ZSH_ZDOTDIR="$ZDOTDIR"; fi
-                export ZDOTDIR=\(LoopflowZshBootstrap.install().map(shellEscape) ?? #""$GHOSTTY_RESOURCES_DIR/shell-integration/zsh""#)
-                ;;
-            bash)
-                export GHOSTTY_BASH_ENV="${ENV-}"
-                export GHOSTTY_BASH_INJECT=1
-                export ENV=\(LoopflowZshBootstrap.installBash().map(shellEscape) ?? #""$GHOSTTY_RESOURCES_DIR/shell-integration/bash/ghostty.bash""#)
-                exec \(shellEscape(shell)) --posix -l
-                ;;
-            fish)
-                exec \(shellEscape(shell)) -l -C 'source "$GHOSTTY_RESOURCES_DIR/shell-integration/fish/vendor_conf.d/ghostty-shell-integration.fish"; if test -n "$LF_BIN"; set -gx PATH (dirname "$LF_BIN") $PATH; end'
-                ;;
-        esac
-    fi
-    exec \(shellEscape(shell)) -l
-    """
-    return ["/bin/sh", "-c", script].map(shellEscape).joined(separator: " ")
-}
-
 func ghosttyShouldHandleTextAsKeyEvent(_ text: String, modifiers: NSEvent.ModifierFlags) -> Bool {
     let controlLikeModifiers: NSEvent.ModifierFlags = [.control, .command]
     guard !modifiers.intersection(controlLikeModifiers).isEmpty else { return false }
@@ -1869,7 +1944,7 @@ private func ghosttyIsPrintableKeyText(_ text: String) -> Bool {
     }
 }
 
-private func shellEscape(_ value: String) -> String {
+func shellEscape(_ value: String) -> String {
     let escaped = value.replacingOccurrences(of: "'", with: "'\\''")
     return "'\(escaped)'"
 }

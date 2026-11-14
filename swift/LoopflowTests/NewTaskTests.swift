@@ -32,8 +32,10 @@ struct NewTaskTests {
         let shown = try await query.waveGraph(wave: nil, cwd: "/repo")
         #expect(shown.wave == nil)
         #expect(shown.default.name == "code")
-        #expect(shown.default.source == "default")
-        #expect(calls.withLock { $0 } == [
+        #expect(shown.default.source == "builtin")
+        let submitted = calls.withLock { $0 }
+        #expect(UUID(uuidString: submitted[0][3]) != nil)
+        #expect([Array(submitted[0].prefix(2)) + Array(submitted[0].dropFirst(4)), submitted[1]] == [
             ["task", "create", "--wave", "product", "--graph", "auto", "--run", "--json", "--", "-v is ignored"],
             ["wave", "graph", "show", "--no-wave", "--json"],
         ])
@@ -47,7 +49,7 @@ struct NewTaskTests {
     @Test("The sheet follows the scope's reported workflow, names whose default it is, and waits for a request")
     func sheetDefaultsToTheReportedWorkflow() async throws {
         let catalog = try fixture("graph_catalog.json")
-        let defaultGraph = #"{"wave_id": null, "wave": null, "default": {"name": "feature", "source": "repo"}}"#
+        let defaultGraph = #"{"wave_id": null, "wave": null, "default": {"name": "feature", "source": "repository"}}"#
         let query = RegistryQuery { args, _ in
             if args.starts(with: ["graph", "list"]) { return catalog }
             if args.starts(with: ["wave", "graph", "show"]) { return defaultGraph }

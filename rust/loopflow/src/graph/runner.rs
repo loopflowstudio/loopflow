@@ -189,6 +189,7 @@ impl ConcreteXor {
             skill: self.router.clone(),
             id: None,
             interactive: false,
+            interactive_name: None,
             returns: None,
             sources: self.sources.clone(),
         }
@@ -519,6 +520,7 @@ mod tests {
             skill: Skill::named(name),
             id: None,
             interactive: false,
+            interactive_name: None,
             returns: None,
             sources: vec!["test".to_string()],
         }

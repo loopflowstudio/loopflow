@@ -1,0 +1,1 @@
+{"type":"request","id":"release-1","operation":{"kind":"repo.release","directory":"/repo","version":"minor","target":null},"select":null}

@@ -8,7 +8,7 @@ struct WorkSelectionTests {
     @Test func viewPlanRetainsOccurrencesAndMissingPrimaryWithoutExecution() async throws {
         let text = String(decoding: try loadFixtureData("view_plan.json"), as: UTF8.self)
         let query = RegistryQuery { args, cwd in
-            guard args == ["desktop", "view", "state:backlog", "--plan", "--json"], cwd == "/repo" else {
+            guard args == ["desktop", "view", "show", "state:backlog", "--json"], cwd == "/repo" else {
                 throw RegistryQueryError("Unexpected command while planning")
             }
             return text
@@ -25,12 +25,18 @@ struct WorkSelectionTests {
         #expect(restored == plan)
     }
 
-    @Test func queryPlansArriveFromTheirWatch() throws {
-        let entries = try #require(JSONSerialization.jsonObject(with: loadFixtureData("watch_frames.json"))
+    @Test func everyStateRustSendsDecodes() throws {
+        let states = try JSONDecoder().decode(
+            [WorkSelectionState].self, from: loadFixtureData("selection_states.json"))
+        #expect(states.contains(.working) && states.contains(.autonomous))
+    }
+
+    @Test func queryPlansArriveFromTheirSubscription() throws {
+        let entries = try #require(JSONSerialization.jsonObject(with: loadFixtureData("subscribe_frames.json"))
             as? [[String: Any]])
         let entry = try #require(entries.first { $0["part"] as? String == "selections" })
         let frame = try WorkFrame.decode(
-            part: .selections, scope: WorkScope(repo: "/repo", headless: false, task: nil, activity: nil),
+            part: .selections, scope: WorkScope(repo: "/repo", headless: false, task: nil, activity: nil, taskListWave: nil),
             sequence: 1, line: JSONSerialization.data(withJSONObject: try #require(entry["frame"])))
         guard case .selections(let plans?) = frame.content else {
             Issue.record("Missing Dashboard plans"); return
@@ -60,6 +66,12 @@ struct WorkSelectionTests {
         #expect(layout.focused == "pane-0")
         #expect(layout.zoomed == "pane-2")
         #expect(layout.hidden == ["pane-1"])
+        if case .split(_, _, _, let second) = layout.tree,
+           case .split(_, _, _, let browser) = second,
+           case .pane(_, .browser(_, let tabs, _)) = browser {
+            #expect(tabs.contains(.task(id: "task")))
+            #expect(tabs.contains(.changes(id: "changes-parent", comparison: .workingTree(base: "parent"))))
+        } else { Issue.record("Expected retained browser tools") }
         let encoded = try JSONEncoder().encode(layout)
         #expect(try JSONSerialization.jsonObject(with: encoded) as? NSDictionary == JSONSerialization.jsonObject(with: bytes) as? NSDictionary)
     }
@@ -78,15 +90,32 @@ struct WorkSelectionTests {
     }
 }
 
-func fixtureViewPlan(owner: WorkWorkspaceKey, members: [WorkViewPlan.Content]) -> WorkViewPlan {
+func fixtureViewPlan(owner: WorkWorkspaceKey, members: [WorkViewPlan.Content],
+                     slots: DashboardSlotLayout = DashboardSlotLayout(root: .slot(0))) -> WorkViewPlan {
     let refs = members.map { WorkMemberRef(source: [owner.id], work: $0.work) }
-    return WorkViewPlan(name: nil, pinned: false, dashboardID: nil, repository: owner.repository,
+    return WorkViewPlan(name: nil, pinned: false, dashboardID: nil, repository: owner.repository, repositoryPath: "/src/fixture",
         selection: WorkSelection(id: owner.id, expression: owner.kind == .repository ? .repository : .wave(owner.id)), savedRevision: nil,
         resolution: WorkSelectionResolution(attention: [], members: refs, unavailable: []),
         arrangement: WorkArrangement(order: refs, hidden: [], mode: .auto),
-        projection: WorkArrangementProjection(visible: refs, suppressed: []), slots: DashboardSlotLayout(root: .slot(0)), contents: members)
+        projection: WorkArrangementProjection(visible: refs, suppressed: []), slots: slots, contents: members)
 }
+extension WorkModel {
+    /// The sidebar's started list as the server reads it for `wave`: each Task with its states, in order.
+    func applyStartedFixture(_ tasks: [(id: String, states: [WorkSelectionState])], wave: String? = nil, repository: String = "repo") {
+        let members = tasks.map {
+            WorkViewPlan.Content(paneRevision: nil, face: nil, work: .init(repository: repository, kind: .task, id: $0.id), title: $0.id,
+                states: [.open] + $0.states, identifier: nil, primarySession: nil, location: nil, argv: nil, unavailable: [])
+        }
+        applyTaskList(fixtureViewPlan(owner: .init(repository: repository, kind: .repository, id: repository), members: members),
+                      wave: wave, reason: "")
+    }
+
+    func applyStartedFixture(working: [String], autonomous: [String] = [], wave: String? = nil, repository: String = "repo") {
+        applyStartedFixture(working.map { ($0, [.working]) } + autonomous.map { ($0, [.autonomous]) }, wave: wave, repository: repository)
+    }
+}
+
 func fixtureViewContent(work: WorkWorkspaceKey, title: String) -> WorkViewPlan.Content {
     WorkViewPlan.Content(paneRevision: nil, face: nil, work: work, title: title,
-        states: [.open], primarySession: nil, location: nil, argv: nil, unavailable: [])
+        states: [.open], identifier: nil, primarySession: nil, location: nil, argv: nil, unavailable: [])
 }

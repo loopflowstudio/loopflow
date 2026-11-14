@@ -1,62 +1,53 @@
 //! A native client's exit text names its own resume commands, which bypass lf
-//! and, for a remote Codex client, a relay that no longer exists. While a client
-//! runs, the owner withholds what it prints after restoring the terminal and
+//! and, for a remote Codex client, a server that no longer exists. While a client
+//! runs, the held terminal withholds what it prints after restoring the terminal and
 //! shows lf's return line instead. A client that ends without restoring its
 //! terminal (Codex on SIGTERM) gets it restored here, before that line.
 
-use std::os::fd::RawFd;
 use std::time::{Duration, Instant};
 
-use super::terminal::AlternateScreen;
+use super::terminal::{AlternateScreen, RESET_MODES};
 use super::LIMIT;
 
 /// Output after a client restores its terminal is exit text only if the client
 /// exits within this window; otherwise it was ordinary output.
 const EXIT_WINDOW: Duration = Duration::from_secs(5);
 
-/// Input and display modes a full-screen client may leave on: kitty keyboard,
-/// focus, mouse, bracketed paste, then cursor visibility and attributes.
-const RESET_MODES: &[u8] =
-    b"\x1b[<u\x1b[?1004l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[?25h\x1b[0m";
-
 #[derive(Debug)]
 pub(super) struct NativeClient {
     exit: String,
     pub detach: String,
-    /// The terminal the client last wrote to, once it was raw.
-    raw: Option<RawFd>,
+    /// The client has put its terminal in raw mode at some point.
+    was_raw: bool,
     held: Vec<u8>,
     since: Option<Instant>,
     alternate: AlternateScreen,
-    /// The terminal's modes before any client ran.
-    cooked: Option<libc::termios>,
 }
 
 impl NativeClient {
-    pub fn new(exit: String, detach: String, cooked: Option<libc::termios>) -> Self {
+    pub fn new(exit: String, detach: String) -> Self {
         Self {
             exit,
             detach,
-            raw: None,
+            was_raw: false,
             held: Vec::new(),
             since: None,
             alternate: AlternateScreen::default(),
-            cooked,
         }
     }
 
-    /// Bytes to deliver now from output read while the terminal at `fd` is in
-    /// its current mode.
-    pub fn accept(&mut self, fd: RawFd, bytes: &[u8]) -> Vec<u8> {
+    /// Bytes to deliver now from output read while the client's terminal was
+    /// `raw` or not.
+    pub fn accept(&mut self, raw: bool, bytes: &[u8]) -> Vec<u8> {
         self.alternate.observe(bytes);
-        if is_raw(fd) {
-            self.raw = Some(fd);
+        if raw {
+            self.was_raw = true;
             self.since = None;
             let mut ready = std::mem::take(&mut self.held);
             ready.extend_from_slice(bytes);
             return ready;
         }
-        if self.raw.is_none() {
+        if !self.was_raw {
             return bytes.to_vec();
         }
         self.held.extend_from_slice(bytes);
@@ -68,12 +59,14 @@ impl NativeClient {
         Vec::new()
     }
 
+    /// When held output stops being a possible exit message.
+    pub fn expires_at(&self) -> Option<Instant> {
+        self.since.map(|since| since + EXIT_WINDOW)
+    }
+
     /// Held output that outlived the exit window.
     pub fn expire(&mut self) -> Vec<u8> {
-        if self
-            .since
-            .is_some_and(|since| since.elapsed() > EXIT_WINDOW)
-        {
+        if self.expires_at().is_some_and(|at| at <= Instant::now()) {
             self.since = None;
             return std::mem::take(&mut self.held);
         }
@@ -86,9 +79,10 @@ impl NativeClient {
     }
 
     /// The client exited: keep its terminal restoration, replace its text.
-    /// The replaced text goes to the owner's log, so a provider's last error
-    /// is never lost. A client that died raw is restored first.
-    pub fn finish(self) -> Vec<u8> {
+    /// The replaced text goes to the held terminal's log, so a provider's last error
+    /// is never lost. A client that died leaving its terminal `raw` has it
+    /// put back by `restore` first.
+    pub fn finish(self, raw: bool, restore: impl FnOnce()) -> Vec<u8> {
         if self.held.iter().any(|byte| !byte.is_ascii_whitespace()) {
             eprintln!(
                 "native client exit output (replaced on screen):\n{}",
@@ -96,13 +90,8 @@ impl NativeClient {
             );
         }
         let mut bytes = Vec::new();
-        if let Some(fd) = self.raw.filter(|fd| is_raw(*fd)) {
-            if let Some(cooked) = &self.cooked {
-                // SAFETY: restores attributes read from this terminal before the client ran.
-                unsafe {
-                    libc::tcsetattr(fd, libc::TCSANOW, cooked);
-                }
-            }
+        if self.was_raw && raw {
+            restore();
             if self.alternate.entered {
                 bytes.extend_from_slice(b"\x1b[?1049l");
             }
@@ -111,14 +100,6 @@ impl NativeClient {
         bytes.extend(controls(&self.held));
         bytes.extend_from_slice(format!("\r\n{}\r\n", self.exit).as_bytes());
         bytes
-    }
-}
-
-fn is_raw(fd: RawFd) -> bool {
-    // SAFETY: tcgetattr writes into a live termios; the descriptor is borrowed.
-    unsafe {
-        let mut termios = std::mem::zeroed::<libc::termios>();
-        libc::tcgetattr(fd, &mut termios) == 0 && termios.c_lflag & libc::ICANON == 0
     }
 }
 
@@ -176,6 +157,23 @@ mod tests {
 
     use super::{controls, NativeClient};
 
+    fn is_raw(fd: i32) -> bool {
+        // SAFETY: tcgetattr writes into a live termios; the descriptor is borrowed.
+        unsafe {
+            let mut termios = std::mem::zeroed::<libc::termios>();
+            libc::tcgetattr(fd, &mut termios) == 0 && termios.c_lflag & libc::ICANON == 0
+        }
+    }
+
+    fn restore(fd: i32, cooked: libc::termios) -> impl FnOnce() {
+        move || {
+            // SAFETY: restores attributes read from this terminal.
+            unsafe {
+                libc::tcsetattr(fd, libc::TCSANOW, &cooked);
+            }
+        }
+    }
+
     fn terminal() -> (std::fs::File, std::fs::File) {
         let (mut master, mut slave) = (-1, -1);
         // SAFETY: openpty initializes both descriptors on success.
@@ -218,17 +216,23 @@ mod tests {
     #[test]
     fn exit_text_after_terminal_restoration_becomes_the_lf_line() {
         let (master, slave) = terminal();
-        let mut client = NativeClient::new("Left it.".into(), "Detached.".into(), None);
+        let mut client = NativeClient::new("Left it.".into(), "Detached.".into());
         assert_eq!(
-            client.accept(master.as_raw_fd(), b"Starting\r\n"),
+            client.accept(is_raw(master.as_raw_fd()), b"Starting\r\n"),
             b"Starting\r\n"
         );
         set_raw(slave.as_raw_fd(), true);
-        assert_eq!(client.accept(master.as_raw_fd(), b"frame"), b"frame");
+        assert_eq!(
+            client.accept(is_raw(master.as_raw_fd()), b"frame"),
+            b"frame"
+        );
         set_raw(slave.as_raw_fd(), false);
         let exit = b"\x1b[?1049l\x1b[?25h\x1b]0;title\x07To continue, run:\r\n  codex resume 1\r\n";
-        assert!(client.accept(master.as_raw_fd(), exit).is_empty());
-        assert_eq!(client.finish(), b"\x1b[?1049l\x1b[?25h\r\nLeft it.\r\n");
+        assert!(client.accept(is_raw(master.as_raw_fd()), exit).is_empty());
+        assert_eq!(
+            client.finish(is_raw(master.as_raw_fd()), || panic!("was not raw")),
+            b"\x1b[?1049l\x1b[?25h\r\nLeft it.\r\n"
+        );
     }
 
     fn cooked(fd: i32) -> libc::termios {
@@ -244,15 +248,18 @@ mod tests {
     fn a_client_that_dies_raw_on_the_alternate_screen_is_restored_before_the_lf_line() {
         let (master, slave) = terminal();
         set_raw(slave.as_raw_fd(), false);
-        let mut client = NativeClient::new(
-            "Left it.".into(),
-            "Detached.".into(),
-            Some(cooked(master.as_raw_fd())),
-        );
+        let before = cooked(master.as_raw_fd());
+        let mut client = NativeClient::new("Left it.".into(), "Detached.".into());
         set_raw(slave.as_raw_fd(), true);
-        client.accept(master.as_raw_fd(), b"\x1b[?1049h\x1b[?1000h\x1b[>5uframe");
+        client.accept(
+            is_raw(master.as_raw_fd()),
+            b"\x1b[?1049h\x1b[?1000h\x1b[>5uframe",
+        );
         assert_eq!(
-            client.finish(),
+            client.finish(
+                is_raw(master.as_raw_fd()),
+                restore(master.as_raw_fd(), before)
+            ),
             [
                 b"\x1b[?1049l".as_slice(),
                 super::RESET_MODES,
@@ -260,22 +267,22 @@ mod tests {
             ]
             .concat()
         );
-        assert!(!super::is_raw(slave.as_raw_fd()));
+        assert!(!is_raw(slave.as_raw_fd()));
     }
 
     #[test]
     fn an_inline_client_that_dies_raw_keeps_its_screen() {
         let (master, slave) = terminal();
         set_raw(slave.as_raw_fd(), false);
-        let mut client = NativeClient::new(
-            "Left it.".into(),
-            "Detached.".into(),
-            Some(cooked(master.as_raw_fd())),
-        );
+        let before = cooked(master.as_raw_fd());
+        let mut client = NativeClient::new("Left it.".into(), "Detached.".into());
         set_raw(slave.as_raw_fd(), true);
-        client.accept(master.as_raw_fd(), b"\x1b[?2004hframe");
+        client.accept(is_raw(master.as_raw_fd()), b"\x1b[?2004hframe");
         assert_eq!(
-            client.finish(),
+            client.finish(
+                is_raw(master.as_raw_fd()),
+                restore(master.as_raw_fd(), before)
+            ),
             [super::RESET_MODES, b"\r\nLeft it.\r\n"].concat()
         );
     }
@@ -283,16 +290,16 @@ mod tests {
     #[test]
     fn output_after_a_client_returns_to_its_terminal_is_delivered() {
         let (master, slave) = terminal();
-        let mut client = NativeClient::new("Left it.".into(), "Detached.".into(), None);
+        let mut client = NativeClient::new("Left it.".into(), "Detached.".into());
         set_raw(slave.as_raw_fd(), true);
-        client.accept(master.as_raw_fd(), b"frame");
+        client.accept(is_raw(master.as_raw_fd()), b"frame");
         set_raw(slave.as_raw_fd(), false);
         assert!(client
-            .accept(master.as_raw_fd(), b"shell output\r\n")
+            .accept(is_raw(master.as_raw_fd()), b"shell output\r\n")
             .is_empty());
         set_raw(slave.as_raw_fd(), true);
         assert_eq!(
-            client.accept(master.as_raw_fd(), b"next frame"),
+            client.accept(is_raw(master.as_raw_fd()), b"next frame"),
             b"shell output\r\nnext frame"
         );
     }

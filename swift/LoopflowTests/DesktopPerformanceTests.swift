@@ -2,6 +2,7 @@
 import AppKit
 import Darwin
 import Foundation
+import SQLite3
 import SwiftUI
 import Testing
 import ViewInspector
@@ -79,10 +80,10 @@ struct DesktopPerformanceTests {
         let repo = try #require(environment["LF_DESKTOP_PERF_REPO"])
         let journal = try PerformanceJournal(url: output)
         let store = PerformanceStore(database: home + "/loopflow.db")
-        // The window under measurement reads in this process, as Desktop does.
-        setenv("LF_HOME", home, 1)
-        let query = RegistryQuery(watchWork: {
-            try WorkWatches.observe(launch: LoopflowLibrary.watch)
+        let server = LocalServerFixture(try BuiltLf(home: URL(fileURLWithPath: home)))
+        let location = server.location()
+        let query = RegistryQuery(subscribeWork: {
+            try WorkSubscriptions.observe { ServerClient.subscribe($0, location: location) }
         }) { args, _ in
             // The window under measurement reads through its one reader.
             throw RegistryQueryError("write-to-visible ran lf \(args.joined(separator: " "))")
@@ -329,8 +330,7 @@ struct DesktopPerformanceTests {
                                        styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         defer { window.contentView = nil; window.close() }
-        let companion = buildWorkspaceShellCommand(id: "launch-contract", argv: ["/bin/sh", "-c", "exit 0"], env: [:])
-        for command in ["/bin/bash --noprofile --norc -i", "/bin/bash -i", companion] {
+        for command in ["/bin/bash --noprofile --norc -i", "/bin/bash -i"] {
             let terminal = GhosttyMetalView(terminal: .shell(UUID().uuidString, machineId: fixtureMachineId), frame: CGRect(x: 0, y: 0, width: 900, height: 500))
             terminal.workingDirectory = checkout.path
             terminal.command = command
@@ -347,11 +347,6 @@ struct DesktopPerformanceTests {
                 let text = terminalText(surface)
                 return [marker, checkout.path, home.path, "xterm-256color", profileValue, "login-shell-ok", "pty-ok"]
                     .allSatisfy { text.contains("\n\($0)") }
-            }
-            if command == companion {
-                let input = "test \"$LF_TERMINAL_ID\" = launch-contract && test -n \"$LF_TERMINAL_TTY\" && printf '\\ncompanion-ready\\n'\n"
-                input.withCString { ghostty_surface_text(surface, $0, UInt(input.utf8.count)) }
-                try await wait(window) { terminalText(surface).contains("\ncompanion-ready") }
             }
             window.contentView = NSView(frame: terminal.frame)
             window.contentView = terminal
@@ -983,7 +978,7 @@ struct DesktopPerformanceTests {
             task["reference"] = reference
             var runtime = try #require(task["runtime"] as? [String: Any])
             runtime["work_id"] = "perf-work-\(index)"
-            runtime["owner"] = ["person": "Jack Heart", "machine": ["id": NSNull(), "label": NSNull()]] as [String: Any]
+            runtime["owner"] = ["person": "Jack Heart", "person_id": NSNull(), "machine": ["id": NSNull(), "label": NSNull()]] as [String: Any]
             task["runtime"] = runtime
             return task
         }
@@ -997,14 +992,14 @@ struct DesktopPerformanceTests {
         _ = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(roadmap.utf8))
         let planning = PerformancePlanning(roadmap: roadmap)
         let sessions = try JSONSerialization.data(withJSONObject: stride(from: 0, to: taskCount, by: 2).map { index in
-            ["id": "perf-session-\(index)", "run_id": "perf-run-\(index)", "interactive": true,
+            ["id": "perf-session-\(index)", "turn": NSNull(), "raw": false, "interactive": true,
              "work": ["kind": "task", "id": "perf-work-\(index)"],
              "workspace": ["machine_id": fixtureMachineId, "worktree": checkout,
                            "task_id": "perf-work-\(index)", "unavailable": NSNull()],
              "title": String(format: "Conversation %03d", index), "detail": "Benchmark fixture",
              "cwd": checkout, "wave_id": "wave-1", "state": "active", "ready_summary": NSNull(), "work_path": NSNull(),
              "actions": sessionActionFixture(state: "active"),
-             "title_source": "generated", "task_primary": false, "graph_membership": ["kind": "independent"], "task_ids": ["perf-work-\(index)"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids": [], "open_argv": ["must-not-launch"]] as [String: Any]
+             "blocked": false, "title_source": "generated", "task_primary": false, "graph_membership": ["kind": "independent"], "task_ids": ["perf-work-\(index)"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids": [], "open_argv": ["must-not-launch"]] as [String: Any]
         })
         let historyTemplate = try #require(JSONSerialization.jsonObject(with: Data(contentsOf:
             root.appendingPathComponent("tests/fixtures/dto/session_history_summary.json"))) as? [String: Any])
@@ -1021,22 +1016,23 @@ struct DesktopPerformanceTests {
         let catalogJSON = try String(contentsOf: fixtureRoot.appendingPathComponent("graph_catalog.json"), encoding: .utf8)
         let sessionJSON = String(decoding: sessions, as: UTF8.self)
         let reader = PerformanceReader(planning: planning, sessions: sessionJSON)
-        let query = RegistryQuery(watchWork: { await reader.open() }) { args, _ in
+        let query = RegistryQuery(subscribeWork: { await reader.open() }) { args, _ in
             await planning.count(args)
             switch args.first {
-            case "machine" where args.dropFirst().first == "id": return "{\"id\":\"\(fixtureMachineId)\"}"
-            case "desktop" where args.dropFirst().first == "plan": return await planning.read()
+            case "machine" where args.dropFirst().first == "self": return "{\"id\":\"\(fixtureMachineId)\"}"
+            case "plan" where args.dropFirst().first == "list": return await planning.read()
             case "graph" where args.dropFirst().first == "list" && args.contains("--json"): return catalogJSON
             case "wave" where args.dropFirst().first == "list": return "[]"
-            case "desktop" where args.dropFirst().first == "sessions": return #"{"entries":\#(sessionJSON),"next":null}"#
-            case "usage": return args.contains("--context") ? contextJSON : historyJSON
-            case "task" where args.dropFirst().first == "status": return "{\"work\":\(workJSON)}"
-            case "task" where args.dropFirst().first == "comment" && args.contains("--json"): return commentsJSON
-            case "task" where args.contains("--files"):
+            case "session" where args.dropFirst().first == "list": return #"{"entries":\#(sessionJSON),"next":null}"#
+            case "session" where args.dropFirst().first == "usage": return historyJSON
+            case "task" where args.dropFirst().first == "context": return contextJSON
+            case "task" where args.dropFirst().first == "show":
+                return #"{"overview":\#(workJSON),"graph_processes":[],"comments":\#(commentsJSON),"execution":null,"row":null}"#
+            case "task" where args.dropFirst().first == "changes":
                 return #"{"issue_identifier":"PERF-0","task_id":"perf-work-0","base_commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","head_commit":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","files":[{"path":"notes.txt","old_path":null,"committed":true,"staged":false,"unstaged":false,"untracked":false}],"scratch":[],"scratch_truncated":false,"recovery_directory":null}"#
             case "task" where args.dropFirst().first == "file":
                 return #"{"issue_identifier":"PERF-0","task_id":"perf-work-0","path":"notes.txt","content":"Original notes","state":"text","revision":"fixed","size_bytes":14,"recoveries":[],"read_only_reason":null}"#
-            case "history": return #"{"truncated":false,"items":[]}"#
+            case "session" where args.dropFirst().first == "history": return #"{"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Benchmark does not launch providers or mutate planning")
             }
         }
@@ -1145,9 +1141,9 @@ private final class PerformanceReader {
             """#)
     }
 
-    /// One watch line, as `lf … --json --watch` prints it for this scope.
+    /// One subscription line, as `lf … --json --subscribe` prints it for this scope.
     private func send(_ part: WorkPart, _ answers: Int, _ body: String) {
-        let scope = scope ?? WorkScope(repo: nil, headless: false, task: nil, activity: nil)
+        let scope = scope ?? WorkScope(repo: nil, headless: false, task: nil, activity: nil, taskListWave: nil)
         sequence += 1
         let line = #"{"answers":\#(answers),"unavailable":null,"body":\#(body)}"#
         // A frame this file wrote; one that does not decode fails the wait on it.
@@ -1462,8 +1458,8 @@ actor SnapshotReads {
         defer { active -= 1 }
         do {
             let verb = args.prefix(2).joined(separator: " ")
-            if let fixture, verb == "session resume" || verb == "machine id"
-                || args.contains(fixture.issue) || args.contains(fixture.taskId) {
+            if let fixture, verb == "session resume" || verb == "machine self"
+                || args.contains(fixture.issue) || args.contains(fixture.taskId) || args.contains(fixture.sessionId) {
                 return .success(try await fixture.read(args))
             }
             let output = try await Task.detached {
@@ -1471,8 +1467,8 @@ actor SnapshotReads {
             }.value
             guard let fixture else { return .success(output) }
             var value = try JSONSerialization.jsonObject(with: Data(output.utf8))
-            if args.prefix(2) == ["desktop", "plan"], !args.contains("--task") {
-                let owned = try await fixture.read(["desktop", "plan", "--all", "--json"])
+            if args.prefix(2) == ["plan", "list"], !args.contains("--task") {
+                let owned = try await fixture.read(["plan", "list", "--all", "--json"])
                 var page = try #require(value as? [String: Any])
                 let extra = try #require(JSONSerialization.jsonObject(with: Data(owned.utf8)) as? [String: Any])
                 page["waves"] = (try #require(page["waves"] as? [Any])) + (try #require(extra["waves"] as? [Any]))
@@ -1484,8 +1480,9 @@ actor SnapshotReads {
                 // The synthetic conversation remains explicitly discoverable after
                 // client exit. Copied entries and their paging cursor stay intact.
                 if let page = value as? [String: Any], !(page["next"] is NSNull) { return .success(output) }
-                let owned = try await fixture.read(["desktop", "sessions", "--all", "--history", "--json"])
-                let extra = try #require(JSONSerialization.jsonObject(with: Data(owned.utf8)) as? [Any])
+                let owned = try await fixture.read(["session", "card", fixture.sessionId, "--json"])
+                let card = try #require(JSONSerialization.jsonObject(with: Data(owned.utf8)) as? [String: Any])
+                let extra = [try #require(card["session"])]
                 if var page = value as? [String: Any] {
                     if page["next"] is NSNull { page["entries"] = (try #require(page["entries"] as? [Any])) + extra }
                     value = page
@@ -1495,17 +1492,50 @@ actor SnapshotReads {
         } catch { return .failure(error) }
     }
 
+    func records(binary: String, home: String, cwd: String, fixture: DesktopNativeSessionFixture? = nil) async throws -> [SessionRecord] {
+        let ids = try snapshotSessionIDs(home: home)
+        var records: [SessionRecord] = []
+        for id in ids {
+            let output = try await read(binary: binary, home: home, args: ["session", "card", id, "--json"], cwd: cwd).get()
+            records.append(try JSONDecoder().decode(SessionCard.self, from: Data(output.utf8)).session)
+        }
+        if let fixture { records += try await fixture.records() }
+        return records
+    }
+
     func finish() async {
         closed = true
         while active > 0 { try? await Task.sleep(for: .milliseconds(10)) }
     }
 }
 
+func snapshotSessionIDs(home: String) throws -> [String] {
+    var database: OpaquePointer?
+    guard sqlite3_open_v2(home + "/loopflow.db", &database, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+        if let database { sqlite3_close(database) }
+        throw RegistryQueryError("Cannot read snapshot Session IDs")
+    }
+    defer { sqlite3_close(database) }
+    var statement: OpaquePointer?
+    guard sqlite3_prepare_v2(database, "SELECT id FROM agent_sessions WHERE interactive=1 ORDER BY title,id", -1, &statement, nil) == SQLITE_OK else {
+        throw RegistryQueryError("Cannot select snapshot Session IDs")
+    }
+    defer { sqlite3_finalize(statement) }
+    var ids: [String] = []
+    var result = sqlite3_step(statement)
+    while result == SQLITE_ROW {
+        ids.append(String(cString: sqlite3_column_text(statement, 0)))
+        result = sqlite3_step(statement)
+    }
+    guard result == SQLITE_DONE else { throw RegistryQueryError("Cannot finish snapshot Session IDs") }
+    return ids
+}
+
 private func snapshotRead(binary: String, home: String, args: [String], cwd: String) throws -> String {
     // Copied launch authority is never exercised. This transport permits only local
     // reads; no network, Session connection, watcher, worker or provider can start.
     let verb = args.prefix(2).joined(separator: " ")
-    guard args.first == "history" || ["wave show", "wave list", "wave status", "session list", "session history", "machine id", "task status", "task files", "task diff", "graph list"].contains(verb) else {
+    guard ["wave show", "wave list", "wave status", "session list", "session card", "session history", "machine self", "task status", "task files", "task diff", "graph list"].contains(verb) else {
         throw RegistryQueryError("Snapshot does not execute \(verb)")
     }
     let process = Process()

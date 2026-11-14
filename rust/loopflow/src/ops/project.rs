@@ -29,8 +29,7 @@ pub(crate) fn current_project(store: &Store, wave: &Wave) -> OpsResult<Project> 
     Ok(project)
 }
 
-/// Explicitly seed a Wave's shared selection with an existing Project UUID.
-/// Switching an established binding belongs to Project rotation.
+/// Select an existing non-terminal Project as the Wave's shared current plan.
 pub async fn bind_project(repo: &Path, name: &str, project_id: &str) -> OpsResult<Project> {
     let store = super::planning_sync::planning_store().await?;
     let wave = crate::work::wave::context::resolve_managed_wave(
@@ -47,29 +46,6 @@ pub async fn bind_project(repo: &Path, name: &str, project_id: &str) -> OpsResul
         .sqlite
         .bind_project(wave.id(), project_id)
         .map_err(project_error)
-}
-
-/// Explicit activation; ordinary planning reads never call this operation.
-pub async fn ensure(repo: &Path, name: &str) -> OpsResult<Project> {
-    let store = super::planning_sync::planning_store().await?;
-    let wave = crate::work::wave::ensure_wave_row(&store, repo, name)
-        .await
-        .map_err(project_error)?;
-    store
-        .sqlite
-        .record_project_activation(wave.id(), crate::journal::current_lf_process_id().as_ref())
-        .map_err(project_error)?;
-    let acquisition = super::planning_sync::lock_wave_planning(&wave).await?;
-    import_binding(&store, &wave, &acquisition)?;
-    let id = store
-        .sqlite
-        .ensure_project(wave.id(), wave.slug())
-        .map_err(project_error)?;
-    store
-        .sqlite
-        .project(&id)
-        .map_err(project_error)?
-        .ok_or_else(|| project_error("selected Project is missing"))
 }
 
 pub async fn update_plan(
@@ -282,20 +258,24 @@ pub async fn edit(
     read_saved(&store, &project.id)
 }
 
-/// The graph a scope's new Tasks take up, resolved through your `lf set graph`,
+/// The graph a scope's new Tasks take up, resolved through your `lf set wave.graph`,
 /// the Wave's and the repository's `graph:`, then `code`.
 /// The repository scope has no Wave.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct WaveGraph {
     pub wave_id: Option<crate::id::WaveId>,
     pub wave: Option<String>,
     pub default: GraphDefault,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct GraphDefault {
     pub name: String,
-    pub source: crate::work::wave::setup::SetupSource,
+    pub source: crate::config::ConfigSource,
 }
 
 /// `selector: None` reads the ambient Wave; `in_wave: false` the repository.

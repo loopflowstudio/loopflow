@@ -44,23 +44,23 @@ public struct WorkWorkspaceKey: Codable, Hashable, Sendable {
 }
 
 // Match Rust's case-only domains. Paths and native provider identities never use this.
-enum StructuredIdentity {
+public enum StructuredIdentity {
     private static let hyphenated = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
     private static var uuidPattern: String { "^(?:[0-9a-f]{32}|\(hyphenated)|\\{\(hyphenated)\\}|urn:uuid:\(hyphenated))$" }
 
-    static func uuid(_ value: String) -> String {
+    public static func uuid(_ value: String) -> String {
         let lower = value.lowercased()
         return lower.range(of: uuidPattern, options: .regularExpression) == nil ? value : lower
     }
 
-    static func prefixed(_ value: String, _ prefix: String) -> String {
+    public static func prefixed(_ value: String, _ prefix: String) -> String {
         let lower = value.lowercased()
         guard lower.hasPrefix(prefix),
               String(lower.dropFirst(prefix.count)).range(of: uuidPattern, options: .regularExpression) != nil else { return value }
         return lower
     }
 
-    static func session(_ value: String) -> String {
+    public static func session(_ value: String) -> String {
         let lower = value.lowercased()
         return lower.range(of: "^(?:session_)?[0-9a-f]{32}$", options: .regularExpression) == nil ? value : lower
     }

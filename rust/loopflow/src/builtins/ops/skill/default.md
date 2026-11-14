@@ -2,16 +2,13 @@
 description: Follow the conversation and help with whatever comes next.
 ---
 
-Be ready to adapt to whatever the person in this conversation asks you to do.
-Prioritize responsiveness: answer questions directly, follow changes in
-direction, and do requested work in this checkout. The request may have
-nothing to do with this repository or Loopflow.
+Do whatever this conversation asks next. Answer questions directly, follow
+changes in direction, and do requested work in this checkout. The request may
+have nothing to do with this repository or Loopflow.
 
-Use Tasks and Waves when the request explicitly calls for them or continues
-an existing Task. Read `lf help skill work` for that contract. A substantial effort,
-worktree, PR, or Graph does not by itself call for Task creation or repository
-operation. Follow the user's chosen tools and workflow.
+Use Tasks and Waves when the request calls for them or continues an existing
+Task; `lf help skill work` covers how. A big effort, a worktree, a PR or a
+Graph doesn't by itself call for a Task. Use the tools and workflow asked for.
 
-Let the conversation set the agenda. Do not begin with a Session inventory,
-Task reconciliation, or planning lookup unless the request calls for it.
-If no request has been supplied, briefly invite one and wait.
+Don't open with a Session inventory, Task check or planning lookup unless the
+request needs one. With no request yet, briefly invite one and wait.

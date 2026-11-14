@@ -47,7 +47,7 @@ pub enum ShipStep {
 
 /// What a shipping Task is doing, derived from its ship process, its state
 /// and its landing. Nothing here waits on a person.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ShippingSnapshot {
     /// When the Task was handed off.
     pub shipped_at: i64,
@@ -56,7 +56,7 @@ pub struct ShippingSnapshot {
     pub reason: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ShippingState {
@@ -89,6 +89,20 @@ pub(crate) fn starter(
     sqlite.process_starter(process, person.as_deref())
 }
 
+/// A served stop retains the person at admission, independent of later settings.
+pub(crate) fn stopper(
+    sqlite: &crate::store::sqlite::SqliteStore,
+    repo: &std::path::Path,
+    stop: &crate::store::sqlite::task_work::ShipStop,
+) -> crate::store::StoreResult<crate::process::Starter> {
+    match stop.by.as_ref() {
+        Some(process) => starter(sqlite, repo, Some(process)),
+        None => Ok(crate::process::Starter::Person {
+            name: stop.person.clone(),
+        }),
+    }
+}
+
 /// Whether the process carrying a shipping Task has exited. Unknown evidence
 /// is never read as a dead process; no carrier at all is.
 fn carrier_evidence(
@@ -96,7 +110,7 @@ fn carrier_evidence(
     shipping: &TaskShipping,
 ) -> ProcessIdentityEvidence {
     match &shipping.process {
-        Some(process) => crate::journal::process_evidence(sqlite, process),
+        Some(process) => crate::journal::lf_evidence(sqlite, process),
         None => ProcessIdentityEvidence::Dead,
     }
 }
@@ -185,7 +199,7 @@ pub(crate) fn shipping_snapshot(
     let reason = match graph {
         None => "taking up its graph".to_string(),
         Some(graph) => match (&graph.position, graph.waiting_step()) {
-            (TaskGraphPosition::Run { step, .. }, _) => format!("running from {step}"),
+            (TaskGraphPosition::Run { at, .. }, _) => format!("running at {at}"),
             (_, Some(step)) => format!("{} (stand-in)", step.name),
             (TaskGraphPosition::At { step }, None) => format!("from {step}"),
         },
@@ -246,7 +260,7 @@ pub fn ship_begin(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsRe
             .and_then(|shipping| shipping.process)
         {
             if carrier != process
-                && crate::journal::process_evidence(&store.sqlite, &carrier)
+                && crate::journal::lf_evidence(&store.sqlite, &carrier)
                     != ProcessIdentityEvidence::Dead
             {
                 return Ok(ShipStart::AlreadyShipping {
@@ -299,21 +313,20 @@ pub fn ship_begin(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsRe
 /// merge request Loopflow armed on GitHub. The stop stands until `lf ship`: a
 /// run reaching `end` no longer approves it. Returns false when it was not shipping.
 pub fn ship_stop(issue: &str, note: Option<&str>) -> OpsResult<bool> {
-    let process = crate::journal::current_lf_process_id()
-        .ok_or_else(|| task_error("lf ship --stop requires a registered Process"))?;
+    let process = crate::journal::current_lf_process_id();
     withdraw(issue, Withdrawal::Stop { process, note })
 }
 
-/// Withdraw the approval from inside the ship process when every attempt of its
-/// run failed with one error: restarting it would only repeat the failure. This
-/// is no person's stop, so a relaunch that reaches `end` may approve it again.
+/// Withdraw approval when a Task run stops on a provider refusal or repeated
+/// failure. This is no person's stop, so a relaunch that reaches `end` may
+/// approve it again. Returns false when it was not shipping.
 pub fn ship_halt(issue: &str, cause: &str) -> OpsResult<bool> {
     withdraw(issue, Withdrawal::Halt { cause })
 }
 
 enum Withdrawal<'a> {
     Stop {
-        process: LfProcessId,
+        process: Option<LfProcessId>,
         note: Option<&'a str>,
     },
     Halt {
@@ -329,12 +342,22 @@ fn withdraw(issue: &str, withdrawal: Withdrawal<'_>) -> OpsResult<bool> {
         let (note, stopped_by) = match &withdrawal {
             Withdrawal::Stop { process, note } => {
                 let repo = super::repository_for_task(&store, &task)?;
-                let by = starter(&store.sqlite, &repo, Some(process)).map_err(task_error)?;
+                let person = if process.is_none() {
+                    crate::config::participant_name_in(&repo).ok().flatten()
+                } else {
+                    None
+                };
+                let stop = crate::store::sqlite::task_work::ShipStop {
+                    at: crate::store::rows::now_unix(),
+                    by: process.clone(),
+                    person,
+                };
+                let by = stopper(&store.sqlite, &repo, &stop).map_err(task_error)?;
                 let note = match note {
                     Some(note) => format!("{by}: {note}"),
                     None => by.to_string(),
                 };
-                (note, Some(process))
+                (note, Some(stop))
             }
             Withdrawal::Halt { cause } => (format!("Loopflow: {cause}"), None),
         };
@@ -347,12 +370,11 @@ fn withdraw(issue: &str, withdrawal: Withdrawal<'_>) -> OpsResult<bool> {
             .and_then(|shipping| shipping.process.as_ref())
             .filter(|process| current.as_ref() != Some(*process))
         {
-            if crate::journal::process_evidence(&store.sqlite, process)
-                == ProcessIdentityEvidence::Live
+            if crate::journal::lf_evidence(&store.sqlite, process) == ProcessIdentityEvidence::Live
             {
                 if let Some(pid) = store
                     .sqlite
-                    .process(process)
+                    .lf_process(process)
                     .ok()
                     .flatten()
                     .and_then(|record| record.pid)
@@ -387,7 +409,7 @@ pub fn ship_branch_task(repo: &std::path::Path, wave: Option<&str>) -> OpsResult
         .next()
         .unwrap_or(&branch)
         .replace(['-', '_'], " ");
-    let task = super::task_create(repo, wave, Some(title), None, None)?;
+    let task = super::task_create(repo, wave, Some(title), None, Default::default(), None)?;
     super::prepare_task(
         repo,
         &task.identifier,
@@ -531,8 +553,31 @@ pub fn ship_progressed(task: &crate::work::task::TaskId) -> OpsResult<()> {
     })
 }
 
+/// Start `lf <args>` again in `worktree`, outliving this process, under `agent`
+/// when the run had one. Recovery runs inside any read, so the reader's own
+/// agent choice and settings are cleared rather than inherited.
+pub(super) fn restart_lf_in(
+    worktree: &std::path::Path,
+    agent: Option<&str>,
+    args: &[&str],
+) -> OpsResult<()> {
+    let context = crate::os_process::execution_context().map_err(task_error)?;
+    let mut argv = vec![context.lf_bin.to_string_lossy().to_string()];
+    if let Some(agent) = agent {
+        argv.extend(["--agent".to_string(), agent.to_string()]);
+    }
+    argv.extend(args.iter().map(ToString::to_string));
+    let env = [
+        (crate::config::AGENT_OVERRIDE_ENV, ""),
+        ("LF_SETTINGS", "{}"),
+    ];
+    crate::os_process::detached::start_lf(worktree, &argv, &env, &|_| {}).map_err(task_error)?;
+    Ok(())
+}
+
 /// Start `lf --task ISSUE ship` again for each shipping Task checked out on
-/// this Machine whose ship process has exited. Unassigned and finished Tasks wait.
+/// and owned by this Machine whose ship process has exited. Unassigned,
+/// moved and finished Tasks wait.
 /// After a failure the restart waits, longer each time in a row; a process
 /// that ended without failing (killed, interrupted) restarts at once.
 pub(crate) fn restart_ships() -> OpsResult<()> {
@@ -542,8 +587,20 @@ pub(crate) fn restart_ships() -> OpsResult<()> {
         for (id, shipping) in store.sqlite.local_shipping_tasks().map_err(task_error)? {
             let state = store.sqlite.task_state(&id).map_err(task_error)?;
             if state.is_terminal()
-                || !store.sqlite.task_owned(&id).map_err(task_error)?
+                || !store.sqlite.task_claimed_here(&id).map_err(task_error)?
                 || carrier_evidence(&store.sqlite, &shipping) != ProcessIdentityEvidence::Dead
+            {
+                continue;
+            }
+            // A run another `lf task run` carries, such as one a move continued
+            // on this Machine, ships once it stops.
+            if store
+                .sqlite
+                .task_graph(&id)
+                .map_err(task_error)?
+                .is_some_and(|graph| {
+                    matches!(graph.position, TaskGraphPosition::Run { running: true, .. })
+                })
             {
                 continue;
             }
@@ -553,24 +610,26 @@ pub(crate) fn restart_ships() -> OpsResult<()> {
                     continue;
                 }
             }
+            // A run waiting out a limit starts again when it resets, not into the wait.
+            let wait =
+                super::limit_recovery::waiting_on_limit(&store.sqlite, &id).map_err(task_error)?;
+            if wait.as_ref().is_some_and(|wait| wait.retry_at > now) {
+                continue;
+            }
             let Some(task) = store.get_task(&id).await.map_err(task_error)? else {
                 continue;
             };
             let Some(worktree) = task.worktree.as_ref().filter(|path| path.is_dir()) else {
                 continue;
             };
-            let context = crate::os_process::execution_context().map_err(task_error)?;
-            let argv = [
-                context.lf_bin.to_string_lossy().to_string(),
-                "--task".into(),
-                task.identifier.clone(),
-                "ship".into(),
-            ];
             if failure.is_some() {
                 store.sqlite.count_ship_restart(&id).map_err(task_error)?;
             }
-            crate::os_process::start_lf_session(worktree, &argv, &[], &|_| {})
-                .map_err(task_error)?;
+            restart_lf_in(
+                worktree,
+                wait.as_ref().and_then(|wait| wait.agent.as_deref()),
+                &["--task", &task.identifier, "ship"],
+            )?;
             tracing::info!("restarted the ship process for {}", task.identifier);
         }
         Ok(())
@@ -659,6 +718,7 @@ mod tests {
         assert_eq!(at("end"), ShipStep::Finished);
         let stopped = feature_at(TaskGraphPosition::Run {
             step: "demo".into(),
+            at: "implement".into(),
             lf_process_id: "gone".into(),
             running: false,
         });

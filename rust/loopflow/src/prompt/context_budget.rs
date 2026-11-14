@@ -6,9 +6,18 @@ use crate::config::Config;
 use crate::error::CoreError;
 use crate::prompt::{count_tokens, Document, DocumentSource};
 
-/// Keys in the existing `context_budgets` configuration block.
+/// Keys in the `context.budgets` configuration block.
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+    schemars::JsonSchema,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    serde::Serialize,
+    serde::Deserialize,
 )]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
@@ -56,12 +65,32 @@ pub struct BudgetLimit {
 pub struct ContextBudgets(BTreeMap<BudgetKey, BudgetLimit>);
 
 impl ContextBudgets {
+    pub fn load(repo: &std::path::Path, wave: Option<&str>) -> Result<Self, CoreError> {
+        let mut layers = crate::config::config_layers(Some(repo), wave)?;
+        // Measuring authored documents needs their budgets, not a valid provider
+        // selection or the documents a future launch would request.
+        for layer in &mut layers {
+            if let Some(values) = layer.value.as_mapping_mut() {
+                values.retain(|key, _| key.as_str() == Some("context"));
+                if let Some(context) = values
+                    .get_mut("context")
+                    .and_then(serde_yaml_ng::Value::as_mapping_mut)
+                {
+                    context.retain(|key, _| key.as_str() == Some("budgets"));
+                }
+            }
+        }
+        let resolved = crate::config::settings::resolve_layers(&layers, None)?;
+        Self::resolve(&resolved.config)
+    }
+
     pub fn resolve(config: &Config) -> Result<Self, CoreError> {
         let limits: BTreeMap<_, _> = BudgetKey::ALL
             .into_iter()
             .map(|key| {
                 let value = config
-                    .context_budgets
+                    .context
+                    .budgets
                     .get(&key)
                     .copied()
                     .unwrap_or(key.default_limit());
@@ -70,7 +99,7 @@ impl ContextBudgets {
                     .get(&key)
                     .cloned()
                     .unwrap_or_else(|| {
-                        if config.context_budgets.contains_key(&key) {
+                        if config.context.budgets.contains_key(&key) {
                             "provided config"
                         } else {
                             "default"
@@ -83,7 +112,7 @@ impl ContextBudgets {
         for (key, limit) in &limits {
             if limit.value == 0 {
                 return Err(CoreError::ExecutionFailed(format!(
-                    "context_budgets.{} must be positive ({})",
+                    "context.budgets.{} must be positive ({})",
                     key.name(),
                     limit.source
                 )));
@@ -201,7 +230,10 @@ mod tests {
     fn context_targets_measure_without_changing_sources() {
         let repo = tempfile::tempdir().unwrap();
         let config = Config {
-            context_budgets: [(BudgetKey::ScratchBytes, 1)].into(),
+            context: crate::config::ContextConfig {
+                budgets: [(BudgetKey::ScratchBytes, 1)].into(),
+                ..Default::default()
+            },
             ..Default::default()
         };
         let docs = vec![Document {

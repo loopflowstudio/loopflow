@@ -4,7 +4,7 @@
     "wave": "product",
     "default": {
       "name": "code",
-      "source": "repo"
+      "source": "repository"
     }
   },
   {
@@ -12,7 +12,7 @@
     "wave": null,
     "default": {
       "name": "code",
-      "source": "default"
+      "source": "builtin"
     }
   }
 ]

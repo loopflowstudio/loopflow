@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 import Observation
 import Testing
@@ -23,6 +22,41 @@ struct ProgramStatusTests {
         #expect(reducer.snapshot.records.count == 2)
         #expect(reducer.snapshot.summary?.msg == nil)
         #expect(reducer.snapshot.summary?.kind == nil)
+    }
+
+    @Test("Native turn reports reach pane and Session labels without a launcher Working record")
+    @MainActor func nativeTurnPresentation() async throws {
+        let surface = ProgramStatusSurface()
+        defer { surface.close() }
+        let fixture = try renameFixtureRecord("native-status", title: "Native conversation")
+        var session = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(fixture)) as? [String: Any])
+
+        // Reproduce the old producer's extra record: an idle root cannot retire
+        // another program's Working claim. The repair removes that producer.
+        surface.receive(.report(report(.working, id: "lf/launcher")), incarnation: surface.incarnation)
+        surface.receive(.report(report(.idle)), incarnation: surface.incarnation)
+        try await eventually { surface.snapshot.records.count == 2 }
+        #expect(surface.snapshot.summary?.state == .working)
+        surface.receive(.report(report(.clear, id: "lf/launcher")), incarnation: surface.incarnation)
+        try await eventually { surface.snapshot.summary?.state == .idle }
+
+        for (raw, state) in [(1, ProgramStatusState.working), (2, .done), (0, .idle), (3, .blocked), (1, .working), (5, .clear)] {
+            let event = try #require(copyProgramStatusEvent(event: 0, state: raw, kind: -1, progress: -1,
+                                                           id: nil, app: nil, title: nil, msg: nil))
+            surface.receive(event, incarnation: surface.incarnation)
+            let expected: ProgramStatusState? = state == .clear ? nil : state
+            try await eventually { surface.snapshot.summary?.state == expected }
+            session["program_status"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(surface.snapshot))
+            let record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: session))
+            #expect(SessionProgramStatus(sessions: [record], unavailable: nil).label == expected?.rawValue.capitalized)
+            if let expected {
+                let view = ProgramStatusLabel(status: surface.snapshot)
+                #expect(try view.inspect().find(text: expected.rawValue.capitalized).string() == expected.rawValue.capitalized)
+            } else {
+                #expect(surface.snapshot.seen)
+                #expect(surface.snapshot.records.isEmpty)
+            }
+        }
     }
 
     @Test func clearUsesPathComponents() {
@@ -134,59 +168,73 @@ struct ProgramStatusTests {
         #expect(surface.snapshot.seen)
     }
 
-    @Test("A later status event recovers an exited observer without replacing the Session")
-    @MainActor func observationFailureRecovers() async throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        let bin = directory.appendingPathComponent("bin")
-        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
-        let helper = bin.appendingPathComponent("lf")
-        try Data("""
-        #!/bin/sh
-        if [ ! -f "$LF_HOME/failed" ]; then
-            IFS= read -r frame
-            touch "$LF_HOME/failed"
-            exit 1
-        fi
-        while IFS= read -r frame; do
-            printf '%s' "$frame" > "$LF_HOME/received.tmp"
-            mv "$LF_HOME/received.tmp" "$LF_HOME/received"
-        done
-        touch "$LF_HOME/closed"
-        """.utf8).write(to: helper)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
-        let environment = ProcessInfo.processInfo.environment
-        for (key, value) in ["LF_HOME": directory.path, "LF_BIN": helper.path] {
-            setenv(key, value, 1)
-        }
-        let surface = ProgramStatusSurface()
-        defer {
-            surface.close()
-            for key in ["LF_HOME", "LF_BIN"] {
-                if let value = environment[key] { setenv(key, value, 1) } else { unsetenv(key) }
+    /// What the server would have recorded, with the first sends refused.
+    private final class StatusSink: @unchecked Sendable {
+        struct Reading { let stream: String; let sequence: Int; let records: ProgramStatusRecords }
+        private let lock = NSLock()
+        private var refusals: Int
+        private var readings: [Reading] = []
+
+        init(refusals: Int = 0) { self.refusals = refusals }
+
+        func send(_ write: ServedWrite) throws {
+            try lock.withLock {
+                if refusals > 0 {
+                    refusals -= 1
+                    throw RegistryQueryError("Status observation unavailable")
+                }
+                guard case .sessionStatus(_, _, _, _, let stream, let sequence, let records) = write else { return }
+                readings.append(Reading(stream: stream, sequence: sequence, records: records))
             }
-            try? FileManager.default.removeItem(at: directory)
         }
-        surface.associate(sessionId: "retained", terminalId: "terminal", provider: .init(agentProcessId: "agent"))
+
+        var received: [Reading] { lock.withLock { readings } }
+    }
+
+    @Test("A later status event recovers a refused observer without replacing the Session")
+    @MainActor func observationFailureRecovers() async throws {
+        let sink = StatusSink(refusals: 1)
+        let surface = ProgramStatusSurface(send: { try sink.send($0) })
+        defer { surface.close() }
+        surface.associate(sessionId: "retained", terminalId: "terminal", provider: .init(agentProcessId: AgentProcessId(rawValue: "agent")))
         surface.receive(.report(report(.working, msg: "First turn")), incarnation: surface.incarnation)
         try await eventually { surface.observationError != nil }
         #expect(surface.sessionId == "retained")
-        #expect(surface.observationError?.contains("ended (1)") == true)
+        #expect(surface.observationError == "Status observation unavailable")
         // The new turn clears the previous report before its fresh result arrives.
         surface.receive(.reset, incarnation: surface.incarnation)
         try await eventually {
-            guard let data = try? Data(contentsOf: directory.appendingPathComponent("received")),
-                  let records = try? JSONDecoder().decode(ProgramStatusRecords.self, from: data) else { return false }
-            return records.seen && records.records.isEmpty && surface.observationError == nil
+            guard let last = sink.received.last else { return false }
+            return last.records.seen && last.records.records.isEmpty && surface.observationError == nil
         }
         surface.receive(.report(report(.blocked, msg: "New result")), incarnation: surface.incarnation)
-        try await eventually {
-            guard let data = try? Data(contentsOf: directory.appendingPathComponent("received")),
-                  let records = try? JSONDecoder().decode(ProgramStatusRecords.self, from: data) else { return false }
-            return records.summary?.msg == "New result"
-        }
+        try await eventually { sink.received.last?.records.summary?.msg == "New result" }
         #expect(surface.sessionId == "retained")
         surface.close()
-        try await eventually { FileManager.default.fileExists(atPath: directory.appendingPathComponent("closed").path) }
+        // The closing snapshot still reaches the server, in order, on one stream.
+        try await eventually { sink.received.count == 3 }
+        #expect(sink.received.map(\.sequence) == [1, 2, 3])
+        #expect(Set(sink.received.map(\.stream)).count == 1)
+        #expect(sink.received.last?.records.records.isEmpty == true)
+    }
+
+    @Test("A restored question reaches the first Session reading without leaking to its replacement")
+    @MainActor func restoredStatusSurvivesLateAssociation() async throws {
+        let sink = StatusSink()
+        let surface = ProgramStatusSurface(send: { try sink.send($0) })
+        defer { surface.close() }
+        func received() -> ProgramStatusRecords? { sink.received.last?.records }
+        surface.receive(.report(report(.blocked, msg: "Original question")), incarnation: surface.incarnation)
+        try await eventually { surface.snapshot.summary?.state == .blocked }
+        surface.associate(sessionId: "retained", terminalId: "terminal", provider: .init(agentProcessId: AgentProcessId(rawValue: "first")))
+        try await eventually { received()?.summary?.msg == "Original question" }
+        surface.associate(sessionId: "retained", terminalId: "terminal", provider: .init(agentProcessId: AgentProcessId(rawValue: "replacement")))
+        surface.receive(.report(report(.idle, id: "new")), incarnation: surface.incarnation)
+        try await eventually { received()?.summary?.state == .idle }
+        #expect(received()?.records.count == 1)
+        // The replacement provider is a new observer, counted from one.
+        #expect(sink.received.last?.sequence == 1)
+        #expect(Set(sink.received.map(\.stream)).count == 2)
     }
 
     @MainActor private func eventually(_ condition: () -> Bool) async throws {

@@ -2,12 +2,12 @@
 use std::path::Path;
 
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
-use sha2::{Digest, Sha256};
 
 use super::SqliteStore;
 use crate::process::SessionAttachment;
 use crate::steer::{
-    NativeBoundary, SessionSteerPage, SessionSteerStatus, Steer, SteerAdapter, SteerContext,
+    IdleConversation, IdleReach, NativeBoundary, SessionSteerPage, SessionSteerStatus, Steer,
+    SteerAdapter,
 };
 use crate::store::{StoreError, StoreResult};
 
@@ -53,6 +53,33 @@ impl SqliteStore {
             NativeBoundary::Select { .. } => self.resume_reference(&adapter.session)?,
             _ => None,
         };
+        // A turn in the selected, activated, already observed conversation
+        // changes nothing; it takes no write lock. Any other answer goes
+        // through the transaction, which checks again.
+        if matches!(boundary, NativeBoundary::Turn) && !thread.is_empty() {
+            let conn = self.conn.lock().expect("store mutex poisoned");
+            let current: Option<bool> = conn
+                .query_row(
+                    "SELECT s.provider_thread IS ?4 AND a.activated_at IS NOT NULL FROM steer_adapters a
+                 JOIN processes p ON p.id=a.agent_process_id
+                 JOIN agent_sessions s ON s.agent_process_id=p.id
+                 WHERE s.id=?1 AND p.id=?2 AND a.capability=?3 AND p.completed_at IS NULL",
+                    params![
+                        adapter.session,
+                        adapter.agent_process_id,
+                        adapter.capability,
+                        thread
+                    ],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if current == Some(true)
+                && super::provider_transitions::observed_in(&conn, &adapter.session, thread)?
+            {
+                drop(conn);
+                return write();
+            }
+        }
         {
             let mut conn = self.conn.lock().expect("store mutex poisoned");
             let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -80,21 +107,7 @@ impl SqliteStore {
             }
             match (boundary, selected.as_deref()) {
                 (_, Some(current)) if current == thread => {}
-                (NativeBoundary::Select { source }, previous)
-                | (NativeBoundary::Activate { source }, previous @ None) => {
-                    tx.execute(
-                        "INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,observed_at,payload,captured_event)
-                         SELECT s.id,'observed',?2,p.attached_lf_process_id,unixepoch(),json_object('type','agent_session_selected',
-                            'agent_process_id',p.id,'provider_thread',?3,'next_provider_thread',?4,'source',?5),s.current_capture
-                         FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1",
-                        params![
-                            adapter.session,
-                            format!("agent-session:{}:selected:{}", adapter.agent_process_id, uuid::Uuid::new_v4()),
-                            previous,
-                            thread,
-                            source
-                        ],
-                    )?;
+                (NativeBoundary::Select { .. }, _) | (NativeBoundary::Activate { .. }, None) => {
                     tx.execute(
                         "UPDATE agent_sessions SET provider_thread=?2 WHERE id=?1",
                         params![adapter.session, thread],
@@ -111,6 +124,11 @@ impl SqliteStore {
                     )));
                 }
             }
+            let source = match boundary {
+                NativeBoundary::Select { source } | NativeBoundary::Activate { source } => source,
+                _ => "observed",
+            };
+            super::provider_transitions::observe_in(&tx, &adapter.session, thread, source)?;
             if let Some((session, input, reference)) =
                 resume.filter(|(_, _, reference)| reference.agent_session.as_str() != thread)
             {
@@ -132,6 +150,143 @@ impl SqliteStore {
             tx.commit()?;
         }
         write()
+    }
+
+    /// Native hooks report turn boundaries and work that outlives a reply.
+    /// A retained provider capability follows attachment handoff, but cannot
+    /// report for a replacement provider or a different native conversation.
+    pub(crate) fn record_native_turn(
+        &self,
+        adapter: &SteerAdapter,
+        thread: &str,
+        yielded: bool,
+        open_tools: Option<usize>,
+    ) -> StoreResult<()> {
+        self.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
+            let (native, previous_work): (bool, i64) =
+                self.conn.lock().expect("store mutex poisoned").query_row(
+                    "SELECT s.interactive, COALESCE(act.open_tools,0)
+                     FROM processes p JOIN agent_sessions s ON s.id=?2
+                     LEFT JOIN session_activity act
+                       ON act.agent_process_id=p.id AND act.session_id=s.id
+                     WHERE p.id=?1",
+                    params![adapter.agent_process_id, adapter.session],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )?;
+            // A headless run reports through the stream lf owns. A person's
+            // conversation reports here, Codex's included: its AgentProcess is
+            // an app-server lf spawned, but a native client takes the turns.
+            if !native {
+                return Ok(());
+            }
+            let attachment = self.session_attachment(&adapter.session)?.ok_or_else(|| {
+                StoreError::InvalidAuthority("Native provider has no attachment".into())
+            })?;
+            self.record_session_activity(
+                &adapter.session,
+                &attachment,
+                &crate::session::SessionActivity {
+                    preview: None,
+                    observed_at: time::OffsetDateTime::now_utc().unix_timestamp(),
+                    // An unavailable task registry cannot settle known work.
+                    open_tools: open_tools.unwrap_or(previous_work as usize),
+                    pending_input: 0,
+                    yielded,
+                },
+            )
+        })
+    }
+
+    /// Save where an idle Claude conversation takes messages: the inbox key
+    /// file its hook found. Written only when it changes.
+    pub(crate) fn record_agent_inbox(&self, adapter: &SteerAdapter, key: &Path) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE processes SET inbox=?3 WHERE id=?2 AND inbox IS NOT ?3 AND EXISTS(
+                SELECT 1 FROM steer_adapters a JOIN agent_sessions s ON s.agent_process_id=a.agent_process_id
+                WHERE s.id=?1 AND a.agent_process_id=?2 AND a.capability=?4)",
+            params![
+                adapter.session,
+                adapter.agent_process_id,
+                key.to_string_lossy(),
+                adapter.capability
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Managed conversations whose last boundary was a turn end, on a live
+    /// AgentProcess the server can reach; only `session` when given. Driven
+    /// from unfinished processes: every Session ever recorded is far more.
+    pub(crate) fn idle_conversations(
+        &self,
+        session: Option<&str>,
+    ) -> StoreResult<Vec<IdleConversation>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(
+            "SELECT s.id,p.id,a.capability,s.provider_thread,s.cwd,
+                CASE WHEN p.agent_provider='codex' THEN p.endpoint END,p.inbox,
+                s.work_source,p.pid,p.os_started_at
+             FROM processes p INDEXED BY processes_unfinished
+             JOIN agent_sessions s ON s.agent_process_id=p.id
+             JOIN steer_adapters a ON a.agent_process_id=p.id
+             JOIN session_activity act ON act.session_id=s.id AND act.agent_process_id=p.id
+             WHERE act.yielded=1 AND p.completed_at IS NULL AND s.provider_thread IS NOT NULL
+               AND (p.agent_provider='codex' AND p.endpoint IS NOT NULL OR p.inbox IS NOT NULL)
+               AND (?1 IS NULL OR s.id=?1)",
+        )?;
+        let rows = statement.query_map([session], |row| {
+            let reach = match row.get::<_, Option<String>>(5)? {
+                Some(endpoint) => IdleReach::Codex(endpoint.into()),
+                None => IdleReach::Claude(row.get::<_, String>(6)?.into()),
+            };
+            let source: Option<crate::session::WorkSource> = row
+                .get::<_, Option<String>>(7)?
+                .map(|source| serde_json::from_value(serde_json::Value::String(source)))
+                .transpose()
+                .map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        7,
+                        rusqlite::types::Type::Text,
+                        Box::new(error),
+                    )
+                })?;
+            let live = row
+                .get::<_, Option<u32>>(8)?
+                .zip(row.get::<_, Option<i64>>(9)?)
+                .is_some_and(|(pid, start)| {
+                    crate::journal::process_identity_evidence(pid, start)
+                        == crate::journal::ProcessIdentityEvidence::Live
+                });
+            let conversation = IdleConversation {
+                adapter: SteerAdapter {
+                    session: row.get(0)?,
+                    agent_process_id: row.get(1)?,
+                    capability: row.get(2)?,
+                },
+                thread: row.get(3)?,
+                cwd: row.get::<_, String>(4)?.into(),
+                reach,
+            };
+            Ok(
+                (live && source.is_some_and(crate::session::WorkSource::is_managed))
+                    .then_some(conversation),
+            )
+        })?;
+        Ok(rows
+            .filter_map(Result::transpose)
+            .collect::<Result<_, _>>()?)
+    }
+
+    /// A woken conversation is in a turn until its next Stop says otherwise.
+    pub(crate) fn record_woken(&self, adapter: &SteerAdapter) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE session_activity SET yielded=0,observed_at=unixepoch()
+             WHERE session_id=?1 AND agent_process_id=?2",
+            params![adapter.session, adapter.agent_process_id],
+        )?;
+        Ok(())
     }
 
     /// The Session's published resume reference with the input it belongs to.
@@ -215,13 +370,18 @@ pub(super) fn save_in(
         ],
     )?;
     // This transaction holds the write lock, so a hook that checks after this
-    // touch waits for the commit before reading pending steers.
+    // touch waits for the commit before claiming pending steers.
     if let Some(home) = conn
         .path()
         .filter(|path| !path.is_empty())
         .and_then(|path| Path::new(path).parent())
     {
-        crate::steer::touch(&crate::steer::latest_marker(home))
+        let marker = match owner.0 {
+            "task" => crate::steer::task_marker(home, owner.1),
+            "session" => crate::steer::session_marker(home, owner.1),
+            _ => crate::steer::latest_marker(home),
+        };
+        crate::steer::touch(&marker)
             .map_err(|error| invalid(format!("Mark saved steer for hooks: {error}")))?;
     }
     let result = conn.query_row(
@@ -242,19 +402,12 @@ pub(super) fn save_in(
     Ok(result)
 }
 
-fn reconcile(conn: &Connection, session: &str) -> StoreResult<()> {
-    let exists: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE id=?1)",
-        [session],
-        |r| r.get(0),
-    )?;
-    if !exists {
-        return Err(StoreError::NotFound);
-    }
+/// The steers that apply to Session `?1`, as CTE `applicable`.
+fn scopes() -> String {
     // Membership is derived here; receipts alone retain delivery state.
     // Reuse Task inventory's association rule, including explicit binds and
     // checkout membership. UNION terminates even in malformed cyclic ancestry.
-    let scopes = format!("WITH RECURSIVE member_tasks(id) AS (
+    format!("WITH RECURSIVE member_tasks(id) AS MATERIALIZED (
         SELECT tw.id FROM agent_sessions s JOIN tasks tw ON tw.id IN ({}) WHERE s.id=?1
         ), member_waves(id) AS (
         SELECT wave_id FROM agent_sessions WHERE id=?1
@@ -265,76 +418,43 @@ fn reconcile(conn: &Connection, session: &str) -> StoreResult<()> {
         (p.session_id=?1 OR p.task_id IN member_tasks OR p.wave_id IN member_waves
          OR p.repo=(SELECT repo FROM agent_sessions WHERE id=?1))
         AND NOT EXISTS(SELECT 1 FROM steers newer WHERE newer.source=p.source AND newer.seq>p.seq)
-        )", super::task_work::session_tasks("s"));
-    conn.execute(
-        &format!(
-            "{scopes} UPDATE session_steers SET applicable=(steer_id IN applicable)
-        WHERE session_id=?1"
-        ),
-        [session],
-    )?;
-    conn.execute(
-        &format!(
-            "{scopes} INSERT INTO session_steers(session_id,steer_id)
-        SELECT ?1,id FROM applicable WHERE true ON CONFLICT DO NOTHING"
-        ),
-        [session],
-    )?;
-    // A revision or association change cancels the whole not-yet-written batch.
-    // Its emitter checks the reservation again before exposing any bytes.
-    conn.execute(
-        "UPDATE steer_batches SET evidence='cancelled'
-        WHERE session_id=?1 AND evidence='prepared' AND EXISTS(
-            SELECT 1 FROM steer_deliveries d JOIN session_steers s
-            ON s.session_id=d.session_id AND s.steer_id=d.steer_id
-            WHERE d.batch_id=steer_batches.id AND s.applicable=0)",
-        [session],
-    )?;
-    conn.execute(
-        "DELETE FROM steer_deliveries WHERE session_id=?1 AND batch_id IN (
-        SELECT id FROM steer_batches WHERE evidence='cancelled')",
-        [session],
-    )?;
-    // Emitted and uncertain receipts survive scope changes and corrections.
-    conn.execute(
-        "DELETE FROM session_steers WHERE session_id=?1 AND applicable=0
-        AND NOT EXISTS(SELECT 1 FROM steer_deliveries d
-            WHERE d.session_id=?1 AND d.steer_id=session_steers.steer_id)",
-        [session],
-    )?;
-    Ok(())
+        -- A Task update (`update:<writer Session or ->:<key>`) is for the
+        -- Task's interactive conversations, never the Session that caused it.
+        AND (p.source NOT LIKE 'update:%'
+         OR ((SELECT interactive FROM agent_sessions WHERE id=?1)
+             AND p.source NOT LIKE 'update:'||?1||':%'))
+        -- A shared steer saved before this Session started and already read
+        -- by another Session was read there; a later Session starts past it.
+        AND (p.session_id=?1 OR p.created_at>=(SELECT created_at FROM agent_sessions WHERE id=?1)
+         OR NOT EXISTS(SELECT 1 FROM steer_delivered d
+            WHERE d.steer_id=p.id AND d.session_id!=?1 AND d.delivered_at IS NOT NULL))
+        )", super::task_work::session_tasks("s"))
+}
+
+/// A claim whose hook never stamped it lapses after this long, and the steer
+/// is printed again: a hook has ten seconds to run.
+const CLAIM_SECS: i64 = 15;
+
+/// The applicable steers Session `?1` has not read: no row, or a claim that
+/// lapsed unstamped.
+fn unread() -> String {
+    format!(
+        "{} SELECT {COLUMNS} FROM applicable a JOIN steers p ON p.id=a.id
+        WHERE NOT EXISTS(SELECT 1 FROM steer_delivered d WHERE d.session_id=?1 AND d.steer_id=a.id
+            AND (d.delivered_at IS NOT NULL OR d.claimed_at>unixepoch()-{CLAIM_SECS}))",
+        scopes()
+    )
 }
 
 fn pending_count(conn: &Connection, session: &str) -> StoreResult<i64> {
     Ok(conn.query_row(
-        "SELECT count(*) FROM session_steers s WHERE s.session_id=?1 AND s.applicable=1
-        AND NOT EXISTS(SELECT 1 FROM steer_deliveries d WHERE d.session_id=s.session_id
-        AND d.steer_id=s.steer_id AND d.attempt=s.attempt)",
+        &format!("SELECT count(*) FROM ({})", unread()),
         [session],
         |row| row.get(0),
     )?)
 }
 
 impl SqliteStore {
-    /// Every emitter holds a shared Session fence from reservation through write.
-    /// Acquiring it exclusively proves no prepared emitter survives; elapsed time
-    /// and provider liveness cannot establish that fact.
-    pub(crate) fn recover_prepared_steers(&self, session: &str) -> StoreResult<()> {
-        let Some(_fence) = self.try_lock_session_attachment(session)? else {
-            return Ok(());
-        };
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        tx.execute(
-            "DELETE FROM steer_deliveries WHERE batch_id IN (
-            SELECT id FROM steer_batches WHERE session_id=?1 AND evidence='prepared')",
-            [session],
-        )?;
-        tx.execute("UPDATE steer_batches SET evidence='cancelled' WHERE session_id=?1 AND evidence='prepared'", [session])?;
-        tx.commit()?;
-        Ok(())
-    }
-
     pub fn save_wave_steer(
         &self,
         wave: &crate::id::WaveId,
@@ -362,6 +482,18 @@ impl SqliteStore {
         self.save_scope_steer(("session", session), author, text)
     }
 
+    /// The steer `source` at `revision` derived, whichever scope owns it.
+    pub fn steer_by_source(&self, source: &str, revision: &str) -> StoreResult<Option<Steer>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {COLUMNS} FROM steers p WHERE p.source=?1 AND p.revision=?2"
+        ))?;
+        let steer = stmt
+            .query_row(params![source, revision], read_steer)
+            .optional()?;
+        Ok(steer)
+    }
+
     fn save_scope_steer(
         &self,
         owner: (&str, &str),
@@ -384,6 +516,19 @@ impl SqliteStore {
         Ok(steer)
     }
 
+    /// Whether `session` has a steer to read. Hooks and the server ask often;
+    /// nearly always the answer is no, and it takes no write lock.
+    pub(crate) fn has_undelivered_steers(&self, session: &str) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(
+            conn.query_row(&format!("SELECT EXISTS({})", unread()), [session], |row| {
+                row.get(0)
+            })?,
+        )
+    }
+
+    /// Every steer that applies to the Session or that it read, oldest first,
+    /// with when it read each.
     pub fn session_steers(
         &self,
         session: &str,
@@ -391,22 +536,30 @@ impl SqliteStore {
         limit: usize,
     ) -> StoreResult<SessionSteerPage> {
         let limit = limit.clamp(1, 100);
-        self.recover_prepared_steers(session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        reconcile(&tx, session)?;
-        let mut items = tx.prepare(&format!("SELECT {COLUMNS},s.attempt,COALESCE(b.evidence,CASE WHEN s.applicable=1 THEN 'pending' ELSE 'cancelled' END),b.id,b.payload_hash,d.excerpted
-            FROM session_steers s JOIN steers p ON p.id=s.steer_id
-            LEFT JOIN steer_deliveries d ON d.session_id=s.session_id AND d.steer_id=s.steer_id AND d.attempt=s.attempt
-            LEFT JOIN steer_batches b ON b.id=d.batch_id WHERE s.session_id=?1 AND p.seq>?2 ORDER BY p.seq LIMIT ?3"))?
+        let tx = conn.savepoint()?;
+        let exists: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE id=?1)",
+            [session],
+            |row| row.get(0),
+        )?;
+        if !exists {
+            return Err(StoreError::NotFound);
+        }
+        let mut items = tx
+            .prepare(&format!(
+                "{} SELECT {COLUMNS},d.delivered_at FROM (
+                    SELECT id FROM applicable
+                    UNION SELECT steer_id FROM steer_delivered WHERE session_id=?1) known
+                JOIN steers p ON p.id=known.id
+                LEFT JOIN steer_delivered d ON d.session_id=?1 AND d.steer_id=p.id
+                WHERE p.seq>?2 ORDER BY p.seq LIMIT ?3",
+                scopes()
+            ))?
             .query_map(params![session, after, (limit + 1) as i64], |row| {
                 Ok(SessionSteerStatus {
                     steer: read_steer(row)?,
-                    attempt: row.get(6)?,
-                    evidence: row.get(7)?,
-                    batch_id: row.get(8)?,
-                    payload_hash: row.get(9)?,
-                    excerpted: row.get(10)?,
+                    delivered_at: row.get(6)?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -416,21 +569,10 @@ impl SqliteStore {
         } else {
             None
         };
-        let pending = pending_count(&tx, session)?;
-        let capability: String = tx.query_row("SELECT CASE
-            WHEN p.id IS NULL OR p.completed_at IS NOT NULL THEN 'idle; pending until next supported provider start'
-            WHEN a.agent_process_id IS NULL THEN 'unavailable; provider start required to install adapter'
-            WHEN a.activated_at IS NULL THEN 'capability reserved; no authenticated callback observed (hook may be unavailable or untrusted)'
-            ELSE 'authenticated provider callback observed; output acceptance unconfirmed' END
-            FROM agent_sessions s LEFT JOIN processes p ON p.id=s.agent_process_id
-            LEFT JOIN steer_adapters a ON a.agent_process_id=p.id WHERE s.id=?1",
-            [session], |row| row.get(0))?;
-        tx.commit()?;
         Ok(SessionSteerPage {
             items,
             next_after,
-            pending,
-            capability,
+            pending: pending_count(&tx, session)?,
         })
     }
 
@@ -439,134 +581,155 @@ impl SqliteStore {
         session: &str,
         id: &crate::id::SteerId,
     ) -> StoreResult<Steer> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        reconcile(&tx, session)?;
-        let result = tx
-            .query_row(
-                &format!(
-                    "SELECT {COLUMNS} FROM steers p
-            JOIN session_steers s ON s.steer_id=p.id WHERE s.session_id=?1 AND p.id=?2"
-                ),
-                params![session, id],
-                read_steer,
-            )
-            .optional()?
-            .ok_or(StoreError::NotFound)?;
-        tx.commit()?;
-        Ok(result)
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            &format!(
+                "{} SELECT {COLUMNS} FROM steers p WHERE p.id=?2 AND (p.id IN applicable
+                OR EXISTS(SELECT 1 FROM steer_delivered d WHERE d.session_id=?1 AND d.steer_id=p.id))",
+                scopes()
+            ),
+            params![session, id],
+            read_steer,
+        )
+        .optional()?
+        .ok_or(StoreError::NotFound)
     }
 
-    pub fn retry_session_steer(
+    /// What the Task looked like when its updates were last written.
+    pub(crate) fn task_update_reading(
         &self,
-        session: &str,
-        steer_id: &crate::id::SteerId,
+        task: &crate::durable::TaskId,
+    ) -> StoreResult<Option<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT observation FROM task_update_readings WHERE task_id=?1",
+                [task.as_str()],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    /// Save the Task's new reading and the steers that report what moved
+    /// since `expected`, each as `(source, text)`. Nothing when another
+    /// reader wrote first: its steers already say it.
+    pub(crate) fn save_task_update(
+        &self,
+        task: &crate::durable::TaskId,
+        expected: Option<&str>,
+        observation: &str,
+        updates: &[(String, String)],
     ) -> StoreResult<()> {
-        let _lock = self.lock_session_attachment(session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        reconcile(&tx, session)?;
-        if tx.execute(
-            "UPDATE session_steers SET attempt=attempt+1 WHERE session_id=?1 AND steer_id=?2 AND applicable=1
-            AND EXISTS(SELECT 1 FROM steer_deliveries d JOIN steer_batches b ON b.id=d.batch_id
-             WHERE d.session_id=?1 AND d.steer_id=?2 AND d.attempt=session_steers.attempt
-             AND b.evidence IN ('uncertain','emitted','confirmed'))",
-            params![session, steer_id],
-        )? == 0
-        {
-            return Err(invalid("No applicable emitted or uncertain steer to retry"));
+        let current: Option<String> = tx
+            .query_row(
+                "SELECT observation FROM task_update_readings WHERE task_id=?1",
+                [task.as_str()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if current.as_deref() != expected {
+            return Ok(());
+        }
+        tx.execute(
+            "INSERT INTO task_update_readings(task_id,observation) VALUES(?1,?2)
+            ON CONFLICT(task_id) DO UPDATE SET observation=excluded.observation",
+            params![task.as_str(), observation],
+        )?;
+        for (source, text) in updates {
+            save_in(
+                &tx,
+                ("task", task.as_str()),
+                source,
+                "1",
+                &crate::durable::Author::Named("Loopflow".into()),
+                text,
+            )?;
         }
         tx.commit()?;
         Ok(())
     }
 
-    /// Returns whether a payload was written, not whether it was accepted. Only
-    /// owned provider history containing the batch and hash could confirm it.
-    pub(crate) fn emit_session_steers(
+    /// A conversation that just started has its Tasks' history in its prompt:
+    /// the updates written so far are not news to it.
+    pub(crate) fn baseline_task_updates(&self, session: &str) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let pending = format!("{} AND p.source LIKE 'update:%'", unread());
+        let any: bool = conn.query_row(&format!("SELECT EXISTS({pending})"), [session], |row| {
+            row.get(0)
+        })?;
+        if any {
+            conn.execute(
+                &format!(
+                    "INSERT INTO steer_delivered(session_id,steer_id,claimed_at,delivered_at)
+                    SELECT ?1,id,unixepoch(),unixepoch() FROM ({pending}) WHERE true
+                    ON CONFLICT(session_id,steer_id) DO UPDATE SET delivered_at=unixepoch()"
+                ),
+                [session],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Claim up to eight of the Session's unread steers for the caller to
+    /// print, oldest first, with how many more wait behind them. A second hook
+    /// at the same moment finds them claimed. The caller stamps them with
+    /// [`Self::deliver_session_steers`] once printed; an unstamped claim
+    /// lapses.
+    pub(crate) fn claim_session_steers(
         &self,
         adapter: &SteerAdapter,
         provider_thread: &str,
-        boundary: &str,
-        render: impl FnOnce(&str, &[Steer], usize) -> StoreResult<SteerContext>,
-        write: impl FnOnce(&str) -> StoreResult<()>,
-    ) -> StoreResult<bool> {
-        let _lock = self.lock_session_dispatch(&adapter.session)?;
-        let batch = crate::id::SteerBatchId::new();
-        let (steers, remaining) = {
-            let mut conn = self.conn.lock().expect("store mutex poisoned");
-            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-            let claim: Option<String> = tx.query_row("SELECT p.attachment_token FROM agent_sessions s
+    ) -> StoreResult<(Vec<Steer>, usize)> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let owns: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM agent_sessions s
                 JOIN processes p ON p.id=s.agent_process_id JOIN steer_adapters a ON a.agent_process_id=p.id
                 WHERE s.id=?1 AND p.id=?2 AND a.capability=?3 AND s.provider_thread=?4
-                AND p.completed_at IS NULL",params![adapter.session,adapter.agent_process_id,adapter.capability,provider_thread],|r|r.get(0)).optional()?;
-            let claim = claim.ok_or_else(|| {
-                StoreError::InvalidAuthority(
-                    "Context adapter no longer owns this provider conversation".into(),
-                )
-            })?;
-            reconcile(&tx, &adapter.session)?;
-            let duplicate: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM steer_batches WHERE agent_process_id=?1 AND boundary=?2 AND evidence!='cancelled')",params![adapter.agent_process_id,boundary],|r|r.get(0))?;
-            if duplicate {
-                return Ok(false);
-            }
-            let rows = tx.prepare(&format!("SELECT {COLUMNS} FROM session_steers s JOIN steers p ON p.id=s.steer_id
-                WHERE s.session_id=?1 AND s.applicable=1 AND NOT EXISTS(SELECT 1 FROM steer_deliveries d
-                WHERE d.session_id=s.session_id AND d.steer_id=s.steer_id AND d.attempt=s.attempt)
-                ORDER BY p.seq LIMIT 8"))?.query_map([&adapter.session],read_steer)?.collect::<rusqlite::Result<Vec<_>>>()?;
-            if rows.is_empty() {
-                return Ok(false);
-            }
-            tx.execute("INSERT INTO steer_batches(id,session_id,agent_process_id,provider_thread,attachment_token,boundary,evidence,created_at)
-                VALUES(?1,?2,?3,?4,?5,?6,'prepared',unixepoch())",params![batch,adapter.session,adapter.agent_process_id,provider_thread,claim,boundary])?;
-            for row in &rows {
-                tx.execute("INSERT INTO steer_deliveries(session_id,steer_id,attempt,batch_id)
-                    SELECT session_id,steer_id,attempt,?3 FROM session_steers WHERE session_id=?1 AND steer_id=?2",
-                    params![adapter.session,row.id,batch])?;
-            }
-            let remaining = pending_count(&tx, &adapter.session)?;
-            tx.commit()?;
-            (rows, remaining as usize)
-        };
-        let payload = match render(batch.as_str(), &steers, remaining) {
-            Ok(payload) => payload,
-            Err(error) => {
-                let mut conn = self.conn.lock().expect("store mutex poisoned");
-                let tx = conn.transaction()?;
-                tx.execute("DELETE FROM steer_deliveries WHERE batch_id=?1", [&batch])?;
-                tx.execute("DELETE FROM steer_batches WHERE id=?1", [&batch])?;
-                tx.commit()?;
-                return Err(error);
-            }
-        };
-        let hash = hex::encode(Sha256::digest(payload.text.as_bytes()));
-        {
-            let mut conn = self.conn.lock().expect("store mutex poisoned");
-            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-            reconcile(&tx, &adapter.session)?;
-            tx.execute(
-                "UPDATE steer_deliveries SET excerpted=0 WHERE batch_id=?1",
-                [&batch],
-            )?;
-            for steer in &payload.excerpts {
-                tx.execute(
-                    "UPDATE steer_deliveries SET excerpted=1 WHERE batch_id=?1 AND steer_id=?2",
-                    params![batch, steer],
-                )?;
-            }
-            let retained = tx.execute(
-                "UPDATE steer_batches SET evidence='uncertain',payload_hash=?2 WHERE id=?1 AND evidence='prepared'",
-                params![batch,hash])? == 1;
-            tx.commit()?;
-            if !retained {
-                return Ok(false);
-            }
-        }
-        write(&payload.text)?;
-        self.conn.lock().expect("store mutex poisoned").execute(
-            "UPDATE steer_batches SET evidence='emitted' WHERE id=?1",
-            [batch],
+                AND p.completed_at IS NULL)",
+            params![adapter.session, adapter.agent_process_id, adapter.capability, provider_thread],
+            |row| row.get(0),
         )?;
-        Ok(true)
+        if !owns {
+            return Err(StoreError::InvalidAuthority(
+                "Context adapter no longer owns this provider conversation".into(),
+            ));
+        }
+        let steers = tx
+            .prepare(&format!("{} ORDER BY p.seq LIMIT 8", unread()))?
+            .query_map([&adapter.session], read_steer)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        for steer in &steers {
+            tx.execute(
+                "INSERT INTO steer_delivered(session_id,steer_id,claimed_at) VALUES(?1,?2,unixepoch())
+                ON CONFLICT(session_id,steer_id) DO UPDATE SET claimed_at=unixepoch()",
+                params![adapter.session, steer.id],
+            )?;
+        }
+        let remaining = pending_count(&tx, &adapter.session)?;
+        tx.commit()?;
+        Ok((steers, remaining as usize))
+    }
+
+    /// The caller printed these claimed steers: the Session has read them.
+    pub(crate) fn deliver_session_steers(
+        &self,
+        session: &str,
+        steers: &[crate::id::SteerId],
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        for steer in steers {
+            tx.execute(
+                "UPDATE steer_delivered SET delivered_at=unixepoch()
+                WHERE session_id=?1 AND steer_id=?2 AND delivered_at IS NULL",
+                params![session, steer],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
     }
 }
 

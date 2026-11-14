@@ -39,10 +39,9 @@ fn git_locator_in(conn: &Connection, repo: &str) -> StoreResult<Option<PathBuf>>
 // before locators existed. A remote, basename, or main checkout path cannot.
 fn retained_checkout_matches(conn: &Connection, repo: &str) -> StoreResult<bool> {
     let mut statement = conn.prepare(
-        "SELECT t.worktree,t.branch FROM tasks t
+        "SELECT c.worktree,c.branch FROM task_checkouts c JOIN tasks t ON t.id=c.task_id
          JOIN repository_plans w ON w.id=t.repository_id
-         WHERE w.repo=?1 AND t.checkout_machine_id=(SELECT id FROM machines WHERE route='local')
-           AND t.worktree IS NOT NULL AND t.worktree<>?1 AND t.branch IS NOT NULL",
+         WHERE w.repo=?1 AND c.worktree<>?1",
     )?;
     let retained = statement
         .query_map([repo], |row| {
@@ -82,7 +81,7 @@ pub(super) fn ensure_repository_in(conn: &Connection, repo: &str) -> StoreResult
         if let Some(common) = common.as_ref().filter(|_| locator.is_none()) {
             if !retained_checkout_matches(conn, repo)? {
                 return Err(StoreError::InvalidData(format!(
-                "{repo} retains repository {id} but has no Git locator; establish the original checkout with `lf repository --bind {id}`, or recover the moved checkout with `lf repository --relocate {id}`"
+                "{repo} retains repository {id} but has no Git locator; establish the original checkout with `lf config repo --bind {id}`, or recover the moved checkout with `lf config repo --relocate {id}`"
                 )));
             }
             crate::repository::location::write_locator(common, &id)
@@ -98,8 +97,7 @@ pub(super) fn ensure_repository_in(conn: &Connection, repo: &str) -> StoreResult
                 .optional()?;
             if path.as_deref() != Some(repo) {
                 return Err(StoreError::InvalidData(
-                    "Git locator conflicts with retained Work; reconcile with `lf repository`"
-                        .into(),
+                    "Git locator conflicts with retained Work; reconcile with `lf repo`".into(),
                 ));
             }
         }
@@ -166,10 +164,10 @@ impl SqliteStore {
         // A future clone reusing the old path cannot acquire this history.
         tx.execute(
             "INSERT OR IGNORE INTO relocated_task_processes(task_id,process_id)
-             SELECT t.id,e.id FROM tasks t JOIN repository_plans w ON w.id=t.repository_id JOIN processes e
-               ON e.cwd=rtrim(t.worktree,'/') OR instr(e.cwd,rtrim(t.worktree,'/')||'/')=1
-             WHERE w.repo=?1 AND t.checkout_machine_id=(SELECT id FROM machines WHERE route='local')
-               AND (t.worktree=?1 OR instr(t.worktree,?1||'/')=1)",
+             SELECT t.id,e.id FROM task_checkouts c JOIN tasks t ON t.id=c.task_id
+               JOIN repository_plans w ON w.id=t.repository_id JOIN processes e
+               ON e.cwd=rtrim(c.worktree,'/') OR instr(e.cwd,rtrim(c.worktree,'/')||'/')=1
+             WHERE w.repo=?1 AND (c.worktree=?1 OR instr(c.worktree,?1||'/')=1)",
             [&source],
         )?;
         for table in [
@@ -192,7 +190,7 @@ impl SqliteStore {
         // their actual paths, even when their names retain the old prefix.
         for (table, column, scope) in [
             ("agent_sessions", "cwd", "repo=?2"),
-            ("tasks", "worktree", "checkout_machine_id=(SELECT id FROM machines WHERE route='local') AND repository_id IN (SELECT id FROM repository_plans WHERE repo=?2)"),
+            ("task_checkouts", "worktree", "task_id IN (SELECT t.id FROM tasks t JOIN repository_plans w ON w.id=t.repository_id WHERE w.repo=?2)"),
         ] {
             tx.execute(
                 &format!("UPDATE {table} SET {column}=?2 || substr({column},length(?1)+1)
@@ -214,7 +212,8 @@ impl SqliteStore {
     ) -> StoreResult<crate::durable::TaskLocationObservation> {
         use crate::durable::{TaskLocation, TaskLocationObservation};
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction()?;
+        // One snapshot that only reads: a savepoint, not the write lock.
+        let tx = conn.savepoint()?;
         let machine = super::durable::map_local_machine(&tx)?.id;
         let location = (|| -> StoreResult<TaskLocation> {
             let repo: String = tx.query_row(
@@ -224,18 +223,20 @@ impl SqliteStore {
             )?;
             let id = super::children::resolve_task_id_in(&tx, task.as_str(), Some(&repo))?
                 .ok_or(StoreError::NotFound)?;
-            let (checkout, owner): (Option<String>, Option<String>) = tx.query_row(
-                "SELECT worktree,checkout_machine_id FROM tasks WHERE id=?1",
-                [id.as_str()],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )?;
-            if checkout.is_none() && !super::task_ownership::owned_in(&tx, &id)? {
-                return Ok(TaskLocation::Unrecorded);
-            }
-            if owner.as_deref() != Some(machine.as_str()) {
-                return Ok(TaskLocation::Unavailable {
-                    reason: "execution Machine is unknown or not this observer; read its owner"
-                        .into(),
+            let checkout: Option<String> = tx
+                .query_row(
+                    "SELECT worktree FROM task_checkouts WHERE task_id=?1",
+                    [id.as_str()],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if checkout.is_none() {
+                return Ok(if super::task_ownership::owned_in(&tx, &id)? {
+                    TaskLocation::Unavailable {
+                        reason: "not checked out on this Machine; read its owner".into(),
+                    }
+                } else {
+                    TaskLocation::Unrecorded
                 });
             }
             Ok(TaskLocation::Recorded {
@@ -258,17 +259,18 @@ impl SqliteStore {
 
     pub fn task_execution_route(&self, task: &TaskId) -> StoreResult<TaskExecutionRoute> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let me = super::task_ownership::OwnershipFacts::of_task_in(&conn, task)?;
         let tx = conn.savepoint()?;
         let (repo, checkout): (String, Option<String>) = tx.query_row(
-            "SELECT w.repo,t.worktree FROM tasks t JOIN repository_plans w ON w.id=t.repository_id
-             WHERE t.id=?1",
+            "SELECT w.repo,c.worktree FROM tasks t JOIN repository_plans w ON w.id=t.repository_id
+             LEFT JOIN task_checkouts c ON c.task_id=t.id WHERE t.id=?1",
             [task.as_str()],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
         let repository_id = repository_id_in(&tx, &repo)?.ok_or_else(|| {
             StoreError::InvalidData(format!("repository {repo} has no selected plan identity"))
         })?;
-        let (machine_id, source) = super::task_ownership::writer_in(&tx, task)?;
+        let (machine_id, source) = super::task_ownership::writer_in(&tx, task, &me)?;
         Ok(TaskExecutionRoute {
             task_id: task.clone(),
             checkout,
@@ -406,9 +408,14 @@ mod tests {
             .unwrap();
             conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(),wave]).unwrap();
             conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
-            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1','/before/task',1,(SELECT id FROM machines WHERE route='local'))",params![task.as_str(),project.as_str()]).unwrap();
+            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,created_at) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1',1)",params![task.as_str(),project.as_str()]).unwrap();
+            conn.execute(
+                "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/before/task')",
+                [task.as_str()],
+            )
+            .unwrap();
             conn.execute("INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,'/before/task/src',1)",params![process,TraceId::new()]).unwrap();
-            conn.execute_batch("CREATE TRIGGER interrupt_move BEFORE UPDATE OF worktree ON tasks BEGIN SELECT RAISE(ABORT,'interrupted'); END;").unwrap();
+            conn.execute_batch("CREATE TRIGGER interrupt_move BEFORE UPDATE OF worktree ON task_checkouts BEGIN SELECT RAISE(ABORT,'interrupted'); END;").unwrap();
         }
         assert!(store.relocate_repository(&id, "/after").is_err());
         assert_eq!(
@@ -424,8 +431,14 @@ mod tests {
             .unwrap();
         store.relocate_repository(&id, "/after").unwrap();
         store.relocate_repository(&id, "/after").unwrap();
-        assert_eq!(store.task_work(&task).unwrap().processes[0].id, process);
-        assert_eq!(store.task_open_processes(&task).unwrap()[0].id, process);
+        assert_eq!(
+            store.task_work(&task).unwrap().processes[0].id(),
+            process.as_str()
+        );
+        assert_eq!(
+            store.task_open_processes(&task).unwrap()[0].id(),
+            process.as_str()
+        );
         let conn = store.conn.lock().unwrap();
         assert_eq!(
             super::super::task_work::task_of_process(&conn, &process)
@@ -462,7 +475,10 @@ mod tests {
         use crate::durable::{
             DefaultScope, MachineSetting, OwningMachineSource, TaskExecutionSource,
         };
+        let _env = crate::journal::test_env_lock();
         let home = tempfile::tempdir().unwrap();
+        let _home =
+            crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
         let repo = home.path().canonicalize().unwrap();
         let repo = repo.to_str().unwrap();
@@ -496,12 +512,9 @@ mod tests {
             .unwrap();
         let task = new_task("Routed");
         let route = store.task_execution_route(&task.id).unwrap();
-        assert_eq!(
-            (route.machine_id, route.source),
-            (
-                worker.clone(),
-                TaskExecutionSource::OwningMachine(OwningMachineSource::Repository)
-            )
+        assert_eq!(route.machine_id, worker);
+        assert!(
+            matches!(route.source, TaskExecutionSource::OwningMachine(OwningMachineSource::Preference(selected)) if selected.scope == crate::config::settings::SettingScope::Repository)
         );
         // The Wave's Session Machine places no Task.
         store
@@ -518,8 +531,9 @@ mod tests {
         assert_eq!(
             store
                 .wave_owning_machine(&wave, MachineSetting::Session)
-                .unwrap(),
-            (local.clone(), OwningMachineSource::Wave("work".into()))
+                .unwrap()
+                .0,
+            local.clone()
         );
         // The Wave's default outranks the repository's.
         store
@@ -530,12 +544,9 @@ mod tests {
             )
             .unwrap();
         let route = store.task_execution_route(&task.id).unwrap();
-        assert_eq!(
-            (route.machine_id, route.source),
-            (
-                mini,
-                TaskExecutionSource::OwningMachine(OwningMachineSource::Wave("work".into()))
-            )
+        assert_eq!(route.machine_id, mini);
+        assert!(
+            matches!(route.source, TaskExecutionSource::OwningMachine(OwningMachineSource::Preference(selected)) if selected.scope == crate::config::settings::SettingScope::Wave)
         );
         // Only your Machine for the Wave claims; this one refuses without writing.
         assert!(store.claim_task(&task.id).is_err());
@@ -551,7 +562,7 @@ mod tests {
 
     #[test]
     fn a_waves_capacity_takes_its_new_tasks_until_a_nearer_machine_does() {
-        use crate::durable::{DefaultScope, MachineSetting, OwningMachineSource};
+        use crate::durable::{DefaultScope, MachineSetting};
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
         let repo = home.path().canonicalize().unwrap();
@@ -589,11 +600,9 @@ mod tests {
         assert_eq!(
             store
                 .wave_owning_machine(&project.wave_id, MachineSetting::Tasks)
-                .unwrap(),
-            (
-                store.local_machine().unwrap().id,
-                OwningMachineSource::Wave("infrastructure".into())
-            )
+                .unwrap()
+                .0,
+            store.local_machine().unwrap().id
         );
         assert_eq!(store.capacity_defaults().unwrap().len(), 1);
 

@@ -30,16 +30,16 @@ struct SessionChromeProofTests {
         let terminal = registry.surfaces.view(for: .shell(pane, machineId: fixtureMachineId))
         terminal.frame = CGRect(x: 0, y: 0, width: 600, height: 400)
         terminal.workingDirectory = NSTemporaryDirectory()
-        terminal.command = buildWorkspaceShellCommand(id: pane, argv: ["/bin/cat"], env: [:])
+        terminal.command = buildGhosttyShellCommand(argv: ["/bin/cat"], env: [:])
         terminal.createSurface(manager: GhosttyManager.shared)
         defer { registry.surfaces.release(.shell(pane, machineId: fixtureMachineId)) }
         let surface = try #require(terminal.surface)
         let query = RegistryQuery { args, _ in
             switch args.first {
-            case "desktop" where args.dropFirst().first == "plan": return #"{"generated_at":1,"waves":[]}"#
+            case "plan" where args.dropFirst().first == "list": return #"{"generated_at":1,"waves":[]}"#
             case "wave" where args.dropFirst().first == "list": return "[]"
-            case "desktop" where args.dropFirst().first == "sessions": return #"{"entries":[],"next":null}"#
-            case "history": return #"{"truncated":false,"items":[]}"#
+            case "session" where args.dropFirst().first == "list": return #"{"entries":[],"next":null}"#
+            case "session" where args.dropFirst().first == "history": return #"{"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Keybinds must not launch or mutate: \(args)")
             }
         }
@@ -99,7 +99,7 @@ struct SessionChromeProofTests {
             let terminal = registry.surfaces.view(for: .shell(pane, machineId: fixtureMachineId))
             terminal.frame = CGRect(x: 0, y: 0, width: 400, height: 350)
             terminal.workingDirectory = NSTemporaryDirectory()
-            terminal.command = buildWorkspaceShellCommand(id: pane, argv: ["/bin/cat"], env: [:])
+            terminal.command = buildGhosttyShellCommand(argv: ["/bin/cat"], env: [:])
             terminal.createSurface(manager: GhosttyManager.shared)
             terminals.append(terminal)
         }
@@ -121,8 +121,8 @@ struct SessionChromeProofTests {
         let graphs = try String(contentsOf: repoRoot.appendingPathComponent("tests/fixtures/dto/graph_catalog.json"), encoding: .utf8)
         let inventory = PaletteSessionInventory(sessions)
         let query = RegistryQuery { args, _ in
-            if args.prefix(2) == ["desktop", "plan"] { return roadmap }
-            if args.prefix(2) == ["desktop", "sessions"] { return await inventory.read() }
+            if args.prefix(2) == ["plan", "list"] { return roadmap }
+            if args.prefix(2) == ["session", "list"] { return await inventory.read() }
             if args.first == "graph" { return graphs }
             if args.first == "wave" { return "[]" }
             throw RegistryQueryError("No launch or mutation authorized by palette inspection")

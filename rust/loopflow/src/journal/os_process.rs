@@ -22,13 +22,40 @@ pub(crate) struct OsProcess {
 }
 
 impl OsProcess {
-    #[cfg(target_os = "macos")]
+    /// Argument boundaries from the kernel, excluding the process environment.
+    pub(crate) fn arguments(pid: u32) -> io::Result<Option<Vec<String>>> {
+        #[cfg(target_os = "macos")]
+        {
+            macos::arguments(pid)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            match std::fs::read(format!("/proc/{pid}/cmdline")) {
+                Ok(bytes) => Ok(Some(
+                    bytes
+                        .strip_suffix(&[0])
+                        .unwrap_or(&bytes)
+                        .split(|byte| *byte == 0)
+                        .map(|arg| String::from_utf8_lossy(arg).into_owned())
+                        .collect(),
+                )),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+                Err(error) => Err(error),
+            }
+        }
+    }
+
     pub(crate) fn read(pid: u32) -> io::Result<Option<Self>> {
+        crate::observe::process(pid)
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn observe(pid: u32) -> io::Result<Option<Self>> {
         macos::read(pid)
     }
 
     #[cfg(not(target_os = "macos"))]
-    pub(crate) fn read(pid: u32) -> io::Result<Option<Self>> {
+    pub(crate) fn observe(pid: u32) -> io::Result<Option<Self>> {
         let mut rows = query(
             &["-p", &pid.to_string()],
             time::OffsetDateTime::now_utc().unix_timestamp(),
@@ -44,12 +71,18 @@ impl OsProcess {
     #[cfg(target_os = "macos")]
     pub(crate) fn read_each(pids: &[u32], _now: i64) -> io::Result<Vec<Self>> {
         pids.iter()
-            .filter_map(|pid| macos::read(*pid).transpose())
+            .filter_map(|pid| Self::read(*pid).transpose())
             .collect()
     }
 
     #[cfg(not(target_os = "macos"))]
     pub(crate) fn read_each(pids: &[u32], now: i64) -> io::Result<Vec<Self>> {
+        if crate::observe::active() {
+            return pids
+                .iter()
+                .filter_map(|pid| Self::read(*pid).transpose())
+                .collect();
+        }
         if pids.is_empty() {
             return Ok(Vec::new());
         }
@@ -65,6 +98,55 @@ impl OsProcess {
     #[cfg(target_os = "macos")]
     pub(crate) fn sample(_now: i64) -> io::Result<Vec<Self>> {
         macos::sample()
+    }
+
+    /// Every process with `command` set to its kernel name, never its arguments.
+    #[cfg(target_os = "macos")]
+    pub(crate) fn sample_names() -> io::Result<Vec<Self>> {
+        macos::sample_names()
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub(crate) fn sample_names() -> io::Result<Vec<Self>> {
+        query_column(
+            &["-ax"],
+            "comm",
+            time::OffsetDateTime::now_utc().unix_timestamp(),
+        )
+    }
+
+    /// The directory `pid` runs in; `None` when the kernel withholds it.
+    #[cfg(target_os = "macos")]
+    pub(crate) fn cwd(pid: u32) -> Option<PathBuf> {
+        macos::cwd(pid)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub(crate) fn cwd(pid: u32) -> Option<PathBuf> {
+        std::fs::read_link(format!("/proc/{pid}/cwd")).ok()
+    }
+
+    /// Only this owned OS session, without reading unrelated processes' argv.
+    pub(crate) fn session(session: u32) -> io::Result<Vec<Self>> {
+        #[cfg(target_os = "macos")]
+        let pids = macos::pids()?;
+        #[cfg(not(target_os = "macos"))]
+        let pids = std::fs::read_dir("/proc")?
+            .filter_map(|entry| entry.ok()?.file_name().to_str()?.parse::<u32>().ok())
+            .collect::<Vec<_>>();
+        let mut processes = Vec::new();
+        for pid in pids {
+            // SAFETY: getsid reads the kernel's session membership for this PID.
+            if unsafe { libc::getsid(pid as i32) } != session as i32 {
+                continue;
+            }
+            if let Some(process) = Self::read(pid)? {
+                if !process.has_exited() {
+                    processes.push(process);
+                }
+            }
+        }
+        Ok(processes)
     }
 
     /// The executable file `pid` runs, resolved by the kernel rather than the
@@ -130,9 +212,19 @@ impl OsProcess {
 
 #[cfg(not(target_os = "macos"))]
 fn query(selection: &[&str], now: i64) -> io::Result<Vec<OsProcess>> {
+    query_column(selection, "command", now)
+}
+
+/// `last` is the final, free-text column: `command` or `comm`.
+#[cfg(not(target_os = "macos"))]
+fn query_column(selection: &[&str], last: &str, now: i64) -> io::Result<Vec<OsProcess>> {
     let output = Command::new("ps")
         .args(selection)
-        .args(["-ww", "-o", "pid=,ppid=,pgid=,state=,etime=,command="])
+        .args([
+            "-ww",
+            "-o",
+            &format!("pid=,ppid=,pgid=,state=,etime=,{last}="),
+        ])
         .output()?;
     if !output.status.success() {
         if output.status.code() == Some(1) && output.stdout.is_empty() && output.stderr.is_empty() {
@@ -210,6 +302,32 @@ mod tests {
 
     use super::{parse, OsProcess};
     use crate::journal::ProcessIdentityEvidence;
+
+    #[test]
+    fn a_child_reads_with_its_kernel_name_and_directory() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .current_dir(directory.path())
+            .spawn()
+            .unwrap();
+        let named = OsProcess::sample_names().unwrap();
+        let cwd = OsProcess::cwd(child.id());
+        child.kill().unwrap();
+        child.wait().unwrap();
+        let process = named.iter().find(|p| p.pid == child.id()).unwrap();
+        assert_eq!(process.command, "sleep");
+        assert_eq!(process.ppid, std::process::id());
+        assert_eq!(cwd, Some(directory.path().canonicalize().unwrap()));
+    }
+
+    #[test]
+    fn kernel_arguments_match_the_running_program() {
+        assert_eq!(
+            OsProcess::arguments(std::process::id()).unwrap(),
+            Some(std::env::args().collect())
+        );
+    }
 
     #[test]
     fn executable_is_the_running_file_not_its_launch_path() {

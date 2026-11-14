@@ -13,8 +13,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-// Identities are shared with the runtime; ordering and the additivity proof
-// run only here (and in the runtime's tests).
+use sha2::{Digest, Sha256};
+
+// Identities are shared with the runtime; ordering runs only here (and in the
+// runtime's tests).
 #[path = "src/store/migration_build.rs"]
 mod migration_build;
 #[allow(dead_code)]
@@ -40,6 +42,16 @@ const SESSION_OPERATE_PAIRS: &[(&str, &str)] = &[
 ];
 
 fn main() {
+    println!("cargo:rerun-if-changed=src/installation/registration.m");
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
+        cc::Build::new()
+            .file("src/installation/registration.m")
+            .flag("-fobjc-arc")
+            .compile("server_registration");
+        println!("cargo:rustc-link-lib=framework=ServiceManagement");
+        println!("cargo:rustc-link-lib=framework=Foundation");
+    }
+
     if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
         println!("cargo:rerun-if-changed=src/journal/os_process/macos.c");
         cc::Build::new()
@@ -49,10 +61,17 @@ fn main() {
     let manifest_dir =
         PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set"));
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR not set"));
-    let git_root = manifest_dir
-        .ancestors()
-        .find(|ancestor| ancestor.join(".git").exists())
-        .map(Path::to_path_buf);
+    link_ghostty_vt(&manifest_dir, &out_dir);
+    // Cargo verifies extracted archives under the checkout's target directory.
+    // That enclosing repository is not the archive's source tree.
+    let git_root = (!manifest_dir.join(".cargo_vcs_info.json").exists())
+        .then(|| {
+            manifest_dir
+                .ancestors()
+                .find(|ancestor| ancestor.join(".git").exists())
+                .map(Path::to_path_buf)
+        })
+        .flatten();
     let unmerged = emit_migration_catalog(&manifest_dir, git_root.as_deref(), &out_dir);
     emit_build_provenance(&manifest_dir, git_root.as_deref(), &unmerged);
     let builtins_dir = manifest_dir.join("src/builtins");
@@ -92,8 +111,8 @@ fn emit_migration_catalog(
                 .map(str::to_string)
                 .collect()
         }
-        None => git_root
-            .map(|root| {
+        None => match git_root {
+            Some(root) => {
                 let root = root
                     .canonicalize()
                     .expect("canonicalize Loopflow source root");
@@ -101,13 +120,22 @@ fn emit_migration_catalog(
                     .canonicalize()
                     .expect("canonicalize migrations directory");
                 migration_build::merged_order(&root, &directory)
-            })
-            .unwrap_or_default(),
+            }
+            None => {
+                let path = manifest_dir.join("migration-order.txt");
+                println!("cargo:rerun-if-changed={}", path.display());
+                fs::read_to_string(path)
+                    .expect("read packaged migration order")
+                    .lines()
+                    .map(str::to_string)
+                    .collect()
+            }
+        },
     };
-    let ordered = migration_build::order_catalog(&directory, &merged_order)
+    let catalog = migration_build::order_catalog(&directory, &merged_order)
         .unwrap_or_else(|error| panic!("order migrations: {error}"));
-    let (catalog, connection) = migration_build::build_catalog(ordered)
-        .unwrap_or_else(|error| panic!("build migration catalog: {error}"));
+    let connection = migration_build::apply_catalog(&catalog)
+        .unwrap_or_else(|error| panic!("apply migration catalog: {error}"));
 
     let mut code = String::from("static MIGRATIONS: &[Migration] = &[\n");
     for entry in &catalog {
@@ -117,10 +145,9 @@ fn emit_migration_catalog(
             .unwrap_or_else(|error| panic!("canonicalize {}: {error}", entry.path.display()));
         writeln!(
             code,
-            "    Migration {{ version: {:?}, sql: include_str!({:?}), reader_floor: {:?}, merged: {} }},",
+            "    Migration {{ version: {:?}, sql: include_str!({:?}), merged: {} }},",
             entry.version,
             path.to_string_lossy(),
-            entry.reader_floor,
             entry.merged
         )
         .expect("write migration catalog");
@@ -132,6 +159,27 @@ fn emit_migration_catalog(
         migration_schema::product_schema(&connection).expect("project catalog schema reference");
     let json = serde_json::to_vec(&*schema).expect("serialize catalog schema reference");
     fs::write(out_dir.join("canonical_schema.json"), json).expect("write catalog schema reference");
+    // Test processes each get an independent copy, including nextest's one-test
+    // processes. Replaying the catalog here keeps that cost out of every fixture.
+    let fixture = out_dir.join("test-store.db");
+    let _ = fs::remove_file(&fixture);
+    for (index, entry) in catalog.iter().enumerate() {
+        let sql = fs::read(&entry.path).expect("read fixture migration");
+        let checksum = format!("{:x}", Sha256::digest(&sql));
+        connection
+            .execute(
+                "INSERT INTO schema_migrations(version,applied_at,checksum) VALUES(?1,?2,?3)",
+                rusqlite::params![entry.version, index as i64, checksum],
+            )
+            .expect("record fixture migration");
+    }
+    connection
+        .execute(
+            "VACUUM INTO ?1",
+            [fixture.to_str().expect("UTF-8 build directory")],
+        )
+        .expect("write test store image");
+
     catalog
         .into_iter()
         .filter(|entry| !entry.merged)
@@ -532,4 +580,101 @@ fn walkdir(dir: &Path) -> Vec<PathBuf> {
         }
     }
     result
+}
+
+// --- libghostty-vt ---
+
+/// Link the prebuilt libghostty-vt archive for the build target. The pin file
+/// names the Ghostty revision, the artifact generation and each target's
+/// SHA-256; `scripts/loopflow-dev.py ghostty-vt-build` produces and publishes
+/// the archives. `LOOPFLOW_GHOSTTY_VT_DIR` names a directory holding a locally
+/// built `libghostty-vt.a` instead, for offline work or a Ghostty bump.
+fn link_ghostty_vt(manifest_dir: &Path, out_dir: &Path) {
+    let pin_path = manifest_dir.join("ghostty-vt.json");
+    println!("cargo:rerun-if-changed={}", pin_path.display());
+    println!("cargo:rerun-if-env-changed=LOOPFLOW_GHOSTTY_VT_DIR");
+    let pin: GhosttyVtPin =
+        serde_json::from_str(&fs::read_to_string(&pin_path).expect("ghostty-vt.json is readable"))
+            .expect("ghostty-vt.json is valid");
+    println!("cargo:rustc-env=LOOPFLOW_GHOSTTY_REVISION={}", pin.revision);
+    let lib_dir = match env::var_os("LOOPFLOW_GHOSTTY_VT_DIR") {
+        Some(dir) => {
+            let archive = PathBuf::from(dir).join("libghostty-vt.a");
+            println!("cargo:rerun-if-changed={}", archive.display());
+            // Zig also emits a dylib here. Apple's linker prefers it even for
+            // rustc's static request; search a directory containing only the archive.
+            let dir = out_dir.join("ghostty-vt-local");
+            fs::create_dir_all(&dir).expect("create local libghostty-vt directory");
+            fs::copy(&archive, dir.join("libghostty-vt.a"))
+                .unwrap_or_else(|error| panic!("copy {}: {error}", archive.display()));
+            dir
+        }
+        None => fetch_ghostty_vt(&pin, out_dir),
+    };
+    assert!(
+        lib_dir.join("libghostty-vt.a").is_file(),
+        "{} holds no libghostty-vt.a",
+        lib_dir.display()
+    );
+    println!("cargo:rustc-link-search=native={}", lib_dir.display());
+    println!("cargo:rustc-link-lib=static=ghostty-vt");
+}
+
+/// `ghostty-vt.json`: the Ghostty revision, the artifact generation (bumped
+/// when a patch or build flag changes) and each target's archive checksum.
+#[derive(serde::Deserialize)]
+struct GhosttyVtPin {
+    revision: String,
+    artifact: String,
+    base_url: String,
+    sha256: std::collections::BTreeMap<String, String>,
+}
+
+/// The published archive for this target, downloaded once per build directory.
+fn fetch_ghostty_vt(pin: &GhosttyVtPin, out_dir: &Path) -> PathBuf {
+    let target = env::var("TARGET").expect("TARGET not set");
+    let name = format!(
+        "libghostty-vt-{}-{}-{target}.tar.gz",
+        &pin.revision[..7],
+        pin.artifact
+    );
+    let expected = pin
+        .sha256
+        .get(&target)
+        .unwrap_or_else(|| panic!("ghostty-vt.json pins no SHA-256 for {target}"));
+    let dir = out_dir.join("ghostty-vt").join(&name);
+    let stamp = dir.join("sha256");
+    if fs::read_to_string(&stamp).is_ok_and(|pinned| pinned.trim() == expected) {
+        return dir;
+    }
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).expect("create libghostty-vt directory");
+    let archive = dir.join(&name);
+    let url = format!("{}/{name}", pin.base_url);
+    let status = Command::new("curl")
+        .args(["-fsSL", "--retry", "3", "-o"])
+        .arg(&archive)
+        .arg(&url)
+        .status()
+        .expect("run curl");
+    assert!(
+        status.success(),
+        "downloading {url} failed; set LOOPFLOW_GHOSTTY_VT_DIR to a local libghostty-vt build"
+    );
+    let bytes = fs::read(&archive).expect("read downloaded archive");
+    let digest = format!("{:x}", <sha2::Sha256 as sha2::Digest>::digest(&bytes));
+    assert!(
+        &digest == expected,
+        "{name} has SHA-256 {digest}; ghostty-vt.json pins {expected}"
+    );
+    let status = Command::new("tar")
+        .arg("-xzf")
+        .arg(&archive)
+        .arg("-C")
+        .arg(&dir)
+        .status()
+        .expect("run tar");
+    assert!(status.success(), "extracting {name} failed");
+    fs::write(&stamp, expected).expect("record archive checksum");
+    dir
 }

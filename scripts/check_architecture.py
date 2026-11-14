@@ -25,7 +25,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-ARCHITECTURE = Path("docs/architecture-reference.md")
+ARCHITECTURE = Path("docs/dev/reference.md")
 MIGRATIONS = Path("rust/loopflow/src/store/migrations")
 LF_MOD = Path("rust/loopflow/src/lf/mod.rs")
 CRATE_MANIFEST = Path("rust/loopflow/Cargo.toml")
@@ -36,7 +36,9 @@ CODE_TOKEN = re.compile(r"`([^`]+)`")
 MARKDOWN_LINK = re.compile(r"\[([^]]+)]\(([^)]+)\)")
 RELEASED_MIGRATION = re.compile(r"^(\d+)\.(\d+)\.(?:(\d+)\.)?(\d{3})_[a-z0-9_]+\.sql$")
 SLUG_MIGRATION = re.compile(r"^[a-z][a-z0-9_]*\.sql$")
-COMMAND_EDGE = re.compile(r"(?<!clap::)(?:std::process::|tokio::process::)?Command::new\(\s*\"([^\"]+)\"")
+COMMAND_EDGE = re.compile(
+    r"(?<!clap::)(?:std::process::|tokio::process::)?Command::new\(\s*\"([^\"]+)\""
+)
 SHIM_MARKER = re.compile(r"architecture-shim:\s*([a-z0-9-]+)")
 GRAPH_COMMAND = re.compile(r"^\s*-\s*cmd:\s*([a-z0-9_-]+)\s*$", re.MULTILINE)
 

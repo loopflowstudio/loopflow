@@ -79,18 +79,15 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
     public let state: String?
     public let completedAt: String?
     public let dueDate: String?
-    /// The release this bug regressed in; `stable` stays below it until the fix ships.
-    public let regressedIn: String?
     public let assignee: String?
 
     enum CodingKeys: String, CodingKey {
-        case repositoryId = "repository_id", projectId = "project_id", waveId = "wave_id"
+        case repositoryId = "repo_id", projectId = "project_id", waveId = "wave_id"
         case repo
         case id, identifier, name, description, rank, state, assignee, sync, acquisition
         case linearId = "linear_id"
         case completedAt = "completed_at"
         case dueDate = "due_date"
-        case regressedIn = "regressed_in"
     }
 
     public var terminalLabel: String? {
@@ -116,7 +113,7 @@ public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
     public let completionPending: String?
     public let reason: String
     public let updatedAt: String
-    public let provider: String
+    public let provider: String?
     /// Who owns the Task on which Machine; absent when it is unowned.
     public let owner: TaskOwner?
 
@@ -137,13 +134,26 @@ public struct MachineRef: Decodable, Sendable, Hashable {
 /// The person and Machine that own a Task.
 public struct TaskOwner: Decodable, Sendable, Hashable {
     public let person: String?
-    /// The owner's lowercase Git email; shown when they have no name.
+    /// The owner's lowercase Git email: the display fallback when they have no
+    /// name, not their identity.
     public let personKey: String?
+    /// The owner's `people` id, which says who they are; nil when the claim
+    /// named none.
+    public let personId: String?
     public let machine: MachineRef
 
     enum CodingKeys: String, CodingKey {
         case person, machine
         case personKey = "person_key"
+        case personId = "person_id"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        person = try container.decodeIfPresent(String.self, forKey: .person)
+        personKey = try container.decodeIfPresent(String.self, forKey: .personKey)
+        personId = try container.decode(String?.self, forKey: .personId)
+        machine = try container.decode(MachineRef.self, forKey: .machine)
     }
 
     /// "Jack Heart on mini"; "Machine unknown" when the Machine was never recorded.
@@ -186,11 +196,10 @@ public struct TaskWorktreeSnapshot: Decodable, Sendable, Hashable {
     }
 }
 
-public enum RoadmapSection: String, Decodable, Sendable, Hashable {
-    case now
-    case waiting
-    case notStarted = "not_started"
-    case later
+/// Where a Task sits on the Wave board, derived once in Rust: the board, the
+/// sidebar's Working Tasks and every count read it.
+public enum TaskSection: String, Decodable, Sendable, Hashable {
+    case backlog, working, autonomous, done, abandoned
 }
 
 public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
@@ -210,7 +219,7 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     public let shipControl: TaskRunControl
     public let shipping: ShippingSnapshot?
     public let pr: PrSnapshot?
-    public let section: RoadmapSection
+    public let section: TaskSection
 
     enum CodingKeys: String, CodingKey {
         case task, reference, runtime, condition, actions, execution, section, pr
@@ -227,6 +236,21 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     public var isUnassigned: Bool {
         guard let runtime else { return false }
         return runtime.owner == nil && runtime.status != .unstarted && !runtime.status.isTerminal
+    }
+
+    // What a Task's Session slot does follows its state alone, never its owner:
+    // unstarted offers Start, working opens with Start, finished reveals history.
+
+    /// Not yet started and still open: it has no checkout, so no conversation to
+    /// open, and its Session slot offers Start instead.
+    public var awaitsStart: Bool { (runtime?.status ?? .unstarted) == .unstarted && !task.isTerminal }
+
+    public var isCompleted: Bool { runtime?.status.isTerminal ?? task.isTerminal }
+
+    /// Working Tasks start their conversation when opened, owned or not: opening
+    /// claims nothing. Unstarted and finished Tasks only show history.
+    public var conversationIntent: SessionOpenIntent {
+        runtime?.status.isWorking == true ? .start : .reveal
     }
 }
 

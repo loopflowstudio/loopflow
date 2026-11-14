@@ -1,30 +1,80 @@
 # Surfaces
 
 Your Tasks and conversations live in `lf`, not in a window. Open them wherever
-you already work: Loopflow Desktop, cmux, Herdr, tmux or a plain terminal.
+you already work: Loopflow Desktop, Rex, cmux, Herdr, tmux or a plain terminal.
+
+For presentation modes, layouts and recovery, read
+[Open conversations and workspaces](workspaces.md).
 
 ## Open Work where you are
 
 ```bash
-lf open loopflow://loopflow/task/LOO-12        # LOO-12's conversation, in the host you're in
-lf open loopflow://loopflow/wave/product       # the product Wave's conversation
-lf open --available                            # every conversation available for you, at once
-lf open loopflow://loopflow/task/LOO-12 --diff # conversation plus its Changes (Desktop)
+lf open loopflow://loopflow/task/LOO-12       # attach LOO-12's conversation here
+lf open --task LOO-12 --tab                  # attach in a sibling tab
+lf open --task LOO-12 --focus                # reveal its existing view
+lf open --wave product                      # the product Wave's conversation
+lf workspace --wave product                 # the Wave's Task overview
+lf open --task LOO-12 --host desktop --diff   # conversation and Changes in Desktop
 ```
 
-From a Herdr pane, `lf open` adds a Herdr workspace; from tmux, a new window
-right after this one; from cmux, a new workspace. Otherwise it opens in Desktop on
-macOS, then a plain terminal. It reads only the host's own environment
-(`HERDR_*`, `TMUX`, `CMUX_*`, Desktop's `LF_DESKTOP`) and never scans running
-apps. `--host desktop|cmux|herdr|tmux|terminal` picks one explicitly.
+Direct CLI opening attaches in the current terminal, including inside Rex.
+An agent call defaults to a sibling tab in its conversation's host. It never
+attaches inside its own tool call. Desktop navigation focuses its existing view.
 
-A conversation already live in this host is focused, draft intact. One live in
-another client is reported as `elsewhere`, with the `lf resume` command that
-moves it; opening never steals it. Open the same Task twice while its
-workspace starts and you get the one workspace.
+Ordinary terminal opening reports an already-open conversation's location and
+offers `--focus`; it does not move input or create a duplicate. `--focus` reports
+**Not open** if there is no live view. A plain terminal without sibling-tab
+support reports that limitation and gives a command to run in a terminal you
+open yourself. `--host desktop|rex|cmux|herdr|tmux|terminal` chooses a host; a
+failure never falls through to another.
+
+`lf open` resolves one conversation, independently of workspace layouts.
+`lf workspace` opens configured arrangements and repository or Wave overviews;
+`lf task view` inspects workflow. Opening a conversation does not advance a Graph
+or replay its prompt. Success means the conversation attached; attachment
+failure reaches the opening command and can be retried.
 
 A Work address names the repository by folder, then the Task or Wave. It never
 carries a path or a host, so the same link works on any machine with the repository.
+
+## Session titles
+
+```bash
+lf session rename SESSION 'Resume repair'
+```
+
+Bare `lf` starts a taskless Session with its directory name until the work is known.
+Renames follow it through the standard OSC terminal-title protocol, including
+reattachment. cmux tabs and tmux windows also receive host-specific renames;
+cmux workspaces follow the Task title while preserving hand-edited names.
+
+Rex can display the program title; its **Prefer generated titles** setting can
+override that display. Loopflow leaves this preference unchanged.
+[Rex settings](https://www.superlogical.com/rex/docs/reference/mac-settings).
+
+Herdr keeps OSC names as `terminal_title` and `terminal_title_stripped`, separate
+from manual pane/tab names. Its default Agent sidebar rows omit these values,
+and its outer title shows the host and workspace. To show Session names, add
+`terminal_title_stripped` to your Agent rows and `{terminal_title}` to your
+`ui.window_title` template. Loopflow leaves those layouts and manual names intact.
+[Herdr title and sidebar settings](https://herdr.dev/tui/docs/configuration/).
+
+## Present documentation in Desktop
+
+```bash
+lf open --host desktop --file docs/usage.md --file README.md
+```
+
+Present the original files in an attached Desktop Files view, without starting a
+host or conversation. Paths are relative to the selected checkout. Markdown and
+HTML render in read mode; active edits keep their selection and draft while
+another file becomes a tab. Desktop retains its existing remote Files transport.
+
+With no Desktop attached, the command reports paths and opens nothing. A missing
+file, invalid Work selection or unmatched view reports an error; correct the
+path or destination and retry presentation without rewriting the docs. The
+docs-first workflow reports paths and continues when presentation is unavailable.
+It never launches a terminal editor, browser or host as a fallback.
 
 ## Share a link
 
@@ -32,8 +82,8 @@ carries a path or a host, so the same link works on any machine with the reposit
 lf --task LOO-12 open --link --format markdown   # a Markdown link to LOO-12's conversation
 ```
 
-`--link` opens nothing. Paste it in a PR, a chat or a note; clicking it runs
-`lf open` and lands in Desktop, or a terminal when Desktop isn't installed.
+`--link` opens nothing. Paste it in a PR, a chat or a note; clicking it uses
+your registered `loopflow:` handler. From a terminal, pass it to `lf open`.
 Installing `lf` registers a `loopflow:` handler, leaving one you chose in place.
 With Herdr installed, Control-click opens the Work beside the clicked pane.
 
@@ -55,18 +105,29 @@ The Mac app shows the same records the commands print; it keeps no copy of its o
 
 ```bash
 lf desktop view 'state:available'                       # a Dashboard of every available conversation
-lf desktop query attention 'state:available or state:blocked'   # save it as "attention"
+lf desktop dashboard query attention 'state:available or state:blocked'   # save it as "attention"
 ```
 
 Queries take `wave:`, `task:`, `kind:task|wave` and
 `state:open|available|running|blocked|paused|idle|backlog|done`; whitespace
 means AND, and `or` and parentheses compose.
 
+### Connection recovery
+
+Desktop uses the local Loopflow server to read Work and attach Session terminals.
+Installation prepares the connection. Check availability with `lf server status`.
+The native connection row shows recovery while keeping the screen and local
+reading actions available; input waits for acknowledgement. **Retry** reconnects;
+**Move here** explicitly requests control when another viewer has it. Recovery
+never replays uncertain input. See [Connect clients](server.md) for updates,
+background access and the distinction from Machine execution destinations.
+
 ## Drive Desktop from a script
 
 `lf desktop` is Desktop's own pane API, the same kind of thing as tmux's,
 cmux's, Herdr's or Rex's. Use theirs directly in those hosts; use this one in
-Desktop. Every key and menu item is a verb here by the same name.
+Desktop. Every key and menu item is a verb here by the same name. This automation
+endpoint lives with the app; the client server has an independent lifetime.
 
 ```bash
 lf desktop run 'cargo test -p loopflow'           # a new shell tab in the Task's checkout; focus stays put
@@ -94,51 +155,74 @@ real shell tab, so the tab outlives the command.
 ## Build your own view
 
 A herdr, tmux or other GUI pane uses the reads below. Each streams with
-`--watch --json`: one JSON line now, another each time its answer changes,
+`--subscribe --json`: one JSON line now, another each time its answer changes,
 until stdin closes.
 
 ```bash
-lf wave show --all --watch --json         # every Wave's plan and Tasks
-lf task list --watch --json               # open Tasks, as your sidebar would list them
-lf task status LOO-12 --watch --json      # one Task with its conversations, Graph processes and comments
-lf session list --watch --json            # conversations, with which ones are available for you
-lf history --since 7d --watch --json      # what Sessions did, tagged with their Task and Wave
-lf ps --watch --json                      # live lf call trees
-lf planning status --watch --json         # planning sync; keeps it exchanged while it runs
-lf desktop plans --watch --json           # every plan a repository window shows
+lf wave show --all --subscribe --json         # every Wave's plan and Tasks
+lf task list --subscribe --json               # open Tasks, as your sidebar would list them
+lf task status LOO-12 --subscribe --json      # one Task with its conversations, Graph processes and thread
+lf session list --subscribe --json            # conversations, with which ones are available for you
+lf session history --since 7d --subscribe --json   # what Sessions did, tagged with their Task and Wave
+lf process list --subscribe --json                      # live lf call trees
+lf repo plan --subscribe --json         # planning sync; keeps it exchanged while it runs
+lf desktop view list --subscribe --json           # every plan a repository window shows
 ```
 
 ```json
 {"answers": null, "unavailable": null, "body": {…}}
 ```
 
-Every Task read prints the same Task row, each fact once:
+Every Task list read (`lf task list`, `lf wave show`, `lf wave status`,
+`lf plan list`) prints the same Task record the server sends:
 
 ```json
-{"id": "task_…", "identifier": "LOO-12", "title": "Search transcripts", "wave": "infra",
- "project": "Search", "state": "active", "reason": "…", "workflow": {"name": "code", "stage": "review"},
- "pr": {"number": 1719, "url": "…", "phase": "open"}, "next": "lf task run LOO-12"}
+{"task": {"id": "task_…", "identifier": "LOO-12", "name": "Search transcripts", "wave_id": "…", …},
+ "runtime": {"status": "active", "reason": "…", "owner": {…}, …},
+ "next_move": {"owner": "task", "reason": "…"},
+ "condition": {"state": "clear", "reason": "…", …},
+ "graph_name": "code", "pr": {"phase": "open", …}, "section": "now", …}
 ```
 
-`state` is one of `unstarted`, `idle`, `active`, `moving`,
-`shipping`, `done` or `abandoned`; `next` is the command that moves the Task
-on, `null` while it moves by itself.
+`runtime.status` is one of `unstarted`, `idle`, `active`, `moving`,
+`shipping`, `done` or `abandoned` (`runtime` is `null` before a first run);
+`next_move.owner` (`user`, `wave`, `task`, `ci`, `external`) says who moves it
+on. `lf task status <issue> --json` prints one
+Task as a row, each fact once, with its Sessions, Graph processes and
+thread.
 
-A Session row:
+A Session record:
 
 ```json
 {"id": "session_…", "title": "Search transcripts", "provider": "claude", "interactive": true,
- "state": "active", "available": true, "task": "task_…", "wave": "infra",
- "cwd": "/src/loopflow.loo-12", "agent_process_id": "…"}
+ "state": "active", "availability": "available", "work": {"kind": "task", "id": "task_…"},
+ "task_ids": ["task_…"], "wave_id": "…", "cwd": "/src/loopflow.loo-12", "actions": [{"kind": "open", …}], …}
 ```
 
 `state` is what its agent process shows (`active`, `detached`, `closed`,
-`unknown`); `available` says it is ready for your next turn. `lf resume <id>`
-opens it.
+`unknown`); `availability` is `"available"` when it is ready for your next
+turn and `null` while it works. `lf resume <id>` opens it.
 
-Desktop's own presentation (sections, conditions, controls) is
-`lf desktop plan`, `lf desktop task`, `lf desktop wave`, `lf desktop done` and
-`lf desktop sessions`, with the same `--watch`.
+`turn` is its current or last turn, `null` when nothing is known:
+
+```json
+"turn": {"id": "5b0c…", "state": "ended", "started_at": "2026-11-10T16:25:37Z",
+         "ended_at": "2026-11-10T16:27:51Z", "model": "claude-opus-5-5",
+         "usage": {"input_tokens": 41200, "cached_input_tokens": 38000, "output_tokens": 1100}}
+```
+
+It is the last turn in the provider's transcript. `id` is the provider's name
+for it, `state` is `running`, `ended` or `interrupted`, `ended_at` is `null`
+while it runs and `usage` counts its tokens so far. A conversation whose agent
+reports no status is `available` whenever its turn is not `running`.
+A provider process lf isn't holding lists with `"raw": true` and its provider
+conversation ID as `id`.
+
+Desktop reads the same records through `lf plan list`, `lf task show`,
+`lf wave plan`, `lf task list --closed` and `lf session list`, with the
+same `--subscribe`. `lf wave status` and `lf wave show` exchange planning with the
+tracker first; `lf wave plan` and `lf plan list` read what the store
+records, and `lf wave sync` refreshes it.
 
 `body` is what the same command prints with `--json` alone. Write
 `{"id": 1, "args": {"query": "parser"}}` to stdin to change what it reads; the
@@ -149,13 +233,13 @@ A development build with unreleased migrations reads a preview copy; its
 One-shot reads for everything else:
 
 ```bash
-lf desktop view 'wave:product' --plan     # what a Dashboard would show, for your own host; opens nothing
+lf desktop view show 'wave:product'     # what a Dashboard would show, for your own host; opens nothing
 lf --task LOO-12 open --link --json       # the target, its fallback command and the route it would take
 lf desktop events --json                  # Desktop's window and pane changes, one line each
 lf help desktop --all --json              # every Desktop command's arguments and result schema
 ```
 
-`desktop view --plan`, `query`, `pin`, `rename` and `layout` work without macOS
+`desktop view show`, `desktop dashboard` and `desktop layout` work without macOS
 or a running Desktop; they read and write the same saved Dashboards Desktop
 uses. A program running in a Desktop shell can report its own state with
 Program Status (OSC 7501, Rex's protocol); a blocked report marks the pane available.

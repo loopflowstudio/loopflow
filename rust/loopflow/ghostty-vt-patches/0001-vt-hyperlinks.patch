@@ -1,0 +1,90 @@
+--- a/src/terminal/formatter.zig
++++ b/src/terminal/formatter.zig
+@@ -1456,10 +1456,9 @@
+ 
+                 // Hyperlink state
+                 hyperlink: {
+-                    // We currently only emit hyperlinks for HTML. In the
+-                    // future we can support emitting OSC 8 hyperlinks for
+-                    // VT output as well.
+-                    if (comptime emit != .html) break :hyperlink;
++                    // Styled output carries hyperlinks: HTML as anchors,
++                    // VT as OSC 8 so a replay restores them.
++                    if (comptime !formatStyled(emit)) break :hyperlink;
+ 
+                     // Get the hyperlink ID. This ID is our internal ID,
+                     // not necessarily the OSC8 ID.
+@@ -1679,7 +1678,7 @@
+             // cell must belong to the currently open hyperlink (or none).
+             // Transitions take the slow path. This is checked after blank
+             // accounting because blank cells never touch hyperlink state.
+-            if (comptime emit == .html) {
++            if (comptime formatStyled(emit)) {
+                 if (cell.hyperlink) {
+                     const run_id = run_hyperlink_id orelse break;
+                     const cell_id = self.page.lookupHyperlink(cell) orelse break;
+@@ -2080,7 +2079,13 @@
+         uri: []const u8,
+     ) std.Io.Writer.Error!void {
+         switch (emit) {
+-            .plain, .vt => unreachable,
++            .plain => unreachable,
++
++            .vt => {
++                try writer.writeAll("\x1b]8;;");
++                try writer.writeAll(uri);
++                try writer.writeAll("\x1b\\");
++            },
+ 
+             // layout since we're primarily using it as a CSS wrapper.
+             .html => {
+@@ -2102,7 +2107,8 @@
+     ) std.Io.Writer.Error!void {
+         const str: []const u8 = switch (emit) {
+             .html => "</a>",
+-            .plain, .vt => return,
++            .vt => "\x1b]8;;\x1b\\",
++            .plain => return,
+         };
+ 
+         try writer.writeAll(str);
+@@ -6804,6 +6810,39 @@
+     try testing.expect(has_red_bg_line1);
+ }
+ 
++test "Page VT with hyperlinks" {
++    const testing = std.testing;
++    const alloc = testing.allocator;
++    const io = testing.io;
++
++    var builder: std.Io.Writer.Allocating = .init(alloc);
++    defer builder.deinit();
++
++    var t = try Terminal.init(io, alloc, .{
++        .cols = 80,
++        .rows = 24,
++    });
++    defer t.deinit(alloc);
++
++    var s = t.vtStream();
++    defer s.deinit();
++
++    s.nextSlice("\x1b]8;;https://example.com\x1b\\link text\x1b]8;;\x1b\\ normal \x1b]8;;https://example.org\x1b\\more");
++
++    const pages = &t.screens.active.pages;
++    const page = pages.pages.last.?.page();
++    var formatter: PageFormatter = .init(page, .{ .emit = .vt });
++
++    try formatter.format(&builder.writer);
++    const output = builder.writer.buffered();
++
++    try testing.expectEqualStrings(
++        "\x1b]8;;https://example.com\x1b\\link text\x1b]8;;\x1b\\ normal " ++
++            "\x1b]8;;https://example.org\x1b\\more\x1b]8;;\x1b\\",
++        output,
++    );
++}
++
+ test "Page HTML with hyperlinks" {
+     const testing = std.testing;
+     const alloc = testing.allocator;

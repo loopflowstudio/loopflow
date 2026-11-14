@@ -1,0 +1,29 @@
+[
+  {
+    "provider": "claude",
+    "scope": "default",
+    "outcome": "ready",
+    "account_id": "engineering",
+    "login": "engineering@example.com",
+    "reason": "the only login ready for this launch",
+    "without_order": null
+  },
+  {
+    "provider": "codex",
+    "scope": "repository",
+    "outcome": "ready",
+    "account_id": "manabot",
+    "login": "manabot-eng@example.com",
+    "reason": "this repository's order names only it",
+    "without_order": "jack@example.com, 60% left"
+  },
+  {
+    "provider": "claude",
+    "scope": "automatic",
+    "outcome": "login_needed",
+    "account_id": null,
+    "login": null,
+    "reason": "'jack@example.com' credential is missing",
+    "without_order": null
+  }
+]

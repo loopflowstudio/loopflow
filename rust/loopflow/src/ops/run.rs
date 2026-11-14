@@ -19,7 +19,6 @@ pub struct WorkBinding {
     pub subjects: Vec<String>,
     pub cwd: PathBuf,
     pub context: String,
-    pub agent: Option<String>,
 }
 
 pub(crate) fn render_task_context(
@@ -253,7 +252,6 @@ async fn bind_selected_work(
             wave_name: wave.as_ref().map(|w| w.slug().to_owned()),
             cwd,
             context,
-            agent: task.agent,
         });
     }
 
@@ -283,7 +281,6 @@ async fn bind_selected_work(
         wave_name: Some(wave.slug().to_string()),
         cwd,
         context,
-        agent: None,
     })
 }
 
@@ -318,6 +315,9 @@ pub(crate) async fn select_execution_work(
         if let Some(selected) = select_work(store, cwd, WorkSelection::default()).await? {
             return Ok(Some(selected));
         }
+    }
+    if crate::journal::request::active() {
+        return Ok(None);
     }
     match std::env::var(crate::lf::WORK_DECLARATION_ENV) {
         Ok(selector) => select_work(store, cwd, WorkSelection::parse(&selector)?).await,
@@ -412,13 +412,11 @@ mod tests {
             branch: "jack/runtime-research".to_string(),
             base_commit: "deadbeef".to_string(),
             parent_pr_id: None,
-            agent: None,
             created_at: now,
             updated_at: now,
             rank: 0,
             assignee: None,
             due_date: None,
-            regressed_in: None,
             state: None,
             completed_at: None,
             observation: Observation::NotRequired,
@@ -475,20 +473,15 @@ mod tests {
         )
         .unwrap();
         let task = store
-            .create_task(
-                &crate::work::task::NewTask {
-                    repository_id: store.sqlite.ensure_repository(wave.repo()).unwrap(),
-                    due_date: None,
-                    id: TaskId::new(),
-                    project_id: Some(project.id),
-                    title: "Inspect before starting".into(),
-                    description: String::new(),
-                },
-                Some(std::sync::Arc::new(crate::store::PlanningLocks::new(
-                    tempfile::tempfile().unwrap(),
-                ))),
-            )
-            .await
+            .sqlite
+            .create_task(&crate::work::task::NewTask {
+                repository_id: store.sqlite.ensure_repository(wave.repo()).unwrap(),
+                due_date: None,
+                id: TaskId::new(),
+                project_id: Some(project.id),
+                title: "Inspect before starting".into(),
+                description: String::new(),
+            })
             .unwrap();
         let report = explain_context(
             &store,
@@ -603,7 +596,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn explanation_preserves_remote_and_unknown_location_without_local_access() {
+    async fn explanation_binds_execution_to_the_local_checkout_only() {
         use crate::ops::context::{explain_context, ContextFact};
         let (directory, store) = test_store().await;
         let wave = Wave::new(
@@ -615,47 +608,39 @@ mod tests {
         let project = project(&wave, "runtime", "project-runtime");
         store.create_project(&project).await.unwrap();
         let task = task(&store, &wave, &project, "/not/a/local/checkout".into()).await;
-        let peer = crate::durable::MachineId::new();
-        store.add_machine(&peer, "peer", "peer").await.unwrap();
-        let conn = rusqlite::Connection::open(directory.path().join("loopflow.db")).unwrap();
-        for machine in [Some(peer.as_str()), None] {
-            conn.execute(
-                "UPDATE tasks SET checkout_machine_id=?2 WHERE id=?1",
-                rusqlite::params![task.id.as_str(), machine],
-            )
-            .unwrap();
-            let report = explain_context(
-                &store,
-                directory.path(),
-                WorkSelection {
-                    task: Some(task.id.as_str()),
-                    wave: None,
-                },
-                None,
-                None,
-            )
-            .await;
-            assert_eq!(
-                report.checkout,
-                ContextFact::Bound {
-                    value: "/not/a/local/checkout".into(),
-                    source: "recorded_checkout".into()
-                }
-            );
-            match machine {
-                Some(id) => assert_eq!(
-                    report.execution_machine,
-                    ContextFact::Bound {
-                        value: id.into(),
-                        source: "recorded_checkout".into()
-                    }
-                ),
-                None => assert!(matches!(
-                    report.execution_machine,
-                    ContextFact::Unavailable { .. }
-                )),
+        let local = store.local_machine().await.unwrap().id;
+        let selection = || WorkSelection {
+            task: Some(task.id.as_str()),
+            wave: None,
+        };
+        let report = explain_context(&store, directory.path(), selection(), None, None).await;
+        assert_eq!(
+            report.checkout,
+            ContextFact::Bound {
+                value: "/not/a/local/checkout".into(),
+                source: "recorded_checkout".into()
             }
-        }
+        );
+        assert_eq!(
+            report.execution_machine,
+            ContextFact::Bound {
+                value: local.to_string(),
+                source: "recorded_checkout".into()
+            }
+        );
+        let conn = rusqlite::Connection::open(directory.path().join("loopflow.db")).unwrap();
+        conn.execute(
+            "DELETE FROM task_checkouts WHERE task_id=?1",
+            [task.id.as_str()],
+        )
+        .unwrap();
+        let report = explain_context(&store, directory.path(), selection(), None, None).await;
+        assert_eq!(
+            report.execution_machine,
+            ContextFact::Unavailable {
+                reason: "No local execution location; peer execution has not been observed".into()
+            }
+        );
     }
 
     #[tokio::test]
@@ -704,9 +689,6 @@ mod tests {
         ] {
             let prepared = crate::prompt::process::prepare_process_prompt(
                 &crate::config::Config {
-                    diff_files: false,
-                    diff: false,
-                    paste: false,
                     ..Default::default()
                 },
                 crate::prompt::process::ProcessPromptInput {
@@ -1030,7 +1012,7 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(binding.work, work);
-            let capture = crate::session_record::CaptureHandle::begin_at(
+            let capture = crate::session_record::SessionRecorder::begin_at(
                 directory.path(),
                 crate::session_record::SessionCaptureSpec {
                     harness: "codex".into(),
@@ -1051,6 +1033,7 @@ mod tests {
                     }),
                 },
             )
+            .map(crate::process::LfProcessRuntime::new)
             .unwrap();
             assert_eq!(
                 store
@@ -1084,7 +1067,13 @@ mod tests {
             // The resuming invocation and its capture share this fixture's store.
             let resumed = crate::journal::with_test_ledger(
                 crate::store::database_path_from_env().unwrap(),
-                || crate::lf::commands::util::resume_session(&capture.artifact_key(), &history),
+                || {
+                    crate::lf::commands::util::resume_session(
+                        &capture.artifact_key(),
+                        &history,
+                        false,
+                    )
+                },
             );
             let error = resumed.unwrap_err().to_string();
             assert!(error.contains("was deleted"), "{error}");

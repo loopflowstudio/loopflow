@@ -73,10 +73,10 @@ enum LocalWaveAgentLauncher {
                                                     "error": error.errorDescription ?? "unknown"])
             throw error
         }
-        // `lf doctor --json` exits 1 when a check fails, but its stdout is the
+        // `lf machine doctor --json` exits 1 when a check fails, but its stdout is the
         // report the telemetry dashboard must show. A red monitor cannot hide
         // itself behind the query runner's generic non-zero handling.
-        if subargs == ["doctor", "--json"], !result.stdout.isEmpty {
+        if subargs == ["machine", "doctor", "--json"], !result.stdout.isEmpty {
             return result.stdout
         }
         guard result.status == 0 else {
@@ -147,9 +147,9 @@ enum LocalWaveAgentLauncher {
         try Task.checkCancellation()
         let deadline = ProcessInfo.processInfo.systemUptime + 30
         let process = queryProcess(args, cwd: cwd)
-        let stdout = Pipe()
-        let stderr = Pipe()
-        let stdin = input.map { _ in Pipe() }
+        let stdout = Pipe.uninherited()
+        let stderr = Pipe.uninherited()
+        let stdin = input.map { _ in Pipe.uninherited() }
         process.standardOutput = stdout
         process.standardError = stderr
         process.standardInput = stdin.map { $0 as Any } ?? FileHandle.nullDevice

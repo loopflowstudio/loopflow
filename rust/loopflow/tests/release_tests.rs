@@ -8,8 +8,9 @@ use std::time::{Duration, Instant};
 
 use loopflow::ops::{
     bump_version, generate_release, preview_release_notes, release_bump, release_check,
-    release_notes, release_run, release_status, release_tag, NullProgress, OpsError, Progress,
-    ReleaseNotesDegradation, ReleaseNotesStatus, ReleaseRunOutcome,
+    release_issues, release_notes, release_promote, release_regress, release_run, release_status,
+    release_tag, NullProgress, OpsError, Progress, ReleaseNotesDegradation, ReleaseNotesStatus,
+    ReleaseRunOutcome,
 };
 use loopflow::repository::RepoId;
 use loopflow::store::{open_store, storage_config_from_env, StorageConfig};
@@ -1473,7 +1474,7 @@ fn daily_run_moves_stable_to_the_newest_soaked_release() {
             ("v0.9.2", 8, false),
             ("v0.9.1", 20, true),
         ],
-        None,
+        Regressions::NoLabels,
     );
     assert_eq!(
         effects,
@@ -1482,14 +1483,14 @@ fn daily_run_moves_stable_to_the_newest_soaked_release() {
 }
 
 #[test]
-fn an_open_regression_task_holds_stable_below_the_release_it_regressed_in() {
+fn an_open_regression_issue_holds_stable_below_the_release_it_regressed_in() {
     let effects = run_stable_advance(
         &[
             ("v0.9.3", 9, false),
             ("v0.9.2", 12, false),
             ("v0.9.1", 20, true),
         ],
-        Some("0.9.3"),
+        Regressions::labelled([("v0.9.3", regression_issue("OPEN", "", None))]),
     );
     assert_eq!(
         effects,
@@ -1498,14 +1499,78 @@ fn an_open_regression_task_holds_stable_below_the_release_it_regressed_in() {
 }
 
 #[test]
-fn release_status_names_the_task_holding_stable() {
+fn a_regression_closed_as_completed_releases_the_next_soaked_release() {
+    let effects = run_stable_advance(
+        &[
+            ("v0.9.3", 9, false),
+            ("v0.9.2", 12, false),
+            ("v0.9.1", 20, true),
+        ],
+        Regressions::labelled([("v0.9.2", regression_issue("CLOSED", "COMPLETED", Some(10)))]),
+    );
+    assert_eq!(
+        effects,
+        "publisher promote --tag v0.9.3\ngh release edit v0.9.3 --latest\n"
+    );
+}
+
+#[test]
+fn a_release_published_before_the_fix_stays_held() {
+    let effects = run_stable_advance(
+        &[("v0.9.2", 12, false), ("v0.9.1", 20, true)],
+        Regressions::labelled([("v0.9.2", regression_issue("CLOSED", "COMPLETED", Some(10)))]),
+    );
+    assert_eq!(effects, "");
+}
+
+#[test]
+fn a_reopened_regression_holds_stable_again() {
+    let effects = run_stable_advance(
+        &[("v0.9.2", 12, false), ("v0.9.1", 20, true)],
+        Regressions::labelled([("v0.9.2", regression_issue("OPEN", "REOPENED", Some(20)))]),
+    );
+    assert_eq!(effects, "");
+}
+
+#[test]
+fn a_regression_closed_as_not_planned_holds_nothing() {
+    let effects = run_stable_advance(
+        &[("v0.9.2", 12, false), ("v0.9.1", 20, true)],
+        Regressions::labelled([("v0.9.2", regression_issue("CLOSED", "NOT_PLANNED", Some(1)))]),
+    );
+    assert_eq!(
+        effects,
+        "publisher promote --tag v0.9.2\ngh release edit v0.9.2 --latest\n"
+    );
+}
+
+#[test]
+fn unread_regressions_hold_stable_and_say_why() {
+    let releases = [("v0.9.2", 12, false), ("v0.9.1", 20, true)];
+    assert_eq!(run_stable_advance(&releases, Regressions::Unreadable), "");
+
+    let (repo, _log, _env) = stable_fixture(&releases, Regressions::Unreadable);
+    let stable = release_status(repo.path(), None).unwrap().stable.unwrap();
+    assert_eq!(stable.current.unwrap().tag, "v0.9.1");
+    assert_eq!(stable.next, None);
+    let holds: Vec<String> = stable.holds.iter().map(ToString::to_string).collect();
+    assert_eq!(holds.len(), 1);
+    assert!(holds[0].contains("issues are disabled"), "{holds:?}");
+
+    let error = release_check(repo.path(), None).unwrap_err().to_string();
+    assert!(error.contains("stable would hold"), "{error}");
+    assert!(error.contains("issues are disabled"), "{error}");
+}
+
+#[test]
+fn release_status_names_the_issue_holding_stable() {
     let (repo, _log, _env) = stable_fixture(
         &[
             ("v0.9.3", 9, false),
             ("v0.9.2", 2, false),
             ("v0.9.1", 20, true),
         ],
-        Some("0.9.3"),
+        Regressions::labelled([("v0.9.3", regression_issue("OPEN", "", None))]),
     );
 
     let status = release_status(repo.path(), None).unwrap();
@@ -1517,15 +1582,243 @@ fn release_status_names_the_task_holding_stable() {
     assert_eq!(stable.next, None);
     let holds: Vec<String> = stable.holds.iter().map(ToString::to_string).collect();
     assert_eq!(holds.len(), 2);
-    assert!(holds[0].ends_with(" holds v0.9.3"), "{holds:?}");
+    assert_eq!(holds[0], "#7 holds v0.9.3");
     assert!(holds[1].starts_with("v0.9.2 soaks until "), "{holds:?}");
 }
 
+#[test]
+fn release_issues_filters_by_version_and_shows_the_hold() {
+    let numbered = |number: u64, mut issue: serde_json::Value| {
+        issue["number"] = number.into();
+        issue
+    };
+    let (repo, _log, _env) = stable_fixture(
+        &[
+            ("v0.9.3", 9, false),
+            ("v0.9.2", 12, false),
+            ("v0.9.1", 20, true),
+        ],
+        Regressions::labelled([
+            ("v0.9.3", regression_issue("OPEN", "", None)),
+            ("v0.9.2", numbered(8, regression_issue("OPEN", "", None))),
+            (
+                "v0.9.1",
+                numbered(9, regression_issue("CLOSED", "COMPLETED", Some(25))),
+            ),
+        ]),
+    );
+    let numbers = |version| -> Vec<u64> {
+        release_issues(repo.path(), version, None)
+            .unwrap()
+            .iter()
+            .map(|issue| issue.number)
+            .collect()
+    };
+
+    // v0.9.3 carries the bug v0.9.2 regressed in; v0.9.2 does not carry v0.9.3's.
+    assert_eq!(numbers(Some("v0.9.3")), [7, 8]);
+    assert_eq!(numbers(Some("0.9.2")), [8]);
+    assert_eq!(numbers(Some("v0.9.1")), [9]);
+    assert_eq!(numbers(None), [7, 8]);
+
+    let issues = release_issues(repo.path(), Some("v0.9.3"), None).unwrap();
+    assert_eq!(issues[0].title, "Sessions lose their name");
+    assert_eq!(issues[0].state, "OPEN");
+    assert_eq!(issues[0].url, "https://github.com/acme/app/issues/7");
+    assert_eq!(issues[0].regressed_in, "v0.9.3");
+    assert_eq!(issues[0].holds, ["v0.9.3"]);
+    assert_eq!(issues[1].holds, ["v0.9.3", "v0.9.2"]);
+    assert!(
+        release_issues(repo.path(), Some("v0.9.1"), None).unwrap()[0]
+            .holds
+            .is_empty()
+    );
+}
+
+#[test]
+fn release_issues_refuses_a_version_it_cannot_read_and_fails_on_unread_regressions() {
+    let (repo, _log, _env) = stable_fixture(&[("v0.9.1", 20, true)], Regressions::Unreadable);
+
+    let error = release_issues(repo.path(), Some("soon"), None).unwrap_err();
+    assert!(error.to_string().contains("invalid release version: soon"));
+
+    let error = release_issues(repo.path(), None, None).unwrap_err();
+    assert!(error.to_string().contains("issues are disabled"), "{error}");
+}
+
+#[test]
+fn release_regress_creates_a_missing_label_once_and_files_the_issue() {
+    let repo = TestRepo::new();
+    let state = tempfile::tempdir().unwrap();
+    let log = state.path().join("gh.log");
+    let labels = state.path().join("labels");
+    fs::write(&labels, "bug\n").unwrap();
+    let gh = format!(
+        r#"#!/bin/sh
+[ "$1" != --version ] || exit 0
+case "$1 $2" in
+  'label list') cat '{labels}'; exit 0;;
+  'label create') echo "gh $*" >> '{log}'; echo "$3" >> '{labels}'; exit 0;;
+  'issue create') echo "gh $*" >> '{log}'; echo https://github.com/acme/app/issues/12; exit 0;;
+esac
+exit 1
+"#,
+        labels = labels.display(),
+        log = log.display(),
+    );
+    let _env = EnvGuard::new(&[("gh", gh.as_str())]);
+
+    let url = release_regress(repo.path(), "0.15.3", "Sessions lose their name").unwrap();
+    release_regress(repo.path(), "v0.15.3", "Tabs lose their order").unwrap();
+
+    assert_eq!(url, "https://github.com/acme/app/issues/12");
+    assert_eq!(
+        fs::read_to_string(&log).unwrap(),
+        "gh label create regressed-in:v0.15.3\n\
+         gh issue create --title Sessions lose their name --label regressed-in:v0.15.3 --body Regressed in v0.15.3.\n\
+         gh issue create --title Tabs lose their order --label regressed-in:v0.15.3 --body Regressed in v0.15.3.\n"
+    );
+
+    let error = release_regress(repo.path(), "soon", "Nope").unwrap_err();
+    assert!(error.to_string().contains("invalid release version: soon"));
+}
+
+#[test]
+fn release_promote_moves_stable_past_soak() {
+    let (repo, log, _env) = stable_fixture(
+        &[
+            ("v0.9.3", 1, false),
+            ("v0.9.2", 8, false),
+            ("v0.9.1", 20, true),
+        ],
+        Regressions::NoLabels,
+    );
+
+    let stable = release_promote(repo.path(), None, false, &NullProgress).unwrap();
+
+    assert_eq!(stable.next.unwrap().tag, "v0.9.2");
+    assert_eq!(
+        fs::read_to_string(&log).unwrap(),
+        "publisher promote --tag v0.9.2\ngh release edit v0.9.2 --latest\n"
+    );
+}
+
+#[test]
+fn release_promote_stops_at_an_open_regression() {
+    let (repo, log, _env) = stable_fixture(
+        &[("v0.9.2", 12, false), ("v0.9.1", 20, true)],
+        Regressions::labelled([("v0.9.2", regression_issue("OPEN", "", None))]),
+    );
+
+    let stable = release_promote(repo.path(), None, false, &NullProgress).unwrap();
+
+    assert_eq!(stable.next, None);
+    let holds: Vec<String> = stable.holds.iter().map(ToString::to_string).collect();
+    assert_eq!(holds, ["#7 holds v0.9.2"]);
+    assert!(!log.exists());
+}
+
+#[test]
+fn release_promote_dry_run_says_what_would_move_and_leaves_latest() {
+    let (repo, log, _env) = stable_fixture(
+        &[("v0.9.2", 8, false), ("v0.9.1", 20, true)],
+        Regressions::NoLabels,
+    );
+
+    let stable = release_promote(repo.path(), None, true, &NullProgress).unwrap();
+
+    assert_eq!(stable.current.unwrap().tag, "v0.9.1");
+    assert_eq!(stable.next.unwrap().tag, "v0.9.2");
+    assert!(!log.exists());
+}
+
+#[test]
+fn release_promote_fails_with_the_reason_when_regressions_are_unread() {
+    let releases = [("v0.9.2", 12, false), ("v0.9.1", 20, true)];
+    let (repo, log, _env) = stable_fixture(&releases, Regressions::Unreadable);
+
+    for dry_run in [false, true] {
+        let error = release_promote(repo.path(), None, dry_run, &NullProgress).unwrap_err();
+        assert!(error.to_string().contains("issues are disabled"), "{error}");
+    }
+    assert!(!log.exists());
+}
+
+#[test]
+fn release_promote_needs_a_github_release_target() {
+    let repo = TestRepo::new();
+    let _env = EnvGuard::new(&[("gh", "#!/bin/sh\nexit 0\n")]);
+
+    let error = release_promote(repo.path(), None, true, &NullProgress).unwrap_err();
+
+    assert!(error.to_string().contains("no stable stream"), "{error}");
+}
+
+/// What the fake `gh` answers for the repository's regressions.
+enum Regressions {
+    /// A repository with no labels, for which `gh` prints nothing.
+    NoLabels,
+    /// `(label, issue)` pairs.
+    Labelled(Vec<(String, serde_json::Value)>),
+    /// Labels read; the issue read fails.
+    Unreadable,
+}
+
+impl Regressions {
+    fn labelled<const N: usize>(issues: [(&str, serde_json::Value); N]) -> Self {
+        Self::Labelled(
+            issues
+                .into_iter()
+                .map(|(version, issue)| (format!("regressed-in:{version}"), issue))
+                .collect(),
+        )
+    }
+
+    /// The `label list` and `issue list` arms of a fake `gh` script.
+    fn gh_arms(&self) -> String {
+        let (labels, issues) = match self {
+            Self::NoLabels => (String::new(), String::new()),
+            Self::Labelled(issues) => {
+                let labels: Vec<&str> = issues.iter().map(|(label, _)| label.as_str()).collect();
+                let reads: String = issues
+                    .iter()
+                    .map(|(label, issue)| {
+                        format!(
+                            "'{label}') echo '{}'; exit 0;; ",
+                            serde_json::json!([issue])
+                        )
+                    })
+                    .collect();
+                (
+                    format!("bug\nregressed-in:soon\n{}", labels.join("\n")),
+                    format!("  'issue list') case \"$6\" in {reads}esac; exit 1;;\n"),
+                )
+            }
+            Self::Unreadable => (
+                "regressed-in:v0.9.2".to_string(),
+                "  'issue list') echo 'issues are disabled' >&2; exit 1;;\n".to_string(),
+            ),
+        };
+        format!("  'label list') printf '%s' '{labels}'; exit 0;;\n{issues}")
+    }
+}
+
+/// Issue #7 as `gh issue list --json` prints it, closed `closed_days_ago`.
+fn regression_issue(state: &str, reason: &str, closed_days_ago: Option<i64>) -> serde_json::Value {
+    let closed_at = closed_days_ago
+        .map(|days| (chrono::Utc::now() - chrono::TimeDelta::days(days)).to_rfc3339());
+    serde_json::json!({
+        "number": 7, "title": "Sessions lose their name",
+        "url": "https://github.com/acme/app/issues/7",
+        "state": state, "stateReason": reason, "closedAt": closed_at,
+    })
+}
+
 /// Run the daily release with nothing to release against published `(tag,
-/// days ago, latest)` releases, optionally after marking a regression Task,
-/// and return the stream effects it logged.
-fn run_stable_advance(releases: &[(&str, i64, bool)], regressed_in: Option<&str>) -> String {
-    let (repo, log, _env) = stable_fixture(releases, regressed_in);
+/// days ago, latest)` releases and `regressions`, and return the stream
+/// effects it logged.
+fn run_stable_advance(releases: &[(&str, i64, bool)], regressions: Regressions) -> String {
+    let (repo, log, _env) = stable_fixture(releases, regressions);
 
     let outcome = release_run(repo.path(), "patch", None, &NullProgress).unwrap();
 
@@ -1534,11 +1827,11 @@ fn run_stable_advance(releases: &[(&str, i64, bool)], regressed_in: Option<&str>
 }
 
 /// A `completion: github-release` repository whose fake `gh` lists published
-/// `(tag, days ago, latest)` releases and logs stream effects, optionally
-/// with a regression Task marked.
+/// `(tag, days ago, latest)` releases and `regressions`, and logs stream
+/// effects.
 fn stable_fixture(
     releases: &[(&str, i64, bool)],
-    regressed_in: Option<&str>,
+    regressions: Regressions,
 ) -> (TestRepo, PathBuf, EnvGuard) {
     let repo = TestRepo::new();
     let log = repo.path().join("effects.log");
@@ -1553,8 +1846,9 @@ fn stable_fixture(
         .collect();
     let releases = serde_json::Value::Array(releases);
     let gh = format!(
-        "#!/bin/sh\n[ \"$1\" != --version ] || exit 0\ncase \"$1 $2\" in\n  'release view') echo '{{\"isDraft\":false}}'; exit 0;;\n  'release list') cat <<'JSON'\n{releases}\nJSON\n    exit 0;;\n  'release edit') echo \"gh $*\" >> '{log}'; exit 0;;\n  'pr list'|'run list') echo '[]'; exit 0;;\nesac\necho \"unexpected gh invocation: $*\" >&2\nexit 1\n",
-        log = log.display()
+        "#!/bin/sh\n[ \"$1\" != --version ] || exit 0\ncase \"$1 $2\" in\n  'release view') echo '{{\"isDraft\":false}}'; exit 0;;\n  'release list') cat <<'JSON'\n{releases}\nJSON\n    exit 0;;\n  'release edit') echo \"gh $*\" >> '{log}'; exit 0;;\n  'pr list'|'run list') echo '[]'; exit 0;;\n{regressions}esac\necho \"unexpected gh invocation: $*\" >&2\nexit 1\n",
+        log = log.display(),
+        regressions = regressions.gh_arms(),
     );
     let env = EnvGuard::new(&[("gh", gh.as_str())]);
     repo.create_file(
@@ -1573,17 +1867,6 @@ fn stable_fixture(
     repo.commit("Configure release streams");
     git(&repo, &["push", "origin", "HEAD"]);
     git(&repo, &["tag", "v0.9.3"]);
-    if let Some(version) = regressed_in {
-        let task = loopflow::ops::task::task_create(
-            repo.path(),
-            None,
-            Some("Sessions lose their name".into()),
-            None,
-            Some(format!("v{version}")),
-        )
-        .unwrap();
-        assert_eq!(task.regressed_in, Some(format!("v{version}")));
-    }
     (repo, log, env)
 }
 
@@ -1651,6 +1934,62 @@ fn release_run_builds_fixes_merged_after_the_release_pr() {
     assert_eq!(
         git_output_bare(&repo, &["rev-parse", "refs/tags/v0.9.2"]),
         fixed
+    );
+}
+
+#[test]
+fn release_run_fetches_a_release_merge_it_has_not_seen() {
+    let repo = TestRepo::new();
+    prepare_candidate_release_repo(&repo);
+    fs::write(
+        repo.path().join(".lf/config.yaml"),
+        "release:\n  targets:\n    default:\n      workflow: release.yml\n      verify: ['test -f feature.txt']\n",
+    )
+    .expect("write release config");
+    git(&repo, &["commit", "-am", "Verify release sources"]);
+    git(&repo, &["push", "origin", "HEAD"]);
+    // GitHub merges the release PR after this run fetched main: the merge
+    // commit exists only on origin until the run fetches it.
+    let merger = tempfile::tempdir().expect("merger clone");
+    let merger_path = merger.path().to_string_lossy();
+    let bare = repo.bare_path().to_string_lossy().to_string();
+    let merger_git = |args: &[&str]| {
+        let output = Command::new("git")
+            .args([
+                "-c",
+                "user.name=GitHub",
+                "-c",
+                "user.email=noreply@github.com",
+            ])
+            .args(args)
+            .current_dir(merger.path())
+            .output()
+            .expect("run git");
+        assert!(output.status.success(), "git {args:?} failed");
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    };
+    merger_git(&["clone", "--quiet", &bare, "."]);
+    merger_git(&["commit", "--allow-empty", "-m", "release: v0.9.2 (#1176)"]);
+    let merge = merger_git(&["rev-parse", "HEAD"]);
+    let state = tempfile::tempdir().expect("release state");
+    let log_path = state.path().join("gh.log");
+    let gh_script = write_gh_candidate_release_script(&log_path.to_string_lossy(), "success")
+        .replace(
+            r#"head="$(git rev-parse HEAD)""#,
+            &format!(r#"git -C '{merger_path}' push --quiet origin HEAD:main >&2; head="{merge}""#),
+        );
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
+
+    let outcome = release_run(repo.path(), "patch", None, &NullProgress)
+        .expect("release should fetch its merge commit and finish");
+
+    let ReleaseRunOutcome::Released(receipt) = outcome else {
+        panic!("expected a released receipt");
+    };
+    assert_eq!(receipt.commit, merge);
+    assert_eq!(
+        git_output_bare(&repo, &["rev-parse", "refs/tags/v0.9.2"]),
+        merge
     );
 }
 

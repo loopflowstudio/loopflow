@@ -41,14 +41,12 @@ struct WaveDetailPane: View {
 
     @Environment(\.palette) private var palette
     @State private var showHistory = false
-    @State private var showRealignment = false
 
     var body: some View {
         VStack(spacing: 0) {
             header
             HStack {
                 Button("Project history") { showHistory = true }
-                Button("Realign Projects…") { showRealignment = true }
             }.padding(.bottom, 8)
             Divider()
             HSplitView {
@@ -66,9 +64,6 @@ struct WaveDetailPane: View {
 
 
             }
-        }
-        .sheet(isPresented: $showRealignment) {
-            ProjectRealignmentView(repo: repoPath)
         }
         .sheet(isPresented: $showHistory) {
             ProjectHistoryView(wave: wave.name, repo: repoPath, sourceReference: nil)

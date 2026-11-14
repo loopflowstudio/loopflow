@@ -37,7 +37,8 @@ pub fn isolated_read(repo: &Path, home: &Path, args: &[&str], input: Option<&str
     }
     let output = child.wait_with_output().unwrap();
     assert!(
-        output.status.success() || (args == ["doctor", "--json"] && !output.stdout.is_empty()),
+        output.status.success()
+            || (args == ["machine", "doctor", "--json"] && !output.stdout.is_empty()),
         "{args:?}: {}",
         String::from_utf8_lossy(&output.stderr)
     );

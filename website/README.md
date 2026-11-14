@@ -22,7 +22,11 @@ The homepage's pictures are HTML, not captures. They show the intended product,
 including commands and output that `lf` does not print yet.
 
 Edit documentation in the repository's `docs/` directory. The dev commands
-sync it into the website; `website/docs/` is generated.
+sync it into the website; `website/docs/` is generated. User guides live directly under `docs/`; developer
+architecture, its checked reference and portable export live under `docs/dev/`.
+The developer website continues to serve them at `/architecture` and its child
+URLs. Register new pages in the appropriate area in `main.py` so navigation,
+Markdown endpoints and link rewriting agree.
 
 ## Testing
 
@@ -40,7 +44,7 @@ cd website && uv run python dev.py test -a     # Accessibility tests only
 cd website && uv run python dev.py sync-docs   # Refresh generated docs copy
 ```
 
-After changing `docs/architecture.md` or its website rendering, regenerate the
+After changing `docs/dev/index.md` or its website rendering, regenerate the
 portable HTML before gate and include it in the same change:
 
 ```bash
@@ -50,7 +54,7 @@ uv run python ../scripts/render_architecture_html.py
 uv run python ../scripts/render_architecture_html.py --check
 ```
 
-The website suite checks that `docs/architecture.html` matches the rendered
+The website suite checks that `docs/dev/index.html` matches the rendered
 source. A Markdown-only edit can fail that check.
 
 The introductions in `README.md` and `docs/index.md` share the same text. When

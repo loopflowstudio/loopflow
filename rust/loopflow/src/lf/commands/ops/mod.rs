@@ -2,10 +2,9 @@ use crate::agent::{run_agent, ProcessConfig};
 use crate::config::{load_config_or_default, Config};
 use crate::git::worktree_name::WorktreeName;
 use crate::git::worktrees::{
-    create_from_placement_plan, diff_shortstats, list_worktrees, list_worktrees_timed,
-    main_repo_root, plan_placement, prune_worktrees, sibling_worktree_name,
-    sibling_worktree_name_with_main, PlacementStrategy, PullRequestState, WorktreeOwnership,
-    WorktreePruneReport, WorktreeSegment,
+    diff_shortstats, list_worktrees, list_worktrees_timed, main_repo_root, prune_worktrees,
+    sibling_worktree_name, sibling_worktree_name_with_main, PullRequestState, WorktreeOwnership,
+    WorktreePruneReport,
 };
 use crate::git::{current_branch, get_default_branch};
 use crate::graph::load_skill;
@@ -18,13 +17,11 @@ use crate::ops::branch_prune::{
 };
 use crate::ops::OpsError;
 use crate::ops::{
-    abandon_branch, abort_sync_after_authorization, abort_sync_for_resolution, arm,
-    commit_workflow, continue_sync_after_authorization, continue_sync_for_resolution,
-    create_or_update_pr, current_pr, finish_arm_after_sync, finish_submit_after_sync, plan_sync,
-    preview_release_notes, recover_sync, release_bump, release_check, release_notes,
-    release_publish, release_run, release_status, release_tag, submit, sync_class_name,
-    sync_strategy_name, sync_with_plan, AbandonOptions, CommitOptions, LandOptions, PrOptions,
-    Progress, SyncOptions,
+    abort_sync_after_authorization, abort_sync_for_resolution, continue_sync_after_authorization,
+    continue_sync_for_resolution, current_pr, plan_sync, preview_release_notes, recover_sync,
+    release_bump, release_check, release_issues, release_notes, release_promote, release_publish,
+    release_regress, release_status, release_tag, sync_class_name, sync_strategy_name,
+    sync_with_plan, Progress, SyncOptions,
 };
 use crate::prompt::process::prepare_process_prompt;
 use crate::prompt::process::ContextSourceOverrides;
@@ -41,20 +38,32 @@ use std::time::Instant;
 mod review;
 
 pub fn run_pr(cmd: Option<&PrCommand>, cli_agent: Option<&str>) -> Result<()> {
+    use crate::engine::pr as engine;
     let progress = CliProgress;
-    let wait_and_fix = matches!(
-        cmd,
-        Some(PrCommand::Land {
-            wait_and_fix: true,
-            ..
-        })
-    );
+    let repo_root = find_repo_root()?;
+    let land_input = |strict: &bool,
+                      local: bool,
+                      wait_and_fix: bool,
+                      worktree: &Option<String>,
+                      message: &Option<String>,
+                      title: &Option<String>,
+                      body: &Option<String>| engine::LandInput {
+        strict: *strict,
+        local,
+        wait_and_fix,
+        worktree: worktree.clone(),
+        message: message.clone(),
+        title: title.clone(),
+        body: body.clone(),
+        agent: cli_agent.map(str::to_string),
+    };
     match cmd {
-        None => pr_status(),
-        Some(PrCommand::Reconcile) => {
-            let repo = find_repo_root()?;
-            crate::ops::task::reconcile_checkout_pr(&repo)?;
-            let report = crate::ops::pr_landing::reconcile_repository(&repo)?;
+        None => pr_status(&repo_root),
+        Some(PrCommand::Reconcile { json }) => {
+            let report = engine::reconcile(&repo_root)?;
+            if *json {
+                print_json(&report)?;
+            }
             if !report.errors.is_empty() {
                 anyhow::bail!(report.errors.join("\n"));
             }
@@ -65,14 +74,53 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_agent: Option<&str>) -> Result<()> {
             watch,
             logs,
             required,
-        }) => pr_checks(*watch, *logs, *required),
-        Some(PrCommand::RequestReview { pr, reviewer }) => review::request(pr.as_deref(), reviewer),
-        Some(PrCommand::Reviews { pr, json }) => review::show(pr.as_deref(), *json),
-        Some(PrCommand::Publish { title, body }) => {
-            publish_pr(title.clone(), body.clone(), cli_agent, &progress)
+            json,
+        }) => pr_checks(&repo_root, *watch, *logs, *required, *json),
+        Some(PrCommand::RequestReview { pr, reviewer, json }) => {
+            let requested = engine::request_review(&repo_root, pr.as_deref(), reviewer)
+                .map_err(engine::exit_of)?;
+            if *json {
+                print_json(&requested)?;
+            }
+            Ok(())
         }
-        Some(PrCommand::Open { title, body }) => {
-            open_pr(title.clone(), body.clone(), cli_agent, &progress)
+        Some(PrCommand::Reviews { pr, json }) => {
+            let reviews = engine::reviews(&repo_root, pr.as_deref()).map_err(engine::exit_of)?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&reviews)?);
+            } else {
+                print!("{}", review::render(&reviews));
+            }
+            Ok(())
+        }
+        Some(PrCommand::Publish { title, body, json }) => {
+            let published = engine::publish(
+                &repo_root,
+                title.as_deref(),
+                body.as_deref(),
+                cli_agent,
+                &progress,
+            )?;
+            print_published(&published, *json)
+        }
+        Some(PrCommand::Open { title, body, json }) => {
+            let published = engine::open(
+                &repo_root,
+                title.as_deref(),
+                body.as_deref(),
+                cli_agent,
+                &progress,
+            )?;
+            // The PR exists — print it before presenting so a failed
+            // review-surface launch fails only `pr open` and never hides the PR.
+            print_published(&published, *json)?;
+            crate::ops::present_pr_review(&published.url).map_err(|err| {
+                anyhow!(
+                    "PR available at {} but opening it for review failed: {err}",
+                    published.url
+                )
+            })?;
+            Ok(())
         }
         Some(PrCommand::Submit {
             strict,
@@ -80,19 +128,19 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_agent: Option<&str>) -> Result<()> {
             message,
             title,
             body,
-        }) => submit_current(
-            &LandOptions {
-                strict: *strict,
-                local: false,
-                wait_and_fix: false,
-                worktree: worktree.clone(),
-                commit_message: message.clone(),
-                pr_title: title.clone(),
-                pr_body: body.clone(),
-                agent: cli_agent.map(str::to_string),
-            },
-            &progress,
-        ),
+            json,
+        }) => {
+            let prepared = engine::submit(
+                &repo_root,
+                &land_input(strict, false, false, worktree, message, title, body),
+                &progress,
+            )?;
+            if *json {
+                print_json(&prepared)?;
+            }
+            progress.status("Ready to land — click merge on the PR once checks pass.");
+            Ok(())
+        }
         Some(PrCommand::Arm {
             strict,
             local,
@@ -100,40 +148,90 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_agent: Option<&str>) -> Result<()> {
             message,
             title,
             body,
-        })
-        | Some(PrCommand::Land {
-            wait_and_fix: _,
+            json,
+        }) => {
+            let landed = engine::arm(
+                &repo_root,
+                &land_input(strict, *local, false, worktree, message, title, body),
+                &progress,
+            )?;
+            if *json {
+                print_json(&landed)?;
+            }
+            Ok(())
+        }
+        Some(PrCommand::Land {
+            wait_and_fix,
             strict,
             local,
             worktree,
             message,
             title,
             body,
-        }) => land_current(
-            &LandOptions {
-                strict: *strict,
-                local: *local,
-                wait_and_fix,
-                worktree: worktree.clone(),
-                commit_message: message.clone(),
-                pr_title: title.clone(),
-                pr_body: body.clone(),
-                agent: cli_agent.map(str::to_string),
-            },
-            &progress,
-        ),
-        Some(PrCommand::Abandon { force, branch }) => {
-            abandon_current(branch.as_deref(), *force, &progress)
+            json,
+        }) => {
+            let landed = engine::carry_land(
+                &repo_root,
+                &land_input(
+                    strict,
+                    *local,
+                    *wait_and_fix,
+                    worktree,
+                    message,
+                    title,
+                    body,
+                ),
+                &progress,
+            )?;
+            if *json {
+                print_json(&landed)?;
+            }
+            Ok(())
+        }
+        Some(PrCommand::Abandon {
+            force,
+            branch,
+            json,
+        }) => {
+            let abandoned = engine::abandon(&repo_root, branch.as_deref(), *force, &progress)?;
+            if *json {
+                print_json(&abandoned)?;
+            }
+            Ok(())
         }
     }
+}
+
+fn print_json(value: &impl serde::Serialize) -> Result<()> {
+    println!("{}", serde_json::to_string(value)?);
+    Ok(())
+}
+
+/// Print the PR's state and URL; the raw URL when GitHub state wasn't re-read.
+fn print_published(published: &crate::engine::pr::Published, json: bool) -> Result<()> {
+    if json {
+        return print_json(published);
+    }
+    let verb = if published.created {
+        "created"
+    } else {
+        "updated"
+    };
+    match &published.pr {
+        Some(pr) => println!("{verb} #{} {} {}", pr.number, pr.state, published.url),
+        None => println!("{verb} {}", published.url),
+    }
+    Ok(())
 }
 
 pub fn run_release(cmd: &ReleaseCommand) -> Result<()> {
     let progress = CliProgress;
     match cmd {
-        ReleaseCommand::Run { version, target } => {
-            release_run_cmd(version.as_deref(), target.as_deref(), &progress)
-        }
+        ReleaseCommand::Run {
+            version,
+            target,
+            json,
+        } => release_run_cmd(version.as_deref(), target.as_deref(), *json, &progress),
         ReleaseCommand::Check { target } => release_check_cmd(target.as_deref()),
         ReleaseCommand::Notes {
             version,
@@ -170,6 +268,18 @@ pub fn run_release(cmd: &ReleaseCommand) -> Result<()> {
             Ok(())
         }
         ReleaseCommand::Status { target } => release_status_cmd(target.as_deref()),
+        ReleaseCommand::Issues {
+            version,
+            json,
+            target,
+        } => release_issues_cmd(version.as_deref(), *json, target.as_deref()),
+        ReleaseCommand::Regress { version, title } => {
+            println!("{}", release_regress(&find_repo_root()?, version, title)?);
+            Ok(())
+        }
+        ReleaseCommand::Promote { dry_run, target } => {
+            release_promote_cmd(*dry_run, target.as_deref(), &progress)
+        }
     }
 }
 
@@ -200,36 +310,33 @@ impl Progress for CliProgress {
     }
 }
 
-pub fn run_sync(
-    onto: Option<&str>,
-    plan_only: bool,
-    manual: bool,
-    continue_sync: bool,
-    abort: bool,
-    adopt: bool,
-) -> Result<()> {
+pub fn run_sync(input: &crate::engine::checkout::SyncInput<'_>, json: bool) -> Result<()> {
     let repo_root = crate::repo::require_repo_root(&std::env::current_dir()?, "lf sync")?;
-    run_sync_in(
-        &repo_root,
+    let outcome = crate::engine::checkout::carry_sync(&repo_root, input, &CliProgress)?;
+    if json {
+        println!("{}", serde_json::to_string(&outcome)?);
+    } else {
+        println!("{}", outcome.render());
+    }
+    Ok(())
+}
+
+/// `lf sync` in `repo_root`. A sync that moves the branch first announces
+/// itself to the launcher that started it detached, if one did.
+pub(crate) fn run_sync_in(
+    repo_root: &Path,
+    input: &crate::engine::checkout::SyncInput<'_>,
+    progress: &impl Progress,
+) -> Result<crate::engine::checkout::Sync> {
+    use crate::engine::checkout::Sync;
+    let crate::engine::checkout::SyncInput {
         onto,
-        plan_only,
+        preview: plan_only,
         manual,
         continue_sync,
         abort,
         adopt,
-    )
-}
-
-pub(crate) fn run_sync_in(
-    repo_root: &Path,
-    onto: Option<&str>,
-    plan_only: bool,
-    manual: bool,
-    continue_sync: bool,
-    abort: bool,
-    adopt: bool,
-) -> Result<()> {
-    let progress = &CliProgress;
+    } = *input;
     if onto.is_some() && (continue_sync || abort) {
         return Err(anyhow!(
             "a sync target cannot be combined with --continue or --abort"
@@ -252,8 +359,9 @@ pub(crate) fn run_sync_in(
         } else {
             continue_sync_for_resolution(repo_root, false)?;
         }
-        progress.status("Sync complete; branch remains local.");
-        return Ok(());
+        return Ok(Sync::Finished {
+            message: "Sync complete; branch remains local.".into(),
+        });
     }
     if abort {
         if adopt {
@@ -267,8 +375,15 @@ pub(crate) fn run_sync_in(
         } else {
             abort_sync_for_resolution(repo_root, false)?;
         }
-        progress.status("Sync aborted.");
-        return Ok(());
+        return Ok(Sync::Finished {
+            message: "Sync aborted.".into(),
+        });
+    }
+    if !plan_only {
+        crate::engine::launch::carry(
+            "checkout.sync",
+            format!("sync onto {}", onto.unwrap_or("the branch it follows")),
+        )?;
     }
     let started = Instant::now();
     let default = get_default_branch(repo_root)?;
@@ -277,20 +392,23 @@ pub(crate) fn run_sync_in(
     if !plan_only && (onto.is_none() || (on_main && onto == Some(upstream.as_str()))) {
         crate::ops::checkout::refresh_main(repo_root, progress)?;
         if on_main && onto.is_none_or(|target| target == upstream) {
-            progress.status("Main is current; unpublished commits and edits remain local.");
-            return Ok(());
+            return Ok(Sync::Finished {
+                message: "Main is current; unpublished commits and edits remain local.".into(),
+            });
         }
     }
-    // A Task stack owns its sync target: the live parent branch until merge,
-    // then the default branch. An explicit override could silently drop work.
+    // An explicit default branch detaches the child using its recorded fork;
+    // ordinary sync continues to follow the live parent.
     let stacked = if on_main {
         None
     } else {
         crate::ops::task::task_stack(repo_root)?
     };
-    if stacked.is_some() && onto.is_some() {
+    let detach =
+        stacked.is_some() && onto.is_some_and(|target| target == default || target == upstream);
+    if stacked.is_some() && onto.is_some() && !detach {
         return Err(anyhow!(
-            "stacked Task syncs choose their parent automatically; omit the target"
+            "use the default branch to detach this Task, or omit the target to sync its parent"
         ));
     }
     let stacked_onto = stacked
@@ -298,8 +416,12 @@ pub(crate) fn run_sync_in(
         .and_then(|stacked| stacked.parent_branch.as_ref())
         .map(|branch| format!("origin/{branch}"));
     let fork_base = stacked.as_ref().map(|stacked| stacked.fork_base.clone());
-    let default_target = if on_main { upstream } else { default.clone() };
-    let target = stacked_onto.as_deref().or(onto).unwrap_or(&default_target);
+    let default_target = if on_main { &upstream } else { &default };
+    let target = if detach {
+        upstream.as_str()
+    } else {
+        stacked_onto.as_deref().or(onto).unwrap_or(default_target)
+    };
     if !plan_only {
         crate::git::fetch_tracking_ref(repo_root, target)?;
     }
@@ -307,8 +429,7 @@ pub(crate) fn run_sync_in(
     // runs is the one the metric records.
     let mut plan = plan_sync(repo_root, Some(target), fork_base.clone())?;
     if plan_only {
-        print_sync_plan(&plan);
-        return Ok(());
+        return Ok(Sync::Planned { plan });
     }
     // Checkpoint ordinary edits so their conflicts reach the merge resolver,
     // rather than surfacing during stash restoration after the resolver is gone.
@@ -355,15 +476,13 @@ pub(crate) fn run_sync_in(
             }
         })?
     };
-    if let Some(stacked) = stacked.as_ref() {
-        crate::ops::task::record_stack_sync(
-            stacked,
-            &verification.target_sha,
-            stacked.parent_branch.is_none(),
-        )?;
-    }
     if manual {
-        return Ok(());
+        return Ok(Sync::Finished {
+            message: format!(
+                "Synced onto {}; the sync and edits remain local.",
+                plan.base_ref
+            ),
+        });
     }
     record_ops_metric(
         repo_root,
@@ -382,7 +501,9 @@ pub(crate) fn run_sync_in(
             "exit_status": "ok",
         }),
     );
-    Ok(())
+    Ok(Sync::Finished {
+        message: format!("Synced onto {}.", plan.base_ref),
+    })
 }
 
 /// Checkpoint ordinary edits while retaining telemetry's staged and working contents.
@@ -420,22 +541,6 @@ fn checkpoint_uncommitted_work(repo: &Path, base: &str, progress: &impl Progress
     )
     .map_err(|error| anyhow!("checkpoint saved; index refresh failed: {error}"))?;
     Ok(true)
-}
-
-fn print_sync_plan(plan: &crate::ops::SyncPlan) {
-    println!("branch: {}", plan.branch);
-    println!("base: {}", plan.base_ref);
-    if let Some(fork_base) = &plan.fork_base {
-        println!("fork_base: {fork_base}");
-    }
-    println!("class: {}", sync_class_name(&plan.class));
-    println!("strategy: {}", sync_strategy_name(&plan.strategy));
-    println!("unique_commits: {}", plan.unique_commits);
-    println!("changed_files: {}", plan.changed_files.len());
-    println!(
-        "protected: {}",
-        matches!(plan.class, crate::ops::SyncClass::Protected)
-    );
 }
 
 /// Hand a conflicted sync to exactly one recovery agent under the owning
@@ -491,7 +596,7 @@ mod sync_performance_tests {
 
 /// Run a PR-mutating op; on a sync conflict, launch the sync agent to
 /// resolve it and retry once. A second conflict is a real error.
-fn with_sync_retry<T>(
+pub(crate) fn with_sync_retry<T>(
     repo_root: &Path,
     label: &str,
     progress: &impl Progress,
@@ -520,163 +625,8 @@ fn with_sync_retry<T>(
     }
 }
 
-fn land_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    land_repo(&repo_root, options, progress)
-}
-
-pub(crate) fn land_repo(
-    repo_root: &Path,
-    options: &LandOptions,
-    progress: &impl Progress,
-) -> Result<()> {
-    let (checkout, _) = crate::ops::land::resolve_repos(repo_root, options.worktree.as_deref())?;
-    if !options.local {
-        if let Some((task, pr, state)) = crate::ops::task::reconcile_checkout_pr(&checkout)? {
-            let unchanged = pr.phase() == crate::work::task::PrPhase::Merged
-                && crate::git::git_stdout(
-                    &checkout,
-                    &["status", "--porcelain", "--", ".", ":(exclude)scratch"],
-                )?
-                .trim()
-                .is_empty()
-                && (pr.head_sha() == Some(crate::git::rev_parse(&checkout, "HEAD")?.as_str())
-                    || crate::ops::landed_at(
-                        &checkout,
-                        &crate::git::integration_base(&checkout)?,
-                        "HEAD",
-                    )?);
-            if unchanged {
-                let next = match state {
-                    crate::durable::TaskState::Done => {
-                        format!("Task {} is complete.", task.identifier)
-                    }
-                    crate::durable::TaskState::Abandoned => {
-                        format!("Task {} is abandoned.", task.identifier)
-                    }
-                    _ => format!(
-                        "Complete the accepted outcome with lf task complete {}.",
-                        task.identifier
-                    ),
-                };
-                progress.status(&format!("Pull request already merged. {next}"));
-                return Ok(());
-            }
-        }
-    }
-    // The wave home stays put on land.
-    let pr = with_sync_retry(repo_root, "land", progress, |repo, integrated| {
-        if integrated {
-            finish_arm_after_sync(repo, options, progress, &|_| {})
-        } else {
-            arm(repo, options, progress)
-        }
-    })?;
-    if let Some(pr) = pr {
-        if options.wait_and_fix {
-            crate::agent::register_interrupt_cleanup(|| {
-                eprintln!("Landing wait interrupted; merge intent retained.");
-            });
-            crate::ops::pr_landing::wait_for_merge(repo_root, options, &pr).map_err(|error| {
-                match error {
-                    OpsError::DeliveryHeld(reason) => {
-                        anyhow::Error::new(crate::process::GraphHeld(reason))
-                    }
-                    error => anyhow::Error::new(error),
-                }
-            })?;
-            progress.status("Pull request merged; Task completion can proceed.");
-            return Ok(());
-        }
-        progress.status(&format!(
-            "PR #{} handed off; lf pr reconcile checks delivery.",
-            pr.number
-        ));
-    }
-    Ok(())
-}
-
-fn submit_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    with_sync_retry(&repo_root, "submit", progress, |repo, integrated| {
-        if integrated {
-            finish_submit_after_sync(repo, options, progress)
-        } else {
-            submit(repo, options, progress)
-        }
-    })?;
-    progress.status("Ready to land — click merge on the PR once checks pass.");
-    Ok(())
-}
-
-/// Push and create/update the PR with the requested readiness. Opens no browser.
-fn prepare_current_pr(
-    title: Option<String>,
-    body: Option<String>,
-    agent_override: Option<&str>,
-    draft: bool,
-    progress: &impl Progress,
-) -> Result<crate::ops::PrResult> {
-    let repo_root = find_repo_root()?;
-    let result = create_or_update_pr(
-        &repo_root,
-        &PrOptions {
-            draft,
-            title,
-            body,
-            agent: agent_override.map(str::to_string),
-        },
-        progress,
-    )?;
-    Ok(result)
-}
-
-fn publish_pr(
-    title: Option<String>,
-    body: Option<String>,
-    agent_override: Option<&str>,
-    progress: &impl Progress,
-) -> Result<()> {
-    let result = prepare_current_pr(title, body, agent_override, false, progress)?;
-    print_pr_result(&result);
-    Ok(())
-}
-
-fn open_pr(
-    title: Option<String>,
-    body: Option<String>,
-    agent_override: Option<&str>,
-    progress: &impl Progress,
-) -> Result<()> {
-    let result = prepare_current_pr(title, body, agent_override, true, progress)?;
-    // The PR exists — print the URL before presenting so a failed
-    // review-surface launch fails only `pr open` and never hides the PR.
-    print_pr_result(&result);
-    crate::ops::present_pr_review(&result.url).map_err(|err| {
-        anyhow!(
-            "PR available at {} but opening it for review failed: {err}",
-            result.url
-        )
-    })?;
-    Ok(())
-}
-
-/// Print the PR's state and URL. Falls back to the raw URL when
-/// GitHub state can't be re-read.
-fn print_pr_result(result: &crate::ops::PrResult) {
-    let verb = if result.created { "created" } else { "updated" };
-    match find_repo_root()
-        .ok()
-        .and_then(|repo| current_pr(&repo).ok()?)
-    {
-        Some(pr) => println!("{verb} #{} {} {}", pr.number, pr.state, result.url),
-        None => println!("{verb} {}", result.url),
-    }
-}
-
-fn pr_status() -> Result<()> {
-    let repo_root = find_repo_root()?;
-    match current_pr(&repo_root)? {
+fn pr_status(repo_root: &Path) -> Result<()> {
+    match current_pr(repo_root)? {
         Some(pr) => {
             println!("#{} {} {} {}", pr.number, pr.state, pr.branch, pr.url);
         }
@@ -720,40 +670,28 @@ pub fn run_commit(
     no_add: bool,
     paths: &[String],
     agent_override: Option<&str>,
+    json: bool,
 ) -> Result<()> {
     let repo_root = find_repo_root()?;
-    if !paths.is_empty() {
-        return Ok(crate::ops::commit_selected(&repo_root, paths, message)?);
-    }
-    let _ = commit_workflow(
+    let committed = crate::engine::checkout::commit(
         &repo_root,
-        &CommitOptions {
-            add: !no_add,
-            push,
-            message: message.map(str::to_string),
-            agent: agent_override.map(str::to_string),
-            ..CommitOptions::for_task("commit")
-        },
+        message,
+        push,
+        no_add,
+        paths,
+        agent_override,
         &CliProgress,
-        &|_| {},
     )?;
+    if json {
+        println!("{}", serde_json::to_string(&committed)?);
+    }
     Ok(())
 }
 
-fn abandon_current(branch: Option<&str>, force: bool, progress: &impl Progress) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    abandon_branch(
-        &repo_root,
-        &AbandonOptions {
-            branch: branch.map(str::to_string),
-            force,
-        },
-        progress,
-    )?;
-    Ok(())
-}
-
-fn planning_wave(repo: &std::path::Path, explicit: Option<&str>) -> Result<Option<String>> {
+pub(crate) fn planning_wave(
+    repo: &std::path::Path,
+    explicit: Option<&str>,
+) -> Result<Option<String>> {
     use crate::work::wave::context::WaveResolveError;
     match crate::work::wave::context::resolve_managed_wave_sync(Some(repo), explicit) {
         Ok(wave) => Ok(Some(wave.slug().to_string())),
@@ -768,36 +706,21 @@ pub fn connect_wave(
     all: bool,
     team_key: Option<&str>,
     team_name: Option<&str>,
+    json: bool,
 ) -> Result<()> {
-    let progress = &CliProgress;
-    let ambient_wave = |explicit| planning_wave(repo_root, explicit);
-    let targets = if all {
-        crate::ops::linear::list_local_waves(repo_root)?
-    } else {
-        let explicit = wave;
-        // Wave connection is a creation graph: its positional name may select a
-        // wave not yet registered (it links a wave directory to
-        // Linear, not a registry row). Normalize-only for explicit;
-        // ambient still uses the shared validating resolver.
-        let name = if let Some(raw) = explicit {
-            crate::ops::normalize_wave_name(raw)
-                .ok_or_else(|| anyhow!("wave connect requires a non-empty wave name"))?
-        } else {
-            ambient_wave(None)?
-                .ok_or_else(|| anyhow!("cannot determine wave; run `lf wave connect <name>`"))?
-        };
-        vec![name]
-    };
-    for wave in targets {
-        let result = crate::ops::linear::connect(
-            repo_root,
-            &crate::ops::linear::LinearInitOptions {
-                wave: Some(wave),
-                team_key: team_key.map(str::to_string),
-                team_name: team_name.map(str::to_string),
-            },
-            progress,
-        )?;
+    let results = crate::engine::wave::planning_connect(
+        repo_root,
+        wave,
+        all,
+        team_key,
+        team_name,
+        &CliProgress,
+    )?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&results)?);
+        return Ok(());
+    }
+    for result in &results {
         let initiative_state = if result.created { "created" } else { "linked" };
         let team_state = if result.team_created {
             format!(
@@ -814,6 +737,12 @@ pub fn connect_wave(
             "{}: Linear Initiative {} ({initiative_state}){team_state}",
             result.wave, result.initiative_id
         );
+        if let crate::ops::wave_lifecycle::AuthoredFiles::Uncommitted { reason } = &result.files {
+            println!(
+                ".lf/wave/{} is not committed on the main checkout: {reason}",
+                result.wave
+            );
+        }
     }
     Ok(())
 }
@@ -848,33 +777,55 @@ pub fn sync_planning(
     Ok(())
 }
 
+/// What `lf wave sync` refreshed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PlanningRefresh {
+    /// Git planning: the repository's whole plan.
+    Repository,
+    /// One Wave, from its Linear Initiative.
+    Wave(String),
+    /// A Wave with no Initiative has nothing to exchange; its local planning stands.
+    Unconnected(String),
+}
+
+impl PlanningRefresh {
+    pub fn wave(&self) -> Option<&str> {
+        match self {
+            Self::Repository => None,
+            Self::Wave(wave) | Self::Unconnected(wave) => Some(wave),
+        }
+    }
+}
+
 /// Refresh shared planning before `wave status --sync` reads it: the Wave from
 /// Linear, or the repository's Git planning ref, whose exchange is per repository.
-/// Returns the Wave a Linear refresh resolved.
-pub fn refresh_status(directory: &std::path::Path, wave: Option<&str>) -> Result<Option<String>> {
+pub fn refresh_status(directory: &std::path::Path, wave: Option<&str>) -> Result<PlanningRefresh> {
     let repo = crate::repo::working_directory_in(directory)?;
-    if crate::lf::commands::planning::plans_through_git(&repo)? {
-        crate::lf::commands::planning::refresh(&repo)?;
-        return Ok(None);
+    if crate::lf::commands::plan::plans_through_git(&repo)? {
+        crate::lf::commands::plan::refresh(&repo)?;
+        return Ok(PlanningRefresh::Repository);
     }
     let wave =
         planning_wave(&repo, wave)?.ok_or_else(|| anyhow::anyhow!("Select a Wave to refresh"))?;
+    if crate::ops::linear::read_initiative(&repo, &wave).is_none() {
+        return Ok(PlanningRefresh::Unconnected(wave));
+    }
     // The Team delta brings changes and comments in and pending saves go out,
     // so a save left by an outage is delivered on the next refresh.
     if let Err(error) = crate::ops::planning_sync::refresh_directory(&repo) {
         tracing::debug!(%error, "planning delivery pending before refresh");
     }
     tokio::runtime::Runtime::new()?.block_on(crate::ops::linear::refresh_wave(&repo, &wave))?;
-    Ok(Some(wave))
+    Ok(PlanningRefresh::Wave(wave))
 }
 
-pub fn reteam(repo: &std::path::Path, apply: bool) -> Result<()> {
-    let result = crate::ops::linear::reteam(
-        repo,
-        &crate::ops::linear::LinearReteamOptions { apply },
-        &CliProgress,
-    )?;
-    print_pm_reteam_result(&result);
+pub fn reteam(repo: &std::path::Path, apply: bool, json: bool) -> Result<()> {
+    let result = crate::engine::wave::planning_reteam(repo, apply, &CliProgress)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&result)?);
+    } else {
+        print_pm_reteam_result(&result);
+    }
     Ok(())
 }
 
@@ -981,11 +932,17 @@ fn release_check_cmd(target_name: Option<&str>) -> Result<()> {
 fn release_run_cmd(
     version_input: Option<&str>,
     target_name: Option<&str>,
+    json: bool,
     progress: &impl Progress,
 ) -> Result<()> {
     let repo_root = find_repo_root()?;
-    let input = version_input.unwrap_or("patch");
-    match release_run(&repo_root, input, target_name, progress)? {
+    let outcome =
+        crate::engine::repo::carry_release(&repo_root, version_input, target_name, progress)?;
+    if json {
+        println!("{}", serde_json::to_string(&outcome)?);
+        return Ok(());
+    }
+    match outcome {
         crate::ops::ReleaseRunOutcome::NoChanges {
             target, latest_tag, ..
         } => {
@@ -1078,6 +1035,56 @@ fn release_tag_cmd(version: &str, target_name: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+fn release_issues_cmd(version: Option<&str>, json: bool, target_name: Option<&str>) -> Result<()> {
+    let issues = release_issues(&find_repo_root()?, version, target_name)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&issues)?);
+        return Ok(());
+    }
+    if issues.is_empty() {
+        match version {
+            Some(version) => println!("No regressions reported against {version}."),
+            None => println!("No open regressions."),
+        }
+    }
+    for issue in &issues {
+        println!(
+            "{} #{} {}: {}",
+            issue.regressed_in,
+            issue.number,
+            issue.state.to_lowercase(),
+            issue.title
+        );
+        match issue.holds.as_slice() {
+            [] => println!("  holds nothing"),
+            tags => println!("  holds {}", tags.join(", ")),
+        }
+        println!("  {}", issue.url);
+    }
+    Ok(())
+}
+
+fn release_promote_cmd(
+    dry_run: bool,
+    target_name: Option<&str>,
+    progress: &impl Progress,
+) -> Result<()> {
+    let stable = release_promote(&find_repo_root()?, target_name, dry_run, progress)?;
+    let current = stable
+        .current
+        .as_ref()
+        .map_or("(none)", |release| release.tag.as_str());
+    match &stable.next {
+        Some(next) if dry_run => println!("Stable: {current} (would move to {})", next.tag),
+        Some(next) => println!("Stable: {} (was {current})", next.tag),
+        None => println!("Stable: {current} (stays)"),
+    }
+    for hold in &stable.holds {
+        println!("  {hold}");
+    }
+    Ok(())
+}
+
 fn release_status_cmd(target_name: Option<&str>) -> Result<()> {
     let repo_root = find_repo_root()?;
     let status = release_status(&repo_root, target_name)?;
@@ -1094,7 +1101,7 @@ fn release_status_cmd(target_name: Option<&str>) -> Result<()> {
             .map_or("(none)", |release| release.tag.as_str());
         match &stable.next {
             Some(next) => println!(
-                "Stable: {current} (moves to {} on the next release run)",
+                "Stable: {current} (moves to {} on the next promote or release run)",
                 next.tag
             ),
             None => println!("Stable: {current}"),
@@ -1145,18 +1152,22 @@ pub fn run_wt(cmd: &WtCommand) -> Result<()> {
             name,
             plan,
             persistent,
+            json,
         } => {
-            if *persistent && !*plan {
-                let repo = find_repo_root()?;
-                let workspace = crate::git::worktrees::ensure_agent_worktree(
-                    &repo,
-                    WorktreeSegment::parse(name)?,
-                )?;
-                println!("Persistent workspace: {}", workspace.path.display());
-                Ok(())
-            } else {
-                wt_create(name, *plan)
+            let repo_root = find_repo_root()?;
+            let checkout = crate::engine::checkout::create(
+                &repo_root,
+                name,
+                *plan,
+                *persistent,
+                &CliProgress,
+            )?;
+            if *json {
+                println!("{}", serde_json::to_string(&checkout)?);
+                return Ok(());
             }
+            print_checkout(name, *persistent, &checkout)?;
+            Ok(())
         }
         WtCommand::Switch { name } => wt_switch(name),
         WtCommand::List { json, sync } => wt_list(*json, *sync),
@@ -1189,69 +1200,46 @@ pub fn run_wt(cmd: &WtCommand) -> Result<()> {
     }
 }
 
-fn wt_create(name: &str, dry_run: bool) -> Result<()> {
-    let started = Instant::now();
-    let repo_root = find_repo_root()?;
-    let main_repo = main_repo_root(&repo_root)?;
-    let segment = WorktreeSegment::parse(name)?;
-
-    let mut placement = plan_placement(&main_repo, segment.clone())?;
-    if !dry_run && placement.strategy != PlacementStrategy::UseExistingWorktree {
-        crate::ops::checkout::refresh_main(&main_repo, &CliProgress)?;
-        placement = plan_placement(&main_repo, segment)?;
-    }
-
-    if dry_run {
-        print_placement_plan(&placement);
+fn print_checkout(
+    name: &str,
+    persistent: bool,
+    checkout: &crate::engine::checkout::Checkout,
+) -> Result<()> {
+    use crate::git::worktrees::PlacementStrategy;
+    if !checkout.created {
+        println!("branch: {}", checkout.branch);
+        if let Some(base) = &checkout.base {
+            println!("base: {base}");
+        }
+        println!("worktree: {}", checkout.path.display());
+        if let Some(strategy) = &checkout.strategy {
+            println!(
+                "strategy: {}",
+                serde_json::to_value(strategy)?.as_str().unwrap_or_default()
+            );
+        }
         return Ok(());
     }
-
-    let result = create_from_placement_plan(&main_repo, &placement)?;
-    record_ops_metric(
-        &repo_root,
-        serde_json::json!({
-            "op": "wt.create",
-            "branch": placement.branch,
-            "base_ref": placement.base_ref,
-            "strategy": placement_strategy_name(&placement.strategy),
-            "duration_ms": started.elapsed().as_millis(),
-            "exit_status": "ok",
-        }),
-    );
-
-    if placement.strategy == PlacementStrategy::UseExistingWorktree {
-        println!("Using existing worktree: {}", result.path.display());
+    if persistent {
+        println!("Persistent workspace: {}", checkout.path.display());
+        return Ok(());
+    }
+    if checkout.strategy == Some(PlacementStrategy::UseExistingWorktree) {
+        println!("Using existing worktree: {}", checkout.path.display());
     } else {
-        println!("Created worktree: {}", result.path.display());
+        println!("Created worktree: {}", checkout.path.display());
     }
-    if result.branch != name {
-        println!("Branch: {}", result.branch);
+    if checkout.branch != name {
+        println!("Branch: {}", checkout.branch);
     }
-    if let Some(base_branch) = result.base_branch {
-        println!("Base: {base_branch}");
+    if let Some(base) = &checkout.base {
+        println!("Base: {base}");
     }
-
-    if !write_shell_directive(&format!("cd {}", result.path.display()))? {
-        println!("cd {}", result.path.display());
+    if !write_shell_directive(&format!("cd {}", checkout.path.display()))? {
+        println!("cd {}", checkout.path.display());
         println!("Tip: source scripts/dev-lf to apply auto-cd in this shell");
     }
-
     Ok(())
-}
-
-fn print_placement_plan(plan: &crate::git::worktrees::PlacementPlan) {
-    println!("branch: {}", plan.branch);
-    println!("base: {}", plan.base_ref);
-    println!("worktree: {}", plan.worktree_path.display());
-    println!("strategy: {}", placement_strategy_name(&plan.strategy));
-}
-
-fn placement_strategy_name(strategy: &PlacementStrategy) -> &'static str {
-    match strategy {
-        PlacementStrategy::Create => "create",
-        PlacementStrategy::CheckoutExisting => "checkout_existing",
-        PlacementStrategy::UseExistingWorktree => "use_existing_worktree",
-    }
 }
 
 /// Local ops telemetry lives under the git-ignored `.lf/tmp/` tree so read-only
@@ -1778,6 +1766,7 @@ fn task_ownership() -> Result<WorktreeOwnership> {
             let tasks = runtime
                 .block_on(store.list_tasks(None))
                 .map_err(|error| anyhow!("cannot verify Task ownership before pruning: {error}"))?;
+            let local = store.sqlite.local_machine()?.id;
             for task in tasks {
                 let work = runtime
                     .block_on(store.work_for_child(&crate::child::ChildRef::Task(task.id.clone())))
@@ -1794,8 +1783,19 @@ fn task_ownership() -> Result<WorktreeOwnership> {
                     .map_err(|error| anyhow!("cannot read Task PRs: {error}"))?;
                 named.push((task.branch, open));
                 named.extend(prs.into_iter().map(|pr| (pr.branch, open)));
+                // A move pushed the branch before handing the Task off.
+                let elsewhere = if open {
+                    let owned = store.sqlite.task_ownership(&task.id)?;
+                    owned.owner_elsewhere(&local).map(|machine| machine.name())
+                } else {
+                    None
+                };
                 if let Some(worktree) = task.worktree {
-                    if open {
+                    if let Some(machine) = elsewhere {
+                        ownership
+                            .departed_checkouts
+                            .insert(worktree, (task.identifier, machine));
+                    } else if open {
                         ownership
                             .unfinished_checkouts
                             .insert(worktree, Some(task.identifier));
@@ -1840,34 +1840,44 @@ fn task_ownership() -> Result<WorktreeOwnership> {
     Ok(ownership)
 }
 
-fn pr_checks(watch: bool, logs: bool, required: bool) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    let branch = current_branch(&repo_root)?.ok_or_else(|| anyhow!("not on a branch"))?;
-
-    let mut args = vec!["pr", "checks", &branch];
+fn pr_checks(repo_root: &Path, watch: bool, logs: bool, required: bool, json: bool) -> Result<()> {
+    use crate::engine::pr::ChecksState;
     if watch {
-        args.push("--watch");
-    }
-    if required {
-        args.push("--required");
-    }
-
-    let status = Command::new("gh")
-        .args(&args)
-        .current_dir(&repo_root)
-        .status()?;
-
-    if status.code() == Some(1) && logs {
-        print_failed_check_logs(&repo_root, &branch)?;
-    }
-
-    if status.success() {
-        Ok(())
-    } else {
-        if status.code() == Some(8) {
-            eprintln!("CI checks are pending.");
+        // gh streams the watch to the terminal; the served read has no watch.
+        let branch = current_branch(repo_root)?.ok_or_else(|| anyhow!("not on a branch"))?;
+        let mut args = vec!["pr", "checks", &branch, "--watch"];
+        if required {
+            args.push("--required");
         }
-        Err(crate::process::CommandExit(status.code().unwrap_or(1) as u8).into())
+        let status = Command::new("gh")
+            .args(&args)
+            .current_dir(repo_root)
+            .status()?;
+        return if status.success() {
+            Ok(())
+        } else {
+            Err(crate::process::CommandExit(status.code().unwrap_or(1) as u8).into())
+        };
+    }
+    let checks =
+        crate::engine::pr::checks(repo_root, required).map_err(crate::engine::pr::exit_of)?;
+    if json {
+        print_json(&checks)?;
+    } else {
+        print!("{}", checks.report);
+    }
+    match checks.state {
+        ChecksState::Passing => Ok(()),
+        ChecksState::Pending => {
+            eprintln!("CI checks are pending.");
+            Err(crate::process::CommandExit(checks.exit_code()).into())
+        }
+        ChecksState::Failing => {
+            if logs {
+                print_failed_check_logs(repo_root, &checks.branch)?;
+            }
+            Err(crate::process::CommandExit(checks.exit_code()).into())
+        }
     }
 }
 
@@ -2030,7 +2040,6 @@ fn process_skill_agent(
             resolved_skill: Some(skill),
             surface: Surface::Headless,
             message,
-            yolo_mode: config.yolo,
             source_overrides: ContextSourceOverrides {
                 // Sync conflicts already name the affected paths in `context`.
                 // Embedding every authored file here makes the task prompt grow
@@ -2045,7 +2054,7 @@ fn process_skill_agent(
         },
     )?;
 
-    let agent = prepared.config.agent();
+    let agent = prepared.config.agent()?;
     let (provider, model) = crate::config::parse_agent(agent);
     let cwd = prepared
         .config
@@ -2056,7 +2065,7 @@ fn process_skill_agent(
         &crate::agent::system_prompt_with_structured_replies(&prepared.config),
         &prepared.config.task_prompt,
     );
-    let capture = crate::session_record::CaptureHandle::begin_with_context(
+    let capture = crate::session_record::SessionRecorder::begin_with_context(
         crate::session_record::SessionCaptureSpec {
             harness: provider,
             model,
@@ -2072,14 +2081,15 @@ fn process_skill_agent(
         &context,
         Some(crate::session_record::AgentProcessRequest::from_prepared(
             &prepared.config,
-        )),
-    )?;
+        )?),
+    )
+    .map(crate::process::LfProcessRuntime::new)?;
 
     let launch = prepared.config;
     let process = ProcessConfig {
         auto: true,
         stream: true,
-        capture: Some(capture.clone().into()),
+        runtime: Some(capture.clone()),
         ..Default::default()
     };
 

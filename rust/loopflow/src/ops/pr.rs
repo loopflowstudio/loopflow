@@ -4,10 +4,10 @@ use std::process::Command;
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::agent::{run_agent, AgentConfig, ProcessConfig};
-use crate::config::{load_config_or_default, load_repo_config, MergeMethod};
+use crate::config::{load_config_or_default, MergeMethod};
 use crate::git::worktrees::{list_worktrees, main_repo_root};
 use crate::git::{current_branch, get_default_branch, rev_parse};
 use crate::graph::load_skill;
@@ -32,7 +32,8 @@ pub struct PrResult {
     pub created: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct PrInfo {
     pub url: String,
     pub number: u64,
@@ -527,11 +528,17 @@ pub fn generate_pr_copy(
     );
 
     let config = load_config_or_default(Some(repo));
-    let agent = agent_override.unwrap_or_else(|| config.agent()).to_string();
+    let agent = match agent_override {
+        Some(agent) => agent,
+        None => config.agent()?,
+    }
+    .to_string();
     progress.status("Generating PR title/body...");
 
     let launch = AgentConfig {
         chrome: config.chrome,
+        codex_service_tier: config.codex.service_tier,
+        claude_model: config.claude.model.clone(),
         task_prompt: prompt,
         agent: Some(agent),
         cwd: Some(repo.to_path_buf()),
@@ -1098,9 +1105,10 @@ pub(crate) fn enable_auto_merge(
     {
         return Ok(());
     }
-    let configured = load_repo_config(repo)
+    let configured = crate::config::load_config(Some(repo))
         .map_err(|error| OpsError::Message(error.to_string()))?
-        .and_then(|config| config.merge_method);
+        .unwrap_or_default()
+        .merge_method;
     // A merge queue owns its strategy. Validate policy before replacing an arm.
     let method = if observation.merge_queue_enabled {
         None
@@ -1247,7 +1255,7 @@ pub(crate) fn observe_pr_by_number(
         "Accept: application/vnd.github+json",
         endpoint.as_str(),
     ]);
-    let output = match Command::new("gh").current_dir(repo).args(&args).output() {
+    let output = match crate::observe::github(repo, &args) {
         Ok(output) => output,
         Err(error) => {
             return PrObservation::Degraded {
@@ -1273,13 +1281,12 @@ pub(crate) fn observe_pr_by_number(
 }
 
 pub(crate) fn observe_pr_by_branch(repo: &Path, branch: &str) -> PrObservation {
-    let output = match Command::new("gh")
-        .current_dir(repo)
-        .args([
+    let output = match crate::observe::github(
+        repo,
+        &[
             "pr", "list", "--head", branch, "--state", "all", "--limit", "2", "--json", "number",
-        ])
-        .output()
-    {
+        ],
+    ) {
         Ok(output) if output.status.success() => output,
         Ok(output) => {
             return PrObservation::Degraded {
@@ -2037,10 +2044,19 @@ pub(crate) fn retarget_open_pr(
     let Some(pr) = find_open_pr(repo)? else {
         return Ok(());
     };
+    retarget_pr(repo, pr.number, base, inherit_pr)
+}
+
+pub(crate) fn retarget_pr(
+    repo: &Path,
+    number: u64,
+    base: &str,
+    inherit_pr: &impl Fn(&mut Command),
+) -> OpsResult<()> {
     let mut cmd = Command::new("gh");
     cmd.arg("pr")
         .arg("edit")
-        .arg(pr.number.to_string())
+        .arg(number.to_string())
         .arg("--base")
         .arg(base)
         .current_dir(repo);

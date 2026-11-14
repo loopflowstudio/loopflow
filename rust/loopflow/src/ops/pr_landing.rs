@@ -154,7 +154,7 @@ fn repair_windows(store: &SharedStore, repo: &str, pr_number: u32) -> OpsResult<
                     start,
                     end: Some(at(ended)?),
                 }),
-                None => (crate::journal::process_evidence(&store.sqlite, &process)
+                None => (crate::journal::lf_evidence(&store.sqlite, &process)
                     != crate::journal::ProcessIdentityEvidence::Dead)
                     .then_some(RepairWindow { start, end: None }),
             }
@@ -296,17 +296,13 @@ fn admit_ci_fix(
                     "Task is unassigned; CI repair waits for `lf task claim`",
                 ));
             }
-            let local = store.local_machine().await.map_err(repair_error)?;
-            let machine = store
+            if store
                 .sqlite
                 .task_checkout(task_id)
                 .map_err(repair_error)?
-                .and_then(|checkout| checkout.machine_id)
-                .ok_or_else(|| repair_error("Task checkout Machine is unknown"))?;
-            if machine != local.id {
-                return Err(repair_error(format!(
-                    "Task checkout belongs to Machine {machine}"
-                )));
+                .is_none()
+            {
+                return Err(repair_error("Task is not checked out on this Machine"));
             }
         }
         // Live work in the checkout, such as the Task's own open Session,
@@ -356,7 +352,7 @@ fn admit_ci_fix(
             (crate::lf::WORK_DECLARATION_ENV, work.as_str()),
             ("LF_USER_NAME", ""),
         ];
-        let owner = crate::os_process::start_lf_session(
+        let worker = crate::os_process::detached::start_lf(
             &landing.worktree,
             &argv,
             &environment,
@@ -370,7 +366,7 @@ fn admit_ci_fix(
         .map_err(repair_error)?;
         if !store
             .sqlite
-            .handoff_repair(&incident.identity, &launcher, &owner)
+            .handoff_repair(&incident.identity, &launcher, &worker)
             .map_err(repair_error)?
         {
             return Err(repair_error("repair reservation changed during startup"));
@@ -433,7 +429,7 @@ fn ci_fix_message(
 fn repair_live(store: &SharedStore, process: Option<&crate::id::LfProcessId>) -> bool {
     process.is_some_and(|process| {
         Some(process) != crate::journal::current_lf_process_id().as_ref()
-            && crate::journal::process_evidence(&store.sqlite, process)
+            && crate::journal::lf_evidence(&store.sqlite, process)
                 != crate::journal::ProcessIdentityEvidence::Dead
     })
 }
@@ -449,7 +445,7 @@ fn checkout_execution_blockers(store: &SharedStore, worktree: &Path) -> OpsResul
         .processes_since(0)
         .map_err(repair_error)?
         .into_iter()
-        .filter(|process| process.cwd.as_deref() == worktree.to_str())
+        .filter(|process| process.cwd() == worktree.to_str())
         .collect();
     super::task_execution::execution_blockers(&store.sqlite, &processes)
 }
@@ -464,17 +460,13 @@ fn settle_repairs(store: &SharedStore, repo: &str, pr_number: u32) -> OpsResult<
         .map_err(repair_error)?
     {
         if Some(&owner) == current.as_ref()
-            || crate::journal::process_evidence(&store.sqlite, &owner)
+            || crate::journal::lf_evidence(&store.sqlite, &owner)
                 != crate::journal::ProcessIdentityEvidence::Dead
         {
             continue;
         }
-        // The run's Session names the owner that served it.
-        let session = match store
-            .sqlite
-            .transport_session(&owner)
-            .map_err(repair_error)?
-        {
+        // The Session the run's agent ran in.
+        let session = match store.sqlite.process_session(&owner).map_err(repair_error)? {
             Some(id) => store.sqlite.session(&id).map_err(repair_error)?,
             None => None,
         };
@@ -492,7 +484,7 @@ fn settle_repairs(store: &SharedStore, repo: &str, pr_number: u32) -> OpsResult<
             (None, _) => (
                 None,
                 Some(format!(
-                    "ci-fix run {owner} exited before opening a Session; inspect transport.log"
+                    "ci-fix run {owner} exited before opening a Session; inspect logs/detached.log"
                 )),
             ),
             (Some(session), None) => (
@@ -517,9 +509,7 @@ fn settle_repairs(store: &SharedStore, repo: &str, pr_number: u32) -> OpsResult<
             .finish_repair(
                 &identity,
                 &owner,
-                session
-                    .as_ref()
-                    .map(|session| (session.id.as_str(), session.captured)),
+                session.as_ref().map(|session| session.id.as_str()),
                 error.as_deref(),
                 conclusion,
             )
@@ -1118,7 +1108,7 @@ async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResul
         if crate::ops::task::task_work_status(store, &task).await?
             == crate::durable::WorkStatus::Done
         {
-            return crate::ops::task::cleanup_completed_task(store, &task).await;
+            return crate::ops::task::retirement::schedule(store, &task).await;
         }
         eprintln!("Task {} has merged; retained its checkout until completion. Inspect remaining work with `lf task status {}`.", task.identifier, task.identifier);
         return Ok(());
@@ -1131,7 +1121,7 @@ async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResul
         .iter()
         .any(|graph| {
             graph.process.completed_at.is_none()
-                && crate::journal::process_evidence(&store.sqlite, graph.id())
+                && crate::journal::lf_evidence(&store.sqlite, graph.id())
                     != crate::journal::ProcessIdentityEvidence::Dead
         })
     {
@@ -1288,7 +1278,9 @@ pub(crate) fn repair_running(store: &SharedStore, repo: &str, pr_number: u32) ->
         .any(|(_, process)| repair_live(store, Some(process))))
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct DeliveryCheck {
     pub checked_at: i64,
     pub errors: Vec<String>,
@@ -1697,13 +1689,11 @@ mod tests {
             branch: "feature".into(),
             base_commit: "deadbeef".into(),
             parent_pr_id: None,
-            agent: None,
             created_at: now,
             updated_at: now,
             rank: 0,
             assignee: None,
             due_date: None,
-            regressed_in: None,
             state: None,
             completed_at: None,
             observation: Observation::NotRequired,

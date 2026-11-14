@@ -147,14 +147,15 @@ def _notarytool_failed(
     result: subprocess.CompletedProcess, what: str, advice: str
 ) -> RuntimeError:
     """Print notarytool's output and name Apple's first line in the error."""
-    for output in (result.stdout, result.stderr):
-        if output and output.strip():
-            print(output.rstrip(), flush=True)
-    for output in (result.stderr, result.stdout):
-        for line in (output or "").splitlines():
-            if line.strip():
-                return RuntimeError(f"{what}: {line.strip()}")
-    return RuntimeError(f"{what}; {advice}")
+    stdout = (result.stdout or "").strip()
+    stderr = (result.stderr or "").strip()
+    for output in (stdout, stderr):
+        if output:
+            print(output, flush=True)
+    message = stderr or stdout
+    if not message:
+        return RuntimeError(f"{what}; {advice}")
+    return RuntimeError(f"{what}: {message.splitlines()[0].strip()}")
 
 
 def _notarize_dmg(dmg_path: Path) -> int:

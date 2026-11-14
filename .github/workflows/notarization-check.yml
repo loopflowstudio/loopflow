@@ -57,7 +57,7 @@ jobs:
             cat "$RUNNER_TEMP/notarytool.err"
             echo '```'
             echo
-            echo "Fixes are in \`.github/CI.md\`, \"Notarization\". A 403 \"required agreement\" means the Account Holder accepts the agreement at developer.apple.com."
+            echo "Fixes are in \`.github/CI.md\`, \"Notarization\"."
           } > "$RUNNER_TEMP/body.md"
 
           if [ -n "$issue" ]; then

@@ -706,6 +706,7 @@ impl Store {
         .await
     }
 
+    /// Commit a poll only while its starting capacity revision is still current.
     pub(crate) async fn reconcile_provider_account_capacity(
         &self,
         account: &ProviderAccount,

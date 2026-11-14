@@ -31,24 +31,16 @@ Both credential verifications succeeded. Older stream rows named
 `cooldown_until: null`, while `account next` still reported cooling. Reopening
 both Fable and non-Fable conversations encountered cooldown errors.
 
-## Findings that determine the design
+## Facts that determine the design
 
-- `provider_account.rs::account_held_until` combines the account cooldown with
-  every applicable window's `limited_until`. `limit_affects(scope, None)` is
-  deliberately conservative. `save_polled_usage` clears only the account
-  cooldown; the poll's `seven_day_fable` key cannot replace a stream row named
-  `seven_day_overage_included`. This explains the first login remaining blocked
-  even after its poll found Fable capacity.
-- `store/sqlite.rs::upsert_provider_account_limits` keys on
-  `(provider, account_id, window)`, overwrites on arrival, timestamps at save
-  time in seconds, and retains omitted windows. `save_polled_usage` writes
-  windows and clears cooldown in separate transactions, using a previously
-  loaded account. A delayed poll can overwrite a newer rejection even on a
-  matching key. Wall-clock timestamps alone cannot order same-second writes.
-- `harness/claude_decode.rs::rate_limit_signal` uses
-  `rate_type.contains("overage")` to classify credits. That conflates an
-  included per-model allocation with paid-credit exhaustion.
-  Anthropic's [SDK changelog, 0.3.191](https://github.com/anthropics/claude-agent-sdk-typescript/blob/main/CHANGELOG.md)
+At checkout base `53a62ddfa7113c61314aeaf885a1f137b6b62c60`,
+`provider_account::save_polled_usage` upserted poll windows and cleared the
+account cooldown separately. A poll's `seven_day_fable` could not replace a
+stream's `seven_day_overage_included`; second-resolution timestamps could not
+order an in-flight poll against a newer rejection.
+
+- The original decoder conflated included per-model allocation and paid-credit
+  exhaustion with `rate_type.contains("overage")`. Anthropic's [SDK changelog, 0.3.191](https://github.com/anthropics/claude-agent-sdk-typescript/blob/main/CHANGELOG.md)
   describes `seven_day_overage_included` as a per-model weekly limit and adds
   `model_scoped` usage windows. Checked 2026-11-14. This establishes the bucket
   category; it does not establish that every future such event means Fable.
@@ -58,26 +50,13 @@ both Fable and non-Fable conversations encountered cooldown errors.
   says a Fable reset restores Fable weekly usage without restoring other models'
   usage. Checked 2026-11-14. Overall weekly headroom alone cannot refute a
   Fable rejection, and included headroom cannot refute a paid-credit rejection.
-- `subscription.rs::claude_windows` reads a `limits[]` array and maps weekly
-  model display names to `seven_day_<model>`. Its comment correctly calls the
-  existing fixture synthetic. The incident establishes decoded observations,
-  not a captured raw response. Keep that distinction in new fixture names;
-  do not claim a newly verified wire schema. Normalize recognized family
-  labels consistently with launch models; unknown labels stay distinct.
-- `subscription.rs::poll_account` sets exhausted windows' holds through reset
-  plus five seconds. Keep that grace. Missing resets must remain unknown,
-  rather than inventing a week-long deadline. Existing rejection fallback is
-  15 minutes plus grace.
-- Consumers include ordinary/exact/shared-home launch resolution,
-  `LaunchCapacity` for open conversations, store route queries, urgency
-  ranking, `hold::ready/end_when_full`, account reports, and `profile::next`.
-  A stale 100% alias also distorts urgency, so merely ignoring its hold in one
-  routing function is insufficient. Explicit account selection's current
-  routing-policy bypass remains unchanged.
-- `docs/subscriptions.md` promises that a fresh read repairs a wrong cooldown;
-  the implementation repairs only one representation. Its description of
-  `next` also sounds model-specific although `profile::next_launch` supplies
-  no model. Clarify both descriptions.
+- `subscription::claude_windows` consumes a synthetic `limits[]` fixture.
+  The incident supplies decoded observations, not a captured raw response;
+  it does not establish a newly verified wire schema.
+- Routing, account status, urgency, held-account release and open conversations
+  read the same persisted capacity. Fixing launch eligibility alone would leave
+  stale aliases distorting ranking and explanations. Fresh and resumed launches
+  already pass their model through the common resolver.
 
 ## Chosen architecture
 
@@ -154,138 +133,99 @@ than weakening `limit_affects(None)` globally. Human-readable account details
 show the scoped holds; `cooldown_until: null` continues to mean no account-wide
 cooldown, not unrestricted capacity on every model.
 
-## Alternatives and failure modes
+## Scope precedence
 
-- Clear all cooldowns on every successful poll: rejected; authentication,
-  aggregate quota and per-model capacity answer different questions.
-- Match aliases or timestamp precedence only in launch eligibility: rejected;
-  status, urgency and held-account release would keep contradictory records.
-- Compare second-resolution timestamps or completion order: rejected; a
-  response begun before a rejection can arrive afterward in the same second.
-- Per-bucket generations would admit more concurrent observations, but add
-  bookkeeping across aliases and broad cooldowns. Choose one revision per
-  account for this change; avoid speculative machinery.
+A known bucket determines scope before incidental model metadata.
+`harness/claude_decode.rs::rate_limit_signal` uses the reported model only for
+`seven_day_overage_included`. Synthetic review counterexamples (not captured
+provider responses): `seven_day` with `model: fable` must still block Sonnet;
+`seven_day_fable` with `model: sonnet` must still hold Fable alone. The decoder
+regression follows both through recording and refresh.
 
-Success means refresh repairs both routing and its explanation, including
-already-open conversations, without manual DB changes. Failure would be silently
-erasing a valid rejection because some unrelated percentage is below 100, or
-retaining a stale alias that still affects account ranking. Tests must catch
-both. Another failure is a recorder path that forgets the revision increment;
-keep capacity mutations behind the store operations and exercise concurrent
-writers with deterministic barriers.
+The earlier review walkthrough is recoverable from
+`f004f5a1ab54075d7f6f5900ee70cf8d9b3cdbd6:scratch/concept-review.html`;
+its proposed correction is implemented.
 
-## Concept review — 2026-11-14
+## Implementation constraints
 
-Outcome: iterate to implement. No open product choice. The existing requirement
-that genuine account-wide exhaustion stops every model determines the remaining
-correction: a bucket's known scope takes precedence over incidental model
-metadata. A reported model supplies the family for an included per-model bucket
-that does not name one; it cannot narrow `seven_day` or `five_hour`, or contradict
-a family already named by `seven_day_<family>`.
-
-The current decoder takes `rate_limit_info.model` before interpreting the bucket.
-Counterexample: `rate_limit_type: seven_day`, `model: fable`, rejected at 100%
-becomes a Fable-only window with no account cooldown; Sonnet can launch despite
-aggregate exhaustion. A second counterexample, `seven_day_fable` with
-`model: sonnet`, stores a Fable key with Sonnet scope. These are synthetic review
-inputs, not captured provider responses. Interpret known global and named-family
-buckets first, use reported/launch family only where bucket semantics require it,
-and keep unknown buckets distinct. No additional capacity record or public API
-is needed. Keep the existing model-unspecified behavior of `next`.
-
-Implemented: `claude_decode.rs::rate_limit_signal` takes the reported model
-only for `seven_day_overage_included`; every other bucket's scope comes from
-its name. `claude_usage_reconciliation_bucket_scope_outranks_the_reported_model`
-drives both counterexamples through the recorder and poll: the global rejection
-holds Sonnet and Fable, a Fable-only poll leaves it, a matching `seven_day`
-poll with room clears it, and the mislabelled `seven_day_fable` holds Fable
-alone.
-
-## Implementation and remaining delivery
-
-The implementation follows the single-store revision design. Fresh and resumed
-launches already pass their actual model through the common resolver; their
-regression fixture exercises that path without changing conservative `next`.
-The account fixture calls the real report/output handlers with synthetic usage
-responses and isolated credentials; it starts no provider process.
-
-A stated, unscoped “weekly limit” names the known aggregate weekly cause.
-An unqualified “usage limit” remains unknown. Known model statements use the
+A stated, unscoped “weekly limit” names the aggregate weekly cause; an
+unqualified “usage limit” remains unknown. Known model statements use the
 canonical weekly key; stated paid-credit failures keep their separate key.
 Missing reset times retain an existing rejection deadline while leaving
 `resets_at` unknown. Negative percentages, malformed scopes and invalid reset
 strings cannot establish recovery; percentages above 100 saturate at exhaustion.
 
+No automatic retry, public revision DTO, separate capacity cache, or per-bucket
+generation. One account revision may discard an otherwise valid poll after an
+unrelated capacity write; a later refresh can retry normally. Do not weaken
+`limit_affects(None)` or change explicit account selection's routing bypass.
+
 ### Delete — do not maintain
 
-- The old unconditional poll upsert plus separate cooldown clear inside
-  `provider_account::save_polled_usage` is replaced by atomic reconciliation.
-- The recorder's separate health/window writes are replaced by one capacity write.
-- The decoder's `contains("overage")` classification and its
-  `a_rejected_overage_is_a_credits_limit_naming_no_model` assertion are removed.
-- Known aliases are removed only by a matching model refresh. The store's legacy
-  read comparison handles historical competing rows until that refresh.
-- General window writes remain for other callers and advance the same revision.
+Removed:
 
-No live account records were edited. Publication and the gate's broader suites
-remain with the following Graph steps.
+- Unconditional poll upsert plus separate cooldown clear. All four poll callers
+  now use `Store::reconcile_provider_account_capacity` directly; the forwarding
+  `provider_account::save_polled_usage` wrapper is deleted.
+- Separate recorder health/window writes; one atomic capacity write survives.
+- Decoder `contains("overage")` classification and its obsolete credit assertion.
+- The completed concept review's obsolete implementation walkthrough.
+- Single-deadline cooldown explanations that hide a longer model hold behind
+  an account-wide label; shared per-scope explanations survive.
 
-## Acceptance and unattended checks
+Retained deliberately:
 
-Create `claude_usage_reconciliation_` named tests in existing library test
-modules, including a CLI-dispatch fixture using the real account handlers and
-fixture endpoint. Detached stand-ins must re-execute the test binary because
-`LF_TEST_CLAUDE_*` endpoints are test-only; never launch the installed provider.
-Use isolated HOME/LF_HOME and repository routes, await fixture completion, and
-coordinate races with barriers, never sleeps. Add an upgrade test starting at
-the merged schema frontier for the additive revision column.
+- Legacy alias comparison until a matching model refresh deletes that alias;
+  unknown, unrelated and omitted windows remain.
+- General health/window writes for other callers; both advance the revision.
 
-The fixture drives decoder → persisted rejection → poll → reconciliation →
-account JSON/text → `next` → fresh and resumed model-specific resolution:
+The store shares one canonical model-weekly predicate for recovery, alias
+removal and legacy comparison. Legacy selection consumes winning rows without
+cloning them; stream normalization runs in one pass. Recovery tests remain on
+the surviving store path.
 
-- Seed both incident logins. First Fable becomes available after its matching
-  11% poll; second Fable stays blocked at 100%; both allow non-Fable models when
-  account-wide windows have room. Assert hold deadlines, ranking and account
-  isolation as well as selected login. Re-run reads to establish recovery lasts.
-- Real global exhaustion blocks every model. A model-only poll cannot clear it;
-  a newer matching global window with room can. Fable-only exhaustion never
-  releases a held account as globally full.
-- Rejection after a poll, and rejection during an in-flight poll in the same
-  second, both win. Two polls completing out of order cannot roll capacity back.
-  A warning on a different bucket cannot clear an active rejection.
-- Unknown/paid-credit buckets, absent scoped windows, empty response, malformed
-  windows, failed poll and credential replacement retain appropriate holds.
-  A conflicting legacy alias cannot override newer canonical capacity.
-- At reset plus grace the applicable hold expires; a manual provider reset
-  observed by a matching fresh poll restores capacity before natural expiry.
-  No reset time uses the existing bounded rejection fallback; test this without
-  turning missing usage into zero usage.
-- `next` remains model-unspecified and reports scoped reasons honestly. Status
-  and routing read the committed winner when a refresh loses a race. Codex
-  observations, connect and reset refresh keep their current outcomes.
+## Checks and remaining delivery
 
-Commands below run with inherited `LF_*` removed and stdin closed, as required
-by `scripts/testing.md`; account tests run from an empty temporary directory
-with isolated HOME when invoking the built test binary directly.
+No live account records were edited. Publication and gate's broader suites
+remain with subsequent Graph steps. The existing synthetic account-handler
+fixture covers both incident logins, JSON/text reports, `next`, fresh/resumed
+routing and a rejection arriving during refresh; it launches no provider.
 
-- `cargo test -p loopflow --lib claude_usage_reconciliation_` — implementation
-  focused check — passed, 12 tests, including the account-handler race, upgrade
-  and indexed 10,000-account lookup checks.
-- `uv run python scripts/test.py --reuse-passing --rust-filter 'test(claude_usage_reconciliation_) | test(provider_account::) | test(subscription::) | test(harness::claude_decode::) | test(lf::commands::account) | test(lf::commands::profile::) | test(store::sqlite::account) | test(documented_commands::)'`
-  — gate runs once; expected affected routing, store, status, parser and docs
-  checks pass. Confirm selectors against the suite list after implementation.
-- `cargo fmt --check` — passed.
-- `cargo clippy --all-targets -- -D warnings` — passed; CI owns the full suite.
-- Built library test binary, isolated cwd/HOME/LF_HOME: matching cooldown recovery,
-  stated weekly recovery, Fable scope and unknown percentages — four passed.
-- `EXPLAIN QUERY PLAN` for new revision/reconciliation lookups on an isolated
-  10,000-account fixture — implementation checks indexed provider/account and
-  window lookups; no scan across unrelated account observations.
-- `uv run python scripts/check_migrations.py` — passed; one additive migration.
-- `uv run python scripts/check_architecture.py` — passed.
-- `lf context` and `git diff --check` — within targets and clean.
+Earlier implementation run results (before compression):
 
-Done when a refresh restores usable models, retains genuine scoped/global
-limits, survives newer rejections and explains the same committed capacity
-through CLI status, routing and conversation reopen. The two-account fixture
-must pass without any manual cooldown clearing.
+- `cargo test -p loopflow --lib claude_usage_reconciliation_` — passed, 12 tests,
+  including account-handler race, migration upgrade and indexed 10,000-account
+  lookups.
+- Built library test binary with isolated cwd/HOME/LF_HOME — four additional
+  cooldown/stated-weekly/Fable-scope/unknown-percentage checks passed.
+- `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
+  `uv run python scripts/check_migrations.py`,
+  `uv run python scripts/check_architecture.py`, `git diff --check` — passed.
+
+Compression checks (inherited `LF_*` unset; test/clippy stdin closed):
+
+- `cargo test -p loopflow --lib claude_usage_reconciliation_` — passed, 12 tests;
+  test-binary linker warned that `__eh_frame` exceeds compact-unwind offsets.
+- `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
+  `git diff --check` — passed.
+- `lf context` — 2,500 tokens / 11,868 bytes before these check results;
+  within both scratch targets.
+
+Gate selects a few named high-risk tests; CI runs suites. Keep race ordering,
+matching-cause recovery, unknown/paid-credit retention, reset grace and missing
+reset behavior covered. A refresh must restore usable models without erasing
+newer rejection or making account status disagree with routing.
+
+QA follow-up uses shared per-scope descriptions: `next` gives account-wide
+and Fable holds separate deadlines. `--clear-cooldown` names remaining window
+holds; an already-null cooldown says no active account-wide cooldown. Eligibility
+and stored windows keep their existing semantics.
+
+Concept review, 2026-11-14: no further design change or open product choice.
+The overlapping-hold correction above is present in the working tree and fits
+the existing model: one login has independently scoped capacity holds, and
+clearing its account cooldown leaves observed windows intact. The review page
+at `scratch/concept-review.html` shows the failure and recovery interaction.
+Next: gate the implemented correction; no additional implement direction.
+
+- `cargo test -p loopflow --lib claude_usage_reconciliation_explains_overlapping_and_cleared_holds` — passed (1); linker repeated the compact-unwind size warning above. `cargo fmt --check` and `git diff --check` passed; gate/CI own clippy, documented commands and broader suites after this explanation fix.

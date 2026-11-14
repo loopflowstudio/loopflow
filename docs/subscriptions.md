@@ -263,7 +263,8 @@ lf account set personal@ --clear-cooldown
 Pausing the active login switches the Machine to the route's next login at
 once, and every open Claude follows; with no other login, it stays and says
 so. Clearing cooldown retains credential state, aggregate utilization and every
-observed window. It does not reset provider quota. Once `paid-through` passes,
+observed window. The command reports any window holds that remain, including
+their models and deadlines. It does not reset provider quota. Once `paid-through` passes,
 an otherwise automatic login behaves as paused until the date is cleared.
 
 ## Route a repository

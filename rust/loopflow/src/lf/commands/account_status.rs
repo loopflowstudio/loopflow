@@ -423,13 +423,9 @@ async fn managed_rows(
                             usage.identity.credential_digest.as_deref(),
                         )
                         .await?;
-                    let committed = crate::provider_account::save_polled_usage(
-                        store,
-                        account,
-                        revision,
-                        &usage.windows,
-                    )
-                    .await?;
+                    let committed = store
+                        .reconcile_provider_account_capacity(account, revision, &usage.windows)
+                        .await?;
                     if !committed {
                         diagnostic =
                             Some("usage refresh superseded by a newer capacity observation".into());

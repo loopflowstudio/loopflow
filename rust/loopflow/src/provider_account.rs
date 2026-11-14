@@ -824,8 +824,6 @@ async fn record_rate_limit_signal(
         if signal.limited && window.model == scope {
             window.limited_until = cooldown_until;
         }
-    }
-    for window in &mut windows {
         if window.window == "seven_day_overage_included" {
             if let Some(model) = window
                 .model
@@ -895,21 +893,11 @@ async fn record_stated_limit(
         .provider_account_capacity_revision(&account.provider, &account.account_id)
         .await?;
     if let Ok(usage) = crate::subscription::poll_account(&account).await {
-        save_polled_usage(store, &account, revision, &usage.windows).await?;
+        store
+            .reconcile_provider_account_capacity(&account, revision, &usage.windows)
+            .await?;
     }
     Ok(())
-}
-
-/// Commit a poll only while its starting capacity revision is still current.
-pub(crate) async fn save_polled_usage(
-    store: &SharedStore,
-    account: &ProviderAccount,
-    revision: i64,
-    polled: &[crate::store::AccountLimitWindow],
-) -> Result<bool, ProviderAccountError> {
-    Ok(store
-        .reconcile_provider_account_capacity(account, revision, polled)
-        .await?)
 }
 
 #[cfg(test)]
@@ -1664,32 +1652,46 @@ pub(crate) fn account_unavailable_reason(
             routing.as_str()
         );
     }
-    if let Some(until) = account_held_until(account, limits, model, now) {
-        return format!(
-            "'{}' cooling{}{}",
-            account_login(account),
-            match model {
-                Some(model) if account.cooldown_until.is_none_or(|cooling| cooling <= now) => {
-                    format!(" for {model}")
-                }
-                None if account.cooldown_until.is_none_or(|cooling| cooling <= now) => {
-                    let scopes: std::collections::BTreeSet<_> = limits
-                        .iter()
-                        .filter(|limit| {
-                            limit.provider == account.provider
-                                && limit.account_id == account.account_id
-                                && limit.limited_until.is_some_and(|until| until > now)
-                        })
-                        .filter_map(|limit| limit.model.as_deref())
-                        .collect();
-                    format!(" for {}", scopes.into_iter().collect::<Vec<_>>().join(", "))
-                }
-                _ => String::new(),
-            },
-            format_reset_time(until)
-        );
+    let holds = account_capacity_holds(account, limits, model, now);
+    if !holds.is_empty() {
+        return format!("'{}' cooling {}", account_login(account), holds.join("; "));
     }
     format!("'{}' is unavailable", account_login(account))
+}
+
+/// Active capacity holds, with each scope's own deadline.
+pub(crate) fn account_capacity_holds(
+    account: &ProviderAccount,
+    limits: &[AccountLimitRow],
+    model: Option<&str>,
+    now: i64,
+) -> Vec<String> {
+    let mut holds = std::collections::BTreeMap::<Option<&str>, i64>::new();
+    if let Some(until) = account.cooldown_until.filter(|until| *until > now) {
+        holds.insert(None, until);
+    }
+    for limit in limits.iter().filter(|limit| {
+        limit.provider == account.provider
+            && limit.account_id == account.account_id
+            && limit_affects(limit.model.as_deref(), model)
+    }) {
+        if let Some(until) = limit.limited_until.filter(|until| *until > now) {
+            holds
+                .entry(limit.model.as_deref())
+                .and_modify(|current| *current = (*current).max(until))
+                .or_insert(until);
+        }
+    }
+    holds
+        .into_iter()
+        .map(|(scope, until)| {
+            let scope = scope.map_or_else(
+                || "account-wide".to_string(),
+                |scope| format!("for {scope}"),
+            );
+            format!("{scope}{}", format_reset_time(until))
+        })
+        .collect()
 }
 
 #[derive(Debug)]
@@ -2554,7 +2556,8 @@ mod tests {
             .provider_account_capacity_revision("claude", &account.account_id)
             .await
             .unwrap();
-        assert!(save_polled_usage(&store, &account, revision, &[])
+        assert!(store
+            .reconcile_provider_account_capacity(&account, revision, &[])
             .await
             .unwrap());
         let spent = [window("weekly", 100, None)];
@@ -2562,7 +2565,8 @@ mod tests {
             .provider_account_capacity_revision("claude", &account.account_id)
             .await
             .unwrap();
-        assert!(save_polled_usage(&store, &account, revision, &spent)
+        assert!(store
+            .reconcile_provider_account_capacity(&account, revision, &spent)
             .await
             .unwrap());
         let room = [
@@ -2573,7 +2577,8 @@ mod tests {
             .provider_account_capacity_revision("claude", &account.account_id)
             .await
             .unwrap();
-        assert!(save_polled_usage(&store, &account, revision, &room)
+        assert!(store
+            .reconcile_provider_account_capacity(&account, revision, &room)
             .await
             .unwrap());
         let stored = store

@@ -287,8 +287,9 @@ pub(crate) async fn run_async(cmd: &AccountCommand) -> Result<()> {
                 .await?;
             }
             if *clear_cooldown {
-                clear_account_cooldown(&store, account.as_ref().expect("cooldown names a login"))
+                let message = clear_account_cooldown(&store, account.as_ref().expect("cooldown names a login"))
                     .await?;
+                narrate!("{message}");
             }
             if !chrome_profile.is_empty() || *clear_chrome_profiles {
                 set_browser_profiles(&store, provider, account.as_ref(), chrome_profile).await?;
@@ -705,7 +706,8 @@ pub(crate) async fn redeem_reset(
             format!("reset outcome unconfirmed; retry only with --idempotency-key {key}")
         })?;
     let usage = redemption.after.as_ref().unwrap_or(&redemption.before);
-    crate::provider_account::save_polled_usage(&store, account, revision, &usage.windows)
+    store
+        .reconcile_provider_account_capacity(account, revision, &usage.windows)
         .await
         .with_context(|| {
             format!(
@@ -885,7 +887,8 @@ async fn read_first_usage(
         .await?;
     match crate::subscription::poll_account(&account).await {
         Ok(usage) => {
-            crate::provider_account::save_polled_usage(store, &account, revision, &usage.windows)
+            store
+                .reconcile_provider_account_capacity(&account, revision, &usage.windows)
                 .await?;
         }
         Err(error) => narrate!("Usage not read yet ({error}); `lf account` reads it"),
@@ -1594,18 +1597,45 @@ fn parse_paid_through(value: &str) -> Result<time::Date> {
         .map_err(|_| anyhow!("invalid paid-through date '{value}': expected YYYY-MM-DD"))
 }
 
-async fn clear_account_cooldown(store: &SharedStore, account: &ProviderAccount) -> Result<()> {
+async fn clear_account_cooldown(store: &SharedStore, account: &ProviderAccount) -> Result<String> {
     let provider: Provider = account.provider.parse()?;
     store
         .clear_provider_account_cooldown(provider.as_str(), &account.account_id)
         .await
         .map_err(|error| account_store_error(provider, account_login(account), error))?;
-    narrate!(
-        "Cleared {} login '{}' cooldown",
-        provider.display_name(),
-        account_login(account)
+    let current = store
+        .get_provider_account(provider.as_str(), &account.account_id)
+        .await?
+        .ok_or(StoreError::NotFound)?;
+    let limits = store
+        .provider_account_limits(Some(provider.as_str()))
+        .await?;
+    let holds = crate::provider_account::account_capacity_holds(
+        &current,
+        &limits,
+        None,
+        OffsetDateTime::now_utc().unix_timestamp(),
     );
-    Ok(())
+    let mut message = if account
+        .cooldown_until
+        .is_some_and(|until| until > OffsetDateTime::now_utc().unix_timestamp())
+    {
+        format!(
+            "Cleared {} login '{}' account-wide cooldown",
+            provider.display_name(),
+            account_login(account)
+        )
+    } else {
+        format!(
+            "{} login '{}' has no active account-wide cooldown",
+            provider.display_name(),
+            account_login(account)
+        )
+    };
+    if !holds.is_empty() {
+        message.push_str(&format!("; still held {}", holds.join("; ")));
+    }
+    Ok(message)
 }
 
 fn account_store_error(provider: Provider, account: &str, error: StoreError) -> anyhow::Error {
@@ -1752,6 +1782,102 @@ mod tests {
         install_claude_login, install_codex_login, parse_paid_through,
         wait_for_browser_confirmation,
     };
+
+    #[tokio::test]
+    async fn claude_usage_reconciliation_explains_overlapping_and_cleared_holds() {
+        use crate::provider_account::account_unavailable_reason;
+        use crate::store::{AccountLimitWindow, StorageConfig};
+
+        let root = tempfile::tempdir().unwrap();
+        let store = std::sync::Arc::new(
+            crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+                root.path().join("store.db"),
+            ))
+            .await
+            .unwrap(),
+        );
+        let mut account = crate::provider_account::new_account(
+            Provider::Claude,
+            ProviderAccountId::parse("fixture").unwrap(),
+            root.path().join("claude"),
+            Some(EmailAddress::parse("fixture@example.com").unwrap()),
+        );
+        store.upsert_provider_account(&account).await.unwrap();
+        store
+            .upsert_provider_account_limits(
+                "claude",
+                &account.account_id,
+                &[AccountLimitWindow {
+                    window: "seven_day_fable".into(),
+                    used_percent: 100,
+                    resets_at: Some(4102531200),
+                    plan: None,
+                    model: Some("fable".into()),
+                    limited_until: Some(4102531205),
+                }],
+                "stream",
+            )
+            .await
+            .unwrap();
+        for cooldown in [Some(4102444800), None] {
+            store
+                .record_provider_account_health(
+                    "claude",
+                    &account.account_id,
+                    None,
+                    cooldown,
+                    Some("rejected"),
+                )
+                .await
+                .unwrap();
+            account = store
+                .get_provider_account("claude", &account.account_id)
+                .await
+                .unwrap()
+                .unwrap();
+            let limits = store.provider_account_limits(Some("claude")).await.unwrap();
+            let reason = account_unavailable_reason(&account, &limits, None, 1_900_000_000);
+            assert!(
+                reason.contains("for fable until 2100-01-02T00:00:05Z"),
+                "{reason}"
+            );
+            if cooldown.is_some() {
+                assert!(
+                    reason.contains("account-wide until 2100-01-01T00:00:00Z"),
+                    "{reason}"
+                );
+                let sonnet =
+                    account_unavailable_reason(&account, &limits, Some("sonnet"), 1_900_000_000);
+                assert!(!sonnet.contains("fable"), "{sonnet}");
+                assert!(
+                    sonnet.contains("account-wide until 2100-01-01T00:00:00Z"),
+                    "{sonnet}"
+                );
+            }
+            let message = super::clear_account_cooldown(&store, &account)
+                .await
+                .unwrap();
+            let prefix = if cooldown.is_some() {
+                "Cleared Claude login 'fixture@example.com' account-wide cooldown"
+            } else {
+                "Claude login 'fixture@example.com' has no active account-wide cooldown"
+            };
+            assert_eq!(
+                message,
+                format!("{prefix}; still held for fable until 2100-01-02T00:00:05Z")
+            );
+            let current = store
+                .get_provider_account("claude", &account.account_id)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(current.cooldown_until, None);
+            assert_eq!(
+                store.provider_account_limits(Some("claude")).await.unwrap(),
+                limits
+            );
+        }
+    }
 
     #[tokio::test(start_paused = true)]
     async fn browser_confirmation_survives_old_timeout_boundary() {

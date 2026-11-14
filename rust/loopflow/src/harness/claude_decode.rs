@@ -1201,9 +1201,7 @@ mod tests {
 
     #[tokio::test]
     async fn claude_usage_reconciliation_decoder_records_and_refreshes_the_reported_family() {
-        use crate::provider_account::{
-            account_held_until, new_account, save_polled_usage, ProviderAccountRoute,
-        };
+        use crate::provider_account::{account_held_until, new_account, ProviderAccountRoute};
         use crate::provider_auth::Provider;
         use crate::store::{AccountLimitWindow, ProviderAccountId, StorageConfig};
         let root = tempfile::tempdir().unwrap();
@@ -1246,21 +1244,21 @@ mod tests {
             .provider_account_capacity_revision("claude", &account.account_id)
             .await
             .unwrap();
-        assert!(save_polled_usage(
-            &store,
-            &account,
-            revision,
-            &[AccountLimitWindow {
-                window: "seven_day_opus".into(),
-                used_percent: 11,
-                resets_at: None,
-                plan: None,
-                model: Some("opus".into()),
-                limited_until: None,
-            }]
-        )
-        .await
-        .unwrap());
+        assert!(store
+            .reconcile_provider_account_capacity(
+                &account,
+                revision,
+                &[AccountLimitWindow {
+                    window: "seven_day_opus".into(),
+                    used_percent: 11,
+                    resets_at: None,
+                    plan: None,
+                    model: Some("opus".into()),
+                    limited_until: None,
+                }]
+            )
+            .await
+            .unwrap());
         let limits = store.provider_account_limits(None).await.unwrap();
         assert_eq!(account_held_until(&account, &limits, Some("opus"), 1), None);
     }
@@ -1268,9 +1266,7 @@ mod tests {
     /// A reported model never narrows a global bucket or relabels a named one.
     #[tokio::test]
     async fn claude_usage_reconciliation_bucket_scope_outranks_the_reported_model() {
-        use crate::provider_account::{
-            account_held_until, new_account, save_polled_usage, ProviderAccountRoute,
-        };
+        use crate::provider_account::{account_held_until, new_account, ProviderAccountRoute};
         use crate::provider_auth::Provider;
         use crate::store::{AccountLimitWindow, ProviderAccountId, StorageConfig};
         let poll = |window: &str, used_percent: u8, model: Option<&str>| AccountLimitWindow {
@@ -1340,7 +1336,8 @@ mod tests {
                     .provider_account_capacity_revision("claude", &id)
                     .await
                     .unwrap();
-                assert!(save_polled_usage(&store, &current, revision, &[polled])
+                assert!(store
+                    .reconcile_provider_account_capacity(&current, revision, &[polled])
                     .await
                     .unwrap());
                 let current = store

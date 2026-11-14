@@ -1,0 +1,72 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>LOO-900 QA: Claude capacity reconciliation</title>
+<style>
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:920px;margin:2em auto;padding:0 1em;color:#222}
+pre{background:#f5f5f2;padding:.7em 1em;overflow-x:auto;font-size:12.5px;border-radius:4px}
+td,th{border-bottom:1px solid #ddd;padding:.3em .6em;text-align:left;vertical-align:top}
+table{border-collapse:collapse;width:100%}
+.ok{color:#176b2c}.bad{color:#a3231d}.note{color:#7a5a00}
+</style></head><body>
+<h1>LOO-900 QA: refreshed Claude usage vs model-scoped holds</h1>
+<p>Branch <code>lf 0.15.3+f004f5a1a.dirty</code> against the released <code>lf 0.15.3+53a62ddfa</code> (the checkout base). Private Machine at
+<code>/tmp/lf-qa-900</code>: isolated <code>HOME</code>/<code>LF_HOME</code>, no inherited <code>LF_*</code>, fake <code>security</code> first on <code>PATH</code>,
+a stand-in <code>claude</code> that prints a stream-json <code>rate_limit_event</code> read from a file. Two fixture logins, <code>alpha@example.com</code> and
+<code>beta@example.com</code>, stand in for the incident's two logins. No live account data touched.</p>
+
+<h2>How the state was built</h2>
+<p>The released binary initialized the store; two <code>provider_accounts</code> rows, credential files and <code>config.yaml</code> account declarations were written by hand
+(the fixture-account route; no OAuth possible). Then the <em>released</em> binary recorded the incident's rejections through real <code>lf -b</code> launches:</p>
+<pre>{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","rateLimitType":"seven_day_overage_included",
+ "utilization":1.0,"resetsAt":&lt;now+3d / now+4d&gt;,"model":"claude-fable-5-2"}}</pre>
+<p>Resulting store matches the incident record: <code>cooldown_until</code> null, one Fable-scoped alias row per login.</p>
+<pre>alpha||rejected: seven_day_overage_included|100
+beta||rejected: seven_day_overage_included|100
+alpha|seven_day_overage_included|100||1794931060|...|stream|fable|1794931065
+beta|seven_day_overage_included|100||1795017479|...|stream|fable|1795017484</pre>
+
+<h2>Scenarios</h2>
+<table>
+<tr><th>Scenario</th><th>Released lf</th><th>Branch lf</th></tr>
+<tr><td>Upgrade: open the incident store</td><td>—</td><td class="ok">Migration applied (<code>capacity_revision</code>=0); <code>lf account</code>, <code>lf account claude --cached</code> show <code>held for fable until …</code></td></tr>
+<tr><td><code>lf account next --json</code></td><td>exit 2, <code>'alpha…' cooling until …</code> (no scope)</td><td class="ok">exit 2, <code>'alpha…' cooling for fable until …</code></td></tr>
+<tr><td>Fresh <code>-b -a claude:sonnet|opus|haiku</code></td><td>sonnet exit 0</td><td class="ok">all exit 0</td></tr>
+<tr><td>Fresh <code>-a claude:fable</code></td><td>refused</td><td class="ok">refused: <code>no eligible managed claude account: … cooling for fable until …</code></td></tr>
+<tr><td>Interactive Sonnet Session, then <code>lf -i session resume</code> (PTY)</td><td>resumed</td><td class="ok">resumed, <code>--model sonnet --resume &lt;thread&gt;</code></td></tr>
+<tr><td>Same Session, <code>-a claude:fable session resume</code></td><td>—</td><td class="ok">refused with the Fable reason; no provider started</td></tr>
+<tr><td>Bare <code>-a claude</code>, no saved model</td><td>—</td><td class="note">refused (waits for every scope, as documented). With <code>--setting claude.model=opus</code>: exit 0, <code>--model opus</code>. This Machine's real config has <code>claude.model: opus</code>.</td></tr>
+<tr><td>Branch records <code>seven_day_overage_included</code> + model fable</td><td>stored as alias <code>seven_day_overage_included</code></td><td class="ok">stored as canonical <code>seven_day_fable</code>, model fable; old alias kept until a matching poll</td></tr>
+<tr><td><code>seven_day</code> rejected tagged <code>model: fable</code> on beta</td><td>—</td><td class="ok">stored unscoped, <code>cooldown_until</code> set; Sonnet and Haiku route to alpha; Fable refused on both</td></tr>
+<tr><td><code>seven_day_fable</code> tagged <code>model: sonnet</code> on alpha (clean home)</td><td>—</td><td class="ok">stored model fable; routed Sonnet stays on alpha, routed Fable moves to beta</td></tr>
+<tr><td>Paid-credit <code>overage</code> on beta (Fable launch)</td><td>—</td><td class="ok">separate <code>overage</code> row scoped to the launched model; display <code>fable out until …</code></td></tr>
+<tr><td>Reset passes (alpha's 50-second Fable hold + grace)</td><td>—</td><td class="ok"><code>next</code> picks alpha; Fable launch runs on alpha</td></tr>
+<tr><td><code>lf account set beta@ --clear-cooldown</code> with only a Fable hold</td><td>—</td><td class="note">prints <code>Cleared Claude login 'beta@example.com' cooldown</code>; Fable stays held (documented: windows retained)</td></tr>
+<tr><td><code>lf account claude --json</code> poll + reconciliation, in-flight race</td><td colspan="2" class="note">Not reachable from a real binary: the usage endpoint override is <code>cfg(test)</code> only, and real polling needs the real logins. Covered by the automated account-handler fixture below.</td></tr>
+</table>
+
+<h2>Automated component check</h2>
+<pre>cargo test -p loopflow --lib claude_usage_reconciliation_   (LF_*/REX_* unset, stdin closed)
+test result: ok. 12 passed; 0 failed</pre>
+<p>Includes <code>account_handlers_refresh_both_logins</code> (both incident logins, JSON/text, <code>next</code>, fresh/resumed routing, rejection during refresh),
+delayed-poll revision rejection and the migration upgrade.</p>
+
+<h2>Fixed</h2>
+<p>Nothing needed fixing in scope.</p>
+
+<h2>Works now</h2>
+<p>On the incident state, Sonnet/Opus/Haiku launch and resume; Fable is held with a reason that names Fable; account-wide limits still block every model;
+bucket beats reported model in both directions; resets restore the login; the released store upgrades cleanly.</p>
+
+<h2>Could not reach</h2>
+<ul>
+<li>A real <code>/api/oauth/usage</code> poll replacing the alias row and clearing a broad hold. Needs real logins; importing them into a private home risks rotating their refresh tokens.</li>
+<li>Real Claude's stream-json for these buckets: the events are synthetic, shaped from the decoder and the incident record.</li>
+</ul>
+
+<h2>Still rough, worst first</h2>
+<ol>
+<li><code>--clear-cooldown</code> reports success while a model-scoped hold keeps that model blocked. In the incident's shape (scoped rows, null cooldown) the command changes nothing a person can see. Documented, but the message reads as if it worked.</li>
+<li><code>lf account next</code> says <code>beta… cooling until 2026-11-18…</code> without "for fable" when a login carries both an account-wide hold (ends Nov 15) and a longer Fable hold; the date is right for Fable, the label overstates the account-wide hold.</li>
+<li><code>next</code> says "the only login ready for this launch" while another login could run Sonnet: the documented model-unspecified conservatism.</li>
+<li>Pre-existing, unrelated: local fixture logins show <code>access token until 2100-01-01; the laptop's `lf machine connect` renews it</code> on a non-rental Machine.</li>
+</ol>
+</body></html>

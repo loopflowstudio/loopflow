@@ -18,16 +18,23 @@ use crate::store::{
 };
 use crate::work::wave::{Wave, WaveLocator};
 
+fn is_model_weekly_window(window: &str, model: Option<&str>) -> bool {
+    model.is_some_and(|model| {
+        crate::config::CLAUDE_MODEL_FAMILIES.contains(&model)
+            && window.strip_prefix("seven_day_") == Some(model)
+    })
+}
+
 // Historical aliases can coexist with canonical observations. Prefer the newer
 // reading; at equal second-resolution timestamps retain the stricter reading.
 fn reconcile_legacy_account_windows(limits: Vec<AccountLimitRow>) -> Vec<AccountLimitRow> {
     let mut winners = std::collections::HashMap::new();
     let key = |row: &AccountLimitRow| {
         let model = row.model.as_deref()?;
-        let canonical = format!("seven_day_{model}");
         (row.provider == "claude"
             && crate::config::CLAUDE_MODEL_FAMILIES.contains(&model)
-            && (row.window == canonical || row.window == "seven_day_overage_included"))
+            && (is_model_weekly_window(&row.window, Some(model))
+                || row.window == "seven_day_overage_included"))
             .then(|| (row.account_id.clone(), model.to_owned()))
     };
     for (index, row) in limits.iter().enumerate() {
@@ -45,10 +52,10 @@ fn reconcile_legacy_account_windows(limits: Vec<AccountLimitRow>) -> Vec<Account
         }
     }
     limits
-        .iter()
+        .into_iter()
         .enumerate()
         .filter(|(index, row)| key(row).is_none_or(|key| winners[&key].1 == *index))
-        .map(|(_, row)| row.clone())
+        .map(|(_, row)| row)
         .collect()
 }
 
@@ -1402,17 +1409,20 @@ impl SqliteStore {
     ) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current: (i64, Option<String>, Option<i64>) = transaction.query_row(
+        let (current_revision, cooldown_reason, cooldown_until): (
+            i64,
+            Option<String>,
+            Option<i64>,
+        ) = transaction.query_row(
             "SELECT capacity_revision, cooldown_reason, cooldown_until FROM provider_accounts
              WHERE provider=?1 AND account_id=?2",
             params![account.provider, account.account_id.as_str()],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )?;
-        if current.0 != revision {
+        if current_revision != revision {
             return Ok(false);
         }
-        let cause = current
-            .1
+        let cause = cooldown_reason
             .as_deref()
             .and_then(|reason| reason.rsplit(": ").next());
         let mut windows = windows.to_vec();
@@ -1427,32 +1437,27 @@ impl SqliteStore {
                 )?;
                 window.limited_until = prior.or_else(|| {
                     (cause == Some(window.window.as_str()))
-                        .then_some(current.2)
+                        .then_some(cooldown_until)
                         .flatten()
                 });
             }
         }
         let recovered = windows.iter().any(|window| {
-            let matching = cause == Some(window.window.as_str());
-            (matching
-                && matches!(
+            if cause != Some(window.window.as_str()) {
+                return false;
+            }
+            // A matching model window replaces a broad hold even when still
+            // spent; a global hold requires room in its own window.
+            is_model_weekly_window(&window.window, window.model.as_deref())
+                || (matches!(
                     window.window.as_str(),
                     "five_hour" | "seven_day" | "weekly" | "session"
-                )
-                && window.model.is_none()
-                && window.used_percent < 100)
-                || (matching
-                    && window.model.as_deref().is_some_and(|model| {
-                        crate::config::CLAUDE_MODEL_FAMILIES.contains(&model)
-                            && window.window == format!("seven_day_{model}")
-                    }))
+                ) && window.model.is_none()
+                    && window.used_percent < 100)
         });
         for window in &windows {
             if account.provider == "claude"
-                && window.model.as_deref().is_some_and(|model| {
-                    crate::config::CLAUDE_MODEL_FAMILIES.contains(&model)
-                        && window.window == format!("seven_day_{model}")
-                })
+                && is_model_weekly_window(&window.window, window.model.as_deref())
             {
                 transaction.execute(
                     "DELETE FROM provider_account_limits WHERE provider=?1 AND account_id=?2

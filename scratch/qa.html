@@ -1,0 +1,58 @@
+<!doctype html><meta charset=utf-8><title>LOO-857 QA</title>
+<style>body{font:15px/1.5 -apple-system,sans-serif;max-width:860px;margin:2em auto;padding:0 1em;color:#222}pre{background:#f5f5f2;padding:.8em;overflow-x:auto;font-size:13px}h2{margin-top:1.8em}td,th{padding:.2em .6em;text-align:left;border-bottom:1px solid #ddd}</style>
+<h1>LOO-857 QA: Linear conflicts through the CLI</h1>
+<p>Run on 2026-11-12 against the Machine's own store (<code>~/.lf/loopflow.db</code>) and the real Linear workspace. Branch <code>lf 0.15.3+bbbad0ba6</code> plus the fix below; installed <code>lf 0.15.3+3f3153d95</code>. Their migration sets are identical (111 = 111), so the branch binary opens the store without changing its schema.</p>
+
+<h2>What the Machine held before</h2>
+<p>The three Tasks in the 5-whys had been cleared by hand. Read-only queries found more held by the same error:</p>
+<ul>
+<li>LOO-714: completed locally on Nov 5. <code>pm_writeback</code> was <code>pending complete_task</code> with "conflicting planning facts at the same provider revision for LOO-714; refresh planning".</li>
+<li>21 queued field changes on 19 Tasks (loopflow, manabot, EXP), all with the same error.</li>
+<li>18 of those issues got <b>9,698 <code>IssueOwnership</code> reads in the last 24 h</b> from the installed lf, with no mutation between them. That's the incident's loop, still running.</li>
+</ul>
+
+<h2>Scenario 1: a held completion (LOO-714)</h2>
+<pre>$ lf task sync LOO-714            # installed
+Error: invalid data: conflicting planning facts at the same provider revision for LOO-714; refresh planning
+exit=1
+
+$ lf task sync LOO-714            # branch, first build
+Error: Newer or unresolved provider planning retained; field delivery deferred
+exit=1
+</pre>
+<p>The completion reached Linear (new revision <code>2026-11-12T17:22:57.303Z</code>, state completed, branch name re-read at 59 chars), but the command still failed with a message that names no fix. A second run printed <code>LOO-714: synchronized</code>.</p>
+<p><b>Cause.</b> From <code>linear-requests.jsonl</code> for that process: <code>IssueOwnership, IssueTeam, SetIssueState</code> (mutation), <code>ListTeams</code>, then <code>IssueOwnership</code> 0.5 s after the write. The stored revision came from the mutation's answer and is what Linear reports now, so that last read must have returned Linear's previous copy. <code>deliver_fields</code> always reads the issue and failed when the read wasn't accepted, even though LOO-714 had no field changes queued.</p>
+<p><b>Fixed</b> (<code>ops/planning_delivery.rs</code>): <code>observe</code> returns <code>None</code> for a read that was kept but not accepted. Field delivery refuses only when something is queued (field changes, Project order, or a deletion); with nothing queued it succeeds. Test: <code>older_read_with_nothing_queued_is_not_a_delivery_failure</code>. The existing case with a queued title still defers (<code>task_field_delivery_requires_revision_accepted_into_work</code>).</p>
+
+<h2>Scenario 2: a held field edit (LOO-724), after the fix</h2>
+<pre>$ lf task sync LOO-724 --retry-updates   # installed 0.15.3
+Error: invalid data: conflicting planning facts at the same provider revision for LOO-724; refresh planning
+exit=1
+$ lf task sync LOO-724 --retry-updates   # branch
+LOO-724: synchronized
+exit=0
+1|
+56|2026-11-12T17:36:53.871Z|790dc5e3-0adc-4e2b-9c3a-2d8486e7bc3f
+</pre>
+<p>The queued assignee reached Linear in one run, the change is acknowledged with no error, and the branch name was re-read at 56 chars.</p>
+
+<h2>Real Linear writes made during QA</h2>
+<ul><li>LOO-714 set to completed (queued since Nov 5).</li><li>LOO-724 assignee set (queued since Nov 4).</li></ul>
+
+<h2>Checks</h2>
+<ul>
+<li><code>cargo test -p loopflow --lib -- ops::linear::task_planning_tests:: linear::acceptance::</code>: 97 passed.</li>
+<li>Focused: the new test, the deletion tests, and <code>task_/project_field_delivery_requires_revision_accepted_into_work</code>: pass.</li>
+</ul>
+
+<h2>Not reached</h2>
+<ul>
+<li>The Project errors (Initiative move, missing from Initiative): reproducing them means moving a real Project in Linear. Covered only by unit tests.</li>
+<li>The Desktop Task detail refusal text (<code>waves.rs</code>): not viewed in a window.</li>
+</ul>
+
+<h2>Still wrong, worst first</h2>
+<ol>
+<li>The installed lf keeps re-reading the 18 still-held issues, about 400 requests an hour against Linear's budget. They clear on the first pass after this branch is installed, or one at a time with the branch's <code>lf task sync &lt;issue&gt; --retry-updates</code>. They're weeks-old queued edits, so QA didn't send them.</li>
+<li>"Newer or unresolved provider planning retained; field delivery deferred" still has no remedy when edits <i>are</i> queued. The background pass retries it, so it heals, but the text doesn't say so.</li>
+</ol>

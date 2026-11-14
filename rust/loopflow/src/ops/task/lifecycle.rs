@@ -11,74 +11,6 @@ use crate::work::task::{Task, TaskPr};
 
 use super::{block_on_task, repository_for_task, task_error, task_store};
 
-/// Completion is durable before cleanup; failure never reverses the outcome.
-pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> OpsResult<()> {
-    if super::task_work_status(store, task).await? != WorkStatus::Done {
-        return Ok(());
-    }
-    let Some(pr) = store.active_task_pr(&task.id).await.map_err(task_error)? else {
-        eprintln!(
-            "Task {} is complete; retained its PR-less checkout and artifacts.",
-            task.identifier
-        );
-        return Ok(());
-    };
-    if super::completion_refusal(Some(&pr), &task.identifier).is_some() {
-        eprintln!(
-            "Task {} is complete; retained checkout for unresolved delivery.",
-            task.identifier
-        );
-        return Ok(());
-    }
-    // Removal waits for running work; writing alongside it never does.
-    let blockers = crate::ops::task_execution::task_execution_blockers(&store.sqlite, &task.id)?;
-    if !blockers.is_empty() {
-        eprintln!(
-            "Task {} is complete; retained checkout: {}",
-            task.identifier,
-            blockers.join("; ")
-        );
-        return Ok(());
-    }
-    let result = async {
-        let repo = main_repo_root(&repository_for_task(store, task)?)?;
-        if task.worktree.as_ref().is_some_and(|path| path == &repo) {
-            eprintln!(
-                "Task {} is complete; retained the primary checkout and branch.",
-                task.identifier
-            );
-            return Ok(());
-        }
-        let _mutation = task
-            .worktree
-            .as_ref()
-            .filter(|path| path.exists())
-            .map(|path| super::lock_task_pr_mutation(path))
-            .transpose()?;
-        // The completion gate above admits only a merged PR with resolved scope.
-        let deletion = crate::ops::wt::prepare_landed_delete(
-            &repo,
-            &pr.branch,
-            pr.head_sha()
-                .ok_or_else(|| task_error("merged PR has no recorded head"))?,
-        )?;
-        crate::ops::wt::apply_delete(deletion, &NullProgress)?;
-        if task.worktree.as_ref().is_some_and(|path| path.exists()) {
-            return Err(task_error(
-                "checkout is on a different branch; retained it for explicit wt delete",
-            ));
-        }
-        Ok(())
-    }
-    .await;
-    result.map_err(|error| {
-        task_error(format!(
-            "Task {} is complete, but cleanup is incomplete: {error}. Inspect the retained checkout with `lf wt list`.",
-            task.identifier,
-        ))
-    })
-}
-
 async fn branch_task(repo: &Path, branch: &str) -> OpsResult<Option<(SharedStore, Task)>> {
     let store = match super::authority_store().await? {
         Some(store) => store,
@@ -182,22 +114,29 @@ async fn abandon(repo: &Path, selector: &str, force: bool) -> OpsResult<String> 
     };
     save_abandon(&store, &task).await?;
     // Failed cleanup cannot undo the decision or grant control over live work.
-    let cleanup = async {
-        if let Some(deletion) =
-            prepare_abandon(repo, &store, Some(&task), selector, force, false).await?
-        {
-            crate::ops::abandon::abandon_prepared(deletion, &NullProgress).await?;
-        }
-        Ok::<(), crate::ops::OpsError>(())
-    }
-    .await;
+    let cleanup = cleanup_abandoned(repo, &store, &task, force).await;
     if let Err(error) = cleanup {
-        eprintln!(
+        crate::journal::request::diagnostic(format_args!(
             "{} is canceled; retained checkout/PR: {error}",
             task.identifier
-        );
+        ));
     }
     Ok(task.identifier)
+}
+
+pub(super) async fn cleanup_abandoned(
+    repo: &Path,
+    store: &SharedStore,
+    task: &Task,
+    force: bool,
+) -> OpsResult<bool> {
+    if let Some(deletion) =
+        prepare_abandon(repo, store, Some(task), &task.identifier, force, false).await?
+    {
+        crate::ops::abandon::abandon_prepared(deletion, &NullProgress).await?;
+        return Ok(true);
+    }
+    Ok(false)
 }
 
 async fn save_abandon(store: &SharedStore, task: &Task) -> OpsResult<()> {
@@ -205,6 +144,7 @@ async fn save_abandon(store: &SharedStore, task: &Task) -> OpsResult<()> {
         .abandon(&WorkRef::Task(task.id.clone()), "explicit Task abandonment")
         .await
         .map_err(task_error)?;
+    super::retirement::close_conversations(&store.sqlite, &task.id)?;
     crate::ops::planning_sync::sync_after_save(
         store,
         &repository_for_task(store, task)?.to_string_lossy(),

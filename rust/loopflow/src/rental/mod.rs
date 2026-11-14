@@ -48,7 +48,10 @@ pub const BOOT_SECONDS: i64 = 60 * 60;
 // ---------------------------------------------------------------------------
 
 /// US dollars in millionths, so prices like $0.03 per vCPU-hour stay exact.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(
+    schemars::JsonSchema, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default,
+)]
+#[schemars(with = "String")]
 pub struct Usd(i64);
 
 impl Usd {
@@ -147,7 +150,9 @@ impl std::str::FromStr for Usd {
 // Providers and hardware
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
+#[derive(
+    schemars::JsonSchema, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum,
+)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum Provider {
@@ -414,7 +419,8 @@ impl fmt::Display for Provider {
 }
 
 /// What an on-demand rents and a rental was granted.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(schemars::JsonSchema, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Hardware {
     pub vcpus: u32,
     pub memory_gb: u32,

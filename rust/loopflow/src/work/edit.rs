@@ -75,6 +75,8 @@ macro_rules! work_values {
 work_values! {
     (WaveName, "wave_name", String),
     (WaveParent, "wave_parent", Option<String>),
+    // Captured only once a Wave is removed, so live Waves exchange as before.
+    (WaveRetired, "wave_retired", Option<i64>),
     (WaveProject, "wave_project", Option<String>),
     (ProjectWave, "project_wave", String),
     (ProjectLinearId, "project_linear_id", Option<String>),
@@ -101,7 +103,9 @@ work_values! {
     (TaskUrl, "task_url", Option<String>),
     (TaskBranch, "task_branch", Option<String>),
     (TaskTeam, "task_team", Option<String>),
-    (TaskRegressedIn, "task_regressed_in", Option<String>),
+    // Regressions are GitHub issues. Stored journal rows and released peers still carry
+    // this field, so it round-trips unread until LOO-730 deletes the rows and column.
+    (HistoricalTaskRegressedIn, "task_regressed_in", Option<String>),
     (CommentTask, "comment_task", String),
     (HistoricalProjectWorkflow, "workflow", String),
     // Released peers recorded the Wave default here; it lives in the Wave config.yaml.
@@ -154,13 +158,6 @@ impl WorkValue {
         match self {
             Self::Disposition(v) if !matches!(v.planning_completed, 0 | 1) => {
                 return Err(StoreError::InvalidData("invalid completion value".into()))
-            }
-            Self::TaskRegressedIn(Some(v))
-                if crate::work::task::release_version(v).as_ref() != Some(v) =>
-            {
-                return Err(StoreError::InvalidData(format!(
-                    "regressed-in {v:?} is not a release version like v0.15.3"
-                )))
             }
             Self::MetricTargets(v) => {
                 crate::work::project::validate_metric_targets(v).map_err(StoreError::InvalidData)?

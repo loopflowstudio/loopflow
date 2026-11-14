@@ -79,7 +79,7 @@ struct DesktopPaneControlTests {
         #expect(store.browserPane?.content == browser.content)
     }
 
-    @Test("Companion switches retain the shell and file draft; the next close retires a closed shell")
+    @Test("Companion switches retain the shell and file draft; Close releases the shell")
     func companionSwitchRetainsViews() throws {
         let workspace = SessionsWorkspace(key: workKey, title: "Task", location: identity, localMachineId: identity.machineId)
         let store = workspace.multiplexer
@@ -109,9 +109,8 @@ struct DesktopPaneControlTests {
         #expect(store.shellPane?.content.selectedShell == nil)
         #expect(store.collapsedPaneIds.contains(shell.id))
         #if canImport(GhosttyKit)
-        #expect(workspace.surfaces.view(for: terminal) === view)
-        workspace.closePane(browser.id)
         #expect(workspace.surfaces.view(for: terminal) !== view)
+        #expect(workspace.disconnectedShells.contains(try #require(shell.content.selectedShell).id))
         #endif
     }
 
@@ -133,7 +132,7 @@ struct DesktopPaneControlTests {
         let b = WorkWorkspaceKey(repository: repository, kind: .task, id: "b")
         let members = [a, b].map { WorkMemberRef(source: ["root"], work: $0) }
         func plan(dashboard: String?, expression: WorkSelection.Expression, also: [WorkWorkspaceKey] = []) -> WorkViewPlan {
-            WorkViewPlan(name: dashboard, pinned: false, dashboardID: dashboard, repository: repository,
+            WorkViewPlan(name: dashboard, pinned: false, dashboardID: dashboard, repository: repository, repositoryPath: "/src/fixture",
                 selection: WorkSelection(id: "root", expression: expression), savedRevision: dashboard == nil ? nil : 1,
                 resolution: WorkSelectionResolution(attention: [], members: members, unavailable: []),
                 arrangement: WorkArrangement(order: members, hidden: [], mode: .touched),
@@ -148,6 +147,7 @@ struct DesktopPaneControlTests {
         model.applySelectionPlans([plan(dashboard: "review", expression: .filter(.state(.open))),
                                    plan(dashboard: nil, expression: .repository, also: [waveKey]),
                                    plan(dashboard: nil, expression: .wave(wave))], reason: "")
+        model.applyStartedFixture(working: ["a", "b"], repository: repository)
         let router = WorkLinkRouter()
         let window = UUID()
         router.register(window, repository: repository, focus: {},
@@ -207,7 +207,7 @@ struct DesktopPaneControlTests {
     private func actionFixture() -> (WorkModel, SessionsWorkspaceRegistry, WorkLinkRouter, UUID) {
         let keys = ["a", "b"].map { WorkWorkspaceKey(repository: repository, kind: .task, id: $0) }
         let members = keys.map { WorkMemberRef(source: ["root"], work: $0) }
-        let plan = WorkViewPlan(name: nil, pinned: false, dashboardID: nil, repository: repository,
+        let plan = WorkViewPlan(name: nil, pinned: false, dashboardID: nil, repository: repository, repositoryPath: "/src/fixture",
             selection: WorkSelection(id: "root", expression: .repository), savedRevision: nil,
             resolution: WorkSelectionResolution(attention: [], members: members, unavailable: []),
             arrangement: WorkArrangement(order: members, hidden: [], mode: .touched),
@@ -373,8 +373,8 @@ struct DesktopPaneControlTests {
             object: TerminalIdentity.shell(try #require(shell.content.selectedShell).id, machineId: fixtureMachineId))
         #expect(workspace.multiplexer.layout.pane(for: shell.id) == shell)
         NotificationCenter.default.post(name: .ghosttySurfaceClosed, object: terminal)
-        #expect(workspace.multiplexer.focusedPane.kind == .session)
-        #expect(workspace.multiplexer.collapsedPaneIds.contains(shell.id))
+        #expect(workspace.multiplexer.focusedPane == shell)
+        #expect(workspace.disconnectedShells.contains(try #require(shell.content.selectedShell).id))
         let unknown = try #require(workspace.multiplexer.newShell())
         #expect(unknown.terminal == nil)
     }
@@ -672,6 +672,12 @@ struct DesktopPaneControlTests {
         #expect(!store.collapsedPaneIds.contains(files.id))
         #expect(store.browserPane?.incarnation == files.incarnation)
         #expect(store.browserPane?.content.selectedBrowserTab == .files)
+        let documents = workspace.files(issue: task.id, cwd: identity.worktree)
+        documents.selectFile("note.txt", mode: .edit)
+        _ = try router.perform(DesktopActionRequest("files", at: source, args: ["path": "docs/usage.md"]))
+        #expect(documents.selection == "note.txt")
+        #expect(documents.mode == .edit)
+        #expect(documents.tabs.contains { $0.path == "docs/usage.md" })
         let shellReceipt = try router.perform(DesktopActionRequest("run", at: source))
         #expect(store.shell(shellReceipt.tab ?? "")?.location == identity)
         #expect(shellReceipt.pane == selected.id)
@@ -799,7 +805,7 @@ struct DesktopPaneControlTests {
         _ = try router.perform(DesktopActionRequest("move", at: shellTarget, args: ["destination": sessionTarget.pane, "axis": "vertical"]))
         #expect(store.layout.allPanes.map(\.id) == [session.id, shell.id, filesPane.id])
         _ = try router.perform(DesktopActionRequest("resize", at: shellTarget, args: ["toward": sessionTarget.pane, "ratio": String(0.7)]))
-        let reading = DesktopLayoutInspection(store.layout, surface: { _ in nil }, commands: { _ in nil })
+        let reading = DesktopLayoutInspection(store.layout, surface: { _ in nil }, commands: { _ in nil }, attachment: { _ in nil })
         let movedSplit = reading.children[0]
         #expect(movedSplit.axis == "vertical")
         #expect(abs(try #require(movedSplit.ratio) - 0.3) < 0.0001)
@@ -912,7 +918,7 @@ struct DesktopPaneControlTests {
         #expect(!store.collapsedPaneIds.contains(old.pane))
     }
 
-    @Test("⌘W then ⇧⌘T returns the same shell tab and surface, by key and by Apple event")
+    @Test("⌘W then ⇧⌘T returns the ended shell identity, by key and by Apple event")
     func undoCloseReturnsTheClosedShellTab() throws {
         for byKey in [true, false] {
             let router = WorkLinkRouter(), registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId), window = UUID()
@@ -945,7 +951,8 @@ struct DesktopPaneControlTests {
             #expect(reopened.tab == closing.id)
             #expect(store.focusedPane == shell)
             #if canImport(GhosttyKit)
-            #expect(registry.surfaces.view(for: try #require(shell.terminal)) === view)
+            #expect(registry.surfaces.view(for: try #require(shell.terminal)) !== view)
+            #expect(workspace.disconnectedShells.contains(closing.id))
             #endif
             #expect(throws: DesktopTargetError.self) { _ = try press("t", [.command, .shift]) }
         }

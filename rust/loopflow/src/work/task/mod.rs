@@ -25,7 +25,6 @@ pub struct TaskUpdate {
     pub assignee: Option<Option<String>>,
     pub title: Option<String>,
     pub description: Option<String>,
-    pub regressed_in: Option<String>,
 }
 
 /// The caller retains this identity across a retry; a separate create mints another.
@@ -39,18 +38,6 @@ pub struct NewTask {
     pub description: String,
 }
 
-/// A release version as `regressed_in` stores it, `v` and three numbers:
-/// `0.15.3` and `v0.15.3` both read as `v0.15.3`.
-pub fn release_version(text: &str) -> Option<String> {
-    let numbers = text.trim().strip_prefix('v').unwrap_or(text.trim());
-    let parts: Vec<&str> = numbers.split('.').collect();
-    (parts.len() == 3
-        && parts
-            .iter()
-            .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit())))
-    .then(|| format!("v{numbers}"))
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum TaskDataError {
     #[error("invalid Task id: {0}")]
@@ -61,7 +48,7 @@ pub enum TaskDataError {
 
 prefixed_uuid_id!(TaskPrId, "pr_", TaskDataError, TaskDataError::InvalidId);
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GithubPr {
     pub number: u32,
     pub url: String,
@@ -74,7 +61,7 @@ pub struct GithubPr {
 /// The state of a PR head's required checks, as last observed by a reconcile.
 /// Failure dominates: any failing required check makes the head `Failing`
 /// regardless of what else is still pending.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CiState {
     Pending,
@@ -94,7 +81,7 @@ impl CiState {
 
 /// One required check that is not passing, named so the `ci-fix` skill can
 /// resolve the exact failure from its logs.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CiCheck {
     pub name: String,
     pub url: Option<String>,
@@ -102,11 +89,12 @@ pub struct CiCheck {
 
 /// The required-check reading for one PR head. `head_sha` pins it: a reading is
 /// stale — and never starts repair — once the PR's head moves past it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CiObservation {
     pub head_sha: String,
     pub state: CiState,
     pub failing_checks: Vec<CiCheck>,
+    #[schemars(with = "crate::server::schema::TimeTuple")]
     pub observed_at: OffsetDateTime,
 }
 
@@ -144,13 +132,14 @@ pub struct CiIncident {
 /// The last attempt to refresh one persisted GitHub PR. This metadata lives on
 /// `TaskPr` beside the cached PR fields: it bounds repeated reads across `lf`
 /// processes without making GitHub the source of truth.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GithubObservation {
+    #[schemars(with = "crate::server::schema::TimeTuple")]
     pub checked_at: OffsetDateTime,
     pub result: GithubObservationResult,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum GithubObservationResult {
     Fresh,
@@ -173,7 +162,7 @@ impl TaskPrRepairKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum PrPhase {
@@ -204,7 +193,7 @@ impl PrPhase {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PrMergeMode {
     User,
@@ -234,29 +223,31 @@ impl FromStr for PrMergeMode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PrMergeRequest {
     pub mode: PrMergeMode,
+    #[schemars(with = "crate::server::schema::TimeTuple")]
     pub requested_at: OffsetDateTime,
     pub head_sha: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PrPresentation {
     pub title: String,
     pub body: String,
     pub head_sha: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PrPublication {
+    #[schemars(with = "crate::server::schema::TimeTuple")]
     pub requested_at: OffsetDateTime,
     pub presentation: Option<PrPresentation>,
     pub github: Option<GithubPr>,
     pub merge: Option<PrMergeRequest>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskPr {
     pub id: TaskPrId,
     pub task_id: TaskId,
@@ -271,6 +262,7 @@ pub struct TaskPr {
     pub parent_pr_id: Option<TaskPrId>,
     pub publication: Option<PrPublication>,
     pub merge_commit: Option<String>,
+    #[schemars(with = "Option<crate::server::schema::TimeTuple>")]
     pub abandoned_at: Option<OffsetDateTime>,
     /// The most recent required-check reading for this PR's open head. `None`
     /// until the head has been observed; ignored once the head moves past
@@ -292,7 +284,9 @@ pub struct TaskPr {
     /// string when it degraded. The GitHub publication still succeeded — this only
     /// records that the Linear side is behind, and is cleared on the next success.
     pub linear_link_error: Option<String>,
+    #[schemars(with = "crate::server::schema::TimeTuple")]
     pub created_at: OffsetDateTime,
+    #[schemars(with = "crate::server::schema::TimeTuple")]
     pub updated_at: OffsetDateTime,
 }
 
@@ -454,7 +448,7 @@ impl TaskPr {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum LinearWritebackOperation {
@@ -463,7 +457,7 @@ pub enum LinearWritebackOperation {
     CancelTask,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum LinearWritebackState {
     Current,
@@ -477,26 +471,34 @@ pub enum LinearWritebackState {
 /// The durable attempt metadata lives on `TaskPr`; this derived view tells one
 /// caller whether it read GitHub, reused a recent reading, or opened a degraded
 /// circuit while preserving the cached PR fields.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema)]
 #[serde(tag = "freshness", rename_all = "snake_case")]
 pub enum Observation {
     /// No remote read applies, as for an unpublished working PR.
     #[default]
     NotRequired,
     /// GitHub answered during this reconcile.
-    Fresh { observed_at: OffsetDateTime },
+    Fresh {
+        #[schemars(with = "crate::server::schema::TimeTuple")]
+        observed_at: OffsetDateTime,
+    },
     /// A recent successful reading was reused without spending another request.
-    Cached { observed_at: OffsetDateTime },
+    Cached {
+        #[schemars(with = "crate::server::schema::TimeTuple")]
+        observed_at: OffsetDateTime,
+    },
     /// A bounded read failed. The reason and retry boundary are durable, so
     /// later local controls reuse the cached state without hammering GitHub.
     Degraded {
         reason: String,
+        #[schemars(with = "crate::server::schema::TimeTuple")]
         cached_as_of: OffsetDateTime,
+        #[schemars(with = "crate::server::schema::TimeTuple")]
         retry_at: OffsetDateTime,
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Task {
     pub id: TaskId,
     /// Local optimistic-write revision; independent of Linear observation age.
@@ -508,9 +510,6 @@ pub struct Task {
     pub rank: u32,
     pub assignee: Option<String>,
     pub due_date: Option<String>,
-    /// The release this bug regressed in (`v0.15.3`); `stable` skips releases
-    /// it covers until the release that ships the fix.
-    pub regressed_in: Option<String>,
     /// Linear's state type, `completed` once done; the lifecycle is `TaskState`.
     pub state: Option<String>,
     pub completed_at: Option<String>,
@@ -522,6 +521,7 @@ pub struct Task {
     /// Read projection from the Project join, validated against the Project on save.
     pub wave_id: Option<WaveId>,
     /// Stable repository identity, independent of planning membership.
+    #[serde(rename = "repo_id")]
     pub repository_id: crate::durable::RepositoryId,
     pub project_id: Option<ProjectId>,
     pub worktree: Option<PathBuf>,
@@ -529,10 +529,10 @@ pub struct Task {
     pub branch: String,
     pub base_commit: String,
     pub parent_pr_id: Option<TaskPrId>,
-    /// Explicit choice for every Graph step; None uses the step/config defaults.
-    pub agent: Option<String>,
+    #[schemars(with = "String")]
     #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
+    #[schemars(with = "String")]
     #[serde(with = "time::serde::rfc3339")]
     pub updated_at: OffsetDateTime,
     /// Per-command view derived from the active PR's durable observation cache.
@@ -568,14 +568,14 @@ impl Task {
 }
 
 /// Historical keep-open scope, retained for event decoding only.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskFollowUp {
     pub outcome: String,
     pub evidence: String,
     pub check_at: i64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TaskEventKind {
     // Historical follow-through events remain readable; no current writers.
@@ -699,11 +699,12 @@ impl TaskEventKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskEvent {
     pub id: i64,
     pub task_id: TaskId,
     pub kind: TaskEventKind,
+    #[schemars(with = "crate::server::schema::TimeTuple")]
     pub created_at: OffsetDateTime,
 }
 
@@ -775,13 +776,11 @@ mod tests {
             branch: "jack/ship-it".to_string(),
             base_commit: "abc".to_string(),
             parent_pr_id: None,
-            agent: None,
             created_at: now,
             updated_at: now,
             rank: 0,
             assignee: None,
             due_date: None,
-            regressed_in: None,
             state: None,
             completed_at: None,
             observation: crate::work::task::Observation::NotRequired,

@@ -2,11 +2,12 @@
 //! Unknown identity, duplicate PID/birth and unknown attachment life grant no signal authority.
 use crate::id::LfProcessId;
 use crate::journal::{
-    process_evidence, process_identity_evidence, process_started_at, OsProcess,
+    agent_evidence, lf_evidence, process_identity_evidence, process_started_at, OsProcess,
     ProcessIdentityEvidence,
 };
 use crate::os_process::terminate_process_group;
 use crate::process::SessionAttachment;
+use crate::session::Holder;
 use crate::store::sqlite::SqliteStore;
 use crate::store::{StoreError, StoreResult};
 use anyhow::{anyhow, Result};
@@ -15,23 +16,6 @@ use std::collections::{HashMap, HashSet};
 /// The store, LfSession and frozen attachment one invocation launches and
 /// writes under.
 pub(crate) type AttachmentOwner = (SqliteStore, String, SessionAttachment);
-
-/// Admit cleanup while the provider still owns this detached tool group.
-/// The watchdog remains a member, so its group identity cannot be recycled.
-pub fn guard_tool_lifeline(path: &std::path::Path, provider_pid: u32) -> Result<()> {
-    let group = crate::os_process::current_process_group_id()
-        .ok_or_else(|| anyhow!("tool process group is unavailable"))?;
-    let provider = OsProcess::read(provider_pid)?
-        .ok_or_else(|| anyhow!("tool provider exited before lifeline admission"))?;
-    let leader = OsProcess::read(group)?
-        .ok_or_else(|| anyhow!("tool group leader exited before lifeline admission"))?;
-    anyhow::ensure!(
-        group != provider.pgid && leader.ppid == provider.pid,
-        "tool does not belong to a detached group created by its provider"
-    );
-    crate::os_process::watch_tool_lifeline(path)?;
-    Ok(())
-}
 
 /// Open the invocation's attachment without refreshing its authority from the
 /// store. A launch without one is refused: every AgentProcess is recorded.
@@ -68,24 +52,17 @@ pub(crate) fn spawn(
     mut command: tokio::process::Command,
     lifeline: Option<&std::path::Path>,
     owner: &AttachmentOwner,
+    holder: Holder,
 ) -> Result<tokio::process::Child> {
     let (store, session, attachment) = owner;
-    super::dispatch::off_reactor(|| {
-        let capability = store.reserve_steer_adapter(session, attachment)?;
-        command.env(
-            crate::steer::PROVIDER_CONTEXT_ENV,
-            serde_json::to_string(&capability)?,
-        );
-        command.env(
-            crate::steer::STEER_SEEN_ENV,
-            crate::steer::seen_marker(&crate::store::lf_home_dir(), &capability.agent_process_id),
-        );
+    super::dispatch::off_reactor(|| -> Result<tokio::process::Child> {
+        context_environment(command.as_std_mut(), owner, holder)?;
         let program = command
             .as_std()
             .get_program()
             .to_string_lossy()
             .into_owned();
-        store.with_session_attachment(session, attachment, || {
+        Ok(store.with_session_attachment(session, attachment, || {
             store.record_agent_process_launch(session, attachment, command.as_std(), false)?;
             let spawned =
                 crate::os_process::spawn_agent_process(command, lifeline, record_identity(owner));
@@ -95,9 +72,8 @@ pub(crate) fn spawn(
             spawned.map_err(|error| {
                 StoreError::InvalidData(format!("failed to spawn {program}: {error}"))
             })
-        })
+        })?)
     })
-    .map_err(Into::into)
 }
 
 /// Native terminals keep their foreground process group. Remote clients do not
@@ -106,19 +82,13 @@ pub(crate) fn spawn(
 pub(crate) fn spawn_native(
     mut command: std::process::Command,
     owner: &AttachmentOwner,
+    holder: Holder,
 ) -> Result<std::process::Child> {
     let (store, session, attachment) = owner;
     crate::agent_input_timing::record("provider_spawn_begin", session);
-    let capability = store.reserve_steer_adapter(session, attachment)?;
-    command.env(
-        crate::steer::PROVIDER_CONTEXT_ENV,
-        serde_json::to_string(&capability)?,
-    );
-    command.env(
-        crate::steer::STEER_SEEN_ENV,
-        crate::steer::seen_marker(&crate::store::lf_home_dir(), &capability.agent_process_id),
-    );
-    store
+    context_environment(&mut command, owner, holder)?;
+    let cwd = command.get_current_dir().map(std::path::Path::to_path_buf);
+    let child = store
         .with_session_attachment(session, attachment, || {
             store.record_agent_process_launch(session, attachment, &command, true)?;
             let spawned =
@@ -137,7 +107,137 @@ pub(crate) fn spawn_native(
             // Preserve the OS error (including NotFound) for the caller's message.
             Ok(spawned)
         })?
-        .map_err(Into::into)
+        .map_err(anyhow::Error::from)?;
+    if let Some(cwd) = cwd {
+        crate::transport::report_directory(&cwd);
+    }
+    Ok(child)
+}
+
+/// A managed launch is recorded and steered through the Machine server, so
+/// its agent starts only once that server welcomes a connection, as the hooks
+/// will need it to. A stopped server is started the way a managed view starts
+/// it: by the selected installation, never by this build.
+pub(crate) fn require_server() -> Result<()> {
+    use crate::server::client::Connection;
+    if Connection::open().is_ok() {
+        return Ok(());
+    }
+    let setup = crate::installation::server::readiness_command()?.output()?;
+    let Err(down) = Connection::open() else {
+        return Ok(());
+    };
+    let setup = String::from_utf8_lossy(&setup.stderr);
+    let reason = match setup.trim() {
+        "" => format!("{down:#}"),
+        setup => setup.to_owned(),
+    };
+    anyhow::bail!(
+        "Loopflow server is not running, and Task and Wave work needs it ({reason}); \
+         run `lf install server`, then `lf server status`"
+    )
+}
+
+/// Capture identity in the launch's delivery file and give the launch its
+/// steer capability. A launch the Machine server holds starts beside it and
+/// presents the capability to that server. A bare launch reaches no server:
+/// its hook presents the capability to the store.
+fn context_environment(
+    command: &mut std::process::Command,
+    owner: &AttachmentOwner,
+    holder: Holder,
+) -> Result<()> {
+    let (store, session, attachment) = owner;
+    if let Some(path) = command.get_envs().find_map(|(name, value)| {
+        (name == crate::context_block::CONTEXT_DELIVERY_ENV)
+            .then_some(value)
+            .flatten()
+    }) {
+        let path = std::path::Path::new(path);
+        let mut delivery = crate::context_block::ContextDelivery::load(path)?;
+        delivery.identify(store, session)?;
+        delivery.save(path)?;
+    }
+    let capability_env = match holder {
+        Holder::Caller => crate::steer::BARE_STEER_ENV,
+        Holder::Server => {
+            require_server()?;
+            crate::steer::PROVIDER_CONTEXT_ENV
+        }
+    };
+    let capability = store.reserve_steer_adapter(session, attachment)?;
+    let home = crate::store::lf_home_dir();
+    command.env(capability_env, serde_json::to_string(&capability)?);
+    command.env(
+        crate::steer::STEER_SEEN_ENV,
+        crate::steer::seen_marker(&home, &capability.agent_process_id),
+    );
+    command.env(
+        crate::steer::STEER_SESSION_ENV,
+        crate::steer::session_marker(&home, session),
+    );
+    // A Session belongs to at most one Task: Task checkouts do not nest.
+    if let [task] = store.session_task_ids(session)?.as_slice() {
+        command.env(
+            crate::steer::STEER_TASK_ENV,
+            crate::steer::task_marker(&home, task.as_str()),
+        );
+    }
+    Ok(())
+}
+
+/// Become the provider: this process is the AgentProcess, recorded under the
+/// owner's attachment before the exec. Returns only when the exec failed, with
+/// the launch recorded as never spawned.
+pub(crate) fn exec_native(
+    mut command: std::process::Command,
+    owner: &AttachmentOwner,
+    holder: Holder,
+    launch_lock: Option<std::fs::File>,
+) -> std::io::Error {
+    use std::os::unix::process::CommandExt;
+    let (store, session, attachment) = owner;
+    crate::agent_input_timing::record("provider_exec_begin", session);
+    if let Err(error) = context_environment(&mut command, owner, holder) {
+        return std::io::Error::other(error.to_string());
+    }
+    let pid = std::process::id();
+    let started_at = match process_started_at(pid) {
+        Ok(Some(started_at)) => started_at,
+        Ok(None) => return std::io::Error::other("AgentProcess birth unavailable before exec"),
+        Err(error) => return error,
+    };
+    let admitted = store.with_session_attachment(session, attachment, || {
+        store.record_agent_process_launch(session, attachment, &command, true)?;
+        store.record_agent_process_identity(session, attachment, pid, started_at)
+    });
+    if let Err(error) = admitted {
+        return std::io::Error::other(error.to_string());
+    }
+    // Identity is visible before another connect can acquire the launch lock.
+    drop(launch_lock);
+    let error = command.exec();
+    crate::agent_input_timing::record("provider_exec_failed", session);
+    if let Err(record) = store.with_session_attachment(session, attachment, || {
+        store.record_agent_process_exit(session, attachment, false)
+    }) {
+        tracing::warn!(error = %record, "failed exec was not recorded");
+    }
+    error
+}
+
+/// Become a client of the provider running beside this process. The client
+/// takes over holding the provider's lifeline, so the provider outlives lf.
+pub(crate) fn exec_client(
+    mut command: std::process::Command,
+    launch_lock: Option<std::fs::File>,
+) -> std::io::Error {
+    use std::os::unix::process::CommandExt;
+    if let Err(error) = crate::os_process::inherit_lifelines() {
+        return error;
+    }
+    drop(launch_lock);
+    command.exec()
 }
 
 /// Failed terminal setup still owns an admitted child. Serialize its cleanup
@@ -191,10 +291,10 @@ pub(crate) fn stop_session_agent(
     };
     // Already-dead providers have no observed interruption outcome. Preserve that
     // uncertainty instead of attributing their death to this Move request.
-    if process_evidence(store, &agent.process.id) == ProcessIdentityEvidence::Dead {
+    if agent_evidence(store, &agent.process.id) == ProcessIdentityEvidence::Dead {
         anyhow::ensure!(
             store.settle_agent_process(&agent, || {
-                if process_evidence(store, &agent.process.id) != ProcessIdentityEvidence::Dead {
+                if agent_evidence(store, &agent.process.id) != ProcessIdentityEvidence::Dead {
                     return Err(StoreError::InvalidAuthority(
                         "AgentProcess death changed".into(),
                     ));
@@ -370,13 +470,14 @@ fn close_agent_process(pid: u32, started: i64) -> Result<()> {
 
 // Leader death alone neither proves group death nor authorizes signaling helpers.
 fn confirmed_group_death(pid: u32) -> Result<()> {
+    crate::os_process::release_agent_lifeline(pid);
     let mut survivors = OsProcess::group(pid)?;
-    if crate::os_process::release_agent_lifeline(pid) {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
-        while !survivors.is_empty() && std::time::Instant::now() < deadline {
-            std::thread::sleep(std::time::Duration::from_millis(25));
-            survivors = OsProcess::group(pid)?;
-        }
+    // Recovery in another process holds no lifeline writer, but can still
+    // observe helpers finishing the previous owner's teardown.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while !survivors.is_empty() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(25));
+        survivors = OsProcess::group(pid)?;
     }
     if !survivors.is_empty() {
         return Err(anyhow!(
@@ -398,7 +499,7 @@ pub struct AgentProcessReapReport {
 /// Exact bookkeeping disposition, including records that remain unresolved.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct AgentProcessCleanup {
-    pub id: LfProcessId,
+    pub id: crate::id::AgentProcessId,
     pub action: String,
     pub reason: String,
 }
@@ -468,7 +569,7 @@ fn reap_in(store: &SqliteStore, dry_run: bool) -> StoreResult<AgentProcessReapRe
         }
     }
     let dead_lf =
-        |process: &LfProcessId| process_evidence(store, process) == ProcessIdentityEvidence::Dead;
+        |process: &LfProcessId| lf_evidence(store, process) == ProcessIdentityEvidence::Dead;
     let mut report = AgentProcessReapReport::default();
     for agent in &agents {
         let mut record = AgentProcessCleanup {
@@ -716,17 +817,19 @@ fn descendant_group_leaders(pid: u32, processes: &[OsProcess]) -> Vec<(u32, i64)
 #[cfg(test)]
 mod tests {
     use crate::id::LfProcessId;
+    use crate::session::Holder;
     use crate::store::sqlite::SqliteStore;
     use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
 
     /// The live LOO-643 shape: an ended agent reserved under an lf whose
-    /// start receipt never landed, still attached to that unrecorded lf.
+    /// start receipt never landed, still attached to that unrecorded lf. The
+    /// Session is a Task's: a bare one resumes beside its old attachment.
     fn unrecorded_ancestry_fixture(
         store: &SqliteStore,
         sql: &rusqlite::Connection,
         name: &str,
-    ) -> (String, LfProcessId, LfProcessId) {
+    ) -> (String, LfProcessId, crate::id::AgentProcessId) {
         let session = store.test_session(name, &crate::session_record::new_artifact_key());
         let ghost = store.test_lf_process();
         let attachment = store
@@ -735,7 +838,7 @@ mod tests {
         sql.execute_batch(&format!(
             "UPDATE processes SET trace_id=id,completed_at=2 WHERE id='{agent}';
              DELETE FROM processes WHERE id='{ghost}';
-             UPDATE agent_sessions SET provider_thread='thread-1' WHERE id='{session}';",
+             UPDATE agent_sessions SET provider_thread='thread-1',work_source='declared' WHERE id='{session}';",
             agent = attachment.agent_process_id,
             session = session.id,
         ))
@@ -834,12 +937,12 @@ mod tests {
         let (_, _, owned) = unrecorded_ancestry_fixture(&store, &sql, "owned");
         sql.execute(
             "UPDATE processes SET attached_lf_process_id=?2 WHERE id=?1",
-            [&owned, &store.test_lf_process()],
+            rusqlite::params![owned, store.test_lf_process()],
         )
         .unwrap();
         sql.execute(
             "UPDATE processes SET trace_id=?2 WHERE id=?1",
-            [&pruned, &LfProcessId::new()],
+            rusqlite::params![pruned, crate::id::TraceId::new()],
         )
         .unwrap();
         sql.execute(
@@ -866,22 +969,14 @@ mod tests {
                 .execute("DELETE FROM processes WHERE id=?1", [&process])?;
             let session = store.test_session("lost", &crate::session_record::new_artifact_key());
             let attachment = store.claim_session_attachment(&session.id, None, &process, true)?;
-            let parent = store.process(&process)?.unwrap();
-            let agent = store.process(&attachment.agent_process_id)?.unwrap();
+            let parent = store.lf_process(&process)?.unwrap();
+            let agent = store.agent_process(&attachment.agent_process_id)?.unwrap();
             assert_eq!(agent.trace_id, parent.trace_id);
             assert!(parent.command.is_some());
             assert!(lineage(&store).status == crate::lf::commands::doctor::Status::Ok);
             Ok(())
         })
         .unwrap();
-    }
-
-    #[test]
-    fn tool_lifeline_refuses_the_providers_own_group() {
-        let error =
-            super::guard_tool_lifeline(std::path::Path::new("unused-lifeline"), std::process::id())
-                .unwrap_err();
-        assert!(error.to_string().contains("detached group"));
     }
 
     #[test]
@@ -897,6 +992,7 @@ mod tests {
         let mut child = super::spawn_native(
             command,
             &(store.clone(), session.id.to_string(), attachment.clone()),
+            Holder::Caller,
         )
         .unwrap();
         child.wait().unwrap();
@@ -907,7 +1003,7 @@ mod tests {
         )
         .unwrap();
         let process = store
-            .process(&attachment.agent_process_id)
+            .agent_process(&attachment.agent_process_id)
             .unwrap()
             .unwrap();
         assert!(process.completed_at.is_some());
@@ -916,6 +1012,45 @@ mod tests {
             store.session_attachment(&session.id).unwrap(),
             Some(attachment)
         );
+    }
+
+    #[test]
+    fn a_launcher_that_ended_before_recording_identity_never_started_its_agent() {
+        let home = tempfile::tempdir().unwrap();
+        let database = home.path().join("db");
+        let store = SqliteStore::open_ephemeral(&database).unwrap();
+        let session = store.test_session("reserved", &crate::session_record::new_artifact_key());
+        let sql = rusqlite::Connection::open(&database).unwrap();
+        sql.execute(
+            "UPDATE agent_sessions SET interactive=1 WHERE id=?1",
+            [&session.id],
+        )
+        .unwrap();
+        let launcher = LfProcessId::new();
+        sql.execute(
+            "INSERT INTO processes(id,trace_id,started_at,completed_at,exit_code)
+             VALUES(?1,?1,strftime('%s','now'),strftime('%s','now'),1)",
+            [&launcher],
+        )
+        .unwrap();
+        let attachment = store
+            .claim_session_attachment(&session.id, None, &launcher, true)
+            .unwrap();
+        assert_eq!(
+            crate::journal::agent_evidence(&store, &attachment.agent_process_id),
+            crate::journal::ProcessIdentityEvidence::Dead
+        );
+        super::stop_session_agent(
+            &store,
+            &session.id,
+            crate::process::Departure::Terminal { to: None },
+        )
+        .unwrap();
+        let process = store
+            .agent_process(&attachment.agent_process_id)
+            .unwrap()
+            .unwrap();
+        assert!(process.completed_at.is_some());
     }
 
     #[test]
@@ -959,12 +1094,15 @@ mod tests {
             let mut child = super::spawn_native(
                 command,
                 &(store.clone(), session.id.to_string(), attachment.clone()),
+                Holder::Caller,
             )
             .unwrap();
             let stopped = super::stop_session_agent(&store, &session.id, departure.clone());
             let _ = child.kill();
             child.wait().unwrap();
             stopped.unwrap();
+            let retained = store.session(&session.id).unwrap().unwrap();
+            assert_eq!(retained.completed_at, None, "a move continues the Session");
             assert_eq!(
                 store
                     .attachment_departure(&session.id, &attachment)
@@ -993,9 +1131,11 @@ mod tests {
         .unwrap();
         let parent = LfProcessId::new();
         let next = LfProcessId::new();
+        // Launchers that may still be running; an ended launcher would make
+        // its unidentified agent dead instead.
         for id in [&parent, &next] {
             sql.execute(
-                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,1)",
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,strftime('%s','now'))",
                 [id],
             )
             .unwrap();
@@ -1019,6 +1159,7 @@ mod tests {
         let mut child = super::spawn_native(
             command,
             &(store.clone(), session.id.to_string(), attachment.clone()),
+            Holder::Caller,
         )
         .unwrap();
         store
@@ -1072,7 +1213,7 @@ mod tests {
         assert!(!summary.available);
         assert_eq!(
             store
-                .process(&attachment.agent_process_id)
+                .agent_process(&attachment.agent_process_id)
                 .unwrap()
                 .unwrap()
                 .outcome
@@ -1127,7 +1268,12 @@ mod tests {
             1
         );
         for (id, _) in &expected {
-            assert!(store.process(id).unwrap().unwrap().completed_at.is_none());
+            assert!(store
+                .agent_process(id)
+                .unwrap()
+                .unwrap()
+                .completed_at
+                .is_none());
         }
         let applied = super::reap_in(&store, false).unwrap();
         assert!(applied.errors.is_empty());
@@ -1140,7 +1286,7 @@ mod tests {
             1
         );
         for (id, retired) in &expected {
-            let process = store.process(id).unwrap().unwrap();
+            let process = store.agent_process(id).unwrap().unwrap();
             assert_eq!(process.completed_at.is_some(), *retired);
             assert!(process.outcome.is_none());
             assert!(process.pid.is_none());
@@ -1181,6 +1327,7 @@ mod tests {
             let mut child = super::spawn_native(
                 command,
                 &(store.clone(), session.id.to_string(), attachment.clone()),
+                Holder::Caller,
             )
             .unwrap();
             child.wait().unwrap();
@@ -1190,7 +1337,7 @@ mod tests {
             assert!(report.orphaned.is_empty());
             assert_eq!(report.reaped, 0);
             let process = store
-                .process(&attachment.agent_process_id)
+                .agent_process(&attachment.agent_process_id)
                 .unwrap()
                 .unwrap();
             assert!(process.completed_at.is_some());
@@ -1226,10 +1373,13 @@ mod tests {
             command.env_clear().arg("60");
             command
         };
-        let mut child = super::spawn_native(command(), &first_owner).unwrap();
+        let mut child = super::spawn_native(command(), &first_owner, Holder::Caller).unwrap();
         let pid = child.id();
         super::stop_native(&mut child, Some(&first_owner)).unwrap();
-        let exited = store.process(&first.agent_process_id).unwrap().unwrap();
+        let exited = store
+            .agent_process(&first.agent_process_id)
+            .unwrap()
+            .unwrap();
         assert_eq!(exited.pid, Some(pid));
         assert!(exited.os_started_at.is_some());
         assert!(exited.completed_at.is_some());
@@ -1238,14 +1388,17 @@ mod tests {
             .prepare_session_agent_process(&session.id, &first)
             .unwrap();
         let next_owner = (store.clone(), session.id.to_string(), next.clone());
-        let mut provider = super::spawn_native(command(), &next_owner).unwrap();
-        let recorded = store.process(&next.agent_process_id).unwrap().unwrap();
+        let mut provider = super::spawn_native(command(), &next_owner, Holder::Caller).unwrap();
+        let recorded = store
+            .agent_process(&next.agent_process_id)
+            .unwrap()
+            .unwrap();
         // Reusing the current attachment is not permission for a second spawn.
         // Reject before fork, without recording failure on the running process.
-        let duplicate = super::spawn_native(command(), &next_owner);
+        let duplicate = super::spawn_native(command(), &next_owner, Holder::Caller);
         assert!(duplicate.is_err());
         assert_eq!(
-            store.process(&next.agent_process_id).unwrap(),
+            store.agent_process(&next.agent_process_id).unwrap(),
             Some(recorded)
         );
         // A delayed cleanup has no authority over a replacement, even if it
@@ -1254,13 +1407,16 @@ mod tests {
         let provider_alive = provider.try_wait().unwrap().is_none();
         let mut client = command().spawn().unwrap();
         super::stop_native(&mut client, None).unwrap();
-        let remote_unchanged = store.process(&next.agent_process_id).unwrap().unwrap();
+        let remote_unchanged = store
+            .agent_process(&next.agent_process_id)
+            .unwrap()
+            .unwrap();
         let remote_alive = provider.try_wait().unwrap().is_none();
         super::stop_native(&mut provider, Some(&next_owner)).unwrap();
         assert!(provider_alive && remote_alive);
         assert!(remote_unchanged.completed_at.is_none());
         assert_eq!(
-            store.process(&first.agent_process_id).unwrap(),
+            store.agent_process(&first.agent_process_id).unwrap(),
             Some(exited)
         );
     }
@@ -1276,13 +1432,16 @@ mod tests {
         let first_owner = (store.clone(), session.id.to_string(), first.clone());
         let mut command = Command::new("/bin/sleep");
         command.env_clear().arg("60");
-        let mut child = super::spawn_native(command, &first_owner).unwrap();
+        let mut child = super::spawn_native(command, &first_owner, Holder::Caller).unwrap();
         let next = store
             .claim_session_attachment(&session.id, Some(&first), &LfProcessId::new(), false)
             .unwrap();
         let refused = super::stop_native(&mut child, Some(&first_owner)).is_err();
         let alive = child.try_wait().unwrap().is_none();
-        let unchanged = store.process(&first.agent_process_id).unwrap().unwrap();
+        let unchanged = store
+            .agent_process(&first.agent_process_id)
+            .unwrap()
+            .unwrap();
         super::stop_native(
             &mut child,
             Some(&(store.clone(), session.id.to_string(), next.clone())),
@@ -1304,7 +1463,7 @@ mod tests {
         let owner = (store.clone(), session.id.to_string(), attachment.clone());
         let mut command = Command::new("/bin/sh");
         command.env_clear().args(["-c", "exit 42"]);
-        let mut child = super::spawn_native(command, &owner).unwrap();
+        let mut child = super::spawn_native(command, &owner, Holder::Caller).unwrap();
         // Reap only this throwaway child outside its handle, forcing ECHILD.
         // SAFETY: waitpid observes the exact fixture child; it signals nothing.
         assert_eq!(
@@ -1313,7 +1472,7 @@ mod tests {
         );
         assert!(super::stop_native(&mut child, Some(&owner)).is_err());
         let retained = store
-            .process(&attachment.agent_process_id)
+            .agent_process(&attachment.agent_process_id)
             .unwrap()
             .unwrap();
         assert_eq!(retained.pid, Some(child.id()));
@@ -1333,8 +1492,11 @@ mod tests {
         let owner = |attachment| (store.clone(), session.id.to_string(), attachment);
         let mut command = tokio::process::Command::new("/bin/sh");
         command.env_clear().args(["-c", "exit 42"]);
-        let mut child = super::spawn(command, None, &owner(first.clone())).unwrap();
-        let recorded = store.process(&first.agent_process_id).unwrap().unwrap();
+        let mut child = super::spawn(command, None, &owner(first.clone()), Holder::Caller).unwrap();
+        let recorded = store
+            .agent_process(&first.agent_process_id)
+            .unwrap()
+            .unwrap();
         assert_eq!(recorded.pid, child.id());
         assert!(recorded.os_started_at.is_some());
         assert_eq!(child.wait().await.unwrap().code(), Some(42));
@@ -1353,22 +1515,25 @@ mod tests {
             .env_clear()
             .args(["-c", "printf effect > \"$1\"", "fixture"])
             .arg(&marker);
-        assert!(super::spawn(stale, None, &owner(first.clone())).is_err());
+        assert!(super::spawn(stale, None, &owner(first.clone()), Holder::Caller).is_err());
         assert!(!marker.exists());
         assert_eq!(
             store.session_attachment(&session.id).unwrap(),
             Some(next.clone())
         );
         assert!(store
-            .process(&next.agent_process_id)
+            .agent_process(&next.agent_process_id)
             .unwrap()
             .unwrap()
             .pid
             .is_none());
 
         let missing = tokio::process::Command::new(home.path().join("absent-provider"));
-        assert!(super::spawn(missing, None, &owner(next.clone())).is_err());
-        let failed = store.process(&next.agent_process_id).unwrap().unwrap();
+        assert!(super::spawn(missing, None, &owner(next.clone()), Holder::Caller).is_err());
+        let failed = store
+            .agent_process(&next.agent_process_id)
+            .unwrap()
+            .unwrap();
         assert!(failed.completed_at.is_some());
         assert!(
             failed.outcome.is_none(),
@@ -1378,11 +1543,54 @@ mod tests {
             .prepare_session_agent_process(&session.id, &next)
             .unwrap();
         assert_ne!(retry.agent_process_id, next.agent_process_id);
-        assert_eq!(store.process(&next.agent_process_id).unwrap(), Some(failed));
         assert_eq!(
-            store.process(&first.agent_process_id).unwrap().unwrap().pid,
+            store.agent_process(&next.agent_process_id).unwrap(),
+            Some(failed)
+        );
+        assert_eq!(
+            store
+                .agent_process(&first.agent_process_id)
+                .unwrap()
+                .unwrap()
+                .pid,
             recorded.pid
         );
+    }
+
+    /// A bare conversation reads steers without reporting to a server.
+    #[test]
+    fn a_bare_launch_carries_only_a_store_steer_capability() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let capability = |holder: crate::session::Holder| {
+            let id = format!("{holder:?}");
+            let session = store.test_session(&id, &crate::session_record::new_artifact_key());
+            let attachment = store
+                .claim_session_attachment(&session.id, None, &store.test_lf_process(), true)
+                .unwrap();
+            let seen = home.path().join(&id);
+            let mut command = Command::new("/bin/sh");
+            command.env_clear().args([
+                "-c",
+                &format!(
+                    "printf '%s\\n%s' \"${{{}:-}}\" \"${{{}:-}}\" > {}",
+                    crate::steer::PROVIDER_CONTEXT_ENV,
+                    crate::steer::BARE_STEER_ENV,
+                    seen.display()
+                ),
+            ]);
+            let owner = (store.clone(), session.id.to_string(), attachment);
+            super::spawn_native(command, &owner, holder)
+                .unwrap()
+                .wait()
+                .unwrap();
+            std::fs::read_to_string(seen).unwrap()
+        };
+        let output = capability(Holder::Caller);
+        let (server, bare) = output.split_once('\n').unwrap();
+        assert_eq!(server, "");
+        let adapter: crate::steer::SteerAdapter = serde_json::from_str(bare).unwrap();
+        assert_eq!(adapter.session, "Caller");
     }
 
     #[test]
@@ -1397,8 +1605,11 @@ mod tests {
         let owner = (store.clone(), session.id.to_string(), first.clone());
         let mut command = Command::new("/bin/sh");
         command.env_clear().args(["-c", "exit 42"]);
-        let mut child = super::spawn_native(command, &owner).unwrap();
-        let recorded = store.process(&first.agent_process_id).unwrap().unwrap();
+        let mut child = super::spawn_native(command, &owner, Holder::Caller).unwrap();
+        let recorded = store
+            .agent_process(&first.agent_process_id)
+            .unwrap()
+            .unwrap();
         assert_eq!(recorded.pid, Some(child.id()));
         assert!(recorded.os_started_at.is_some());
         assert_eq!(child.wait().unwrap().code(), Some(42));
@@ -1414,24 +1625,35 @@ mod tests {
             .env_clear()
             .args(["-c", "printf effect > \"$1\"", "fixture"])
             .arg(&marker);
-        assert!(super::spawn_native(stale, &owner).is_err());
+        assert!(super::spawn_native(stale, &owner, Holder::Caller).is_err());
         assert!(!marker.exists());
         assert_eq!(
             store.session_attachment(&session.id).unwrap(),
             Some(next.clone())
         );
         let owner = (store.clone(), session.id.to_string(), next.clone());
-        let error =
-            super::spawn_native(Command::new(home.path().join("absent")), &owner).unwrap_err();
+        let error = super::spawn_native(
+            Command::new(home.path().join("absent")),
+            &owner,
+            Holder::Caller,
+        )
+        .unwrap_err();
         assert_eq!(
             error.downcast_ref::<std::io::Error>().unwrap().kind(),
             std::io::ErrorKind::NotFound
         );
-        let failed = store.process(&next.agent_process_id).unwrap().unwrap();
+        let failed = store
+            .agent_process(&next.agent_process_id)
+            .unwrap()
+            .unwrap();
         assert!(failed.completed_at.is_some());
         assert!(failed.outcome.is_none());
         assert_eq!(
-            store.process(&first.agent_process_id).unwrap().unwrap().pid,
+            store
+                .agent_process(&first.agent_process_id)
+                .unwrap()
+                .unwrap()
+                .pid,
             recorded.pid
         );
     }

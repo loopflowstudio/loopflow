@@ -304,7 +304,7 @@ struct DesktopAction {
             guard let page = Int(try context.string("page")), (1...pages).contains(page) else {
                 throw DesktopArgumentError("page must be 1 to \(pages); nothing changed.")
             }
-            model.navigation.wavePages[wave] = page - 1
+            model.turnPage(wave, to: page - 1)
             return nil
         },
         DesktopAction("section", "Show Wave Board Section", arguments: [.init(name: "section", kind: .string, required: true)],
@@ -523,8 +523,21 @@ struct DesktopAction {
             workspace.toggleBrowser()
             return browserOutcome(workspace)
         },
-        DesktopAction("files", "Show Files", scope: .pane, available: taskTool) { context in
-            try show(.files, context)
+        DesktopAction("files", "Show Files", scope: .pane,
+            arguments: [.init(name: "path", kind: .string, required: false)], available: taskTool) { context in
+            if let path = context.args["path"] {
+                guard !path.hasPrefix("/"), !path.split(separator: "/").contains("..") else {
+                    throw DesktopArgumentError("Files path must stay inside the checkout; nothing opened.")
+                }
+            }
+            let outcome = try show(.files, context)
+            if let path = context.args["path"] {
+                let workspace = try context.task
+                if let browser = workspace.multiplexer.browserPane {
+                    try workspace.files(for: browser.content, task: nil, query: RegistryQueryLocal.shared).presentFile(path)
+                }
+            }
+            return outcome
         },
         DesktopAction("graph-log", "Show Graph Processes", scope: .pane, available: taskTool) { context in
             try show(.graphLog, context)
@@ -553,6 +566,22 @@ struct DesktopAction {
             available: webPage) { context in
             try page(context).reload()
             return nil
+        },
+        DesktopAction("refresh-session", "Refresh Session", scope: .pane) { context in
+            let (_, pane) = try context.addressed
+            guard let id = pane.sessionId else {
+                throw DesktopTargetError("Address a Session pane to refresh its conversation; nothing changed.")
+            }
+            Task { @MainActor in await context.workspaces.refreshSession(id) }
+            return DesktopActionOutcome(pane: pane.id, tab: nil)
+        },
+        DesktopAction("take-back-session", "Take Back Session", scope: .pane) { context in
+            let (_, pane) = try context.addressed
+            guard let id = pane.sessionId else {
+                throw DesktopTargetError("Address a Session pane to take back its input; nothing changed.")
+            }
+            Task { @MainActor in await context.workspaces.takeBackSession(id) }
+            return DesktopActionOutcome(pane: pane.id, tab: nil)
         },
         DesktopAction("switch", "Switch Conversation", scope: .pane,
             arguments: [.init(name: "session", kind: .string, required: true)]) { context in

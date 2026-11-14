@@ -13,7 +13,7 @@ try {
   writeFileSync(join(sdk, "package.json"), JSON.stringify({ type: "module", exports: "./index.js" }));
   writeFileSync(join(sdk, "index.js"), `
     export function createBashToolDefinition() { throw new Error("unexpected tool execution"); }
-    export function createLocalBashOperations() { throw new Error("unexpected tool execution"); }
+    export function createLocalBashOperations() { return {}; }
   `);
   const sourceFile = join(root, "context");
   const callback = join(root, "callback");
@@ -21,8 +21,9 @@ try {
   process.env.LF_BIN = callback;
   process.env.LF_CONTEXT_DELIVERY = "fixture";
   const source = readFileSync(new URL("../../../rust/loopflow/src/harness/context_pi.mjs", import.meta.url), "utf8");
+  const server = readFileSync(new URL("../../../rust/loopflow/src/harness/server_connection.js", import.meta.url), "utf8");
   const path = join(root, "extension.mjs");
-  writeFileSync(path, `const spec = { native: false };\n${source}`);
+  writeFileSync(path, `const spec = ${JSON.stringify({ native: false, executable: callback })};\n${source}\n${server}`);
   const hooks = new Map();
   (await import(path)).default({ on: (name, handler) => hooks.set(name, handler) });
   const ctx = { sessionManager: { getSessionFile: () => join(root, "pi.jsonl") } };

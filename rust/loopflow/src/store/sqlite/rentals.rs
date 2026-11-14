@@ -27,12 +27,13 @@ fn usd(text: String) -> StoreResult<Usd> {
 }
 
 fn name_taken_in(conn: &Connection, name: &str) -> StoreResult<bool> {
-    Ok(conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM pools WHERE name=?1)
-             OR EXISTS(SELECT 1 FROM ondemands WHERE name=?1)",
-        [name],
-        |row| row.get(0),
-    )?)
+    let document = crate::config::placement::read(conn, None).map_err(invalid)?;
+    Ok(["pools", "ondemands"].iter().any(|key| {
+        document
+            .get(key)
+            .and_then(|value| value.get(name))
+            .is_some()
+    }))
 }
 
 fn require_name(name: &str) -> StoreResult<()> {
@@ -42,32 +43,54 @@ fn require_name(name: &str) -> StoreResult<()> {
     Ok(())
 }
 
-const POOL_COLUMNS: &str = "name,off,created_at";
-
-fn map_pool(row: &rusqlite::Row<'_>) -> StoreResult<Pool> {
-    Ok(Pool {
-        name: row.get(0)?,
-        off: row.get(1)?,
-        created_at: at(row.get(2)?)?,
-    })
+fn declared_pools(conn: &Connection) -> StoreResult<Vec<Pool>> {
+    crate::config::placement::global_settings(conn)
+        .map_err(invalid)?
+        .pools
+        .into_iter()
+        .map(|(name, declaration)| {
+            let created_at = conn
+                .query_row(
+                    "SELECT created_at FROM pools WHERE name=?1",
+                    [&name],
+                    |row| row.get(0),
+                )
+                .optional()?
+                .unwrap_or(0);
+            Ok(Pool {
+                name,
+                off: declaration.off,
+                created_at: at(created_at)?,
+            })
+        })
+        .collect()
 }
 
-const ONDEMAND_COLUMNS: &str =
-    "name,provider,template,max_machines,max_usd_per_hour,hours,created_at";
-
-fn map_ondemand(row: &rusqlite::Row<'_>) -> StoreResult<OnDemand> {
-    let provider: String = row.get(1)?;
-    let template: String = row.get(2)?;
-    Ok(OnDemand {
-        name: row.get(0)?,
-        provider: Provider::parse(&provider)
-            .ok_or_else(|| invalid(format!("unknown provider {provider}")))?,
-        hardware: serde_json::from_str::<Hardware>(&template)?,
-        max_machines: row.get(3)?,
-        max_usd_per_hour: usd(row.get(4)?)?,
-        hours: row.get(5)?,
-        created_at: at(row.get(6)?)?,
-    })
+fn declared_ondemands(conn: &Connection) -> StoreResult<Vec<OnDemand>> {
+    crate::config::placement::global_settings(conn)
+        .map_err(invalid)?
+        .ondemands
+        .into_iter()
+        .map(|(name, declaration)| {
+            let created_at = conn
+                .query_row(
+                    "SELECT created_at FROM ondemands WHERE name=?1",
+                    [&name],
+                    |row| row.get(0),
+                )
+                .optional()?
+                .unwrap_or(0);
+            Ok(OnDemand {
+                name,
+                provider: declaration.provider,
+                hardware: declaration.hardware,
+                max_machines: declaration.max_machines,
+                max_usd_per_hour: declaration.max_usd_per_hour,
+                hours: declaration.hours,
+                created_at: at(created_at)?,
+            })
+        })
+        .collect()
 }
 
 const RENTAL_COLUMNS: &str = "id,ondemand,provider,provider_name,provider_id,machine_id,by_hand,
@@ -119,77 +142,54 @@ fn rental_in(conn: &Connection, id: &RentalId) -> StoreResult<Rental> {
     .ok_or(StoreError::NotFound)?
 }
 
-/// Unfinished Tasks whose current owner is this Machine.
-pub(super) fn tasks_held_in(conn: &Connection, machine: &MachineId) -> StoreResult<Vec<TaskId>> {
-    let candidates = {
-        let mut statement = conn.prepare(
-            "SELECT DISTINCT o.task_id FROM task_ownership o JOIN tasks t ON t.id=o.task_id
-             WHERE o.machine_id=?1 AND t.planning_completed=0 AND t.abandoned_at IS NULL
-             ORDER BY o.task_id",
-        )?;
-        let rows = statement.query_map([machine.as_str()], |row| row.get::<_, String>(0))?;
-        rows.collect::<Result<Vec<_>, _>>()?
-    };
-    let mut held = Vec::new();
-    for task in candidates {
-        let task = TaskId::from_raw(task);
-        let ownership = super::task_ownership::ownership_in(conn, &task)?;
-        if ownership.owner.and_then(|owner| owner.machine.id).as_ref() == Some(machine) {
-            held.push(task);
-        }
-    }
-    Ok(held)
-}
-
 impl SqliteStore {
     // -- Pools -------------------------------------------------------------
 
     pub fn add_pool(&self, name: &str) -> StoreResult<Pool> {
         require_name(name)?;
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if name_taken_in(&tx, name)? {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        if name_taken_in(&conn, name)? {
             return Err(invalid(format!("{name} already names a pool or on-demand")));
         }
-        tx.execute(
-            "INSERT INTO pools(name,off,created_at) VALUES(?1,0,?2)",
+        crate::config::placement::write(
+            &conn,
+            None,
+            &["pools", name],
+            Some(
+                serde_yaml_ng::to_value(crate::config::placement::PoolDeclaration { off: false })
+                    .map_err(invalid)?,
+            ),
+        )
+        .map_err(invalid)?;
+        conn.execute(
+            "INSERT OR IGNORE INTO pools(name,created_at) VALUES(?1,?2)",
             params![name, now_unix()],
         )?;
-        let pool = tx.query_row(
-            &format!("SELECT {POOL_COLUMNS} FROM pools WHERE name=?1"),
-            [name],
-            |row| Ok(map_pool(row)),
-        )??;
-        tx.commit()?;
-        Ok(pool)
+        declared_pools(&conn)?
+            .into_iter()
+            .find(|pool| pool.name == name)
+            .ok_or(StoreError::NotFound)
     }
 
     pub fn pools(&self) -> StoreResult<Vec<Pool>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        collect(
-            &conn,
-            &format!("SELECT {POOL_COLUMNS} FROM pools ORDER BY name"),
-            [],
-            map_pool,
-        )
+        declared_pools(&conn)
     }
 
     pub fn pool(&self, name: &str) -> StoreResult<Option<Pool>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.query_row(
-            &format!("SELECT {POOL_COLUMNS} FROM pools WHERE name=?1"),
-            [name],
-            |row| Ok(map_pool(row)),
-        )
-        .optional()?
-        .transpose()
+        Ok(declared_pools(&conn)?
+            .into_iter()
+            .find(|pool| pool.name == name))
     }
 
     pub fn set_pool_off(&self, name: &str, off: bool) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        if conn.execute("UPDATE pools SET off=?2 WHERE name=?1", params![name, off])? == 0 {
+        if !declared_pools(&conn)?.iter().any(|pool| pool.name == name) {
             return Err(StoreError::NotFound);
         }
+        crate::config::placement::write(&conn, None, &["pools", name, "off"], Some(off.into()))
+            .map_err(invalid)?;
         Ok(())
     }
 
@@ -197,10 +197,11 @@ impl SqliteStore {
     pub fn remove_pool(&self, name: &str) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        tx.execute("UPDATE machines SET pool=NULL WHERE pool=?1", [name])?;
-        if tx.execute("DELETE FROM pools WHERE name=?1", [name])? == 0 {
+        if !crate::config::placement::write(&tx, None, &["pools", name], None).map_err(invalid)? {
             return Err(StoreError::NotFound);
         }
+        tx.execute("UPDATE pool_machines SET pool=NULL WHERE pool=?1", [name])?;
+        tx.execute("DELETE FROM pools WHERE name=?1", [name])?;
         tx.commit()?;
         Ok(())
     }
@@ -211,7 +212,7 @@ impl SqliteStore {
         let snapshot = conn.savepoint()?;
         let ids = {
             let mut statement = snapshot.prepare(
-                "SELECT id FROM machines WHERE pool=?1 AND label IS NOT NULL ORDER BY label",
+                "SELECT machine_id FROM pool_machines WHERE pool=?1 ORDER BY machine_id",
             )?;
             let rows = statement.query_map([name], |row| row.get::<_, String>(0))?;
             rows.collect::<Result<Vec<_>, _>>()?
@@ -223,7 +224,10 @@ impl SqliteStore {
                     .ok_or(StoreError::NotFound)?;
                 Ok(PoolMachine {
                     ownership: ownership_in(&snapshot, &id)?,
-                    tasks: tasks_held_in(&snapshot, &id)?,
+                    tasks: super::task_ownership::held_in(&snapshot, &id)?
+                        .into_iter()
+                        .map(|held| held.task)
+                        .collect(),
                     machine,
                 })
             })
@@ -247,8 +251,30 @@ impl SqliteStore {
         if rented {
             return Err(invalid("a rented machine has no pool, cost or expiry"));
         }
-        let changed = tx.execute(
-            "UPDATE machines SET pool=?2,cost_usd=?3,expires_at=?4 WHERE id=?1",
+        if let Some(pool) = &ownership.pool {
+            if !declared_pools(&tx)?
+                .iter()
+                .any(|candidate| &candidate.name == pool)
+            {
+                return Err(StoreError::NotFound);
+            }
+            tx.execute(
+                "INSERT OR IGNORE INTO pools(name,created_at) VALUES(?1,?2)",
+                params![pool, now_unix()],
+            )?;
+        }
+        let known: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM machines WHERE id=?1)",
+            [machine.as_str()],
+            |row| row.get(0),
+        )?;
+        if !known {
+            return Err(StoreError::NotFound);
+        }
+        tx.execute(
+            "INSERT INTO pool_machines(machine_id,pool,cost_usd,expires_at) VALUES(?1,?2,?3,?4)
+             ON CONFLICT(machine_id) DO UPDATE SET pool=excluded.pool,
+                 cost_usd=excluded.cost_usd,expires_at=excluded.expires_at",
             params![
                 machine.as_str(),
                 ownership.pool,
@@ -256,9 +282,6 @@ impl SqliteStore {
                 ownership.expires_at.map(OffsetDateTime::unix_timestamp)
             ],
         )?;
-        if changed == 0 {
-            return Err(StoreError::NotFound);
-        }
         tx.commit()?;
         Ok(())
     }
@@ -303,49 +326,59 @@ impl SqliteStore {
         Ok(latest)
     }
 
-    pub fn tasks_held_by(&self, machine: &MachineId) -> StoreResult<Vec<TaskId>> {
+    /// Unfinished Tasks `machine` owns, each with when its claim reached it.
+    pub fn tasks_held_by(&self, machine: &MachineId) -> StoreResult<Vec<(TaskId, i64)>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let snapshot = conn.savepoint()?;
-        tasks_held_in(&snapshot, machine)
+        super::task_ownership::held_in(&snapshot, machine)?
+            .into_iter()
+            .map(|held| {
+                let since = held.since.ok_or_else(|| {
+                    StoreError::InvalidData(format!(
+                        "Task {} is owned on {machine} with no log entry naming it",
+                        held.task
+                    ))
+                })?;
+                Ok((held.task, since))
+            })
+            .collect()
     }
 
     // -- On-demands ----------------------------------------------------------
 
     pub fn add_ondemand(&self, ondemand: &OnDemand) -> StoreResult<()> {
         require_name(&ondemand.name)?;
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if name_taken_in(&tx, &ondemand.name)? {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        if name_taken_in(&conn, &ondemand.name)? {
             return Err(invalid(format!(
                 "{} already names a pool or on-demand",
                 ondemand.name
             )));
         }
-        tx.execute(
-            "INSERT INTO ondemands(name,provider,template,max_machines,max_usd_per_hour,hours,created_at)
-             VALUES(?1,?2,?3,?4,?5,?6,?7)",
-            params![
-                ondemand.name,
-                ondemand.provider.as_str(),
-                serde_json::to_string(&ondemand.hardware)?,
-                ondemand.max_machines,
-                ondemand.max_usd_per_hour.to_decimal(),
-                ondemand.hours,
-                ondemand.created_at.unix_timestamp()
-            ],
+        let declaration = crate::config::placement::OnDemandDeclaration {
+            provider: ondemand.provider,
+            hardware: ondemand.hardware.clone(),
+            max_machines: ondemand.max_machines,
+            max_usd_per_hour: ondemand.max_usd_per_hour,
+            hours: ondemand.hours,
+        };
+        crate::config::placement::write(
+            &conn,
+            None,
+            &["ondemands", &ondemand.name],
+            Some(serde_yaml_ng::to_value(declaration).map_err(invalid)?),
+        )
+        .map_err(invalid)?;
+        conn.execute(
+            "INSERT OR IGNORE INTO ondemands(name,created_at) VALUES(?1,?2)",
+            params![ondemand.name, ondemand.created_at.unix_timestamp()],
         )?;
-        tx.commit()?;
         Ok(())
     }
 
     pub fn ondemands(&self) -> StoreResult<Vec<OnDemand>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        collect(
-            &conn,
-            &format!("SELECT {ONDEMAND_COLUMNS} FROM ondemands ORDER BY name"),
-            [],
-            map_ondemand,
-        )
+        declared_ondemands(&conn)
     }
 
     pub fn ondemand(&self, name: &str) -> StoreResult<Option<OnDemand>> {
@@ -356,13 +389,16 @@ impl SqliteStore {
     /// Change the limit; current machines stay.
     pub fn set_ondemand_max(&self, name: &str, max: u32) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        if conn.execute(
-            "UPDATE ondemands SET max_machines=?2 WHERE name=?1",
-            params![name, max],
-        )? == 0
-        {
+        if ondemand_in(&conn, name)?.is_none() {
             return Err(StoreError::NotFound);
         }
+        crate::config::placement::write(
+            &conn,
+            None,
+            &["ondemands", name, "max_machines"],
+            Some(max.into()),
+        )
+        .map_err(invalid)?;
         Ok(())
     }
 
@@ -375,9 +411,12 @@ impl SqliteStore {
                 "{name} still has {live} live machine(s); `lf machine end` gives them back"
             )));
         }
-        if conn.execute("DELETE FROM ondemands WHERE name=?1", [name])? == 0 {
+        if !crate::config::placement::write(&conn, None, &["ondemands", name], None)
+            .map_err(invalid)?
+        {
             return Err(StoreError::NotFound);
         }
+        conn.execute("DELETE FROM ondemands WHERE name=?1", [name])?;
         Ok(())
     }
 
@@ -480,19 +519,32 @@ impl SqliteStore {
         state: RentalState,
     ) -> StoreResult<(Rental, Vec<TaskId>)> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let ended = (!state.is_live()).then(now_unix);
-        tx.execute(
-            "UPDATE rentals SET state=?2,ended_at=COALESCE(ended_at,?3) WHERE id=?1",
-            params![id.as_str(), state.as_str(), ended],
-        )?;
-        let rental = rental_in(&tx, id)?;
-        let returned = match (&rental.machine_id, state.is_live()) {
-            (Some(machine), false) => super::task_ownership::hand_back_in(&tx, machine)?,
-            _ => Vec::new(),
-        };
-        tx.commit()?;
-        Ok((rental, returned))
+        loop {
+            let planning = match (&rental_in(&conn, id)?.machine_id, state.is_live()) {
+                (Some(machine), false) => super::task_ownership::held_planning_in(&conn, machine)?,
+                _ => Default::default(),
+            };
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let ended = (!state.is_live()).then(now_unix);
+            tx.execute(
+                "UPDATE rentals SET state=?2,ended_at=COALESCE(ended_at,?3) WHERE id=?1",
+                params![id.as_str(), state.as_str(), ended],
+            )?;
+            let rental = rental_in(&tx, id)?;
+            let returned = match (&rental.machine_id, state.is_live()) {
+                (Some(machine), false) => {
+                    match super::task_ownership::hand_back_in(&tx, machine, &planning)? {
+                        Some(tasks) => tasks,
+                        // A claim arrived after preflight: roll back, read its
+                        // planning configuration outside the write lock, retry.
+                        None => continue,
+                    }
+                }
+                _ => Vec::new(),
+            };
+            tx.commit()?;
+            return Ok((rental, returned));
+        }
     }
 
     /// Reachable and added: the rental is running as this Machine.
@@ -531,13 +583,9 @@ impl SqliteStore {
 }
 
 fn ondemand_in(conn: &Connection, name: &str) -> StoreResult<Option<OnDemand>> {
-    conn.query_row(
-        &format!("SELECT {ONDEMAND_COLUMNS} FROM ondemands WHERE name=?1"),
-        [name],
-        |row| Ok(map_ondemand(row)),
-    )
-    .optional()?
-    .transpose()
+    Ok(declared_ondemands(conn)?
+        .into_iter()
+        .find(|ondemand| ondemand.name == name))
 }
 
 fn live_in(conn: &Connection, ondemand: &str) -> StoreResult<u32> {
@@ -551,7 +599,8 @@ fn live_in(conn: &Connection, ondemand: &str) -> StoreResult<u32> {
 fn ownership_in(conn: &Connection, machine: &MachineId) -> StoreResult<Ownership> {
     let (pool, cost, expires): (Option<String>, Option<String>, Option<i64>) = conn
         .query_row(
-            "SELECT pool,cost_usd,expires_at FROM machines WHERE id=?1",
+            "SELECT p.pool,p.cost_usd,p.expires_at FROM machines m
+             LEFT JOIN pool_machines p ON p.machine_id=m.id WHERE m.id=?1",
             [machine.as_str()],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )

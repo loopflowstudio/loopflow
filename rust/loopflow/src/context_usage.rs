@@ -20,7 +20,9 @@ use crate::session_record::SessionHistory;
 use crate::store::sqlite::SqliteStore;
 use crate::trace::{ContextAsset, ContextAssetKind, ContextDecision};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, schemars::JsonSchema,
+)]
 #[non_exhaustive]
 #[serde(rename_all = "snake_case")]
 pub enum ContextSource {
@@ -100,7 +102,7 @@ impl ContextSource {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 pub struct SourceUsage {
     pub source: ContextSource,
     pub tokens: Option<u64>,
@@ -125,7 +127,7 @@ impl SourceUsage {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 pub struct StepContext {
     pub input: String,
     pub session_id: crate::id::LfSessionId,
@@ -141,7 +143,7 @@ pub struct StepContext {
     pub gaps: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 pub struct ContextReport {
     pub steps: Vec<StepContext>,
     pub totals: Vec<SourceUsage>,
@@ -741,7 +743,7 @@ mod tests {
         let mut step = step(dir.path(), Vec::new());
         let mut config = crate::config::Config::default();
         for key in crate::prompt::context_budget::BudgetKey::ALL {
-            config.context_budgets.insert(key, 50);
+            config.context.budgets.insert(key, 50);
         }
         let budgets = crate::prompt::context_budget::ContextBudgets::resolve(&config).unwrap();
         super::flag(&mut step, &budgets);

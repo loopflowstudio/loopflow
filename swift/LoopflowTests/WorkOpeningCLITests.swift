@@ -18,7 +18,7 @@ struct WorkOpeningCLITests {
         }
 
         let router = WorkLinkRouter()
-        await #expect(throws: RegistryQueryError.self) {
+        await #expect(throws: ServerError.self) {
             _ = try await fixture.query.workLink(URL(string: "loopflow://alpha")!)
         }
         #expect(router.inspect().openings.isEmpty, "an ambiguous address changes nothing")
@@ -44,9 +44,12 @@ struct WorkOpeningCLITests {
         let fixture = try Fixture()
         defer { fixture.remove() }
         let repo = try fixture.repository(parent: "work", name: "beta", planningRemote: true)
-        struct Created: Decodable, Sendable { let identifier: String }
+        struct Created: Decodable, Sendable {
+            struct Task: Decodable, Sendable { let identifier: String }
+            let task: Task
+        }
         let identifier = try await fixture.json(["task", "create", "--wave", "proof", "--title", "Arrives through CLI", "--json"],
-                                                cwd: repo, as: Created.self).identifier
+                                                cwd: repo, as: Created.self).task.identifier
 
         let router = WorkLinkRouter()
         var windows: [RepositoryWorkspace] = []
@@ -81,7 +84,8 @@ struct WorkOpeningCLITests {
     private struct Fixture {
         let root: URL
         let lf: BuiltLf
-        var query: RegistryQuery { lf.query }
+        /// One query, so one private server: each `lf.query` starts its own.
+        let query: RegistryQuery
 
         init() throws {
             root = FileManager.default.temporaryDirectory.appendingPathComponent("work-open-\(UUID().uuidString)")
@@ -89,6 +93,7 @@ struct WorkOpeningCLITests {
             let home = root.appendingPathComponent("home")
             try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
             lf = try BuiltLf(home: home)
+            query = lf.query
         }
 
         func remove() { try? FileManager.default.removeItem(at: root) }

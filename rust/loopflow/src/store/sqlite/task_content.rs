@@ -120,16 +120,6 @@ impl SqliteStore {
             edits.push(Edit::TaskAssignee(value.clone()));
         }
         PlanningChanges::Task(id).save(&tx, &edits)?;
-        // Linear has no field for it; it travels between Machines as local planning.
-        if let Some(value) = &patch.regressed_in {
-            super::planning_write::local(
-                &tx,
-                &crate::work::edit::WorkEdit::for_target(
-                    id.as_str(),
-                    &[Edit::TaskRegressedIn(Some(value.clone()))],
-                ),
-            )?;
-        }
         if let Some(rank) = patch.rank {
             super::planning_order::reorder_in(&tx, &task, rank)?;
         }
@@ -312,6 +302,7 @@ mod tests {
                     artifact_key: Some(new_artifact_key()),
                     ..bound
                 },
+                None,
             )
             .unwrap();
         let before = store.session_history(&session.id, 0, 0).unwrap();
@@ -336,6 +327,7 @@ mod tests {
                     artifact_key: Some(new_artifact_key()),
                     ..captured
                 },
+                None,
             )
             .unwrap();
         assert_eq!(next.wave_id, Some(product.wave_id.clone()));
@@ -354,6 +346,7 @@ mod tests {
                     artifact_key: Some(new_artifact_key()),
                     ..next
                 },
+                None,
             )
             .unwrap();
         assert!(final_input.wave_id.is_none());

@@ -45,7 +45,7 @@ lf task status LOO-41         # one Task: its run, its PR, what it needs
 > *"Tell the token one to keep the retry budget at 3."*
 
 ```bash
-lf comment LOO-41 'keep the retry budget at 3'   # reaches the run before its next step
+lf task steer LOO-41 'keep the retry budget at 3' # reaches the run before its next step
 ```
 
 ## Get back into it

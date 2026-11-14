@@ -4,6 +4,8 @@ use serde::Serialize;
 
 #[derive(Debug, Error)]
 pub enum LoadError {
+    #[error("No agent selected. Use `-a <harness>` for this command or `lf set --global default_agent <harness>` to save a preference (claude, codex, opencode, pi). Without a preference, exactly one supported harness must be installed.")]
+    AgentSelection,
     #[error("skill or graph not found: {0}. Run `lf list skill` or `lf list graph` to discover definitions, or `lf : <message>` to send a message")]
     TargetNotFound(String),
     #[error("graph not found: {0}. For a skill, use `lf skill {0}`")]

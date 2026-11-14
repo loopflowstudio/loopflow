@@ -1,4 +1,4 @@
-//! Retained-checkout companions. Neither operation prepares or starts Task work.
+//! File observation in a retained Task checkout; never prepares or starts work.
 use std::collections::{BTreeSet, HashSet};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -27,7 +27,7 @@ pub struct TaskFilesFrame {
     pub paths: Vec<String>,
 }
 
-fn pinned_checkout(issue: &str, expected: &Path) -> Result<TaskCheckout> {
+pub(crate) fn pinned_checkout(issue: &str, expected: &Path) -> Result<TaskCheckout> {
     let checkout = file_context(&file_store()?, issue)?;
     ensure!(
         checkout.worktree == expected,
@@ -40,28 +40,13 @@ fn pinned_checkout(issue: &str, expected: &Path) -> Result<TaskCheckout> {
     Ok(checkout)
 }
 
-pub fn task_shell(issue: &str, expected: &Path) -> Result<()> {
-    let checkout = pinned_checkout(issue, expected)?;
-    if crate::transport::delegate_current(false)? {
-        return Ok(());
-    }
-    let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/sh".into());
-    let status = std::process::Command::new(shell)
-        .arg("-l")
-        .current_dir(checkout.worktree)
-        .status()?;
-    if !status.success() {
-        return Err(crate::process::CommandExit(status.code().unwrap_or(1) as u8).into());
-    }
-    Ok(())
-}
-
 /// The existing owned-line transport keeps stdin open and closes it on cancellation.
 /// Heartbeats recheck recorded ownership; filesystem events, not a read timer,
 /// invalidate contents. Access events from our own reads never cause another read,
 /// and neither do git-ignored writes such as `lf`'s own journal traces.
 pub fn watch_task_files(issue: &str, expected: &Path, request: &str) -> Result<()> {
     let checkout = pinned_checkout(issue, expected)?;
+    let machine_id = file_store()?.local_machine()?.id;
     let metadata = crate::git::absolute_git_dir(expected)?;
     // Watchers report either the watched spelling or the resolved one.
     let roots = EventRoots {
@@ -113,13 +98,13 @@ pub fn watch_task_files(issue: &str, expected: &Path, request: &str) -> Result<(
         }
         let current = pinned_checkout(issue, expected)?;
         ensure!(
-            current.task_id == checkout.task_id && current.machine_id == checkout.machine_id,
+            current.task_id == checkout.task_id,
             "Task execution ownership changed; reopen the Task"
         );
         let frame = TaskFilesFrame {
             request: request.into(),
             task_id: current.task_id,
-            machine_id: current.machine_id.expect("file_context requires a Machine"),
+            machine_id: machine_id.clone(),
             checkout: expected.to_string_lossy().into_owned(),
             paths,
         };

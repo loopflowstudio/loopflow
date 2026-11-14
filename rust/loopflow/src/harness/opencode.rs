@@ -117,6 +117,11 @@ impl OpenCodeHarness {
 
     async fn start_inner(&mut self, config: &AgentConfig) -> Result<()> {
         let owner = super::agent_process::open_owner(config.session_attachment.as_ref())?;
+        let mut config = config.clone();
+        if let Some(context) = &mut config.conversation_context {
+            context.identify(&owner.0, &owner.1)?;
+        }
+        let config = &config;
         self.owner = Some(owner.clone());
         self.password = uuid::Uuid::new_v4().simple().to_string();
         self.authorization = reqwest::header::HeaderValue::from_str(&format!(
@@ -164,7 +169,12 @@ impl OpenCodeHarness {
             tempfile::tempfile()?
         };
         command.stderr(diagnostics.try_clone()?);
-        self.child = Some(super::agent_process::spawn(command, None, &owner)?);
+        self.child = Some(super::agent_process::spawn(
+            command,
+            None,
+            &owner,
+            config.holder,
+        )?);
         let child = self.child.as_mut().expect("server was spawned");
         let mut endpoint = String::new();
         let startup = tokio::time::timeout(
@@ -336,6 +346,7 @@ impl OpenCodeHarness {
                         drop(stream);
                         for decoded in decoded {
                             if let Decoded::Display(event) = decoded {
+                                if matches!(event, ConversationEvent::TurnStarted { .. }) { turn_in_progress.store(true, Ordering::SeqCst); }
                                 if matches!(event, ConversationEvent::TurnCompleted { .. }) { turn_in_progress.store(false, Ordering::SeqCst); }
                                 let _ = event_tx.send(event);
                             }
@@ -506,7 +517,7 @@ impl Harness for OpenCodeHarness {
         let payload = json!({"id":provider_turn_id,"text":text,"delivery":"steer"});
         let steer_url = format!("{base_url}/api/session/{agent_session}/prompt");
         match post(owner, self.authorization.clone(), steer_url, payload).await {
-            Ok(()) => SendCurrentOutcome::Sent { provider_turn_id },
+            Ok(_) => SendCurrentOutcome::Sent { provider_turn_id },
             Err(error) => SendCurrentOutcome::Failed {
                 error: format!("failed to send opencode steer: {error}"),
             },
@@ -583,11 +594,41 @@ async fn open_agent_session(
     let model =
         opencode_model(config).map(|(provider, model)| json!({"providerID":provider,"id":model}));
     if let Some(session_id) = stored {
-        client
+        let saved: Value = client
             .get(format!("{base_url}/api/session/{session_id}"))
             .send()
             .await?
-            .error_for_status()?;
+            .error_for_status()?
+            .json()
+            .await?;
+        if let Some(cwd) = &config.cwd {
+            if saved["data"]["location"]["directory"].as_str() != cwd.to_str() {
+                client
+                    .post(format!("{base_url}/api/session/{session_id}/move"))
+                    .timeout(Duration::from_secs(5))
+                    .json(&json!({"directory":cwd,"delivery":"queue"}))
+                    .send()
+                    .await?
+                    .error_for_status()?;
+                let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+                loop {
+                    let moved: Value = client
+                        .get(format!("{base_url}/api/session/{session_id}"))
+                        .timeout(deadline.saturating_duration_since(tokio::time::Instant::now()))
+                        .send()
+                        .await?
+                        .error_for_status()?
+                        .json()
+                        .await?;
+                    if moved["data"]["location"]["directory"].as_str() == cwd.to_str() {
+                        break;
+                    }
+                    anyhow::ensure!(tokio::time::Instant::now() < deadline,
+                        "OpenCode has not moved conversation {session_id} to {}; reconnect to retry", cwd.display());
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+            }
+        }
         if let Some(model) = model {
             client
                 .post(format!("{base_url}/api/session/{session_id}/model"))
@@ -725,7 +766,7 @@ async fn post(
     authorization: reqwest::header::HeaderValue,
     url: String,
     payload: Value,
-) -> Result<()> {
+) -> Result<bool> {
     tokio::task::spawn_blocking(move || {
         let (store, session, attachment) = owner;
         store.with_session_dispatch(&session, &attachment, || {
@@ -741,11 +782,12 @@ async fn post(
                     crate::store::StoreError::InvalidData(format!(
                         "OpenCode native request: {error}"
                     ))
-                })
+                })?;
+            Ok(true)
         })
     })
-    .await??;
-    Ok(())
+    .await?
+    .map_err(Into::into)
 }
 
 /// Build disconnect evidence for the harness's own `/api/event` SSE stream dropping.
@@ -866,6 +908,19 @@ mod tests {
         SendCurrentOutcome, SseParser,
     };
 
+    #[test]
+    fn bare_opencode_sends_no_model_and_a_pinned_variant_names_provider_and_model() {
+        let launch = |agent: &str| AgentConfig {
+            agent: Some(agent.into()),
+            ..AgentConfig::default()
+        };
+        assert_eq!(super::opencode_model(&launch("opencode")), None);
+        assert_eq!(
+            super::opencode_model(&launch("opencode:anthropic/claude-sonnet")),
+            Some(("anthropic".into(), "claude-sonnet".into()))
+        );
+    }
+
     #[tokio::test]
     async fn stop_clears_the_child_and_its_group() {
         let home = tempfile::tempdir().unwrap();
@@ -890,7 +945,13 @@ mod tests {
         let owner = (store.clone(), "stop".to_string(), first.clone());
         let mut command = Command::new("/bin/sleep");
         command.env_clear().arg("60");
-        let child = super::super::agent_process::spawn(command, None, &owner).unwrap();
+        let child = super::super::agent_process::spawn(
+            command,
+            None,
+            &owner,
+            crate::session::Holder::Caller,
+        )
+        .unwrap();
         let pid = child.id().unwrap();
         let birth = crate::journal::process_started_at(pid).unwrap().unwrap();
         let (tx, _rx) = mpsc::unbounded_channel();
@@ -1056,25 +1117,9 @@ mod tests {
 
     fn live_config() -> AgentConfig {
         AgentConfig {
-            chrome: false,
-            session_attachment: None,
-            system_prompt: String::new(),
-            conversation_context: None,
-            task_prompt: String::new(),
-            skill_invocation: None,
-            output_schema: None,
             agent: Some("opencode".to_string()),
             cwd: Some(std::env::temp_dir()),
-            max_turns: None,
-            resume_token: None,
-            provider_account_id: None,
-            provider_account_authority_home: None,
-            write_scope: crate::agent::AgentWriteScope::Configured,
-            execution_boundary: None,
-            skip_permissions: false,
-            structured_replies: Vec::new(),
-            directive_relay: None,
-            env: Default::default(),
+            ..Default::default()
         }
     }
 

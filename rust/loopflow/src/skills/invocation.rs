@@ -14,8 +14,19 @@ pub struct SkillInvocation {
 }
 
 impl SkillInvocation {
-    pub fn read(path: &Path) -> anyhow::Result<Self> {
-        Ok(serde_json::from_slice(&std::fs::read(path)?)?)
+    pub fn read(path: &Path, repo: &Path, message: Option<&str>) -> anyhow::Result<Self> {
+        let mut invocation: Self = serde_json::from_slice(&std::fs::read(path)?)?;
+        // Native recipes retain authored occurrences but select the skill in the
+        // launch repository. Runtime Graph captures already contain their body.
+        if invocation.skill.content.is_none() {
+            let mut skill = crate::graph::load_skill(&invocation.skill.name, repo)?;
+            skill.occurrence = invocation.skill.occurrence;
+            invocation.skill = skill;
+            if let Some(message) = message {
+                invocation.arguments = message.to_owned();
+            }
+        }
+        Ok(invocation)
     }
 
     fn capture_directory(config: &crate::agent::AgentConfig) -> anyhow::Result<PathBuf> {
@@ -393,6 +404,7 @@ mod tests {
         let invocation = SkillInvocation {
             skill: Skill {
                 source: Some(SkillOrigin {
+                    config_source: None,
                     path: "/skills/audit/SKILL.md".into(),
                     dialect: SkillDialect::Claude,
                     frontmatter: Some("arguments: [first, second, absent]".into()),
@@ -422,6 +434,7 @@ mod tests {
         let invocation = SkillInvocation {
             skill: Skill {
                 source: Some(SkillOrigin {
+                    config_source: None,
                     path: "/skills/prompts/audit.md".into(),
                     dialect: SkillDialect::Codex,
                     frontmatter: None,
@@ -441,6 +454,7 @@ mod tests {
         let invocation = SkillInvocation {
             skill: Skill {
                 source: Some(SkillOrigin {
+                    config_source: None,
                     path: "/skills/audit/SKILL.md".into(),
                     dialect: SkillDialect::Claude,
                     frontmatter: Some("allowed-tools: Read\nmodel: sonnet".into()),

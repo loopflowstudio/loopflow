@@ -49,6 +49,10 @@ plan in the conversation; do not require a document template or a prior skill.
 
 1. **Understand the design**
    Recover the intended outcome, accepted constraints, approach, and acceptance checks.
+   Read the affected user documentation, including saved edits since the
+   previous pass. It describes the experience to build; preserve corrections
+   rather than regenerating it from an older plan. Reconcile consequential
+   conflicts with accepted direction in the conversation or working design.
    Read the current plan wherever it lives. Reconstruct the affected concepts,
    owners, persistence, and call paths before choosing where behavior belongs.
    Read or add the plan's **Delete — do not maintain** list: concrete files/symbols
@@ -82,6 +86,10 @@ plan in the conversation; do not require a document template or a prior skill.
      Do not stage the landing with flags, v2s, or setups nothing uses yet.
 
 3. **Sanity check**
+   - Reread the affected user docs before finishing to pick up edits made during
+     implementation. Verify their examples against the behavior built; keep
+     missing behavior explicit rather than weakening the docs to match it.
+     Maintain those files in place and preserve edits made since the last read.
    - This repository's focused commands are in the included
      `scripts/testing.md`.
    - Build the changed code and run the focused test for the behavior changed:
@@ -91,8 +99,9 @@ plan in the conversation; do not require a document template or a prior skill.
    - One build at a time: never run two compilers, test runners or linters
      against the same build directory concurrently, in the background or in
      parallel tool calls.
-   - Gate owns affected suites and the design's automated acceptance checks,
-     once. Do not run them early because they appear in Done when.
+   - Gate starts CI for the suites and selects a few high-risk tests, including
+     the design's automated acceptance checks. Do not run suites early because
+     they appear in Done when.
    - If a check cannot run headless here, use a headless equivalent or leave it
      to gate/CI rather than stopping implementation. Ask the person for a
      judgment you need when one is in the conversation; headless, leave it for

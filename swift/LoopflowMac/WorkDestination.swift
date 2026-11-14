@@ -70,17 +70,22 @@ struct TaskLink: Equatable, Sendable {
     }
 }
 
-/// A Work destination delivered to its repository window: a Task, or a Wave
-/// whose primary conversation the window selects.
+/// A Work destination delivered to its repository window, optionally selecting
+/// an exact conversation instead of its primary.
 enum LinkedWork: Equatable, Sendable {
     case task(TaskLink)
+    case session(id: String, address: String)
     /// `address` is the public Work address when the Wave arrived as one.
     case wave(id: String, address: String?)
     /// A selection expression from `lf desktop view`, shown in the repository window.
     case view(expression: String, address: String)
 
-    /// An external Work link resolved by Rust; a repository root delivers nothing.
+    /// An external Work link resolved by Rust; an unqualified repository root delivers nothing.
     init?(_ link: WorkLink) {
+        if link.target.kind != .task, let session = link.target.session {
+            self = .session(id: session, address: link.url)
+            return
+        }
         switch link.target.kind {
         case .task: guard let task = TaskLink(link) else { return nil }; self = .task(task)
         case .wave: guard let wave = link.target.wave else { return nil }; self = .wave(id: wave, address: link.url)
@@ -91,6 +96,7 @@ enum LinkedWork: Equatable, Sendable {
     var address: String? {
         switch self {
         case .task(let link): link.address
+        case .session(_, let address): address
         case .wave(_, let address): address
         case .view(_, let address): address
         }
@@ -99,7 +105,7 @@ enum LinkedWork: Equatable, Sendable {
     func with(repo: String) -> LinkedWork {
         switch self {
         case .task(let link): .task(link.with(repo: repo))
-        case .wave, .view: self
+        case .wave, .view, .session: self
         }
     }
 }
@@ -111,19 +117,21 @@ struct WorkLinkReceiver: NSViewRepresentable {
     let inspect: (String, UUID) -> DesktopWindowInspection
     let perform: (DesktopActionRequest) throws -> DesktopActionOutcome
     let readText: (DesktopTextRequest) throws -> DesktopTextReading
+    var closed: () -> Void = {}
     let receive: (LinkedWork) async -> Void
 
     func makeNSView(context: Context) -> Receiver {
-        Receiver(router: router, repository: repository, openingRequests: openingRequests, inspect: inspect, perform: perform, readText: readText, receive: receive)
+        Receiver(router: router, repository: repository, openingRequests: openingRequests, inspect: inspect, perform: perform, readText: readText, closed: closed, receive: receive)
     }
     func updateNSView(_ view: Receiver, context: Context) {
         view.receive = receive
         view.inspect = inspect
         view.perform = perform
         view.readText = readText
+        view.closed = closed
     }
     static func dismantleNSView(_ view: Receiver, coordinator: ()) {
-        view.router.remove(view.id, repository: view.repository)
+        view.disconnect()
     }
 
     final class Receiver: NSView {
@@ -135,15 +143,26 @@ struct WorkLinkReceiver: NSViewRepresentable {
         var perform: (DesktopActionRequest) throws -> DesktopActionOutcome
         var readText: (DesktopTextRequest) throws -> DesktopTextReading
         var receive: (LinkedWork) async -> Void
+        var closed: () -> Void
+        private var closeObserver: NSObjectProtocol?
+
+        func disconnect() {
+            router.remove(id, repository: repository)
+            if let closeObserver { NotificationCenter.default.removeObserver(closeObserver) }
+            closeObserver = nil
+        }
+
 
         init(router: WorkLinkRouter, repository: String, openingRequests: Set<UUID>, inspect: @escaping (String, UUID) -> DesktopWindowInspection,
              perform: @escaping (DesktopActionRequest) throws -> DesktopActionOutcome,
              readText: @escaping (DesktopTextRequest) throws -> DesktopTextReading,
+             closed: @escaping () -> Void,
              receive: @escaping (LinkedWork) async -> Void) {
             self.router = router
             self.repository = repository
             self.openingRequests = openingRequests
             self.receive = receive
+            self.closed = closed
             self.inspect = inspect
             self.perform = perform
             self.readText = readText
@@ -151,8 +170,13 @@ struct WorkLinkReceiver: NSViewRepresentable {
         }
         required init?(coder: NSCoder) { fatalError("init(coder:) is unsupported") }
         override func viewDidMoveToWindow() {
-            router.remove(id, repository: repository)
+            disconnect()
             if let window {
+                closeObserver = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification,
+                    object: window, queue: .main) { [weak self] _ in
+                        MainActor.assumeIsolated { self?.closed() }
+                    }
+
                 router.register(id, repository: repository, openingRequests: openingRequests, focus: { [weak window] in
                     window?.makeKeyAndOrderFront(nil)
                 }, inspect: inspect, perform: { [weak self] request in

@@ -90,7 +90,7 @@ pub fn assemble(
         .unwrap_or(repo);
     if let Some(name) = skill {
         let invocation = if let Some(path) = &cli.skill_input {
-            let invocation = SkillInvocation::read(path)?;
+            let invocation = SkillInvocation::read(path, cwd, message)?;
             anyhow::ensure!(
                 invocation.skill.name == name,
                 "captured skill does not match {name}"

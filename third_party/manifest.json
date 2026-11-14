@@ -1,40 +1,8 @@
 {
   "ghostty": {
-    "url": "https://bin.loopflow.studio/GhosttyKit-a60e9e2-lf7-theme-readback1.xcframework.zip",
-    "sha256": "19d6f6e2f93cf3d967aaaa9761c6ee1995683381ac432598d7b0496610934ce9",
-    "revision": "a60e9e2a57f73e1eef2bd1cf2995a467f69e7fb0",
-    "libintl_members": [
-      "bindtextdom.o",
-      "dcgettext.o",
-      "dcigettext.o",
-      "dcngettext.o",
-      "dgettext.o",
-      "dngettext.o",
-      "explodename.o",
-      "finddomain.o",
-      "gettext.o",
-      "hash-string.o",
-      "intl-compat.o",
-      "l10nflist.o",
-      "langprefs.o",
-      "loadmsgcat.o",
-      "localealias.o",
-      "log.o",
-      "ngettext.o",
-      "plural-exp.o",
-      "plural.o",
-      "setlocale.o",
-      "textdomain.o",
-      "version.o",
-      "compat.o",
-      "getlocalename_l-unsafe.o",
-      "localename.o",
-      "localename-environ.o",
-      "localename-unsafe.o",
-      "setlocale-lock.o",
-      "setlocale_null.o",
-      "setlocale_null-unlocked.o"
-    ]
+    "url": "https://bin.loopflow.studio/GhosttyKit-a60e9e2-lf8.xcframework.zip",
+    "sha256": "306d53ebe8604121ca0e371f01d5f7eeabf788a78e615ff21572eb25bfaaaa99",
+    "revision": "a60e9e2a57f73e1eef2bd1cf2995a467f69e7fb0"
   },
   "components": [
     {
@@ -154,14 +122,7 @@
       "scope": "GhosttyKit",
       "source": {
         "url": "https://deps.files.ghostty.org/breakpad-b99f444ba5f6b98cac261cbb391d8766b34a5918.tar.gz",
-        "sha256": "6cca98943d1a990766cef61077c09aff5938063fe17a1efe1228e5412b6d6ad9",
-        "packaged": {
-          "sha256": "3d78b0b701e98063cd974c1d5a2009f420474bfe7a6384d40593ca728f09db07",
-          "omit_binary_fixtures": [
-            "breakpad-b99f444ba5f6b98cac261cbb391d8766b34a5918/src/client/mac/testapp/crashduringload",
-            "breakpad-b99f444ba5f6b98cac261cbb391d8766b34a5918/src/client/mac/testapp/crashInMain"
-          ]
-        }
+        "sha256": "6cca98943d1a990766cef61077c09aff5938063fe17a1efe1228e5412b6d6ad9"
       },
       "notices": [
         {
@@ -280,7 +241,8 @@
           "path": "third_party/notices/z2d.txt",
           "sha256": "8425dcd8f4d11b43d8a755ffbba9e4fb478a759e8295e76a546138dce625ebfd"
         }
-      ]
+      ],
+      "license": "MPL-2.0"
     },
     {
       "id": "zig_objc",
@@ -353,20 +315,6 @@
       ]
     },
     {
-      "id": "gettext",
-      "scope": "GhosttyKit",
-      "source": {
-        "url": "https://deps.files.ghostty.org/gettext-0.24.tar.gz",
-        "sha256": "c918503d593d70daf4844d175a13d816afacb667c06fba1ec9dcd5002c1518b7"
-      },
-      "notices": [
-        {
-          "path": "third_party/notices/gettext.txt",
-          "sha256": "41333c451fcbfa45bc2325c62b72037a0d007d778e462c3d4685b31ada73ca44"
-        }
-      ]
-    },
-    {
       "id": "nerd-glyphs",
       "scope": "GhosttyKit",
       "notices": [
@@ -417,6 +365,10 @@
     "tiktoken-rs@0.12.1": {
       "path": "third_party/notices/crate-tiktoken-rs.txt",
       "sha256": "f7c6ddf9d84fd7b8ad5917e4074d4c05e4c1dfb752a28a0058f06bd0f5e2edcc"
+    },
+    "yaml-edit@0.3.6": {
+      "path": "third_party/notices/crate-yaml-edit.txt",
+      "sha256": "1f3cca984850863bfa90a00e6f9302808fe2a4c78fe065544a0b26425b4c55f3"
     }
   },
   "notice_provenance": {
@@ -551,6 +503,14 @@
     "glyph-iec": {
       "url": "https://raw.githubusercontent.com/jloughry/Unicode/805536fb6f93604da985d80e0c6b099f98f8b4d9/LICENSE.txt",
       "sha256": "11aef1cdf2d58d822e6857e2574870ccc59d4900052bf5c098e319d750e7ac3d"
+    },
+    "crate-yaml-edit-declaration": {
+      "url": "https://raw.githubusercontent.com/jelmer/yaml-edit/780a686e5b882941b710c0ef19fd8d061d03bcc8/Cargo.toml",
+      "sha256": "3d44ba585064f076cf26e7fda1e18a647da2c53df24a0d17368922b99d0d8a3b"
+    },
+    "apache-2.0": {
+      "url": "https://www.apache.org/licenses/LICENSE-2.0.txt",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
     }
   }
 }

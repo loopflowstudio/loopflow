@@ -189,10 +189,16 @@ fn generate_commit_message(repo: &Path, agent_override: Option<&str>) -> OpsResu
     );
 
     let config = load_config_or_default(Some(repo));
-    let agent = agent_override.unwrap_or_else(|| config.agent()).to_string();
+    let agent = match agent_override {
+        Some(agent) => agent,
+        None => config.agent()?,
+    }
+    .to_string();
 
     let launch = AgentConfig {
         chrome: config.chrome,
+        codex_service_tier: config.codex.service_tier,
+        claude_model: config.claude.model.clone(),
         task_prompt: prompt,
         agent: Some(agent),
         cwd: Some(repo.to_path_buf()),

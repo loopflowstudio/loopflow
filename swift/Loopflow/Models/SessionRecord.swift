@@ -20,6 +20,7 @@ public enum SessionAvailability: String, Codable, Sendable, Hashable {
 }
 
 public enum SessionActionKind: String, Codable, Sendable, Hashable {
+    case reveal
     case open
     case moveHere = "move_here"
 }
@@ -178,13 +179,45 @@ public struct SessionPreview: Codable, Hashable, Sendable {
     }
 }
 
+public enum ProviderTransitionKind: String, Codable, Sendable, Hashable {
+    case retained, resumed, forked, started
+}
+
+public struct ProviderTransition: Codable, Sendable, Hashable {
+    public let kind: ProviderTransitionKind
+    public let fromProviderSession: String?
+    public let toProviderSession: String
+    public let fromAgentProcess: AgentProcessId?
+    public let toAgentProcess: AgentProcessId
+    public let originalRunning: Bool?
+    public let seed: String?
+    public let observedAt: Int64
+
+    public var explanation: String {
+        switch kind {
+        case .retained: "Same process"
+        case .resumed: "Resumed in a new process"
+        case .forked: "Forked from \(fromProviderSession ?? "earlier conversation")" + (originalRunning == true ? "; original was running at fork" : "")
+        case .started: fromProviderSession == nil ? "New conversation" : "New conversation; earlier one left behind"
+        }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case kind, seed
+        case fromProviderSession = "from_provider_session", toProviderSession = "to_provider_session"
+        case fromAgentProcess = "from_agent_process", toAgentProcess = "to_agent_process"
+        case originalRunning = "original_running", observedAt = "observed_at"
+    }
+}
+
 public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
+    public let transition: ProviderTransition?
     public let preview: SessionPreview?
     public let primaryScope: String?
     public let availability: SessionAvailability?
     public let programStatus: ProgramStatusRecords?
     /// The provider's current AgentProcess; absent when Loopflow never launched one.
-    public let agentProcessId: String?
+    public let agentProcessId: AgentProcessId?
     /// Its Task names it as the Task's primary conversation.
     public let taskPrimary: Bool
     public let taskIds: [String]
@@ -204,11 +237,19 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     public let provider: String?
     /// The login its conversation is pinned to; nil for a shared or unrouted one.
     public let account: String?
+    /// The model its current input launched with, when one was named.
+    public let model: String?
+    /// Its next message would fail: the login it would use cannot take its model now.
+    public let blocked: Bool
     public let cwd: String
     public let state: SessionState
     public let readySummary: String?
     public var openArgv: [String]
     public let terminalIds: [String]
+    /// Its current or last turn while it is live; nil when nothing says.
+    public let turn: SessionTurn?
+    /// Open here but never launched by Loopflow; `id` is the provider's conversation ID.
+    public let raw: Bool
 
     /// One word for a row: Available for a person wins over what its client is doing.
     public var statusLabel: String {
@@ -225,9 +266,28 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
         actions.first { $0.kind == kind }
     }
 
+    /// Every Task this Session belongs to: its memberships, its checkout's Task
+    /// and its own Work when that is a Task.
+    public var taskMemberships: Set<String> {
+        Set(taskIds + [workspace?.taskId, work?.kind == .task ? work?.id : nil].compactMap { $0 })
+    }
+
+    public func names(task id: String) -> Bool { taskMemberships.contains(id) }
+
+    /// A first launch ended with no history, so there is nothing to open and no
+    /// holder: MoveHere is the explicit click that repeats it.
+    public var launchRetry: SessionAction? {
+        action(.open) == nil ? action(.moveHere) : nil
+    }
+
+    /// Another client holds input; only Take back transfers it.
+    public var heldElsewhere: Bool {
+        action(.moveHere) != nil && launchRetry == nil
+    }
+
     enum CodingKeys: String, CodingKey {
-        case id, interactive, work, workspace, title, detail, provider, account, cwd, state, availability
-        case preview
+        case id, interactive, work, workspace, title, detail, provider, account, model, blocked, cwd, state, availability
+        case preview, transition
         case programStatus = "program_status"
         case agentProcessId = "agent_process_id"
         case primaryScope = "primary_scope"
@@ -241,6 +301,61 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
         case readySummary = "ready_summary"
         case openArgv = "open_argv"
         case terminalIds = "terminal_ids"
+        case turn, raw
+    }
+}
+
+/// A conversation's current or last turn, as its provider's transcript shows it.
+public struct SessionTurn: Codable, Sendable, Hashable {
+    public enum State: String, Codable, Sendable, Hashable {
+        case running, ended, interrupted
+    }
+
+    public struct Usage: Codable, Sendable, Hashable {
+        /// Every input token, cached ones included.
+        public let inputTokens: Int
+        public let cachedInputTokens: Int
+        public let outputTokens: Int
+
+        enum CodingKeys: String, CodingKey {
+            case inputTokens = "input_tokens"
+            case cachedInputTokens = "cached_input_tokens"
+            case outputTokens = "output_tokens"
+        }
+    }
+
+    /// The provider's name for the turn.
+    public let id: String?
+    public let state: State
+    public let startedAt: String?
+    public let endedAt: String?
+    public let model: String?
+    public let usage: Usage?
+
+    enum CodingKeys: String, CodingKey {
+        case id, state, model, usage
+        case startedAt = "started_at"
+        case endedAt = "ended_at"
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(id, forKey: .id)
+        try values.encode(state, forKey: .state)
+        try values.encode(startedAt, forKey: .startedAt)
+        try values.encode(endedAt, forKey: .endedAt)
+        try values.encode(model, forKey: .model)
+        try values.encode(usage, forKey: .usage)
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String?.self, forKey: .id)
+        state = try values.decode(State.self, forKey: .state)
+        startedAt = try values.decode(String?.self, forKey: .startedAt)
+        endedAt = try values.decode(String?.self, forKey: .endedAt)
+        model = try values.decode(String?.self, forKey: .model)
+        usage = try values.decode(Usage?.self, forKey: .usage)
     }
 }
 
@@ -258,6 +373,33 @@ public struct TaskSessionGroups: Sendable, Equatable {
     }
 }
 
+/// What `lf session move --json` reports: Sessions moved now, Sessions that
+/// move after their turn, and Sessions skipped with why.
+public struct SessionMoveReport: Codable, Sendable, Hashable {
+    public struct Moved: Codable, Sendable, Hashable {
+        public let id: String
+        public let title: String
+        public let how: String
+    }
+
+    public struct Skipped: Codable, Sendable, Hashable {
+        public let id: String
+        public let title: String
+        public let reason: String
+    }
+
+    public let moved: [Moved]
+    public let pending: [Moved]
+    public let skipped: [Skipped]
+
+    /// One line per outcome, as the Desktop shows after a move.
+    public var summary: String {
+        let lines = moved.map { "\($0.title): \($0.how)" } + pending.map { "\($0.title): \($0.how)" }
+            + skipped.map { "\($0.title): skipped, \($0.reason)" }
+        return lines.isEmpty ? "No blocked Sessions." : lines.joined(separator: "\n")
+    }
+}
+
 /// A bounded inventory page; nil next marks a complete enumeration.
 public struct SessionPage: Codable, Sendable, Hashable {
     public let entries: [SessionRecord]
@@ -265,13 +407,48 @@ public struct SessionPage: Codable, Sendable, Hashable {
 }
 
 extension SessionRecord {
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(transition, forKey: .transition)
+        try values.encode(preview, forKey: .preview)
+        try values.encode(primaryScope, forKey: .primaryScope)
+        try values.encode(availability, forKey: .availability)
+        try values.encode(programStatus, forKey: .programStatus)
+        try values.encode(agentProcessId, forKey: .agentProcessId)
+        try values.encode(taskPrimary, forKey: .taskPrimary)
+        try values.encode(taskIds, forKey: .taskIds)
+        try values.encode(id, forKey: .id)
+        try values.encode(interactive, forKey: .interactive)
+        try values.encode(work, forKey: .work)
+        try values.encode(workspace, forKey: .workspace)
+        try values.encode(waveId, forKey: .waveId)
+        try values.encode(workPath, forKey: .workPath)
+        try values.encode(actions, forKey: .actions)
+        try values.encode(title, forKey: .title)
+        try values.encode(titleSource, forKey: .titleSource)
+        try values.encode(graphMembership, forKey: .graphMembership)
+        try values.encode(detail, forKey: .detail)
+        try values.encode(provider, forKey: .provider)
+        try values.encode(account, forKey: .account)
+        try values.encode(model, forKey: .model)
+        try values.encode(blocked, forKey: .blocked)
+        try values.encode(cwd, forKey: .cwd)
+        try values.encode(state, forKey: .state)
+        try values.encode(readySummary, forKey: .readySummary)
+        try values.encode(openArgv, forKey: .openArgv)
+        try values.encode(terminalIds, forKey: .terminalIds)
+        try values.encode(turn, forKey: .turn)
+        try values.encode(raw, forKey: .raw)
+    }
+
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
+        transition = try values.decodeIfPresent(ProviderTransition.self, forKey: .transition)
         preview = try values.decodeIfPresent(SessionPreview.self, forKey: .preview)
         primaryScope = try values.decodeIfPresent(String.self, forKey: .primaryScope)
         availability = try values.decodeIfPresent(SessionAvailability.self, forKey: .availability)
         programStatus = try values.decodeIfPresent(ProgramStatusRecords.self, forKey: .programStatus)
-        agentProcessId = (try values.decodeIfPresent(String.self, forKey: .agentProcessId)).map { StructuredIdentity.uuid($0) }
+        agentProcessId = try values.decodeIfPresent(AgentProcessId.self, forKey: .agentProcessId)
         taskPrimary = try values.decode(Bool.self, forKey: .taskPrimary)
         taskIds = (try values.decode([String].self, forKey: .taskIds)).map { StructuredIdentity.prefixed($0, "task_") }
         id = StructuredIdentity.session(try values.decode(String.self, forKey: .id))
@@ -287,10 +464,14 @@ extension SessionRecord {
         detail = try values.decode(String.self, forKey: .detail)
         provider = try values.decodeIfPresent(String.self, forKey: .provider)
         account = try values.decodeIfPresent(String.self, forKey: .account)
+        model = try values.decodeIfPresent(String.self, forKey: .model)
+        blocked = try values.decode(Bool.self, forKey: .blocked)
         cwd = try values.decode(String.self, forKey: .cwd)
         state = try values.decode(SessionState.self, forKey: .state)
         readySummary = try values.decodeIfPresent(String.self, forKey: .readySummary)
         openArgv = try values.decode([String].self, forKey: .openArgv)
         terminalIds = try values.decode([String].self, forKey: .terminalIds)
+        turn = try values.decode(SessionTurn?.self, forKey: .turn)
+        raw = try values.decode(Bool.self, forKey: .raw)
     }
 }

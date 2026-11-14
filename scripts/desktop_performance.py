@@ -614,9 +614,15 @@ def _prepare_native_fixture(output: Path, cli: Path) -> Path:
         "RUST_LOG": "off",
     }
     repo = world / "repo"
-    records = json.loads(
-        _fixture_cli(cli, ["desktop", "sessions", "--all", "--history", "--json"], repo, environment)
-    )
+    database_uri = (Path(homes["LF_HOME"]) / "loopflow.db").as_uri() + "?mode=ro"
+    with sqlite3.connect(database_uri, uri=True) as database:
+        session_ids = [row[0] for row in database.execute("SELECT id FROM agent_sessions")]
+    records = [
+        json.loads(
+            _fixture_cli(cli, ["session", "card", session_id, "--json"], repo, environment)
+        )["session"]
+        for session_id in session_ids
+    ]
     if len(records) != 1 or len(records[0]["task_ids"]) != 1:
         raise RuntimeError("The one-task world did not hold exactly one Task-bound Session")
     task = json.loads(

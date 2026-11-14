@@ -222,39 +222,6 @@ struct WorkModelTests {
         #expect(model.visibleWaves.count == 2)
     }
 
-    @Test("Authored Waves remain visible without active Runs")
-    func authoredWavesRemainVisible() async throws {
-        let fixture = try WorkTestFixture.load()
-        let repo = FileManager.default.temporaryDirectory
-            .appendingPathComponent("loopflow-authored-\(UUID().uuidString)", isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: repo) }
-        for name in ["infrastructure", "intelligence", "product"] {
-            let wave = repo
-                .appendingPathComponent(".lf/wave", isDirectory: true)
-                .appendingPathComponent(name, isDirectory: true)
-            try FileManager.default.createDirectory(at: wave, withIntermediateDirectories: true)
-            try Data("# \(name)\n".utf8).write(to: wave.appendingPathComponent("GOAL.md"))
-        }
-        try git(["init", "-q"], at: repo)
-
-        let model = WorkModel(query: fixture.query)
-        model.applyFixture(
-            roadmap: .available(fixture.roadmap),
-            waves: .available([]),
-            workActivity: .available(fixture.workActivity),
-            repos: []
-        )
-        await model.applyPortfolio(
-            [PortfolioRepo(path: repo.resolvingSymlinksInPath().path, error: nil)], initialRepoPath: nil
-        )
-        #expect(model.repos.count == 1)
-        model.setRepoPath(repo.path)
-
-        #expect(model.visibleWaves.map(\.displayName) == [
-            "Infrastructure", "Intelligence", "Product",
-        ])
-    }
-
     @Test("A checkout's repository identity follows its origin once that is resolved")
     func repoIdentityFollowsResolvedOrigin() throws {
         let fixture = try WorkTestFixture.load()
@@ -286,21 +253,21 @@ struct WorkModelTests {
         model.select(.wave(id: "wave-1"))
         await model.refreshWorkActivity()
         #expect(await fixture.activityArguments.last == [
-            "history", "--since", "7d", "--limit", "50",
+            "session", "history", "--since", "7d", "--limit", "50",
             "--wave", "product", "--json",
         ])
 
         model.select(.project(id: "project-1"))
         await model.refreshWorkActivity()
         #expect(await fixture.activityArguments.last == [
-            "history", "--since", "7d", "--limit", "50",
+            "session", "history", "--since", "7d", "--limit", "50",
             "--wave", "product", "--json",
         ])
 
         model.select(.task(id: "issue-now"))
         await model.refreshWorkActivity()
         #expect(await fixture.activityArguments.last == [
-            "history", "--since", "7d", "--limit", "50",
+            "session", "history", "--since", "7d", "--limit", "50",
             "--wave", "product",
             "--task", "W2-144", "--json",
         ])
@@ -313,7 +280,7 @@ struct WorkModelTests {
         let selectedJSON = try fixture.workActivityJSON(replacingFirstSubjectWith: "W2-144")
         let deferred = DeferredActivityResponse()
         let query = RegistryQuery { args, _ in
-            guard args.first == "history" else {
+            guard args.prefix(2) == ["session", "history"] else {
                 throw RegistryQueryError("unexpected command \(args.joined(separator: " "))")
             }
             if args.contains("W2-144") { return selectedJSON }
@@ -354,7 +321,7 @@ struct WorkModelTests {
             encoding: .utf8
         )
         let query = RegistryQuery { args, cwd in
-            #expect(args == ["desktop", "sessions", "--json", "--page", "--limit", "100"])
+            #expect(args == ["session", "list", "--json", "--page", "--limit", "100"])
             #expect(cwd == "/src/loopflow")
             return #"{"entries":\#(json),"next":null}"#
         }
@@ -379,7 +346,7 @@ struct WorkModelTests {
             encoding: .utf8
         )
         let query = RegistryQuery { args, _ in
-            #expect(args == ["desktop", "sessions", "--json", "--page", "--limit", "100"])
+            #expect(args == ["session", "list", "--json", "--page", "--limit", "100"])
             return #"{"entries":\#(json),"next":null}"#
         }
         let model = WorkModel(query: query, repoPath: "/src/first")
@@ -404,7 +371,7 @@ struct WorkModelTests {
         )
         let deferred = DeferredActivityResponse()
         let query = RegistryQuery { args, _ in
-            #expect(args == ["desktop", "sessions", "--json", "--page", "--limit", "100"])
+            #expect(args == ["session", "list", "--json", "--page", "--limit", "100"])
             return #"{"entries":\#(await deferred.response()),"next":null}"#
         }
         let model = WorkModel(query: query, repoPath: "/src/first")
@@ -472,7 +439,7 @@ struct WorkModelStreamTests {
         let model = WorkModel(query: fixture.streaming(feed), repoPath: "/src/loopflow", cache: cache)
         model.bindWorkspaces(registry, repository: "/src/loopflow")
         let key = WorkNodeKey(repo: "/src/loopflow", work: .task(id: "issue-review"))
-        #expect(model.selection == nil) // Saved data does not restore last launch's Task.
+        #expect(model.selection == key.work) // Selection restores before fresh execution evidence.
         model.select(key.work)
         let workspaceKey = model.workspaceKey(for: key.work, repository: "/src/loopflow")
         let workspace = try #require(registry.retained(workspaceKey))
@@ -537,7 +504,7 @@ struct WorkModelStreamTests {
             .deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto/task_work.json")
         let work = try String(contentsOf: workURL, encoding: .utf8)
         let shown = WorkScope(repo: "/src/loopflow", headless: false, task: found.task.task.identifier,
-                              activity: nil)
+                              activity: nil, taskListWave: nil)
         await feed.send(try fixture.frame("task", sequence: 2, answers: scope.id, scope: shown,
             body: "{\"overview\":\(work),\"comments\":{\"identifier\":\"\(found.task.task.identifier)\",\"comments\":[],\"conflicts\":{},\"pending_sync\":[],\"refresh_error\":null},\"graph_processes\":[],\"execution\":null}"))
         try await eventually { model.taskWork[found.task.id].value?.graph != nil }
@@ -570,7 +537,7 @@ struct WorkModelStreamTests {
         func peers(_ sequence: Int, _ answers: Int, repo: String, statuses: String) throws -> WorkFrame {
             let body = #"{"transport":"git","destinations":\#(statuses)}"#
             return try fixture.frame("peer_planning", sequence: sequence, answers: answers,
-                                     scope: WorkScope(repo: repo, headless: false, task: nil, activity: nil),
+                                     scope: WorkScope(repo: repo, headless: false, task: nil, activity: nil, taskListWave: nil),
                                      body: body)
         }
         await feed.send(try fixture.planningFrame(sequence: 1, answers: scope.id))
@@ -735,7 +702,7 @@ struct WorkModelStreamTests {
             }
         }
         let catalog = Catalog(original)
-        let query = RegistryQuery(watchWork: { await feed.open() }) { args, _ in
+        let query = RegistryQuery(subscribeWork: { await feed.open() }) { args, _ in
             guard args.starts(with: ["graph", "list"]) else {
                 throw RegistryQueryError("unexpected catalogue operation")
             }
@@ -796,7 +763,7 @@ struct WorkModelStreamTests {
     func mutationConfirmation() async throws {
         let fixture = try WorkTestFixture.load()
         let feed = WorkFeed()
-        let query = RegistryQuery(watchWork: { await feed.open() }) { args, _ in
+        let query = RegistryQuery(subscribeWork: { await feed.open() }) { args, _ in
             guard args.starts(with: ["task", "unassign"]) else {
                 throw RegistryQueryError("unexpected read: \(args)")
             }
@@ -828,7 +795,7 @@ struct WorkModelStreamTests {
     func taskConfirmationDeadline() async throws {
         let fixture = try WorkTestFixture.load()
         let feed = WorkFeed()
-        let query = RegistryQuery(watchWork: { await feed.open() }) { args, _ in
+        let query = RegistryQuery(subscribeWork: { await feed.open() }) { args, _ in
             guard args.starts(with: ["task", "complete"]) else { throw RegistryQueryError("unexpected command") }
             try await Task.sleep(for: .milliseconds(100))
             return ""
@@ -913,6 +880,33 @@ struct WorkModelStreamTests {
         #expect(model.task(id: "issue-now") != nil)
     }
 
+    @Test("Successful frames before repeated failures retain backoff, and cancellation stops retries")
+    func observationRetryBackoff() async throws {
+        let fixture = try WorkTestFixture.load()
+        let feed = WorkFeed()
+        let model = WorkModel(query: fixture.streaming(feed))
+        let keeping = Task { await model.keepWorkCurrent() }
+        defer { keeping.cancel() }
+        try await feed.opened(1, within: .seconds(5))
+        for attempt in 1...3 {
+            await feed.send(try fixture.planningFrame(sequence: 1, answers: nil))
+            try await eventually { model.roadmap.value != nil && model.roadmap.errorMessage == nil }
+            let failed = ContinuousClock.now
+            await feed.fail(RegistryQueryError("part ended"))
+            try await eventually { model.roadmap.errorMessage == "part ended" }
+            #expect(model.task(id: "issue-now") != nil)
+            if attempt < 3 {
+                try await feed.opened(attempt + 1, within: .seconds(5))
+                #expect(ContinuousClock.now - failed >= .seconds(attempt))
+            }
+        }
+        let cancelled = ContinuousClock.now
+        keeping.cancel()
+        await keeping.value
+        #expect(ContinuousClock.now - cancelled < .seconds(1))
+        #expect(await feed.openCount == 3)
+    }
+
     @Test("New turns clear previews and an ended reader recovers without reviving old output")
     func readerEndRecovers() async throws {
         let fixture = try WorkTestFixture.load()
@@ -952,26 +946,14 @@ struct WorkModelStreamTests {
         await feed.send(try fixture.planningFrame(sequence: 1, answers: answers))
         await feed.send(try sessionFrame(2, turn: "Previous result", available: true))
         try await eventually { preview() == "Previous result" }
-        model.applySelectionPlans([fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"), members: [
-            fixtureViewContent(work: .init(repository: "repo", kind: .task, id: "preview-task"), title: "Preview")
-        ])], reason: "")
-        model.navigation.sidebarFilter = .available
-        #expect(model.sidebarTaskIDs == ["preview-task"])
         await feed.send(try sessionFrame(3, turn: nil))
         try await eventually { preview() == "Summary · brief" }
         await feed.send(try sessionFrame(4, turn: "New turn output"))
         try await eventually { preview() == "New turn output" }
-        model.navigation.sidebarFilter = .busy
-        #expect(model.sidebarTaskIDs == ["preview-task"])
         await feed.fail(RegistryQueryError("reader exited"))
         try await eventually { model.sessions.errorMessage == "reader exited" }
         #expect(model.sessions.value?.first?.preview?.text == "New turn output")
         #expect(preview() == "Summary · brief")
-        #expect(model.sidebarTaskIDs.isEmpty)
-        model.navigation.sidebarFilter = .available
-        #expect(model.sidebarTaskIDs.isEmpty)
-        model.navigation.sidebarFilter = .working
-        #expect(model.sidebarTaskIDs == ["preview-task"])
         #expect(model.roadmap.value != nil)
         #expect(!model.roadmap.isLoading)
 
@@ -1009,6 +991,7 @@ private actor Flag {
 private actor WorkFeed {
     private var continuations: [AsyncThrowingStream<WorkFrame, any Error>.Continuation] = []
     private var requests: [WorkRequest] = []
+    var openCount: Int { continuations.count }
 
     nonisolated func open() async -> WorkObservation {
         let (stream, continuation) = AsyncThrowingStream<WorkFrame, any Error>.makeStream()
@@ -1083,11 +1066,11 @@ private struct WorkTestFixture {
         let activityArguments = ActivityArguments()
         let query = RegistryQuery { args, _ in
             switch args.first {
-            case "desktop" where args.dropFirst().first == "plan": return roadmapJSON
-            case "planning": return #"{"destinations":[]}"#
+            case "plan" where args.dropFirst().first == "list": return roadmapJSON
+            case "repo" where args.dropFirst().first == "plan": return #"{"destinations":[]}"#
             case "wave" where args.dropFirst().first == "list": return wavesJSON
-            case "desktop" where args.dropFirst().first == "sessions": return #"{"entries":[],"next":null}"#
-            case "history":
+            case "session" where args.dropFirst().first == "list": return #"{"entries":[],"next":null}"#
+            case "session" where args.dropFirst().first == "history":
                 await activityArguments.record(args)
                 return workActivityJSON
             default: throw RegistryQueryError("unexpected command \(args.joined(separator: " "))")
@@ -1107,14 +1090,14 @@ private struct WorkTestFixture {
     }
 
     func streaming(_ feed: WorkFeed) -> RegistryQuery {
-        RegistryQuery(watchWork: { await feed.open() }) { args, _ in
+        RegistryQuery(subscribeWork: { await feed.open() }) { args, _ in
             throw RegistryQueryError("a streamed window ran lf \(args.joined(separator: " "))")
         }
     }
 
-    static let scope = WorkScope(repo: "/src/loopflow", headless: false, task: nil, activity: nil)
+    static let scope = WorkScope(repo: "/src/loopflow", headless: false, task: nil, activity: nil, taskListWave: nil)
 
-    /// One line of `part`'s watch, as the transport hands it to the window.
+    /// One line of `part`'s subscription, as the transport hands it to the window.
     func frame(
         _ part: String, sequence: Int, answers: Int?, scope: WorkScope = Self.scope, body: String
     ) throws -> WorkFrame {
@@ -1160,7 +1143,7 @@ private struct WorkTestFixture {
 
     func sessionsFrame(sequence: Int, answers: Int?, repo: String, entries: String) throws -> WorkFrame {
         try frame("sessions", sequence: sequence, answers: answers,
-                  scope: WorkScope(repo: repo, headless: false, task: nil, activity: nil), body: entries)
+                  scope: WorkScope(repo: repo, headless: false, task: nil, activity: nil, taskListWave: nil), body: entries)
     }
 
     /// A live-process reading: a frame that confirms and changes no Work.

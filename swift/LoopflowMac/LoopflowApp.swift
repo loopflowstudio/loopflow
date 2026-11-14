@@ -11,11 +11,44 @@ private func enrichProcessPathForGUILaunch() {
     }
 }
 
+@MainActor
+final class DesktopAppDelegate: NSObject, NSApplicationDelegate {
+    let workspaces = RepositoryWorkspaces(
+        localMachineId: AppTestMode.shouldBypassRegistry ? nil : WorkCache.home.load()?.machineId,
+        runtime: .shared)
+    private var quitting = false
+
+    /// Quit can start inside a MainActor job (the UI-test snapshot's `.task`).
+    /// AppKit's terminate-later loop then runs nested inside that job, where
+    /// MainActor tasks never run, so the wait for relays polls a run-loop timer.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard !quitting else { return .terminateLater }
+        quitting = true
+        workspaces.prepareForQuit()
+        // Let leave cross SSH before AppKit tears down the PTYs. If delivery
+        // fails, the remote connection's bounded absence policy owns cleanup.
+        workspaces.detachViewersForQuit()
+        guard workspaces.hasRunningRelays else { return .terminateNow }
+        let deadline = Date().addingTimeInterval(2)
+        let timer = Timer(timeInterval: 0.05, repeats: true) { [workspaces] timer in
+            let done = MainActor.assumeIsolated {
+                Date() >= deadline || !workspaces.hasRunningRelays
+            }
+            guard done else { return }
+            timer.invalidate()
+            MainActor.assumeIsolated { sender.reply(toApplicationShouldTerminate: true) }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        return .terminateLater
+    }
+}
+
 @main
 struct LoopflowApp: App {
+    @NSApplicationDelegateAdaptor(DesktopAppDelegate.self) private var delegate
     @State private var taskLinks = WorkLinkRouter.shared
     @State private var portfolioService = PortfolioService()
-    @State private var workspaces: RepositoryWorkspaces
+    private var workspaces: RepositoryWorkspaces { delegate.workspaces }
     @Environment(\.openWindow) private var openWindow
     @State private var snapshotError: String?
     @State private var showSnapshotError = false
@@ -29,7 +62,7 @@ struct LoopflowApp: App {
     init() {
         NSWindow.allowsAutomaticWindowTabbing = false
         Perf.begin(Perf.coldStart, "launch", id: "launch",
-                   detail: "pre_main_ms=\(Int(Perf.millisecondsSinceProcessStart() ?? -1))")
+                   detail: "pre_main_ms=\(Int(PerfClock.millisecondsSinceProcessStart() ?? -1))")
         Perf.begin(Perf.workspaceCurrent, "launch", id: "launch")
         if AppTestMode.current() == nil {
             DesktopLog.home.begin()
@@ -39,28 +72,17 @@ struct LoopflowApp: App {
             AppUpdates.adoptIfUpdated()
         }
         bootstrapLoopflowApp()
-        _workspaces = State(initialValue: RepositoryWorkspaces(
-            localMachineId: AppTestMode.shouldBypassRegistry ? nil : WorkCache.home.load()?.machineId))
         // Enrich our own process PATH before any children spawn, so tools launched
         // by Wave launchers can find git and agent CLIs that live in
         // Homebrew or ~/.local/bin.
         enrichProcessPathForGUILaunch()
-        // A reboot leaves interrupted Sessions behind; bring them all back unasked.
-        if AppTestMode.current() == nil {
-            Task.detached(priority: .utility) {
-                do {
-                    try await RegistryQueryLocal.shared.resumeInterrupted()
-                } catch {
-                    DesktopLog.home.error("Resuming interrupted Sessions failed", ["error": String(describing: error)])
-                }
-            }
-        }
         // Ghostty borrows the process environment when appearance initializes it.
         // Finish environment changes before publishing the initial theme.
         _appearance = State(initialValue: AppearanceStore.shared)
         if AppTestMode.current() == nil {
             _desktopServer = State(initialValue: DesktopServer.start())
             AppUpdater.shared.start()
+            CreationRecovery.shared.start()
         }
     }
 
@@ -181,7 +203,9 @@ struct LoopflowApp: App {
                 ThemeChooser(appearance: appearance).tabItem { Label("Appearance", systemImage: "paintpalette") }
                 Form { Toggle("Autosave Task Files", isOn: $taskFilesAutosave) }
                     .padding(24).tabItem { Label("Editing", systemImage: "pencil") }
+                ConfigurationSettingsView().tabItem { Label("Configuration", systemImage: "slider.horizontal.3") }
                 KeyboardShortcutsView().tabItem { Label("Keyboard Shortcuts", systemImage: "keyboard") }
+                MobileSettings().tabItem { Label("Mobile", systemImage: "iphone") }
             }.modifier(AppAppearance(appearance: appearance))
         }
         Window("Keyboard Shortcuts", id: "keyboard-shortcuts") { KeyboardShortcutsView() }

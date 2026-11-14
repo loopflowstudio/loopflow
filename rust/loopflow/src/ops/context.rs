@@ -174,12 +174,12 @@ async fn read_context(
                 anyhow::bail!(error);
             }
         };
-        report.process = ContextFact::bound(record.id, "explicit");
+        report.process = ContextFact::bound(record.id(), "explicit");
         // The caller is provenance, not the work this command performed.
-        if let Some(id) = record.caller_session_id {
+        if let Some(id) = record.as_lf().and_then(|lf| lf.caller_session_id.clone()) {
             report.session = ContextFact::bound(id, "process_caller");
         }
-        let Some(path) = record.cwd else {
+        let Some(path) = record.cwd() else {
             anyhow::bail!("Process has no recorded checkout")
         };
         directory = path.into();
@@ -262,10 +262,8 @@ async fn read_context(
             if let Some(checkout) = store.task_checkout(&task.id).await? {
                 report.checkout =
                     ContextFact::bound(checkout.worktree.display(), "recorded_checkout");
-                report.execution_machine = match checkout.machine_id {
-                    Some(machine) => ContextFact::bound(machine, "recorded_checkout"),
-                    None => ContextFact::unavailable("Recorded checkout Machine is unknown"),
-                };
+                report.execution_machine =
+                    ContextFact::bound(store.local_machine().await?.id, "recorded_checkout");
             } else {
                 // Local absence is not a distributed negative observation.
                 report.execution_machine = ContextFact::unavailable(

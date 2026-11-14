@@ -46,7 +46,6 @@ def _native_artifacts(directory: Path) -> None:
         package_dir.mkdir()
         with tarfile.open(package_dir / f"lf-{target}.tar.gz", "w:gz") as package:
             package.add(binary, arcname="lf")
-        (package_dir / "reader-catalog.txt").write_text("v0.14.0\nwave_setup\n")
 
 
 def test_publisher_requires_the_complete_native_matrix(tmp_path: Path):
@@ -235,7 +234,6 @@ def test_publisher_prepares_exact_artifacts_before_marking_release_published(
         *(f"lf-{target}.tar.gz" for target in publish_release.TARGETS),
         "Loopflow.dmg",
         "install.sh",
-        "reader-catalog.txt",
         "SHA256SUMS",
     }
     checksum_lines = (prepared_dir / "SHA256SUMS").read_text().splitlines()
@@ -243,9 +241,7 @@ def test_publisher_prepares_exact_artifacts_before_marking_release_published(
         *(f"lf-{target}.tar.gz" for target in publish_release.TARGETS),
         "Loopflow.dmg",
         "install.sh",
-        "reader-catalog.txt",
     }
-    assert (prepared_dir / "reader-catalog.txt").read_text() == "v0.14.0\nwave_setup\n"
 
     retained = json.loads((tmp_path / ".lf/logs/release.v1.2.3.json").read_text())
     assert retained["artifact_sha256"] == receipt.artifact_sha256
@@ -259,20 +255,11 @@ def test_publisher_prepares_exact_artifacts_before_marking_release_published(
     assert deploy[-2:] == ["--repo", str(tmp_path)]
 
 
-def test_publisher_refuses_targets_that_disagree_on_the_reader_catalog(tmp_path: Path):
-    _native_artifacts(tmp_path)
-    (tmp_path / publish_release.TARGETS[0] / "reader-catalog.txt").write_text("v0.14.0\n")
-
-    with pytest.raises(RuntimeError, match="disagree"):
-        publish_release._find_reader_catalog(tmp_path)
-
-
 def test_public_artifact_hashes_reject_modified_and_missing_assets(tmp_path: Path):
     names = {
         *(f"lf-{target}.tar.gz" for target in publish_release.TARGETS),
         "Loopflow.dmg",
         "install.sh",
-        "reader-catalog.txt",
         "SHA256SUMS",
     }
     for name in names:
@@ -307,7 +294,6 @@ def public_release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sparkle_key)
             package.addfile(info, io.BytesIO(body))
     (artifacts / "Loopflow.dmg").write_bytes(b"notarized artifact")
     (artifacts / "install.sh").write_text("#!/bin/sh\nexit 1\n")
-    (artifacts / "reader-catalog.txt").write_text("v0.14.0\n")
     publish_release._write_checksums(tuple(artifacts.iterdir()), artifacts / "SHA256SUMS")
     hashes = {p.name: publish_release._sha256(p) for p in artifacts.iterdir()}
     monkeypatch.setenv("LF_RELEASE_MAIN_REPO", str(tmp_path))

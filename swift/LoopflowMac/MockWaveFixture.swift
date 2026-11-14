@@ -68,8 +68,7 @@ enum MockWaveFixture {
     static var plans: [String: WavePlan] {
         var result: [String: WavePlan] = [:]
         for wave in waves {
-            let key = PortfolioRepoState.wavePlanKey(repoPath: wave.repo, waveName: wave.name)
-            result[key] = WavePlan(objective: objective(for: wave.name), projects: wave.name == detailWaveName ? (selectedWaveDetail()?.projects ?? .unavailable(reason: "Fixture missing")) : .available(items: [], truncated: false))
+            result[wave.id] = WavePlan(objective: objective(for: wave.name), projects: wave.name == detailWaveName ? (selectedWaveDetail()?.projects ?? .unavailable(reason: "Fixture missing")) : .available(items: [], truncated: false))
         }
         return result
     }
@@ -206,7 +205,7 @@ enum MockWaveFixture {
             "items": [
               {
                 "task": {
-                  "repository_id": "repo_00000000000040008000000000000001",
+                  "repo_id": "repo_00000000000040008000000000000001",
                   "repo": "/src/loopflow",
                   "project_id": "project-1",
                   "wave_id": "wave-1",
@@ -232,7 +231,7 @@ enum MockWaveFixture {
                   "reason": "ready",
                   "updated_at": "2026-07-13T19:00:00Z",
                   "provider": "codex",
-                  "owner": {"person": "Jack Heart", "machine": {"id": null, "label": null}}
+                  "owner": {"person": "Jack Heart", "person_id": null, "machine": {"id": null, "label": null}}
                 },
                 "graph_name":"feature","graph_source":"wave","latest_graph_process":null,"execution":null,"run_control":{"unavailable":null},
                 "ship_control":{"unavailable":null},"shipping":null,
@@ -289,11 +288,11 @@ enum MockWaveFixture {
                     "merge_commit": null,
                     "abandoned_at": null
                   },
-                "section": "waiting"
+                "section": "working"
               },
               {
                 "task": {
-                  "repository_id": "repo_00000000000040008000000000000001",
+                  "repo_id": "repo_00000000000040008000000000000001",
                   "repo": "/src/loopflow",
                   "project_id": "project-1",
                   "wave_id": "wave-1",
@@ -336,7 +335,7 @@ enum MockWaveFixture {
                   "reason": "Task is ready to start"
                 },
                 "pr": null,
-                "section": "not_started"
+                "section": "backlog"
               }
             ],
             "truncated": false

@@ -11,6 +11,7 @@ it uses whatever Developer ID Application identity is in the keychain.
 Publisher preparation retains the submitted DMG and Apple submission ID outside
 the generated checkout. Retry the same `lf release run` after a wait timeout;
 it resumes that submission and staples a copy of the exact submitted image.
+Notarization failures and their fixes: `.github/CI.md`, "Notarization".
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ from bundle_version import (
     stamp_bundle_version,
     stamp_release_bundle_id,
 )
+from check_desktop_launch import check_launch
 
 REPO_ROOT = Path(__file__).parent.parent
 SWIFT_DIR = REPO_ROOT / "swift"
@@ -141,6 +143,17 @@ def _write_submission(path: Path, receipt: dict[str, object]) -> None:
     temporary.replace(path)
 
 
+def _notarytool_failed(result: subprocess.CompletedProcess, what: str, advice: str) -> RuntimeError:
+    """Print notarytool's output; the error names Apple's first line, then what is safe next."""
+    stdout, stderr = result.stdout.strip(), result.stderr.strip()
+    for output in (stdout, stderr):
+        if output:
+            print(output, flush=True)
+    if message := stderr or stdout:
+        what = f"{what}: {message.splitlines()[0].strip().rstrip('.')}"
+    return RuntimeError(f"{what}; {advice}")
+
+
 def _notarize_dmg(dmg_path: Path) -> int:
     key = os.environ.get("NOTARY_KEY")
     key_id = os.environ.get("NOTARY_KEY_ID")
@@ -200,9 +213,8 @@ def _notarize_dmg(dmg_path: Path) -> int:
                 timeout=30 * 60,
             )
             if result.returncode:
-                raise RuntimeError(
-                    "Notarization upload did not return a receipt; "
-                    "inspect Apple history before retrying"
+                raise _notarytool_failed(
+                    result, "Notarization upload failed", "inspect Apple history before retrying"
                 )
             receipt["submission_id"] = json.loads(result.stdout)["id"]
             _write_submission(receipt_path, receipt)
@@ -223,8 +235,10 @@ def _notarize_dmg(dmg_path: Path) -> int:
             timeout=30 * 60,
         )
         if result.returncode:
-            raise RuntimeError(
-                f"Notarization {submission_id} wait failed; retry resumes the retained submission"
+            raise _notarytool_failed(
+                result,
+                f"Notarization {submission_id} wait failed",
+                "retry resumes the retained submission",
             )
         status = json.loads(result.stdout)["status"]
         if status != "Accepted":
@@ -246,6 +260,8 @@ def _notarize_dmg(dmg_path: Path) -> int:
 
 
 def _copy_bundled_tools(app_macos_dir: Path) -> None:
+    agents = app_macos_dir.parent / "Library/LaunchAgents"
+    shutil.copytree(SWIFT_DIR / "LaunchAgents", agents, dirs_exist_ok=True)
     release_binary = os.environ.get("LF_RELEASE_BINARY")
     if release_binary:
         bin_dir = Path(release_binary).parent
@@ -313,7 +329,6 @@ def _verify_app_resource_self_containment(
         dir=build_dir.parent,
     ) as temp:
         holding_dir = Path(temp)
-        snapshot = holding_dir / "snapshot.png"
         (holding_dir / "app").mkdir()
         executable = _resource_check_copy(app_path, holding_dir / "app", identity, entitlements)
         moved: list[tuple[Path, Path]] = []
@@ -323,30 +338,10 @@ def _verify_app_resource_self_containment(
                 bundle.rename(held)
                 moved.append((held, bundle))
 
-            result = run_capture(
-                [str(executable), "-ui-test-mode", "empty-workspaces"],
-                timeout=30,
-                env={
-                    **os.environ,
-                    "LOOPFLOW_UI_TEST_SNAPSHOT_PATH": str(snapshot),
-                    "LOOPFLOW_UI_TEST_DELAY": "0.2",
-                    "LOOPFLOW_UI_TEST_WIDTH": "900",
-                    "LOOPFLOW_UI_TEST_HEIGHT": "600",
-                },
-            )
+            check_launch(executable, holding_dir)
         finally:
             for held, bundle in reversed(moved):
                 held.rename(bundle)
-
-        if result.returncode != 0:
-            diagnostic = (result.stderr.strip() or result.stdout.strip())[-2000:]
-            detail = f": {diagnostic}" if diagnostic else ""
-            raise RuntimeError(
-                "Packaged app failed without SwiftPM build resources "
-                f"(exit {result.returncode}){detail}"
-            )
-        if not snapshot.is_file() or snapshot.stat().st_size == 0:
-            raise RuntimeError("Packaged app produced no resource-check snapshot")
     print(
         "Verified packaged app renders without SwiftPM build resources",
         flush=True,
@@ -359,15 +354,6 @@ def release() -> int:
         return _notarize_dmg(dmg_path)
     print("Building Loopflow release...", flush=True)
 
-    # The app links Loopflow's Rust library from target/release.
-    result = run(
-        ["cargo", "build", "--locked", "-p", "loopflow-ffi", "--lib", "--release"],
-        cwd=REPO_ROOT,
-        check=False,
-        timeout=20 * 60,
-    )
-    if result.returncode != 0:
-        return result.returncode
     result = run(
         ["swift", "build", "-c", "release"],
         cwd=SWIFT_DIR,

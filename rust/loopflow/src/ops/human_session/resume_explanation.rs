@@ -203,6 +203,12 @@ pub(crate) async fn explain_resume(
             fork: false,
             prepare_only,
         });
+        report.actions = vec![SessionAction {
+            kind: super::SessionActionKind::Open,
+            label: "Start conversation".into(),
+            help: "No existing conversation; start one explicitly".into(),
+            unavailable_reason: None,
+        }];
     }
     report
 }
@@ -225,7 +231,7 @@ async fn read_resume(
         .transpose()?
         .flatten();
     // A metadata read does not acquire viewer control or probe the endpoint.
-    let connection = store.sqlite.session_transport(&session.id)?;
+    let connection = store.sqlite.session_terminal(&session.id)?;
     // Opening checks the harness before any holder: another agent never
     // takes over the running one, it starts a thread from the log.
     let handoff = provider.as_ref().and(super::handoff_agent(&session));
@@ -284,6 +290,6 @@ async fn read_resume(
         .ok_or_else(|| super::session_not_found(&session.id))?;
     let state = super::session_state(&metadata);
     report.state = Some(state);
-    report.actions = super::session_actions(state, session.interactive);
+    report.actions = super::projected_actions(&metadata);
     Ok(())
 }

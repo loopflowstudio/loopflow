@@ -11,7 +11,6 @@
         "state": "completed",
         "completed_at": "2026-07-14T18:30:00Z",
         "due_date": null,
-        "regressed_in": null,
         "sync": {
           "connected": true,
           "changes": [
@@ -74,7 +73,7 @@
           "state": "available",
           "observed_at": null
         },
-        "repository_id": "repo_00000000000040008000000000000001",
+        "repo_id": "repo_00000000000040008000000000000001",
         "repo": "/src/loopflow",
         "project_id": "proj_0123456789ab40008000000000000001",
         "wave_id": "wave-1"
@@ -100,6 +99,7 @@
         "provider": "codex",
         "owner": {
           "person": "Jack Heart",
+          "person_id": null,
           "person_key": "jack@loopflow.studio",
           "machine": {
             "id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b",
@@ -334,8 +334,8 @@
         "merge_commit": null,
         "abandoned_at": null
       },
-      "graph_source": "task",
-      "section": "later",
+      "graph_source": null,
+      "section": "done",
       "ship_control": {
         "unavailable": null
       },

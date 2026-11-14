@@ -11,7 +11,7 @@ use crate::id::{AgentSessionId, LfSessionId, WaveId};
 pub(crate) struct SessionTurnOrigin {
     pub session_id: LfSessionId,
     pub lf_process_id: crate::id::LfProcessId,
-    pub agent_process_id: crate::id::LfProcessId,
+    pub agent_process_id: crate::id::AgentProcessId,
     pub captured_event: Option<i64>,
     pub task_id: Option<String>,
     pub wave_id: Option<String>,
@@ -81,6 +81,7 @@ pub struct LfSession {
     /// Causal input reference; grants neither attachment nor Graph authority.
     pub caller_artifact_key: Option<String>,
     pub input_published: bool,
+    /// Selected working directory; existing Process records retain their launch directory.
     pub cwd: std::path::PathBuf,
     pub skill: Option<String>,
     pub provider: Option<String>,
@@ -129,7 +130,7 @@ pub struct SessionBind {
 pub(crate) const AVAILABILITY_QUIET_SECONDS: i64 = 120;
 
 /// Bounded provider text observed on the current native turn. Display evidence only.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SessionPreview {
     pub provider_thread: AgentSessionId,
     pub provider_turn: String,
@@ -203,7 +204,7 @@ pub struct SessionWork {
 }
 
 /// How this attempt received its work attribution; absent for unrecorded history.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkSource {
     Declared,
@@ -212,35 +213,99 @@ pub enum WorkSource {
     Bound,
 }
 
-/// SQL selection for conversation inventory; mode and completion are independent.
+impl WorkSource {
+    /// A launch is managed when a Task or Wave command named its Work (a
+    /// selector, a Task's run, a Task or Wave conversation, a binding); a bare
+    /// `lf` in a Task's checkout, or a child run a Session's agent started,
+    /// only counts toward the Task. What each kind gets is in
+    /// `server/README.md` ("Turn and tool boundaries").
+    pub(crate) fn is_managed(self) -> bool {
+        matches!(self, Self::Declared | Self::Bound)
+    }
+}
+
+/// Who holds a launch's provider process. It decides the launch's hooks,
+/// whether it needs the Machine server and whether it takes steers, and is
+/// decided once, where the launch is configured.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Holder {
+    /// A bare launch: the terminal it runs in, or the caller waiting on a
+    /// headless run. It behaves as the harness alone would, with no server:
+    /// two context hooks, and a steer check that reads the store itself.
+    #[default]
+    Caller,
+    /// Task, Wave or repository work: every hook and steers, beside a
+    /// Machine server that must be up before the agent starts.
+    Server,
+}
+
+impl Holder {
+    /// `work`: the launch's Work was selected with `--task` or `--wave`, or
+    /// the Session it reopens is not bare (`SqliteStore::is_bare`).
+    pub(crate) fn of(work: bool) -> Self {
+        if work {
+            Self::Server
+        } else {
+            Self::Caller
+        }
+    }
+
+    /// Whether the provider reports its turn boundaries to the Machine server.
+    pub(crate) fn reports_turns(self) -> bool {
+        self != Self::Caller
+    }
+}
+
+/// Which scopes' current primary conversations to list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum SessionPrimary {
+    All,
+    Task,
+    Wave,
+    Repository,
+}
+
+/// Inventory selection; SQL filters metadata, then the list resolves checkout membership.
 #[derive(Debug, Clone)]
 pub struct SessionFilter {
     pub orphan: bool,
     pub repo: Option<String>,
     pub task: Option<String>,
+    /// Attribution or resolved checkout membership, selected before pagination.
+    pub wave: Option<WaveId>,
+    pub primary: Option<SessionPrimary>,
     pub search: Option<String>,
-    pub interactive: Option<bool>,
+    /// Include headless Sessions alongside interactive conversations.
+    pub headless: bool,
     /// Only conversations available for a person, chosen before paging.
     pub available: bool,
-    pub history: bool,
+    /// Also list raw conversations: providers lf never launched, which have no Session.
+    pub raw: bool,
     pub limit: usize,
-    pub offset: usize,
     /// Present for stable-ID pages; empty starts the first page.
     pub after: Option<String>,
+    /// Only Sessions whose next message would fail: their login cannot take
+    /// their model now.
+    pub blocked: bool,
+    /// Only Sessions using this login (`work@`, `claude=work@`) or on `harness[:model]`.
+    pub on: Option<String>,
 }
 
 impl Default for SessionFilter {
     fn default() -> Self {
         Self {
+            blocked: false,
+            on: None,
             orphan: false,
             repo: None,
             task: None,
+            wave: None,
+            primary: None,
             search: None,
-            interactive: Some(true),
+            headless: false,
             available: false,
-            history: false,
+            raw: true,
             limit: 100,
-            offset: 0,
             after: None,
         }
     }
@@ -250,17 +315,20 @@ impl Default for SessionFilter {
 /// validation belong to exact detail/actions, never to this row projection.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SessionSummary {
+    pub transition: Option<crate::store::sqlite::provider_transitions::ProviderTransition>,
     pub preview: Option<SessionPreview>,
     pub terminal_id: Option<String>,
-    /// Its execution owner runs with no viewer attached.
+    /// Its held terminal or detached process runs with no viewer attached.
     pub unviewed: bool,
+    /// Its agent runs in a terminal a holder keeps; any number of views attach.
+    pub held: bool,
     pub primary_scope: Option<String>,
     pub agent_process_evidence: crate::journal::ProcessIdentityEvidence,
     /// Available for a person, as of the read's clock.
     pub available: bool,
     pub program_status: Option<crate::program_status::Records>,
     /// None for a conversation Loopflow never attached to.
-    pub agent_process_id: Option<crate::id::LfProcessId>,
+    pub agent_process_id: Option<crate::id::AgentProcessId>,
     pub task_terminal: bool,
     /// Its Task names it as the Task's primary conversation.
     pub task_primary: bool,
@@ -268,6 +336,8 @@ pub(crate) struct SessionSummary {
     pub captured: Option<i64>,
     pub id: LfSessionId,
     pub artifact_key: Option<String>,
+    /// The current input records a native resume reference; opening validates it.
+    pub has_provider_history: bool,
     pub title: String,
     pub title_source: TitleSource,
     pub ready_summary: Option<String>,
@@ -279,7 +349,7 @@ pub(crate) struct SessionSummary {
     pub cwd: std::path::PathBuf,
     pub skill: Option<String>,
     pub provider: Option<String>,
-    /// The login its current conversation is pinned to.
+    /// The login its current conversation last ran on.
     pub account: Option<crate::store::ProviderAccountId>,
     pub model: Option<String>,
     pub node: Option<u32>,
@@ -293,7 +363,7 @@ pub(crate) struct SessionSummary {
 }
 
 /// A Graph as its Graph process records it; Current says nothing about a live process.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GraphProcessSummary {
     /// The Graph process.
     pub id: String,
@@ -305,7 +375,7 @@ pub struct GraphProcessSummary {
     pub updated_at: i64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum GraphProcessSummaryState {
     /// The Graph process has no recorded exit.
@@ -348,19 +418,17 @@ pub(crate) struct HistoryCapture {
 
 pub(crate) fn conversation(
     cwd: &std::path::Path,
-    agent: Option<&str>,
     skill: &str,
     title: String,
 ) -> anyhow::Result<LfSession> {
-    let skill = crate::graph::load_skill(skill, cwd)?.name;
+    let skill = crate::graph::load_skill(skill, cwd)?;
     let wave = crate::work::wave::context::resolve_ambient_wave_name();
     let agent = crate::ops::task::resolve_task_agent(
         cwd,
         wave.as_deref(),
         &crate::config::PersonalSettings::read(Some(cwd), wave.as_deref()),
-        agent,
-        None,
-    );
+        Some(&skill),
+    )?;
     let (provider, model) = crate::config::parse_agent(&agent);
     Ok(LfSession {
         captured: None,
@@ -369,7 +437,7 @@ pub(crate) fn conversation(
         caller_artifact_key: None,
         input_published: false,
         cwd: cwd.to_path_buf(),
-        skill: Some(skill),
+        skill: Some(skill.name),
         provider: Some(provider),
         model,
         node: None,

@@ -68,13 +68,12 @@
       "updated_at": "2026-10-08T00:00:00Z",
       "work_id": "task_0123456789ab40008000000000000001"
     },
-    "section": "waiting",
+    "section": "backlog",
     "task": {
       "assignee": null,
       "completed_at": null,
       "description": "Keep the escaped quote",
       "due_date": null,
-      "regressed_in": null,
       "id": "task_0123456789ab40008000000000000001",
       "identifier": "012345",
       "name": "Retain quoted input",
@@ -89,12 +88,12 @@
         "state": "available",
         "observed_at": null
       },
-      "repository_id": "repo_00000000000040008000000000000001",
+      "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
       "project_id": null,
       "wave_id": null
     },
     "graph_name": "code",
-    "graph_source": "default"
+    "graph_source": "builtin"
   }
 }

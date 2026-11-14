@@ -1,27 +1,20 @@
 //! Render compiled Graph topology as a native chat skill's checklist.
-use clap::CommandFactory;
+use std::path::PathBuf;
 
 use crate::error::LoadError;
 use crate::graph::ConcreteStep;
 use crate::graph::Skill;
 use crate::graph::{return_target, split_frontmatter};
-use crate::lf::navigation::resolve_child;
 
 pub fn render_graph_instructions(
     name: &str,
     steps: &[ConcreteStep],
-    graph_names: &[String],
+    capture: &mut impl FnMut(&Skill) -> Result<PathBuf, LoadError>,
 ) -> Result<String, LoadError> {
     let mut output = format!("# Graph: {name}\n\n");
     output.push_str("Carry out these steps using the current request. Wait for each command to finish and inspect its result; stop on failure. Give headless skill runs the relevant request, findings and next action as their message.\n\n\
 For conversational steps, load and follow the named skill here, retaining its native controls and resource base. If it requires user invocation, ask here. After interruption, inspect results before repeating a successful command. This Graph needs no Task. For an associated Task, completing this checklist does not move its graph.\n\n");
-    render_steps(
-        steps,
-        "",
-        graph_names,
-        &crate::lf::Cli::command(),
-        &mut output,
-    )?;
+    render_steps(steps, "", capture, &mut output)?;
     Ok(output)
 }
 
@@ -39,30 +32,24 @@ fn is_builtin_decision(skill: &Skill, name: &str) -> bool {
     skill.name == name && skill.source.is_none() && skill.content.as_deref() == Some(body)
 }
 
-fn headless_command(
-    skill: &Skill,
-    graph_names: &[String],
-    commands: &clap::Command,
-) -> Result<String, LoadError> {
-    let mut argv = vec!["lf", "-b"];
-    if let Some(agent) = &skill.agent {
-        argv.extend(["-a", agent]);
-    }
-    if graph_names.contains(&skill.name)
-        || skill.name.starts_with('-')
-        || !matches!(resolve_child(commands, &skill.name, &[]), Ok(None))
-    {
-        argv.extend(["skill", "--"]);
-    }
-    argv.push(&skill.name);
-    shlex::try_join(argv).map_err(|error| LoadError::InvalidGraph(error.to_string()))
+fn headless_command(skill: &Skill, input: &std::path::Path) -> Result<String, LoadError> {
+    let input = input.to_string_lossy();
+    shlex::try_join([
+        "lf",
+        "-b",
+        "--skill-input",
+        &input,
+        "skill",
+        "--",
+        &skill.name,
+    ])
+    .map_err(|error| LoadError::InvalidGraph(error.to_string()))
 }
 
 fn render_steps(
     steps: &[ConcreteStep],
     prefix: &str,
-    graph_names: &[String],
-    commands: &clap::Command,
+    capture: &mut impl FnMut(&Skill) -> Result<PathBuf, LoadError>,
     output: &mut String,
 ) -> Result<(), LoadError> {
     for (index, step) in steps.iter().enumerate() {
@@ -84,7 +71,7 @@ fn render_steps(
                 } else if occurrence.interactive {
                     output.push_str(&format!("{position}. {}\n", conversational_skill(skill)));
                 } else {
-                    let command = headless_command(skill, graph_names, commands)?;
+                    let command = headless_command(skill, &capture(skill)?)?;
                     output.push_str(&format!("{position}. Run `{command}`.\n"));
                 }
                 if occurrence.interactive {
@@ -112,8 +99,7 @@ fn render_steps(
                     render_steps(
                         &path.steps,
                         &format!("{position}[{name}]."),
-                        graph_names,
-                        commands,
+                        capture,
                         output,
                     )?;
                     output.push_str(&format!(
@@ -129,7 +115,7 @@ fn render_steps(
 #[cfg(test)]
 mod tests {
     use super::render_graph_instructions;
-    use crate::graph::{available_graph_names, compile_graph, load_authored_graph};
+    use crate::graph::{compile_graph, load_authored_graph};
     use crate::lf::{navigation::normalize_args, Cli, Commands, SkillCommand};
     use clap::Parser;
     use std::fs;
@@ -138,7 +124,10 @@ mod tests {
     fn recipe(repo: &std::path::Path, name: &str) -> String {
         let graph = load_authored_graph(name, repo).unwrap();
         let steps = compile_graph(&graph, repo).unwrap();
-        render_graph_instructions(name, &steps, &available_graph_names(repo).unwrap()).unwrap()
+        render_graph_instructions(name, &steps, &mut |skill| {
+            Ok(std::path::PathBuf::from("/captures").join(format!("{}.json", skill.name)))
+        })
+        .unwrap()
     }
 
     #[test]
@@ -174,7 +163,7 @@ mod tests {
         )
         .unwrap();
         let plan = recipe(repo.path(), "chat");
-        assert!(plan.contains("1. Run `lf -b skill -- work`."));
+        assert!(plan.contains("1. Run `lf -b --skill-input /captures/work.json skill -- work`."));
         assert!(plan.contains("repeat steps 1 through 3"));
         assert!(plan.contains("repeat steps 3[repair].1 through 3[repair].1"));
         assert!(plan.contains("reassess at step 3[repair].2"));
@@ -234,16 +223,26 @@ mod tests {
         fs::create_dir_all(repo.path().join(".lf/skills")).unwrap();
         fs::write(repo.path().join(".lf/skills/sync.md"), "Skill, not command").unwrap();
         fs::write(repo.path().join(".lf/skills/ship.md"), "Skill, not Graph").unwrap();
+        fs::write(
+            repo.path().join(".lf/skills/defaulted.md"),
+            "---\nagent: claude\n---\nUse the configured preference.",
+        )
+        .unwrap();
         fs::write(repo.path().join(".lf/graphs/ship.yaml"), "- implement\n").unwrap();
         fs::write(
             repo.path().join(".lf/graphs/chat.yaml"),
-            "- step: sync\n- step: ship\n- step: {name: implement, agent: codex:mini}\n",
+            "- step: sync\n- step: ship\n- step: {name: implement, agent: codex:mini}\n- defaulted\n",
         )
         .unwrap();
         let plan = recipe(repo.path(), "chat");
-        assert!(plan.contains("Run `lf -b skill -- sync`"));
-        assert!(plan.contains("Run `lf -b skill -- ship`"));
-        assert!(plan.contains("Run `lf -b -a codex:mini implement`"));
+        assert!(plan.contains("Run `lf -b --skill-input /captures/sync.json skill -- sync`"));
+        assert!(plan.contains("Run `lf -b --skill-input /captures/ship.json skill -- ship`"));
+        assert!(
+            plan.contains("Run `lf -b --skill-input /captures/implement.json skill -- implement`")
+        );
+        assert!(
+            plan.contains("Run `lf -b --skill-input /captures/defaulted.json skill -- defaulted`")
+        );
     }
 
     #[test]

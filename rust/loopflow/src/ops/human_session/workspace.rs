@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
@@ -11,7 +11,7 @@ use crate::work::task::TaskId;
 
 use super::SessionRecord;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SessionWorkspace {
     pub machine_id: MachineId,
     pub worktree: PathBuf,
@@ -19,7 +19,8 @@ pub struct SessionWorkspace {
     pub unavailable: Option<String>,
 }
 
-struct WorkspaceResolver {
+#[derive(Debug)]
+pub(super) struct WorkspaceResolver {
     home: MachineId,
     checkouts: Vec<TaskCheckout>,
     roots: HashMap<PathBuf, Option<PathBuf>>,
@@ -35,9 +36,6 @@ impl WorkspaceResolver {
             tasks_by_root: HashMap::new(),
         };
         for checkout in resolver.checkouts.clone() {
-            if checkout.machine_id.as_ref() != Some(&resolver.home) {
-                continue;
-            }
             if let Some(root) = resolver.root(&checkout.worktree) {
                 resolver
                     .tasks_by_root
@@ -47,6 +45,17 @@ impl WorkspaceResolver {
             }
         }
         resolver
+    }
+
+    pub(super) fn in_task_checkout(&mut self, cwd: &Path, tasks: &HashSet<TaskId>) -> bool {
+        let root = self.root(cwd).unwrap_or_else(|| cwd.to_path_buf());
+        self.tasks_by_root
+            .get(&root)
+            .is_some_and(|ids| ids.iter().any(|id| tasks.contains(id)))
+            || self
+                .checkouts
+                .iter()
+                .any(|checkout| checkout.worktree == root && tasks.contains(&checkout.task_id))
     }
 
     fn root(&mut self, path: &Path) -> Option<PathBuf> {
@@ -65,47 +74,28 @@ impl WorkspaceResolver {
                 .get(&root)
                 .map(Vec::as_slice)
                 .unwrap_or_default();
-            let missing_machine = self.checkouts.iter().any(|checkout| {
-                checkout.machine_id.is_none()
-                    && (checkout.worktree == root || checkout.worktree == cwd)
-            });
             return Some(SessionWorkspace {
                 machine_id: self.home.clone(),
                 worktree: root,
                 task_id: (tasks.len() == 1).then(|| tasks[0].clone()),
-                unavailable: if tasks.len() > 1 {
-                    Some("Multiple Tasks claim this checkout".into())
-                } else if missing_machine {
-                    Some("Task checkout Machine is unknown".into())
-                } else {
-                    None
-                },
+                unavailable: (tasks.len() > 1).then(|| "Multiple Tasks claim this checkout".into()),
             });
         }
         // An unavailable cwd is not an ancestor match. Only exact recorded
         // checkout evidence or explicit Task attribution can retain association.
         let mut candidates = self.checkouts.iter().filter(|checkout| {
-            checkout
-                .machine_id
-                .as_ref()
-                .is_none_or(|home| home == &self.home)
-                && (checkout.worktree == cwd
-                    || matches!(work, Some(WorkRef::Task(id)) if id == &checkout.task_id))
+            checkout.worktree == cwd
+                || matches!(work, Some(WorkRef::Task(id)) if id == &checkout.task_id)
         });
         let checkout = candidates.next()?;
         let ambiguous = candidates.next().is_some();
         Some(SessionWorkspace {
             machine_id: self.home.clone(),
             worktree: checkout.worktree.clone(),
-            task_id: (!ambiguous
-                && (checkout.machine_id.as_ref() == Some(&self.home)
-                    || matches!(work, Some(WorkRef::Task(id)) if id == &checkout.task_id)))
-            .then(|| checkout.task_id.clone()),
+            task_id: (!ambiguous).then(|| checkout.task_id.clone()),
             unavailable: Some(
                 if ambiguous {
                     "Multiple Tasks claim this unavailable checkout"
-                } else if checkout.machine_id.is_none() {
-                    "Task checkout Machine is unknown and checkout is unavailable"
                 } else {
                     "Task checkout is unavailable"
                 }
@@ -115,33 +105,24 @@ impl WorkspaceResolver {
     }
 }
 
-pub(super) async fn associate(store: &SharedStore, sessions: &mut [SessionRecord]) -> Result<()> {
+pub(super) async fn associate(
+    store: &SharedStore,
+    sessions: &mut [SessionRecord],
+) -> Result<WorkspaceResolver> {
     // Both callers supply local registry Sessions without workspace projections.
     // A failed snapshot propagates: callers must retain their last good inventory.
     let checkouts = store.task_checkouts().await?;
     let home = store.local_machine().await?.id;
     let mut resolver = WorkspaceResolver::new(home.clone(), checkouts);
     for session in sessions {
-        if session.task_primary {
-            if let Some(WorkRef::Task(id)) = &session.work {
-                if !resolver
-                    .checkouts
-                    .iter()
-                    .any(|checkout| &checkout.task_id == id)
-                {
-                    session.workspace = None;
-                    session.task_ids = vec![id.clone()];
-                    continue;
-                }
-            }
-        }
         if session.primary_scope.is_some() {
             let cwd = Path::new(&session.cwd);
             session.workspace = Some(SessionWorkspace {
                 machine_id: home.clone(),
                 worktree: resolver.root(cwd).unwrap_or_else(|| cwd.to_path_buf()),
                 task_id: None,
-                unavailable: (!cwd.exists()).then(|| "Persistent checkout is unavailable".into()),
+                unavailable: (!crate::observe::exists(cwd))
+                    .then(|| "Persistent checkout is unavailable".into()),
             });
             session.task_ids.clear();
             continue;
@@ -157,7 +138,7 @@ pub(super) async fn associate(store: &SharedStore, sessions: &mut [SessionRecord
             }
         }
     }
-    Ok(())
+    Ok(resolver)
 }
 
 #[cfg(test)]
@@ -178,7 +159,7 @@ mod tests {
         );
         rusqlite::Connection::open(path)
             .unwrap()
-            .execute_batch("ALTER TABLE tasks RENAME COLUMN checkout_machine_id TO unavailable;")
+            .execute_batch("ALTER TABLE task_checkouts RENAME COLUMN worktree TO unavailable;")
             .unwrap();
         assert!(super::associate(&store, &mut []).await.is_err());
     }
@@ -193,12 +174,8 @@ mod tests {
             task_id: id.clone(),
             issue_identifier: "TEST-1".into(),
             worktree: repo.path().to_path_buf(),
-            machine_id: Some(home.clone()),
         };
-        let mut remote = checkout.clone();
-        remote.task_id = TaskId::new();
-        remote.machine_id = Some(MachineId::new());
-        let mut resolver = WorkspaceResolver::new(home.clone(), vec![checkout.clone(), remote]);
+        let mut resolver = WorkspaceResolver::new(home.clone(), vec![checkout.clone()]);
         std::fs::create_dir(repo.path().join("sub")).unwrap();
         let aliases = tempfile::tempdir().unwrap();
         std::os::unix::fs::symlink(repo.path(), aliases.path().join("alias")).unwrap();
@@ -249,21 +226,6 @@ mod tests {
                 .task_id,
             Some(id.clone())
         );
-        let mut unplaced = checkout.clone();
-        unplaced.machine_id = None;
-        let mut resolver = WorkspaceResolver::new(home.clone(), vec![unplaced]);
-        let unplaced = resolver.resolve(repo.path(), None).unwrap();
-        assert!(unplaced.task_id.is_none());
-        assert!(unplaced.unavailable.is_some());
-        missing.machine_id = None;
-        let mut resolver = WorkspaceResolver::new(home.clone(), vec![missing.clone()]);
-        let unknown = resolver.resolve(&missing.worktree, None).unwrap();
-        assert!(unknown.task_id.is_none());
-        assert!(unknown.unavailable.is_some());
-        let bound = resolver
-            .resolve(&missing.worktree, Some(&WorkRef::Task(id.clone())))
-            .unwrap();
-        assert_eq!(bound.task_id, Some(id));
         let mut duplicate = checkout.clone();
         duplicate.task_id = TaskId::new();
         let mut resolver = WorkspaceResolver::new(home, vec![checkout, duplicate]);

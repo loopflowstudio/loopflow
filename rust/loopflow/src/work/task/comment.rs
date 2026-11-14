@@ -1,6 +1,8 @@
 //! Shared Task discussion, independent of its synchronization transport.
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct TaskComment {
     #[serde(deserialize_with = "crate::id::deserialize_uuid")]
     pub id: String,
@@ -12,7 +14,9 @@ pub struct TaskComment {
 /// Who wrote a comment. Person attribution survives local saves and provider acquisition;
 /// integrations are distinct from participant direction. An agent's direction
 /// is the Session's, written for its requester.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TaskCommentAuthor {
     Person {
@@ -82,7 +86,9 @@ fn comment_session(body: &str) -> Option<String> {
 
 /// The saved Task thread, its pending deliveries and any failed refresh.
 /// Partial provider reads never replace the retained thread.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct TaskComments {
     pub identifier: String,
     pub comments: Vec<TaskComment>,

@@ -1,19 +1,16 @@
-//! The catalog `build.rs` generates: discovery, merge order and the additivity
-//! proof that computes each migration's reader floor. Runtime builds compile it
-//! only for tests.
+//! The catalog `build.rs` generates: discovery and merge order. Runtime builds
+//! compile it only for tests.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use super::migration_catalog::{is_slug, table_within, MigrationId};
+use super::migration_catalog::{is_slug, MigrationId};
 
 /// A migration file as the build script found it, in catalog order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CatalogEntry {
     pub version: String,
     pub path: PathBuf,
-    pub sql: String,
-    pub reader_floor: String,
     pub merged: bool,
 }
 
@@ -23,7 +20,7 @@ pub struct CatalogEntry {
 pub fn order_catalog(
     directory: &Path,
     merged_order: &[String],
-) -> Result<Vec<(String, PathBuf, bool)>, String> {
+) -> Result<Vec<CatalogEntry>, String> {
     let mut released = Vec::new();
     let mut slugs = Vec::new();
     let entries = std::fs::read_dir(directory)
@@ -63,10 +60,18 @@ pub fn order_catalog(
     );
     Ok(released
         .into_iter()
-        .map(|(_, stem, path)| (stem, path, true))
-        .chain(slugs.into_iter().map(|(stem, path)| {
-            let merged = position(&stem).is_some();
-            (stem, path, merged)
+        .map(|(_, version, path)| CatalogEntry {
+            version,
+            path,
+            merged: true,
+        })
+        .chain(slugs.into_iter().map(|(version, path)| {
+            let merged = position(&version).is_some();
+            CatalogEntry {
+                version,
+                path,
+                merged,
+            }
         }))
         .collect())
 }
@@ -129,171 +134,22 @@ pub fn merged_order(git_root: &Path, directory: &Path) -> Vec<String> {
     order
 }
 
-/// Apply the ordered catalog to an empty schema and compute each migration's
-/// reader floor: released batches and breaking slugs name themselves; an
-/// additive slug keeps the floor before it.
-pub fn build_catalog(
-    ordered: Vec<(String, PathBuf, bool)>,
-) -> Result<(Vec<CatalogEntry>, rusqlite::Connection), String> {
+/// Apply the ordered catalog to an empty schema.
+pub fn apply_catalog(catalog: &[CatalogEntry]) -> Result<rusqlite::Connection, String> {
     let connection = rusqlite::Connection::open_in_memory().map_err(|error| error.to_string())?;
     connection
         .execute_batch(
             "CREATE TABLE schema_migrations (version TEXT PRIMARY KEY, applied_at INTEGER NOT NULL);",
         )
         .map_err(|error| error.to_string())?;
-    let mut catalog: Vec<CatalogEntry> = Vec::new();
-    for (version, path, merged) in ordered {
-        let sql = std::fs::read_to_string(&path)
-            .map_err(|error| format!("read {}: {error}", path.display()))?;
-        let reader_floor = if MigrationId::parse_version(&version).is_some() {
-            connection
-                .execute_batch(&sql)
-                .map_err(|error| format!("apply {version}: {error}"))?;
-            version.clone()
-        } else {
-            let additive = is_additive(&connection, &sql)
-                .map_err(|error| format!("apply {version}: {error}"))?;
-            match catalog.last() {
-                Some(previous) if additive => previous.reader_floor.clone(),
-                _ => version.clone(),
-            }
-        };
-        catalog.push(CatalogEntry {
-            version,
-            path,
-            sql,
-            reader_floor,
-            merged,
-        });
+    for entry in catalog {
+        let sql = std::fs::read_to_string(&entry.path)
+            .map_err(|error| format!("read {}: {error}", entry.path.display()))?;
+        connection
+            .execute_batch(&sql)
+            .map_err(|error| format!("apply {}: {error}", entry.version))?;
     }
-    Ok((catalog, connection))
-}
-
-// -- Additivity ---------------------------------------------------------------
-
-/// Apply `sql` and report whether every reader of the schema before it can still
-/// read the schema after it: existing objects survive unchanged, tables only
-/// gain nullable or defaulted columns, new objects are tables or non-unique
-/// indexes, and no statement writes an existing table. `-- breaks: <reason>`
-/// forces a break; nothing declares a migration additive.
-pub fn is_additive(connection: &rusqlite::Connection, sql: &str) -> rusqlite::Result<bool> {
-    use rusqlite::hooks::{AuthAction, Authorization};
-    use std::sync::{Arc, Mutex};
-
-    let before = schema_rows(connection)?;
-    let tables: Vec<String> = before
-        .iter()
-        .filter(|row| row.0 == "table")
-        .map(|row| row.1.clone())
-        .collect();
-    let mut columns = Vec::new();
-    for table in &tables {
-        columns.push((table.clone(), table_columns(connection, table)?));
-    }
-    let writes = Arc::new(Mutex::new(false));
-    let observed = Arc::clone(&writes);
-    let existing = tables.clone();
-    connection.authorizer(Some(move |context: rusqlite::hooks::AuthContext<'_>| {
-        let table = match context.action {
-            AuthAction::Insert { table_name }
-            | AuthAction::Delete { table_name }
-            | AuthAction::Update { table_name, .. } => Some(table_name),
-            _ => None,
-        };
-        if table.is_some_and(|table| existing.iter().any(|known| known == table)) {
-            *observed.lock().expect("authorizer flag") = true;
-        }
-        Authorization::Allow
-    }))?;
-    let applied = connection.execute_batch(sql);
-    let reset =
-        connection.authorizer(None::<fn(rusqlite::hooks::AuthContext<'_>) -> Authorization>);
-    applied?;
-    reset?;
-    let wrote = *writes.lock().expect("authorizer flag");
-    if wrote
-        || sql.lines().any(|line| {
-            line.trim_start()
-                .strip_prefix("--")
-                .is_some_and(|rest| rest.trim_start().starts_with("breaks:"))
-        })
-    {
-        return Ok(false);
-    }
-    let after = schema_rows(connection)?;
-    for (kind, name, table, definition) in &before {
-        let Some(now) = after.iter().find(|row| &row.0 == kind && &row.1 == name) else {
-            return Ok(false);
-        };
-        if (&now.2, &now.3) != (table, definition)
-            && (kind != "table" || !table_within(definition, &now.3))
-        {
-            return Ok(false);
-        }
-    }
-    for (kind, name, table, definition) in &after {
-        if before.iter().any(|row| &row.0 == kind && &row.1 == name) {
-            continue;
-        }
-        let unique_index = definition
-            .split_whitespace()
-            .take(2)
-            .map(str::to_ascii_uppercase)
-            .eq(["CREATE", "UNIQUE"]);
-        if kind == "index" && tables.contains(table) && unique_index {
-            return Ok(false);
-        }
-        if kind != "table" && kind != "index" {
-            return Ok(false);
-        }
-    }
-    for (table, old) in &columns {
-        let new = table_columns(connection, table)?;
-        if new.len() < old.len() || new[..old.len()] != old[..] {
-            return Ok(false);
-        }
-        for (_name, _kind, required, default, primary, hidden) in &new[old.len()..] {
-            let defaulted = default.as_deref().is_some_and(|value| value != "NULL");
-            if (*required && !defaulted) || *primary || *hidden {
-                return Ok(false);
-            }
-        }
-    }
-    Ok(true)
-}
-
-type SchemaRow = (String, String, String, String);
-type ColumnRow = (String, String, bool, Option<String>, bool, bool);
-
-fn schema_rows(connection: &rusqlite::Connection) -> rusqlite::Result<Vec<SchemaRow>> {
-    let mut statement = connection.prepare(
-        "SELECT type, name, tbl_name, coalesce(sql, '') FROM sqlite_master
-         WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name",
-    )?;
-    let rows = statement.query_map([], |row| {
-        Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
-    })?;
-    rows.collect()
-}
-
-fn table_columns(
-    connection: &rusqlite::Connection,
-    table: &str,
-) -> rusqlite::Result<Vec<ColumnRow>> {
-    let mut statement = connection.prepare(
-        "SELECT name, type, \"notnull\", dflt_value, pk, hidden FROM pragma_table_xinfo(?1)",
-    )?;
-    let rows = statement.query_map([table], |row| {
-        Ok((
-            row.get(0)?,
-            row.get(1)?,
-            row.get::<_, i64>(2)? != 0,
-            row.get(3)?,
-            row.get::<_, i64>(4)? != 0,
-            row.get::<_, i64>(5)? != 0,
-        ))
-    })?;
-    rows.collect()
+    Ok(connection)
 }
 
 #[cfg(test)]
@@ -301,16 +157,16 @@ mod tests {
     use std::path::Path;
     use std::process::Command;
 
-    use super::{build_catalog, is_additive, merged_order, order_catalog};
+    use super::{apply_catalog, merged_order, order_catalog, CatalogEntry};
 
     fn write(directory: &Path, name: &str, sql: &str) {
         std::fs::write(directory.join(format!("{name}.sql")), sql).unwrap();
     }
 
-    fn versions(ordered: &[(String, std::path::PathBuf, bool)]) -> Vec<(&str, bool)> {
-        ordered
+    fn versions(catalog: &[CatalogEntry]) -> Vec<(&str, bool)> {
+        catalog
             .iter()
-            .map(|(version, _, merged)| (version.as_str(), *merged))
+            .map(|entry| (entry.version.as_str(), entry.merged))
             .collect()
     }
 
@@ -333,6 +189,22 @@ mod tests {
         );
         write(directory.path(), "Not-A-Slug", "SELECT 1;");
         assert!(order_catalog(directory.path(), &[]).is_err());
+    }
+
+    #[test]
+    fn a_migration_that_does_not_apply_names_itself() {
+        let directory = tempfile::tempdir().unwrap();
+        write(
+            directory.path(),
+            "0.10.001_initial",
+            "CREATE TABLE waves (id TEXT);",
+        );
+        write(directory.path(), "drop_badges", "DROP TABLE badges;");
+        let ordered = order_catalog(directory.path(), &["drop_badges".into()]).unwrap();
+
+        let error = apply_catalog(&ordered).unwrap_err();
+
+        assert!(error.starts_with("apply drop_badges:"), "{error}");
     }
 
     fn git(repo: &Path, args: &[&str]) {
@@ -376,74 +248,6 @@ mod tests {
         assert_eq!(
             merged_order(&root, &root.join("migrations")),
             ["second", "first"]
-        );
-    }
-
-    fn additive(before: &str, sql: &str) -> bool {
-        let connection = rusqlite::Connection::open_in_memory().unwrap();
-        connection.execute_batch(before).unwrap();
-        is_additive(&connection, sql).unwrap()
-    }
-
-    #[test]
-    fn only_changes_every_older_reader_survives_are_additive() {
-        let before = "CREATE TABLE waves (id TEXT PRIMARY KEY, name TEXT NOT NULL);";
-        for sql in [
-            "ALTER TABLE waves ADD COLUMN colour TEXT;",
-            "ALTER TABLE waves ADD COLUMN rank INTEGER NOT NULL DEFAULT 0;",
-            "CREATE TABLE badges (wave_id TEXT); INSERT INTO badges VALUES ('w');",
-            "CREATE INDEX waves_name ON waves(name);",
-        ] {
-            assert!(additive(before, sql), "{sql}");
-        }
-        for sql in [
-            "ALTER TABLE waves ADD COLUMN rank INTEGER NOT NULL;",
-            "DROP TABLE waves;",
-            "ALTER TABLE waves RENAME COLUMN name TO title;",
-            "INSERT INTO waves VALUES ('w', 'name');",
-            "DELETE FROM waves;",
-            "CREATE UNIQUE INDEX waves_name ON waves(name);",
-            "CREATE VIEW wave_names AS SELECT name FROM waves;",
-            "-- breaks: a new status older readers reject\nCREATE TABLE badges (wave_id TEXT);",
-        ] {
-            assert!(!additive(before, sql), "{sql}");
-        }
-    }
-
-    #[test]
-    fn a_floor_rises_only_at_a_breaking_migration() {
-        let directory = tempfile::tempdir().unwrap();
-        write(
-            directory.path(),
-            "0.10.001_initial",
-            "CREATE TABLE waves (id TEXT PRIMARY KEY);",
-        );
-        write(
-            directory.path(),
-            "add_colour",
-            "ALTER TABLE waves ADD COLUMN colour TEXT;",
-        );
-        write(directory.path(), "drop_waves", "DROP TABLE waves;");
-        write(
-            directory.path(),
-            "add_badges",
-            "CREATE TABLE badges (id TEXT);",
-        );
-        let order = ["add_colour", "drop_waves", "add_badges"].map(String::from);
-        let ordered = order_catalog(directory.path(), &order).unwrap();
-        let (catalog, _) = build_catalog(ordered).unwrap();
-        let floors: Vec<(&str, &str)> = catalog
-            .iter()
-            .map(|entry| (entry.version.as_str(), entry.reader_floor.as_str()))
-            .collect();
-        assert_eq!(
-            floors,
-            [
-                ("0.10.001_initial", "0.10.001_initial"),
-                ("add_colour", "0.10.001_initial"),
-                ("drop_waves", "drop_waves"),
-                ("add_badges", "drop_waves"),
-            ]
         );
     }
 }

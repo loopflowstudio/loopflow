@@ -1169,11 +1169,9 @@ fn assert_background_conversation(run_graph: bool) {
         );
         let path: String = rusqlite::Connection::open(&db)
             .unwrap()
-            .query_row(
-                "SELECT worktree FROM task_checkouts WHERE task_id=?1",
-                [id],
-                |row| row.get(0),
-            )
+            .query_row("SELECT worktree FROM tasks WHERE id=?1", [id], |row| {
+                row.get(0)
+            })
             .unwrap();
         PathBuf::from(path)
     } else {

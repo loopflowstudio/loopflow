@@ -469,7 +469,11 @@ fn opening_an_unplaced_task_places_it_and_starts_its_conversation() {
     assert_eq!(report["receipts"][0]["status"], "usable", "{report}");
     let worktree: String = rusqlite::Connection::open(home.path().join("loopflow.db"))
         .unwrap()
-        .query_row("SELECT worktree FROM task_checkouts", [], |row| row.get(0))
+        .query_row(
+            "SELECT worktree FROM tasks WHERE worktree IS NOT NULL",
+            [],
+            |row| row.get(0),
+        )
         .unwrap();
     assert!(Path::new(&worktree).is_dir(), "{worktree}");
     let calls = std::fs::read_to_string(log).unwrap();
@@ -786,7 +790,7 @@ fn available_conversations_need_no_question_and_are_never_taken_over() {
     )
     .unwrap();
     db.execute(
-        "INSERT OR REPLACE INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
+        "UPDATE tasks SET primary_session_id=?2 WHERE id=?1",
         rusqlite::params![registered.task.id.as_str(), primary],
     )
     .unwrap();
@@ -892,7 +896,7 @@ fn ordinary_open_reports_the_view_and_only_explicit_focus_reveals_it() {
     );
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     db.execute(
-        "INSERT OR REPLACE INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
+        "UPDATE tasks SET primary_session_id=?2 WHERE id=?1",
         rusqlite::params![registered.task.id.as_str(), primary],
     )
     .unwrap();
@@ -979,7 +983,7 @@ fn links_tell_the_current_conversation_from_another_on_the_same_task() {
     );
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     db.execute(
-        "INSERT OR REPLACE INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
+        "UPDATE tasks SET primary_session_id=?2 WHERE id=?1",
         rusqlite::params![registered.task.id.as_str(), primary],
     )
     .unwrap();
@@ -1068,7 +1072,7 @@ fn a_task_identifier_connects_and_a_viewerless_terminal_reads_detached() {
     );
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     db.execute(
-        "INSERT OR REPLACE INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
+        "UPDATE tasks SET primary_session_id=?2 WHERE id=?1",
         rusqlite::params![registered.task.id.as_str(), primary],
     )
     .unwrap();
@@ -1378,12 +1382,12 @@ fn rex_follower_places_remote_arrivals_in_one_container_per_machine() {
         .add_machine(&peer, "remote.invalid", "Remote")
         .unwrap();
     store.claim_task(&registered.task.id).unwrap();
-    store.move_claim(&registered.task.id, &peer).unwrap();
+    store.handoff_task(&registered.task.id, &peer).unwrap();
     // Remote checkout state is not copied here; the peer decides eligibility.
     rusqlite::Connection::open(home.path().join("loopflow.db"))
         .unwrap()
         .execute(
-            "DELETE FROM task_checkouts WHERE task_id=?1",
+            "UPDATE tasks SET worktree=NULL WHERE id=?1",
             [registered.task.id.as_str()],
         )
         .unwrap();

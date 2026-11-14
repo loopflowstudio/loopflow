@@ -890,7 +890,7 @@ mod tests {
         {
             let conn = b.conn.lock().unwrap();
             conn.execute(
-                "INSERT INTO task_checkouts(task_id,worktree,branch) VALUES(?1,'/retained','local-branch') ON CONFLICT(task_id) DO UPDATE SET worktree=excluded.worktree,branch=excluded.branch",
+                "UPDATE tasks SET worktree='/retained',branch='local-branch' WHERE id=?1",
                 [task.as_str()],
             )
             .unwrap();

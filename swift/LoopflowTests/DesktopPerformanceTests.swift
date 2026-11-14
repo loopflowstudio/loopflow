@@ -978,7 +978,7 @@ struct DesktopPerformanceTests {
             task["reference"] = reference
             var runtime = try #require(task["runtime"] as? [String: Any])
             runtime["work_id"] = "perf-work-\(index)"
-            runtime["owner"] = ["person": "Jack Heart", "person_id": NSNull(), "machine": ["id": NSNull(), "label": NSNull()]] as [String: Any]
+            runtime["owner"] = ["person": "Jack Heart", "machine": ["id": NSNull(), "label": NSNull()]] as [String: Any]
             task["runtime"] = runtime
             return task
         }

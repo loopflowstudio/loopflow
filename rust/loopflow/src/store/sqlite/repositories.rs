@@ -39,9 +39,10 @@ fn git_locator_in(conn: &Connection, repo: &str) -> StoreResult<Option<PathBuf>>
 // before locators existed. A remote, basename, or main checkout path cannot.
 fn retained_checkout_matches(conn: &Connection, repo: &str) -> StoreResult<bool> {
     let mut statement = conn.prepare(
-        "SELECT c.worktree,c.branch FROM task_checkouts c JOIN tasks t ON t.id=c.task_id
+        "SELECT t.worktree,t.branch FROM tasks t
          JOIN repository_plans w ON w.id=t.repository_id
-         WHERE w.repo=?1 AND c.worktree<>?1",
+         WHERE w.repo=?1 AND t.checkout_machine_id=(SELECT id FROM machines WHERE is_local=1)
+           AND t.worktree IS NOT NULL AND t.worktree<>?1 AND t.branch IS NOT NULL",
     )?;
     let retained = statement
         .query_map([repo], |row| {
@@ -81,7 +82,7 @@ pub(super) fn ensure_repository_in(conn: &Connection, repo: &str) -> StoreResult
         if let Some(common) = common.as_ref().filter(|_| locator.is_none()) {
             if !retained_checkout_matches(conn, repo)? {
                 return Err(StoreError::InvalidData(format!(
-                "{repo} retains repository {id} but has no Git locator; establish the original checkout with `lf config repo --bind {id}`, or recover the moved checkout with `lf config repo --relocate {id}`"
+                "{repo} retains repository {id} but has no Git locator; establish the original checkout with `lf repo --bind {id}`, or recover the moved checkout with `lf repo --relocate {id}`"
                 )));
             }
             crate::repository::location::write_locator(common, &id)
@@ -164,10 +165,10 @@ impl SqliteStore {
         // A future clone reusing the old path cannot acquire this history.
         tx.execute(
             "INSERT OR IGNORE INTO relocated_task_processes(task_id,process_id)
-             SELECT t.id,e.id FROM task_checkouts c JOIN tasks t ON t.id=c.task_id
-               JOIN repository_plans w ON w.id=t.repository_id JOIN processes e
-               ON e.cwd=rtrim(c.worktree,'/') OR instr(e.cwd,rtrim(c.worktree,'/')||'/')=1
-             WHERE w.repo=?1 AND (c.worktree=?1 OR instr(c.worktree,?1||'/')=1)",
+             SELECT t.id,e.id FROM tasks t JOIN repository_plans w ON w.id=t.repository_id JOIN processes e
+               ON e.cwd=rtrim(t.worktree,'/') OR instr(e.cwd,rtrim(t.worktree,'/')||'/')=1
+             WHERE w.repo=?1 AND t.checkout_machine_id=(SELECT id FROM machines WHERE is_local=1)
+               AND (t.worktree=?1 OR instr(t.worktree,?1||'/')=1)",
             [&source],
         )?;
         for table in [
@@ -190,7 +191,7 @@ impl SqliteStore {
         // their actual paths, even when their names retain the old prefix.
         for (table, column, scope) in [
             ("agent_sessions", "cwd", "repo=?2"),
-            ("task_checkouts", "worktree", "task_id IN (SELECT t.id FROM tasks t JOIN repository_plans w ON w.id=t.repository_id WHERE w.repo=?2)"),
+            ("tasks", "worktree", "checkout_machine_id=(SELECT id FROM machines WHERE is_local=1) AND repository_id IN (SELECT id FROM repository_plans WHERE repo=?2)"),
         ] {
             tx.execute(
                 &format!("UPDATE {table} SET {column}=?2 || substr({column},length(?1)+1)
@@ -223,20 +224,18 @@ impl SqliteStore {
             )?;
             let id = super::children::resolve_task_id_in(&tx, task.as_str(), Some(&repo))?
                 .ok_or(StoreError::NotFound)?;
-            let checkout: Option<String> = tx
-                .query_row(
-                    "SELECT worktree FROM task_checkouts WHERE task_id=?1",
-                    [id.as_str()],
-                    |row| row.get(0),
-                )
-                .optional()?;
-            if checkout.is_none() {
-                return Ok(if super::task_ownership::owned_in(&tx, &id)? {
-                    TaskLocation::Unavailable {
-                        reason: "not checked out on this Machine; read its owner".into(),
-                    }
-                } else {
-                    TaskLocation::Unrecorded
+            let (checkout, owner): (Option<String>, Option<String>) = tx.query_row(
+                "SELECT worktree,checkout_machine_id FROM tasks WHERE id=?1",
+                [id.as_str()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+            if checkout.is_none() && !super::task_ownership::owned_in(&tx, &id)? {
+                return Ok(TaskLocation::Unrecorded);
+            }
+            if owner.as_deref() != Some(machine.as_str()) {
+                return Ok(TaskLocation::Unavailable {
+                    reason: "execution Machine is unknown or not this observer; read its owner"
+                        .into(),
                 });
             }
             Ok(TaskLocation::Recorded {
@@ -262,8 +261,8 @@ impl SqliteStore {
         let me = super::task_ownership::OwnershipFacts::of_task_in(&conn, task)?;
         let tx = conn.savepoint()?;
         let (repo, checkout): (String, Option<String>) = tx.query_row(
-            "SELECT w.repo,c.worktree FROM tasks t JOIN repository_plans w ON w.id=t.repository_id
-             LEFT JOIN task_checkouts c ON c.task_id=t.id WHERE t.id=?1",
+            "SELECT w.repo,t.worktree FROM tasks t JOIN repository_plans w ON w.id=t.repository_id
+             WHERE t.id=?1",
             [task.as_str()],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
@@ -408,14 +407,9 @@ mod tests {
             .unwrap();
             conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(),wave]).unwrap();
             conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
-            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,created_at) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1',1)",params![task.as_str(),project.as_str()]).unwrap();
-            conn.execute(
-                "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/before/task')",
-                [task.as_str()],
-            )
-            .unwrap();
+            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1','/before/task',1,(SELECT id FROM machines WHERE is_local=1))",params![task.as_str(),project.as_str()]).unwrap();
             conn.execute("INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,'/before/task/src',1)",params![process,TraceId::new()]).unwrap();
-            conn.execute_batch("CREATE TRIGGER interrupt_move BEFORE UPDATE OF worktree ON task_checkouts BEGIN SELECT RAISE(ABORT,'interrupted'); END;").unwrap();
+            conn.execute_batch("CREATE TRIGGER interrupt_move BEFORE UPDATE OF worktree ON tasks BEGIN SELECT RAISE(ABORT,'interrupted'); END;").unwrap();
         }
         assert!(store.relocate_repository(&id, "/after").is_err());
         assert_eq!(

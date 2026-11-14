@@ -218,10 +218,9 @@ impl SqliteStore {
                      CROSS JOIN agent_sessions s ON s.held_terminal_id=t.id
                      WHERE t.ended_at IS NULL AND s.completed_at IS NULL AND s.interactive=1)
              SELECT task_id FROM task_retirements WHERE phase!='retired'
-             UNION SELECT a.id FROM tasks a INDEXED BY tasks_abandoned
-               CROSS JOIN task_checkouts c ON c.task_id=a.id
-               WHERE a.abandoned_at IS NOT NULL
-               AND NOT EXISTS(SELECT 1 FROM task_retirements WHERE task_id=a.id)
+             UNION SELECT id FROM tasks WHERE abandoned_at IS NOT NULL AND worktree IS NOT NULL
+               AND checkout_machine_id=(SELECT id FROM machines WHERE is_local=1)
+               AND NOT EXISTS(SELECT 1 FROM task_retirements WHERE task_id=tasks.id)
              UNION SELECT tw.id FROM hosted h CROSS JOIN tasks tw ON tw.id IN ({members})
                WHERE tw.planning_completed=1 OR tw.abandoned_at IS NOT NULL
              ORDER BY 1",
@@ -263,9 +262,10 @@ impl SqliteStore {
         };
         let grace = if abandoned { 0 } else { WORKSPACE_GRACE };
         tx.execute("INSERT INTO task_retirements(task_id,completion,checkout,branch,due_at,phase)
-            SELECT t.id,CASE WHEN t.abandoned_at IS NOT NULL THEN 'abandoned:'||t.abandoned_at ELSE t.planning_completed_at END,
-                c.worktree,c.branch,?2+?3,'waiting' FROM tasks t JOIN task_checkouts c ON c.task_id=t.id
-            WHERE t.id=?1 AND (t.abandoned_at IS NOT NULL OR (t.planning_completed=1 AND t.planning_completed_at IS NOT NULL))
+            SELECT id,CASE WHEN abandoned_at IS NOT NULL THEN 'abandoned:'||abandoned_at ELSE planning_completed_at END,
+                worktree,branch,?2+?3,'waiting' FROM tasks
+            WHERE id=?1 AND (abandoned_at IS NOT NULL OR (planning_completed=1 AND planning_completed_at IS NOT NULL))
+                AND worktree IS NOT NULL
             ON CONFLICT(task_id) DO NOTHING", params![task.as_str(),now,grace])?;
         match hold {
             Some(ViewerHold::Viewed(_)) => hold_retirement(&tx, task, Some(VIEWED))?,
@@ -415,8 +415,7 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
         let repo = store.ensure_repository("/repo").unwrap();
         let task = TaskId::new();
-        store.conn.lock().unwrap().execute_batch(&format!("INSERT INTO tasks(id,repository_id,issue_identifier,created_at,planning_completed,planning_completed_at) VALUES('{task}','{repo}','SHELL-1',1,1,'completion-1');
-            INSERT INTO task_checkouts(task_id,worktree,branch) VALUES('{task}','/repo.task','task');", task=task.as_str(), repo=repo.as_str())).unwrap();
+        store.conn.lock().unwrap().execute("INSERT INTO tasks(id,repository_id,issue_identifier,created_at,worktree,branch,planning_completed,planning_completed_at) VALUES(?1,?2,'SHELL-1',1,'/repo.task','task',1,'completion-1')", params![task.as_str(),repo.as_str()]).unwrap();
         (home, store, task)
     }
 
@@ -515,7 +514,8 @@ mod tests {
             .lock()
             .unwrap()
             .execute(
-                "UPDATE tasks SET planning_completed=0,abandoned_at=1 WHERE id=?1",
+                "UPDATE tasks SET planning_completed=0,abandoned_at=1,
+            checkout_machine_id=(SELECT id FROM machines WHERE is_local=1) WHERE id=?1",
                 [task.as_str()],
             )
             .unwrap();
@@ -591,22 +591,11 @@ mod tests {
         let repo = store.ensure_repository("/repo").unwrap();
         for n in 0..32 {
             let other = TaskId::new();
-            let conn = store.conn.lock().unwrap();
-            conn.execute(
-                "INSERT INTO tasks(id,repository_id,issue_identifier,created_at,planning_completed,planning_completed_at)
-                 VALUES(?1,?2,?3,1,1,'completion-1')",
-                params![other.as_str(), repo.as_str(), format!("OTHER-{n}")],
+            store.conn.lock().unwrap().execute(
+                "INSERT INTO tasks(id,repository_id,issue_identifier,created_at,worktree,branch,planning_completed,planning_completed_at)
+                 VALUES(?1,?2,?3,1,?4,?3,1,'completion-1')",
+                params![other.as_str(), repo.as_str(), format!("OTHER-{n}"), format!("/repo.other-{n}")],
             ).unwrap();
-            conn.execute(
-                "INSERT INTO task_checkouts(task_id,worktree,branch) VALUES(?1,?2,?3)",
-                params![
-                    other.as_str(),
-                    format!("/repo.other-{n}"),
-                    format!("OTHER-{n}")
-                ],
-            )
-            .unwrap();
-            drop(conn);
             store.reconcile_task_retirement(&other, 100, None).unwrap();
             session_owner(&store, &other, &format!("other-{n}"));
         }
@@ -765,7 +754,7 @@ mod tests {
             .lock()
             .unwrap()
             .execute(
-                "UPDATE task_checkouts SET worktree='/repo.new' WHERE task_id=?1",
+                "UPDATE tasks SET worktree='/repo.new' WHERE id=?1",
                 [task.as_str()],
             )
             .unwrap();

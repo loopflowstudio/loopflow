@@ -1,18 +1,16 @@
-//! Claim, move and unassign a Task. Commands already run on the Task's
+//! Claim, hand off and unassign a Task. Commands already run on the Task's
 //! writer: entry dispatch forwards them over `lf --machine` before they arrive.
 use std::path::Path;
 
 use crate::durable::{MachineId, TaskId, TaskOwnership};
 use crate::ops::{OpsError, OpsResult};
-use crate::store::sqlite::task_moves::{MoveInFlight, MoveStage};
 use crate::store::sqlite::SqliteStore;
-use crate::store::StoreResult;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OwnershipChange {
     Claim,
     /// A registered Machine label or a Machine id.
-    Move(String),
+    Handoff(String),
     /// Nobody owns it, and Linear shows no assignee.
     Unassign,
 }
@@ -49,11 +47,11 @@ pub fn change(repo: &Path, issue: &str, change: OwnershipChange) -> OpsResult<Ta
             OwnershipChange::Claim => {
                 store.sqlite.claim_task(&task.id).map_err(message)?;
             }
-            OwnershipChange::Move(target) => {
+            OwnershipChange::Handoff(target) => {
                 let target = resolve_machine(&store.sqlite, target)?;
                 store
                     .sqlite
-                    .move_claim(&task.id, &target)
+                    .handoff_task(&task.id, &target)
                     .map_err(message)?;
             }
             OwnershipChange::Unassign => {
@@ -72,8 +70,7 @@ pub fn change(repo: &Path, issue: &str, change: OwnershipChange) -> OpsResult<Ta
 }
 
 /// While this Machine holds an unsuperseded claim, Linear shows its person as
-/// assignee. The person is the Linear viewer on this Machine, which is also
-/// who this Machine belongs to (`people` id `linear:<viewer>`). Without a viewer
+/// assignee. The person is the Linear viewer on this Machine. Without a viewer
 /// the assignee is left alone; ownership is already saved.
 pub(crate) async fn assert_assignee(store: &SqliteStore, repository: &Path, task: &TaskId) {
     if !super::planning_client::is_linear(&repository.to_string_lossy()) {
@@ -93,14 +90,6 @@ pub(crate) async fn assert_assignee(store: &SqliteStore, repository: &Path, task
     };
     match viewer {
         Ok(viewer) => {
-            let name = crate::config::participant_name_in(repository)
-                .ok()
-                .flatten();
-            if let Err(error) =
-                store.record_local_person(&format!("linear:{viewer}"), name.as_deref())
-            {
-                tracing::warn!(%error, "the Linear viewer was not recorded as this Machine's person");
-            }
             if let Err(error) = store.assign_task_owner(task, Some(viewer.as_str())) {
                 tracing::warn!(%task, %error, "Linear assignee was not queued");
             }
@@ -133,108 +122,6 @@ pub fn runs_elsewhere_here(ownership: &TaskOwnership) -> OpsResult<Option<String
     };
     let local = store.sqlite.local_machine().map_err(message)?.id;
     Ok(runs_elsewhere(ownership, &local))
-}
-
-/// `Not checked out on mini`: this Machine has no checkout of the Task, so it
-/// shows no path, whichever Machine runs it.
-pub fn not_checked_out_here() -> String {
-    format!(
-        "Not checked out on {}",
-        crate::store::sqlite::task_ownership::local_label()
-    )
-}
-
-/// A move of the Task this Machine began that has not arrived, with the
-/// command that carries it on: `Moving to mini since Nov 12 10:42: not sent`
-/// or `…: sent, not arrived`, since when the move began. `None` when no move
-/// is in flight.
-pub fn moving_here(task: &TaskId, identifier: &str) -> OpsResult<Option<String>> {
-    let Some(store) = crate::store::read_existing_registry().map_err(message)? else {
-        return Ok(None);
-    };
-    let Some(moving) = store.sqlite.task_move_in_flight(task).map_err(message)? else {
-        return Ok(None);
-    };
-    describe_move(&store.sqlite, identifier, &moving)
-        .map(Some)
-        .map_err(message)
-}
-
-/// [`describe_check`], read against this Machine's registry.
-pub fn checked_here(task: &TaskId, identifier: &str) -> OpsResult<Option<String>> {
-    let Some(store) = crate::store::read_existing_registry().map_err(message)? else {
-        return Ok(None);
-    };
-    describe_check(&store.sqlite, task, identifier).map_err(message)
-}
-
-/// A move of the Task another Machine checked with this one, and the command
-/// that asks that Machine for it: `Checked move from laptop at Nov 12 10:42`.
-/// A past check: the source may have taken the Task back since.
-pub(crate) fn describe_check(
-    store: &SqliteStore,
-    task: &TaskId,
-    identifier: &str,
-) -> StoreResult<Option<String>> {
-    let Some(check) = store.task_move_check(task)? else {
-        return Ok(None);
-    };
-    let from = &check.from_machine_id;
-    let from = store
-        .machine_by_id(from)?
-        .map_or_else(|| from.to_string(), |machine| machine.name());
-    Ok(Some(format!(
-        "Checked move from {from} at {}\n  retry: lf task move {identifier} --machine {}",
-        crate::lf::output::format_time(check.at),
-        crate::store::sqlite::task_ownership::local_label(),
-    )))
-}
-
-/// [`moving_here`]'s lines for `moving`.
-pub(crate) fn describe_move(
-    store: &SqliteStore,
-    identifier: &str,
-    moving: &MoveInFlight,
-) -> StoreResult<String> {
-    let (place, line) = moving_to(store, moving)?;
-    Ok(format!("{line}\n{}", ways_out(identifier, &place)))
-}
-
-/// What to run for a move to `place` that has not arrived: the same move
-/// again, or, while `place` stays out of reach, claiming the Task here, which
-/// asks the target first to resolve a lost arrival acknowledgement. An
-/// unreachable target may still be running it.
-pub(crate) fn ways_out(identifier: &str, place: &str) -> String {
-    format!(
-        "  retry: lf task move {identifier} --machine {place}\n  take back: lf task claim {identifier}"
-    )
-}
-
-/// The line a list shows for a Task whose move from here has not arrived,
-/// without the retry. `None` when no move is in flight.
-pub(crate) fn move_line(store: &SqliteStore, task: &TaskId) -> StoreResult<Option<String>> {
-    let Some(moving) = store.task_move_in_flight(task)? else {
-        return Ok(None);
-    };
-    Ok(Some(moving_to(store, &moving)?.1))
-}
-
-/// The Machine `moving` names and its one line, without the retry:
-/// `Moving to mini since Nov 12 10:42: sent, not arrived`.
-fn moving_to(store: &SqliteStore, moving: &MoveInFlight) -> StoreResult<(String, String)> {
-    let to = &moving.to_machine_id;
-    let place = store
-        .machine_by_id(to)?
-        .map_or_else(|| to.to_string(), |machine| machine.name());
-    let progress = match moving.stage {
-        MoveStage::Leaving { .. } => "not sent",
-        MoveStage::Sent { .. } => "sent, not arrived",
-    };
-    let line = format!(
-        "Moving to {place} since {}: {progress}",
-        crate::lf::output::format_time(moving.at)
-    );
-    Ok((place, line))
 }
 
 pub fn render(ownership: &TaskOwnership) -> String {
@@ -274,10 +161,8 @@ mod tests {
                 kind,
                 person: Some("Lee".into()),
                 person_key: None,
-                person_id: None,
                 machine_id: Some(MachineId::new()),
                 machine_label: Some("lee-mbp".into()),
-                writer_machine_id: None,
                 at: 1_792_600_000,
             }],
         }

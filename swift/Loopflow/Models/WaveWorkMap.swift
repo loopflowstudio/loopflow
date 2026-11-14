@@ -134,26 +134,13 @@ public struct MachineRef: Decodable, Sendable, Hashable {
 /// The person and Machine that own a Task.
 public struct TaskOwner: Decodable, Sendable, Hashable {
     public let person: String?
-    /// The owner's lowercase Git email: the display fallback when they have no
-    /// name, not their identity.
+    /// The owner's lowercase Git email; shown when they have no name.
     public let personKey: String?
-    /// The owner's `people` id, which says who they are; nil when the claim
-    /// named none.
-    public let personId: String?
     public let machine: MachineRef
 
     enum CodingKeys: String, CodingKey {
         case person, machine
         case personKey = "person_key"
-        case personId = "person_id"
-    }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        person = try container.decodeIfPresent(String.self, forKey: .person)
-        personKey = try container.decodeIfPresent(String.self, forKey: .personKey)
-        personId = try container.decode(String?.self, forKey: .personId)
-        machine = try container.decode(MachineRef.self, forKey: .machine)
     }
 
     /// "Jack Heart on mini"; "Machine unknown" when the Machine was never recorded.

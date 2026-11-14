@@ -408,7 +408,7 @@ fn task_status_preserves_canonical_work_and_acquisition_evidence() {
             .collect::<Vec<_>>(),
         [
             loopflow::durable::OwnershipKind::Claim,
-            loopflow::durable::OwnershipKind::Claim
+            loopflow::durable::OwnershipKind::Handoff
         ]
     );
     let value: serde_json::Value = serde_json::from_str(json).unwrap();

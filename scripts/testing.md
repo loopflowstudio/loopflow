@@ -79,22 +79,6 @@ checks catch per-Task and per-Graph SQL growth beyond focused store tests.
 Store-wide schema or trigger changes also run `binary(two_people)`,
 `test(transport::)` and `binary(transport_tests)`: shared planning exchanges,
 viewer holds and owner lifetimes exercise writers beyond the changed store module.
-Task storage changes also run `binary(session_lifecycle_tests)`: creation and
-promotion cover absent checkouts and primary Sessions. When moving nullable
-columns into separate tables, update fixture reads to handle absent rows and
-direct SQL writes and shared fixture lookups to use the new tables. Run
-`test(server::service::tests::a_plan_watch_refreshes_and_a_task_view_resolves_its_primary_session)`
-for primary Session storage changes: the served watch fixture writes the
-association directly before resolving the Task's conversation. Run
-`scripts/test_desktop.sh --filter 'TaskRowMetadataTests|WaveStandupTests|DTOFixtureTests'`
-when changing Task ownership DTOs; inline Swift fixtures must include required
-nullable keys alongside the shared JSON fixtures. Run
-`test(performance_tests::)` to check that seeded Graphs still belong to their
-Tasks. Include `test(ops::task::tests::)`:
-checkout adoption must still find a running Graph and prevent a second run.
-Store query changes also run `test(store::query_plans::tests::)`. Missing-key
-fixtures must use prefixes outside generated UUID keys, not short hex strings
-that can randomly match a captured input.
 Fixture database seeding changes include
 `test(concurrent_copies_share_one_initialized_machine)` and
 `test(two_task_research_runs_leave_distinct_uncommitted_artifacts_for_the_next_prompt)`:

@@ -1180,7 +1180,7 @@ struct WorkNavigationTests {
         var tasks = try #require(inventory["items"] as? [[String: Any]])
         let index = try #require(tasks.firstIndex { ($0["task"] as? [String: Any])?["id"] as? String == "issue-now" })
         var runtime = try #require(tasks[index]["runtime"] as? [String: Any])
-        runtime["owner"] = ["person": "Jack Heart", "person_id": NSNull(), "person_key": "jack@loopflow.studio",
+        runtime["owner"] = ["person": "Jack Heart", "person_key": "jack@loopflow.studio",
                             "machine": ["id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b", "label": "mini"]]
         tasks[index]["runtime"] = runtime
         tasks[index]["section"] = "autonomous"

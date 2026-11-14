@@ -775,13 +775,14 @@ mod tests {
         .unwrap();
         sql.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
         sql.execute(
-            "INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,created_at) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1',1)",
+            "INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,worktree,created_at) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1','/repo/task',1)",
             rusqlite::params![task.as_str(), project.as_str()],
         )
         .unwrap();
+        let machine = store.local_machine().unwrap().id;
         sql.execute(
-            "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/repo/task')",
-            [task.as_str()],
+            "UPDATE tasks SET checkout_machine_id=?1",
+            [machine.as_str()],
         )
         .unwrap();
         sql.execute("UPDATE processes SET cwd='/repo/task'", [])

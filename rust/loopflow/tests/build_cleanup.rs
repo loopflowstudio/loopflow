@@ -367,7 +367,7 @@ fn build_cleanup_retains_tracked_output_symlink_escape_and_unregistered_ownershi
     Connection::open(fixture.database())
         .unwrap()
         .execute(
-            "DELETE FROM task_checkouts WHERE task_id=?1",
+            "UPDATE tasks SET worktree=NULL WHERE id=?1",
             [&fixture.task],
         )
         .unwrap();
@@ -484,8 +484,7 @@ fn build_cleanup_retains_unfinished_association_and_unknown_execution() {
     let fixture = Fixture::new();
     let conn = Connection::open(fixture.database()).unwrap();
     let pending = loopflow::durable::TaskId::new();
-    conn.execute("INSERT INTO tasks(id,repository_id,project_id,issue_identifier,created_at,planning_completed) SELECT ?1,repository_id,project_id,'PROOF-2',1,0 FROM tasks WHERE id=?2",params![pending.as_str(),fixture.task]).unwrap();
-    conn.execute("INSERT INTO task_checkouts(task_id,worktree) SELECT ?1,worktree || '/.' FROM task_checkouts WHERE task_id=?2",params![pending.as_str(),fixture.task]).unwrap();
+    conn.execute("INSERT INTO tasks(id,repository_id,project_id,issue_identifier,worktree,created_at,checkout_machine_id,planning_completed) SELECT ?1,repository_id,project_id,'PROOF-2',worktree || '/.',1,checkout_machine_id,0 FROM tasks WHERE id=?2",params![pending.as_str(),fixture.task]).unwrap();
     let retained = fixture.entry(&fixture.prune(&[]));
     assert!(
         retained["reason"].as_str().unwrap().contains("unfinished"),

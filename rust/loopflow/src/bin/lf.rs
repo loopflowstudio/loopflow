@@ -1768,6 +1768,10 @@ fn run() -> anyhow::Result<()> {
                     cmd: loopflow::lf::ConfigCommand::Settings { .. }
                 } | Commands::Open(_)
                     | Commands::Workspace(_)
+                    | Commands::Account {
+                        cmd: Some(loopflow::lf::AccountCommand::Next { .. }),
+                        ..
+                    }
             )
         )
     {

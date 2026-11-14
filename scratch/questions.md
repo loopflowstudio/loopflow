@@ -30,3 +30,6 @@ Assumptions taken in `claude-capacity.md`; each is reversible.
   connected credential without a matching identity reports that blocker. The
   server `account.next` request gets required nullable `agent` so model selection
   survives served reads; Swift's request type carries it too.
+- QA: with every managed login signed out, `lf account next` says "no login
+  is in rotation; lf account unpause <login>" (exit 3) while the launch runs on
+  the ambient login. Pre-existing on main; left unchanged here.

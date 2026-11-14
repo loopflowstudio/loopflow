@@ -1,0 +1,117 @@
+<!doctype html><meta charset=utf-8><title>LOO-901 QA</title>
+<style>body{font:15px/1.5 -apple-system,sans-serif;max-width:900px;margin:2em auto;padding:0 1em}pre{background:#f4f4f4;padding:.8em;overflow-x:auto;font-size:12.5px}h2{margin-top:2em}</style>
+<h1>LOO-901 QA: lf account reads the capacity launches use</h1>
+<p>Branch-built <code>lf</code> (69a00d540b + fix below), private <code>HOME</code>/<code>LF_HOME</code> under <code>/tmp/lf-qa-901</code>, inherited <code>LF_*</code> cleared, stdin closed. Two Claude logins (<code>loopflow</code>, <code>primary</code>) seeded with raw SQL: <code>provider_accounts</code> rows with credential digests, config entries, and the 17 <code>provider_account_limits</code> rows listed under Findings in <code>claude-capacity.md</code>, every timestamp shifted by the same offset so their relationships to "now" match 2026-11-14 18:49 UTC exactly. A stand-in <code>claude</code> and <code>security</code> (the tests' FAKE_SECURITY) on <code>PATH</code>; launches recorded in <code>provider_session_accounts</code>.</p>
+
+<h2>1. Returning user with the incident's rows</h2>
+<p>Historical names collapse into poll buckets: <code>weekly</code>→<code>seven_day</code>, <code>session</code>→<code>five_hour</code>, the prefixed row and the stated Fable lines fold into <code>seven_day_fable</code>; the paid-credit line stays its own window. <code>loopflow</code>'s newer 16% poll outranks the prefixed hold; <code>primary</code>'s genuine 100% poll holds Fable.</p>
+<pre>Managed accounts
+claude       loopflow · loopflow@example.com
+  auth: cached connected · not checked
+  plan: max observed
+  launches: fable, opus, sonnet, haiku
+  next: lf account claude (refresh credential and capacity evidence)
+  You&#x27;re out of usage credits. Run /usage-credits to keep using Fable 5.2 or
+    /model to switch models.: 100% used, 0% left · cached 1d ago · reset unknown
+    source=stream observed=2026-11-13T16:35:03Z plan=unknown
+  five_hour: usage unknown · cached 14d ago · reset passed; refresh needed
+    source=stream observed=2026-10-30T23:44:37Z plan=unknown
+  seven_day: 69% used, 31% left · cached 33s ago · resets 2026-11-17T06:40:21Z
+    source=poll observed=2026-11-14T19:27:47Z plan=unknown
+  seven_day_fable: 16% used, 84% left · cached 33s ago · resets
+    2026-11-17T06:40:22Z
+    source=poll observed=2026-11-14T19:27:47Z plan=unknown
+claude       primary · primary@example.com
+  auth: cached connected · not checked
+  plan: max observed
+  launches: opus, sonnet, haiku · fable out until Wed 04:40
+  next: lf account claude (refresh credential and capacity evidence)
+  five_hour: usage unknown · cached 14d ago · reset passed; refresh needed
+    source=stream observed=2026-10-30T23:41:16Z plan=unknown
+  seven_day: 65% used, 35% left · cached 32s ago · resets 2026-11-18T12:40:22Z
+    source=poll observed=2026-11-14T19:27:48Z plan=unknown
+  seven_day_fable: 100% used, 0% left · cached 32s ago · resets
+    2026-11-18T12:40:22Z
+    source=poll observed=2026-11-14T19:27:48Z plan=unknown
+
+Local services
+claude       local credentials
+  auth: cached uninspected · not checked
+  next: lf account connect claude (ambient access is not checked here)
+  usage: unknown
+
+Browser profiles
+Local Chrome choices
+  local Chrome profiles unavailable</pre>
+<p>JSON <code>launches</code> and <code>next -a claude:fable --json</code>:</p>
+<pre>{&quot;login&quot;:&quot;loopflow&quot;,&quot;windows&quot;:[&quot;You&#x27;re out of usage credits. Run /usage-credits to keep using Fable 5.2 or /model to switch models.&quot;,&quot;five_hour&quot;,&quot;seven_day&quot;,&quot;seven_day_fable&quot;],&quot;launches&quot;:[{&quot;model&quot;:&quot;fable&quot;,&quot;eligible&quot;:true,&quot;out_until&quot;:null,&quot;blockers&quot;:[]},{&quot;model&quot;:&quot;opus&quot;,&quot;eligible&quot;:true,&quot;out_until&quot;:null,&quot;blockers&quot;:[]},{&quot;model&quot;:&quot;sonnet&quot;,&quot;eligible&quot;:true,&quot;out_until&quot;:null,&quot;blockers&quot;:[]},{&quot;model&quot;:&quot;haiku&quot;,&quot;eligible&quot;:true,&quot;out_until&quot;:null,&quot;blockers&quot;:[]},{&quot;model&quot;:null,&quot;eligible&quot;:true,&quot;out_until&quot;:null,&quot;blockers&quot;:[]}]}
+{&quot;login&quot;:&quot;primary&quot;,&quot;windows&quot;:[&quot;five_hour&quot;,&quot;seven_day&quot;,&quot;seven_day_fable&quot;],&quot;launches&quot;:[{&quot;model&quot;:&quot;fable&quot;,&quot;eligible&quot;:false,&quot;out_until&quot;:1795005627,&quot;blockers&quot;:[&quot;cooling for fable until 2026-11-18T12:40:27Z&quot;]},{&quot;model&quot;:&quot;opus&quot;,&quot;eligible&quot;:true,&quot;out_until&quot;:null,&quot;blockers&quot;:[]},{&quot;model&quot;:&quot;sonnet&quot;,&quot;eligible&quot;:true,&quot;out_until&quot;:null,&quot;blockers&quot;:[]},{&quot;model&quot;:&quot;haiku&quot;,&quot;eligible&quot;:true,&quot;out_until&quot;:null,&quot;blockers&quot;:[]},{&quot;model&quot;:null,&quot;eligible&quot;:false,&quot;out_until&quot;:1795005627,&quot;blockers&quot;:[&quot;cooling for fable until 2026-11-18T12:40:27Z&quot;]}]}
+[
+  {
+    &quot;provider&quot;: &quot;claude&quot;,
+    &quot;model&quot;: &quot;fable&quot;,
+    &quot;scope&quot;: &quot;automatic&quot;,
+    &quot;outcome&quot;: &quot;ready&quot;,
+    &quot;account_id&quot;: &quot;loopflow&quot;,
+    &quot;login&quot;: &quot;loopflow@example.com&quot;,
+    &quot;reason&quot;: &quot;the only login ready for this launch&quot;,
+    &quot;without_order&quot;: null
+  },
+  {
+    &quot;provider&quot;: &quot;codex&quot;,
+    &quot;model&quot;: null,
+    &quot;scope&quot;: &quot;automatic&quot;,
+    &quot;outcome&quot;: &quot;ambient&quot;,
+    &quot;account_id&quot;: null,
+    &quot;login&quot;: null,
+    &quot;reason&quot;: &quot;no stored login; launches use codex&#x27;s own&quot;,
+    &quot;without_order&quot;: null
+  }
+]</pre>
+
+<h2>2. Fresh and resumed Fable launches</h2>
+<p><code>lf -b -a claude:fable : 'Reply QA_OK'</code> selected <code>loopflow</code>. A prepared Session's first turn and its second turn (<code>--resume &lt;thread&gt; --model fable</code>) both selected <code>loopflow</code>.</p>
+
+<h2>3. Prefixed rejection newer than the poll</h2>
+<p>Set <code>loopflow</code>'s <code>rejected: seven_day_overage_included</code> row's <code>observed_at</code> to now. It wins its bucket and holds; <code>next</code> and the launch error name the same blockers word for word; Sonnet still routes.</p>
+<pre>  claude  —  &#x27;loopflow@example.com&#x27; cooling for fable until 2026-11-17T06:40:27Z, &#x27;primary@example.com&#x27; cooling for fable until 2026-11-18T12:40:27Z
+  codex   —  no stored login; launches use codex&#x27;s own
+Error: execution failed: failed to select provider account: no eligible managed claude account: &#x27;loopflow@example.com&#x27; cooling for fable until 2026-11-17T06:40:27Z, &#x27;primary@example.com&#x27; cooling for fable until 2026-11-18T12:40:27Z</pre>
+
+<h2>4. --clear-cooldown</h2>
+<pre>Cleared cooldowns on Claude login &#x27;primary@example.com&#x27;: for fable until 2026-11-18T12:40:27Z
+--- rows before / after (capacity_revision, cooldown; window|used|resets|observed|limited_until)
+1,3c1,3
+&lt; 0||rejected: seven_day_overage_included
+&lt; You&#x27;ve reached your Fable limit. Run /usage-credits to continue or switch models with /model.|100||1794398058|1794398963
+&lt; rejected: seven_day_overage_included|100||1794574674|1795005627
+---
+&gt; 1||
+&gt; You&#x27;ve reached your Fable limit. Run /usage-credits to continue or switch models with /model.|100||1794398058|
+&gt; rejected: seven_day_overage_included|100||1794574674|
+6c6
+&lt; seven_day_fable|100|1795005622|1794684468|1795005627
+---
+&gt; seven_day_fable|100|1795005622|1794684468|</pre>
+<p>Account cooldown reason and every <code>limited_until</code> cleared, readings kept, revision 0→1. Second run: "has no active cooldown". <code>next -a claude:fable</code> then chose <code>primary</code> and a Fable launch ran there. <code>--help</code>: "Release all recorded account and window holds, retaining usage readings".</p>
+
+<h2>5. Refresh that fails (placeholder tokens)</h2>
+<p><code>lf account claude</code> without <code>--cached</code> reached Anthropic with placeholder tokens; both logins became "needs login". No limit row changed. <code>launches: none · credential is missing</code>.</p>
+
+<h2>Fixed</h2>
+<p><code>lf account next -a claude:fable</code> printed "This command does not start an agent; --agent has no effect." above a model-specific answer. <code>lf.rs</code> now exempts <code>account next</code> from that warning.</p>
+
+<h2>What works</h2>
+<ul><li>Historical rows reconcile on read; a newer historical rejection still holds; genuine exhaustion stays held.</li>
+<li><code>lf account</code>, <code>next -a</code>, fresh and resumed launches agree per model.</li>
+<li><code>--clear-cooldown</code> releases every hold and names it.</li></ul>
+
+<h2>Not reached</h2>
+<ul><li>A successful refresh: the usage endpoint override exists only under <code>cfg(test)</code>, so deleting historical rows on a real poll is covered by <code>claude_capacity_</code> / <code>claude_usage_reconciliation_</code> tests, not here.</li>
+<li>The installed CLI on the live store: needs this change released; it belongs to verify.</li>
+<li>Interactive <code>lf resume</code> in a PTY; resume was checked headless (<code>session resume --message</code>).</li></ul>
+
+<h2>Still wrong, worst first</h2>
+<ol><li>With every managed Claude login needing a login, <code>lf account next -a claude:fable</code> exits 3 with "no login is in rotation; lf account unpause &lt;login&gt;", while the launch runs on the ambient login. The wording points at pausing, not signing in, and the outcome disagrees with what the launch does. Same on main (<code>profile.rs</code>); not changed here.</li>
+<li><code>lf -a claude session resume --prepare</code> prints "--agent has no effect" though the prepared Session's harness comes from it. Pre-existing.</li>
+<li>The paid-credit line renders as "…switch models.: 100% used". Pre-existing.</li></ol>

@@ -286,13 +286,27 @@ hold clearing, model-specific account reports and `next -a`. The shared
 `account.next` read carries a required nullable `agent`; Swift encodes it and
 its CLI argv too. No schema migration or live-row edits.
 
-The clear message uses the common hold formatter: `Cleared Claude login '…'
-holds account-wide until …; for fable until …`. The docs follow that format.
+The clear message currently uses the common hold formatter; item 1 of the
+concept review changes its wording.
 A paused or signed-out login still cannot route after clearing capacity holds.
 
-Remaining: gate's boundary checks and the installed
-workflow below after delivery. Historical writer retirement still needs a
-separate decision before removing the classifier.
+Remaining, in order:
+
+1. The four items under "Next implement direction" below. None is in the code
+   at 784b221e13: `AccountLaunch.held_until` (`account_status.rs`), its
+   fixtures (`server_schema.json`) and `docs/subscriptions.md` still say
+   `held_until`; the table's `launches:` line (`render_table`, from
+   `launch_summary`) prints under every managed login; `launch_summary` repeats
+   a login-wide blocker per model and names Codex "launch out until";
+   `eligible` is `account_route_eligible(..) && identity` beside a separately
+   built blocker list, and `account_unavailable_reason` keeps its
+   "is unavailable" fallback; the clear says "Cleared … holds …" and
+   "has no active cooldown or window hold" (`account.rs::clear_account_cooldown`
+   and its test `claude_usage_reconciliation_explains_overlapping_and_cleared_holds`).
+2. Gate's boundary checks and the installed workflow below after delivery.
+
+Historical writer retirement still needs a separate decision before removing
+the classifier.
 
 ## Next implement direction (concept review, 2026-11-14)
 

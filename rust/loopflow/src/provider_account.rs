@@ -37,6 +37,42 @@ const PROVIDER_CREDENTIAL_ENV_VARS: [&str; 6] = [
     "CODEX_HOME",
 ];
 
+// Pre-#1937 stream writers used reasons as keys; pre-#1828 polls used
+// weekly/session. Keep this until those processes can no longer write the store.
+pub(crate) fn canonical_claude_window(
+    window: &str,
+    model: Option<&str>,
+) -> Option<(String, Option<String>)> {
+    let window = window
+        .split_once(": ")
+        .filter(|(status, _)| {
+            matches!(
+                *status,
+                "rejected" | "blocked" | "limited" | "rate_limit_reached"
+            )
+        })
+        .map_or(window, |(_, name)| name);
+    if model.is_none() {
+        match window {
+            "weekly" | "seven_day" => return Some(("seven_day".into(), None)),
+            "session" | "five_hour" => return Some(("five_hour".into(), None)),
+            _ => {}
+        }
+        if let Some(family) = window.strip_prefix("weekly:") {
+            if crate::config::CLAUDE_MODEL_FAMILIES.contains(&family) {
+                return Some((format!("seven_day_{family}"), Some(family.into())));
+            }
+        }
+    }
+    let model = model.filter(|model| crate::config::CLAUDE_MODEL_FAMILIES.contains(model))?;
+    let stated = crate::agent::subscription_limit_text(window)
+        .is_some_and(|limit| !limit.credits && limit.model.as_deref() == Some(model));
+    (window == "seven_day_overage_included"
+        || window.strip_prefix("seven_day_") == Some(model)
+        || stated)
+        .then(|| (format!("seven_day_{model}"), Some(model.into())))
+}
+
 /// Whether a limit the provider scoped to `scope` holds back a launch of
 /// `model`. A limit on every model holds everything back; a scoped one holds
 /// back that model and any launch whose model the provider would pick itself.
@@ -95,11 +131,7 @@ pub(crate) fn account_route_eligible(
     model: Option<&str>,
     now: i64,
 ) -> bool {
-    let today = time::OffsetDateTime::from_unix_timestamp(now)
-        .expect("current timestamp is valid")
-        .date();
-    account.eligible_for_automatic_routing(today)
-        && account_held_until(account, limits, model, now).is_none()
+    account_launch_blockers(account, limits, model, now).is_empty()
 }
 
 /// When the first of `accounts` held back at `now` can take `model` again.
@@ -1795,22 +1827,36 @@ pub(crate) fn account_unavailable_reason(
     model: Option<&str>,
     now: i64,
 ) -> String {
+    let blockers = account_launch_blockers(account, limits, model, now);
+    if blockers.is_empty() {
+        return format!("'{}' is unavailable", account_login(account));
+    }
+    format!("'{}' {}", account_login(account), blockers.join("; "))
+}
+
+pub(crate) fn account_launch_blockers(
+    account: &ProviderAccount,
+    limits: &[AccountLimitRow],
+    model: Option<&str>,
+    now: i64,
+) -> Vec<String> {
+    let mut blockers = Vec::new();
     if account.credential_state != CredentialState::Connected {
-        return format!("'{}' credential is missing", account_login(account));
+        blockers.push("credential is missing".into());
     }
-    let routing = account.effective_routing_state(time::OffsetDateTime::now_utc().date());
+    let today = time::OffsetDateTime::from_unix_timestamp(now)
+        .expect("valid timestamp")
+        .date();
+    let routing = account.effective_routing_state(today);
     if routing != RoutingState::Automatic {
-        return format!(
-            "'{}' routing is {}",
-            account_login(account),
-            routing.as_str()
-        );
+        blockers.push(format!("routing is {}", routing.as_str()));
     }
-    let holds = account_capacity_holds(account, limits, model, now);
-    if !holds.is_empty() {
-        return format!("'{}' cooling {}", account_login(account), holds.join("; "));
-    }
-    format!("'{}' is unavailable", account_login(account))
+    blockers.extend(
+        account_capacity_holds(account, limits, model, now)
+            .into_iter()
+            .map(|hold| format!("cooling {hold}")),
+    );
+    blockers
 }
 
 /// Active capacity holds, with each scope's own deadline.
@@ -1903,11 +1949,15 @@ pub(crate) async fn inspect_provider_route(
     store: Option<&SharedStore>,
     repo_id: Option<&CanonicalRepo>,
     provider: Provider,
+    model: Option<&str>,
 ) -> Result<Option<Vec<ProviderAccount>>, ProviderAccountError> {
     if !selection::AccountSelection::from_env()?.is_default() {
         return Ok(ordered_selected_candidates(
             provider,
-            LaunchAsk::default(),
+            LaunchAsk {
+                model,
+                ..LaunchAsk::default()
+            },
             repo_id,
             None,
             store,
@@ -1932,7 +1982,7 @@ pub(crate) async fn inspect_provider_route(
     let limits = store
         .provider_account_limits(Some(provider.as_str()))
         .await?;
-    let held = hold::ready(provider, &accounts, &limits, None, now)
+    let held = hold::ready(provider, &accounts, &limits, model, now)
         .filter(|account| identity::check_account_identity(account, &accounts).is_ok());
     if ids.is_none() && held.is_none() {
         return Ok(None);
@@ -1941,7 +1991,7 @@ pub(crate) async fn inspect_provider_route(
         .iter()
         .flatten()
         .filter_map(|id| accounts.iter().find(|a| a.account_id == *id))
-        .filter(|account| account_route_eligible(account, &limits, None, now))
+        .filter(|account| account_route_eligible(account, &limits, model, now))
         .filter(
             |account| match identity::check_account_identity(account, &accounts) {
                 Ok(()) => true,
@@ -1953,7 +2003,7 @@ pub(crate) async fn inspect_provider_route(
         )
         .cloned()
         .collect::<Vec<_>>();
-    order_accounts_by_urgency(&mut available, &limits, None, now);
+    order_accounts_by_urgency(&mut available, &limits, model, now);
     if let Some(held) = held {
         available.retain(|account| account.account_id != held.account_id);
         available.insert(0, held.clone());
@@ -1982,7 +2032,7 @@ pub(crate) async fn replacement_login(
     account: &ProviderAccount,
     repo_id: Option<&CanonicalRepo>,
 ) -> Result<Option<ProviderAccount>, ProviderAccountError> {
-    Ok(inspect_provider_route(Some(store), repo_id, provider)
+    Ok(inspect_provider_route(Some(store), repo_id, provider, None)
         .await?
         .unwrap_or_default()
         .into_iter()
@@ -5169,6 +5219,54 @@ mod inspection_tests {
         open_ephemeral_store, AccountLimitWindow, ProviderAccountId, StorageConfig,
     };
 
+    #[test]
+    fn claude_capacity_eligibility_and_blockers_agree() {
+        use crate::provider_account::{account_launch_blockers, account_route_eligible};
+        use crate::store::{AccountLimitRow, CredentialState, RoutingState};
+
+        let now = 1_800_000_000;
+        let base = new_account(
+            Provider::Claude,
+            ProviderAccountId::parse("fixture").unwrap(),
+            std::path::PathBuf::from("/unused"),
+            None,
+        );
+        for state in ["ready", "missing", "paused", "account", "model"] {
+            let mut account = base.clone();
+            let mut limits = Vec::new();
+            match state {
+                "missing" => account.credential_state = CredentialState::Missing,
+                "paused" => account.routing_state = RoutingState::ExplicitOnly,
+                "account" => account.cooldown_until = Some(now + 300),
+                "model" => limits.push(AccountLimitRow {
+                    provider: "claude".into(),
+                    account_id: account.account_id.clone(),
+                    window: "seven_day_fable".into(),
+                    used_percent: 100,
+                    resets_at: Some(now + 300),
+                    plan: None,
+                    observed_at: now,
+                    source: "poll".into(),
+                    model: Some("fable".into()),
+                    limited_until: Some(now + 305),
+                }),
+                _ => {}
+            }
+            for model in [None, Some("fable"), Some("sonnet")] {
+                let eligible = account_route_eligible(&account, &limits, model, now);
+                assert_eq!(
+                    eligible,
+                    account_launch_blockers(&account, &limits, model, now).is_empty()
+                );
+                assert_eq!(
+                    eligible,
+                    state == "ready" || (state == "model" && model == Some("sonnet")),
+                    "{state} {model:?}"
+                );
+            }
+        }
+    }
+
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
     async fn route_inspection_matches_selection_without_writes() {
@@ -5182,7 +5280,7 @@ mod inspection_tests {
         let repo = CanonicalRepo::discover(temp.path()).unwrap();
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
         assert!(
-            inspect_provider_route(Some(&store), Some(&repo), Provider::Codex)
+            inspect_provider_route(Some(&store), Some(&repo), Provider::Codex, None)
                 .await
                 .unwrap()
                 .is_none()
@@ -5244,10 +5342,11 @@ mod inspection_tests {
                     .unwrap();
             }
             let before = store.list_provider_accounts(None).await.unwrap();
-            let inspected = inspect_provider_route(Some(&store), Some(&repo), Provider::Codex)
-                .await
-                .unwrap()
-                .unwrap();
+            let inspected =
+                inspect_provider_route(Some(&store), Some(&repo), Provider::Codex, None)
+                    .await
+                    .unwrap()
+                    .unwrap();
             // Strained has an observed weekly window and healthy has none, so strained
             // leads; cooling is held back.
             assert_eq!(

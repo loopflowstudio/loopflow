@@ -3232,7 +3232,8 @@ pub enum MachineCredentialCommand {
 #[derive(Debug, Subcommand)]
 pub enum AccountCommand {
     /// Which login each provider's next launch takes, and why. Exits 2 when
-    /// none can launch now, 3 when a login is needed
+    /// none can launch now, 3 when a login is needed. Use -a claude:<model>
+    /// to check that model; otherwise any scoped hold blocks the login
     Next {
         #[arg(long, conflicts_with = "default")]
         repo: Option<String>,
@@ -3300,6 +3301,7 @@ pub enum AccountCommand {
         #[arg(long)]
         clear_paid_through: bool,
         #[arg(long)]
+        /// Release all recorded account and window holds, retaining usage readings
         clear_cooldown: bool,
         /// Replace the ordered browser choices (repeat for fallback profiles)
         #[arg(long, conflicts_with = "clear_chrome_profiles")]

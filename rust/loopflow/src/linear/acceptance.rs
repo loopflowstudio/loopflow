@@ -245,7 +245,7 @@ pub(crate) fn accept_linear_inventory_in(
         .find(|id| !projects.iter().any(|project| &project.id == *id))
     {
         return Err(StoreError::InvalidData(format!(
-            "Project {missing} omitted without membership removal evidence; refresh planning"
+            "Project {missing} is missing from its Initiative in Linear; add it back, then run `lf wave sync`"
         )));
     }
     for project in projects {
@@ -328,39 +328,28 @@ fn validate_project_membership(
     // recorded even when rejecting the incoming facts rolls that transaction back.
     let previous = conn
         .query_row(
-            "SELECT revision,initiative_ids,
-                    team_ids
-             FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3",
+            "SELECT revision,initiative_ids FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3",
             params![repo, "linear", project.id],
-            |row| {
-                Ok((
-                    row.get::<_, Option<String>>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            },
+            |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, String>(1)?)),
         )
         .optional()?;
-    let Some((previous_revision, initiatives, teams)) = previous else {
+    let Some((previous_revision, initiatives)) = previous else {
         return Ok(());
     };
     let revision = revision_nanos(project.revision.as_deref())?;
     if revision.is_some() && revision < revision_nanos(previous_revision.as_deref())? {
         return Ok(());
     }
-    // A Project revision does not order its separate Initiative/Team relationships.
-    // Preserve the facts, but do not let managed readers use disputed ownership.
+    // Teams follow the later read in `put_project`. The Initiative decides which
+    // Wave plans the Project, so a move is held until Linear moves it back.
     if !same_ids(
         &project.initiative_ids,
         &serde_json::from_str::<Vec<String>>(&initiatives)?,
-    ) || !same_ids(
-        &project.team_ids,
-        &serde_json::from_str::<Vec<String>>(&teams)?,
     ) {
         conn.execute("UPDATE pm_projects SET membership_unresolved=1 WHERE repo=?1 AND provider=?2 AND id=?3",
             params![repo, "linear", project.id])?;
         return Err(StoreError::InvalidData(format!(
-            "Project {} membership changed without relationship ordering evidence",
+            "Project {} moved to another Initiative in Linear; move it back, then run `lf wave sync`",
             project.id
         )));
     }
@@ -392,77 +381,27 @@ fn put_project(
         ":description": &project.description,
         ":revision": &project.revision,
     };
-    let pending_name_cutover: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM pm_project_name_cutover
-         WHERE repo=?1 AND provider=?2 AND id=?3 AND converted_at IS NULL)",
-        params![repo, "linear", project.id],
-        |row| row.get(0),
-    )?;
+    let revision = revision_nanos(project.revision.as_deref())?;
     let previous = conn
         .query_row(
-            "SELECT revision,observed_at,archived,
-            ((slug IS NOT NULL AND slug IS NOT :slug) OR (name IS NOT NULL AND name IS NOT :name)),
-            (summary IS NOT NULL AND summary IS NOT :summary) OR (status IS NOT NULL AND status IS NOT :status)
-            OR (description_revision IS revision AND description IS NOT NULL
-                AND :description IS NOT NULL AND description IS NOT :description),krs,metric_targets
-         FROM pm_projects WHERE repo=:repo AND provider=:provider AND id=:id",
-            named_params! { ":repo": repo, ":provider": "linear", ":id": &project.id,
-            ":slug": &project.slug, ":name": &project.name, ":summary": &project.summary,
-            ":status": &status, ":description": &project.description },
+            "SELECT revision,observed_at,archived FROM pm_projects
+             WHERE repo=?1 AND provider=?2 AND id=?3",
+            params![repo, "linear", project.id],
             |row| {
                 Ok((
                     row.get::<_, Option<String>>(0)?,
                     row.get::<_, i64>(1)?,
                     row.get::<_, bool>(2)?,
-                    row.get::<_, bool>(3)?,
-                    row.get::<_, bool>(4)?,
-                    row.get::<_, Option<String>>(5)?,
-                    row.get::<_, Option<String>>(6)?,
                 ))
             },
         )
         .optional()?;
-    let revision = revision_nanos(project.revision.as_deref())?;
-    if let Some((
-        previous,
-        acquired,
-        archived,
-        name_changed,
-        content_changed,
-        previous_krs,
-        previous_targets,
-    )) = previous
-    {
-        if archived {
-            return Ok(());
-        }
-        let previous_revision = revision_nanos(previous.as_deref())?;
-        if revision.is_some() && revision < previous_revision {
-            return Ok(());
-        }
-        if revision.is_none() || revision == previous_revision {
-            let criteria_changed = previous_krs
-                .map(|value| serde_json::from_str::<Vec<crate::work::project::ProjectKR>>(&value))
-                .transpose()?
-                .is_some_and(|value| value != project.krs)
-                || previous_targets
-                    .map(|value| {
-                        serde_json::from_str::<Vec<crate::work::wave::metrics::MetricTarget>>(
-                            &value,
-                        )
-                    })
-                    .transpose()?
-                    .is_some_and(|value| value != project.metric_targets);
-            if content_changed || criteria_changed || (name_changed && !pending_name_cutover) {
-                return Err(StoreError::InvalidData(format!(
-                    "unordered or conflicting Project facts for {}; refresh planning",
-                    project.id
-                )));
-            }
-        }
-        if revision.is_none() && previous_revision.is_some()
-            || revision == previous_revision && observed_at < acquired
-        {
+    // A write here passed `validate_project_membership`, so the stored
+    // Initiative matches and any held membership is resolved.
+    if let Some((previous, acquired, archived)) = previous {
+        // Reads order like issues: by revision, then by read time. A read
+        // without a revision sorts below one that has it.
+        if archived || (revision, observed_at) < (revision_nanos(previous.as_deref())?, acquired) {
             return Ok(());
         }
     }
@@ -472,19 +411,12 @@ fn put_project(
              CASE WHEN :description IS NOT NULL THEN :revision END,
              CASE WHEN :description IS NOT NULL THEN :observed_at END)
          ON CONFLICT(repo,provider,id) DO UPDATE SET
-         observed_at=excluded.observed_at,revision=excluded.revision,
+         observed_at=excluded.observed_at,revision=excluded.revision,membership_unresolved=0,
          slug=excluded.slug,name=excluded.name,summary=excluded.summary,status=excluded.status,krs=excluded.krs,metric_targets=excluded.metric_targets,initiative_ids=excluded.initiative_ids,team_ids=excluded.team_ids,
          description=COALESCE(excluded.description,pm_projects.description),
          description_revision=CASE WHEN excluded.description IS NOT NULL THEN excluded.revision ELSE description_revision END,
          description_observed_at=COALESCE(excluded.description_observed_at,description_observed_at)", values,
     )?;
-    if pending_name_cutover {
-        conn.execute(
-            "UPDATE pm_project_name_cutover SET converted_at=?4
-             WHERE repo=?1 AND provider=?2 AND id=?3 AND converted_at IS NULL",
-            params![repo, "linear", project.id, observed_at],
-        )?;
-    }
     Ok(())
 }
 
@@ -505,43 +437,31 @@ pub(crate) fn put_item(
     if change.is_some_and(|(floor, removed)| removed || revision < floor) {
         return Ok(false);
     }
-    let previous = conn.query_row(
-        "SELECT revision,observed_at,identifier IS NOT :identifier OR claimed_project_id IS NOT :project_id OR url IS NOT :url OR name IS NOT :name OR description IS NOT :description OR completed IS NOT :completed OR state IS NOT :state OR team_id IS NOT :team_id OR assignee IS NOT :assignee OR (branch_name IS NOT NULL AND branch_name IS NOT :branch_name) OR (completed_at_observed AND completed_at IS NOT :completed_at) OR (due_date_observed AND due_date IS NOT :due_date),
-            state IS NOT :state OR completed IS NOT :completed
-         FROM pm_items WHERE repo=:repo AND provider=:provider AND id=:id",
-        named_params! { ":repo": repo, ":provider": "linear", ":id": &item.id,
-            ":identifier": &item.identifier,
-            ":project_id": &item.project_id,
-            ":branch_name": &item.branch_name,
-            ":url": &item.url,
-            ":name": &item.name,
-            ":description": &item.description,
-            ":completed": &item.completed,
-            ":completed_at": &item.completed_at,
-            ":due_date": &item.due_date,
-            ":state": &item.state,
-            ":team_id": &item.team_id,
-            ":assignee": &item.assignee,
-        },
-        |row| Ok((row.get::<_,Option<String>>(0)?,row.get::<_,i64>(1)?,
-            row.get::<_,bool>(2)?,row.get::<_,bool>(3)?)),
-    ).optional()?;
+    let previous = conn
+        .query_row(
+            "SELECT revision,observed_at,state IS NOT :state OR completed IS NOT :completed
+             FROM pm_items WHERE repo=:repo AND provider=:provider AND id=:id",
+            named_params! { ":repo": repo, ":provider": "linear", ":id": &item.id,
+                ":completed": &item.completed,
+                ":state": &item.state,
+            },
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, bool>(2)?,
+                ))
+            },
+        )
+        .optional()?;
     let mut status_changed = previous.is_none();
-    if let Some((previous, acquired, conflicting, changed)) = previous {
-        let previous_revision = revision_nanos(previous.as_deref())?;
-        if revision < previous_revision {
+    if let Some((previous, acquired, changed)) = previous {
+        // Linear changes some fields without moving `updatedAt`, so one revision
+        // can carry different facts: reads order by revision, then by read time.
+        if (revision, observed_at) < (revision_nanos(previous.as_deref())?, acquired) {
             return Ok(false);
         }
-        if revision == previous_revision && conflicting {
-            return Err(StoreError::InvalidData(format!(
-                "conflicting planning facts at the same provider revision for {}; refresh planning",
-                item.identifier
-            )));
-        }
-        status_changed = revision > previous_revision && changed;
-        if revision == previous_revision && observed_at < acquired {
-            return Ok(false);
-        }
+        status_changed = changed;
     }
     conn.execute(
         "INSERT INTO pm_items(repo,provider,id,observed_at,identifier,project_id,revision,branch_name,url,name,description,rank,completed,completed_at,due_date,state,team_id,assignee,claimed_project_id,completed_at_observed,due_date_observed,project_id_observed,assignee_observed)
@@ -1353,12 +1273,74 @@ mod tests {
     }
 
     #[test]
-    fn project_name_cutover_retains_both_histories_and_rejects_later_conflicts() {
-        // "Customer requests" represents both a projected prefixed name and a
-        // verbatim plain provider name. The same input must accept both histories.
-        // An already exact prefixed name also consumes the exception once.
+    fn team_change_at_the_stored_revision_follows_linear() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let wave = crate::work::wave::Wave::new(WaveId::new(), "product".into(), "/repo".into());
+        store.create_wave(&wave).unwrap();
+        let mut snapshot: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/dto/task_history_planning.json"
+        ))
+        .unwrap();
+        snapshot.projects.truncate(1);
+        snapshot
+            .items
+            .retain(|item| item.project_id.as_deref() == Some(&snapshot.projects[0].id));
+        snapshot.items.truncate(1);
+        let mut project = snapshot.projects[0].clone();
+        let issue = snapshot.items[0].clone();
+        store
+            .seed_inventory(&crate::test_linear_input::InventoryFixture {
+                wave_id: wave.id().clone(),
+                provider: "linear".into(),
+                initiative: project.initiative_ids[0].clone(),
+                synced_at: 42,
+                snapshot,
+            })
+            .unwrap();
+        let task = store.task_by_issue(&issue.id).unwrap().unwrap();
+        let state = || store.task_acquisition(&task.id).unwrap().state;
+        let teams = || -> String {
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .query_row("SELECT team_ids FROM pm_projects", [], |row| row.get(0))
+                .unwrap()
+        };
+
+        // Linear adds a Team without moving the Project's `updatedAt`.
+        project.team_ids.push("another-team".into());
+        super::accept_linear_issue_in(&store, "/repo", &issue, Some(&project), 43, None).unwrap();
+        assert_eq!(teams(), serde_json::to_string(&project.team_ids).unwrap());
+        assert_eq!(state(), PlanningState::Available);
+
+        // An Initiative move is held, and released once Linear moves it back.
+        let initiative = project.initiative_ids[0].clone();
+        project.initiative_ids = vec!["another-initiative".into()];
+        let error =
+            super::accept_linear_issue_in(&store, "/repo", &issue, Some(&project), 44, None)
+                .unwrap_err()
+                .to_string();
+        assert!(
+            error.contains(
+                "moved to another Initiative in Linear; move it back, then run `lf wave sync`"
+            ),
+            "{error}"
+        );
+        assert_eq!(state(), PlanningState::Invalid);
+        project.initiative_ids = vec![initiative];
+        super::accept_linear_issue_in(&store, "/repo", &issue, Some(&project), 45, None).unwrap();
+        assert_eq!(state(), PlanningState::Available);
+    }
+
+    #[test]
+    fn project_reads_at_one_revision_keep_the_later_one() {
+        // "Customer requests" stands for both a projected prefixed name and a
+        // verbatim plain provider name; Linear may re-render either at the same
+        // `updatedAt`.
         for historical_name in ["Customer requests", "Product — Customer requests"] {
-            let mut conn = Connection::open_in_memory().unwrap();
+            let conn = Connection::open_in_memory().unwrap();
             crate::store::migrations::apply_before_migration(&conn, "planning_peers");
             let snapshot: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
                 "../../../../tests/fixtures/dto/task_history_planning.json"
@@ -1368,68 +1350,56 @@ mod tests {
             project.revision = Some("2026-10-05T12:00:00Z".into());
             project.name = historical_name.into();
             project.slug = crate::linear::project_slug(historical_name);
-            let original = serde_json::to_string(&project).unwrap();
             conn.execute(
                 "INSERT INTO pm_projects(repo,provider,id,observed_at,body)
                 VALUES('/repo','linear',?1,10,?2)",
-                params![project.id, original],
+                params![project.id, serde_json::to_string(&project).unwrap()],
             )
             .unwrap();
-            conn.execute(
-                "INSERT INTO pm_project_name_cutover(repo,provider,id,body,observed_at,archived,membership_unresolved)
-                 VALUES('/repo','linear',?1,?2,10,0,0)",
-                params![project.id, original],
-            ).unwrap();
             conn.execute_batch(&crate::store::migrations::migration_section_sql(
                 "planning_peers",
             ))
             .unwrap();
-            project.name = "Product — Customer requests".into();
-            project.slug = crate::linear::project_slug(&project.name);
-
-            let mut conflict = project.clone();
-            conflict.summary.push_str("conflict");
-            assert!(super::put_project(&conn, "/repo", 11, &conflict).is_err());
-            super::put_project(&conn, "/repo", 9, &project).unwrap();
-            let retained: String = conn
-                .query_row("SELECT name FROM pm_projects", [], |r| r.get(0))
-                .unwrap();
-            assert_eq!(retained, historical_name);
-            // Failed outer work cannot spend the one-time exception.
-            {
-                let tx = conn.transaction().unwrap();
-                super::put_project(&tx, "/repo", 11, &project).unwrap();
-            }
-            let pending: Option<i64> = conn
-                .query_row(
-                    "SELECT converted_at FROM pm_project_name_cutover",
-                    [],
-                    |r| r.get(0),
-                )
-                .unwrap();
-            assert_eq!(pending, None);
-            let tx = conn.transaction().unwrap();
-            super::put_project(&tx, "/repo", 12, &project).unwrap();
-            tx.commit().unwrap();
-            let evidence: (String, i64, Option<i64>) = conn
-                .query_row(
-                    "SELECT body,observed_at,converted_at FROM pm_project_name_cutover",
+            let stored = |conn: &Connection| -> (String, String, Option<String>) {
+                conn.query_row(
+                    "SELECT name,summary,description FROM pm_projects",
                     [],
                     |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
                 )
-                .unwrap();
-            assert_eq!(evidence, (original, 10, Some(12)));
-            let accepted = project.name.clone();
+                .unwrap()
+            };
+            let original = stored(&conn);
+
+            project.name = "Product — Customer requests".into();
+            project.slug = crate::linear::project_slug(&project.name);
+            project.summary.push_str(" re-rendered");
+            super::put_project(&conn, "/repo", 9, &project).unwrap();
+            assert_eq!(stored(&conn), original, "an earlier read is ignored");
+
+            project.description = None;
+            super::put_project(&conn, "/repo", 11, &project).unwrap();
+            assert_eq!(
+                stored(&conn),
+                (
+                    project.name.clone(),
+                    project.summary.clone(),
+                    original.2.clone()
+                ),
+                "a later read wins; a read without a description keeps the stored one"
+            );
+
             project.name = "Another name".into();
-            assert!(super::put_project(&conn, "/repo", 13, &project).is_err());
-            let retained: String = conn
-                .query_row("SELECT name FROM pm_projects", [], |r| r.get(0))
-                .unwrap();
-            assert_eq!(retained, accepted);
-            project.id = "post-cutover".into();
+            super::put_project(&conn, "/repo", 12, &project).unwrap();
+            assert_eq!(stored(&conn).0, "Another name");
+
+            project.revision = None;
+            project.name = "Unrevisioned".into();
             super::put_project(&conn, "/repo", 13, &project).unwrap();
-            project.name = "Conflict on a new record".into();
-            assert!(super::put_project(&conn, "/repo", 14, &project).is_err());
+            assert_eq!(
+                stored(&conn).0,
+                "Another name",
+                "a revisioned read outranks one without"
+            );
         }
     }
 
@@ -1492,7 +1462,7 @@ mod tests {
     }
 
     #[test]
-    fn task_history_enriches_only_absent_completion_dates_at_equal_revision() {
+    fn task_history_enriches_absent_completion_dates_and_follows_later_reads() {
         let conn = Connection::open_in_memory().unwrap();
         crate::store::migrations::apply_before_migration(&conn, "planning_peers");
         let planning: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
@@ -1522,17 +1492,21 @@ mod tests {
             .unwrap();
         assert_eq!(observed, item.completed_at);
         item.completed_at = None;
-        assert!(super::put_item(&conn, "/repo", 3, &item).is_err());
+        assert!(super::put_item(&conn, "/repo", 3, &item).unwrap());
         item.revision = Some("2026-10-01T12:00:00Z".into());
         assert!(!super::put_item(&conn, "/repo", 4, &item).unwrap());
         item.revision = Some("2026-10-03T12:00:00Z".into());
         assert!(super::put_item(&conn, "/repo", 5, &item).unwrap());
         item.completed_at = Some("2026-10-01T12:00:00Z".into());
-        assert!(super::put_item(&conn, "/repo", 6, &item).is_err());
+        assert!(super::put_item(&conn, "/repo", 6, &item).unwrap());
+        let observed: Option<String> = conn
+            .query_row("SELECT completed_at FROM pm_items", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(observed, item.completed_at);
     }
 
     #[test]
-    fn due_dates_enrich_absent_history_but_preserve_observed_null_at_equal_revision() {
+    fn due_dates_enrich_absent_history_and_follow_later_reads_at_equal_revision() {
         let conn = Connection::open_in_memory().unwrap();
         crate::store::migrations::apply_before_migration(&conn, "planning_peers");
         let planning: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
@@ -1555,10 +1529,39 @@ mod tests {
             .unwrap();
         assert_eq!(observed, item.due_date);
         item.due_date = None;
-        assert!(super::put_item(&conn, "/repo", 3, &item).is_err());
-        item.id = "observed-null".into();
-        assert!(super::put_item(&conn, "/repo", 4, &item).unwrap());
-        item.due_date = Some("2026-10-09".into());
-        assert!(super::put_item(&conn, "/repo", 5, &item).is_err());
+        assert!(super::put_item(&conn, "/repo", 3, &item).unwrap());
+        let observed: Option<String> = conn
+            .query_row("SELECT due_date FROM pm_items", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(observed, None);
+    }
+
+    #[test]
+    fn shortened_branch_name_at_the_same_revision_replaces_the_stored_one() {
+        // Between 2026-11-06 and 2026-11-08 Linear cut `branchName` to 60
+        // characters without moving `updatedAt`; LOO-403's read then wedged.
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let conn = store.conn.lock().unwrap();
+        let planning: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/dto/task_history_planning.json"
+        ))
+        .unwrap();
+        let mut item = planning.items[0].clone();
+        let long = "jack/loo-403-make-the-mac-apps-shortcuts-findable-and-put-commands-in-the";
+        item.branch_name = Some(long.into());
+        assert!(super::put_item(&conn, "/repo", 1, &item).unwrap());
+        let branch = || -> Option<String> {
+            conn.query_row("SELECT branch_name FROM pm_items", [], |row| row.get(0))
+                .unwrap()
+        };
+        item.branch_name = Some("jack/loo-403-make-the-mac-apps-shortcuts-findable-and-put".into());
+        assert!(super::put_item(&conn, "/repo", 2, &item).unwrap());
+        assert_eq!(branch(), item.branch_name);
+        // A read that started before the stored one cannot bring the old name back.
+        let mut delayed = item.clone();
+        delayed.branch_name = Some(long.into());
+        assert!(!super::put_item(&conn, "/repo", 1, &delayed).unwrap());
+        assert_eq!(branch(), item.branch_name);
     }
 }

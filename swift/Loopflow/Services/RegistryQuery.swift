@@ -93,7 +93,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     /// Every login's state on this Machine; `cached` skips the providers.
     case accountList(target: String?, cached: Bool)
     /// How the repository selects an account for each provider.
-    case accountNext(directory: String, repo: String?, default: Bool)
+    case accountNext(directory: String, repo: String?, default: Bool, agent: String?)
     /// The commands, skills, graphs and Waves under `path`, as `lf list` shows them.
     case skillList(directory: String, path: [String])
     /// The branch's check report as the provider prints it, with its state.
@@ -199,8 +199,8 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         case .accountList(let target, let cached):
             return ["account"] + argument(nil, target) + (cached ? ["--cached"] : [])
                 + ["--json"]
-        case .accountNext(_, let repo, let `default`):
-            return ["account", "next"] + argument("--repo", repo) + (`default` ? ["--default"] : []) + ["--json"]
+        case .accountNext(_, let repo, let `default`, let agent):
+            return ["account", "next"] + argument("--agent", agent) + argument("--repo", repo) + (`default` ? ["--default"] : []) + ["--json"]
         case .skillList(_, let path):
             return ["list"] + path + ["--json"]
         case .prChecks(_, let required):
@@ -291,8 +291,8 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             TaggedFields("repo.ci", ["since": since, "wave": wave, "repo": repo])
         case .accountList(let target, let cached):
             TaggedFields("account.list", ["target": target, "cached": cached])
-        case .accountNext(let directory, let repo, let `default`):
-            TaggedFields("account.next", ["directory": directory, "repo": repo, "default": `default`])
+        case .accountNext(let directory, let repo, let `default`, let agent):
+            TaggedFields("account.next", ["directory": directory, "repo": repo, "default": `default`, "agent": agent])
         case .skillList(let directory, let path): TaggedFields("skill.list", ["directory": directory, "path": path])
         case .prChecks(let directory, let required):
             TaggedFields("pr.checks", ["directory": directory, "required": required])

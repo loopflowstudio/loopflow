@@ -66,6 +66,40 @@
       ],
       "type": "object"
     },
+    "AccountLaunch": {
+      "additionalProperties": false,
+      "properties": {
+        "blockers": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "eligible": {
+          "type": "boolean"
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "out_until": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "model",
+        "eligible",
+        "out_until",
+        "blockers"
+      ],
+      "type": "object"
+    },
     "AccountLimitRow": {
       "description": "A stored window observation for one managed account.",
       "properties": {
@@ -260,6 +294,12 @@
           "description": "Held there by `lf account use`.",
           "type": "boolean"
         },
+        "launches": {
+          "items": {
+            "$ref": "#/$defs/AccountLaunch"
+          },
+          "type": "array"
+        },
         "login": {
           "type": [
             "string",
@@ -335,6 +375,7 @@
         "cooldown_until",
         "expires_at",
         "windows",
+        "launches",
         "verified_windows",
         "reset_credits",
         "active",
@@ -5368,6 +5409,12 @@
             "null"
           ]
         },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "outcome": {
           "$ref": "#/$defs/NextOutcome"
         },
@@ -5391,6 +5438,7 @@
       },
       "required": [
         "provider",
+        "model",
         "scope",
         "outcome",
         "account_id",
@@ -8729,6 +8777,38 @@
                 "diagnostic": null,
                 "expires_at": 1794614400,
                 "held": false,
+                "launches": [
+                  {
+                    "blockers": [],
+                    "eligible": true,
+                    "model": "fable",
+                    "out_until": null
+                  },
+                  {
+                    "blockers": [],
+                    "eligible": true,
+                    "model": "opus",
+                    "out_until": null
+                  },
+                  {
+                    "blockers": [],
+                    "eligible": true,
+                    "model": "sonnet",
+                    "out_until": null
+                  },
+                  {
+                    "blockers": [],
+                    "eligible": true,
+                    "model": "haiku",
+                    "out_until": null
+                  },
+                  {
+                    "blockers": [],
+                    "eligible": true,
+                    "model": null,
+                    "out_until": null
+                  }
+                ],
                 "login": "maya@example.com",
                 "observed_plan": "max",
                 "provider": "claude",
@@ -8760,9 +8840,10 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf --cwd <directory> account next [--repo <repo>] [--default]\n--json`: how the repository selects an account for each provider.",
+          "description": "`lf --cwd <directory> account next [-a <harness>:<model>] [--repo <repo>] [--default]\n--json`: how the repository selects an account for each provider.",
           "examples": [
             {
+              "agent": null,
               "default": false,
               "directory": "/repo",
               "kind": "account.next",
@@ -8770,6 +8851,12 @@
             }
           ],
           "properties": {
+            "agent": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "default": {
               "type": "boolean"
             },
@@ -8791,7 +8878,8 @@
             "kind",
             "directory",
             "repo",
-            "default"
+            "default",
+            "agent"
           ],
           "type": "object",
           "x-result": {
@@ -8804,6 +8892,7 @@
             {
               "account_id": "engineering",
               "login": "engineering@example.com",
+              "model": null,
               "outcome": "ready",
               "provider": "claude",
               "reason": "the only login ready for this launch",
@@ -8813,6 +8902,7 @@
             {
               "account_id": "manabot",
               "login": "manabot-eng@example.com",
+              "model": null,
               "outcome": "ready",
               "provider": "codex",
               "reason": "this repository's order names only it",

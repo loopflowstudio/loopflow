@@ -319,15 +319,6 @@ fn an_unprinted_claim_hides_the_steer_then_lapses() {
         read(&store, &adapter, "native"),
         std::slice::from_ref(&steer)
     );
-    // A claim handed back is unread at once.
-    store
-        .save_session_steer("session", "Named author", "And another")
-        .unwrap();
-    let (claimed, _) = store.claim_session_steers(&adapter, "native").unwrap();
-    store
-        .release_session_steers("session", &[claimed[0].id.clone()])
-        .unwrap();
-    assert_eq!(store.session_steers("session", 0, 32).unwrap().pending, 1);
 }
 
 #[test]

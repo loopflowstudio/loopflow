@@ -159,14 +159,11 @@ pub(crate) fn claim(
         if steers.is_empty() {
             return Ok(None);
         }
-        let ids: Vec<_> = steers.iter().map(|steer| steer.id.clone()).collect();
-        match render(repo, &adapter.session, &steers, remaining) {
-            Ok(text) => Ok(Some(ClaimedSteers { steers: ids, text })),
-            Err(error) => {
-                store.release_session_steers(&adapter.session, &ids)?;
-                Err(crate::store::StoreError::InvalidData(error.to_string()))
-            }
-        }
+        // A render that fails leaves its claim to lapse, like a hook that died.
+        let text = render(repo, &adapter.session, &steers, remaining)
+            .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))?;
+        let steers = steers.into_iter().map(|steer| steer.id).collect();
+        Ok(Some(ClaimedSteers { steers, text }))
     })
 }
 

@@ -454,14 +454,14 @@ mod tests {
             // compares against it.
             crate::harness::task_updates::write(&store, "hooked").unwrap();
             let reading = store.task_update_reading(&task).unwrap();
-            assert!(store
+            store
                 .save_task_update(
                     &task,
                     reading.as_deref(),
                     reading.as_deref().unwrap(),
                     &[("update:-:fixture".into(), "Task update".into())],
                 )
-                .unwrap());
+                .unwrap();
             store.baseline_task_updates("hooked").unwrap();
             let (claimed, _) = store.claim_session_steers(&adapter, "thread").unwrap();
             assert_eq!(claimed.len(), 1);

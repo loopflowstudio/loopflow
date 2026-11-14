@@ -446,14 +446,6 @@ fn unread() -> String {
     )
 }
 
-fn undelivered(conn: &Connection, session: &str) -> StoreResult<bool> {
-    Ok(
-        conn.query_row(&format!("SELECT EXISTS({})", unread()), [session], |row| {
-            row.get(0)
-        })?,
-    )
-}
-
 fn pending_count(conn: &Connection, session: &str) -> StoreResult<i64> {
     Ok(conn.query_row(
         &format!("SELECT count(*) FROM ({})", unread()),
@@ -528,7 +520,11 @@ impl SqliteStore {
     /// nearly always the answer is no, and it takes no write lock.
     pub(crate) fn has_undelivered_steers(&self, session: &str) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        undelivered(&conn, session)
+        Ok(
+            conn.query_row(&format!("SELECT EXISTS({})", unread()), [session], |row| {
+                row.get(0)
+            })?,
+        )
     }
 
     /// Every steer that applies to the Session or that it read, oldest first,
@@ -615,15 +611,15 @@ impl SqliteStore {
     }
 
     /// Save the Task's new reading and the steers that report what moved
-    /// since `expected`, each as `(source, text)`. False when another reader
-    /// wrote first: its steers already say it.
+    /// since `expected`, each as `(source, text)`. Nothing when another
+    /// reader wrote first: its steers already say it.
     pub(crate) fn save_task_update(
         &self,
         task: &crate::durable::TaskId,
         expected: Option<&str>,
         observation: &str,
         updates: &[(String, String)],
-    ) -> StoreResult<bool> {
+    ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let current: Option<String> = tx
@@ -634,7 +630,7 @@ impl SqliteStore {
             )
             .optional()?;
         if current.as_deref() != expected {
-            return Ok(false);
+            return Ok(());
         }
         tx.execute(
             "INSERT INTO task_update_readings(task_id,observation) VALUES(?1,?2)
@@ -652,7 +648,7 @@ impl SqliteStore {
             )?;
         }
         tx.commit()?;
-        Ok(true)
+        Ok(())
     }
 
     /// A conversation that just started has its Tasks' history in its prompt:
@@ -679,18 +675,14 @@ impl SqliteStore {
     /// Claim up to eight of the Session's unread steers for the caller to
     /// print, oldest first, with how many more wait behind them. A second hook
     /// at the same moment finds them claimed. The caller stamps them with
-    /// [`Self::deliver_session_steers`] once printed, or hands them back with
-    /// [`Self::release_session_steers`].
+    /// [`Self::deliver_session_steers`] once printed; an unstamped claim
+    /// lapses.
     pub(crate) fn claim_session_steers(
         &self,
         adapter: &SteerAdapter,
         provider_thread: &str,
     ) -> StoreResult<(Vec<Steer>, usize)> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        // Nothing to claim at most boundaries: answer without the write lock.
-        if !undelivered(&conn, &adapter.session)? {
-            return Ok((Vec::new(), 0));
-        }
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let owns: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM agent_sessions s
@@ -732,25 +724,6 @@ impl SqliteStore {
         for steer in steers {
             tx.execute(
                 "UPDATE steer_delivered SET delivered_at=unixepoch()
-                WHERE session_id=?1 AND steer_id=?2 AND delivered_at IS NULL",
-                params![session, steer],
-            )?;
-        }
-        tx.commit()?;
-        Ok(())
-    }
-
-    /// The caller could not print these claimed steers: they are unread again.
-    pub(crate) fn release_session_steers(
-        &self,
-        session: &str,
-        steers: &[crate::id::SteerId],
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        for steer in steers {
-            tx.execute(
-                "DELETE FROM steer_delivered
                 WHERE session_id=?1 AND steer_id=?2 AND delivered_at IS NULL",
                 params![session, steer],
             )?;

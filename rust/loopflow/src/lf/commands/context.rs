@@ -279,7 +279,7 @@ pub fn emit_block(
         ContextMoment::Steer => None,
         other => anyhow::bail!("{other:?} is not a turn or tool boundary"),
     };
-    let adapter = |name: &str| -> Result<Option<crate::steer::SteerAdapter>> {
+    let read_adapter = |name: &str| -> Result<Option<crate::steer::SteerAdapter>> {
         Ok(std::env::var(name)
             .ok()
             .map(|value| serde_json::from_str(&value))
@@ -287,10 +287,10 @@ pub fn emit_block(
     };
     // The capability of a launch whose boundaries the server records, or of
     // one that reports to no server.
-    let held = adapter(crate::steer::PROVIDER_CONTEXT_ENV)?;
-    let adapter = match &held {
-        Some(held) => Some(held.clone()),
-        None => adapter(crate::steer::BARE_STEER_ENV)?,
+    let held = read_adapter(crate::steer::PROVIDER_CONTEXT_ENV)?;
+    let adapter = match held.clone() {
+        Some(held) => Some(held),
+        None => read_adapter(crate::steer::BARE_STEER_ENV)?,
     };
     // Mark the check before reading unread steers, so one saved during it is
     // newer and the next tool boundary checks again.
@@ -369,8 +369,8 @@ struct News {
 }
 
 /// Claim the Session's unread steers for the conversation `thread`, after
-/// writing what changed on its Tasks as steers. `unrecorded`: no server recorded this boundary, so a provider
-/// start selects its conversation here.
+/// writing what changed on its Tasks as steers. `unrecorded`: no server
+/// recorded this boundary, so a provider start selects its conversation here.
 fn read_news(
     delivery: &crate::context_block::ContextDelivery,
     adapter: &crate::steer::SteerAdapter,
@@ -393,8 +393,7 @@ fn read_news(
     if unrecorded && matches!(boundary, NativeBoundary::Select { .. }) {
         store.with_provider_context(adapter, thread, boundary, || Ok(()))?;
     }
-    let started =
-        event == "SessionStart" && input["source"].as_str().unwrap_or("startup") == "startup";
+    let started = matches!(boundary, NativeBoundary::Select { source: "startup" });
     if let Err(error) =
         crate::harness::task_updates::write(&store, &adapter.session).and_then(|()| match started {
             true => store.baseline_task_updates(&adapter.session),

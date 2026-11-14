@@ -205,8 +205,7 @@ fn write_task(store: &SqliteStore, task: &TaskId) -> StoreResult<()> {
         }
     }
     // Another reader that wrote first reported the same change.
-    store.save_task_update(task, stored.as_deref(), &reading, &updates)?;
-    Ok(())
+    store.save_task_update(task, stored.as_deref(), &reading, &updates)
 }
 
 fn position_text(position: Option<&TaskGraphPosition>) -> String {
@@ -352,12 +351,12 @@ mod tests {
         assert!(quiet(&store), "baseline");
         let reading = store.task_update_reading(&task).unwrap();
         let update = [("update:-:fixture".to_string(), "Run failed".to_string())];
-        assert!(store
+        store
             .save_task_update(&task, reading.as_deref(), "{\"first\":1}", &update)
-            .unwrap());
-        assert!(!store
+            .unwrap();
+        store
             .save_task_update(&task, reading.as_deref(), "{\"second\":1}", &update)
-            .unwrap());
+            .unwrap();
         assert_eq!(
             store.task_update_reading(&task).unwrap().as_deref(),
             Some("{\"first\":1}")

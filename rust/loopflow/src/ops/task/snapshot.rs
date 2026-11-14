@@ -109,14 +109,21 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         None,
     );
     let provider = agent.ok().map(|agent| parse_agent(&agent).0);
-    // A Task's worktree is its checkout on this Machine.
+    let machine_id = store
+        .task_checkout(&task.id)
+        .await
+        .map_err(task_error)?
+        .and_then(|row| row.machine_id);
     let local_machine = store.local_machine().await.map_err(task_error)?;
-    let machine_id = task.worktree.is_some().then(|| local_machine.id.clone());
     let worktree = task.worktree.as_ref().map(|path| {
-        crate::git::worktree_root(path)
-            .ok()
-            .and_then(|root| root.canonicalize().ok())
-            .unwrap_or_else(|| path.clone())
+        if machine_id.as_ref() == Some(&local_machine.id) {
+            crate::git::worktree_root(path)
+                .ok()
+                .and_then(|root| root.canonicalize().ok())
+                .unwrap_or_else(|| path.clone())
+        } else {
+            path.clone()
+        }
     });
     let completion_pending = completion_pending(store, &task)?;
     let starter = |process: Option<&crate::id::LfProcessId>| {

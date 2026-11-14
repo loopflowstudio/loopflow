@@ -238,7 +238,7 @@ writes! {
         machine: Option<String>,
     } => TaskMoveResult;
     { issue, wave, machine, .. } => match machine {
-        Some(machine) => TaskMoveResult::Machine(Box::new(super::session_move::move_task(issue, machine, None)?)),
+        Some(machine) => TaskMoveResult::Machine(Box::new(super::session_move::move_task(issue, machine)?)),
         None => TaskMoveResult::Wave(Box::new(crate::ops::task::task_move_membership(
             &task_repo(issue)?, issue, wave.as_deref(),
         )?)),

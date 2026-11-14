@@ -100,16 +100,6 @@ impl SqliteStore {
                     "INSERT INTO planning_user(singleton,user_key) VALUES(1,?1)",
                     [key],
                 )?;
-                // Under the Git journal this key names you; a Linear identity wins.
-                tx.execute(
-                    "INSERT OR IGNORE INTO people(id) VALUES('journal:' || ?1)",
-                    [key],
-                )?;
-                tx.execute(
-                    "UPDATE machines SET person_id='journal:' || ?1
-                     WHERE is_local=1 AND person_id IS NULL",
-                    [key],
-                )?;
             }
         }
         tx.commit()?;

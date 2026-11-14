@@ -345,7 +345,15 @@ pub(crate) fn file_context(store: &SqliteStore, issue: &str) -> OpsResult<TaskCh
     let checkout = store
         .task_checkout(&task_id)
         .map_err(|error| task_error(format!("cannot read Task checkout: {error}")))?
-        .ok_or_else(|| task_error(format!("Task {issue:?} is not checked out on this Machine")))?;
+        .ok_or_else(|| task_error(format!("Task {issue:?} has no checkout")))?;
+    let machine = checkout.machine_id.as_ref().ok_or_else(|| {
+        task_error("Task checkout Machine is unknown; its files cannot be located")
+    })?;
+    if *machine != store.local_machine().map_err(task_error)?.id {
+        return Err(task_error(format!(
+            "Task checkout belongs to Machine {machine}; read its files on that Machine"
+        )));
+    }
     Ok(checkout)
 }
 
@@ -1819,12 +1827,19 @@ pub(crate) fn counted_task(
     cwd: &Path,
 ) -> OpsResult<Option<crate::durable::TaskId>> {
     // Branch names are not checkout identity: another clone can use the same
-    // branch.
+    // branch. Never probe a remote Machine's recorded path on this Machine.
     let Ok(root) = crate::git::worktree_root(cwd) else {
         return Ok(None);
     };
+    let local = store.local_machine().map_err(task_error)?.id;
     let mut id = None;
     for checkout in store.task_checkouts().map_err(task_error)? {
+        if checkout.machine_id.as_ref() != Some(&local) {
+            if checkout.machine_id.is_none() && checkout.worktree == root {
+                return Err(task_error("Task checkout Machine is unknown"));
+            }
+            continue;
+        }
         if crate::git::worktree_root(&checkout.worktree).ok().as_ref() == Some(&root) {
             if id.is_some() {
                 return Err(task_error("Multiple Tasks claim this checkout"));

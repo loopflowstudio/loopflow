@@ -373,8 +373,7 @@ impl Workspace {
             .unwrap();
         {
             let conn = store.sqlite.conn.lock().unwrap();
-            conn.execute("INSERT INTO tasks(id,repository_id,issue_identifier,issue_title,issue_description,created_at,updated_at,workspace_slug,planning_completed,planning_completed_at) VALUES(?1,?2,?1,'Retire workspace','',1,1,?3,1,'2026-11-03T00:00:00Z')", params![id.as_str(),repository.as_str(),branch]).unwrap();
-            conn.execute("INSERT INTO task_checkouts(task_id,worktree,branch,base_commit) VALUES(?1,?2,?3,?4)", params![id.as_str(),checkout.to_str().unwrap(),branch,head]).unwrap();
+            conn.execute("INSERT INTO tasks(id,repository_id,issue_identifier,issue_title,issue_description,created_at,updated_at,worktree,branch,workspace_slug,base_commit,planning_completed,planning_completed_at) VALUES(?1,?2,?1,'Retire workspace','',1,1,?3,?5,?5,?4,1,'2026-11-03T00:00:00Z')", params![id.as_str(),repository.as_str(),checkout.to_str().unwrap(),head,branch]).unwrap();
             conn.execute("INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,publication_requested_at,github_number,github_url,github_head_sha,merge_commit,created_at,updated_at) VALUES(?1,?1,1,?3,?3,?2,1,1,'https://example.test/pull/1',?2,?2,1,1)", params![id.as_str(),head,branch]).unwrap();
         }
         let task = store.get_task(&id).await.unwrap().unwrap();
@@ -697,7 +696,7 @@ fn conversation_cleanup_owns_grace_membership_and_work() {
     assert_eq!(request(), Some(false));
     // Work in another conversation holds the Task even through checkout membership.
     let other = store.test_lf_process();
-    conn.execute("INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/repo.task') ON CONFLICT(task_id) DO UPDATE SET worktree=excluded.worktree", [task.as_str()]).unwrap();
+    conn.execute("UPDATE tasks SET worktree='/repo.task',checkout_machine_id=(SELECT id FROM machines WHERE is_local=1)", []).unwrap();
     conn.execute(
         "UPDATE processes SET pid=?2,os_started_at=?3 WHERE id=?1",
         params![other, live.pid, live.started_at],
@@ -762,7 +761,8 @@ fn abandoned_checkout_retries_after_live_work_exits_and_keeps_dirty_files() {
         fixture
             .sql()
             .execute(
-                "UPDATE tasks SET planning_completed=0,planning_completed_at=NULL,abandoned_at=1 WHERE id=?1",
+                "UPDATE tasks SET planning_completed=0,planning_completed_at=NULL,abandoned_at=1,
+            checkout_machine_id=(SELECT id FROM machines WHERE is_local=1) WHERE id=?1",
                 [fixture.task.id.as_str()],
             )
             .unwrap();

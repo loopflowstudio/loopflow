@@ -480,22 +480,19 @@ pub(super) fn map_machine_by_id(
 
 /// Completion and abandonment are durable. An open Task's state follows
 /// what it is doing: its Task run, ship process or a Graph in its work has not
-/// exited. Its carrier is the latest Auto-Ship log entry naming one; the
-/// Auto-Ship approval (`shipped_at`) makes that run shipping.
+/// exited, and the Auto-Ship approval (`shipped_at`) makes that run shipping.
 /// Approved with nothing running, it is idle until recovery restarts its ship process.
 pub(crate) fn task_state_sql(t: &str) -> String {
     format!(
         "CASE WHEN {t}.abandoned_at IS NOT NULL THEN 'abandoned' \
          WHEN {t}.planning_completed=1 THEN 'done' \
-         WHEN EXISTS(SELECT 1 FROM processes lp WHERE lp.completed_at IS NULL AND (lp.id=(SELECT CASE WHEN e.kind IN ('approved','carried') THEN e.lf_process_id END \
-             FROM task_ship_events e WHERE e.task_id={t}.id \
-             AND e.kind IN ('approved','carried','stopped','withdrawn') ORDER BY e.id DESC LIMIT 1) \
+         WHEN EXISTS(SELECT 1 FROM processes lp WHERE lp.completed_at IS NULL AND (lp.id={t}.ship_lf_process_id \
              OR lp.id=(SELECT tg.lf_process_id FROM task_graphs tg WHERE tg.task_id={t}.id))) \
              OR EXISTS({open_processes}) \
          THEN CASE WHEN {t}.shipped_at IS NOT NULL THEN 'shipping' ELSE 'moving' END \
          WHEN {t}.shipped_at IS NULL AND EXISTS(SELECT 1 FROM task_graphs tg WHERE tg.task_id={t}.id \
              AND tg.lf_process_id IS NULL AND tg.step NOT IN ('start','end')) THEN 'active' \
-         WHEN NOT EXISTS(SELECT 1 FROM task_checkouts c WHERE c.task_id={t}.id) THEN 'unstarted' \
+         WHEN {t}.worktree IS NULL THEN 'unstarted' \
          ELSE 'idle' END",
         open_processes = super::task_work::task_open_process_ids(
             &format!("{t}.id"),
@@ -996,14 +993,9 @@ mod durable_store_tests {
         )
         .unwrap();
         let other_task = TaskId::new();
-        conn.execute("INSERT INTO tasks(id,repository_id,project_id,external_issue_id,issue_identifier,created_at)
-            SELECT ?1,repository_id,project_id,?1,?1,1 FROM tasks WHERE id=?2",
+        conn.execute("INSERT INTO tasks(id,repository_id,project_id,external_issue_id,issue_identifier,worktree,created_at)
+            SELECT ?1,repository_id,project_id,?1,?1,'/repo.other',1 FROM tasks WHERE id=?2",
             rusqlite::params![other_task.as_str(), task_id.as_str()]).unwrap();
-        conn.execute(
-            "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/repo.other')",
-            [other_task.as_str()],
-        )
-        .unwrap();
         for (invocation, task_input, wave_input, expected_task, expected_wave) in [
             (None, None, None, None, None),
             (
@@ -1151,7 +1143,7 @@ mod durable_store_tests {
             .lock()
             .unwrap()
             .execute(
-                "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)",
+                "UPDATE tasks SET worktree=?2,checkout_machine_id=(SELECT id FROM machines WHERE is_local=1) WHERE id=?1",
                 rusqlite::params![
                     task.id.as_str(),
                     task.worktree.as_ref().unwrap().to_str().unwrap()
@@ -1513,15 +1505,10 @@ mod durable_store_tests {
         conversation.interactive = true;
         let session = store.create_session(conversation, None).unwrap();
         // The caller already prepared placement when completion arrived.
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute_batch(&format!(
-            "DELETE FROM task_checkouts WHERE task_id='{task_id}';
-             UPDATE tasks SET planning_completed=1,planning_state='completed' WHERE id='{task_id}';"
-        ))
-            .unwrap();
+        store.conn.lock().unwrap().execute(
+            "UPDATE tasks SET worktree=NULL,planning_completed=1,planning_state='completed' WHERE id=?1",
+            [task_id.as_str()],
+        ).unwrap();
         for _ in 0..2 {
             let bound = store
                 .promote_task(&task_id, None, Some(&placement), Some(&session), None, None)

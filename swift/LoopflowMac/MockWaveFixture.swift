@@ -231,7 +231,7 @@ enum MockWaveFixture {
                   "reason": "ready",
                   "updated_at": "2026-07-13T19:00:00Z",
                   "provider": "codex",
-                  "owner": {"person": "Jack Heart", "person_id": null, "machine": {"id": null, "label": null}}
+                  "owner": {"person": "Jack Heart", "machine": {"id": null, "label": null}}
                 },
                 "graph_name":"feature","graph_source":"wave","latest_graph_process":null,"execution":null,"run_control":{"unavailable":null},
                 "ship_control":{"unavailable":null},"shipping":null,

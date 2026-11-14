@@ -262,8 +262,10 @@ async fn read_context(
             if let Some(checkout) = store.task_checkout(&task.id).await? {
                 report.checkout =
                     ContextFact::bound(checkout.worktree.display(), "recorded_checkout");
-                report.execution_machine =
-                    ContextFact::bound(store.local_machine().await?.id, "recorded_checkout");
+                report.execution_machine = match checkout.machine_id {
+                    Some(machine) => ContextFact::bound(machine, "recorded_checkout"),
+                    None => ContextFact::unavailable("Recorded checkout Machine is unknown"),
+                };
             } else {
                 // Local absence is not a distributed negative observation.
                 report.execution_machine = ContextFact::unavailable(

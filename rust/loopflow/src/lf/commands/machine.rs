@@ -199,12 +199,11 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
                         println!("  {scope} {} {part}", default.name);
                     }
                     for task in &listing.tasks {
-                        // A move that has not arrived reads as that, as in `lf task status`.
-                        let place = crate::ops::task_ownership::move_line(&store.sqlite, &task.id)?
-                            .unwrap_or_else(|| {
-                                format!("since {}", crate::lf::output::format_time(task.since))
-                            });
-                        println!("  {} {place}", task.identifier);
+                        println!(
+                            "  {} since {}",
+                            task.identifier,
+                            crate::lf::output::format_time(task.since)
+                        );
                     }
                 }
             }

@@ -885,10 +885,8 @@ pub fn list_tasks(repo: &Path, query: &TaskListArgs, json: bool) -> Result<()> {
                 let id = crate::durable::TaskId::from_raw(task.task.id.clone());
                 let ownership = store.sqlite.task_ownership(&id)?;
                 let mut owner = owner_text(task.runtime.as_ref()).to_string();
-                // A move that has not arrived reads as that, as in `lf task status`.
-                let place = crate::ops::task_ownership::move_line(&store.sqlite, &id)?
-                    .or_else(|| crate::ops::task_ownership::runs_elsewhere(&ownership, &local));
-                if let Some(place) = place {
+                if let Some(place) = crate::ops::task_ownership::runs_elsewhere(&ownership, &local)
+                {
                     owner = format!("{owner} · {place}");
                 }
                 println!("{} · {owner} · {}", task.task.identifier, task.task.name);
@@ -1315,14 +1313,17 @@ async fn roadmap_snapshot(
 /// of a plan does not grow by a statement per Task.
 #[derive(Debug)]
 struct SharedTaskReads {
+    checkouts: Vec<crate::store::sqlite::TaskCheckout>,
     machines: Vec<crate::durable::Machine>,
     local_machine: crate::durable::MachineId,
 }
 
 impl SharedTaskReads {
     async fn read(store: &SharedStore) -> Result<Self> {
+        let checkouts = store.task_checkouts().await?;
         let local_machine = store.local_machine().await?.id;
         Ok(Self {
+            checkouts,
             machines: store.machines().await?,
             local_machine,
         })
@@ -1824,9 +1825,15 @@ async fn snapshot_task_detail(
     let agent = reads.agent(task.worktree.as_deref().unwrap_or(repo), wave, personal);
     let provider = agent.map(|agent| crate::config::parse_agent(&agent).0);
     let runtime = snapshot_task_runtime(&execution, task, status, pending, owner, provider);
+    let machine_id = shared
+        .checkouts
+        .iter()
+        .find(|row| row.task_id == task.id)
+        .and_then(|row| row.machine_id.clone());
     let reference = task_reference(
         facts.issue_urls.get(&task.id).cloned(),
         Some(task),
+        machine_id,
         &shared.machines,
         &shared.local_machine,
     );
@@ -2220,18 +2227,19 @@ fn derive_task_condition(
     }
 }
 
-/// A Task's workspace is its checkout on this Machine, if it has one.
 fn task_reference(
     issue_url: Option<String>,
     task: Option<&Task>,
+    machine_id: Option<crate::durable::MachineId>,
     machines: &[crate::durable::Machine],
     local_machine: &crate::durable::MachineId,
 ) -> TaskReferenceSnapshot {
     let workspace = task.and_then(|task| {
         let task_worktree = task.worktree.as_ref()?;
         let branch = Some(task.branch.clone());
+        let local = machine_id.as_ref() == Some(local_machine);
         // A removed checkout has no root to resolve.
-        let worktree = if crate::observe::is_dir(task_worktree) {
+        let worktree = if local && crate::observe::is_dir(task_worktree) {
             crate::git::worktree_root(task_worktree)
                 .ok()
                 .and_then(|root| root.canonicalize().ok())
@@ -2242,14 +2250,16 @@ fn task_reference(
         Some(TaskWorktreeSnapshot {
             machine_label: machines
                 .iter()
-                .find(|machine| &machine.id == local_machine)
+                .find(|machine| Some(&machine.id) == machine_id.as_ref())
                 .and_then(|machine| machine.label.clone()),
-            machine_id: Some(local_machine.clone()),
+            machine_id,
             slug: task.workspace_slug.clone(),
             branch,
             base_commit: task.base_commit.clone(),
             worktree: worktree.display().to_string(),
-            local_exists: crate::observe::try_exists(&worktree).ok(),
+            local_exists: local
+                .then(|| crate::observe::try_exists(&worktree).ok())
+                .flatten(),
         })
     });
     TaskReferenceSnapshot {
@@ -3026,7 +3036,6 @@ mod tests {
         crate::durable::TaskOwner {
             person: Some("Jack Heart".into()),
             person_key: Some("jack@loopflow.studio".into()),
-            person_id: None,
             machine: crate::durable::MachineRef {
                 id: None,
                 label: None,
@@ -3054,7 +3063,7 @@ mod tests {
     use crate::work::wave::Wave;
 
     #[tokio::test]
-    async fn task_reference_names_only_this_machines_checkout() {
+    async fn task_reference_names_recorded_checkout_machine_and_its_renames() {
         let directory = tempfile::tempdir().unwrap();
         let database = directory.path().join("registry.db");
         let store = Arc::new(
@@ -3087,22 +3096,18 @@ mod tests {
             .await
             .unwrap();
         let task = store.list_tasks(Some(wave.id())).await.unwrap().remove(0);
-        let peer = crate::durable::MachineId::new();
-        store
-            .add_machine(&peer, "build-server.invalid", "build-server")
-            .await
-            .unwrap();
-        let shared = super::SharedTaskReads::read(&store).await.unwrap();
-        let reads = super::DetailReads::read(&store, &[&task], &shared).unwrap();
-        let detail = super::snapshot_task_detail(&store, &task, false, &reads)
-            .await
-            .unwrap();
-        assert!(detail.reference.workspace.is_none());
-
+        let owner = crate::durable::MachineId::new();
+        let assigned = crate::durable::MachineId::new();
+        for (id, label) in [(&owner, "build-server"), (&assigned, "new-default")] {
+            store
+                .add_machine(id, &format!("{label}.invalid"), label)
+                .await
+                .unwrap();
+        }
         let db = rusqlite::Connection::open(&database).unwrap();
         db.execute(
-            "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/local/checkout')",
-            [task.id.as_str()],
+            "UPDATE tasks SET worktree='/remote/checkout',checkout_machine_id=?2 WHERE id=?1",
+            rusqlite::params![task.id.as_str(), owner.as_str()],
         )
         .unwrap();
         let task = store.get_task(&task.id).await.unwrap().unwrap();
@@ -3112,12 +3117,21 @@ mod tests {
             .await
             .unwrap();
         let workspace = detail.reference.workspace.unwrap();
-        assert_eq!(
-            workspace.machine_id,
-            Some(store.local_machine().await.unwrap().id)
-        );
-        assert_eq!(workspace.worktree, "/local/checkout");
-        assert_eq!(workspace.local_exists, Some(false));
+        assert_eq!(workspace.machine_id, Some(owner.clone()));
+        assert_eq!(workspace.machine_label.as_deref(), Some("build-server"));
+        assert_eq!(workspace.local_exists, None);
+        store
+            .rename_machine("build-server", "renamed-server")
+            .await
+            .unwrap();
+        let shared = super::SharedTaskReads::read(&store).await.unwrap();
+        let reads = super::DetailReads::read(&store, &[&task], &shared).unwrap();
+        let detail = super::snapshot_task_detail(&store, &task, false, &reads)
+            .await
+            .unwrap();
+        let workspace = detail.reference.workspace.unwrap();
+        assert_eq!(workspace.machine_id, Some(owner));
+        assert_eq!(workspace.machine_label.as_deref(), Some("renamed-server"));
     }
 
     #[tokio::test]
@@ -4230,8 +4244,13 @@ mod tests {
             .replace("}]}','demo',3)", "}]}','end',3)");
         conn.execute_batch(&fixture).unwrap();
         crate::store::migrations::upgrade_from_migration(&conn, "task_paused");
-        // The planning read, not this setup, fails.
-        conn.execute_batch("DROP TABLE task_ship_events").unwrap();
+        // Remove the column's dependents so the planning read, not this setup, fails.
+        conn.execute_batch(
+            "DROP INDEX tasks_ship_process;
+             DROP TRIGGER store_revision_tasks_update;
+             ALTER TABLE tasks DROP COLUMN ship_lf_process_id",
+        )
+        .unwrap();
         let frontier = crate::store::migrations::latest_applied_version_sqlite(&conn).unwrap();
         let store: crate::store::SharedStore = Arc::new(crate::store::Store {
             sqlite: crate::store::sqlite::SqliteStore::open_read_only(&database).unwrap(),
@@ -4255,7 +4274,7 @@ mod tests {
             );
         };
         assert!(
-            reason.contains("no such table: task_ship_events"),
+            reason.contains("no such column: t.ship_lf_process_id"),
             "{reason}"
         );
         let graph = store.sqlite.task_overview(&task).unwrap().0.graph.unwrap();

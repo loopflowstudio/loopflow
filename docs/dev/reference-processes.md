@@ -143,20 +143,19 @@ lf task unassign LOO-523
 ```
 
 A Task is owned by (person, Machine) or unowned. Its `task_ownership` log holds
-`claim` and `unclaim` entries that are never updated or deleted; the later entry
-wins in provider order (Linear comment time, or the Git planning journal order,
-where each entry sorts after every entry its writing Machine had seen). Each
-entry names the Machine that wrote it, so every Machine stores the same rows. A
-move is a claim by the same person naming another Machine; it needs only the
-target's identity, not a connection.
+`claim`, `handoff` and `unclaim` entries that are never updated or deleted; the
+later entry wins in provider order (Linear comment time, or the Git planning
+journal order, where each local append sorts after every entry its Machine has seen).
+A handoff moves the claim to its target Machine and keeps the person; it needs
+only the target's identity, not a connection.
 
 Forwarding stays within one person's Machines. A Task the caller owns on another
 of their Machines reruns there; an unowned Task gets the caller's claim on their
 Wave Machine; a Task someone else owns gets the caller's claim on their own Wave
 Machine, and the later claim wins. Nothing routes to another person's Machine, and
-nobody moves or unclaims another person's claim; moving a Task to another
-person is deferred. The Machine in a claim comment is informational only.
-`lf task claim|move|unassign`, `lf task run` and `lf task checkout` route to
+nobody hands off or unclaims another person's claim; cross-person handoff is
+deferred. The Machine in a claim comment is informational only.
+`lf task claim|handoff|unassign`, `lf task run` and `lf task checkout` route to
 that writer over `lf --machine` and re-check inside one IMMEDIATE transaction.
 `task_execution_route` returns the claim's Machine (source `owner`) or the Wave
 Machine (`owning_machine:wave:<name>`, `owning_machine:this_machine`). `lf task location --peers` observes other
@@ -167,11 +166,11 @@ on mini" plus a `loopflow-ownership` HTML comment carrying the entry) through
 ordinary comment delivery to Linear or the Git planning journal; inbound comments
 are parsed into the log. With Linear, a claim sets the assignee to that Machine's
 Linear viewer and moves backlog, triage or `unstarted` to `started`; unclaim clears
-the assignee; a move leaves it. Assignee changes write no entries; the owning
+the assignee; handoff leaves it. Assignee changes write no entries; the owning
 Machine re-asserts its assignee while its claim is unsuperseded.
 
-An entry another Machine wrote never ends this Machine's own open claim; only a
-later entry this Machine wrote does. When another Machine claims later, every other Machine shows the
+An inbound entry never ends this Machine's own open claim; only its own unclaim or
+handoff does. When another Machine claims later, every other Machine shows the
 later claim while the earlier claimant still owns it locally, reports
 `superseded_by` and steers its live Sessions. Nothing is cancelled. If the log
 stops showing this Machine as owner for any other reason, such as a stale

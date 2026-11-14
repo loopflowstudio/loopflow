@@ -13,7 +13,7 @@ use rusqlite::OptionalExtension;
 use super::sqlite::SqliteStore;
 
 /// Tables that grow with every Task, Session, turn, steer or Process.
-const GROWING: [&str; 17] = [
+const GROWING: [&str; 12] = [
     "agent_sessions",
     "planning_peer_changes",
     "planning_peer_routes",
@@ -23,13 +23,8 @@ const GROWING: [&str; 17] = [
     "steer_batches",
     "steer_deliveries",
     "steers",
-    "task_checkouts",
     "task_events",
-    "task_moves",
-    "task_ownership",
-    "task_primary_sessions",
     "task_retirements",
-    "task_ship_events",
     "tasks",
 ];
 
@@ -37,19 +32,11 @@ const GROWING: [&str; 17] = [
 /// Sessions, 170,688 Processes, 283,304 Session events, 37,512 planning
 /// changes and 3,362 steers (November 13). Indexes newer than that store's
 /// schema were built and analyzed on a copy of it.
-/// `task_checkouts` retains the November 12 measurement of 838 checkouts;
-/// `tasks_abandoned` counts that store's 259 abandoned Tasks, and
-/// `task_checkouts_parent_pr` its 11 parent PRs;
-/// `task_primary_sessions` takes the 319 primaries `tasks_primary_session` counted.
-/// `task_ship_events` counts the 396 rows that store's 174 shipping and 12
-/// stopped Tasks backfill to, 216 of them naming a Process.
-/// `task_ownership` counts November 13's 895 entries over 880 Tasks.
 const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          'agent_sessions','processes','session_events','tasks','steer_batches',
          'steer_deliveries','session_steers','steer_adapters','projects','waves',
          'planning_peer_changes','planning_peer_routes','repository_plans','steers',
-         'task_retirements','task_checkouts','task_primary_sessions','task_ship_events',
-         'task_ownership');
+         'task_retirements');
      INSERT INTO sqlite_stat1(tbl,idx,stat) VALUES
          ('agent_sessions','agent_sessions_agent_process','17171 1'),
          ('agent_sessions','agent_sessions_held_terminal','85 2'),
@@ -128,17 +115,6 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          ('steers','steers_wave','0 0 0'),
          ('task_retirements','sqlite_autoindex_task_retirements_1','258 1'),
          ('task_retirements','task_retirements_unfinished','179 1'),
-         ('task_checkouts','sqlite_autoindex_task_checkouts_1','838 1'),
-         ('task_checkouts','task_checkouts_worktree','838 1'),
-         ('task_checkouts','task_checkouts_root','838 1'),
-         ('task_checkouts','task_checkouts_branch','838 2'),
-         ('task_checkouts','task_checkouts_parent_pr','11 2'),
-         ('task_ownership','idx_task_ownership_task','895 1'),
-         ('task_ownership','sqlite_autoindex_task_ownership_1','895 1'),
-         ('task_primary_sessions','sqlite_autoindex_task_primary_sessions_1','319 1'),
-         ('task_ship_events','task_ship_events_task','396 3 1'),
-         ('task_ship_events','task_ship_events_process','216 1'),
-         ('task_primary_sessions','sqlite_autoindex_task_primary_sessions_2','319 1'),
          ('tasks','idx_tasks_issue_identifier','1219 1'),
          ('tasks','idx_tasks_project','1219 20 1'),
          ('tasks','idx_tasks_repository','1219 134 22 2'),
@@ -146,7 +122,6 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          ('tasks','idx_tasks_worktree','1219 10'),
          ('tasks','sqlite_autoindex_tasks_1','1219 1'),
          ('tasks','sqlite_autoindex_tasks_2','1219 1'),
-         ('tasks','tasks_abandoned','259 1'),
          ('tasks','tasks_abandoned_checkout','179 179'),
          ('tasks','tasks_branch','1219 10'),
          ('tasks','tasks_checkout_machine','1224 612'),
@@ -400,15 +375,10 @@ mod tests {
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(
-                "INSERT INTO tasks(id,repository_id,issue_identifier,created_at,
-                     planning_completed,planning_completed_at)
-                 VALUES(?1,?2,'PLAN-1',1,1,'done')",
+                "INSERT INTO tasks(id,repository_id,issue_identifier,created_at,worktree,branch,
+                     checkout_machine_id,planning_completed,planning_completed_at)
+                 VALUES(?1,?2,'PLAN-1',1,'/repo.task','task',(SELECT id FROM machines WHERE is_local=1),1,'done')",
                 params![task.as_str(), repo.as_str()],
-            )
-            .unwrap();
-            conn.execute(
-                "INSERT INTO task_checkouts(task_id,worktree,branch) VALUES(?1,'/repo.task','task')",
-                [task.as_str()],
             )
             .unwrap();
             conn.execute(
@@ -518,58 +488,13 @@ mod tests {
                 store
                     .sessions_for_agent_session(&crate::id::AgentSessionId::from("thread"))
                     .unwrap();
-                assert!(matches!(
-                    store.resolve_history_input("missing-capture"),
-                    Err(crate::store::StoreError::NotFound)
-                ));
+                assert!(store.resolve_history_input("abc").is_err());
                 store.unrecorded_agent_ancestry().unwrap();
                 // The first read files the steer's receipt; the second has nothing to file.
                 store.session_steers("viewed", 0, 10).unwrap();
                 store.session_steers("viewed", 0, 10).unwrap();
                 store.session_steer_source("viewed", &steer.id).unwrap();
             })
-        });
-        let scans = growing_scans(&store, &traced);
-        assert!(scans.is_empty(), "{}", scans.join("\n"));
-    }
-
-    #[test]
-    fn auto_ship_log_reads_and_writes_plan_by_index() {
-        let (_home, store, _task, _viewer) = fixture();
-        let task = TaskId::new();
-        store
-            .create_task(&crate::work::task::NewTask {
-                id: task.clone(),
-                repository_id: store.ensure_repository("/repo").unwrap(),
-                project_id: None,
-                title: "Ship".into(),
-                description: String::new(),
-                due_date: None,
-            })
-            .unwrap();
-        let traced = statements(&store, || {
-            store
-                .ship_task(&task, &crate::id::LfProcessId::new(), "ship")
-                .unwrap();
-            store.count_ship_restart(&task).unwrap();
-            store
-                .ship_task(&task, &crate::id::LfProcessId::new(), "ship")
-                .unwrap();
-            store.task_shipping(&task).unwrap();
-            store.reset_ship_restarts(&task).unwrap();
-        });
-        let scans = growing_scans(&store, &traced);
-        assert!(scans.is_empty(), "{}", scans.join("\n"));
-    }
-
-    #[test]
-    fn a_move_in_flight_reads_its_row_and_the_ownership_log_by_index() {
-        let (_home, store, task, _viewer) = fixture();
-        let mini = crate::durable::MachineId::new();
-        store.begin_task_move(&task, &mini).unwrap();
-        store.record_move_sent(&task, "{}").unwrap();
-        let traced = statements(&store, || {
-            assert!(store.task_move_in_flight(&task).unwrap().is_some());
         });
         let scans = growing_scans(&store, &traced);
         assert!(scans.is_empty(), "{}", scans.join("\n"));

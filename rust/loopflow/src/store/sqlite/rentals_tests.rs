@@ -214,7 +214,7 @@ fn an_ended_rental_hands_its_open_tasks_back_here() {
     store.attach_rental(&rental.id, &code_1).unwrap();
     let task = open_task(&store);
     store.claim_task(&task).unwrap();
-    store.move_claim(&task, &code_1).unwrap();
+    store.handoff_task(&task, &code_1).unwrap();
     let person = store.task_ownership(&task).unwrap().owner.unwrap().person;
 
     let (_, returned) = store
@@ -236,8 +236,8 @@ fn an_ended_rental_hands_its_open_tasks_back_here() {
         history,
         [
             (OwnershipKind::Claim, local.clone()),
-            (OwnershipKind::Claim, code_1),
-            (OwnershipKind::Claim, local),
+            (OwnershipKind::Handoff, code_1),
+            (OwnershipKind::Handoff, local),
         ]
     );
     // This Machine writes the Task again: `lf task run` stays here.
@@ -254,7 +254,7 @@ fn hand_back_writes_nothing_when_a_claim_lacks_planning_facts() {
     store.add_machine(&machine, "lf@pod", "pod").unwrap();
     let first = open_task(&store);
     store.claim_task(&first).unwrap();
-    store.move_claim(&first, &machine).unwrap();
+    store.handoff_task(&first, &machine).unwrap();
     let planning =
         super::super::task_ownership::held_planning_in(&store.conn.lock().unwrap(), &machine)
             .unwrap();
@@ -262,7 +262,7 @@ fn hand_back_writes_nothing_when_a_claim_lacks_planning_facts() {
     // Another writer claims a Task after preflight but before BEGIN.
     let second = open_task(&store);
     store.claim_task(&second).unwrap();
-    store.move_claim(&second, &machine).unwrap();
+    store.handoff_task(&second, &machine).unwrap();
     {
         let mut conn = store.conn.lock().unwrap();
         let tx = conn
@@ -357,40 +357,4 @@ fn fly_rows_from_0_14_17_go_and_the_rest_still_read() {
         })
         .unwrap();
     assert_eq!(capacity, None);
-}
-
-#[test]
-fn an_owned_machines_pool_cost_and_expiry_move_to_pool_machines() {
-    use crate::store::migrations::{apply_before_migration, migration_section_sql};
-
-    let conn = rusqlite::Connection::open_in_memory().unwrap();
-    apply_before_migration(&conn, "task_machine_local");
-    conn.execute_batch(
-        "INSERT INTO pools(name,created_at) VALUES('lab',1);
-         INSERT INTO machines(id,is_local,created_at,observed_at,pool,cost_usd,expires_at)
-         VALUES('mch_owned',0,1,1,'lab','12.50',99);
-         INSERT INTO machines(id,is_local,created_at,observed_at) VALUES('mch_rented',0,1,1);",
-    )
-    .unwrap();
-    conn.execute_batch(&migration_section_sql("task_machine_local"))
-        .unwrap();
-    type Row = (String, Option<String>, Option<String>, Option<i64>);
-    let rows: Vec<Row> = conn
-        .prepare("SELECT machine_id,pool,cost_usd,expires_at FROM pool_machines")
-        .unwrap()
-        .query_map([], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
-        })
-        .unwrap()
-        .collect::<Result<_, _>>()
-        .unwrap();
-    assert_eq!(
-        rows,
-        [(
-            "mch_owned".to_string(),
-            Some("lab".to_string()),
-            Some("12.50".to_string()),
-            Some(99)
-        )]
-    );
 }

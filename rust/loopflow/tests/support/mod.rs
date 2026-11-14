@@ -834,8 +834,8 @@ pub fn record_graph(home: &Path, cwd: &Path, graph: &str, label: &str, outcome: 
     // checkout holding `cwd`.
     db.execute(
         "INSERT INTO graph_processes(lf_process_id,graph,compiled,task_id) VALUES(?1,?2,?3,
-            (SELECT task_id FROM task_checkouts
-             WHERE ?4=rtrim(worktree,'/') OR instr(?4,rtrim(worktree,'/')||'/')=1
+            (SELECT id FROM tasks WHERE checkout_machine_id=(SELECT id FROM machines WHERE is_local=1)
+                AND worktree!='' AND (?4=rtrim(worktree,'/') OR instr(?4,rtrim(worktree,'/')||'/')=1)
              ORDER BY length(worktree) DESC LIMIT 1))",
         rusqlite::params![
             graph_process.as_str(),

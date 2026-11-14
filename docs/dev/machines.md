@@ -95,22 +95,12 @@ lf task show LOO-123 --json      # ownership: {owner, superseded_by, log}
 ```
 
 A Task is owned by (person, Machine) or unowned. Its append-only ownership log
-holds `claim` and `unclaim` entries; the later entry wins in provider order, and
-no current owner is stored beside it. Each entry names its person, the Machine
-it puts the Task on and the Machine that wrote it, so every Machine stores the
-same rows. Moving a Task is a claim by the same person naming another Machine;
-it needs only the target's identity, not a connection. Entries an earlier `lf`
-wrote as `handoff` read as such claims. `lf task run` and `lf task checkout`
-claim an unowned Task when they allocate its checkout. Completion, abandonment
-and reopening write no entries; a Done Task shows its last owner as history.
-
-A person is named once, in `people`: by the planning provider's user
-(`linear:<user>`, learned when Linear first shows the Task's assignee), else by
-the Git journal's planning user key (`journal:<key>`), with a display name.
-Ownership entries and Machines refer to that row; the Git email names nobody new.
-Entries written before a Machine knew its person still carry only the Git email.
-A claim naming your person is yours; one naming a different person is still
-yours when its Git email is, so connecting Linear keeps journal-era claims.
+holds `claim`, `handoff` and `unclaim` entries; the later entry wins in provider
+order. A handoff moves the claim to its target Machine and keeps the person; it
+needs only the target's identity, not a connection. `lf task run` and
+`lf task checkout` claim an unowned Task when they allocate its checkout.
+Completion, abandonment and reopening write no entries; a Done Task shows its
+last owner as history.
 
 Which Machine runs a person's Wave work is that person's choice, never
 repository content:
@@ -150,7 +140,7 @@ A Task's Machine is captured in its claim, not inherited. Changing the Wave Mach
 moves no existing Task; `lf task move <task> --machine <machine>` moves one (see
 [Move a Task between your Machines](#move-a-task-between-your-machines)).
 
-Forwarding stays within one person's Machines. Claim, move, unclaim,
+Forwarding stays within one person's Machines. Claim, handoff, unclaim,
 `task run`, `task checkout` and global `--task` pick their writer and re-check
 inside one IMMEDIATE transaction:
 
@@ -160,8 +150,8 @@ inside one IMMEDIATE transaction:
 | Unowned | Your Wave Machine |
 | Someone else's | Your own Wave Machine; your later claim wins |
 
-Nothing routes to another person's Machine, and nobody moves or unclaims
-another person's claim; moving a Task to another person is deferred. The Machine in a claim
+Nothing routes to another person's Machine, and nobody hands off or unclaims
+another person's claim; cross-person handoff is deferred. The Machine in a claim
 comment is informational. Routing reports its source: `owner`,
 `owning_machine:wave:<name>` or `owning_machine:this_machine`. Ownership does not move
 a checkout or launch a process. `lf wave status` reads planning, Task conditions,
@@ -182,8 +172,8 @@ LOO-412 supplies user/shared destination selection and portable Work exchange.
 Ownership entries travel as marked Task comments ("Jack Heart claimed this on
 mini" plus a `loopflow-ownership` HTML comment carrying the entry) through the
 ordinary comment delivery to Linear or the Git planning journal; inbound comments
-are parsed into the log with the Machine that wrote them. In the journal each
-entry sorts after every entry its writing Machine had seen. An unknown Machine remains an entry reference, never an
+are parsed into the log. In the journal each local append, and each handoff a
+move delivers, sorts after every entry its Machine has seen. An unknown Machine remains an entry reference, never an
 invented SSH route.
 The journal does not carry RepositoryId: unbound import creates a local repository
 ID. Explicit association converges established roots on a selected ID without
@@ -217,8 +207,8 @@ owned-line transport and retain drafts on disconnect. Missing or stale ownership
 prepares nothing and never falls back to local paths. Headless fixtures cover
 these paths; configured SSH and mounted native usability remain unproved.
 
-An entry another Machine wrote never ends this Machine's own open claim; only a
-later entry this Machine wrote does. If another Machine claims later, every other Machine shows the
+An inbound entry never ends this Machine's own open claim; only its own unclaim
+or handoff does. If another Machine claims later, every other Machine shows the
 later claim, while the earlier claimant still owns it locally, reports
 `superseded_by` ("Also claimed later by Kim on mini" in `lf task status`) and
 steers its live Sessions. Nothing is cancelled. If the log stops showing this
@@ -226,28 +216,18 @@ Machine as owner for any other reason, such as a stale Machine's unclaim, the
 owner claims again.
 
 With Linear, a claim sets the assignee to that Machine's Linear viewer and moves
-backlog, triage or `unstarted` to `started`; unclaim clears the assignee; a move
-keeps the person, so it leaves the assignee. The assignee is not a second ownership store: assignee changes write no
+backlog, triage or `unstarted` to `started`; unclaim clears the assignee; handoff
+leaves it. The assignee is not a second ownership store: assignee changes write no
 entries, and the claim's Machine re-asserts its assignee while its claim is
 unsuperseded.
 
-Where a Task runs and whether this Machine has it checked out are two
-questions with one answer each. The ownership log answers the first. A
-`task_checkouts` row answers the second: worktree path, branch, base commit and
-parent PR, stored only on the Machine that has the checkout. Planning never
-carries a path, so no Machine holds another Machine's path:
-
-```console
-$ lf --machine mini task status MTG-321      # mini never checked it out
-MTG-321  Runs on laptop since Nov 12 09:15
-  Not checked out on mini
-```
-
-Ownership changes move no checkout and start no process. A Machine that loses a
-Task keeps its row after `lf wt prune` removes the worktree, so the Task's
-history on that Machine still finds its Sessions and Processes. Status, file access
-and checkout-based Session/Process membership read this Machine's row. Explicit
-Session bindings retain membership without one.
+Task checkout location is recorded separately: `tasks.checkout_machine_id` and
+`worktree` identify the Machine and path prepared for execution. New checkouts
+record the preparing Machine. Existing checkouts retain their recorded location
+when ownership changes; no process or checkout is moved. Status, file access
+and checkout-based Session/Process membership use that location. Unknown historical
+Machines stay unknown, and file access cannot treat their paths as local. Explicit
+Session bindings retain membership independently of checkout location.
 
 ## Move a Task between your Machines
 
@@ -274,13 +254,6 @@ preferences, which don't name the laptop, and shows its Machine id.
 **Reopen the conversation there.** The terminal that was showing the Task's
 Session ends it with `This conversation moved to mini: lf resume --task MTG-321`;
 that command opens it again from mini.
-
-**The conversation goes only with its Task.** `lf --machine mini resume <session>`
-on a Task's conversation moves the Task, exactly as `lf task move` does, then
-resumes the conversation there. A conversation outside any Task moves alone.
-`lf resume <session>` opens a Task's conversation wherever the Task runs now:
-when a rental ends and its Tasks come back to the laptop, their conversations
-resume on the laptop.
 
 **A running step starts over from the checkpoint.** The Task's primary Session
 travels with its transcript. A headless step that was mid-run, such as
@@ -323,58 +296,16 @@ branch out again.
 can't take the Task, or the worktree is mid-merge or mid-rebase; nothing changes.
 The move hands the Task to mini before it stops the Graph, so nothing on the
 laptop restarts it meanwhile. If the checkpoint can't be pushed, the Task is
-handed back: the log shows both claims, its conversation stays on the laptop,
+handed back: the log shows both handoffs, its conversation stays on the laptop,
 and the Graph stays stopped at the step `lf task status` names.
-The Machine the Task leaves records the move as `leaving` with the claim,
-keeps the step it stopped, records it as `sent`, with what it sent, before it
-answers, and as `arrived` once mini has taken the Task in. A move killed while
-it was leaving, or one whose answer was lost on the way back, shows in status:
-
-```console
-$ lf task status MTG-321
-MTG-321  Moving to mini since Nov 12 10:42: not sent
-  retry: lf task move MTG-321 --machine mini
-  take back: lf task claim MTG-321
-```
-
-Once sent, the stage after the colon reads `sent, not arrived`; `since` stays
-when the move began.
-
-On mini, status shows its recorded check separately from ownership and checkout:
-
-```console
-$ lf task status MTG-321
-…
-MTG-321  Checked move from laptop at Nov 12 10:42
-  retry: lf task move MTG-321 --machine mini-host
-MTG-321  Not checked out on mini-host
-```
-
-The retry names mini's own hostname. This is a past check: the laptop may have
-claimed the Task back since then. It establishes no ownership or active arrival;
-retrying asks the source for the current move. Once the Task arrives, the check
-line disappears.
-
-Running the same move again, from any Machine, asks the Machine the Task left.
-Run on mini, it asks the Machine mini checked the move with, so mini needs that
-Machine added (`lf machine add`). Mini may not know itself by the laptop's
-label; then the refusal prints the same check and retry. Addressed to mini from the laptop
-(`lf --machine mini task move MTG-321 --machine mini`), a move the laptop began
-runs on the laptop, which holds the move. A leaving move carries on: it
-commits, pushes and takes the conversation, which are safe to repeat. A sent
-move is delivered as it was sent, conversation included, without committing or
-pushing again. Either way the Graph continues on mini at the step it was on. If
-the Graph does not start on mini, the move still stands and the last line prints
+If the Task was sent but did not arrive, the error prints one retry command that
+delivers what was sent. A retried delivery does not restart the Graph; run
+`lf --machine mini task run MTG-321 --from implement` after it arrives. If the
+Graph does not start on mini, the move still stands and the last line prints
 `lf task run MTG-321 --from 'implement'`, which starts it at that step on the
 Task's owner.
 
-`lf task claim MTG-321` on the laptop first asks mini whether the move arrived.
-If it did, its answer lost, the Task runs on mini and the claim is written
-there. If it did not, or mini is gone, the laptop takes the Task back and the
-move ends.
-
-Auto-Ship approval travels with the move, as the Graph position does. Each
-Machine keeps approvals and stops as a log (who, when, which process). The continued run is a plain
+Auto-Ship approval is planning, so it travels. The continued run is a plain
 `lf task run`; when it stops at an interactive step, mini's ship process carries
 the Task on, as it would have on the laptop. `lf task hold MTG-321` withdraws the
 approval on either Machine. A Machine ships only Tasks it owns: once a Task has
@@ -382,9 +313,8 @@ left, its old checkout starts nothing.
 
 ## Own and rent Machines
 
-A **pool** names machines you own (`pool_machines`: pool, Machine, `cost_usd`
-and `expires_at`); it knows no provider. A `machines` row is only identity: id,
-public name and the person it belongs to. An **on-demand** declaration in personal configuration is a
+A **pool** names machines you own (`machines.pool`, with `cost_usd` and
+`expires_at`); it knows no provider. An **on-demand** declaration in personal configuration is a
 provider (Daytona, Modal, RunPod or AWS), hardware with at most one GPU
 (RunPod, AWS and Modal rent them; `--vcpus`/`--memory-gb` are floors its machine
 meets) and optionally spot (AWS and RunPod), and a budget: machines at once and the

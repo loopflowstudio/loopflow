@@ -121,7 +121,6 @@ mod tests {
         // Rental capacity is read by `lf pool`/`lf ondemand`, not workspace surfaces.
         "ondemands",
         "pools",
-        "pool_machines",
         "provider_account_limits",
         "provider_account_switches",
         "provider_accounts",
@@ -230,10 +229,6 @@ mod tests {
             for operation in ["insert", "update", "delete"] {
                 // Ownership entries reject deletion; it can never commit.
                 if table == "task_ownership" && operation == "delete" {
-                    continue;
-                }
-                // Auto-Ship events reject updates; one can never commit.
-                if table == "task_ship_events" && operation == "update" {
                     continue;
                 }
                 let name = format!("store_revision_{table}_{operation}");

@@ -315,10 +315,12 @@ fn plan_in(
                     .push("No primary Session is recorded".into());
             }
             if let Some(checkout) = super::children::task_checkout_in(conn, &task_id)? {
-                content.location = Some(ViewLocation {
-                    machine_id: super::durable::map_local_machine(conn)?.id.to_string(),
-                    cwd: checkout.worktree.display().to_string(),
-                });
+                if let Some(machine) = checkout.machine_id {
+                    content.location = Some(ViewLocation {
+                        machine_id: machine.to_string(),
+                        cwd: checkout.worktree.display().to_string(),
+                    });
+                }
             }
             if content.location.is_none() {
                 content
@@ -1049,7 +1051,7 @@ mod tests {
             .lock()
             .unwrap()
             .execute(
-                "INSERT INTO task_checkouts(task_id,worktree) SELECT id,'/repo/fix-1' FROM tasks WHERE issue_identifier='FIX-1'",
+                "UPDATE tasks SET worktree='/repo/fix-1' WHERE issue_identifier='FIX-1'",
                 [],
             )
             .unwrap();
@@ -1078,7 +1080,7 @@ mod tests {
             .lock()
             .unwrap()
             .execute_batch(&format!(
-                "INSERT INTO task_events(task_id,kind_json,created_at) VALUES('{three}','{{\"kind\":\"started\"}}',2); INSERT INTO task_ownership(id,task_id,kind,person,machine_id,at,ordered_at,written_here) VALUES('own_33333333333333333333333333333333','{three}','recorded',NULL,NULL,2,2000,1); INSERT INTO task_checkouts(task_id,worktree) VALUES('{three}','/repo/fix-3');"
+                "INSERT INTO task_events(task_id,kind_json,created_at) VALUES('{three}','{{\"kind\":\"started\"}}',2); INSERT INTO task_ownership(id,task_id,kind,person,machine_id,at,ordered_at,written_here) VALUES('own_33333333333333333333333333333333','{three}','recorded',NULL,NULL,2,2000,1); UPDATE tasks SET worktree='/repo/fix-3' WHERE id='{three}';"
             ))
             .unwrap();
         assert_eq!(
@@ -1588,7 +1590,7 @@ mod tests {
             "selection-primary",
             &crate::session_record::new_artifact_key(),
         );
-        store.conn.lock().unwrap().execute_batch("UPDATE agent_sessions SET repo='/repo',task_id='task_22222222222222222222222222222222',wave_id='11111111-1111-1111-1111-111111111111' WHERE id='selection-primary'; INSERT INTO task_primary_sessions(task_id,session_id) VALUES('task_22222222222222222222222222222222','selection-primary');").unwrap();
+        store.conn.lock().unwrap().execute_batch("UPDATE agent_sessions SET repo='/repo',task_id='task_22222222222222222222222222222222',wave_id='11111111-1111-1111-1111-111111111111' WHERE id='selection-primary'; UPDATE tasks SET primary_session_id='selection-primary' WHERE id='task_22222222222222222222222222222222';").unwrap();
         let location = ViewLocation {
             machine_id: "machine_recorded".into(),
             cwd: "/repo/task".into(),
@@ -1903,7 +1905,7 @@ mod tests {
             .execute(
                 "INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,
                     parent_pr_id,publication_requested_at,created_at,updated_at)
-                 SELECT 'pr_backlog',id,1,'backlog','','',NULL,1,1,1
+                 SELECT 'pr_backlog',id,1,'backlog',branch,base_commit,parent_pr_id,1,1,1
                  FROM tasks WHERE issue_identifier='FIX-3'",
                 [],
             )
@@ -2025,7 +2027,7 @@ mod tests {
         crate::store::migrations::upgrade_from_migration(&conn, "saved_selections");
         // The idle Task has a checkout; the deferred one isn't Working.
         conn.execute(
-            "INSERT INTO task_checkouts(task_id,worktree) SELECT id,'/repo/fix-2' FROM tasks WHERE issue_identifier='FIX-2' ON CONFLICT(task_id) DO UPDATE SET worktree=excluded.worktree",
+            "UPDATE tasks SET worktree='/repo/fix-2' WHERE issue_identifier='FIX-2'",
             [],
         )
         .unwrap();

@@ -97,6 +97,7 @@ mod tests {
     use rusqlite::params;
 
     use super::{SqliteStore, StoreRevisions};
+    use crate::durable::TaskId;
     use crate::id::{LfProcessId, TraceId, WaveId};
 
     /// Tables no workspace surface reads. A new table belongs here or in a
@@ -120,6 +121,7 @@ mod tests {
         // Rental capacity is read by `lf pool`/`lf ondemand`, not workspace surfaces.
         "ondemands",
         "pools",
+        "pool_machines",
         "provider_account_limits",
         "provider_account_switches",
         "provider_accounts",
@@ -133,9 +135,12 @@ mod tests {
         "session_steers",
         "steer_adapters",
         "steer_batches",
+        "steer_delivered",
         "steer_deliveries",
         "store_revisions",
         "task_linear_ingested_comments",
+        // A Task's last reading is compared by the next reader; its news is the steers.
+        "task_update_readings",
         "tool_responses",
         // Wave retry receipts are read only by explicit lifecycle operations.
         "wave_lifecycle_operations",
@@ -228,6 +233,10 @@ mod tests {
             for operation in ["insert", "update", "delete"] {
                 // Ownership entries reject deletion; it can never commit.
                 if table == "task_ownership" && operation == "delete" {
+                    continue;
+                }
+                // Auto-Ship events reject updates; one can never commit.
+                if table == "task_ship_events" && operation == "update" {
                     continue;
                 }
                 let name = format!("store_revision_{table}_{operation}");
@@ -341,6 +350,138 @@ mod tests {
         assert_eq!(record(1145, 0, 1, false), 1, "question asked");
         assert_eq!(record(1150, 0, 0, false), 1, "question answered");
         assert_eq!(record(1155, 0, 0, true), 1, "turn handed back");
+    }
+
+    #[test]
+    fn planning_moves_for_changes_not_reading_times() {
+        let (_dir, store) = store();
+        let repo = store.ensure_repository("/repo").unwrap();
+        let task = TaskId::new();
+        let issue = uuid::Uuid::new_v4().to_string();
+        let delivery = uuid::Uuid::new_v4().to_string();
+        let conn = store.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO tasks(id,repository_id,issue_identifier,created_at) VALUES(?1,?2,'LOO-1',1)",
+            params![task.as_str(), repo.as_str()],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO pm_items(repo,provider,id,identifier,observed_at) VALUES('/repo','linear',?1,'LOO-1',1)",
+            [&issue],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO task_state_deliveries(id,task_id,target,attempted,error) VALUES(?1,?2,'started',1,'rate limited')",
+            params![delivery, task.as_str()],
+        )
+        .unwrap();
+        assert_eq!(
+            planning_moved(
+                &conn,
+                "UPDATE tasks SET pm_snapshot_synced_at=10 WHERE id=?1",
+                task.as_str()
+            ),
+            1,
+            "first observation"
+        );
+        assert_eq!(
+            planning_moved(
+                &conn,
+                "UPDATE tasks SET pm_snapshot_synced_at=20 WHERE id=?1",
+                task.as_str()
+            ),
+            0,
+            "Task restamp"
+        );
+        assert_eq!(
+            planning_moved(
+                &conn,
+                "UPDATE pm_items SET observed_at=30 WHERE id=?1",
+                &issue
+            ),
+            0,
+            "issue restamp"
+        );
+        assert_eq!(
+            planning_moved(
+                &conn,
+                "UPDATE pm_items SET observed_at=40,name='Renamed' WHERE id=?1",
+                &issue
+            ),
+            1,
+            "issue change read with a new stamp"
+        );
+        assert_eq!(
+            planning_moved(
+                &conn,
+                "UPDATE task_state_deliveries SET error='rate limited' WHERE id=?1",
+                &delivery
+            ),
+            0,
+            "same error"
+        );
+        assert_eq!(
+            planning_moved(
+                &conn,
+                "UPDATE task_state_deliveries SET error='denied' WHERE id=?1",
+                &delivery
+            ),
+            1,
+            "new error"
+        );
+    }
+
+    fn planning_moved(conn: &rusqlite::Connection, sql: &str, id: &str) -> i64 {
+        let planning = || -> i64 {
+            conn.query_row(
+                "SELECT revision FROM store_revisions WHERE domain='planning'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        let before = planning();
+        conn.execute(sql, [id]).unwrap();
+        planning() - before
+    }
+
+    /// Planning update triggers compare every column, so a column added
+    /// later must be named there or its changes stay invisible to readers.
+    #[test]
+    fn planning_update_triggers_compare_every_column() {
+        let (_dir, store) = store();
+        let conn = store.conn.lock().unwrap();
+        for table in [
+            "pm_items",
+            "pm_projects",
+            "projects",
+            "tasks",
+            "task_changes",
+            "task_state_deliveries",
+        ] {
+            let trigger: String = conn
+                .query_row(
+                    "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?1",
+                    [format!("store_revision_{table}_update")],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            let columns: Vec<String> = conn
+                .prepare(&format!(
+                    "SELECT name FROM pragma_table_xinfo('{table}') WHERE hidden=0"
+                ))
+                .unwrap()
+                .query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap();
+            for column in columns {
+                assert!(
+                    trigger.contains(&format!("NEW.{column} IS")),
+                    "{table}.{column} missing from its planning trigger"
+                );
+            }
+        }
     }
 
     #[test]

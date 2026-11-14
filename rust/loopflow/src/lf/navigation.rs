@@ -45,6 +45,12 @@ pub fn resolve_child(
     if let Some(child) = command.find_subcommand(name) {
         return Ok(Some(vec![child.get_name().to_string()]));
     }
+    // An old spelling is not an abbreviation of its neighbor: `session steer`
+    // moved to `lf steer`; it never meant `session steers`.
+    let old: Vec<String> = prefix.iter().cloned().chain([name.to_string()]).collect();
+    if super::aliases::find(&old, &[]).is_some_and(|moved| moved.words.is_empty()) {
+        return Ok(None);
+    }
     let mut matches = Vec::new();
     if prefix.is_empty() {
         let owner = match name {

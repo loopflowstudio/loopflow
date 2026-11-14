@@ -103,10 +103,12 @@ fn configuration_edits_use_the_server_without_work_processes() {
     let _env = EnvGuard::with_home(&[], Some(home.path()));
     std::env::set_var("LF_HOME", home.path().canonicalize().unwrap());
     let repo = TestRepo::new();
-    let _server = Server::start(repo.path(), home.path());
     let database = home.path().join("loopflow.db");
+    // Seed corruption before SQLite opens it: a live WAL can restore pages
+    // over a later overwrite of just the main database file.
     fs::write(&database, "unreadable Work registry").unwrap();
     let before = fs::read(&database).unwrap();
+    let _server = Server::start(repo.path(), home.path());
     let status: Value =
         serde_json::from_str(&read(repo.path(), home.path(), &["server", "status"], None)).unwrap();
     assert_eq!(status["ready"], true, "{status}");
@@ -839,7 +841,7 @@ fn screen_reads_are_compact_passive_and_match_cli() {
         .bind_session(session.id.as_str(), session.captured, &registered.task.id)
         .unwrap();
     conn.execute(
-        "UPDATE tasks SET primary_session_id=?1 WHERE id=?2",
+        "INSERT OR REPLACE INTO task_primary_sessions(session_id,task_id) VALUES(?1,?2)",
         rusqlite::params![session.id.as_str(), registered.task.id.as_str()],
     )
     .unwrap();
@@ -2192,10 +2194,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             directory,
             issue,
             message,
-        } => (
-            path(directory),
-            words(&["task", "steer", issue, message, "--json"]),
-        ),
+        } => (path(directory), words(&["steer", issue, message, "--json"])),
         Write::TaskReport {
             directory,
             issue,
@@ -2251,7 +2250,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             if let Some(wave) = wave {
                 spelled.extend(words(&["--wave", wave]));
             }
-            spelled.extend(words(&["session", "steer"]));
+            spelled.extend(words(&["steer"]));
             spelled.extend(session.clone());
             spelled.extend(words(&[message, "--json"]));
             (path(directory), spelled)

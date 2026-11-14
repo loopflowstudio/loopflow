@@ -27,10 +27,10 @@ Run `lf server run` in the foreground and read its socket from `lf server status
 the socket is hashed under `/tmp`, not inside `LF_HOME`. Speak the documented
 newline JSON protocol, disconnect before an answer, then look up
 `lf server receipt qa-report --json` before retrying identical content.
-Stop every server and terminal owner launched for the walkthrough.
-`lf session serve --terminal -- /bin/sh` prints its owner ID and keeps running;
-the first line is readiness, not process exit. Attach with `lf session attach
-<owner-id>`. Use a real shell for input and resize checks without provider login.
+Stop every server and holder launched for the walkthrough: a private home's
+`lf holder run` outlives its server, and the providers it holds are its direct
+children. For input and resize checks without a provider login, hold a real
+shell with `lf desktop shell <task> --checkout <path> --id <id> --create` in a PTY.
 
 A packaged Desktop must use its signed bundled `lf` for the QA server too:
 signing the bundle changes the CLI hash. Set `LF_DESKTOP` to the QA bundle ID
@@ -71,7 +71,13 @@ Set `default_agent: codex` in its `.lf/config.yaml`. Create real records with
 `lf task create --title ... --json` and `lf session resume --prepare --json`;
 `--prepare` creates connection data without starting a provider. For an upgrade
 scenario, prepare a Session with the installed binary before opening the same
-state with the branch binary.
+state with the branch binary. `lf -b graph <name>` runs a command-only Graph
+(`- cmd: help`) in place with no server; run it in a checkout adopted by
+`lf task create --worktree <path>` to give that Task Graphs. A `cmd:` step must
+name a real `lf` command (`version` is not one). To keep a Graph live, give it
+a skill step run by a stand-in `claude` that `cat > /dev/null`: `-p` stream-json
+keeps stdin open, so the step runs until you kill the stand-in. macOS has no
+`setsid` command; detach with Python (`os.fork()`, `os.setsid()`, `os.execvp`).
 
 Run `lf server run` as a child with closed stdin; get its socket from
 `lf server status`. Use the current revision's newline JSON protocol in
@@ -186,10 +192,10 @@ dashboard can have no members for that Task.
 
 Task checkout can also start a background primary conversation when the provider
 CLI is installed, even for a command-only Graph. Set `CODEX_HOME` and
-`CLAUDE_CONFIG_DIR` inside the private HOME. After the Graph ends, find its
-`lf session serve --terminal` owners by their disposable checkout cwd and stop
-their descendant processes too; stopping the foreground server alone leaves
-those conversations running.
+`CLAUDE_CONFIG_DIR` inside the private HOME. After the Graph ends, find those
+conversations' providers by their disposable checkout cwd and stop them with
+their descendants; they are children of the private home's `lf holder run`, so
+stopping the foreground server alone leaves them running.
 
 ## Loopflow served launches
 
@@ -241,6 +247,16 @@ and inspect its actual result without launching it again. Find completed direct
 Graphs with `lf graph list --processes`, then `lf process show <ID>`; the live
 process list cannot find a finished run. Stop the private server and every
 remaining child after the scenarios.
+
+For Task-run retries, a bare `lf task run` returns at registration; poll
+`lf task status <id>` (`Graph <name>: running|stopped at <step>`) rather than
+`lf task wait`, which blocks until the Task is done. `lf task show <id> --json`
+has the position at `.execution.work.graph.position`, and `lf process show
+<graph>` lists each attempt's steps. A Graph reads the Task's checkout, so a
+Graph file added on `main` is invisible until the branch has it. To make a step
+slow or failing, point `LF_BIN` at a wrapper that intercepts that step's argv;
+the stand-in step registers no process, so `lf task interrupt` reports it as
+"between steps".
 
 For watch recovery, save the baseline's opaque `checkpoint`, close the socket,
 then reconnect with the same operation and `select` plus `resume: <checkpoint>`.
@@ -395,7 +411,14 @@ home cannot get without real OAuth (`--import` checks the token against
 Anthropic). To drive real headless Task runs anyway, run a throwaway
 `rust/loopflow/examples/*.rs` that calls `upsert_provider_account` the way
 `tests/session_steers.rs`'s `connect_fixture_account` does, against the private
-store, then delete it. Do not repeat this with release 0.15.3: its
+store, then delete it. Put `tests/support/mod.rs`'s `FAKE_SECURITY` first on
+`PATH` as `security` and set `USER`: signing the login in goes through the
+Keychain. Never run `lf account` there: it checks the token with Anthropic and
+marks the fixture login "needs a login"; register it again if it did. A
+stand-in's usage-limit result cools the only login for 15 minutes, so the
+step waits for capacity rather than stopping. Starting a private server
+resumes every Task whose Auto-Ship was approved: abandon old QA Tasks first.
+Do not repeat this with release 0.15.3: its
 launch from a private home tries to write a Claude Keychain item. Dead
 AgentProcesses are reaped by `lf process prune`, not by `lf session list`.
 Otherwise launch interactively (`-i`) in a PTY. `lf account connect claude --api-key` with a placeholder
@@ -446,9 +469,9 @@ short identifier resolves through Linear.
 To count every `lf` a provider starts, point `LF_BIN` at a `/bin/sh` wrapper
 that appends its argv to a file and execs the branch binary; plugins run
 `spec.executable`, which comes from `LF_BIN`. A `ps` sampler misses short
-processes. Each `lf -i` leaves a `session serve` owner after its PTY closes:
-stop owners whose argv names the private Task, with their descendants, after
-every run. Freeze the private server by the PID its `nohup` recorded, never by
+processes. An `lf -i --task` conversation stays held after its PTY
+closes: stop providers whose cwd is the private Task's checkout, with their
+descendants, after every run. Freeze the private server by the PID its `nohup` recorded, never by
 `pgrep -f 'lf server run'`, which matches other worktrees' servers.
 
 A Task launch with no server runs `lf install server`, which registers
@@ -461,7 +484,10 @@ delivery evidence is `lf session steers <id> --json`; a recovered gap shows as a
 `store-gap` row in `lf session history <id>`. Read the store with
 `sqlite3 "file:…/loopflow.db?immutable=1"` when it has no `-shm`.
 A private home that applied an earlier draft of the branch's migration refuses
-to open (checksum mismatch); move it aside and start a fresh one.
+to open (checksum mismatch), as does one that applied the branch's migration
+before a merge put main's newer migration ahead of it ("migration history or
+schema differs"). Start a fresh one, seeded by the installed `lf` when the
+upgrade path matters.
 
 Boundary query plans: copy the Machine's store with
 `sqlite3 -readonly ~/.lf/loopflow.db ".backup <copy>"`, compare
@@ -471,6 +497,23 @@ missing migration SQL to the copy with `sqlite3`. Never open the copy with
 from `boundary_statements_never_scan_tables_that_grow_with_use` to JSON (a
 temporary line, reverted), then `EXPLAIN QUERY PLAN` and time each statement
 on the copy inside a rolled-back savepoint, before and after `ANALYZE`.
+
+Config loaded inside a write transaction: in a private home, replace
+`$LF_HOME/config.yaml` with a FIFO. At each open, before writing the file's
+contents, try `sqlite3 -cmd '.timeout 0' <db> 'BEGIN IMMEDIATE; ROLLBACK;'`;
+a failure means lf holds the write lock while it reads config. Stop the
+feeder with a flag file, not `kill`: a surviving feeder interleaves writes and
+leaves lf blocked on an open with no writer. In this shell `which lf` names a
+wrapper function; use `whence -p lf` for the installed binary.
+
+Read changes on a large private repository: `lf task create` takes seconds
+each, so create hundreds in parallel batches with `--request-id` (twelve at a
+time held up), claiming and completing some. For a "before" binary, run
+`--version` on sibling worktrees' `target/debug/lf` and pick a build that
+descends from the branch's base with no `store/migrations/` diff; it reads the
+same private store. Compare `jq -S` output of both binaries, then time them in
+interleaved rounds, since other worktrees' builds make the Machine's load swing.
+`lf server status` prints JSON without `--json`.
 
 ## Waking idle conversations
 
@@ -572,7 +615,7 @@ a rebuild can't change the binary under its owners. `lf task checkout <task>`
 warms the Task's conversation detached; `lf session list --json` maps it to its
 Session. Bare `lf task retire` runs one pass over every pending Task. Attach the
 Task's Session in a PTY with `lf session resume <session>`, type a line without
-Enter as a draft, and close the PTY: the owner keeps running detached. Nothing
+Enter as a draft, and close the PTY: the holder keeps it running. Nothing
 schedules checkout cleanup in a private home; call `lf task retire <task>` to
 exercise deletion (the installed `com.loopflow.cleanup` job runs once a minute).
 After `lf task complete`, run `lf task retire <task>` once fifteen minutes have
@@ -592,3 +635,91 @@ claims the Task, which reads `git config user.email` in the repository: with an
 isolated `HOME`, set a repository-local identity first. A PTY driver waiting for
 text can match the repainted saved screen before the new provider reads input;
 wait for text only the new provider prints.
+
+## Headless Work and earlier-build owners
+
+lf-world's `launchctl` stub refuses `bootstrap`, so start the branch's
+`lf server run` (stdin closed) before any Task launch there. The Graph is
+positional: `lf task run <task> <graph> --json`. Headless steps need the fixture
+account above. For a headless step that waits, put a `claude` ahead of the
+world's on `PATH` that, when neither stdin nor stdout is a terminal, reads one
+line (stdin stays open for steers, so never `cat` it), waits for a marker
+file, then prints a stream-json `result` line. A detached launch shows as
+`lf task run …` with parent 1 and its stdout on `logs/graph-<id>.log`; `-b` at
+a PTY tails unlinked temp files. PTY drivers must drain output continuously:
+an undrained PTY blocks the caller on write and looks like a hang.
+
+An earlier build's Session owner: in a fresh home, before the branch opens it,
+run the installed `lf session serve --terminal -- lf -i -a claude : '<msg>'`
+under `nohup`; it prints the owner's Process ID, and `agent_sessions.transport_lf_process_id`
+names it. Write the stand-in's transcript line, then resume with the branch.
+SIGSTOP the owner first to check the "still running under an earlier lf"
+refusal (SIGCONT afterwards; the pending TERM ends it). The installed
+`lf desktop shell <task> --checkout <path> --id <id> --create` in a PTY makes an
+earlier-build Desktop shell; its Task needs a checkout (`lf wt create` then
+`lf task create --worktree`). Running `open_argv` from
+`lf session resume --prepare --json` with `LF_SERVER_STATUS` set to any path
+takes the Desktop pane's relayed route.
+
+## Rented Machines without a provider
+
+Renting runs the provider bridge as `uv run … python -c <bridge> <provider> <op>`
+and reaches the sandbox with `ssh`, both from `PATH`. Stand-ins on a private
+`PATH` drive `lf machine ondemand rent`, `lf task move --machine` and
+`lf machine end` with no account or cloud: `uv` answers `create` with a unique
+`id` and an SSH `route` (`qa@sandbox<n>.invalid`), `get` with the sandbox or
+`null`, and `delete` with `null`; `ssh` takes its last argument as the remote
+command and runs it under a separate `HOME`/`LF_HOME` per sandbox, with the
+branch `lf` on that `PATH`. Exit 0 for the `install.sh` command and print
+`0\n0\n` for the `pgrep` holdings script. Each sandbox needs its own home: one
+Machine identity behind two rentals fails `rentals.machine_id`. Set any
+placeholder `DAYTONA_API_KEY` and an SSH key in the private `HOME`; stub
+`ssh-keygen -R`, which would edit the real `known_hosts`. To land a write between
+a preflight read and its transaction, serve a repository's `.lf/config.yaml`
+through a FIFO and act from another repository at the first open.
+
+## Moving a Task between owned Machines
+
+The same stand-in `ssh` drives `lf machine add mini` and `lf task move <task>
+--machine mini` with no real host: it runs its last argument under mini's own
+`HOME` and explicit `LF_HOME` (unset, `lf` finds the real `~/.lf`), with mini's
+`~/.local/bin/lf` the branch binary and a `~/.gitconfig` identity. A local bare
+origin and `planning: {provider: git, personal: true}` are enough; the move's
+check clones the repository on mini. To leave a move `sent, not arrived`, swap
+mini's `lf` for a wrapper that exits 1 on `session receive` without `--check`,
+then read `lf task status`, `lf task list` and `lf machine list` before
+restoring it and repeating the move. A wrapper that runs the real receive and
+then exits 255 loses the arrival answer. Both homes share the host name, so mini
+labels the laptop's claim by its own host name. For mini to reach the laptop
+(retries on mini, moves back), route the stand-in by host: when an argument is
+`laptop`, run under the laptop's `HOME` and `LF_HOME`; then `lf machine add
+laptop` on mini, from outside any clone. Run inside a clone before the first
+move, `lf machine add` and `lf config repo --bind` minted mini's own planning
+key, and the move's check then refused; start mini's home over. A marker file the
+stand-in checks per host (exit 255, "Connection refused") makes either side
+unreachable without touching the other's store.
+
+## Test-only changes
+
+When the change moves or cuts tests, the people it is for are developers
+running them. Run each filter exactly as `rust/loopflow/tests/README.md`
+prints it, with `LF_*`/`REX_*` unset and stdin closed. Then break the
+production decision on purpose: one `sed` on the line the rows claim to
+check, run that family's filter, `git checkout -- <file>`. Do one for each
+family, plus one Clap → ops wiring break (e.g. drop `worktree` in
+`lf/commands/task_create.rs`) run against the kept full-Machine filter.
+A break no test notices is a missing row; add it, then repeat the break.
+Edit only from one shell, one cargo command at a time, so no other build
+compiles the mutated source.
+
+A Swift "passes under parallel load" check can't use two `swift test`
+processes: the second waits on the `.build` lock ("Another instance of
+SwiftPM … waiting"), even with `--skip-build`, so the runs never overlap.
+Build once, then run the bundle directly for one side:
+`swiftpm-testing-helper --test-bundle-path
+swift/.build/debug/LoopflowSwiftPackageTests.xctest/Contents/MacOS/LoopflowSwiftPackageTests
+--testing-library swift-testing --parallel [--filter …]` from `swift/`, with
+`DYLD_FRAMEWORK_PATH` set to the MacOSX platform's `Library/Frameworks` and
+`Library/PrivateFrameworks`, and `DYLD_LIBRARY_PATH` to its `usr/lib`. The
+helper is in the Xcode toolchain's `usr/libexec/swift/pm/`. Timestamp each
+run to show the overlap.

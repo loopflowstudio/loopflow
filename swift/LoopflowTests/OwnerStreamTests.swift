@@ -105,7 +105,7 @@ struct OwnerStreamTests {
     @Test func controlGrantWaitsForTheReplacementScreenAndLossRevokesInput() throws {
         var stream = try observed()
         stream.expectAttachment(2)
-        let reply = Data(#"{"answers":2,"seq":2,"kind":"attached","viewer":"mobile-viewer","reconnect":"test-reconnect","nonce":"fixture-nonce","token":"test-claim","terminal":true,"grace_ms":60000,"owner":"mobile-viewer"}"#.utf8)
+        let reply = Data(#"{"answers":2,"seq":2,"kind":"attached","viewer":"mobile-viewer","nonce":"fixture-nonce","token":"test-claim","terminal":true,"owner":"mobile-viewer"}"#.utf8)
         #expect(try stream.receive(OwnerStream.frame(.reply, body: reply)).isEmpty)
         #expect(!(stream.ready))
         let resize = Data("\u{1b}_lf1;fixture-nonce;{\"seq\":3,\"type\":\"resize\",\"rows\":20,\"cols\":44}\u{1b}\\".utf8)

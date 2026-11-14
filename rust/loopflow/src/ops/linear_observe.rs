@@ -51,7 +51,8 @@ pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> O
         return Ok(());
     };
     let repository = super::task::repository_for_task(store, &task)?;
-    if !super::planning_client::connected(&repository.to_string_lossy()) {
+    let planning_connected = super::planning_client::connected(&repository.to_string_lossy());
+    if !planning_connected {
         return Ok(());
     }
     // The Team delta carries this issue's new comments; a current one needs no
@@ -98,7 +99,12 @@ pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> O
         }
     }
     store
-        .apply_linear_observation(&task.id, observation, OffsetDateTime::now_utc())
+        .apply_linear_observation(
+            &task.id,
+            observation,
+            OffsetDateTime::now_utc(),
+            planning_connected,
+        )
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
     Ok(())
@@ -158,7 +164,8 @@ pub(crate) async fn check_repository(store: &Store, repository: &str) -> OpsResu
 
 /// `check_repository` unless a check started within `fresh_for` seconds.
 async fn check_scope(store: &Store, repository: &str, fresh_for: i64) -> OpsResult<bool> {
-    if !super::planning_client::connected(repository) {
+    let planning_connected = super::planning_client::connected(repository);
+    if !planning_connected {
         return Ok(false);
     }
     let repo = Path::new(repository);
@@ -273,7 +280,7 @@ async fn check_scope(store: &Store, repository: &str, fresh_for: i64) -> OpsResu
             let mut observation = observation;
             claim_local_comments(store, &task, &client, &mut observation)?;
             store
-                .apply_linear_observation(&task.id, observation, now)
+                .apply_linear_observation(&task.id, observation, now, planning_connected)
                 .await
                 .map_err(message)?;
         }

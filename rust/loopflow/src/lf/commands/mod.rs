@@ -1,5 +1,6 @@
 pub mod account;
 pub mod activity;
+pub mod binaries;
 pub mod bind_attribution;
 pub mod ci;
 pub mod config;
@@ -27,7 +28,6 @@ pub mod profile;
 pub mod read;
 pub mod rental;
 pub mod replay;
-pub mod rollover;
 pub mod run;
 pub mod screens;
 pub mod server;

@@ -865,9 +865,7 @@ struct TaskCheckouts<'a> {
 impl Drop for TaskCheckouts<'_> {
     fn drop(&mut self) {
         let db = rusqlite::Connection::open(self.home.join("loopflow.db")).unwrap();
-        let mut query = db
-            .prepare("SELECT worktree FROM tasks WHERE worktree IS NOT NULL")
-            .unwrap();
+        let mut query = db.prepare("SELECT worktree FROM task_checkouts").unwrap();
         let paths = query.query_map([], |row| row.get::<_, String>(0)).unwrap();
         for path in paths.flatten() {
             // All rows in this disposable Machine were created by the fixture.

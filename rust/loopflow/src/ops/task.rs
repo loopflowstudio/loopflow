@@ -67,7 +67,8 @@ use crate::ops::task_actions::TaskActionModel;
 use crate::store::sqlite::{SqliteStore, TaskCheckout};
 use crate::store::{open_existing_store, SharedStore, Store};
 use crate::work::task::{
-    GithubPr, Observation, PrPhase, PrPublication, Task, TaskEventKind, TaskPr, TaskPrId,
+    GithubPr, Observation, PrMergeMode, PrPhase, PrPublication, Task, TaskEventKind, TaskPr,
+    TaskPrId,
 };
 use crate::work::wave::Wave;
 use time::format_description::well_known::Rfc3339;
@@ -107,7 +108,7 @@ impl TaskProcessOptions {
             }
             if let Some(task) = existing {
                 return Err(task_error(format!(
-                    "Task {} already exists; use `lf task steer {} <new-direction>`",
+                    "Task {} already exists; use `lf steer {} <new-direction>`",
                     task.identifier, task.identifier
                 )));
             }
@@ -345,15 +346,7 @@ pub(crate) fn file_context(store: &SqliteStore, issue: &str) -> OpsResult<TaskCh
     let checkout = store
         .task_checkout(&task_id)
         .map_err(|error| task_error(format!("cannot read Task checkout: {error}")))?
-        .ok_or_else(|| task_error(format!("Task {issue:?} has no checkout")))?;
-    let machine = checkout.machine_id.as_ref().ok_or_else(|| {
-        task_error("Task checkout Machine is unknown; its files cannot be located")
-    })?;
-    if *machine != store.local_machine().map_err(task_error)?.id {
-        return Err(task_error(format!(
-            "Task checkout belongs to Machine {machine}; read its files on that Machine"
-        )));
-    }
+        .ok_or_else(|| task_error(format!("Task {issue:?} is not checked out on this Machine")))?;
     Ok(checkout)
 }
 
@@ -630,16 +623,33 @@ pub(crate) struct TaskRunSelection {
     /// Whether the Task takes `graph` up first: it has none, or named another.
     pub take_up: bool,
     /// Where the run begins; `None` when nothing remains before `end`.
-    pub start: Option<crate::task_graph::Place>,
+    pub start: Option<RunStart>,
+}
+
+/// Where a Task run sets out: the step, and the cursor the Graph starts from.
+/// A stopped run's cursor keeps its loop passes, verdicts and routes.
+#[derive(Debug, Clone)]
+pub(crate) struct RunStart {
+    pub place: crate::task_graph::Place,
+    pub cursor: crate::graph::runner::ExecutionCursor,
+}
+
+impl From<crate::task_graph::Place> for RunStart {
+    fn from(place: crate::task_graph::Place) -> Self {
+        Self {
+            cursor: place.cursor(),
+            place,
+        }
+    }
 }
 
 impl TaskRunSelection {
     /// Whether the run reaches `end`: it runs through interactive steps, or
     /// none lies ahead. Such a run hands the Task off, granting merge authority.
     pub fn reaches_end(&self, mode: TaskRunMode) -> bool {
-        self.start
-            .as_ref()
-            .is_none_or(|place| mode.runs_through() || self.graph.next_interactive(place).is_none())
+        self.start.as_ref().is_none_or(|start| {
+            mode.runs_through() || self.graph.next_interactive(&start.place).is_none()
+        })
     }
 }
 
@@ -727,22 +737,34 @@ pub(crate) fn select_task_run(
             )));
         }
     }
+    // A Graph that was running in the checkout before the Task adopted it.
+    if let Some(execution) =
+        crate::ops::task_execution::open_graph_execution(&store.sqlite, &task.id)
+            .map_err(task_error)?
+    {
+        return Err(task_error(execution.reason));
+    }
     let step = row.as_ref().map_or(START, |row| row.step.as_str());
     let start = match (from, row.as_ref().and_then(|row| row.run.as_ref())) {
-        (Some(name), _) => Some(graph.find(name).ok_or_else(|| {
-            task_error(format!(
-                "graph {} has no step {name:?}. Steps: {}",
-                graph.name,
-                graph.describe_steps()
-            ))
-        })?),
-        // A run that stopped starts again from where it began, or from the
-        // step it was waiting at on a usage limit: the steps before it are done.
-        (None, Some((cursor, _))) => limit_recovery::waiting_on_limit(&store.sqlite, &task.id)
-            .map_err(task_error)?
-            .and_then(|wait| graph.find(&wait.step))
-            .or_else(|| graph.place_of(cursor)),
-        (None, None) if step == START => graph.find(START),
+        (Some(name), _) => Some(
+            graph
+                .find(name)
+                .ok_or_else(|| {
+                    task_error(format!(
+                        "graph {} has no step {name:?}. Steps: {}",
+                        graph.name,
+                        graph.describe_steps()
+                    ))
+                })?
+                .into(),
+        ),
+        // A run that stopped starts again at the step it stopped at, with the
+        // passes and routes it had: the steps before it are done.
+        (None, Some((cursor, _))) => graph.place_of(cursor).map(|place| RunStart {
+            place,
+            cursor: cursor.clone(),
+        }),
+        (None, None) if step == START => graph.find(START).map(RunStart::from),
         (None, None) if step == END => {
             return Err(task_error(format!(
                 "Task {issue} is at the end of graph {}; `lf task run {issue} --from <step>` runs part of it again, `lf task run {issue} <graph>` takes up another. Steps: {}",
@@ -752,7 +774,7 @@ pub(crate) fn select_task_run(
         }
         // Waiting at a step that merges, the Task starts at it again.
         (None, None) => match graph.landing_step(step) {
-            Some(landing) => Some(landing),
+            Some(landing) => Some(landing.into()),
             None => {
                 let place = graph.interactive_step(step).ok_or_else(|| {
                     task_error(format!(
@@ -761,7 +783,7 @@ pub(crate) fn select_task_run(
                         graph.describe_steps()
                     ))
                 })?;
-                graph.after(&place)
+                graph.after(&place).map(RunStart::from)
             }
         },
     };
@@ -815,21 +837,21 @@ async fn start_task_run(
         return Ok(TaskRunStart::Ended);
     };
     // Starting at an interactive step without running past it puts the Task there.
-    if let Some(step) = graph.interactive_at(&start).filter(|_| !through) {
+    if let Some(step) = graph.interactive_at(&start.place).filter(|_| !through) {
         store
             .sqlite
             .set_task_graph_step(&task.id, step)
             .map_err(task_error)?;
         return Ok(TaskRunStart::Waiting(step.to_owned()));
     }
-    let label = if start == crate::task_graph::Place::default() {
+    let label = if start.place == crate::task_graph::Place::default() {
         format!("{} from start", graph.name)
     } else {
-        format!("{} from {}", graph.name, graph.step_name(&start))
+        format!("{} from {}", graph.name, graph.step_name(&start.place))
     };
     if !store
         .sqlite
-        .start_task_graph_run(&task.id, &row, &start.cursor(), &process, ships)
+        .start_task_graph_run(&task.id, &row, &start.cursor, &process, ships)
         .map_err(task_error)?
     {
         return Err(task_error(format!(
@@ -897,6 +919,26 @@ pub(crate) fn check_out_moved_task(repo: &Path, source: remote::TaskSource) -> O
     )
 }
 
+/// Take a Task this Machine has not saved from the repository's planning.
+pub(crate) async fn acquire_from_planning(main: &Path, issue: &str) -> OpsResult<Task> {
+    match crate::config::load_config(Some(main))
+        .map_err(task_error)?
+        .unwrap_or_default()
+        .planning_transport()
+    {
+        crate::config::PlanningConfig::Linear { .. } => {
+            super::linear::acquire_task(main, issue, super::linear::LinearRefresh::Auto).await
+        }
+        crate::config::PlanningConfig::Git { .. } => Err(task_error(format!(
+            "Task {issue:?} not found in selected Git planning"
+        ))),
+        remote => Err(task_error(format!(
+            "Task {issue:?} not found in Loopflow planning; {} tasks are not acquired yet",
+            remote.remote_name().unwrap_or("provider")
+        ))),
+    }
+}
+
 /// `source` is the branch and commit another Machine pushed for this Task.
 fn prepare_task(
     repo: &Path,
@@ -916,27 +958,7 @@ fn prepare_task(
         let acquired = saved.is_none();
         let task = match saved {
             Some(task) => task,
-            None => match crate::config::load_config(Some(&main))
-                .map_err(task_error)?
-                .unwrap_or_default()
-                .planning_transport()
-            {
-                crate::config::PlanningConfig::Linear { .. } => {
-                    super::linear::acquire_task(&main, issue, super::linear::LinearRefresh::Auto)
-                        .await?
-                }
-                crate::config::PlanningConfig::Git { .. } => {
-                    return Err(task_error(format!(
-                        "Task {issue:?} not found in selected Git planning"
-                    )));
-                }
-                remote => {
-                    return Err(task_error(format!(
-                        "Task {issue:?} not found in Loopflow planning; {} tasks are not acquired yet",
-                        remote.remote_name().unwrap_or("provider")
-                    )));
-                }
-            },
+            None => acquire_from_planning(&main, issue).await?,
         };
         let destination = store
             .task_execution_route(&task.id)
@@ -1002,7 +1024,7 @@ fn prepare_task(
             task
         } else {
             if let Some(parent) = options.stack_on.as_deref() {
-                stack_existing_task(&store, &task, parent).await?;
+                stack_existing_task(&store, &main, &task, parent).await?;
             }
             restore_task_checkout(&store, &task, recover_from).await?;
             task
@@ -1182,44 +1204,313 @@ async fn finish_task_checkout(store: &SharedStore, task: &Task) -> OpsResult<()>
     Ok(())
 }
 
-async fn stack_existing_task(store: &SharedStore, task: &Task, requested: &str) -> OpsResult<()> {
-    let parent = select_existing_stack_parent(store, task, requested).await?;
+async fn stack_existing_task(
+    store: &SharedStore,
+    main_repo: &Path,
+    task: &Task,
+    requested: &str,
+) -> OpsResult<()> {
+    fetch_task_refs(main_repo)?;
+    let (parent, note) = record_stack_parent(store, main_repo, task, requested).await?;
     let _mutation = lock_task_pr_mutation(task.worktree()?)?;
+    let base_commit = if task
+        .parent_pr_id
+        .as_ref()
+        .is_some_and(|id| id != &parent.id)
+    {
+        // The old parent's fork makes its inherited files look deleted on the
+        // new parent. Compare from shared history so those files stay child work.
+        let (_, upstream) = resolve_upstream_base(main_repo, &parent.branch)?;
+        merge_base(task.worktree()?, "HEAD", &upstream).map_err(task_error)?
+    } else {
+        task.base_commit.clone()
+    };
     store
-        .stack_task_placement(task, &parent.id)
+        .stack_task_placement(task, &parent.id, &base_commit)
         .await
         .map_err(|error| task_error(error.to_string()))?;
     eprintln!(
-        "Task {} selects parent PR {}. Checkout and GitHub are unchanged; run `lf sync` in {} to integrate it.",
-        task.identifier, parent.id, task.worktree()?.display()
+        "Task {} stacks on {requested} ({}){}. This Task's checkout and PR are unchanged; run `lf sync` in {} to integrate it.",
+        task.identifier,
+        parent.branch,
+        note.map(|note| format!("; {note}")).unwrap_or_default(),
+        task.worktree()?.display()
     );
     Ok(())
 }
 
-async fn select_existing_stack_parent(
+/// The Task a stacked Task names, with the PR record it already has.
+#[derive(Debug)]
+struct StackParent {
+    task: Task,
+    pr: Option<TaskPr>,
+}
+
+impl StackParent {
+    fn branch(&self) -> &str {
+        self.pr
+            .as_ref()
+            .map_or(self.task.branch.as_str(), |pr| pr.branch.as_str())
+    }
+
+    /// A published branch carries review and merge requests.
+    fn is_published(&self) -> bool {
+        self.pr.as_ref().is_some_and(|pr| pr.publication.is_some())
+    }
+
+    /// GitHub has a PR for the branch that the store last saw open.
+    fn has_open_pr(&self) -> bool {
+        self.pr
+            .as_ref()
+            .is_some_and(|pr| pr.phase() == PrPhase::Open)
+    }
+}
+
+/// One rule for every stack: the parent is a Task with a placed branch.
+/// Reads only; [`record_stack_parent`] pushes its branch and records its PR.
+async fn select_stack_parent(
     store: &SharedStore,
     task: &Task,
     requested: &str,
-) -> OpsResult<TaskPr> {
+) -> OpsResult<StackParent> {
     let parent_task = store
         .get_task_by_issue(requested)
         .await
-        .map_err(|error| task_error(error.to_string()))?
-        .ok_or_else(|| task_error(format!("stack parent {requested:?} has no Task")))?;
-    // Retrying the same parent retains its historical PR identity. An explicit
-    // different Task selects that Task's active PR; the store checks the graph.
+        .map_err(|error| task_error(format!("failed to read stack parent Task: {error}")))?
+        .ok_or_else(|| {
+            task_error(format!(
+                "stack parent {requested:?} has no Task; create it with `lf task create`"
+            ))
+        })?;
+    if parent_task.id == task.id {
+        return Err(task_error("a Task cannot stack on itself"));
+    }
+    // Retrying retains its historical PR identity unless that PR closed without merging.
     if let Some(id) = &task.parent_pr_id {
-        if let Some(parent) = store.get_task_pr(id).await.map_err(task_error)? {
-            if parent.task_id == parent_task.id {
-                return Ok(parent);
+        if let Some(pr) = store.get_task_pr(id).await.map_err(task_error)? {
+            if pr.task_id == parent_task.id && pr.phase() != PrPhase::Abandoned {
+                return Ok(StackParent {
+                    task: parent_task,
+                    pr: Some(pr),
+                });
             }
         }
     }
-    store
+    let pr = match store
         .active_task_pr(&parent_task.id)
         .await
-        .map_err(task_error)?
-        .ok_or_else(|| task_error("stack parent PR is missing"))
+        .map_err(|error| task_error(format!("failed to read stack parent PR: {error}")))?
+    {
+        Some(pr) if pr.phase() == PrPhase::Merged => {
+            return Err(task_error(format!(
+                "stack parent {requested} already merged; place this Task without --stack-on"
+            )))
+        }
+        // A closed PR is spent: the placed branch decides, as for a parent that never published.
+        Some(pr) if pr.phase() == PrPhase::Abandoned => None,
+        pr => pr,
+    };
+    if pr.is_none() && (parent_task.worktree.is_none() || parent_task.branch.is_empty()) {
+        return Err(task_error(format!(
+            "stack parent {requested} has no placed branch; run `lf checkout {requested}` first"
+        )));
+    }
+    Ok(StackParent {
+        task: parent_task,
+        pr,
+    })
+}
+
+/// Select the parent, push its branch when origin lacks it (or an unpublished one is behind), then
+/// return its PR record, recording an unpublished one when the parent has none.
+/// The note says what stacking pushed, or which local commits the child leaves out.
+async fn record_stack_parent(
+    store: &SharedStore,
+    main_repo: &Path,
+    task: &Task,
+    requested: &str,
+) -> OpsResult<(TaskPr, Option<String>)> {
+    let mut parent = select_stack_parent(store, task, requested).await?;
+    if parent.has_open_pr()
+        && crate::git::has_origin(main_repo)?
+        && !ref_exists(
+            main_repo,
+            &format!("refs/remotes/origin/{}", parent.branch()),
+        )?
+    {
+        // A deleted branch may mean GitHub landed or closed the PR since our last read.
+        // Reconciliation owns its mutation lock; release it before the push's lock.
+        reconcile_task_pr_observation(
+            store,
+            &mut parent.task,
+            crate::ops::pr::PrReadFreshness::Fresh,
+        )
+        .await?;
+        parent = select_stack_parent(store, task, requested).await?;
+    }
+    // A retry keeps its historical parent identity for sync.
+    // Its branch may already be deleted and must not be republished.
+    if parent.pr.as_ref().is_some_and(TaskPr::is_settled) {
+        return Ok((parent.pr.expect("settled parent has a PR record"), None));
+    }
+    let state = stack_parent_branch(main_repo, &parent)?;
+    let mut revoked = None;
+    if state == StackParentBranch::Behind {
+        // Only a published branch carries a merge request. Under the commit fence's
+        // lock, a branch head other than the requested one revokes the request before
+        // origin sees it. The push exposes the branch, so uncommitted edits keep it.
+        // Callers read the parent's id and branch, never its merge request.
+        let branch = parent.branch();
+        let _mutation = if parent.is_published() {
+            let mutation = lock_task_pr_mutation(parent.task.worktree()?)?;
+            let head = rev_parse(main_repo, &format!("refs/heads/{branch}"))?;
+            let stored = store
+                .active_task_pr(&parent.task.id)
+                .await
+                .map_err(task_error)?;
+            revoked = stale_merge_request(stored.as_ref(), &head);
+            if revoked.is_some() {
+                let checkout = parent.task.worktree()?;
+                delivery::clear_task_pr_merge(store, &parent.task, checkout, true, &|_| {}).await?;
+            }
+            Some(mutation)
+        } else {
+            None
+        };
+        git_output(main_repo, &["push", "--set-upstream", "origin", branch]).map_err(|error| {
+            task_error(format!(
+                "failed to push stack parent {}'s branch {branch} to origin: {error}",
+                parent.task.identifier
+            ))
+        })?;
+    }
+    let note = state.note(&parent, "pushed").map(|pushed| match revoked {
+        // Stacking changed another Task's merge request; say so where the person stacking looks.
+        Some(request) => format!(
+            "{} and {pushed}",
+            request.note(&parent, "turned off", "withdrew")
+        ),
+        None => pushed,
+    });
+    if let Some(pr) = parent.pr {
+        return Ok((pr, note));
+    }
+    let pr = delivery::next_task_pr(store, &parent.task).await?;
+    if let Err(error) = store.insert_task_pr(&pr).await {
+        // Another child may have recorded the parent first; stack on that row.
+        let active = store
+            .active_task_pr(&parent.task.id)
+            .await
+            .map_err(task_error)?
+            .filter(|active| !active.is_settled())
+            .ok_or_else(|| task_error(format!("failed to record stack parent PR: {error}")))?;
+        return Ok((active, note));
+    }
+    Ok((pr, note))
+}
+
+/// A parent's merge request recorded for a head other than its branch's.
+#[derive(Debug, Clone, Copy)]
+struct StaleMergeRequest {
+    number: u32,
+    mode: PrMergeMode,
+}
+
+fn stale_merge_request(pr: Option<&TaskPr>, head: &str) -> Option<StaleMergeRequest> {
+    let pr = pr?;
+    let merge = pr.publication.as_ref()?.merge.as_ref()?;
+    (merge.head_sha != head).then_some(StaleMergeRequest {
+        number: pr.github()?.number,
+        mode: merge.mode,
+    })
+}
+
+impl StaleMergeRequest {
+    /// `auto` and `user` are the verbs for each mode: done at execution, pending in a preview.
+    fn note(&self, parent: &StackParent, auto: &str, user: &str) -> String {
+        let request = match self.mode {
+            PrMergeMode::Auto => format!("{auto} Auto"),
+            PrMergeMode::User => format!("{user} the merge request"),
+        };
+        format!(
+            "{request} on {}'s PR #{}, whose branch is no longer at the requested head,",
+            parent.task.identifier, self.number
+        )
+    }
+}
+
+/// How the parent's local branch relates to origin's, from refs already fetched.
+#[derive(Debug, PartialEq, Eq)]
+enum StackParentBranch {
+    /// Origin has every local commit, or there is no origin to push to.
+    Current,
+    /// Origin lacks the branch or is behind an unpublished one; stacking pushes it.
+    Behind,
+    /// A published or diverged branch stays untouched; the child uses origin's version.
+    LeftOut { left_out: usize },
+}
+
+impl StackParentBranch {
+    /// What stacking changes or leaves out; nothing when origin is current.
+    /// `pushes` is the verb for the push: done at execution, pending in a preview.
+    fn note(&self, parent: &StackParent, pushes: &str) -> Option<String> {
+        let (identifier, branch) = (&parent.task.identifier, parent.branch());
+        match self {
+            Self::Current => None,
+            Self::Behind => Some(format!(
+                "{pushes} {identifier}'s branch {branch} to origin"
+            )),
+            Self::LeftOut { left_out } => Some(format!(
+                "this Task bases on origin/{branch} and leaves out {left_out} local {identifier} commit{} not on origin; run `lf commit -p` in {identifier}'s checkout to include them",
+                if *left_out == 1 { "" } else { "s" }
+            )),
+        }
+    }
+}
+
+/// Errors when the branch is neither local nor on origin.
+fn stack_parent_branch(main_repo: &Path, parent: &StackParent) -> OpsResult<StackParentBranch> {
+    if !crate::git::has_origin(main_repo)? {
+        return Ok(StackParentBranch::Current);
+    }
+    let branch = parent.branch();
+    let local = format!("refs/heads/{branch}");
+    let remote = format!("refs/remotes/origin/{branch}");
+    match (
+        ref_exists(main_repo, &local)?,
+        ref_exists(main_repo, &remote)?,
+    ) {
+        (false, false) => {
+            return Err(task_error(format!(
+                "stack parent {}'s branch {branch} is neither local nor on origin",
+                parent.task.identifier
+            )))
+        }
+        (false, true) => return Ok(StackParentBranch::Current),
+        (true, false) => return Ok(StackParentBranch::Behind),
+        (true, true) => {}
+    }
+    // "<origin-only> <local-only>" commit counts.
+    let counts = git_output(
+        main_repo,
+        &[
+            "rev-list",
+            "--left-right",
+            "--count",
+            &format!("{remote}...{local}"),
+        ],
+    )?;
+    let counts: Vec<usize> = counts
+        .split_whitespace()
+        .map(str::parse)
+        .collect::<Result<_, _>>()
+        .map_err(task_error)?;
+    Ok(match counts[..] {
+        [_, 0] => StackParentBranch::Current,
+        [0, _] if !parent.is_published() => StackParentBranch::Behind,
+        [_, left_out] => StackParentBranch::LeftOut { left_out },
+        _ => return Err(task_error(format!("unexpected rev-list counts {counts:?}"))),
+    })
 }
 
 #[derive(Debug)]
@@ -1318,41 +1609,6 @@ fn plan_task_placement(
     Ok((plan, workspace_slug))
 }
 
-async fn select_new_stack_parent(
-    store: &SharedStore,
-    task: &Task,
-    requested: Option<&str>,
-) -> OpsResult<Option<TaskPr>> {
-    if let Some(parent_issue) = requested {
-        let parent_task = store
-            .get_task_by_issue(parent_issue)
-            .await
-            .map_err(|error| task_error(format!("failed to read parent Task: {error}")))?
-            .ok_or_else(|| {
-                task_error(format!(
-                    "stack parent {parent_issue:?} has no Task; run it first"
-                ))
-            })?;
-        if parent_task.id == task.id {
-            return Err(task_error("a Task cannot stack on itself"));
-        }
-        let parent = store
-            .active_task_pr(&parent_task.id)
-            .await
-            .map_err(|error| task_error(format!("failed to read parent PR: {error}")))?
-            .ok_or_else(|| task_error("stack parent has no active PR"))?;
-        if parent.github().is_none() {
-            return Err(task_error(format!(
-                "open the parent PR from {} before stacking work on it",
-                parent_task.worktree()?.display()
-            )));
-        }
-        Ok(Some(parent))
-    } else {
-        Ok(None)
-    }
-}
-
 async fn prepare_task_placement(
     store: &SharedStore,
     main_repo: &Path,
@@ -1364,7 +1620,16 @@ async fn prepare_task_placement(
     let recorded_branch = recorded_branch.filter(|branch| !branch.is_empty());
     fetch_task_refs(main_repo)?;
     let (plan, workspace_slug) = plan_task_placement(main_repo, task, recorded_branch, options)?;
-    let stack_parent = select_new_stack_parent(store, task, options.stack_on.as_deref()).await?;
+    let stack_parent = match options.stack_on.as_deref() {
+        Some(requested) => {
+            let (parent, note) = record_stack_parent(store, main_repo, task, requested).await?;
+            if let Some(note) = note {
+                eprintln!("Task {} stacks on {requested}: {note}.", task.identifier);
+            }
+            Some(parent)
+        }
+        None => None,
+    };
     let observe_pr = recorded_branch.is_some() || plan.strategy != PlacementStrategy::Create;
     prepare_placement(main_repo, plan, workspace_slug, stack_parent, observe_pr)
 }
@@ -1388,19 +1653,25 @@ fn prepare_placement(
             base_commit
         }
     };
-    let github = if observe_pr {
-        super::pr::branch_pr(main_repo, &plan.branch)?
-            .map(|pr| {
-                Ok::<_, OpsError>(GithubPr {
-                    number: u32::try_from(pr.number).map_err(task_error)?,
-                    url: pr.url,
-                    head_sha: pr.head_sha,
-                })
+    // An unreadable PR (no GitHub login on this Machine, an origin GitHub
+    // does not host) leaves the checkout without one; a later sync finds it.
+    let found = observe_pr
+        .then(|| {
+            super::pr::branch_pr(main_repo, &plan.branch).unwrap_or_else(|error| {
+                tracing::warn!(branch = %plan.branch, %error, "PR unread for the Task checkout");
+                None
             })
-            .transpose()?
-    } else {
-        None
-    };
+        })
+        .flatten();
+    let github = found
+        .map(|pr| {
+            Ok::<_, OpsError>(GithubPr {
+                number: u32::try_from(pr.number).map_err(task_error)?,
+                url: pr.url,
+                head_sha: pr.head_sha,
+            })
+        })
+        .transpose()?;
     if plan.strategy != PlacementStrategy::Create {
         let branch_ref = if ref_exists(main_repo, &format!("refs/heads/{}", plan.branch))? {
             format!("refs/heads/{}", plan.branch)
@@ -1792,19 +2063,12 @@ pub(crate) fn counted_task(
     cwd: &Path,
 ) -> OpsResult<Option<crate::durable::TaskId>> {
     // Branch names are not checkout identity: another clone can use the same
-    // branch. Never probe a remote Machine's recorded path on this Machine.
+    // branch.
     let Ok(root) = crate::git::worktree_root(cwd) else {
         return Ok(None);
     };
-    let local = store.local_machine().map_err(task_error)?.id;
     let mut id = None;
     for checkout in store.task_checkouts().map_err(task_error)? {
-        if checkout.machine_id.as_ref() != Some(&local) {
-            if checkout.machine_id.is_none() && checkout.worktree == root {
-                return Err(task_error("Task checkout Machine is unknown"));
-            }
-            continue;
-        }
         if crate::git::worktree_root(&checkout.worktree).ok().as_ref() == Some(&root) {
             if id.is_some() {
                 return Err(task_error("Multiple Tasks claim this checkout"));
@@ -2576,7 +2840,7 @@ async fn live_execution(store: &SharedStore, task: &Task) -> OpsResult<Option<St
         let name = graph.name.clone();
         let facts = store
             .sqlite
-            .graph_execution_facts([&graph])
+            .graph_execution_facts([&graph], &[&task.id])
             .map_err(task_error)?;
         let (execution, _) = crate::ops::task_execution::execution_of_latest_graph(
             &store.sqlite,

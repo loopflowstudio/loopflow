@@ -96,22 +96,17 @@ pub enum Operation {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", deny_unknown_fields)]
 pub enum ServerOperation {
-    /// A ticket for the Session's terminal: the server resolves the Session's
-    /// held terminal, else its current owner LfProcess, and answers `{ticket,
-    /// owner_lf_process_id, terminal_id, expires_in_ms}` with one ID null. A
-    /// new connection presents the ticket as its first message (`attach`) and
-    /// becomes the bridge; this connection stays a client. When the terminal
-    /// or owner ends, the bridge closes; attaching again by the same Session
-    /// reaches its next one. With `owner_lf_process_id`, the
-    /// Session must still be owned by exactly that LfProcess, for a client that
-    /// reconnects only to the owner it had.
+    /// A ticket for the Session's held terminal, answered `{ticket,
+    /// terminal_id, expires_in_ms}`. A new connection presents the ticket as
+    /// its first message (`attach`) and becomes the bridge; this connection
+    /// stays a client. When the terminal ends, the bridge closes; attaching
+    /// again by the same Session reaches its next one. A Session no terminal
+    /// runs is `not_found`; attaching never starts a provider.
     #[serde(rename = "session.attach")]
     #[schemars(extend("x-result" = generator.subschema_for::<SessionAttached>()))]
     SessionAttach {
         session: crate::id::LfSessionId,
-        owner_lf_process_id: Option<LfProcessId>,
-        /// Attach only to this held terminal. Without either ID, a Session's
-        /// held terminal is preferred to an owner.
+        /// Attach only to this held terminal.
         terminal_id: Option<crate::id::TerminalId>,
     },
     /// Start the Session's agent in this build's holder and answer
@@ -191,9 +186,10 @@ pub struct SessionBoundary {
     /// Session's history as one `store-gap` observation.
     #[serde(deserialize_with = "Option::deserialize")]
     pub gap: Option<BoundaryGap>,
-    /// Steer batches from earlier answers that this conversation's hooks
-    /// printed and have not yet told the server about.
-    pub printed: Vec<crate::id::SteerBatchId>,
+    /// Unused: hooks claim their own steers from the store. Conversations
+    /// started before then still send it. TODO(LOO-838): delete it with
+    /// `ContextMoment::TaskUpdates`, once none of them is live.
+    pub printed: Vec<String>,
     /// The key file Claude publishes for the conversation's cross-session
     /// inbox, `sessions/<pid>.<sha256 of socket>.key` in its configuration
     /// directory, where an idle conversation takes steers and Task updates.
@@ -224,30 +220,20 @@ pub struct BoundaryGap {
     pub last: i64,
 }
 
-/// What `session.boundary` answers.
+/// What `session.boundary` answers: nothing. Hooks claim their own steers and
+/// Task update from the store. The three fields are what conversations
+/// started before then still parse. TODO(LOO-838): delete them with
+/// `ContextMoment::TaskUpdates`, once none of those conversations is live.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SessionBoundaryAnswer {
-    /// The next pending steers; null when none are ready.
     #[serde(deserialize_with = "Option::deserialize")]
-    pub steers: Option<SteerBatch>,
-    /// What changed on the Session's Tasks since its last update, rendered
-    /// for the provider; null when nothing did. Recorded as delivered when
-    /// answered.
+    #[schemars(with = "Untyped")]
+    pub steers: Option<()>,
     #[serde(deserialize_with = "Option::deserialize")]
-    pub update: Option<String>,
-    /// An earlier answer's batch is unconfirmed and its hook may still print
-    /// it: the hook asks again at its next tool boundary.
+    #[schemars(with = "Untyped")]
+    pub update: Option<()>,
     pub waiting: bool,
-}
-
-/// Steers rendered for the provider. They count as delivered once a later
-/// request lists `batch` in `printed`; unconfirmed, they are answered again.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct SteerBatch {
-    pub batch: crate::id::SteerBatchId,
-    pub text: String,
 }
 
 /// What `session.start` answers.
@@ -263,12 +249,8 @@ pub struct SessionStarted {
 pub struct SessionAttached {
     /// Opaque random ticket; single use.
     pub ticket: String,
-    /// The owner the bridge reaches; null for a held terminal.
-    #[serde(deserialize_with = "Option::deserialize")]
-    pub owner_lf_process_id: Option<LfProcessId>,
-    /// The held terminal the bridge reaches; null for an owner.
-    #[serde(deserialize_with = "Option::deserialize")]
-    pub terminal_id: Option<crate::id::TerminalId>,
+    /// The held terminal the bridge reaches.
+    pub terminal_id: crate::id::TerminalId,
     /// How long the ticket opens a bridge, from when it was issued.
     pub expires_in_ms: u64,
 }
@@ -320,13 +302,9 @@ pub enum ServerMessage {
         result: serde_json::Value,
     },
     /// The answer to `attach`: the connection now speaks the viewer protocol
-    /// with this owner LfProcess or this held terminal, whichever is not null,
-    /// and nothing more arrives from the server.
+    /// with this held terminal, and nothing more arrives from the server.
     Bridged {
-        #[serde(deserialize_with = "Option::deserialize")]
-        owner_lf_process_id: Option<LfProcessId>,
-        #[serde(deserialize_with = "Option::deserialize")]
-        terminal_id: Option<crate::id::TerminalId>,
+        terminal_id: crate::id::TerminalId,
     },
     /// One subscription line; its `body` has the shape of the read's `x-result`.
     Reading {
@@ -518,7 +496,6 @@ mod tests {
             include_str!("../../tests/fixtures/dto/server/response.json"),
             include_str!("../../tests/fixtures/dto/server/attached.json"),
             include_str!("../../tests/fixtures/dto/server/bridged.json"),
-            include_str!("../../tests/fixtures/dto/server/bridged_terminal.json"),
             include_str!("../../tests/fixtures/dto/server/session_started.json"),
             include_str!("../../tests/fixtures/dto/server/reading.json"),
             include_str!("../../tests/fixtures/dto/server/event_shipped.json"),

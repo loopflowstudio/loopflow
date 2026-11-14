@@ -59,10 +59,10 @@ mod steers;
 mod task_comments;
 mod task_content;
 mod task_details;
+pub(crate) mod task_moves;
 mod task_retirement;
 mod transport;
 pub(crate) use task_retirement::{TaskRetirement, ViewerHold, WORKSPACE_GRACE};
-pub(crate) use transport::Transport;
 pub(crate) mod task_history;
 pub(crate) mod task_state_delivery;
 pub(crate) mod task_work;
@@ -154,6 +154,18 @@ fn waves_in(conn: &Connection, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
 }
 
 impl SqliteStore {
+    /// Refresh `sqlite_stat1` for tables whose size changed enough to move a
+    /// plan. Bounded by `analysis_limit`, it holds the write lock under a
+    /// second on a store of 770 MB. The Machine server runs it at start and
+    /// about once a day; nothing else does.
+    pub(crate) fn refresh_statistics(&self) -> StoreResult<()> {
+        self.conn
+            .lock()
+            .expect("store mutex poisoned")
+            .execute_batch("PRAGMA analysis_limit=400; PRAGMA optimize=0x10002;")?;
+        Ok(())
+    }
+
     pub(crate) fn home_dir(&self) -> StoreResult<PathBuf> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         home_dir_in(&conn)
@@ -167,13 +179,12 @@ fn home_dir_in(conn: &Connection) -> StoreResult<PathBuf> {
         .ok_or_else(|| StoreError::InvalidData("store has no owning Machine path".into()))
 }
 
-/// Recorded checkout evidence remains usable without chapter metadata.
+/// A Task's checkout on this Machine, usable without chapter metadata.
 #[derive(Debug, Clone)]
 pub(crate) struct TaskCheckout {
     pub task_id: TaskId,
     pub issue_identifier: String,
     pub worktree: PathBuf,
-    pub machine_id: Option<crate::durable::MachineId>,
 }
 
 /// Stable identity fields for observation, independent of execution schema.
@@ -208,6 +219,13 @@ pub(crate) struct TaskWorktreeOwnership {
     pub path: PathBuf,
     pub completed: bool,
     pub unfinished: bool,
+}
+
+/// Copy only into a fresh fixture; reopening must retain its writes and schema.
+#[cfg(test)]
+fn copy_test_store(path: &Path) -> StoreResult<()> {
+    crate::test_support::test_database::copy(path)
+        .map_err(|error| StoreError::InvalidData(format!("copy test store: {error}")))
 }
 
 /// Open a registry read-only without migrating it.
@@ -251,9 +269,21 @@ fn task_state_sql(conn: &Connection) -> StoreResult<(String, &'static str)> {
 pub(crate) fn read_task_branches(path: &Path) -> StoreResult<Vec<(String, bool)>> {
     let conn = open_unmigrated(path)?;
     let (open, _) = task_state_sql(&conn)?;
+    let checkouts: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='task_checkouts')",
+        [],
+        |row| row.get(0),
+    )?;
+    // A registry from before `task_checkouts` keeps the branch on the Task
+    // (removed by Task 538340).
+    let checkout_branches = if checkouts {
+        "SELECT task_id, branch FROM task_checkouts"
+    } else {
+        "SELECT id AS task_id, branch FROM tasks"
+    };
     let mut statement = conn.prepare(&format!(
         "SELECT b.branch,({open}) FROM tasks t JOIN \
-         (SELECT id AS task_id, branch FROM tasks UNION SELECT task_id, branch FROM task_prs) b \
+         ({checkout_branches} UNION SELECT task_id, branch FROM task_prs) b \
          ON b.task_id=t.id"
     ))?;
     let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
@@ -265,28 +295,34 @@ pub(crate) fn read_task_worktree_ownership(path: &Path) -> StoreResult<Vec<TaskW
     let (open, done) = task_state_sql(&conn)?;
     // Old registries still protect unfinished work, but cannot grant deletion
     // until they can establish this machine's positive checkout ownership.
-    let placed: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('tasks') WHERE name='checkout_machine_id')",
-        [],
-        |row| row.get(0),
-    )?;
-    let (local_flag, local_route): (bool, bool) = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('machines') WHERE name='is_local'), \
+    let (checkouts, placed, local_flag, local_route): (bool, bool, bool, bool) = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='task_checkouts'), \
+         EXISTS(SELECT 1 FROM pragma_table_info('tasks') WHERE name='checkout_machine_id'), \
+         EXISTS(SELECT 1 FROM pragma_table_info('machines') WHERE name='is_local'), \
          EXISTS(SELECT 1 FROM pragma_table_info('machines') WHERE name='route')",
         [],
-        |row| Ok((row.get(0)?, row.get(1)?)),
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
     )?;
-    let local = if placed && local_flag {
-        "COALESCE(t.checkout_machine_id=(SELECT id FROM machines WHERE is_local=1),0)"
-    } else if placed && local_route {
-        "COALESCE(t.checkout_machine_id=(SELECT id FROM machines WHERE route='local'),0)"
+    let query = if checkouts {
+        format!(
+            "SELECT t.id,c.worktree,({done}),({open}) FROM task_checkouts c \
+             JOIN tasks t ON t.id=c.task_id"
+        )
     } else {
-        "0"
+        // A registry from before `task_checkouts` (removed by Task 538340).
+        let local = if placed && local_flag {
+            "COALESCE(t.checkout_machine_id=(SELECT id FROM machines WHERE is_local=1),0)"
+        } else if placed && local_route {
+            "COALESCE(t.checkout_machine_id=(SELECT id FROM machines WHERE route='local'),0)"
+        } else {
+            "0"
+        };
+        format!(
+            "SELECT t.id,t.worktree,({done}) AND ({local}),({open}) FROM tasks t \
+             WHERE t.worktree IS NOT NULL AND t.worktree != ''"
+        )
     };
-    let mut statement = conn.prepare(&format!(
-        "SELECT t.id,t.worktree,({done}) AND ({local}),({open}) FROM tasks t \
-         WHERE t.worktree IS NOT NULL AND t.worktree != ''"
-    ))?;
+    let mut statement = conn.prepare(&query)?;
     let rows = statement.query_map([], |row| {
         Ok(TaskWorktreeOwnership {
             task: row.get(0)?,
@@ -547,6 +583,8 @@ impl SqliteStore {
                 StoreError::InvalidData(format!("failed to create db dir: {error}"))
             })?;
         }
+        #[cfg(test)]
+        copy_test_store(path)?;
         let mut conn = Connection::open(path)?;
         crate::performance::observe_sqlite(&conn);
         configure_write_connection(&mut conn, path, SQLITE_WRITE_BUSY_TIMEOUT)?;
@@ -598,6 +636,10 @@ impl SqliteStore {
             })?;
         }
 
+        #[cfg(test)]
+        if !existing_database {
+            copy_test_store(path)?;
+        }
         let mut conn = Connection::open(path)?;
         crate::performance::observe_sqlite(&conn);
         // Install the handler before journal-mode negotiation: that pragma can
@@ -1033,15 +1075,15 @@ impl SqliteStore {
     // -- Provider accounts -----------------------------------------------------
 
     pub fn upsert_provider_account(&self, account: &ProviderAccount) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        tx.execute("INSERT INTO provider_accounts(provider,account_id,home,credential_state,utilization_percent,cooldown_until,cooldown_reason,last_selected_at,created_at,updated_at,observed_email,observed_subject,observed_plan,observed_credential_digest)
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        // The preferences file is written before the row, outside any write
+        // transaction: a rejected preference writes neither.
+        crate::config::placement::write_account_preferences(&conn, account)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+        conn.execute("INSERT INTO provider_accounts(provider,account_id,home,credential_state,utilization_percent,cooldown_until,cooldown_reason,last_selected_at,created_at,updated_at,observed_email,observed_subject,observed_plan,observed_credential_digest)
             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)
             ON CONFLICT(provider,account_id) DO UPDATE SET home=excluded.home,credential_state=excluded.credential_state,utilization_percent=excluded.utilization_percent,cooldown_until=excluded.cooldown_until,cooldown_reason=excluded.cooldown_reason,last_selected_at=excluded.last_selected_at,updated_at=excluded.updated_at,observed_email=excluded.observed_email,observed_subject=excluded.observed_subject,observed_plan=excluded.observed_plan,observed_credential_digest=excluded.observed_credential_digest",
             params![account.provider,account.account_id.as_str(),account.home.as_ref().map(|path| path.to_string_lossy().to_string()),account.credential_state.as_str(),account.utilization_percent,account.cooldown_until,account.cooldown_reason,account.last_selected_at,account.created_at,account.updated_at,account.observed_email,account.observed_subject,account.observed_plan,account.observed_credential_digest])?;
-        crate::config::placement::write_account_preferences(&tx, account)
-            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-        tx.commit()?;
         Ok(())
     }
 
@@ -2072,6 +2114,96 @@ mod frontier_tests {
     use crate::store::FrontierAdvance::{self, Authorized, Forbidden};
     use crate::work::wave::Wave;
     use std::path::{Path, PathBuf};
+
+    #[test]
+    fn concurrent_copies_share_one_initialized_machine() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("store.db");
+        let start = std::sync::Barrier::new(8);
+        let machines = std::thread::scope(|scope| {
+            let workers: Vec<_> = (0..8)
+                .map(|_| {
+                    scope.spawn(|| {
+                        start.wait();
+                        super::copy_test_store(&path).unwrap();
+                        rusqlite::Connection::open(&path)
+                            .unwrap()
+                            .query_row("SELECT id FROM machines WHERE is_local=1", [], |row| {
+                                row.get::<_, String>(0)
+                            })
+                            .unwrap()
+                    })
+                })
+                .collect();
+            workers
+                .into_iter()
+                .map(|worker| worker.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        assert!(machines.iter().all(|machine| machine == &machines[0]));
+    }
+
+    #[test]
+    fn test_store_image_matches_migrations_and_copies_are_independent() {
+        let migrated = rusqlite::Connection::open_in_memory().unwrap();
+        crate::store::migrations::apply_sqlite(&migrated).unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let first = directory.path().join("first.db");
+        let second = directory.path().join("second.db");
+        super::copy_test_store(&first).unwrap();
+        super::copy_test_store(&second).unwrap();
+        let image = rusqlite::Connection::open(&first).unwrap();
+        let schema = crate::store::migration_schema::product_schema(&migrated).unwrap();
+        assert_eq!(
+            *schema,
+            *crate::store::migration_schema::product_schema(&image).unwrap()
+        );
+        for table in schema.iter().filter(|object| object.object_type == "table") {
+            let rows = |conn: &rusqlite::Connection| {
+                let mut query = conn
+                    .prepare(&format!("SELECT * FROM [{}]", table.name))
+                    .unwrap();
+                let columns = query.column_count();
+                let mut rows: Vec<_> = query
+                    .query_map([], |row| {
+                        (if table.name == "machines" { 3 } else { 0 }..columns)
+                            .map(|column| row.get::<_, rusqlite::types::Value>(column))
+                            .collect::<rusqlite::Result<Vec<_>>>()
+                    })
+                    .unwrap()
+                    .map(|row| format!("{:?}", row.unwrap()))
+                    .collect();
+                rows.sort();
+                rows
+            };
+            assert_eq!(rows(&migrated), rows(&image), "{}", table.name);
+        }
+        let machine = |conn: &rusqlite::Connection| {
+            conn.query_row("SELECT id FROM machines WHERE is_local=1", [], |row| {
+                row.get::<_, String>(0)
+            })
+            .unwrap()
+        };
+        assert_ne!(
+            machine(&image),
+            machine(&rusqlite::Connection::open(&second).unwrap())
+        );
+        image
+            .execute_batch("CREATE TABLE fixture_write(value); INSERT INTO fixture_write VALUES(1)")
+            .unwrap();
+        super::copy_test_store(&first).unwrap();
+        assert_eq!(
+            image
+                .query_row("SELECT value FROM fixture_write", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert!(rusqlite::Connection::open(second)
+            .unwrap()
+            .prepare("SELECT * FROM fixture_write")
+            .is_err());
+    }
 
     #[test]
     fn observation_reads_identity_without_execution_schema() {

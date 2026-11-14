@@ -14,9 +14,6 @@ use crate::session_record::SessionTitleSource;
 use crate::store::{open_store, storage_config_from_env, Store};
 
 pub fn run(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()> {
-    if let SessionCommand::Serve { terminal, argv } = command {
-        return crate::transport::serve(argv, *terminal);
-    }
     if let SessionCommand::Card { id, .. } = command {
         return super::screens::print(super::read::Read::SessionCard { id: id.clone() });
     }
@@ -52,33 +49,70 @@ pub fn run(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()>
     }
 }
 
+/// `lf steer`: save `message` for a Session or a Task named by `target`, or
+/// with none for the Wave or repository the invocation selected. A target
+/// that names no Session is a Task. `--json` prints what the server answers:
+/// `task.steer` the Task's thread with the entry, `session.steer` the steer.
+pub fn steer(
+    cli: &crate::lf::Cli,
+    target: Option<&str>,
+    message: &str,
+    json: bool,
+) -> anyhow::Result<()> {
+    use crate::engine::session::SteerScope;
+    let directory = std::env::current_dir()?;
+    let runtime = tokio::runtime::Runtime::new()?;
+    let (store, session) = runtime.block_on(async {
+        let store = open_shared_store().await?;
+        let session = match target {
+            Some(id) => crate::ops::human_session::session_by_id(&store, id).await?,
+            None => None,
+        };
+        anyhow::Ok((store, session))
+    })?;
+    let scope = match (&session, target, cli.wave.as_deref()) {
+        (Some(session), _, _) => SteerScope::Session(&session.id),
+        (None, Some(issue), wave) => {
+            let unknown = || format!("{issue} names no Session and no Task");
+            let repo = super::mutation::selected_task_repository(cli, &directory, Some(issue))
+                .with_context(unknown)?;
+            let thread = runtime.block_on(async {
+                let (store, task) = crate::ops::task::resolve_saved_task(&repo, wave, issue)
+                    .await
+                    .with_context(unknown)?;
+                let scope = SteerScope::Task { issue, wave };
+                let steer = crate::engine::session::steer(&store, &repo, scope, message).await?;
+                anyhow::Ok((steer, store.sqlite.task_comments(&task.id)?))
+            })?;
+            match json {
+                true => println!("{}", serde_json::to_string(&thread.1)?),
+                false => println!("Saved {}", thread.0.id),
+            }
+            return Ok(());
+        }
+        (None, None, Some(wave)) => SteerScope::Wave(wave),
+        // Global `--repo` has already entered the selected repository.
+        (None, None, None) if cli.repo.is_some() => SteerScope::Repository,
+        (None, None, None) => anyhow::bail!(
+            "name who to steer: a Session ID, a Task ID, `--wave WAVE` or `--repo NAME_OR_PATH`"
+        ),
+    };
+    let steer = runtime.block_on(crate::engine::session::steer(
+        &store, &directory, scope, message,
+    ))?;
+    if json {
+        println!("{}", serde_json::to_string(&steer)?);
+    } else {
+        println!("Saved {}", steer.id);
+    }
+    Ok(())
+}
+
 async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()> {
     match command {
-        SessionCommand::Serve { .. } => {
-            unreachable!("serve owns its process before any runtime")
-        }
-        SessionCommand::Steer { id, message, json } => {
-            use crate::engine::session::SteerScope;
-            let store = open_shared_store().await?;
-            // Global `--repo` has already entered the selected repository.
-            let scope = match (id.as_deref(), cli.wave.as_deref()) {
-                (Some(id), _) => SteerScope::Session(id),
-                (None, Some(wave)) => SteerScope::Wave(wave),
-                (None, None) => SteerScope::Repository,
-            };
-            let directory = std::env::current_dir()?;
-            let steer = crate::engine::session::steer(&store, &directory, scope, message).await?;
-            if *json {
-                println!("{}", serde_json::to_string(&steer)?);
-            } else {
-                println!("Saved {}", steer.id);
-            }
-            Ok(())
-        }
         SessionCommand::Steers {
             id,
             json,
-            retry,
             after,
             limit,
             source,
@@ -87,11 +121,6 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             let session = crate::ops::human_session::session_by_id(&store, id)
                 .await?
                 .context("Session not found")?;
-            if let Some(steer) = retry {
-                store
-                    .sqlite
-                    .retry_session_steer(&session.id, &crate::id::SteerId::parse(steer)?)?;
-            }
             if let Some(source) = source {
                 let steer = store
                     .sqlite
@@ -103,17 +132,16 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             if *json {
                 println!("{}", serde_json::to_string_pretty(&status)?);
             } else {
-                println!("{}; {} pending", status.capability, status.pending);
-                // Hooks deliver steers through the Machine server and nothing else.
-                let server = crate::server::client::status()?;
-                if let Some(error) = server.error.filter(|_| !server.listening) {
-                    println!("{error}. Steers wait and turns go unrecorded until it runs.");
-                }
+                println!("{} pending", status.pending);
                 if let Some(after) = status.next_after {
                     println!("Next page: --after {after}");
                 }
                 for row in status.items {
-                    println!("{} {}", row.steer.id, row.evidence);
+                    let state = match row.delivered_at {
+                        Some(_) => "delivered",
+                        None => "pending",
+                    };
+                    println!("{} {state}", row.steer.id);
                 }
             }
             Ok(())
@@ -233,12 +261,25 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             .await
         }
         SessionCommand::Rename { .. } => unreachable!("rename uses shared mutation dispatch"),
-        SessionCommand::Send { id, task, to } => {
+        SessionCommand::Send {
+            id,
+            task,
+            to,
+            arrived,
+        } => {
             let store = open_shared_store().await?;
             let to = crate::ops::task_ownership::resolve_machine(&store.sqlite, to)?;
+            if *arrived {
+                let task = task
+                    .as_deref()
+                    .expect("Clap requires --task with --arrived");
+                return crate::ops::human_session::moves::sent_task_arrived(&store, task, &to)
+                    .await;
+            }
             let moved = match (id, task) {
-                (_, Some(task)) => {
-                    crate::ops::human_session::moves::send_task(&store, task, &to).await?
+                (id, Some(task)) => {
+                    crate::ops::human_session::moves::send_task(&store, task, &to, id.as_deref())
+                        .await?
                 }
                 (Some(id), None) => crate::ops::human_session::moves::send(&store, id, &to).await?,
                 (None, None) => unreachable!("Clap requires a Session or a Task"),
@@ -247,13 +288,46 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             Ok(())
         }
         SessionCommand::Receive {
-            check: true, task, ..
+            check: true,
+            task: Some(task),
+            issue: Some(issue),
+            repository: Some(repository),
+            origin,
+            planning_key,
+            from,
+            ..
         } => {
             let store = open_shared_store().await?;
-            if let Some(task) = task {
-                let id = crate::durable::TaskId::parse(task)?;
-                crate::ops::human_session::moves::known_task(&store, &id, task).await?;
+            let path = crate::ops::human_session::moves::checkout_of(
+                &store,
+                repository,
+                origin.as_deref(),
+            )?;
+            let main = crate::git::worktrees::main_repo_root(&path)?;
+            if let Some(key) = planning_key {
+                crate::ops::planning_sync::adopt_personal_key(&store, &main, key).await?;
             }
+            let id = crate::durable::TaskId::parse(task)?;
+            crate::ops::human_session::moves::arriving_task(&store, &main, &id, issue).await?;
+            if let Some(from) = from {
+                store.sqlite.record_move_checked(&id, from)?;
+            }
+            Ok(())
+        }
+        SessionCommand::Receive {
+            arrived: Some(task),
+            ..
+        } => {
+            let store = open_shared_store().await?;
+            let here = store.sqlite.local_machine()?.id;
+            anyhow::ensure!(
+                store.sqlite.task_move_arrived_on(task, &here)?,
+                "Task {task} did not arrive here"
+            );
+            Ok(())
+        }
+        SessionCommand::Receive { check: true, .. } => {
+            open_shared_store().await?;
             Ok(())
         }
         SessionCommand::Receive { json, .. } => {

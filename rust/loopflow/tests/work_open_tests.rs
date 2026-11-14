@@ -469,11 +469,7 @@ fn opening_an_unplaced_task_places_it_and_starts_its_conversation() {
     assert_eq!(report["receipts"][0]["status"], "usable", "{report}");
     let worktree: String = rusqlite::Connection::open(home.path().join("loopflow.db"))
         .unwrap()
-        .query_row(
-            "SELECT worktree FROM tasks WHERE worktree IS NOT NULL",
-            [],
-            |row| row.get(0),
-        )
+        .query_row("SELECT worktree FROM task_checkouts", [], |row| row.get(0))
         .unwrap();
     assert!(Path::new(&worktree).is_dir(), "{worktree}");
     let calls = std::fs::read_to_string(log).unwrap();
@@ -790,7 +786,7 @@ fn available_conversations_need_no_question_and_are_never_taken_over() {
     )
     .unwrap();
     db.execute(
-        "UPDATE tasks SET primary_session_id=?2 WHERE id=?1",
+        "INSERT OR REPLACE INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
         rusqlite::params![registered.task.id.as_str(), primary],
     )
     .unwrap();
@@ -896,7 +892,7 @@ fn ordinary_open_reports_the_view_and_only_explicit_focus_reveals_it() {
     );
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     db.execute(
-        "UPDATE tasks SET primary_session_id=?2 WHERE id=?1",
+        "INSERT OR REPLACE INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
         rusqlite::params![registered.task.id.as_str(), primary],
     )
     .unwrap();
@@ -983,7 +979,7 @@ fn links_tell_the_current_conversation_from_another_on_the_same_task() {
     );
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     db.execute(
-        "UPDATE tasks SET primary_session_id=?2 WHERE id=?1",
+        "INSERT OR REPLACE INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
         rusqlite::params![registered.task.id.as_str(), primary],
     )
     .unwrap();
@@ -1072,7 +1068,7 @@ fn a_task_identifier_connects_and_a_viewerless_terminal_reads_detached() {
     );
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     db.execute(
-        "UPDATE tasks SET primary_session_id=?2 WHERE id=?1",
+        "INSERT OR REPLACE INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
         rusqlite::params![registered.task.id.as_str(), primary],
     )
     .unwrap();
@@ -1099,16 +1095,16 @@ fn a_task_identifier_connects_and_a_viewerless_terminal_reads_detached() {
     assert!(!missing.status.success());
     assert!(String::from_utf8_lossy(&missing.stderr).contains("Session NOPE-185 was not found"));
 
-    // Its execution owner keeps running after the last viewer's terminal closed.
-    let owner = loopflow::id::LfProcessId::new();
+    // Its held terminal keeps running after the last viewer's terminal closed.
+    let terminal = loopflow::id::TerminalId::new();
     db.execute(
-        "INSERT INTO processes(id,trace_id,started_at,viewed) VALUES(?1,'fixture',1,0)",
-        [&owner],
+        "INSERT INTO held_terminals(id,holder_build,created_at,viewed) VALUES(?1,'fixture',1,0)",
+        [&terminal],
     )
     .unwrap();
     db.execute(
-        "UPDATE agent_sessions SET transport_lf_process_id=?2 WHERE id=?1",
-        rusqlite::params![primary, owner],
+        "UPDATE agent_sessions SET held_terminal_id=?2 WHERE id=?1",
+        rusqlite::params![primary, terminal],
     )
     .unwrap();
     let listed = |state: &str| {
@@ -1132,12 +1128,14 @@ fn a_task_identifier_connects_and_a_viewerless_terminal_reads_detached() {
     assert_eq!(detached["terminal_ids"], serde_json::json!([]));
     assert_eq!(detached["actions"][0]["label"], "Reconnect");
     assert!(detached["actions"][0]["unavailable_reason"].is_null());
-    assert_eq!(detached["actions"][1]["kind"], "reveal");
-    assert!(detached["actions"][1]["unavailable_reason"].is_null());
-    assert_eq!(detached["actions"].as_array().unwrap().len(), 2);
+    // A held terminal takes any number of views: opening is the one action.
+    assert_eq!(detached["actions"].as_array().unwrap().len(), 1);
 
-    db.execute("UPDATE processes SET viewed=1 WHERE id=?1", [&owner])
-        .unwrap();
+    db.execute(
+        "UPDATE held_terminals SET viewed=1 WHERE id=?1",
+        [&terminal],
+    )
+    .unwrap();
     let viewed = listed("active");
     assert_eq!(viewed["terminal_ids"], serde_json::json!(["cmux:WS-1"]));
 }
@@ -1382,12 +1380,12 @@ fn rex_follower_places_remote_arrivals_in_one_container_per_machine() {
         .add_machine(&peer, "remote.invalid", "Remote")
         .unwrap();
     store.claim_task(&registered.task.id).unwrap();
-    store.handoff_task(&registered.task.id, &peer).unwrap();
+    store.move_claim(&registered.task.id, &peer).unwrap();
     // Remote checkout state is not copied here; the peer decides eligibility.
     rusqlite::Connection::open(home.path().join("loopflow.db"))
         .unwrap()
         .execute(
-            "UPDATE tasks SET worktree=NULL WHERE id=?1",
+            "DELETE FROM task_checkouts WHERE task_id=?1",
             [registered.task.id.as_str()],
         )
         .unwrap();
@@ -2401,8 +2399,8 @@ fn failed_attachment_returns_failure_and_the_same_command_can_retry() {
         .as_str()
         .unwrap()
         .contains("provider launch failed"));
-    // A provider configuration error can leave a reservation after its
-    // transport removes the socket. That retired owner cannot block a retry.
+    // A provider configuration error can leave a reservation behind. That
+    // retired launch cannot block a retry.
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     let session: String = db
         .query_row("SELECT id FROM agent_sessions", [], |row| row.get(0))
@@ -2418,11 +2416,6 @@ fn failed_attachment_returns_failure_and_the_same_command_can_retry() {
     store
         .claim_session_attachment(&session, None, &owner, true)
         .unwrap();
-    db.execute(
-        "UPDATE agent_sessions SET transport_lf_process_id=?2 WHERE id=?1",
-        rusqlite::params![session, owner],
-    )
-    .unwrap();
     let focus = lf(
         home.path(),
         repo.path(),

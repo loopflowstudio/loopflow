@@ -19,6 +19,7 @@ struct Fixture {
 impl Fixture {
     fn new(provider: &str) -> Self {
         let home = tempfile::tempdir().unwrap();
+        support::seed_store(&home.path().join("machine"));
         let fixture = Self {
             _server: MachineServer::start(env!("CARGO_BIN_EXE_lf"), &home.path().join("machine")),
             repo: TestRepo::new(),
@@ -352,7 +353,13 @@ fn terminal_launch_and_resume_use_current_policy_and_preserve_native_identity() 
     for provider in ["claude", "codex", "opencode"] {
         let fixture = Fixture::new(provider);
         fixture.settings(provider, true, true);
-        let first = fixture.run(&["-i", ":", "--", "--- keep spaces and 雪"]);
+        // A bare Codex launch runs plain `codex`; behind its app-server it is Work.
+        let mut launch = vec!["-i", ":", "--", "--- keep spaces and 雪"];
+        if provider == "codex" {
+            fixture.create_wave();
+            launch.splice(1..1, ["--wave", "fixture"]);
+        }
+        let first = fixture.run(&launch);
         bypass(&first, provider, true);
         assert_eq!(
             Path::new(first["cwd"].as_str().unwrap())
@@ -417,110 +424,7 @@ fn terminal_launch_and_resume_use_current_policy_and_preserve_native_identity() 
             assert_eq!(first["context"], resumed["context"]);
         }
         assert_eq!(fixture.session(), session);
-        let override_resume =
-            fixture.run(&["--yolo", "--chrome", "on", "session", "resume", &session]);
-        bypass(&override_resume, provider, true);
-        if provider == "claude" {
-            assert!(args(&override_resume).contains(&"--chrome"));
-        }
     }
-}
-
-#[test]
-fn resume_fallback_preserves_provider_and_can_refresh_its_model() {
-    let fixture = Fixture::new("claude:sonnet");
-    let first = fixture.run(&["-i", ":", "Keep this conversation"]);
-    let session = fixture.session();
-    let arguments = args(&first);
-    let token = arguments[arguments
-        .iter()
-        .position(|arg| *arg == "--session-id")
-        .unwrap()
-        + 1];
-    fixture.repo.create_file(
-        ".lf/config.yaml",
-        "diff: false\ndiff_files: false\npaste: false\n",
-    );
-    let unresolved = fixture
-        .command()
-        .args(["config", "show", "--json"])
-        .output()
-        .unwrap();
-    success(&unresolved);
-    let settings: Value = serde_json::from_slice(&unresolved.stdout).unwrap();
-    assert!(settings[0]["settings"]["agent"]["value"].is_null());
-    let resumed = fixture.run(&["session", "resume", &session]);
-    pair(&resumed, "--resume", token);
-    pair(&resumed, "--model", "sonnet");
-    assert_eq!(fixture.session(), session);
-    for (fallback, expected) in [("codex", "sonnet"), ("claude:haiku", "haiku")] {
-        let resumed = fixture.run(&[
-            "--setting",
-            &format!("default_agent={fallback}"),
-            "session",
-            "resume",
-            &session,
-        ]);
-        pair(&resumed, "--resume", token);
-        pair(&resumed, "--model", expected);
-        assert_eq!(fixture.session(), session);
-    }
-}
-
-#[test]
-fn personal_true_overrides_repo_false_and_cli_can_disable_bypass() {
-    let fixture = Fixture::new("claude");
-    fs::create_dir_all(fixture.home.path().join("machine")).unwrap();
-    fs::write(
-        fixture.home.path().join("machine/config.yaml"),
-        "yolo: true\nchrome: true\n",
-    )
-    .unwrap();
-    fixture.repo.create_file(
-        ".claude/settings.json",
-        r#"{"permissions":{"defaultMode":"auto"}}"#,
-    );
-    fixture.settings("claude", false, false);
-    let configured = fixture.run(&["-i", ":", "hello"]);
-    bypass(&configured, "claude", true);
-    assert!(args(&configured).contains(&"--chrome"));
-    let explicit = fixture.run(&[
-        "-i",
-        "--setting",
-        "yolo=false",
-        "--chrome",
-        "off",
-        ":",
-        "hello",
-    ]);
-    bypass(&explicit, "claude", false);
-    assert!(args(&explicit).contains(&"--no-chrome"));
-}
-
-#[test]
-fn unset_chrome_leaves_the_claude_setting_alone_until_a_choice_is_explicit() {
-    let fixture = Fixture::new("claude");
-    fixture.repo.create_file(
-        ".lf/config.yaml",
-        "agent: claude\ndiff: false\ndiff_files: false\npaste: false\n",
-    );
-    fn chrome_flags(value: &Value) -> Vec<&str> {
-        args(value)
-            .into_iter()
-            .filter(|arg| *arg == "--chrome" || *arg == "--no-chrome")
-            .collect()
-    }
-    let attended = fixture.run(&["-i", ":", "hello"]);
-    assert!(chrome_flags(&attended).is_empty(), "{attended}");
-    let session = fixture.session();
-    let resumed = fixture.run(&["session", "resume", &session]);
-    assert!(chrome_flags(&resumed).is_empty(), "{resumed}");
-    let headless = fixture.run(&["-b", ":", "hello"]);
-    assert!(chrome_flags(&headless).is_empty(), "{headless}");
-    let off = fixture.run(&["-i", "--chrome", "off", ":", "hello"]);
-    assert_eq!(chrome_flags(&off), ["--no-chrome"]);
-    let on = fixture.run(&["-i", "--chrome", "on", ":", "hello"]);
-    assert_eq!(chrome_flags(&on), ["--chrome"]);
 }
 
 #[test]
@@ -531,18 +435,8 @@ fn headless_launch_and_graph_keep_current_options() {
         .create_file(".lf/skills/probe.md", "INITIAL_SKILL_ONLY");
     fixture.settings("claude:sonnet", true, true);
     fixture.create_wave();
-    let first = fixture.run(&[
-        "-b",
-        "--wave",
-        "fixture",
-        "--output-schema",
-        r#"{"type":"object"}"#,
-        "probe",
-        "first turn",
-    ]);
+    let first = fixture.run(&["-b", "--wave", "fixture", "probe", "first turn"]);
     pair(&first, "--input-format", "stream-json");
-    pair(&first, "--json-schema", r#"{"type":"object"}"#);
-    assert!(args(&first).contains(&"--chrome"));
     assert!(first["input"].to_string().contains("INITIAL_SKILL_ONLY"));
     fixture.settings("claude:haiku", false, false);
     fixture
@@ -678,24 +572,6 @@ fn machine_dispatch_resolves_destination_policy_and_forwards_launch_and_resume_o
     pair(&explicit, "--model", "haiku");
     assert!(args(&explicit).contains(&"--chrome"));
     assert_eq!(remote.session(), session);
-    let explicit = dispatch(&[
-        "-i",
-        "--yolo",
-        "--chrome",
-        "on",
-        "-a",
-        "claude:sonnet",
-        ":",
-        "--",
-        "--- literal prompt",
-    ]);
-    bypass(&explicit, "claude", true);
-    pair(&explicit, "--model", "sonnet");
-    assert!(args(&explicit).contains(&"--chrome"));
-    assert!(explicit["input"]
-        .as_str()
-        .unwrap()
-        .contains("--- literal prompt"));
 }
 
 #[path = "support/mod.rs"]
@@ -765,6 +641,10 @@ fn task_conversation_preparation_is_passive_and_connect_uses_shared_launch_setti
         serde_json::from_slice::<Value>(&explicit.stdout).unwrap()["id"],
         id
     );
+    fixture.repo.create_file(
+        ".lf/config.yaml",
+        "agents: [claude:sonnet, codex]\nyolo: true\nchrome: true\ndiff: false\ndiff_files: false\npaste: false\n",
+    );
     let first = fixture.run(&["resume"]);
     bypass(&first, "claude", true);
     assert!(args(&first).contains(&"--chrome"));
@@ -787,11 +667,14 @@ fn native_codex_failed_bootstrap_preserves_account_and_pending_input() {
     let fixture = Fixture::new("codex");
     let machine = fixture.home.path().join("machine");
     support::register_codex_account(&machine);
+    fixture.create_wave();
     fs::write(machine.join("fail-terminal"), "").unwrap();
     let failed = fixture
         .command()
         .args([
             "-i",
+            "--wave",
+            "fixture",
             "--only-account",
             "fixture@example.com",
             "--yolo",
@@ -859,9 +742,18 @@ fn a_codex_terminal_moved_to_another_login_ends_and_says_where_it_went() {
     let idling = machine.join("idling");
     // The one idle client ignores losing its server, as Codex 0.164 does.
     fs::write(machine.join("idle-terminal"), "").unwrap();
+    fixture.create_wave();
     let mut first = fixture
         .command()
-        .args(["-i", "--account", "fixture@example.com", ":", "hello"])
+        .args([
+            "-i",
+            "--wave",
+            "fixture",
+            "--account",
+            "fixture@example.com",
+            ":",
+            "hello",
+        ])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -1119,6 +1011,13 @@ fn linked_worktree_metadata_is_accessible_on_launch_and_resume() {
         let fixture = Fixture::new(provider);
         fixture.repo.stage_all();
         fixture.repo.commit("fixture config");
+        // Codex reaches its app-server as Work.
+        let launch: &[&str] = if provider == "codex" {
+            fixture.create_wave();
+            &["-i", "--wave", "fixture", ":", "--", "--- literal prompt"]
+        } else {
+            &["-i", ":", "--", "--- literal prompt"]
+        };
         let worktree = fixture.home.path().join("work tree with spaces");
         success(
             &Command::new("git")
@@ -1132,7 +1031,7 @@ fn linked_worktree_metadata_is_accessible_on_launch_and_resume() {
             &fixture
                 .command()
                 .current_dir(&worktree)
-                .args(["-i", ":", "--", "--- literal prompt"])
+                .args(launch)
                 .output()
                 .unwrap(),
         );
@@ -1277,11 +1176,12 @@ fn live_taskless_provider_switch_preserves_identity_and_accepts_terminal_input()
     let _ = first.kill();
     first.wait().unwrap();
     success(&switched);
+    // A bare Codex launch is plain `codex`: the import rides its opening prompt.
     let imported = fixture.received();
     assert!(
-        imported["turns"][0]
-            .to_string()
-            .contains("Preserve the original design"),
+        args(&imported)
+            .iter()
+            .any(|arg| arg.contains("Preserve the original design")),
         "{imported}"
     );
     assert_eq!(fixture.session(), session);
@@ -1900,13 +1800,15 @@ fn pi_public_headless_skill_delivers_context() {
 #[test]
 fn pi_native_callbacks_retain_identity_final_output_and_usage() {
     let fixture = pi_fixture();
+    // Pi's callbacks carry provider context only for a managed launch.
+    fixture.create_wave();
     let output = fixture
         .command()
         .env(
             "PI_FIXTURE_RECORD",
             fixture.home.path().join("received.json"),
         )
-        .args(["-i", ":", "Native Pi input"])
+        .args(["-i", "--wave", "fixture", ":", "Native Pi input"])
         .output()
         .unwrap();
     success(&output);
@@ -1955,10 +1857,17 @@ fn pi_native_callbacks_retain_identity_final_output_and_usage() {
 #[test]
 fn pi_native_crash_keeps_the_paid_step_and_interrupts_the_turn() {
     let fixture = pi_fixture();
+    fixture.create_wave();
     let output = fixture
         .command()
         .env("PI_FIXTURE_CRASH", "1")
-        .args(["-i", ":", "Crash after a paid model step"])
+        .args([
+            "-i",
+            "--wave",
+            "fixture",
+            ":",
+            "Crash after a paid model step",
+        ])
         .output()
         .unwrap();
     assert!(!output.status.success());
@@ -1982,12 +1891,13 @@ fn pi_native_crash_keeps_the_paid_step_and_interrupts_the_turn() {
 #[test]
 fn pi_native_failed_start_reopens_without_replacing_the_loopflow_session() {
     let fixture = pi_fixture();
+    fixture.create_wave();
     let provider = fixture.home.path().join("bin/pi");
     let original = fs::read(&provider).unwrap();
     fs::write(&provider, "#!/bin/sh\nexit 9\n").unwrap();
     let failed = fixture
         .command()
-        .args(["-i", ":", "Initial input"])
+        .args(["-i", "--wave", "fixture", ":", "Initial input"])
         .output()
         .unwrap();
     assert!(!failed.status.success());

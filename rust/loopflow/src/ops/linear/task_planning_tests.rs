@@ -1644,13 +1644,19 @@ fn assert_native_runner_is_quiet_until_its_turn_ends(agent: &str, auto: bool, ta
             }),
             ..Default::default()
         };
+        // A bare Codex runs as plain `codex` with no turn observer; the
+        // app-server and its turn boundaries belong to Work, beside the server.
+        let _server = (agent == "codex").then(|| {
+            loopflow_test_support::MachineServer::start(
+                loopflow_test_support::lf_binary(),
+                fixture.directory.path(),
+            )
+        });
         let launch = crate::agent::AgentConfig {
             agent: Some(agent.into()),
             cwd: Some(repo.to_path_buf()),
-            // A bare Codex runs as plain `codex` with no turn observer; the
-            // app-server and its turn boundaries belong to a held Session.
             holder: if agent == "codex" {
-                crate::session::Holder::Owner
+                crate::session::Holder::Server
             } else {
                 crate::session::Holder::Caller
             },
@@ -1680,12 +1686,7 @@ fn assert_native_runner_is_quiet_until_its_turn_ends(agent: &str, auto: bool, ta
                 }
                 // Native agent stays open without a watcher. Only the turn
                 // boundary may acquire the change made while it was idle.
-                tokio::time::sleep(std::time::Duration::from_secs(if agent == "codex" {
-                    60
-                } else {
-                    1
-                }))
-                .await;
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                 assert_eq!(state.lock().await.requests, 0);
                 let mut provider = state.lock().await;
                 provider.issues[0]["title"] = json!("Changed during the turn");
@@ -5659,7 +5660,7 @@ fn project_prose_save_delivers_and_settles_without_changing_managed_fields() {
     with_planning_task(|runtime, fixture, repo, task, state| {
         runtime.block_on(async {
             let conn = rusqlite::Connection::open(&fixture.database).unwrap();
-            conn.execute("UPDATE tasks SET worktree='/retained/task',branch='retained/branch' WHERE id=?1", [task.id.as_str()]).unwrap();
+            conn.execute("INSERT INTO task_checkouts(task_id,worktree,branch) VALUES(?1,'/retained/task','retained/branch') ON CONFLICT(task_id) DO UPDATE SET worktree=excluded.worktree,branch=excluded.branch", [task.id.as_str()]).unwrap();
             conn.execute("INSERT INTO processes(id,trace_id,command,cwd,started_at) VALUES('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222','lf run code','/retained/task',2)", []).unwrap();
             conn.execute("INSERT INTO task_graphs(task_id,graph,step,run_start,lf_process_id,updated_at) VALUES(?1,?2,'start','{\"index\":0}','11111111-1111-4111-8111-111111111111',3)", rusqlite::params![task.id.as_str(),json!({"name":"code","steps":[]}).to_string()]).unwrap();
             let workflow_before = fixture.store.sqlite.task_graph(&task.id).unwrap();

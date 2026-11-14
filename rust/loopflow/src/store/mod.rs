@@ -27,6 +27,8 @@ pub mod planning_sync;
 mod pr_landings;
 mod processes;
 mod project_adoption;
+#[cfg(test)]
+pub(crate) mod query_plans;
 mod recording_gap;
 mod repositories;
 pub mod rows;

@@ -85,6 +85,7 @@ fn session_cli_uses_one_truthful_resolution_contract() {
         &["session", "serve-graph"],
         &["session", "ensure"],
         &["session", "connect", "missing-session"],
+        &["session", "serve", "--", "/bin/cat"],
     ] {
         let output = run(home.path(), args);
         assert!(!output.status.success());
@@ -94,7 +95,7 @@ fn session_cli_uses_one_truthful_resolution_contract() {
     let output = run(home.path(), &["session", "attach", "missing-session"]);
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr)
-        .contains("lf session attach names an owner LfProcess id or `--terminal TERMINAL_ID`"));
+        .contains("lf session attach names `--terminal TERMINAL_ID`"));
     let output = run(
         home.path(),
         &[
@@ -960,9 +961,7 @@ while [ ! -f "$LF_HOME/release" ]; do sleep 0.02; done
 printf 'latest agent message: done\n'
 "#,
         );
-        if provider == "codex" {
-            install_codex_fixture(home.path(), None);
-        }
+        // A bare launch runs plain `codex`, configured by argv like Claude.
         write_script(
             "cmux",
             r#"#!/bin/sh
@@ -1068,7 +1067,6 @@ exit 2
                 );
             } else {
                 assert!(args.contains("tui.terminal_title=[]"), "{args}");
-                assert!(args.contains("--remote\n"), "{args}");
             }
             if first {
                 let renamed = inspect(&["session", "rename", &id, "Release notes", "--json"]);
@@ -1079,7 +1077,8 @@ exit 2
                     "{args}"
                 );
             }
-            if first && provider == "claude" {
+            // A provider's start hook names its thread; these stand-ins run none.
+            if first {
                 let store =
                     loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db"))
                         .unwrap();
@@ -1624,7 +1623,7 @@ fn provider_switch_stops_startup_output_before_codex_opens() {
     let provider = home.path().join("bin/codex");
     let script = fs::read_to_string(&provider).unwrap().replace(
         "#!/bin/sh\n",
-        "#!/bin/sh\ncase \" $* \" in *' --remote '*) printf 'NATIVE_TERMINAL_READY\\n' >&2; sleep 1;; esac\n",
+        "#!/bin/sh\ncase \" $* \" in *' app-server '*) ;; *) printf 'NATIVE_TERMINAL_READY\\n' >&2; sleep 1;; esac\n",
     );
     fs::write(&provider, script).unwrap();
 
@@ -2086,15 +2085,21 @@ fn instruction_inspection_reports_recorded_reasons_and_missing_evidence() {
 }
 
 #[test]
-fn retired_title_hooks_never_block_their_provider() {
+fn retired_hooks_never_block_their_provider() {
     let home = tempfile::tempdir().unwrap();
-    let output = command(home.path(), &["__session-title", "claude"])
-        .stdin(std::process::Stdio::null())
-        .output()
-        .unwrap();
-    // Claude treats exit 2 at Stop as "keep working", so a removed callback exits 0.
-    assert!(output.status.success(), "{output:?}");
-    assert!(String::from_utf8_lossy(&output.stderr).contains("restart the Session"));
+    // A removed callback, and a removed value of one that remains.
+    for args in [
+        &["__session-title", "claude"][..],
+        &["__context-block", "--moment", "task-updates"],
+    ] {
+        let output = command(home.path(), args)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        // Claude treats exit 2 at Stop as "keep working", so each exits 0.
+        assert!(output.status.success(), "{args:?}: {output:?}");
+        assert!(String::from_utf8_lossy(&output.stderr).contains("restart the Session"));
+    }
 }
 
 /// Starts `lf` as a terminal's foreground job, as a login shell would, and

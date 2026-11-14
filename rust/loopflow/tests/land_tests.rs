@@ -2002,7 +2002,8 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
     fs::write(
         &launcher,
         if failed_startup {
-            "#!/bin/sh\nif [ \"$4 $5\" = 'skill ci-fix' ]; then exit 17; fi\nexec \"$LF_TEST_BIN\" \"$@\"\n"
+            // The repair's `lf` is admitted, then fails before it opens a Session.
+            "#!/bin/sh\nif [ \"$4 $5\" = 'skill ci-fix' ]; then set -- \"$1\" \"$2\" \"$3\" skill absent-ci-fix \"$6\"; fi\nexec \"$LF_TEST_BIN\" \"$@\"\n"
         } else {
             "#!/bin/sh\nexec \"$LF_TEST_BIN\" \"$@\"\n"
         },
@@ -2031,8 +2032,8 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
             .env("LF_TEST_REPAIR_LAUNCHES", &launches);
         cmd
     };
-    // The waiter never gives up on its own, and its run is owned by a detached
-    // transport server. Reap that run's process group (the Graph and its landing
+    // The waiter never gives up on its own, and its run is a detached
+    // process. Reap that run's process group (the Graph and its landing
     // step) when the test returns early or an assertion fails; otherwise it
     // polls the fake `gh` forever.
     struct Waiter(std::process::Child, std::path::PathBuf);

@@ -14,7 +14,7 @@ use super::wire::{
     ServerOperation, SessionAttached, Welcome, MAX_BULK, MAX_MESSAGE, MIN_REVISION, REVISION,
 };
 use crate::engine::Error;
-use crate::id::{LfProcessId, LfSessionId};
+use crate::id::LfSessionId;
 use crate::lf::commands::read::Read;
 
 /// How long the server has to answer `status`, `hello`, `session.attach` or
@@ -422,39 +422,15 @@ fn accepted(message: ServerMessage) -> Result<ServerMessage> {
     }
 }
 
-/// The exact `owner` of `session` through the server: the bridge refuses
-/// once another Process owns the Session.
-pub fn bridge(session: &LfSessionId, owner: &LfProcessId) -> Result<UnixStream> {
-    // Restored terminals can open before Desktop's first Work reading obtains
-    // the helper. Setup delegates through the same selected installation.
-    let setup = crate::installation::server::readiness_command()?.output()?;
-    anyhow::ensure!(
-        setup.status.success(),
-        "Loopflow server unavailable: {}",
-        String::from_utf8_lossy(&setup.stderr)
-    );
-    bridge_existing(session, owner)
-}
-
-/// Recovery never registers a service or changes installation policy.
-pub(crate) fn bridge_existing(session: &LfSessionId, owner: &LfProcessId) -> Result<UnixStream> {
-    attach(&super::socket_path()?, session, Some(owner))
-}
-
 /// Two connections: a client asks `session.attach` for a ticket, and a fresh
-/// one presents it. After `bridged`, that stream speaks the owner protocol;
-/// until then it reads one byte at a time, so no owner byte is left in a
-/// buffer. With `owner`, only that exact owner is attached.
-pub fn attach(
-    path: &Path,
-    session: &LfSessionId,
-    owner: Option<&LfProcessId>,
-) -> Result<UnixStream> {
+/// one presents it. After `bridged`, that stream speaks the viewer protocol
+/// with the Session's held terminal; until then it reads one byte at a time,
+/// so no terminal byte is left in a buffer.
+pub fn attach(path: &Path, session: &LfSessionId) -> Result<UnixStream> {
     let mut connection = Connection::start(connect(path)?, path, identity("cli", "lf"), HANDSHAKE)?;
     let issued = connection
         .request(Operation::Server(ServerOperation::SessionAttach {
             session: session.clone(),
-            owner_lf_process_id: owner.cloned(),
             terminal_id: None,
         }))
         .map_err(|error| stalled(error, "issue the attach ticket", HANDSHAKE))?;
@@ -469,7 +445,7 @@ pub fn attach(
     })?;
     match socket
         .receive()
-        .map_err(|error| stalled(error, "open the owner bridge", HANDSHAKE))?
+        .map_err(|error| stalled(error, "open the terminal bridge", HANDSHAKE))?
     {
         Some(ServerMessage::Bridged { .. }) => {}
         Some(ServerMessage::Error {
@@ -611,7 +587,7 @@ mod tests {
     use std::time::Instant;
 
     use super::{attach, hook_request, Connection, HANDSHAKE};
-    use crate::id::{LfProcessId, LfSessionId};
+    use crate::id::LfSessionId;
     use crate::server::wire::{
         Limits, ServerMessage, Welcome, MAX_CONNECTIONS, MAX_MESSAGE, MIN_REVISION, REVISION,
     };
@@ -676,12 +652,7 @@ mod tests {
     fn attach_gives_up_on_a_server_that_never_issues_a_ticket() {
         let (_home, path) = silent_server(true);
         let started = Instant::now();
-        let error = attach(
-            &path,
-            &LfSessionId::from("session"),
-            Some(&LfProcessId::new()),
-        )
-        .expect_err("attach stalled");
+        let error = attach(&path, &LfSessionId::from("session")).expect_err("attach stalled");
         within_bound(started);
         assert_eq!(
             error.to_string(),

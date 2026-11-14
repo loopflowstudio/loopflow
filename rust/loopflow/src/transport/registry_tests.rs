@@ -565,3 +565,59 @@ fn a_holder_that_refuses_connections_and_keeps_its_lock_is_waited_for() {
     });
     registry.close();
 }
+
+/// The server reads every held terminal's Program Status, viewed or not: an
+/// agent asking a question with no view open is waiting on its person.
+#[test]
+fn a_held_terminal_with_no_view_reports_that_it_waits() {
+    let ledger = TestLedgerGuard::new();
+    let registry = Registry::open(BUILD).unwrap();
+    let place = holder();
+    let store = crate::journal::process_ledger().unwrap();
+    let session = store.test_session("asking", &crate::session_record::new_artifact_key());
+    let launcher = store.test_lf_process();
+    let attachment = store
+        .claim_session_attachment(session.id.as_str(), None, &launcher, true)
+        .unwrap();
+    let ask = ledger.home().join("ask");
+    let script = format!(
+        r"printf '\033]7501;state=working:app=claude-code\033\\'
+while [ ! -e '{ask}' ]; do sleep 0.02; done
+printf 'May I?\r\n\033]7501;state=blocked:app=claude-code\033\\'
+read answer",
+        ask = ask.display()
+    );
+    let terminal = registry
+        .start(shell(Some(&session.id), "request-1", &script))
+        .unwrap();
+    store
+        .bind_session_terminal(session.id.as_str(), &attachment, &terminal)
+        .unwrap();
+    let pid = crate::server::holder::client::Client::connect(&place)
+        .unwrap()
+        .list()
+        .unwrap()
+        .into_iter()
+        .find(|held| held.terminal == terminal.as_str())
+        .unwrap()
+        .pid;
+    let started = crate::journal::process_started_at(pid).unwrap().unwrap();
+    store
+        .record_agent_process_identity(session.id.as_str(), &attachment, pid, started)
+        .unwrap();
+    let available = || {
+        store
+            .session_summary(
+                session.id.as_str(),
+                time::OffsetDateTime::now_utc().unix_timestamp(),
+            )
+            .unwrap()
+            .unwrap()
+            .available
+    };
+    assert!(!available(), "a working agent waits on nobody");
+    std::fs::write(&ask, "").unwrap();
+    wait_until("the unviewed question to read as waiting", available);
+    registry.close();
+    kill(&place, &terminal);
+}

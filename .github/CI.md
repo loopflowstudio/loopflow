@@ -3,24 +3,32 @@
 ## Scratch, cancellation and macOS path filters
 
 Publish checkpoints with working notes in `scratch/`; hosted CI defers the full
-matrix until scratch is clear. `lf pr submit`, `lf land`, and `lf pr land`
-clear committed scratch additions before pushing a landing candidate. Scratch-free PRs, including
+matrix until scratch is clear. Gate turns the checkpoint into a candidate
+before it reviews (commit, sync, `lf scratch clear`, `lf pr publish`), so the
+matrix runs while it reads the diff. [Gate](../.lf/skills/gate.md) holds the
+steps and where the notes go.
+
+`lf pr submit`, `lf land`, and `lf pr land` clear committed scratch additions
+too; after gate they find none. Scratch-free PRs, including
 small changes and Dependabot updates, run the full test matrix in parallel.
-Implement/compress only build changed code and run its focused test. Gate owns
-affected suites and automated acceptance once; see the verification cadence in
-[AGENTS.md](../AGENTS.md#when-to-run-what). Scratch keeps one check-result line.
+Implement/compress only build changed code and run its focused test. Gate names
+the few tests that matter most for the change and reads their result, and the
+suites', from CI for the head it pushed; see the verification cadence in
+[AGENTS.md](../AGENTS.md#when-to-run-what). The PR body keeps one check-result line.
 Required checks run unattended; defer unavailable checks to capable CI and
 leave people's judgment to demo/review. Neither blocks earlier Graph steps.
 
 For checkpoint PRs, `scratch-clear` reports deferred tests and `tests-result`
-and the matrix jobs skip. That is not a passing test result. The required merge
+and the matrix jobs skip. That is not a passing test result, though
+`lf pr checks` exits 0 for it: read the lines. The required merge
 queue always rejects scratch artifacts and runs the Linux suite before merging.
 Missing scratch, classifier failures, and unexpected skipped candidate jobs
 still fail the aggregate. Restoring scratch on a later PR head defers its tests.
 
 After the final `lf sync`, run `lf scratch clear` and check that `scratch/`
-contains only `.gitkeep` before arming. A sync can restore notes retained during
-conflict resolution after an earlier cleanup. Check the final tree with the
+contains only `.gitkeep` before publishing or arming (cached PR copy is consumed
+by publication). A sync can restore notes retained during conflict resolution
+after an earlier cleanup. Check the final tree with the
 same predicate as CI:
 
 ```bash
@@ -50,10 +58,25 @@ three. Ordinary Rust changes reach Swift through the `lf --json` wire, which the
 DTO fixtures pin; native build inputs also run both Desktop link paths. The queue
 proves the Linux suite on top of main. After merge, `macos-main.yml` runs the jobs the batch since the
 `last-green` tag reaches: one run at a time, the waiting run testing the newest
-main. Green moves `last-green`; red bisects the batch by dispatching the same
-workflow on first-parent commits and opens an unarmed revert PR for the culprit.
+main. Green moves `last-green` to the tested commit. Red leaves `last-green`
+where it was, fails the run and names both commits in the run summary:
+
+```
+macOS failure on 286889bbec; last-green stays at 5c1eee745d.
+```
+
+Nothing reverts automatically. The next push to main tests the batch again from
+the same `last-green`, so a flake clears on its own and a real regression stays
+red until someone fixes or reverts it. To retest a red run without a new push:
+`gh run rerun <id>`.
 
 ## Rust and Swift caches
+
+Every job that builds Rust or replays the migration catalog needs a full
+checkout (`fetch-depth: 0`) and `origin/main`. This includes lint, architecture,
+installation and native app builds. Without merge history, slug migrations
+fall back to name order, which can apply a trigger before its columns exist.
+When adding one of these jobs, follow `rust-build`'s checkout and history fetch.
 
 CI Rust cache keys include the root workspace's build profiles, which the cache
 action's member-manifest discovery omits. Profile changes get fresh dependency
@@ -172,12 +195,41 @@ package-smoke/lf --help
 package-smoke/lf list
 ```
 
+Both macOS packages build on Apple Silicon runners. The Intel CLI is
+cross-compiled for `x86_64-apple-darwin` and smoke-tested under Rosetta.
+
 Its `desktop-app` job builds Loopflow.app around the ARM64 package's exact `lf`,
 signs and notarizes the DMG with the `APPLE_CERTIFICATE_BASE64`,
 `APPLE_CERTIFICATE_PASSWORD`, `NOTARY_KEY`, `NOTARY_KEY_ID` and `NOTARY_ISSUER`
 Actions secrets (copied from Doppler `loopflow`/`prd`), and uploads `Loopflow-dmg`.
 `lf install --dev` installs the newest green run with `gh`, app included on a Mac.
 The artifacts expire after 14 days; releases stay the durable channel.
+
+### Notarization
+
+When Apple rejects an upload or a wait, the `desktop-app` log prints
+notarytool's output above the traceback. The exception carries its first line,
+then what is safe next:
+
+```text
+Error: HTTP status code: 403. A required agreement is missing or has expired. …
+RuntimeError: Notarization upload failed: Error: HTTP status code: 403. A required agreement is missing or has expired …; inspect Apple history before retrying
+```
+
+An upload that fails may still have landed, so check `xcrun notarytool history`
+before retrying. A failed wait keeps its submission; rerunning resumes it.
+
+`.github/workflows/notarization-check.yml` runs `xcrun notarytool history`
+with the same secrets every morning (13:17 UTC), so a broken account shows up
+before a package build hits it. Run it by hand with
+`gh workflow run notarization-check.yml`. A red run opens one issue titled
+"Notarization is failing" quoting Apple's message, or comments on the open one;
+the next green run closes it.
+
+| Apple says | Fix |
+|---|---|
+| `403. A required agreement is missing or has expired` | The Account Holder accepts the new agreement at developer.apple.com. No code change; retrying fails until then. |
+| `401. Unauthenticated` | `NOTARY_KEY_ID`, `NOTARY_ISSUER` or `NOTARY_KEY` is wrong. Fix it in Doppler `loopflow`/`prd` and copy it to the Actions secrets. |
 
 Release candidates also run `cargo package --locked -p loopflow`. This compiles
 the extracted crates.io archive before tagging, so repository-only embedded

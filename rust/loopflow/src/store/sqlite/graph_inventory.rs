@@ -87,13 +87,18 @@ pub(super) fn graphs_in(
         .collect()
 }
 
-/// What the Graph process says of the Graph, and the Work its checkout names.
+/// What the Graph process says of the Graph, including the Task it started for.
 pub(super) fn entry_in(
     conn: &Connection,
     graph: &GraphProcess,
 ) -> StoreResult<GraphProcessInventoryEntry> {
     let process = &graph.process;
-    let task = super::task_work::task_of_process(conn, &process.id)?
+    let task = conn
+        .query_row(
+            "SELECT task_id FROM graph_processes WHERE lf_process_id=?1",
+            [&process.id],
+            |row| row.get::<_, Option<String>>(0),
+        )?
         .map(|id| TaskId::parse(&id))
         .transpose()
         .map_err(invalid)?;
@@ -143,22 +148,15 @@ pub(crate) fn entry_of(
 }
 
 /// What a reading of Graphs' execution asks of the store once: the input each
-/// Process captured last, and the receipt files of unfinished Processes.
+/// Process captured last, open Graph execution in the selected Tasks' work,
+/// and the receipt files of unfinished Processes.
 #[derive(Debug, Default)]
 pub(crate) struct GraphExecutionFacts {
+    pub open_processes: HashMap<TaskId, Vec<(LfProcessId, crate::process::LfProcess)>>,
     pub inputs: HashMap<LfProcessId, (String, String, i64)>,
     pub receipts: HashMap<LfProcessId, PathBuf>,
     pub limit_recoveries: HashMap<LfProcessId, AgentLimitRecovery>,
 }
-
-/// Each process in ?1 and the commands its transport owner serves for it.
-const DELEGATED: &str = "WITH RECURSIVE delegated(root,id,serves) AS (
-                 SELECT id,id,CASE WHEN json_valid(command) THEN json_extract(command,'$[1]')='session' AND json_extract(command,'$[2]')='serve' END
-                 FROM processes WHERE id IN (SELECT value FROM json_each(?1))
-                 UNION
-                 SELECT d.root,p.id,CASE WHEN json_valid(p.command) THEN json_extract(p.command,'$[1]')='session' AND json_extract(p.command,'$[2]')='serve' END
-                 FROM processes p JOIN delegated d ON p.parent_lf_process_id=d.id
-                 WHERE d.serves OR (CASE WHEN json_valid(p.command) THEN json_extract(p.command,'$[1]')='session' AND json_extract(p.command,'$[2]')='serve' END))";
 
 /// How a headless step is getting past a usage limit. `retry_at` set means
 /// nothing can launch before then; none means another account took the step on.
@@ -171,19 +169,17 @@ pub(crate) struct AgentLimitRecovery {
     pub agent: Option<String>,
 }
 
-/// How each of `steps`, or the command served for it, is recovering from a
-/// usage limit.
+/// How each of `steps` is recovering from a usage limit.
 fn limit_recoveries(
     conn: &Connection,
     steps: &[&LfProcessId],
 ) -> StoreResult<HashMap<LfProcessId, AgentLimitRecovery>> {
     let ids = super::children::ids_json(steps.iter().map(|id| id.as_str()));
     let rows = conn
-        .prepare(&format!(
-            "{DELEGATED}
-             SELECT d.root,r.provider,r.reason,r.retry_at,r.agent,MAX(r.updated_at) FROM delegated d
-             JOIN agent_limit_recoveries r ON r.lf_process_id=d.id GROUP BY d.root"
-        ))?
+        .prepare(
+            "SELECT lf_process_id,provider,reason,retry_at,agent FROM agent_limit_recoveries
+             WHERE lf_process_id IN (SELECT value FROM json_each(?1))",
+        )?
         .query_map([&ids], |row| {
             Ok((
                 row.get(0)?,
@@ -200,21 +196,18 @@ fn limit_recoveries(
 }
 
 /// The conversation, captured input and its event each of `processes` opened
-/// last. A process that delegated to its transport owner captures through the
-/// command that transport serves, so the delegation chain counts as itself.
+/// last.
 fn process_inputs(
     conn: &Connection,
     processes: &[&LfProcessId],
 ) -> StoreResult<HashMap<LfProcessId, (String, String, i64)>> {
     let ids = super::children::ids_json(processes.iter().map(|id| id.as_str()));
-    // Agent Processes record a bare executable name, not an argv array.
     let rows = conn
-        .prepare(&format!(
-            "{DELEGATED}
-             SELECT d.root,c.session_id,c.receipt_key,MAX(c.seq) FROM delegated d
-             JOIN session_events c ON c.lf_process_id=d.id
-             WHERE c.kind='captured' GROUP BY d.root"
-        ))?
+        .prepare(
+            "SELECT lf_process_id,session_id,receipt_key,MAX(seq) FROM session_events
+             WHERE lf_process_id IN (SELECT value FROM json_each(?1)) AND kind='captured'
+             GROUP BY lf_process_id",
+        )?
         .query_map([&ids], |row| {
             Ok((row.get(0)?, (row.get(1)?, row.get(2)?, row.get(3)?)))
         })?
@@ -223,7 +216,7 @@ fn process_inputs(
 }
 
 impl SqliteStore {
-    /// Whether `process` runs under a Graph, through any transport owner between.
+    /// Whether `process` runs under a Graph, through any process between.
     pub(crate) fn process_under_graph(&self, process: &LfProcessId) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn.query_row(
@@ -277,13 +270,10 @@ impl SqliteStore {
     /// `step`'s wait is over: its launch is under way, or someone interrupted it.
     pub(crate) fn end_agent_limit_wait(&self, step: &LfProcessId) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let ids = super::children::ids_json(std::iter::once(step.as_str()));
         conn.execute(
-            &format!(
-                "{DELEGATED} UPDATE agent_limit_recoveries SET retry_at=NULL,updated_at=?2
-                 WHERE retry_at IS NOT NULL AND lf_process_id IN (SELECT id FROM delegated)"
-            ),
-            params![ids, crate::store::rows::now_unix()],
+            "UPDATE agent_limit_recoveries SET retry_at=NULL,updated_at=?2
+             WHERE retry_at IS NOT NULL AND lf_process_id=?1",
+            params![step, crate::store::rows::now_unix()],
         )?;
         Ok(())
     }
@@ -367,35 +357,28 @@ impl SqliteStore {
         Ok(Some((graph, entry)))
     }
 
-    /// Whether `process` is a Graph process.
-    pub(crate) fn runs_graph(&self, process: &LfProcessId) -> StoreResult<bool> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM graph_processes WHERE lf_process_id=?1)",
-            [process],
-            |row| row.get(0),
-        )?)
-    }
-
     /// Graphs run from `cwd`, oldest first.
     pub(crate) fn graphs_at(&self, cwd: &std::path::Path) -> StoreResult<Vec<GraphProcess>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         graphs_in(&conn, "e.cwd=?1", &[&cwd.to_string_lossy()])
     }
 
-    /// A Graph process's one write about its Graph: the name and graph it launched with.
+    /// A Graph process's one write about its Graph: the name and graph it
+    /// launched with, and the Task it started for.
     pub(crate) fn record_graph_process(
         &self,
         graph_process: &LfProcessId,
         compiled: &CompiledGraph,
+        task: Option<&TaskId>,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "INSERT INTO graph_processes(lf_process_id,graph,compiled) VALUES(?1,?2,?3)",
+            "INSERT INTO graph_processes(lf_process_id,graph,compiled,task_id) VALUES(?1,?2,?3,?4)",
             params![
                 graph_process,
                 compiled.name,
-                serde_json::to_string(compiled)?
+                serde_json::to_string(compiled)?,
+                task.map(TaskId::as_str)
             ],
         )?;
         Ok(())
@@ -475,16 +458,52 @@ impl SqliteStore {
     }
 
     /// Execution facts of `graphs`: their latest steps' captured inputs and
-    /// the receipts of their unfinished Graph and step Processes.
+    /// open Graph execution in `tasks`, and the receipts of unfinished Processes.
     pub(crate) fn graph_execution_facts<'a>(
         &self,
         graphs: impl IntoIterator<Item = &'a GraphProcess>,
+        tasks: &[&TaskId],
     ) -> StoreResult<GraphExecutionFacts> {
         let graphs: Vec<_> = graphs.into_iter().collect();
         let steps: Vec<_> = graphs
             .iter()
             .filter_map(|graph| graph.latest().map(|step| &step.process.id))
             .collect();
+        let mut connection = self.conn.lock().expect("store mutex poisoned");
+        let conn = connection.savepoint()?;
+        let pairs = super::task_work::task_open_process_pairs(
+            "SELECT value FROM json_each(?1)",
+            "p.kind='lf' AND EXISTS(SELECT 1 FROM graph_processes g WHERE g.lf_process_id IN (p.id,p.parent_lf_process_id))",
+        );
+        let ids = super::children::ids_json(tasks.iter().map(|task| task.as_str()));
+        let mut open_processes =
+            HashMap::<TaskId, Vec<(LfProcessId, crate::process::LfProcess)>>::new();
+        let columns = PROCESS_SELECT
+            .strip_suffix(" FROM processes e")
+            .expect("Process select ends with its table");
+        // Keep membership outside the Process lookup: ORDER BY otherwise
+        // persuades SQLite to scan all history through processes_recent.
+        let mut query = conn.prepare(&format!(
+            "{columns},pairs.task_id,g.lf_process_id FROM ({pairs}) pairs
+             CROSS JOIN processes e ON e.id=pairs.process
+             JOIN graph_processes g ON g.lf_process_id=coalesce(
+                (SELECT own.lf_process_id FROM graph_processes own WHERE own.lf_process_id=e.id),e.parent_lf_process_id)
+             ORDER BY e.started_at DESC,e.id"
+        ))?;
+        for row in query.query_map([&ids], |row| {
+            Ok((
+                row.get::<_, String>(19)?,
+                row.get::<_, LfProcessId>(20)?,
+                read_lf_process(row)?,
+            ))
+        })? {
+            let (task, graph, process) = row?;
+            let task = TaskId::parse(&task).map_err(invalid)?;
+            open_processes
+                .entry(task)
+                .or_default()
+                .push((graph, process));
+        }
         let unfinished = super::children::ids_json(
             graphs
                 .iter()
@@ -492,9 +511,14 @@ impl SqliteStore {
                     std::iter::once(&graph.process).chain(graph.latest().map(|step| &step.process))
                 })
                 .filter(|process| process.completed_at.is_none())
-                .map(|process| process.id.as_str()),
+                .map(|process| process.id.as_str())
+                .chain(
+                    open_processes
+                        .values()
+                        .flatten()
+                        .map(|(_, process)| process.id.as_str()),
+                ),
         );
-        let conn = self.conn.lock().expect("store mutex poisoned");
         let inputs = process_inputs(&conn, &steps)?;
         let limit_recoveries = limit_recoveries(&conn, &steps)?;
         let home = conn
@@ -518,6 +542,7 @@ impl SqliteStore {
             }
         }
         Ok(GraphExecutionFacts {
+            open_processes,
             inputs,
             receipts,
             limit_recoveries,
@@ -580,8 +605,19 @@ impl SqliteStore {
                 })
             })
             .collect();
-        self.record_graph_process(&graph_process, &CompiledGraph::new(name, &compiled))
-            .unwrap();
+        // A Graph started in a checkout is that Task's, as the launch binds it.
+        let task = {
+            let conn = self.conn.lock().expect("store mutex poisoned");
+            super::task_work::task_of_process(&conn, &graph_process)
+                .unwrap()
+                .map(|task| TaskId::parse(&task).unwrap())
+        };
+        self.record_graph_process(
+            &graph_process,
+            &CompiledGraph::new(name, &compiled),
+            task.as_ref(),
+        )
+        .unwrap();
         for (index, (label, outcome)) in steps.iter().enumerate() {
             let step = LfProcessId::new();
             let mut argv = vec!["lf".to_string()];
@@ -613,11 +649,13 @@ mod tests {
             .conn
             .lock()
             .unwrap()
-            .execute(
-                "INSERT INTO tasks(repository_id,id,external_issue_id,issue_identifier,worktree,created_at,checkout_machine_id)
-                 VALUES(?1,?2,'issue','PROOF-1','/repo/task',1,(SELECT id FROM machines WHERE is_local=1))",
-                rusqlite::params![repository.as_str(), task.as_str()],
-            )
+            .execute_batch(&format!(
+                "INSERT INTO tasks(repository_id,id,external_issue_id,issue_identifier,created_at)
+                 VALUES('{repository}','{task}','issue','PROOF-1',1);
+                 INSERT INTO task_checkouts(task_id,worktree) VALUES('{task}','/repo/task');",
+                repository = repository.as_str(),
+                task = task.as_str(),
+            ))
             .unwrap();
         let graph = store.test_graph(
             "code",
@@ -726,11 +764,10 @@ mod tests {
     }
 
     #[test]
-    fn step_input_is_read_through_transport_delegation() {
+    fn step_input_is_the_steps_own_capture() {
         let directory = tempfile::tempdir().unwrap();
         let store = SqliteStore::new(&directory.path().join("loopflow.db")).unwrap();
-        let [step, transport, served, nested] =
-            std::array::from_fn(|_| crate::id::LfProcessId::new());
+        let [step, nested] = std::array::from_fn(|_| crate::id::LfProcessId::new());
         {
             let conn = store.conn.lock().unwrap();
             let process = |id: &crate::id::LfProcessId,
@@ -744,14 +781,8 @@ mod tests {
                 .unwrap();
             };
             process(&step, None, &["lf", "--skill-input", "in"]);
-            process(
-                &transport,
-                Some(&step),
-                &["lf", "session", "serve", "--", "lf"],
-            );
-            process(&served, Some(&transport), &["lf", "--skill-input", "in"]);
             // A command the agent ran is not the step's own capture.
-            process(&nested, Some(&served), &["lf", "-b", "skill", "other"]);
+            process(&nested, Some(&step), &["lf", "-b", "skill", "other"]);
             // Agent Processes record a bare executable name instead of argv.
             conn.execute(
                 "INSERT INTO processes(id,trace_id,parent_lf_process_id,command,started_at)
@@ -766,7 +797,7 @@ mod tests {
             )
             .unwrap();
             for (session, key, process) in [
-                ("step-session", "step-input", &served),
+                ("step-session", "step-input", &step),
                 ("nested-session", "nested-input", &nested),
             ] {
                 conn.execute(
@@ -777,13 +808,11 @@ mod tests {
                 .unwrap();
             }
         }
-        for process in [&step, &transport, &served] {
-            let (session, input, _) = store.process_input(process).unwrap().unwrap();
-            assert_eq!(
-                (session.as_str(), input.as_str()),
-                ("step-session", "step-input")
-            );
-        }
+        let (session, input, _) = store.process_input(&step).unwrap().unwrap();
+        assert_eq!(
+            (session.as_str(), input.as_str()),
+            ("step-session", "step-input")
+        );
         let (session, input, _) = store.process_input(&nested).unwrap().unwrap();
         assert_eq!(
             (session.as_str(), input.as_str()),

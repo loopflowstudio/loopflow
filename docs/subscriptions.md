@@ -341,22 +341,27 @@ A Graph step keeps going by itself:
 ```bash
 lf task status LOO-1
 #   implement went on under another claude account after: provider_rate_limited: rejected: five_hour
+#   compress went on under claude after: codex_error: You've hit your usage limit
 #   implement is waiting for claude capacity until Nov 5 14:00: ... It goes on by itself.
 ```
 
 | What happens | What the step does |
 |---|---|
 | Its account hits a limit, another is eligible | Continues the same conversation under that account |
-| Every eligible account is held back and its harness was named bare (`claude`) | Continues the same conversation on another model of that harness: Opus, then Sonnet, then Haiku |
-| Those are held back too and `default_agent` lists another provider (`claude,codex`) | Continues on the next provider, seeded with the conversation so far, as `lf session new -a` does |
-| Nothing it may use is free | Waits, checking each minute, and continues at the first reset |
-| No account will free up | Fails with the limit, like any other failure |
+| Every eligible account is held back and `agents` has a next entry (`agents: [claude:fable, claude:opus, codex]`) | Continues on that entry: the same conversation on another model of its provider; on another provider, seeded with the conversation so far, as `lf session new -a` does |
+| Every eligible account is held back, no `agents` order is behind it and its harness was named bare (`claude`) | Continues the same conversation on another model of that harness: Opus, then Sonnet, then Haiku |
+| The provider refuses the launch itself with a usage limit, before any turn | The same moves: next login, then the next entry in `agents`. If another entry takes the step, the run continues; if the order runs out, it stops once |
+| The provider reports that the model is unavailable | Moves directly to the next allowed entry, without spending the login’s quota. An explicit model pin stops once with advice to change the pin |
+| Nothing it may use is free, and an account has a known reset | Waits, checking each minute, and continues at the first reset |
+| A usage limit or unavailable model refuses it and no agent it may use is left | Stops once, without automatic retries. The stop line and `lf task status` say what would let it move, such as `lf set --global agents codex,claude`. After a reset or an `agents` change, `lf task run <ID>` starts at that step; earlier steps stay done |
 | Its Process ends during a wait | `lf task run` starts the run again at that step, and earlier steps stay done. An assigned Task that nothing else blocks restarts by itself after the reset, on the `-a` the run was given; no automatic restart starts it sooner |
 
-Only accounts in the resolved route take a step on. An explicit `harness:model`
-stays on its model and changes only accounts; a bare harness may change model;
-only a preference list (`lf set default_agent claude,codex`, no explicit
-`agent`) lets a step change provider. Nothing is written to your preferences.
+Only accounts in the resolved route take a step on. An `agent` choice or `-a`
+keeps the provider, and the model if given. Otherwise,
+[`agents`](config.md#keep-going-when-a-provider-runs-out) supplies the order:
+`lf set --global agents claude,codex` lets a step move from Claude to Codex.
+A launch refused on a login Loopflow does not route fails with its limit once
+the last entry refuses too. Nothing is written to your preferences.
 Commit messages and PR text fail at once, because someone is waiting for them.
 
 A [saved Claude model](config.md#claude-model) supplies bare `claude`'s starting
@@ -375,7 +380,8 @@ window spent holds that window's launches back until it resets.
 Running out of usage credits ("You're out of usage credits", Claude's
 `seven_day_overage_included`) holds back only the model the launch ran, until
 the reset, never the account. A bare `claude` launch runs Fable, so Fable rests
-and the step goes on with Opus on the same account, in the same conversation.
+and, with no other configured entry behind it, the step goes on with Opus on
+the same account, in the same conversation.
 
 Open Claude Sessions need nothing either. When one hits a limit, the login
 moves to the eligible account that ranks first, and every open Claude follows

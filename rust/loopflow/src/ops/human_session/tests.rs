@@ -273,14 +273,14 @@ use crate::session::LfSession;
 use crate::store::{open_ephemeral_store, SharedStore, StorageConfig};
 use crate::work::task::TaskId;
 
-pub(super) struct SessionHome {
+pub(crate) struct SessionHome {
     home: tempfile::TempDir,
     previous: Vec<(&'static str, Option<OsString>)>,
     _ambient: crate::test_ambient::EnvGuard,
 }
 
 impl SessionHome {
-    pub(super) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let ambient = crate::test_ambient::EnvGuard::new();
         let home = tempfile::tempdir().unwrap();
         let previous = ["LF_HOME", "LF_BIN"]
@@ -300,7 +300,11 @@ impl SessionHome {
         }
     }
 
-    pub(super) async fn store(&self) -> SharedStore {
+    pub(crate) fn path(&self) -> &std::path::Path {
+        self.home.path()
+    }
+
+    pub(crate) async fn store(&self) -> SharedStore {
         std::sync::Arc::new(
             open_ephemeral_store(&StorageConfig::sqlite(self.home.path().join("loopflow.db")))
                 .await
@@ -976,7 +980,7 @@ async fn moving_an_unknown_login_says_so_instead_of_moving_nothing() {
 }
 
 #[allow(clippy::await_holding_lock)]
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn task_detail_reads_capacity_once_for_all_sessions() {
     let _lock = crate::journal::test_env_lock();
     let logins = Logins::new().await;
@@ -999,9 +1003,18 @@ async fn task_detail_reads_capacity_once_for_all_sessions() {
             due_date: None,
         })
         .unwrap();
-    let mut status = crate::ops::task::registered_task_status(&logins.store, task)
-        .await
-        .unwrap();
+    // `lf task status`, Desktop and screens read this on the write store.
+    let mut status =
+        crate::store::query_plans::assert_no_empty_writes(&logins.store.sqlite, || {
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current()
+                    .block_on(crate::ops::task::registered_task_status(
+                        &logins.store,
+                        task,
+                    ))
+                    .unwrap()
+            })
+        });
     let capacity = crate::provider_account::LaunchCapacity::read(&logins.store.sqlite).unwrap();
     let mut expected = Vec::new();
     for id in ["first", "second", "third"] {
@@ -1851,7 +1864,12 @@ impl ListFilters {
             rusqlite::params![project.as_str(), wave],
         )
         .unwrap();
-        db.execute("INSERT INTO tasks(id,repository_id,project_id,issue_identifier,worktree,checkout_machine_id,created_at) VALUES(?1,'repo_00000000000000000000000000000001',?2,'TEST-1',?3,(SELECT id FROM machines WHERE is_local=1),1)", rusqlite::params![task.as_str(), project.as_str(), repo.path().to_str().unwrap()]).unwrap();
+        db.execute("INSERT INTO tasks(id,repository_id,project_id,issue_identifier,created_at) VALUES(?1,'repo_00000000000000000000000000000001',?2,'TEST-1',1)", rusqlite::params![task.as_str(), project.as_str()]).unwrap();
+        db.execute(
+            "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)",
+            rusqlite::params![task.as_str(), repo.path().to_str().unwrap()],
+        )
+        .unwrap();
         for id in [
             "outside",
             "wave-primary",
@@ -1881,7 +1899,7 @@ impl ListFilters {
         )
         .unwrap();
         db.execute(
-            "UPDATE tasks SET primary_session_id='task-primary' WHERE id=?1",
+            "INSERT INTO task_primary_sessions(task_id,session_id) VALUES(?1,'task-primary')",
             [task.as_str()],
         )
         .unwrap();

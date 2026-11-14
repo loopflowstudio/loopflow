@@ -142,7 +142,7 @@ async fn start_in_background(
         || session.agent_process_id.is_some()
         || store
             .sqlite
-            .session_transport(session.id.as_str())?
+            .session_terminal(session.id.as_str())?
             .is_some()
     {
         // Prepared conversations can start; previously opened ones stay as they are.
@@ -324,7 +324,7 @@ async fn prepare(store: &SharedStore, id: &str) -> Result<SessionRecord> {
         .session(id)
         .await?
         .ok_or_else(|| session_not_found(id))?;
-    if store.sqlite.session_transport(&session.id)?.is_some()
+    if store.sqlite.session_terminal(&session.id)?.is_some()
         || session
             .artifact_key
             .as_deref()

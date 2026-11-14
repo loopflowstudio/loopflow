@@ -204,7 +204,7 @@ writes! {
     TaskHold { directory: PathBuf, issue: String } => task::Hold;
     { issue, .. } => task::hold(directory, issue, None)?,
 
-    /// `lf task steer <issue> <message> --json`: direction for the Task's
+    /// `lf steer <issue> <message> --json`: direction for the Task's
     /// runs, whoever writes it.
     #[serde(rename = "task.steer")]
     TaskSteer {
@@ -238,7 +238,7 @@ writes! {
         machine: Option<String>,
     } => TaskMoveResult;
     { issue, wave, machine, .. } => match machine {
-        Some(machine) => TaskMoveResult::Machine(Box::new(super::session_move::move_task(issue, machine)?)),
+        Some(machine) => TaskMoveResult::Machine(Box::new(super::session_move::move_task(issue, machine, None)?)),
         None => TaskMoveResult::Wave(Box::new(crate::ops::task::task_move_membership(
             &task_repo(issue)?, issue, wave.as_deref(),
         )?)),
@@ -265,7 +265,7 @@ writes! {
         crate::ops::task::task_save(issue, path, revision, &content)?
     },
 
-    /// `lf [--wave <wave>] session steer [<id>] <message> --json`: a steer
+    /// `lf [--wave <wave>] steer [<id>] <message> --json`: a steer
     /// one Session, every Session of the Wave or, with neither, every Session
     /// of the repository reads at its next boundary.
     #[serde(rename = "session.steer")]
@@ -437,7 +437,7 @@ writes! {
     WaveSync { directory: PathBuf, wave: String } => Option<crate::lf::commands::waves::WaveDetailSnapshot>;
     { wave, .. } => {
         let refreshed = super::ops::refresh_status(directory, Some(wave))?;
-        super::waves::desktop_status(directory, refreshed.as_deref().unwrap_or(wave))?
+        super::waves::desktop_status(directory, refreshed.wave().unwrap_or(wave))?
     },
 
     /// `lf wave plan bind <wave> <project> --json`: the tracker Project

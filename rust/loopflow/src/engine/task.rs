@@ -186,7 +186,7 @@ pub fn hold(directory: &Path, issue: &str, reason: Option<&str>) -> Result<Hold>
     })
 }
 
-/// `task.steer`: direction for the Task's runs, as `lf task steer <issue>
+/// `task.steer`: direction for the Task's runs, as `lf steer <issue>
 /// <message>` does. The delivery is [`super::session::steer`]'s Task scope:
 /// the entry joins the Task's thread and the store saves it as the Task's
 /// steer, which every Session on the Task, now or later, reads at its next
@@ -249,7 +249,9 @@ pub fn ownership(directory: &Path, issue: &str, change: OwnershipChange) -> Resu
         _ => "unassign",
     };
     let spell = |task: &str| spell_task(task, verb);
-    if let Some(ownership) = remote(directory, issue, spell)? {
+    let writer = crate::lf::commands::work_route::remote_ownership_writer(issue)
+        .map_err(|error| Error::refused(&error, ErrorCode::Unavailable))?;
+    if let Some(ownership) = remote_on(writer, directory, spell)? {
         return Ok(ownership);
     }
     let repo = crate::ops::task::task_repository(directory, Some(issue)).map_err(written)?;
@@ -302,9 +304,19 @@ fn remote<T: DeserializeOwned>(
     issue: &str,
     spell: impl FnOnce(&str) -> Vec<String>,
 ) -> Result<Option<T>> {
-    let Some(route) = crate::lf::commands::work_route::remote_task(issue)
-        .map_err(|error| Error::refused(&error, ErrorCode::Unavailable))?
-    else {
+    let route = crate::lf::commands::work_route::remote_task(issue)
+        .map_err(|error| Error::refused(&error, ErrorCode::Unavailable))?;
+    remote_on(route, directory, spell)
+}
+
+/// What the command `spell` names prints on `route`'s Machine; `None` when
+/// it runs here.
+fn remote_on<T: DeserializeOwned>(
+    route: Option<crate::durable::TaskExecutionRoute>,
+    directory: &Path,
+    spell: impl FnOnce(&str) -> Vec<String>,
+) -> Result<Option<T>> {
+    let Some(route) = route else {
         return Ok(None);
     };
     let args = spell(route.task_id.as_str());

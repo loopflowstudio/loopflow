@@ -2445,7 +2445,7 @@ fn settle_switch(
     prune_superseded_artifacts(root, &lf_bin_dir(), active);
     settle_migration_backups(
         &active.selection.store,
-        crate::lf::commands::rollover::inventory(),
+        crate::lf::commands::binaries::inventory(),
     );
     Ok(())
 }
@@ -2457,7 +2457,7 @@ fn settle_switch(
 /// and nothing restores the clone, so it goes.
 fn settle_migration_backups(
     store: &Path,
-    inventory: Result<crate::lf::commands::rollover::BinaryInventory>,
+    inventory: Result<crate::lf::commands::binaries::BinaryInventory>,
 ) {
     match inventory {
         Ok(inventory) if inventory.superseded().next().is_some() => {}
@@ -2794,7 +2794,7 @@ fn promote_from_installation(
     {
         println!("this install advances the store from {applied_frontier} to {latest_known}");
     }
-    crate::lf::commands::rollover::report_before_promote();
+    crate::lf::commands::binaries::report_before_promote();
     let switch_id = format!("switch-{}", Uuid::new_v4().simple());
     let prepared = prepare_artifacts(&artifacts, candidate_binary, &preview, &switch_id)?;
     let target_set = installation_artifact_set(
@@ -2952,7 +2952,7 @@ pub fn promote(
     // agent installing reads the tail.
     if let Some(promoted) = promoted {
         println!("{}", promoted.summary);
-        crate::lf::commands::rollover::report_after_promote(promoted.replaced_app, &promoted.store);
+        crate::lf::commands::binaries::report_after_promote(promoted.replaced_app, &promoted.store);
     }
     Ok(())
 }
@@ -3028,7 +3028,7 @@ fn rollback_from_store(cli_target: &Path, candidate: &Path, bin_dir: &Path) -> R
 mod settle_tests {
     use super::settle_migration_backups;
     use crate::id::LfProcessId;
-    use crate::lf::commands::rollover::{BinaryInventory, RunningBinary, RunningLfProcess};
+    use crate::lf::commands::binaries::{BinaryInventory, RunningBinary, RunningLfProcess};
     use std::path::PathBuf;
 
     fn inventory(binaries: Vec<RunningBinary>) -> BinaryInventory {

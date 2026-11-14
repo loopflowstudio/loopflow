@@ -1069,19 +1069,10 @@ fn conversation_view(target: &Resolved) -> Result<Option<ConversationView>> {
     let Some(summary) = store.sqlite.session_summary(id, now)? else {
         return Ok(desktop);
     };
-    // The owner's stored viewer flag can lag the attachment handshake.
-    // Ask the live transport before using that flag to decide whether to attach.
-    let (viewed, ready) = if let Some(owner) = store.sqlite.session_transport(id)? {
-        match crate::transport::attachment(&owner) {
-            Ok(attachment) => attachment,
-            // A failed provider launch can leave its reservation while the
-            // transport has already returned the terminal and removed its socket.
-            Err(_) if matches!(&owner, crate::transport::Host::Owner(id) if crate::transport::leaving(id)) =>
-            {
-                return Ok(desktop);
-            }
-            Err(error) => return Err(error).context("read conversation attachment"),
-        }
+    // The terminal's stored viewer flag can lag the attachment handshake.
+    // Ask the live terminal before using that flag to decide whether to attach.
+    let (viewed, ready) = if let Some(terminal) = store.sqlite.session_terminal(id)? {
+        crate::transport::attachment(&terminal).context("read conversation attachment")?
     } else {
         (
             !summary.unviewed

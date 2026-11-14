@@ -58,8 +58,17 @@ three. Ordinary Rust changes reach Swift through the `lf --json` wire, which the
 DTO fixtures pin; native build inputs also run both Desktop link paths. The queue
 proves the Linux suite on top of main. After merge, `macos-main.yml` runs the jobs the batch since the
 `last-green` tag reaches: one run at a time, the waiting run testing the newest
-main. Green moves `last-green`; red bisects the batch by dispatching the same
-workflow on first-parent commits and opens an unarmed revert PR for the culprit.
+main. Green moves `last-green` to the tested commit. Red leaves `last-green`
+where it was, fails the run and names both commits in the run summary:
+
+```
+macOS failure on 286889bbec; last-green stays at 5c1eee745d.
+```
+
+Nothing reverts automatically. The next push to main tests the batch again from
+the same `last-green`, so a flake clears on its own and a real regression stays
+red until someone fixes or reverts it. To retest a red run without a new push:
+`gh run rerun <id>`.
 
 ## Rust and Swift caches
 

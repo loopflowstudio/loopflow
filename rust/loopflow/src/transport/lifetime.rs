@@ -1,8 +1,8 @@
-//! Record viewing off the byte path; only an explicit shell Close is polled.
+//! Record viewing off the byte path.
 //!
 //! Nothing here ends a conversation for want of viewers. Task cleanup ends a
 //! done or abandoned Task's conversations (`ops::task::retirement`); a Desktop
-//! shell ends on its explicit Close.
+//! shell's Close ends its terminal directly (`desktop::shells`).
 use std::collections::HashMap;
 use std::io::Write;
 use std::os::unix::net::UnixStream;
@@ -11,8 +11,8 @@ use std::time::Duration;
 
 use anyhow::Result;
 
-use super::Host;
 use crate::harness::native_exit::{NativeExit, Settled};
+use crate::id::TerminalId;
 use crate::process::SessionAttachment;
 use crate::store::sqlite::{SqliteStore, ViewerHold};
 use crate::store::RecordingGap;
@@ -96,9 +96,8 @@ impl Client {
     }
 }
 
-/// One thread recording viewing for every execution a host serves: the
-/// Machine server's held terminals share one, a Session owner process has its
-/// own. It ends once its handle and every watched execution are gone.
+/// One thread recording viewing for every held terminal the Machine server
+/// hosts. It ends once its handle and every watched execution are gone.
 #[derive(Debug)]
 pub(super) struct Watcher {
     messages: mpsc::Sender<Message>,
@@ -146,74 +145,59 @@ impl Watcher {
         }
     }
 
-    /// Record `host`'s viewing sent through the returned handle. A Desktop
-    /// shell's owner (`shell`) also learns of its explicit Close on the
-    /// receiver, after `waker` wakes its wait; so does any host whose
-    /// `client` moved to another attachment, through `client` itself.
-    pub fn watch(
-        &self,
-        host: Host,
-        shell: bool,
-        waker: UnixStream,
-        client: Arc<Client>,
-    ) -> (Viewing, mpsc::Receiver<()>) {
+    /// Record `terminal`'s viewing sent through the returned handle. A host
+    /// whose `client` moved to another attachment learns of it through
+    /// `client` itself, after `waker` wakes its wait.
+    pub fn watch(&self, terminal: TerminalId, waker: UnixStream, client: Arc<Client>) -> Viewing {
         let key = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let (close, closing) = mpsc::channel();
         client
             .0
             .lock()
             .expect("client attachment lock poisoned")
             .wake = Some(self.messages.clone());
         let watch = Watch {
-            host,
-            shell,
-            close,
+            terminal,
             waker,
             client,
             hold: None,
             recorded: None,
             hold_failure: RecordingGap::default(),
-            close_failure: RecordingGap::default(),
             client_failure: RecordingGap::default(),
         };
         let _ = self.messages.send(Message::Watch(key, Box::new(watch)));
-        let viewing = Viewing {
+        Viewing {
             key,
             messages: self.messages.clone(),
-        };
-        (viewing, closing)
+        }
     }
 }
 
 #[derive(Debug)]
 struct Watch {
-    host: Host,
-    shell: bool,
-    close: mpsc::Sender<()>,
+    terminal: TerminalId,
     waker: UnixStream,
     client: Arc<Client>,
     hold: Option<ViewerHold>,
     /// None means no observation has been committed, including initial absence.
     recorded: Option<Option<ViewerHold>>,
     hold_failure: RecordingGap,
-    close_failure: RecordingGap,
     client_failure: RecordingGap,
 }
 
 impl Watch {
-    /// Only a failed write, an explicit shell Close or an attached native
-    /// client needs another attempt without a change.
+    /// Only a failed write or an attached native client needs another
+    /// attempt without a change.
     fn waiting(&self) -> bool {
-        self.shell || self.recorded != Some(self.hold) || self.client.attached()
+        self.recorded != Some(self.hold) || self.client.attached()
     }
 
-    /// Record what changed; false once a shell's Close has been delivered.
-    fn record(&mut self, store: &crate::store::sqlite::SqliteStore) -> bool {
+    /// Record what changed.
+    fn record(&mut self, store: &crate::store::sqlite::SqliteStore) {
         if self.recorded != Some(self.hold)
             && report_result(
                 &mut self.hold_failure,
                 "Session viewer hold",
-                store.record_owner_viewer_hold(self.host.transport(), self.hold),
+                store.record_viewer_hold(&self.terminal, self.hold),
             )
             .is_some()
         {
@@ -227,20 +211,6 @@ impl Watch {
         {
             let _ = (&self.waker).write_all(&[1]);
         }
-        let Some(owner) = self.host.owner().filter(|_| self.shell) else {
-            return true;
-        };
-        if report_result(
-            &mut self.close_failure,
-            "Shell Close",
-            store.shell_should_close(owner),
-        ) == Some(true)
-        {
-            let _ = self.close.send(());
-            let _ = (&self.waker).write_all(&[1]);
-            return false;
-        }
-        true
     }
 }
 
@@ -288,7 +258,9 @@ fn record(received: &mpsc::Receiver<Message>) {
         let Some(store) = store.as_ref() else {
             continue;
         };
-        watches.retain(|_, watch| watch.record(store));
+        for watch in watches.values_mut() {
+            watch.record(store);
+        }
     }
 }
 
@@ -306,7 +278,7 @@ fn report_result<T>(
 
 #[cfg(test)]
 mod tests {
-    use super::Host;
+    use crate::id::TerminalId;
     use crate::store::sqlite::ViewerHold;
     use std::time::{Duration, Instant};
 
@@ -314,11 +286,12 @@ mod tests {
     fn viewer_state_retries_after_a_store_failure_without_another_viewer_change() {
         let guard = crate::journal::TestLedgerGuard::new();
         let store = crate::journal::process_ledger().unwrap();
-        let owner = store.test_lf_process();
+        let terminal = TerminalId::new();
+        store.create_terminal(&terminal, "build").unwrap();
         let db = guard.home().join("loopflow.db");
         let conn = rusqlite::Connection::open(&db).unwrap();
         conn.execute_batch(
-            "CREATE TRIGGER reject_viewer_change BEFORE UPDATE OF viewed ON processes
+            "CREATE TRIGGER reject_viewer_change BEFORE UPDATE OF viewed ON held_terminals
             BEGIN SELECT RAISE(FAIL, 'temporary viewer write failure'); END;",
         )
         .unwrap();
@@ -331,18 +304,13 @@ mod tests {
             crate::journal::with_test_ledger(db, || super::record(&received))
         });
         let (_wake, waker) = std::os::unix::net::UnixStream::pair().unwrap();
-        let (viewing, closing) = watcher.watch(
-            Host::Owner(owner.clone()),
-            false,
-            waker,
-            std::sync::Arc::default(),
-        );
+        let viewing = watcher.watch(terminal.clone(), waker, std::sync::Arc::default());
         viewing.send(Some(ViewerHold::Viewed(123)));
         std::thread::sleep(super::POLL * 2);
         let read = || {
             conn.query_row(
-                "SELECT viewer_hold_at FROM processes WHERE id=?1",
-                [&owner],
+                "SELECT viewer_hold_at FROM held_terminals WHERE id=?1",
+                [&terminal],
                 |r| r.get::<_, Option<i64>>(0),
             )
             .unwrap()
@@ -366,7 +334,6 @@ mod tests {
         drop(watcher);
         recorder.join().unwrap();
         assert_eq!(read(), Some(124));
-        assert!(closing.try_recv().is_err());
     }
 
     #[test]

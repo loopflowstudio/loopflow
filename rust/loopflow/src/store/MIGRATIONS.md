@@ -86,7 +86,7 @@ database as `loopflow.db.backup-<previous migration>-<16 hex>`, never under
 fingerprint of the complete ledger plus product schema, so a backup from another
 branch-local history cannot be mistaken for the state being repaired. Once a
 migration commits, only the clone it made stays. When the install settles it goes
-too, unless a process still runs an older build (`rollover::inventory()`, the list
+too, unless a process still runs an older build (`binaries::inventory()`, the list
 `lf doctor` and `lf install` print): that process reads the live store, and the
 clone is the restore point for the generation its build was written against, so
 the clone stays while such a process can still show the migration lost something,

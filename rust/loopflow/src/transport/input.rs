@@ -9,7 +9,7 @@ pub(super) struct PendingInput {
 }
 
 impl PendingInput {
-    /// False leaves the queue unchanged when the owner cannot accept more input.
+    /// False leaves the queue unchanged when it cannot take more input.
     pub fn push(&mut self, bytes: &[u8]) -> bool {
         if self.bytes.len() + bytes.len() > super::LIMIT {
             return false;

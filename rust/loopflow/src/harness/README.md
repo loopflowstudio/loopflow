@@ -70,7 +70,7 @@ When the server does not answer, the hook still reads its steers, exits 0 and
 records the gap once per native conversation in
 `logs/lf.log`. The turn or tool completes without it. A recording gap is one
 concept, `store::RecordingGap`: one log line per changed failure and one when
-lf's state answers again, whether the gap lives in an owner's
+lf's state answers again, whether the gap lives in the server's
 memory or, for hooks that are a fresh process at every boundary, in a
 `.store-gap` marker beside the delivery file. The next hook that reaches
 the server sends the marker's gap with its request; the server writes it into
@@ -85,12 +85,12 @@ own, one per boundary, instead of starting `lf` at each boundary
 ([OpenCode and Pi report from inside the provider](../server/README.md#opencode-and-pi-report-from-inside-the-provider)).
 A server they cannot reach, or an lf they cannot run, goes to their own log
 (`logs/pi-extension.log`, `opencode.stderr.log` beside the capture), never to
-the conversation. The PTY
-owner delivers typed input even when it cannot record it, and holds the Session
-in memory instead. Quitting returns the provider's own exit within a second; exit
+the conversation. The server
+delivers typed input to a held terminal even when it cannot record it, and
+holds the Session in memory instead. Quitting returns the provider's own exit within a second; exit
 records finish in the background or are lost. Nothing about lf's own state ends a
 conversation either: a removed, rebuilt or superseded lf executable leaves its
-owner serving until the person quits, resumes elsewhere or an operator rolls over.
+holder serving until the person quits or resumes elsewhere.
 
 Codex (`codex_connection.rs`) has no relay: the Codex TUI connects straight to
 its private app-server. lf sends the first turn there before the client starts;

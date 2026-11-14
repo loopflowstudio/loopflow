@@ -164,8 +164,8 @@ impl LfProcessRuntime {
                 )
             })?;
         let attachment = resume_session_agent_process(&store, &session.id, &lf_process_id)?;
-        if let Some(owner) = crate::transport::current() {
-            store.bind_session_transport(&session.id, &attachment, owner.transport())?;
+        if let Some(terminal) = crate::transport::current() {
+            store.bind_session_terminal(&session.id, &attachment, terminal)?;
         }
         runtime.owner = Some((store, session.id.to_string(), attachment));
         drop(runtime);

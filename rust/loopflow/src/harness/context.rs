@@ -311,14 +311,7 @@ mod tests {
             assert_eq!(args[0], "--settings");
             serde_json::from_slice(&std::fs::read(&args[1]).unwrap()).unwrap()
         };
-        let owned = settings(Holder::Owner);
-        assert!(
-            owned["hooks"]["Stop"].is_array(),
-            "an owner keeps turn hooks"
-        );
-        assert!(owned.get("crossSessionInbound").is_none());
-        // No owner holds a caller's launch: it reports no turns, and its
-        // tool hook reads steers from the store.
+        // A bare launch reports no turns; its tool hook reads steers from the store.
         let bare = settings(Holder::Caller);
         assert!(bare["hooks"]["SessionStart"].is_array());
         assert!(bare["hooks"].get("Stop").is_none());
@@ -329,7 +322,9 @@ mod tests {
             assert!(command.ends_with("--moment steer"), "{event}: {command}");
         }
         assert!(bare.get("crossSessionInbound").is_none());
-        assert_eq!(settings(Holder::Server)["crossSessionInbound"], "accept");
+        let managed = settings(Holder::Server);
+        assert!(managed["hooks"]["Stop"].is_array(), "Work keeps turn hooks");
+        assert_eq!(managed["crossSessionInbound"], "accept");
     }
 
     #[test]

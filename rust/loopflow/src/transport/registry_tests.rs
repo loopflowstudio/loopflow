@@ -591,7 +591,7 @@ read answer",
         .start(shell(Some(&session.id), "request-1", &script))
         .unwrap();
     store
-        .bind_session_transport(session.id.as_str(), &attachment, &terminal)
+        .bind_session_terminal(session.id.as_str(), &attachment, &terminal)
         .unwrap();
     let pid = crate::server::holder::client::Client::connect(&place)
         .unwrap()

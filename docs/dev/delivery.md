@@ -408,8 +408,10 @@ admission.
 The repository lock skips overlapping observations. Per-Task and per-PR claims
 still fence direct callers. Delivery observations have no elapsed-time cutoff;
 concurrent checks skip the landing while its current observation owns the lock.
-The detached transport owner starts a separate process group. Startup waits for
-its acknowledgement without an elapsed-time cutoff. No provider turn runs inside
+A landing watcher starts as a plain detached process (`os_process::detached`)
+in its own OS session. Startup waits for its Process ID line without an
+elapsed-time cutoff; a pipe that closes without one leaves delivery unknown,
+and nothing is launched again. No provider turn runs inside
 the tick.
 
 Desktop consumes the Rust automation projection: per-Task CI repair holds and

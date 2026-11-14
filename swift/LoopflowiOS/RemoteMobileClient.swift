@@ -61,7 +61,7 @@ final class RemoteMobileClient: MobileTaskCreationClient {
     /// Attaching takes the keyboard and fits the terminal to `size`.
     func attach(sessionID: String, size: TerminalGeometry) async throws -> RemoteAttachment {
         let ticket: String
-        do { ticket = try decode(Ticket.self, await request(.sessionAttach(session: sessionID, owner: nil))).ticket }
+        do { ticket = try decode(Ticket.self, await request(.sessionAttach(session: sessionID))).ticket }
         catch let error as ServerError where error.code == .notFound { throw SessionNotRunning() }
         let terminal = try await MachineSocket.terminal(endpoint: savedMachine.endpoint, ticket: ticket)
         do { return try await RemoteAttachment.open(sessionID: sessionID, socket: terminal, size: size) }

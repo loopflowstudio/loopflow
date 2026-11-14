@@ -13,6 +13,10 @@ Name the Rust modules and integration binaries the diff can reach before
 building anything: the changed module's own tests, its direct callers, and any
 boundary check its owner README names (see below).
 
+Provider fixtures that launch a Task conversation beside a Graph must signal
+readiness for the process the test exercises. A shared marker can arrive from
+the conversation before the Graph's provider starts.
+
 Task Graph selection, cursors or step names also reach
 `test(ops::task::explain::tests::)`: previews share the execution selector and
 display names. Run these rows before the Task launch fixtures.
@@ -82,7 +86,7 @@ checks catch per-Task and per-Graph SQL growth beyond focused store tests.
 
 Store-wide schema or trigger changes also run `binary(two_people)`,
 `test(transport::)` and `binary(transport_tests)`: shared planning exchanges,
-viewer holds and owner lifetimes exercise writers beyond the changed store module.
+viewer holds and held-terminal lifetimes exercise writers beyond the changed store module.
 Task storage changes also run `binary(session_lifecycle_tests)`: creation and
 promotion cover absent checkouts and primary Sessions. When moving nullable
 columns into separate tables, update fixture reads to handle absent rows and
@@ -118,7 +122,7 @@ Terminal-title changes run `test(transport::output::tests::)` and
 lookup completes in a deterministic output test; a live attachment can miss that
 startup race locally.
 
-Viewer readiness changes also run `test(transport::relay_tests::)` and
+Viewer readiness changes also run `test(transport::viewer_tests::)` and
 `test(session_cli_tests::terminal_titles_follow_session_rename_and_reconnect_without_provider_accounts)`.
 A provider may exit before its viewer sends readiness; final output and exit
 status must survive that acknowledgement failing.
@@ -189,7 +193,7 @@ Phone, shared Swift models and server protocol changes also select `ios`.
 `-only-testing:LoopflowiOSTests/SessionTerminalTests` for a focused check. It creates
 and removes its own Simulator, using an installed iOS runtime and ad-hoc signing.
 The suite covers pairing, Task creation and the terminal; the shared protocol
-decoders, owner stream included, run with the macOS Swift tests. Whether a
+decoders, view stream included, run with the macOS Swift tests. Whether a
 Session works is checked on a physical phone against a real Machine.
 Website checks generate command reference pages from `LF_BIN` or `lf` on PATH.
 After building the candidate, prepend its directory to `PATH` for the gate or
@@ -240,7 +244,7 @@ Omit `--rust-filter` (the whole workspace) only to reproduce a CI
   repository-local identities still win. Do not inject `GIT_CONFIG_GLOBAL` to
   repair a test: it hides missing setup in that private home.
 - Changes to the test environment constructor reach the library suites too.
-  Run `store::tests::` and `transport::relay_tests::` from an empty cwd: they
+  Run `store::tests::` and `transport::viewer_tests::` from an empty cwd: they
   exercise claims for absent repositories and children with cleared environments.
   Such children set both `HOME` and `PATH` before the constructor adds its
   Keychain stand-in; an absent PATH would otherwise contain only the stand-in.

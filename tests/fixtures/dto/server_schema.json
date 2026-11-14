@@ -10014,27 +10014,10 @@
         },
         {
           "additionalProperties": false,
-          "description": "The answer to `attach`: the connection now speaks the viewer protocol\nwith this owner LfProcess or this held terminal, whichever is not null,\nand nothing more arrives from the server.",
+          "description": "The answer to `attach`: the connection now speaks the viewer protocol\nwith this held terminal, and nothing more arrives from the server.",
           "properties": {
-            "owner_lf_process_id": {
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/LfProcessId"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
             "terminal_id": {
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/TerminalId"
-                },
-                {
-                  "type": "null"
-                }
-              ]
+              "$ref": "#/$defs/TerminalId"
             },
             "type": {
               "const": "bridged",
@@ -10043,7 +10026,6 @@
           },
           "required": [
             "type",
-            "owner_lf_process_id",
             "terminal_id"
           ],
           "type": "object"
@@ -10203,11 +10185,10 @@
       "oneOf": [
         {
           "additionalProperties": false,
-          "description": "A ticket for the Session's terminal: the server resolves the Session's\nheld terminal, else its current owner LfProcess, and answers `{ticket,\nowner_lf_process_id, terminal_id, expires_in_ms}` with one ID null. A\nnew connection presents the ticket as its first message (`attach`) and\nbecomes the bridge; this connection stays a client. When the terminal\nor owner ends, the bridge closes; attaching again by the same Session\nreaches its next one. With `owner_lf_process_id`, the\nSession must still be owned by exactly that LfProcess, for a client that\nreconnects only to the owner it had.",
+          "description": "A ticket for the Session's held terminal, answered `{ticket,\nterminal_id, expires_in_ms}`. A new connection presents the ticket as\nits first message (`attach`) and becomes the bridge; this connection\nstays a client. When the terminal ends, the bridge closes; attaching\nagain by the same Session reaches its next one. A Session no terminal\nruns is `not_found`; attaching never starts a provider.",
           "examples": [
             {
               "kind": "session.attach",
-              "owner_lf_process_id": "85c31c1e-850c-4821-878d-55527b6dba46",
               "session": "session_5e55105e000040008000000000000001",
               "terminal_id": null
             }
@@ -10216,16 +10197,6 @@
             "kind": {
               "const": "session.attach",
               "type": "string"
-            },
-            "owner_lf_process_id": {
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/LfProcessId"
-                },
-                {
-                  "type": "null"
-                }
-              ]
             },
             "session": {
               "$ref": "#/$defs/LfSessionId"
@@ -10239,13 +10210,12 @@
                   "type": "null"
                 }
               ],
-              "description": "Attach only to this held terminal. Without either ID, a Session's\nheld terminal is preferred to an owner."
+              "description": "Attach only to this held terminal."
             }
           },
           "required": [
             "kind",
             "session",
-            "owner_lf_process_id",
             "terminal_id"
           ],
           "type": "object",
@@ -10254,8 +10224,7 @@
           },
           "x-result-example": {
             "expires_in_ms": 60000,
-            "owner_lf_process_id": "85c31c1e-850c-4821-878d-55527b6dba46",
-            "terminal_id": null,
+            "terminal_id": "7c1d9a40-e5b2-4f6a-8d3e-2b1c0f9a8e7d",
             "ticket": "Qk9nM3hLcjJwVnc5YVptRQ"
           }
         },
@@ -10708,27 +10677,9 @@
           "minimum": 0,
           "type": "integer"
         },
-        "owner_lf_process_id": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/LfProcessId"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "The owner the bridge reaches; null for a held terminal."
-        },
         "terminal_id": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/TerminalId"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "The held terminal the bridge reaches; null for an owner."
+          "$ref": "#/$defs/TerminalId",
+          "description": "The held terminal the bridge reaches."
         },
         "ticket": {
           "description": "Opaque random ticket; single use.",
@@ -10737,7 +10688,6 @@
       },
       "required": [
         "ticket",
-        "owner_lf_process_id",
         "terminal_id",
         "expires_in_ms"
       ],

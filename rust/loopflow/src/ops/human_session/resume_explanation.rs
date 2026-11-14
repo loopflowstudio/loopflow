@@ -231,7 +231,7 @@ async fn read_resume(
         .transpose()?
         .flatten();
     // A metadata read does not acquire viewer control or probe the endpoint.
-    let connection = store.sqlite.session_transport(&session.id)?;
+    let connection = store.sqlite.session_terminal(&session.id)?;
     // Opening checks the harness before any holder: another agent never
     // takes over the running one, it starts a thread from the log.
     let handoff = provider.as_ref().and(super::handoff_agent(&session));

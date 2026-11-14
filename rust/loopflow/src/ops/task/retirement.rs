@@ -5,13 +5,12 @@ use std::path::Path;
 
 use super::{block_on_task, task_error, task_store};
 use crate::durable::{TaskId, WorkStatus};
-use crate::journal::ProcessIdentityEvidence;
+use crate::id::TerminalId;
 use crate::ops::{NullProgress, OpsError, OpsResult};
 use crate::store::{
     sqlite::{SqliteStore, TaskRetirement, ViewerHold},
     SharedStore,
 };
-use crate::transport::Host;
 use crate::work::task::Task;
 use fs2::FileExt;
 
@@ -38,21 +37,16 @@ fn lock_file(name: &str) -> OpsResult<File> {
         .open(directory.join(format!("{name}.lock")))?)
 }
 
-/// Owners refresh live viewing evidence every ten seconds. A dead or stalled
-/// owner cannot keep a completed checkout forever with its last cached boolean.
+/// The server refreshes live viewing evidence every ten seconds. A stopped
+/// server cannot keep a completed checkout forever with its last cached boolean.
 pub(crate) const VIEWER_OBSERVATION_GRACE: i64 = 30;
 
 fn viewer_hold(store: &SqliteStore, task: &TaskId, now: i64) -> OpsResult<Option<ViewerHold>> {
     let mut absent_since = None;
-    for owner in store.task_viewer_holds(task).map_err(task_error)? {
-        let at = match owner.hold {
+    for terminal in store.task_viewer_holds(task).map_err(task_error)? {
+        let at = match terminal.hold {
             ViewerHold::Viewed(at) => {
-                if !owner.ended
-                    && now < at + VIEWER_OBSERVATION_GRACE
-                    && owner.owner.owner().is_none_or(|owner| {
-                        crate::journal::lf_evidence(store, owner) != ProcessIdentityEvidence::Dead
-                    })
-                {
+                if !terminal.ended && now < at + VIEWER_OBSERVATION_GRACE {
                     return Ok(Some(ViewerHold::Viewed(at)));
                 }
                 at + VIEWER_OBSERVATION_GRACE
@@ -75,36 +69,31 @@ fn reconcile(store: &SqliteStore, task: &TaskId) -> OpsResult<Option<TaskRetirem
 /// Task cleanup owns closure, including Tasks without a checkout and resumed
 /// conversations whose checkout was already retired.
 pub(crate) fn close_conversations(store: &SqliteStore, task: &TaskId) -> OpsResult<()> {
-    for (host, abandoned) in conversation_closes(store, task)? {
+    for (terminal, abandoned) in conversation_closes(store, task)? {
         let notice = if abandoned {
             "Task abandoned"
         } else {
             "Task completed"
         };
-        match &host {
-            Host::Owner(owner) => end_owner(store, owner, notice)?,
-            // A held terminal has no process to signal: the server ends it on
-            // its notice. One the server cannot reach is a candidate next pass.
-            Host::Terminal(_) => {
-                if let Err(error) = crate::transport::close_notice(&host, notice) {
-                    tracing::warn!(%host, %error, "held terminal close unavailable");
-                }
-            }
+        // A held terminal has no process to signal: the server ends it on its
+        // notice. One the server cannot reach is a candidate next pass.
+        if let Err(error) = crate::transport::close_notice(&terminal, notice) {
+            tracing::warn!(%terminal, %error, "held terminal close unavailable");
         }
     }
     Ok(())
 }
 
-fn conversation_closes(store: &SqliteStore, task: &TaskId) -> OpsResult<Vec<(Host, bool)>> {
+fn conversation_closes(store: &SqliteStore, task: &TaskId) -> OpsResult<Vec<(TerminalId, bool)>> {
     let now = now();
-    let mut hosts = store.task_close_candidates(task, now).map_err(task_error)?;
-    let Some((_, abandoned)) = hosts.first() else {
-        return Ok(hosts);
+    let mut terminals = store.task_close_candidates(task, now).map_err(task_error)?;
+    let Some((_, abandoned)) = terminals.first() else {
+        return Ok(terminals);
     };
     if *abandoned {
         let holds = store.task_viewer_holds(task).map_err(task_error)?;
-        hosts.retain(|(host, _)| {
-            !holds.iter().any(|hold| &hold.owner == host
+        terminals.retain(|(terminal, _)| {
+            !holds.iter().any(|hold| &hold.terminal == terminal
             && matches!(hold.hold, ViewerHold::Viewed(at) if now < at + VIEWER_OBSERVATION_GRACE))
         });
     } else {
@@ -119,18 +108,7 @@ fn conversation_closes(store: &SqliteStore, task: &TaskId) -> OpsResult<Vec<(Hos
             return Ok(Vec::new());
         }
     }
-    Ok(hosts)
-}
-
-fn end_owner(store: &SqliteStore, owner: &crate::id::LfProcessId, notice: &str) -> OpsResult<()> {
-    let Some(pid) = crate::journal::live_process_pid(store, owner) else {
-        return Ok(());
-    };
-    // Older owners may not understand the notice; the verified signal still ends them.
-    if let Err(error) = crate::transport::close_notice(&Host::Owner(owner.clone()), notice) {
-        tracing::debug!(%owner, %error, "Owner close notice unavailable");
-    }
-    crate::ops::human_session::end_owner(store, owner, pid).map_err(task_error)
+    Ok(terminals)
 }
 
 pub(crate) async fn schedule(store: &SharedStore, task: &Task) -> OpsResult<()> {
@@ -244,8 +222,19 @@ async fn advance(store: &SharedStore, task: &Task) -> OpsResult<()> {
     {
         return Ok(());
     }
-    for owner in crate::desktop::shells::owners(&store.sqlite, &task.id).map_err(task_error)? {
-        end_owner(&store.sqlite, &owner, "Task completed")?;
+    for (terminal, _) in
+        crate::desktop::shells::hosts(&store.sqlite, &task.id).map_err(task_error)?
+    {
+        // An ended shell has nothing to hear the notice.
+        if store
+            .sqlite
+            .terminal_running(&terminal)
+            .map_err(task_error)?
+        {
+            if let Err(error) = crate::transport::close_notice(&terminal, "Task completed") {
+                tracing::warn!(%terminal, %error, "held shell close unavailable");
+            }
+        }
     }
     store
         .sqlite
@@ -315,16 +304,16 @@ async fn prepare_deletion(
 }
 
 fn unsettled_work(store: &SqliteStore, task: &TaskId) -> OpsResult<Option<String>> {
-    let shells = crate::desktop::shells::owners(store, task).map_err(task_error)?;
-    let mut allowed: HashSet<_> = shells.into_iter().collect();
-    for host in store.task_session_hosts(task).map_err(task_error)? {
-        if host.owner().is_some_and(|owner| {
-            crate::journal::lf_evidence(store, owner) == ProcessIdentityEvidence::Dead
-        }) {
-            continue;
-        }
+    // What runs in a shell descends from the `lf` that created its held
+    // terminal; ending the shell ends it.
+    let shells = crate::desktop::shells::hosts(store, task).map_err(task_error)?;
+    let mut allowed: HashSet<_> = shells
+        .into_iter()
+        .filter_map(|(_, launcher)| launcher)
+        .collect();
+    for terminal in store.task_session_terminals(task).map_err(task_error)? {
         if store
-            .owner_retention(host.transport())
+            .terminal_retention(&terminal)
             .map_err(task_error)?
             .is_some()
         {
@@ -333,20 +322,12 @@ fn unsettled_work(store: &SqliteStore, task: &TaskId) -> OpsResult<Option<String
             ));
         }
         // A held terminal is no process: the lf processes that started inside
-        // it stand where an owner would.
-        match host {
-            Host::Owner(owner) => {
-                allowed.extend(store.owner_session_launchers(&owner).map_err(task_error)?);
-                allowed.insert(owner);
-            }
-            Host::Terminal(terminal) => {
-                allowed.extend(
-                    store
-                        .held_terminal_processes(&terminal)
-                        .map_err(task_error)?,
-                );
-            }
-        }
+        // it stand where the terminal would.
+        allowed.extend(
+            store
+                .held_terminal_processes(&terminal)
+                .map_err(task_error)?,
+        );
     }
     let processes = store.task_open_processes(task).map_err(task_error)?;
     for (process, _) in crate::ops::task_execution::unresolved_processes(store, &processes)? {

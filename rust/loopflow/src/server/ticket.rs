@@ -12,7 +12,7 @@ use base64::Engine as _;
 use tokio::sync::mpsc;
 
 use super::wire::{ClientMessage, TICKET_LIFETIME};
-use crate::transport::Host;
+use crate::id::TerminalId;
 
 /// Who a connection was admitted as; a ticket is redeemable by the same party.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,8 +26,8 @@ pub(super) enum Admission {
 /// What a ticketed connection carries once admitted.
 #[derive(Debug)]
 pub(super) enum Purpose {
-    /// The viewer protocol of an owner or a held terminal, copied byte for byte.
-    Terminal(Host),
+    /// The viewer protocol of a held terminal, copied byte for byte.
+    Terminal(TerminalId),
     /// One server message too large for the control connection.
     Download {
         message: String,
@@ -103,8 +103,7 @@ impl Tickets {
 #[cfg(test)]
 mod tests {
     use super::{Admission, Purpose, Tickets};
-    use crate::id::LfProcessId;
-    use crate::transport::Host;
+    use crate::id::TerminalId;
     use std::time::{Duration, SystemTime};
 
     fn download(text: &str) -> Purpose {
@@ -116,7 +115,7 @@ mod tests {
     }
 
     fn terminal() -> Purpose {
-        Purpose::Terminal(Host::Owner(LfProcessId::new()))
+        Purpose::Terminal(TerminalId::new())
     }
 
     fn remote(node: &str, user: u64) -> Admission {

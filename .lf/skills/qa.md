@@ -27,10 +27,10 @@ Run `lf server run` in the foreground and read its socket from `lf server status
 the socket is hashed under `/tmp`, not inside `LF_HOME`. Speak the documented
 newline JSON protocol, disconnect before an answer, then look up
 `lf server receipt qa-report --json` before retrying identical content.
-Stop every server and terminal owner launched for the walkthrough.
-`lf session serve --terminal -- /bin/sh` prints its owner ID and keeps running;
-the first line is readiness, not process exit. Attach with `lf session attach
-<owner-id>`. Use a real shell for input and resize checks without provider login.
+Stop every server and holder launched for the walkthrough: a private home's
+`lf holder run` outlives its server, and the providers it holds are its direct
+children. For input and resize checks without a provider login, hold a real
+shell with `lf desktop shell <task> --checkout <path> --id <id> --create` in a PTY.
 
 A packaged Desktop must use its signed bundled `lf` for the QA server too:
 signing the bundle changes the CLI hash. Set `LF_DESKTOP` to the QA bundle ID
@@ -192,10 +192,10 @@ dashboard can have no members for that Task.
 
 Task checkout can also start a background primary conversation when the provider
 CLI is installed, even for a command-only Graph. Set `CODEX_HOME` and
-`CLAUDE_CONFIG_DIR` inside the private HOME. After the Graph ends, find its
-`lf session serve --terminal` owners by their disposable checkout cwd and stop
-their descendant processes too; stopping the foreground server alone leaves
-those conversations running.
+`CLAUDE_CONFIG_DIR` inside the private HOME. After the Graph ends, find those
+conversations' providers by their disposable checkout cwd and stop them with
+their descendants; they are children of the private home's `lf holder run`, so
+stopping the foreground server alone leaves them running.
 
 ## Loopflow served launches
 
@@ -452,9 +452,9 @@ short identifier resolves through Linear.
 To count every `lf` a provider starts, point `LF_BIN` at a `/bin/sh` wrapper
 that appends its argv to a file and execs the branch binary; plugins run
 `spec.executable`, which comes from `LF_BIN`. A `ps` sampler misses short
-processes. Each `lf -i` leaves a `session serve` owner after its PTY closes:
-stop owners whose argv names the private Task, with their descendants, after
-every run. Freeze the private server by the PID its `nohup` recorded, never by
+processes. An `lf -i --task` conversation stays held after its PTY
+closes: stop providers whose cwd is the private Task's checkout, with their
+descendants, after every run. Freeze the private server by the PID its `nohup` recorded, never by
 `pgrep -f 'lf server run'`, which matches other worktrees' servers.
 
 A Task launch with no server runs `lf install server`, which registers
@@ -598,7 +598,7 @@ a rebuild can't change the binary under its owners. `lf task checkout <task>`
 warms the Task's conversation detached; `lf session list --json` maps it to its
 Session. Bare `lf task retire` runs one pass over every pending Task. Attach the
 Task's Session in a PTY with `lf session resume <session>`, type a line without
-Enter as a draft, and close the PTY: the owner keeps running detached. Nothing
+Enter as a draft, and close the PTY: the holder keeps it running. Nothing
 schedules checkout cleanup in a private home; call `lf task retire <task>` to
 exercise deletion (the installed `com.loopflow.cleanup` job runs once a minute).
 After `lf task complete`, run `lf task retire <task>` once fifteen minutes have
@@ -618,6 +618,31 @@ claims the Task, which reads `git config user.email` in the repository: with an
 isolated `HOME`, set a repository-local identity first. A PTY driver waiting for
 text can match the repainted saved screen before the new provider reads input;
 wait for text only the new provider prints.
+
+## Headless Work and earlier-build owners
+
+lf-world's `launchctl` stub refuses `bootstrap`, so start the branch's
+`lf server run` (stdin closed) before any Task launch there. The Graph is
+positional: `lf task run <task> <graph> --json`. Headless steps need the fixture
+account above. For a headless step that waits, put a `claude` ahead of the
+world's on `PATH` that, when neither stdin nor stdout is a terminal, reads one
+line (stdin stays open for steers, so never `cat` it), waits for a marker
+file, then prints a stream-json `result` line. A detached launch shows as
+`lf task run …` with parent 1 and its stdout on `logs/graph-<id>.log`; `-b` at
+a PTY tails unlinked temp files. PTY drivers must drain output continuously:
+an undrained PTY blocks the caller on write and looks like a hang.
+
+An earlier build's Session owner: in a fresh home, before the branch opens it,
+run the installed `lf session serve --terminal -- lf -i -a claude : '<msg>'`
+under `nohup`; it prints the owner's Process ID, and `agent_sessions.transport_lf_process_id`
+names it. Write the stand-in's transcript line, then resume with the branch.
+SIGSTOP the owner first to check the "still running under an earlier lf"
+refusal (SIGCONT afterwards; the pending TERM ends it). The installed
+`lf desktop shell <task> --checkout <path> --id <id> --create` in a PTY makes an
+earlier-build Desktop shell; its Task needs a checkout (`lf wt create` then
+`lf task create --worktree`). Running `open_argv` from
+`lf session resume --prepare --json` with `LF_SERVER_STATUS` set to any path
+takes the Desktop pane's relayed route.
 
 ## Rented Machines without a provider
 
@@ -669,3 +694,15 @@ family, plus one Clap → ops wiring break (e.g. drop `worktree` in
 A break no test notices is a missing row; add it, then repeat the break.
 Edit only from one shell, one cargo command at a time, so no other build
 compiles the mutated source.
+
+A Swift "passes under parallel load" check can't use two `swift test`
+processes: the second waits on the `.build` lock ("Another instance of
+SwiftPM … waiting"), even with `--skip-build`, so the runs never overlap.
+Build once, then run the bundle directly for one side:
+`swiftpm-testing-helper --test-bundle-path
+swift/.build/debug/LoopflowSwiftPackageTests.xctest/Contents/MacOS/LoopflowSwiftPackageTests
+--testing-library swift-testing --parallel [--filter …]` from `swift/`, with
+`DYLD_FRAMEWORK_PATH` set to the MacOSX platform's `Library/Frameworks` and
+`Library/PrivateFrameworks`, and `DYLD_LIBRARY_PATH` to its `usr/lib`. The
+helper is in the Xcode toolchain's `usr/libexec/swift/pm/`. Timestamp each
+run to show the overlap.

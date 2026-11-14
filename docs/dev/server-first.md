@@ -5,110 +5,29 @@ title: Server-first Sessions
 
 # Server-first Sessions
 
-Planned in LOO-819. Hooks call the Machine server
+Planned in LOO-819. Held terminals, headless work as plain processes, hooks
+calling the Machine server
 ([`session.boundary`](../../rust/loopflow/src/server/README.md#turn-and-tool-boundaries)),
-the server delivers Task updates and records Codex turns itself
+the server delivering Task updates and recording Codex turns itself
 ([Waking an idle conversation](../../rust/loopflow/src/server/README.md#waking-an-idle-conversation)),
-Desktop sends pane status as `session.status`, and live turn readings and
-turn recording from provider transcripts (LOO-822) are built. The rest is not;
-[Client API server](server.md) and the
-[transport README](../../rust/loopflow/src/transport/README.md) describe what
-runs today. Each piece below lands as its own Task and updates those documents
-when it does. Delete this page when the last piece lands.
+Desktop's `session.status` and transcript telemetry (LOO-822) are built.
+[What runs on a Machine](index.md#what-runs-on-a-machine) is the model, and
+the [transport README](../../rust/loopflow/src/transport/README.md) describes
+the held terminals and headless launches behind it. This page keeps the
+telemetry design, the pieces not yet built and the open questions. Delete it
+when the last piece lands.
 
 How Paseo, T3 Code, Paradev and Rex handle the same questions, and the traps
 they hit, is in [Server protocols elsewhere](research/server-protocols.md).
 
 ## Why
 
-Every conversation has its own detached owner process holding the agent on a
-private PTY, and most have one or two more beside it: a status pipe, a Codex
+Every conversation had its own detached owner process holding the agent on a
+private PTY, and most had one or two more beside it: a status pipe, a Codex
 observer, a Task-update watcher. One Machine measured on November 10, 2026 had
 281 `lf` processes using 11.6 GB, 256 of them per-conversation residents, and
-73 of its 95 owners were more than a day old. Nothing visible holds those
-owners, so nothing shows how many conversations are alive.
-
-## Two kinds of Session
-
-```text
-bare                                  managed
-lf implement                          lf resume --task LOO-1, Desktop
-    |                                     |
-    v                                     v
-agent, a child in your terminal       view --+
-                                      view --+--> Machine server --> holder --> agent on a PTY
-                                      view --+        |
-                                                      +-- store, hooks, Task updates, steers
-```
-
-| | Bare | Managed |
-| --- | --- | --- |
-| Started by | `lf <skill>`, `lf graph …`, `lf -i` in a terminal | Task and Wave commands, Desktop |
-| Holds the process | Your terminal | A holder the Machine server controls |
-| Resident `lf` processes | None beyond the launching parent | The server and its holders, shared by every Session |
-| Hooks | Session start and compaction, printing the context block; no server | Those, plus steers and Task updates in and the provider's callback to the server out |
-| Views | The terminal it runs in | Any number, in Desktop or any terminal, all live |
-| Outlives its terminal | No | Yes |
-
-A Session is the same record in both. What differs is who holds its current
-process.
-
-### Bare
-
-`lf` compiles the prompt and context, starts the agent as a foreground child
-of the calling terminal, waits, and reads the provider's transcript when the
-child exits. It needs no server. Its only hooks print the context block at
-session start and after a compaction, from files in the checkout; it takes no
-steers and reports no turn. A host that shows the foreground program, such as
-Rex, shows the agent.
-
-Persistence, reattachment and status display belong to the terminal. Opening a
-bare Session somewhere else starts a new process in the same Session from the
-provider's history, exactly as for a conversation started by plain `claude` or
-`codex` ([Bring in one you started elsewhere](../sessions.md)). A process
-still open elsewhere is not one `lf` stops.
-
-### Managed
-
-The Machine server starts the agent on a PTY kept by a holder. Every place the
-Session is opened is a view of that one process: typing in any view shows in
-all of them. In a terminal the view is a small `lf` relay, so a host such as
-Rex shows `lf` there, not the agent.
-
-- **Size.** The most recently opened view owns the terminal size; other views
-  render that grid. When the owner closes, ownership falls back to the next
-  most recently opened view. A reconnect is not an open, and a Desktop pane
-  counts as open only while it is shown.
-- **Input.** Every view can type. There is no controlling view, takeover
-  token or Move here.
-- **Joining late.** The server keeps the terminal emulator and paints a
-  joining view from it. The holder keeps only recent raw bytes. After a server
-  restart the emulator is rebuilt from those bytes and a size nudge asking the
-  agent to repaint; scrollback from before the kept bytes may then be absent.
-- **Staying open.** A view's place in the stream is a PTY byte position the
-  holder can serve, so a view that is open across a server restart continues
-  without a repaint.
-- **Attach never creates.** A view of a Session whose process is gone says so
-  and offers resume.
-
-## Processes
-
-| Process | Restarts | Holds |
-| --- | --- | --- |
-| Machine server | On every install | The store connection, the work model, hook and client connections, terminal emulators, observation |
-| Holder | Never for an upgrade | PTYs, their child agents, a ring of recent output per PTY |
-| Graph runner | With its Graph | One running Graph and its headless step children |
-
-An install never ends a conversation. A holder keeps the build it started with
-until its Sessions end; new Sessions go to a holder on the current build, so
-several holders may be alive at once. The server speaks to older holders, which
-keeps the holder's protocol small: start, write, resize, read from a byte
-position, report exit.
-
-A holder is started so that stopping or replacing the server's service does not
-stop it, and it claims its socket with a lock the kernel releases on death. It
-never unlinks a socket path before binding. A dropped connection to a holder
-says nothing about its agents.
+73 of its 95 owners were more than a day old. Nothing visible held those
+owners, so nothing showed how many conversations were alive.
 
 ## Telemetry
 
@@ -125,13 +44,12 @@ Sessions:
 
 Hooks reach the server at its fixed socket path with a short deadline. A hook
 that cannot reach it logs a gap and lets the turn continue. A managed launch
-starts the server before its agent and fails when none comes up. A bare
-launch no owner holds has its two context hooks and the steer check every
-launch has. A bare conversation
-keeps its turn hooks while an owner process holds it, because they say when
-it can take a reply and acknowledge input; they go with the owner.
+starts the server before its agent and fails when none comes up. A bare run,
+headless or in a terminal, has its two context hooks and the steer check every
+launch has.
 
-Bare headless runs and raw conversations have neither signal. They read as available from
+Bare runs at a terminal or headless, and raw conversations, have neither
+signal. They read as available from
 what the transcript shows: a turn that ended. A question with no answer yet
 is not in it: Claude Code 2.1.322, run on November 10, 2026, wrote an
 `AskUserQuestion` call to its transcript only with its answer, 55 seconds
@@ -205,7 +123,7 @@ total. Turn-end hooks send `session.boundary` to the Machine server and open
 the store only to claim their own steers. Before answering a Stop, `server/boundary.rs::answer`
 reads the transcript's tail and records each complete ended turn (Claude's
 and Codex's Stop hook, Pi's `agent_settled`, OpenCode's
-`session.execution.succeeded`). Bare headless runs have no turn-end hook.
+`session.execution.succeeded`). Bare runs have no turn-end hook.
 The launching process reads every turn at exit, through
 `harness/native_exit.rs` or `process/runtime.rs`; that write needs no server.
 A turn that has a row keeps it. If a hook arrives before the transcript
@@ -252,52 +170,30 @@ only from the live `result`; of the two, lf keeps the cost.
 
 ## Pieces
 
-Each is one Task and one PR. The first four do not depend on each other.
-Desktop already sends pane status as `session.status` writes on its server
-connection, with no process per pane. That operation is temporary: it is
-deleted when the server's emulator reads status itself.
+Each is one Task and one PR. Desktop already sends pane status as
+`session.status` writes on its server connection, with no process per pane.
+That operation is temporary: it is deleted when the server's emulator reads
+status itself.
 
 | Piece | Removes | Needs |
 | --- | --- | --- |
-| Bare launches go direct: no owner, agent in the terminal's foreground | Owners and relays for bare runs; the turn hooks of bare conversations | |
-| Hooks call the server, not the store ([`session.boundary`](../../rust/loopflow/src/server/README.md#turn-and-tool-boundaries)); every launch [reads its own steers](../../rust/loopflow/src/server/README.md#every-launch-reads-its-own-steers) from the store; bare runs no owner holds report nothing | Turn recording inside hooks; turn hooks for bare headless runs | |
-| OpenCode and Pi report to the server from inside the provider ([`session.boundary`](../../rust/loopflow/src/server/README.md#opencode-and-pi-report-from-inside-the-provider)) | An `lf` process per model request (OpenCode) and per second, per event and per bash tool (Pi) | Hooks call the server |
-| Transcript telemetry, on demand and watched by the server | The telemetry gap bare launches open | |
-| Retire leaked processes and find the tests that leak them | Stale owners, test and demo leftovers | |
-| Holder: PTYs move from per-Session owners to a holder beside the server; the server keeps a registry of held terminals ([Held terminals](../../rust/loopflow/src/transport/README.md#held-terminals)) | Per-Session owners | The managed rule below |
-| Every view types; size follows the newest view; the server's emulator answers every terminal query and replies coming from a view's terminal are dropped before the PTY | Takeover tokens, Move here, and Desktop's relay status handshake (`LF_SERVER_STATUS`, "Opening… Input paused"), which keeps an owner under a bare agent started in a Desktop pane | Holder |
-| Observers become server registrations ([Waking an idle conversation](../../rust/loopflow/src/server/README.md#waking-an-idle-conversation)) | `__codex-observe`, Task-update watchers | Hooks call the server |
-| CLI cleanup: `session serve`, `session attach`, the detach key | The owner's surface | Bare direct, holder |
+| Every view types; size follows the newest view; the server's emulator answers every terminal query and replies coming from a view's terminal are dropped before the PTY | Takeover tokens, **Move here**, and Desktop's relay status handshake (`LF_SERVER_STATUS`, "Opening… Input paused") | |
+| Retire leaked processes and find the tests that leak them | Test and demo leftovers | |
 
 Server operations for these pieces are added under one protocol revision
 bump; pieces that add operations take the next revision together rather than
 one each.
 
-## The managed rule
+### Every view types
 
-A launch is managed when it comes through a Task, Wave or repository
-conversation command, including those opened by Desktop. A bare `lf` typed inside
-a Task's checkout stays bare and records the Task as its ancestry. The
-command's Work decides: `--task` and `--wave` (a Task or Wave conversation
-passes them, and `lf task run` passes `--task` to its Graph's agent steps)
-bind it as `WorkSource::Declared`, and the launch carries that as
-`Holder::Server` (`AgentConfig::holder`). Beside a
-Session id, `--task`/`--wave` make the resume managed and the id still
-selects: Desktop's Task and Wave workspaces prepare with `lf session resume
-[ID] --task X --prepare`, and the `open_argv` it gets back is `lf session
-resume ID --task X`. Reopening a recorded conversation by id alone names no
-Work, so there the Session row decides holding and the server check:
-`SqliteStore::is_bare` is false for `declared` or `bound` Work and for a
-scope's primary conversation. `transport::delegate` is the one place a
-launch's host is chosen from that answer. A child run started by a Session's agent, which that agent
-steers, and plain `lf <skill>` are bare. Desktop adds no mark: an agent
-started from a Desktop shell is bare.
+What a held terminal's views would become:
 
-Any `lf` run in a Task's checkout counts toward that Task: its usage and time
-roll up into the Task's cost. Design the bare path on the assumption that most
-bare runs are subagents started by a Task's agent, not a person at a prompt:
-nobody is watching, the caller waits on the exit and reads the output, and the
-run ends with its parent.
+- **Size.** The most recently opened view owns the terminal size; other views
+  render that grid. When it closes, ownership falls back to the next most
+  recently opened view. A reconnect is not an open, and a Desktop pane counts
+  as open only while it is shown.
+- **Input.** Every view can type. There is no controlling view, takeover
+  token or **Move here**.
 
 ## Open
 
@@ -312,8 +208,8 @@ run ends with its parent.
   transcript. `session.boundary` carries the whole callback, so it serves
   either.
 - Whether the server becomes the only process that opens the store. Views
-  already stop opening it under this plan; Graph runners, one-shot commands
-  and every hook claiming its own steers still do.
+  already do not open it; Graph processes, one-shot commands and every hook
+  claiming its own steers still do.
 - Whether Claude or Codex re-send terminal modes (bracketed paste, focus,
   Kitty keyboard) on resize, which decides what a crashed server's rebuilt
   emulator gets wrong.

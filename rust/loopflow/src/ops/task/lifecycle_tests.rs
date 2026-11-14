@@ -145,25 +145,22 @@ fi
     let mut paths = vec![bin];
     paths.extend(std::env::split_paths(&path));
     std::env::set_var("PATH", std::env::join_paths(paths).unwrap());
-    // The delivery run holds in an ordinary owned execution until released.
-    let hold = home.path().join("hold.py");
-    fs::write(
-        &hold,
-        r#"import os, time
-from pathlib import Path
-home = Path(os.environ['LF_HOME'])
-(home / 'ready').touch()
-while not (home / 'release').exists():
-    time.sleep(.02)
-"#,
-    )
+    // The delivery run holds at a skill step whose provider waits until released.
+    let claude = home.path().join("bin/claude");
+    fs::write(&claude, crate::task_graph_launch_tests::HOLDING_CLAUDE).unwrap();
+    fs::set_permissions(&claude, fs::Permissions::from_mode(0o755)).unwrap();
+    crate::task_graph_launch_tests::connect_fixture_claude(home.path(), &store);
+    crate::config::files::update(&home.path().join("config.yaml"), |value| {
+        value["agent"] = "claude".into();
+        Ok(())
+    })
     .unwrap();
+    let _server =
+        loopflow_test_support::MachineServer::start(binary.to_str().unwrap(), home.path());
+    repo.create_file(".lf/skills/hold.md", "Hold.");
     repo.create_file(
         ".lf/graphs/delivery.yaml",
-        &format!(
-            "- cmd: session serve -- python3 {}\n- cmd: task complete FIX-1\n",
-            hold.display()
-        ),
+        "- step: {name: hold}\n- cmd: task complete FIX-1\n",
     );
     let provider = Arc::new(Mutex::new(Linear::default()));
     let (url, server) = runtime.block_on(async {

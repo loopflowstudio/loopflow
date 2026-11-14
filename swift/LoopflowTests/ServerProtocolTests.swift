@@ -113,29 +113,28 @@ struct ServerProtocolTests {
         #expect(try encoded(.cancel(id: "tasks-1")) == value("cancel"))
     }
 
-    @Test func commandTraceAndExistingOwnerShareRustFixtures() throws {
+    @Test func commandTraceAndHeldTerminalShareRustFixtures() throws {
         guard case .response(let id, let trace, .object(let renamed)) = try answer("response") else {
             Issue.record("Missing response"); return
         }
         #expect(id == "rename-1")
         #expect(trace == "85c31c1e-850c-4821-878d-55527b6dba46")
         #expect(renamed["title"] == .string("Served name"))
+        let terminal = "7c1d9a40-e5b2-4f6a-8d3e-2b1c0f9a8e7d"
         guard case .response(_, _, .object(let issued)) = try answer("attached"),
-              case .string(let process)? = issued["owner_lf_process_id"], case .string(let ticket)? = issued["ticket"] else {
+              case .string(let attached)? = issued["terminal_id"], case .string(let ticket)? = issued["ticket"] else {
             Issue.record("Missing ticket"); return
         }
-        #expect(process == trace)
+        #expect(attached == terminal)
         #expect(issued["expires_in_ms"] == .integer(60000))
         let attach = ServerClientMessage.request(id: "terminal-1", operation: .sessionAttach(
-            session: "session_5e55105e000040008000000000000001", owner: trace), select: nil)
+            session: "session_5e55105e000040008000000000000001"), select: nil)
         #expect(try encoded(attach) == self.value("attach"))
         // The bridge presents the ticket on a connection of its own.
         #expect(try encoded(.attach(ticket: ticket)) == value("attach_ticket"))
-        guard case .bridged(let owner) = try message("bridged") else { Issue.record("Missing bridge"); return }
-        #expect(owner == .owner(lfProcessID: trace))
         // A held terminal outlives server restarts and is named by its terminal.
-        guard case .bridged(let held) = try message("bridged_terminal") else { Issue.record("Missing held bridge"); return }
-        #expect(held == .terminal(id: "7c1d9a40-e5b2-4f6a-8d3e-2b1c0f9a8e7d"))
+        guard case .bridged(let held) = try message("bridged") else { Issue.record("Missing bridge"); return }
+        #expect(held == terminal)
         let start = ServerClientMessage.request(id: "start-1", operation: .sessionStart(
             session: "session_5e55105e000040008000000000000001", request: "0b9c1f0e-6d1c-4a43-9f0e-2f6c8f0f5a11",
             argv: ["/usr/local/bin/lf", "session", "resume", "session_5e55105e000040008000000000000001"], cwd: "/Users/me/src/app",
@@ -481,7 +480,7 @@ struct ServerProtocolTests {
             try ServerMessage(line: Data(#"{"type":"response","id":"x","result":{"kind":"bootstrap"}}"#.utf8))
         }
         #expect(throws: (any Error).self) {
-            try ServerMessage(line: Data(#"{"type":"bridged","owner_lf_process_id":"x"}"#.utf8))
+            try ServerMessage(line: Data(#"{"type":"bridged"}"#.utf8))
         }
     }
 }

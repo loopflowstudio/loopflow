@@ -7,3 +7,7 @@ published PR. A published parent with unpushed commits is left alone and the
 child bases on `origin/<branch>`, with the left-out commits counted in the stack
 line. The other option is pushing through the commit fence, which revokes the
 parent's Auto from the child's command. Detail in `scratch/loo-837-demo.md`.
+
+If a published parent's remote branch is absent, stacking names that absence
+and points to `lf commit -p` in the parent's checkout. It cannot select an
+origin base without publishing that parent's commits.

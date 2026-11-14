@@ -2440,6 +2440,86 @@ async fn task_preparation_stacks_on_a_placed_parent_with_an_abandoned_pr() {
 }
 
 #[tokio::test]
+async fn task_preparation_stacks_without_moving_a_published_parents_merge_request() {
+    let repo = loopflow_test_support::TestRepo::new();
+    let parent = task_fixture_at("FIX-1", repo.path().canonicalize().unwrap()).await;
+    repo.create_branch(&parent.task.branch);
+    repo.create_file("published.txt", "reviewed work");
+    repo.stage_all();
+    repo.commit("Published parent work");
+    repo.push_new_branch(&parent.task.branch);
+    let published_tip = repo.head_sha();
+    let mut pr = parent
+        .store
+        .active_task_pr(&parent.task.id)
+        .await
+        .unwrap()
+        .unwrap();
+    pr.publication = Some(PrPublication {
+        requested_at: pr.created_at,
+        presentation: Some(PrPresentation {
+            title: "Parent work".into(),
+            body: "Reviewed parent changes".into(),
+            head_sha: published_tip.clone(),
+        }),
+        github: Some(GithubPr {
+            number: 42,
+            url: "https://github.com/fixture/repo/pull/42".into(),
+            head_sha: Some(published_tip.clone()),
+        }),
+        merge: Some(PrMergeRequest {
+            mode: PrMergeMode::Auto,
+            requested_at: pr.created_at,
+            head_sha: published_tip.clone(),
+        }),
+    });
+    parent.store.update_task_pr(&pr).await.unwrap();
+    let saved = parent.store.get_task_pr(&pr.id).await.unwrap();
+    repo.create_file("unreviewed.txt", "local work");
+    repo.stage_all();
+    repo.commit("Unreviewed parent work");
+    let local_tip = repo.head_sha();
+    repo.checkout("main");
+    let child = Task {
+        id: TaskId::new(),
+        ..parent.task.clone()
+    };
+    let prepared = super::prepare_task_placement(
+        &parent.store,
+        repo.path(),
+        &child,
+        None,
+        &super::TaskProcessOptions {
+            name: Some("child-task".into()),
+            stack_on: Some("FIX-1".into()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(prepared.plan.base_ref, published_tip);
+    assert_eq!(prepared.pr(&child.id).parent_pr_id, Some(pr.id.clone()));
+    let (_, note) = super::record_stack_parent(&parent.store, repo.path(), &child, "FIX-1")
+        .await
+        .unwrap();
+    let note = note.unwrap();
+    assert!(
+        note.contains("leaves out 1 local FIX-1 commit not on origin"),
+        "{note}"
+    );
+    assert!(note.contains("lf commit -p"), "{note}");
+    assert_eq!(
+        crate::git::rev_parse(repo.bare_path(), &parent.task.branch).unwrap(),
+        published_tip
+    );
+    assert_eq!(
+        crate::git::rev_parse(repo.path(), &parent.task.branch).unwrap(),
+        local_tip
+    );
+    assert_eq!(parent.store.get_task_pr(&pr.id).await.unwrap(), saved);
+}
+
+#[tokio::test]
 async fn task_preparation_stacks_on_origin_when_the_parent_branch_diverged() {
     let repo = loopflow_test_support::TestRepo::new();
     let parent = task_fixture_at("FIX-1", repo.path().canonicalize().unwrap()).await;
@@ -2483,7 +2563,7 @@ async fn task_preparation_stacks_on_origin_when_the_parent_branch_diverged() {
     assert_eq!(
         note.as_deref(),
         Some(format!(
-            "origin/{} has diverged, so this Task bases on it and leaves out 1 local FIX-1 commit not on origin",
+            "this Task bases on origin/{} and leaves out 1 local FIX-1 commit not on origin; run `lf commit -p` in FIX-1's checkout to include them",
             parent.task.branch
         ).as_str())
     );

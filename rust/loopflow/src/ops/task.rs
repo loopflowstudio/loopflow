@@ -1241,6 +1241,11 @@ impl StackParent {
             .as_ref()
             .map_or(self.task.branch.as_str(), |pr| pr.branch.as_str())
     }
+
+    /// A published branch carries review and merge requests; stacking never moves it.
+    fn is_published(&self) -> bool {
+        self.pr.as_ref().is_some_and(|pr| pr.publication.is_some())
+    }
 }
 
 /// One rule for every stack: the parent is a Task with a placed branch.
@@ -1298,9 +1303,9 @@ async fn select_stack_parent(
     })
 }
 
-/// Select the parent, push its branch when origin lacks it or is behind, then
+/// Select the parent, push its unpublished branch when origin lacks it or is behind, then
 /// return its PR record, recording an unpublished one when the parent has none.
-/// The note says what stacking pushed, or what the child leaves out of a diverged branch.
+/// The note says what stacking pushed, or which local commits the child leaves out.
 async fn record_stack_parent(
     store: &SharedStore,
     main_repo: &Path,
@@ -1323,7 +1328,7 @@ async fn record_stack_parent(
             ))
         })?;
     }
-    let note = state.note(&parent);
+    let note = state.note(&parent, "pushed");
     if let Some(pr) = parent.pr {
         return Ok((pr, note));
     }
@@ -1346,24 +1351,24 @@ async fn record_stack_parent(
 enum StackParentBranch {
     /// Origin has every local commit, or there is no origin to push to.
     Current,
-    /// Origin lacks the branch or is behind it; stacking pushes it.
+    /// Origin lacks the unpublished branch or is behind it; stacking pushes it.
     Behind,
-    /// Origin's branch has commits the local one lacks. Stacking never forces,
-    /// so the child bases on origin's version without the local-only commits.
-    Diverged { left_out: usize },
+    /// A published or diverged branch stays untouched; the child uses origin's version.
+    LeftOut { left_out: usize },
 }
 
 impl StackParentBranch {
     /// What stacking changes or leaves out; nothing when origin is current.
-    fn note(&self, parent: &StackParent) -> Option<String> {
+    /// `pushes` is the verb for the push: done at execution, pending in a preview.
+    fn note(&self, parent: &StackParent, pushes: &str) -> Option<String> {
         let (identifier, branch) = (&parent.task.identifier, parent.branch());
         match self {
             Self::Current => None,
             Self::Behind => Some(format!(
-                "pushed {identifier}'s branch {branch} to origin"
+                "{pushes} {identifier}'s branch {branch} to origin"
             )),
-            Self::Diverged { left_out } => Some(format!(
-                "origin/{branch} has diverged, so this Task bases on it and leaves out {left_out} local {identifier} commit{} not on origin",
+            Self::LeftOut { left_out } => Some(format!(
+                "this Task bases on origin/{branch} and leaves out {left_out} local {identifier} commit{} not on origin; run `lf commit -p` in {identifier}'s checkout to include them",
                 if *left_out == 1 { "" } else { "s" }
             )),
         }
@@ -1389,6 +1394,12 @@ fn stack_parent_branch(main_repo: &Path, parent: &StackParent) -> OpsResult<Stac
             )))
         }
         (false, true) => return Ok(StackParentBranch::Current),
+        (true, false) if parent.is_published() => {
+            return Err(task_error(format!(
+                "stack parent {}'s published branch {branch} is absent from origin; run `lf commit -p` in its checkout before stacking",
+                parent.task.identifier
+            )))
+        }
         (true, false) => return Ok(StackParentBranch::Behind),
         (true, true) => {}
     }
@@ -1409,8 +1420,8 @@ fn stack_parent_branch(main_repo: &Path, parent: &StackParent) -> OpsResult<Stac
         .map_err(task_error)?;
     Ok(match counts[..] {
         [_, 0] => StackParentBranch::Current,
-        [0, _] => StackParentBranch::Behind,
-        [_, left_out] => StackParentBranch::Diverged { left_out },
+        [0, _] if !parent.is_published() => StackParentBranch::Behind,
+        [_, left_out] => StackParentBranch::LeftOut { left_out },
         _ => return Err(task_error(format!("unexpected rev-list counts {counts:?}"))),
     })
 }

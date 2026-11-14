@@ -203,7 +203,7 @@ fn push_stack_effects(
     match super::stack_parent_branch(repo, parent) {
         Ok(state) => report.unavailable.extend(
             state
-                .note(parent)
+                .note(parent, "stacking pushes")
                 .map(|note| format!("Not run (based on already-fetched refs): {note}")),
         ),
         Err(error) => report.impediments.push(error.to_string()),

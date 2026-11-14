@@ -297,12 +297,14 @@ other Task that has a branch, before that parent lands or even opens a PR:
 lf task run LOO-13 --stack-on LOO-12
 ```
 
-If LOO-12's branch isn't on origin yet, or origin is behind, stacking pushes it first. It never
-force-pushes and opens no PR for the parent. If origin has diverged, the child
-bases on `origin/<branch>` and the stack line counts the local commits it
-leaves out. Stacking stops when the parent is
-not a Task, has no branch yet (`lf checkout LOO-12` places one), or the push
-fails; the error shows git's message.
+When the parent has no PR yet, stacking pushes its branch if origin lacks it or
+is behind. It never force-pushes or opens a PR for the parent. A published
+parent's branch stays untouched. If the published parent is ahead of origin, or
+origin has diverged, the child bases on `origin/<branch>` and the stack line
+counts the local commits it leaves out. Run `lf commit -p` in the parent's
+checkout to include them. Stacking stops when the parent is not a Task, has no
+branch yet (`lf checkout LOO-12` places one), has already merged, its published
+branch is absent from origin, or the push fails; a failed push shows git's message.
 
 Conflicts stay visible: resolve them, then `lf sync --continue`, or `lf sync --abort`.
 

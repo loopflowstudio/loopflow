@@ -2216,7 +2216,7 @@ pub enum TaskCommand {
         issue: Option<String>,
         #[arg(long)]
         name: Option<String>,
-        /// Fork this Task's worktree from another Task's branch, pushing it if needed
+        /// Fork from another Task's branch; pushed if needed when the parent has no PR yet
         #[arg(long = "stack-on", value_name = "PARENT_TASK")]
         stack_on: Option<String>,
         #[arg(long)]
@@ -2250,7 +2250,7 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         from: Option<String>,
         #[arg(long)]
         name: Option<String>,
-        /// Fork this Task's worktree from another Task's branch, pushing it if needed
+        /// Fork from another Task's branch; pushed if needed when the parent has no PR yet
         #[arg(long = "stack-on", value_name = "PARENT_TASK")]
         stack_on: Option<String>,
         #[arg(long)]

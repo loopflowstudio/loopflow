@@ -68,15 +68,18 @@ lf checkout INF-124 --stack-on INF-123 --design scratch/child-design.md
 lf task run INF-124
 ```
 
-The parent needs only a placed branch. When it has no Task PR record, stacking
-records an unpublished one for it, and pushes the branch to origin when origin
-lacks it or is behind; it never force-pushes and never opens a GitHub PR for the
-parent. When origin's branch has diverged, nothing is pushed: the child bases on
-`origin/<branch>` and the stack line names the local commits it leaves out. The
+The parent needs only a placed branch. Until it publishes a PR, stacking pushes
+the branch if origin lacks it or is behind, never forcing, and records an
+unpublished Task PR for it without opening one on GitHub. A published parent's
+branch stays untouched.
+When the published parent is ahead of origin, or origin's branch has diverged,
+the child bases on `origin/<branch>` and the stack line counts the local commits
+it leaves out. Run `lf commit -p` in the parent's checkout to include them. The
 child can start and publish before the parent publishes or merges.
 It records its fork point and targets the parent's branch. Stacking fails when
-the parent is not a Task, has no placed branch, has already merged, or the push
-fails; the error names which, with git's message for a failed push. Prepare a
+the parent is not a Task, has no placed branch, has already merged, its published
+branch is absent from origin, or the push fails; the error names which, with
+git's message for a failed push. Prepare a
 self-contained child-specific design and transfer it with
 `--design`; its receipt retains source Task, commit and content hash. Identical
 retries do not reset the child; changed content at an occupied destination is a

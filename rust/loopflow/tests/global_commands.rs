@@ -2734,7 +2734,7 @@ fn task_checkout_explain_reuses_explicit_and_inferred_work_without_effects() {
     assert_eq!(stacked["impediments"], serde_json::json!([]), "{stacked}");
     let unavailable = stacked["unavailable"].to_string();
     for effect in [
-        "pushes INF-124's branch parent-proof to origin",
+        "stacking pushes INF-124's branch parent-proof to origin",
         "records an unpublished PR for INF-124",
     ] {
         assert!(unavailable.contains(effect), "{stacked}");

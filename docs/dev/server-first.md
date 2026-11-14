@@ -202,7 +202,7 @@ work (LOO-732) reads per-turn `usage` and `completed` rows from the store.
 The transcript is the only writer of `usage` rows (`transcript/facts.rs`):
 one row per turn id, holding that turn's tokens and model, not a running
 total. Turn-end hooks send `session.boundary` to the Machine server and open
-no store themselves. Before answering a Stop, `server/boundary.rs::answer`
+the store only to claim their own steers. Before answering a Stop, `server/boundary.rs::answer`
 reads the transcript's tail and records each complete ended turn (Claude's
 and Codex's Stop hook, Pi's `agent_settled`, OpenCode's
 `session.execution.succeeded`). Bare headless runs have no turn-end hook.
@@ -311,9 +311,9 @@ run ends with its parent.
   transcript, or the hook becomes a wake-up that tells the server to read the
   transcript. `session.boundary` carries the whole callback, so it serves
   either.
-- Whether the server becomes the only process that opens the store. Hooks and
-  views already stop opening it under this plan; Graph runners and one-shot
-  commands still do.
+- Whether the server becomes the only process that opens the store. Views
+  already stop opening it under this plan; Graph runners, one-shot commands
+  and every hook claiming its own steers still do.
 - Whether Claude or Codex re-send terminal modes (bracketed paste, focus,
   Kitty keyboard) on resize, which decides what a crashed server's rebuilt
   emulator gets wrong.

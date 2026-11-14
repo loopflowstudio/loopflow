@@ -121,9 +121,9 @@ pub(crate) fn write(store: &SqliteStore, session_id: &str) -> StoreResult<()> {
 fn write_task(store: &SqliteStore, task: &TaskId) -> StoreResult<()> {
     let stored = store.task_update_reading(task)?;
     let old: Option<TaskObservation> = stored.as_deref().map(serde_json::from_str).transpose()?;
-    let (overview, graphs) = store.task_overview(task)?;
+    let (graph, graphs) = store.task_progress(task)?;
     let mut observation = TaskObservation {
-        position: overview.graph.map(|graph| graph.position),
+        position: graph.map(|graph| graph.position),
         runs: HashMap::new(),
         comments: BTreeSet::new(),
     };

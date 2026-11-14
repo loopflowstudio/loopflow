@@ -176,7 +176,7 @@ store, never the live file.
 Every statement on a path that runs per hook, per server request, per Desktop
 read, per Work projection or per Graph step plans as `SEARCH` or reads a fixed
 small table. `SCAN` of a table that grows with use (`steers`,
-`steer_delivered`, `agent_sessions`, `session_events`, `processes`, `tasks`
+`steer_delivered`, `task_update_readings`, `agent_sessions`, `session_events`, `processes`, `tasks`
 and their peers) is a bug. Filters an index cannot serve are the usual cause: an `OR`
 across columns, a function wrapped around an indexed column, a correlated `IN`
 subquery, or a per-row query inside a loop where one query would do. Fix it

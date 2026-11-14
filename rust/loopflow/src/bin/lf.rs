@@ -2069,6 +2069,8 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
             None => break,
         }
     }
+    // `lf steer` names its flag apart from the root `--json`.
+    json |= matches!(&cli.command, Some(Commands::Steer { json: true, .. }));
     // Entry resolution has normalized known selectors to exact Task IDs.
     // Every Task preview uses that same selection, regardless of its action.
     let task = if let Some(Commands::Task { cmd }) = &cli.command {

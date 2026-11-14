@@ -1093,8 +1093,8 @@ mod tests {
         MachineId, MachineRef, OwnershipEntryId, OwnershipKind, OwningMachineSource, RepositoryId,
         TaskExecutionSource, TaskId, TaskOwner, TaskOwnershipEntry,
     };
-    use crate::store::sqlite::task_moves::MoveStage;
     use crate::planning_git::PlanningDestination;
+    use crate::store::sqlite::task_moves::MoveStage;
     use crate::store::sqlite::SqliteStore;
     use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
     use crate::work::task::NewTask;

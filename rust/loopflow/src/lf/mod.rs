@@ -2240,8 +2240,9 @@ pub enum TaskCommand {
     #[command(
         after_help = "A Task runs the graph it took up: its Wave's default, its repository's \
 `graph:`, or `code`. A run stops before each interactive step, where the Task waits for its \
-conversation; the next `lf task run` continues after it. `-i` runs every step with you in this \
-terminal instead. A run that reaches `end`, as `-b` does, approves Auto-Ship like `lf ship`, \
+conversation; the next `lf task run` continues after it. A run that fails starts again at the \
+step that failed; the steps before it stay done, and --from reruns them. `-i` runs every step \
+with you in this terminal instead. A run that reaches `end`, as `-b` does, approves Auto-Ship like `lf ship`, \
 which may merge the PR, unless someone stopped shipping; then it waits at the landing step \
 until `lf ship`. Add --open to open its primary conversation locally when the launch returns, \
 using lf open's ordinary host selection. Preview and --quote open nothing."

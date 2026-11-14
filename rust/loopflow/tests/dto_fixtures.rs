@@ -485,6 +485,7 @@ fn task_work_preserves_all_owners() {
         graph.position,
         loopflow::task_graph::TaskGraphPosition::Run {
             step: "review-design".into(),
+            at: "implement".into(),
             lf_process_id: work.graph_processes[0].summary.id.to_string(),
             running: true,
         }

@@ -19,7 +19,8 @@ lf resume                       # return to this scope’s conversation
 | Uncommitted files | The worktree; prune never removes them | `lf wt list` |
 
 A stopped Graph never resumes. `lf task run` starts a fresh one in the same
-checkout, with the Task's thread and its open PR.
+checkout, with the Task's thread and its open PR, at the step the last one
+stopped on; the steps before it stay done.
 
 ## What went wrong
 
@@ -45,6 +46,7 @@ liveness stays unknown; lf never guesses a process is dead.
 | The run is going the wrong way | `lf steer <ID> "address the latest feedback"` |
 | It must stop now | `lf task interrupt <ID>` |
 | It stopped and should go again | `lf task run <ID> --reason "provider credentials repaired"` |
+| It stopped, and an earlier step's work must be redone | `lf task run <ID> --from <step>` |
 
 ## Doctor reports a failure
 

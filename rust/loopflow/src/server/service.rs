@@ -3427,6 +3427,10 @@ mod tests {
     #[test]
     fn continuing_a_session_resumes_exactly_it_and_a_missing_one_is_refused() {
         with_empty_home(async {
+            // Only the launch request is built; no CLI is executed.
+            let binary = std::env::current_exe().unwrap();
+            let _binary =
+                crate::lf::commands::graph::EnvVarGuard::set("LF_BIN", binary.to_str().unwrap());
             let store = home_store();
             let session =
                 store.test_session("continued", &crate::session_record::new_artifact_key());
@@ -3437,6 +3441,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
+            assert_eq!(std::path::Path::new(&start.argv[0]), binary);
             assert_eq!(
                 start.argv[1..],
                 ["session", "resume", "--", session.id.as_str()]
@@ -3449,6 +3454,10 @@ mod tests {
             );
             assert!(start.env.iter().any(|(name, value)| name == "LF_HOME"
                 && std::path::Path::new(value) == crate::store::lf_home_dir()));
+            assert!(start
+                .env
+                .iter()
+                .any(|(name, value)| name == "LF_BIN" && std::path::Path::new(value) == binary));
 
             let missing = tokio::task::spawn_blocking(|| {
                 super::continuing(

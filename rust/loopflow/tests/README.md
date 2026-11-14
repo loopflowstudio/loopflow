@@ -920,6 +920,9 @@ For executable-resolution failures, reproduce with the compiled test binary:
 unset `LF_BIN` and `CARGO_BIN_EXE_lf`, and use a PATH containing Git but no `lf`.
 Verify the repair in that same environment. A pass under a developer's installed
 Loopflow can hide the CI failure.
+Include `server::service::tests::continuing_a_session_resumes_exactly_it_and_a_missing_one_is_refused`
+when changing Session continuation requests: constructing a launch request also
+resolves `lf`, even when the test never starts it.
 Include direct provider-harness startup tests in this check: even an expected
 spawn failure first resolves the conversation's `lf`. Pin a fixture executable
 under the environment lock and restore the pin afterward.

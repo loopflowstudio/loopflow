@@ -2715,10 +2715,12 @@ fn task_checkout_explain_reuses_explicit_and_inferred_work_without_effects() {
     repo.checkout("checkout-proof");
     db.execute_batch(
         "CREATE TEMP TABLE parent AS SELECT * FROM tasks;
-         UPDATE parent SET id='parent-task', issue_identifier='INF-124', external_issue_id='issue-parent',
-           branch='parent-proof', worktree=worktree || '.parent';
+         UPDATE parent SET id='parent-task', issue_identifier='INF-124', external_issue_id='issue-parent';
          INSERT INTO tasks SELECT * FROM parent;
-         DROP TABLE parent;",
+         DROP TABLE parent;
+         INSERT INTO task_checkouts(task_id,worktree,branch,base_commit,parent_pr_id)
+           SELECT 'parent-task', worktree || '.parent', 'parent-proof', base_commit, NULL
+           FROM task_checkouts;",
     )
     .unwrap();
     let stacked = read(&[

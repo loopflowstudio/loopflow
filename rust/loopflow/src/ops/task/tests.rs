@@ -2310,7 +2310,7 @@ async fn task_preparation_stacks_on_an_unpushed_parent_branch_without_a_pr() {
     };
 
     db.execute(
-        "UPDATE tasks SET worktree=NULL WHERE id=?1",
+        "DELETE FROM task_checkouts WHERE task_id=?1",
         [parent.task.id.as_str()],
     )
     .unwrap();
@@ -2322,10 +2322,12 @@ async fn task_preparation_stacks_on_an_unpushed_parent_branch_without_a_pr() {
         "{error}"
     );
     db.execute(
-        "UPDATE tasks SET worktree=?2 WHERE id=?1",
+        "INSERT INTO task_checkouts(task_id,worktree,branch,base_commit) VALUES(?1,?2,?3,?4)",
         [
             parent.task.id.as_str(),
             &parent.task.worktree.as_ref().unwrap().display().to_string(),
+            &parent.task.branch,
+            &parent.task.base_commit,
         ],
     )
     .unwrap();

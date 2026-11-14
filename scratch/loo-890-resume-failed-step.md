@@ -129,23 +129,23 @@ recovery, or Graphs run outside a Task run (`lf graph <name>` writes nothing).
 Forbidden: a second resume record beside `run_start`; reading history to
 second-guess `run_start`.
 
-## Tests (`tests/linear/task_graph_launch_tests.rs`, `cargo test -p loopflow --lib task_graph_launch_tests::`)
+## Tests (`tests/linear/task_graph_launch_tests.rs`)
 
-- New: `a_failed_run_starts_again_at_the_step_that_failed` on `held`: the first
-  GraphProcess records `[sync, graph show late]`; attempts 2 and 3 record only
-  `graph show late`; status JSON `position.at` names that step; after
-  defining `late`, `lf task run` records only `graph show late` and arrives.
-- New: `--from` overrides: same stopped run, `--from` the first step reruns `sync`.
-- Update `a_stopped_run_is_started_again_from_where_it_began` (gated: 7 graphs,
-  "stopped from review") → step name at gate, "stopped at".
-- Update `a_run_that_failed_after_moving_agents_starts_again_from_where_it_began`
-  → resumes at `graph show late` only; rename.
-- Keep green: `a_run_that_ended_waiting_on_a_limit_starts_again_at_that_step_without_replaying_the_done_ones`,
-  `a_held_command_stops_the_task_run_without_repeating_the_graph`, interrupt tests.
-- Unit (`graph/runner.rs` or `graph.rs`): a loop body failure in pass 2 resumes
-  with `progress.repeats` and `direction` intact (checkpoint carries them).
-- DTO: `tests/fixtures/dto/task_work.json`, `dto_fixtures.rs`, Swift
-  `TaskWork.Position` and its tests, `server_schema.json` regenerated.
+Built:
+- `a_failed_run_starts_again_at_the_step_that_failed` (`held`: attempts 2–3
+  record only `graph show late`; status `position.at`; after defining `late`,
+  `lf task run` runs only it and arrives).
+- `from_starts_a_stopped_run_where_it_names` (`--from` the first step reruns `sync`).
+- Renamed/updated: `a_stopped_run_is_started_again_at_the_step_that_failed`,
+  `a_run_that_failed_after_moving_agents_starts_again_at_the_step_that_failed`,
+  and the limit-wait test (retries record only the failed step).
+- DTO: `position.at` in `tests/fixtures/dto/task_work.json`,
+  `task_lifecycle.json`, `task_overview.json`, `server_schema.json`,
+  `dto_fixtures.rs`; Swift `TaskWork.Position.run` and its tests.
+- Not added: a runner unit test for loop-body resume. `graph/runner.rs`
+  (`nested_xor_checkpoints_root_and_recovers_a_pinned_pending_decision`)
+  already restores direction and passes from a saved cursor; the checkpoint
+  written now is that same cursor.
 
 ## Done when
 
@@ -153,7 +153,8 @@ second-guess `run_start`.
 Task's status names that step while it waits or retries, and the next
 `lf task run` (or `lf ship`) continues there; `--from` still starts anywhere.
 
-Gate check: `cargo test -p loopflow --lib task_graph_launch_tests::` — all pass, new tests included.
+Task brief's `docs/tasks.md` does not exist; restart behavior is documented in
+the files below, and `lf help task run` says the same.
 
 ## Docs written
 
@@ -166,7 +167,11 @@ Gate check: `cargo test -p loopflow --lib task_graph_launch_tests::` — all pas
 
 ## Checks
 
-- `cargo test -p loopflow --lib -- task_graph:: task_graph_launch_tests:: ops::task::ship::tests::` — pass (limit-wait test updated: retries record only the failed step); `server::schema::tests::` and `--test integration dto_fixtures::` pass after regenerating `tests/fixtures/dto/server_schema.json`.
-- compress: `CapturedGraph::step_name_of(cursor)` serves the retry message and `read_task_graph`'s `at`; `world/mod.rs` uses `RunStart` fields directly. `cargo test -p loopflow --lib -- task_graph:: task_graph_launch_tests:: ops::task::ship::tests::` after it: 65 passed.
-- Swift (`TaskWork.Position.run` gained `at`; view and fixture tests updated) — not built here; gate runs `--swift`.
-- Not added: the runner unit test for loop-body resume. Existing `graph/runner.rs` resume tests (`nested_xor_checkpoints_root_and_recovers_a_pinned_pending_decision`) already restore direction and passes from a saved cursor; the checkpoint written now is that same cursor.
+- `cargo test -p loopflow --lib -- task_graph:: task_graph_launch_tests:: ops::task::ship::tests::` — 65 passed after compress (before the main merge `5e18d3f548`). After the merge: 65 passed.
+- `server::schema::tests::`, `--test integration dto_fixtures::` — passed after regenerating `server_schema.json`, before the merge; gate reruns.
+- Swift (`TaskWork.Position.run` gained `at`) — not built here; gate runs `--swift`.
+
+## Remaining
+
+- Gate: Swift build/tests; CI suites.
+- Demo: `lf task run` on `held` as in the Demo section, with `lf task status` naming the resume step.

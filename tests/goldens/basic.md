@@ -15,7 +15,7 @@ commands, unless it is already loaded.
 here. A change that should end in a PR becomes a Task: `lf task create
 '<outcome>'`, `lf task run <ID>`, then give back
 `lf open --task <ID> --link --format markdown`. Check on it with
-`lf task status <ID>`; steer it with `lf steer <ID> '<direction>'`.
+`lf task status <ID>`; steer it with `lf comment <ID> '<direction>'`.
 
 `lf help <command-or-skill>` is the current reference.
 

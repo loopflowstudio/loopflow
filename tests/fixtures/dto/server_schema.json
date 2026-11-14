@@ -10635,9 +10635,9 @@
               "$ref": "#/$defs/BoundaryMoment"
             },
             "printed": {
-              "description": "Unused: hooks claim their own steers from the store. Conversations\nstarted before then still send it. TODO(LOO-838): delete it with\n`ContextMoment::TaskUpdates`, once none of them is live.",
+              "description": "Steer batches from earlier answers that this conversation's hooks\nprinted and have not yet told the server about.",
               "items": {
-                "type": "string"
+                "$ref": "#/$defs/SteerBatchId"
               },
               "type": "array"
             }
@@ -10775,15 +10775,28 @@
     },
     "SessionBoundaryAnswer": {
       "additionalProperties": false,
-      "description": "What `session.boundary` answers: nothing. Hooks claim their own steers and\nTask update from the store. The three fields are what conversations\nstarted before then still parse. TODO(LOO-838): delete them with\n`ContextMoment::TaskUpdates`, once none of those conversations is live.",
+      "description": "What `session.boundary` answers.",
       "properties": {
         "steers": {
-          "$ref": "#/$defs/Untyped"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SteerBatch"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The next pending steers; null when none are ready."
         },
         "update": {
-          "$ref": "#/$defs/Untyped"
+          "description": "What changed on the Session's Tasks since its last update, rendered\nfor the provider; null when nothing did. Recorded as delivered when\nanswered.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "waiting": {
+          "description": "An earlier answer's batch is unconfirmed and its hook may still print\nit: the hook asks again at its next tool boundary.",
           "type": "boolean"
         }
       },
@@ -12154,6 +12167,26 @@
         "capability"
       ],
       "type": "object"
+    },
+    "SteerBatch": {
+      "additionalProperties": false,
+      "description": "Steers rendered for the provider. They count as delivered once a later\nrequest lists `batch` in `printed`; unconfirmed, they are answered again.",
+      "properties": {
+        "batch": {
+          "$ref": "#/$defs/SteerBatchId"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "batch",
+        "text"
+      ],
+      "type": "object"
+    },
+    "SteerBatchId": {
+      "type": "string"
     },
     "SteerId": {
       "type": "string"
@@ -16974,7 +17007,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf steer <issue> <message> --json`: direction for the Task's\nruns, whoever writes it.",
+          "description": "`lf task steer <issue> <message> --json`: direction for the Task's\nruns, whoever writes it.",
           "examples": [
             {
               "directory": "/repo",
@@ -17164,7 +17197,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf [--wave <wave>] steer [<id>] <message> --json`: a steer\none Session, every Session of the Wave or, with neither, every Session\nof the repository reads at its next boundary.",
+          "description": "`lf [--wave <wave>] session steer [<id>] <message> --json`: a steer\none Session, every Session of the Wave or, with neither, every Session\nof the repository reads at its next boundary.",
           "examples": [
             {
               "directory": "/repo",

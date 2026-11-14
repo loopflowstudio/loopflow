@@ -1,42 +1,22 @@
-import { statSync as markerStamp } from "node:fs";
 import { createConnection as connectMachineServer } from "node:net";
 
-// Every launch reads its own news: its unread steers and what changed on its
-// Tasks. It compares the markers a steer for it touches against its last
-// check, as a Claude tool hook does, and only when one is newer starts
-// `lf __context-block --moment steer`, which claims them from the store.
-// Nothing here throws: lf logs a store it cannot read, and the conversation
-// goes on.
-function ownNews(callback, log, args = [], options = {}) {
-  const seen = process.env.LF_STEER_SEEN;
-  if (!seen) return "";
-  const stamp = (path) => {
-    try { return path ? markerStamp(path).mtimeMs : undefined; } catch { return undefined; }
-  };
-  const checked = stamp(seen);
-  const quiet = [spec.steers, process.env.LF_STEER_SESSION, process.env.LF_STEER_TASK]
-    .every((marker) => { const saved = stamp(marker); return saved === undefined || checked > saved; });
-  if (checked !== undefined && quiet) return "";
-  try {
-    const output = execFileSync(spec.executable, ["__context-block", ...args, "--moment", "steer"], {
-      env: process.env, ...options, input: JSON.stringify(callback), encoding: "utf8", timeout: 10000,
-      stdio: ["pipe", "pipe", "pipe"] });
-    return output.trim() ? JSON.parse(output).hookSpecificOutput.additionalContext : "";
-  } catch (error) {
-    log(`steer check failed: ${error.message.split("\n")[0]}`);
-    return "";
-  }
+// Each boundary is one machine.sock connection, as a hook makes one request:
+// connect, the hello a hook sends, one session.boundary, close. The server's
+// connection slot is back as soon as the answer arrives. Nothing here throws:
+// an unanswered boundary is a recording gap, one `recording gap` line per
+// changed failure through `log`, and the next boundary sends the open gap and
+// the printed batches.
+// What a boundary answer brings the conversation: its steers, then what
+// changed on its Tasks, as `lf __context-block` prints them for hooks.
+function news(answer) {
+  return `${answer?.steers?.text ?? ""}${answer?.update ? `${answer.update}\n` : ""}`;
 }
 
-// A held launch reports each boundary for the server to record: one
-// machine.sock connection, as a hook makes one request: connect, the hello a
-// hook sends, one session.boundary, close. The server's connection slot is
-// back as soon as the answer arrives. Nothing here throws: an unanswered
-// boundary is a recording gap, one `recording gap` line per changed failure
-// through `log`, and the next boundary sends the open gap.
 function machineServer(delivery, log) {
   const adapter = process.env.LF_PROVIDER_CONTEXT ? JSON.parse(process.env.LF_PROVIDER_CONTEXT) : null;
   let queue = Promise.resolve();
+  // Batches handed to the provider that no answered request has named yet.
+  const printed = [];
   let gap;
 
   // The two seconds cover connecting, the hello and the answer.
@@ -79,12 +59,14 @@ function machineServer(delivery, log) {
   const send = async (moment, callback, skippable) => {
     // Only a turn end needs no provider context.
     if (!adapter && moment !== "stop") return undefined;
-    // While the server doesn't answer, a boundary later reports repeat isn't
-    // worth another two seconds: it goes into the open gap instead.
+    // While the server doesn't answer, a boundary that can't carry a steer
+    // isn't worth another two seconds: it goes into the open gap instead.
     if (skippable && gap) return undefined;
+    const claimed = [...printed];
     try {
       const answer = await ask({ kind: "session.boundary", moment, delivery, adapter, callback,
-        gap: gap ? { first: gap.first, last: gap.last } : null, printed: [], inbox: null });
+        gap: gap ? { first: gap.first, last: gap.last } : null, printed: claimed, inbox: null });
+      printed.splice(0, claimed.length);
       if (gap) log(`recording gap closed (${gap.message}); lf records from here`);
       gap = undefined;
       return answer;
@@ -106,5 +88,8 @@ function machineServer(delivery, log) {
       queue = answer;
       return answer;
     },
+    // Printed first: a batch the provider took is named by the next request;
+    // one lost before that arrives again, never not at all.
+    printed(batch) { printed.push(batch); },
   };
 }

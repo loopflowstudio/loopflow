@@ -1,4 +1,4 @@
-//! `lf steer` and `lf task report` against an isolated Linear GraphQL fixture.
+//! `lf task steer` and `lf task report` against an isolated Linear GraphQL fixture.
 
 use crate::work::task::comment::TaskCommentAuthor;
 

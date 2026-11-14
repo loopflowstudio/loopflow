@@ -48,7 +48,7 @@ const AMBIENT_ONLY: &[&[&str]] = &[];
 
 /// Task identity selects its owning Wave; an optional Wave only checks that
 /// ownership. Ambient Wave selection must not redirect an explicit Task.
-const ISSUE_OWNED: &[&[&str]] = &[&["task", "update"], &["task", "report"]];
+const ISSUE_OWNED: &[&[&str]] = &[&["task", "update"], &["task", "steer"], &["task", "report"]];
 
 /// Authored inputs do not select an ambient execution Wave: context reads
 /// directories.

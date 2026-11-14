@@ -904,7 +904,7 @@ continuation prompt. Resume with explicit input to continue. A blank terminal
 answer fails headless execution. Native usage checkpoints survive a crash before
 settlement; missing usage stays unknown.
 
-`lf steer <session-id> "direction"` queues guidance during an active Pi
+`lf session steer <session-id> "direction"` queues guidance during an active Pi
 run through the same saved-steer receipts used by other harnesses. An emitted
 receipt means local delivery, not proof the model incorporated it. Idle Sessions
 stay idle. Direct RPC steering reports queued, rejected or uncertain delivery

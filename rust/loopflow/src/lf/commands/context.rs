@@ -239,10 +239,8 @@ pub fn explain_task_checkout(
 }
 
 /// Provider callbacks use launch-owned authority rather than the current client.
-/// A launch the Machine server or an owner holds reports each boundary to the
-/// server, which records it. Every launch then reads its own news from the
-/// store, in this process: the Session's unread steers and what changed on its
-/// Tasks. The context block comes from checkout files.
+/// A turn or tool boundary opens no store: the Machine server records it and
+/// answers steers, and the context block comes from checkout files.
 pub fn emit_block(
     delivery: Option<&std::path::Path>,
     moment: crate::context_block::ContextMoment,
@@ -272,144 +270,153 @@ pub fn emit_block(
         }
     }
     let boundary = match moment {
-        ContextMoment::Start => Some(BoundaryMoment::Start),
-        ContextMoment::Compact => Some(BoundaryMoment::Compact),
-        ContextMoment::Tool => Some(BoundaryMoment::Tool),
-        ContextMoment::Stop => Some(BoundaryMoment::Stop),
-        ContextMoment::Steer => None,
+        ContextMoment::Start => BoundaryMoment::Start,
+        ContextMoment::Compact => BoundaryMoment::Compact,
+        ContextMoment::Tool => BoundaryMoment::Tool,
+        ContextMoment::Stop => BoundaryMoment::Stop,
         other => anyhow::bail!("{other:?} is not a turn or tool boundary"),
     };
-    let read_adapter = |name: &str| -> Result<Option<crate::steer::SteerAdapter>> {
-        Ok(std::env::var(name)
-            .ok()
-            .map(|value| serde_json::from_str(&value))
-            .transpose()?)
-    };
-    // The capability of a launch whose boundaries the server records, or of
-    // one that reports to no server.
-    let held = read_adapter(crate::steer::PROVIDER_CONTEXT_ENV)?;
-    let adapter = match held.clone() {
-        Some(held) => Some(held),
-        None => read_adapter(crate::steer::BARE_STEER_ENV)?,
-    };
-    // Mark the check before reading unread steers, so one saved during it is
-    // newer and the next tool boundary checks again.
+    let adapter = std::env::var(crate::steer::PROVIDER_CONTEXT_ENV)
+        .ok()
+        .map(|value| serde_json::from_str::<crate::steer::SteerAdapter>(&value))
+        .transpose()?;
+    // Mark the check before the server reads pending steers, so one saved
+    // during it is newer and the next tool boundary checks again.
     let seen = std::env::var_os(crate::steer::STEER_SEEN_ENV)
         .map(std::path::PathBuf::from)
-        .filter(|_| {
-            adapter.is_some() && matches!(moment, ContextMoment::Tool | ContextMoment::Steer)
-        });
+        .filter(|_| adapter.is_some() && moment == ContextMoment::Tool);
     if let Some(seen) = &seen {
         crate::steer::touch(seen)?;
     }
     // A conversation lf did not start (a Codex app-server thread) has no
-    // provider context; only its turn end reports, to refresh planning.
-    let answered = match boundary {
-        Some(boundary) if held.is_some() || boundary == BoundaryMoment::Stop => {
-            ask_server(&path, &delivery.home, boundary, held.as_ref(), &input)
-        }
-        _ => false,
+    // provider context; only its turn end asks, to refresh planning.
+    let printed = match &adapter {
+        Some(_) => PrintedBatches::claim(&path),
+        None => PrintedBatches::default(),
     };
+    let answered = if adapter.is_some() || boundary == BoundaryMoment::Stop {
+        ask_server(
+            &path,
+            &delivery.home,
+            boundary,
+            adapter.as_ref(),
+            &input,
+            &printed.batches,
+        )
+    } else {
+        None
+    };
+    printed.settle(answered.is_some());
+    // Steers just delivered may have more behind them, an earlier batch may
+    // still be waiting out its hook, and an unanswered boundary delivered
+    // none: the next tool boundary asks again.
+    let ask_again = answered
+        .as_ref()
+        .is_none_or(|answer| answer.steers.is_some() || answer.waiting);
+    if let Some(seen) = seen.filter(|_| ask_again) {
+        let _ = std::fs::remove_file(seen);
+    }
     if moment == ContextMoment::Stop {
         return Ok(());
     }
     // An answering server may have followed a moved checkout.
-    let delivery = match answered {
-        true => crate::context_block::ContextDelivery::load(&path)?,
-        false => delivery,
+    let (delivery, steers, update) = match answered {
+        Some(answer) => (
+            crate::context_block::ContextDelivery::load(&path)?,
+            answer.steers,
+            answer.update,
+        ),
+        None => (delivery, None, None),
     };
-    let news = match (&adapter, input["session_id"].as_str()) {
-        (Some(adapter), Some(thread)) => {
-            read_news(&delivery, adapter, thread, &input, !answered)
-        }
-        _ => Ok(News::default()),
-    }
-    .unwrap_or_else(|error| {
-        tracing::warn!(error = %format!("{error:#}"), "steers unread at this boundary; the next one asks again");
-        News { again: true, ..News::default() }
-    });
-    // More may wait behind the steers just claimed, and a store that did not
-    // answer delivered none: the next tool boundary asks again.
-    if let Some(seen) = seen.filter(|_| news.again) {
-        let _ = std::fs::remove_file(seen);
-    }
-    let prefix = news
-        .steers
+    let mut prefix = steers
         .as_ref()
-        .map_or(String::new(), |(_, steers)| steers.text.clone());
-    let text = match moment {
-        ContextMoment::Start | ContextMoment::Compact => {
-            delivery.block_with_prefix(moment, &prefix)?.text
-        }
-        _ if prefix.is_empty() => return Ok(()),
-        _ => prefix,
+        .map_or(String::new(), |steers| steers.text.clone());
+    if let Some(update) = update {
+        prefix.push_str(&update);
+        prefix.push('\n');
+    }
+    let text = if moment == ContextMoment::Tool {
+        prefix
+    } else {
+        delivery.block_with_prefix(moment, &prefix)?.text
     };
     let event = input["hook_event_name"].as_str().unwrap_or("SessionStart");
     let output = serde_json::json!({"hookSpecificOutput": {
         "hookEventName": event, "additionalContext": text,
     }});
     write_output(format!("{output}\n").as_bytes())?;
-    // Printed first: a hook that dies between the two leaves a claim that
-    // lapses, and a steer that arrives twice beats one that never arrives.
-    if let (Some(adapter), Some((store, steers))) = (&adapter, &news.steers) {
-        crate::steer::delivered(store, &adapter.session, steers);
+    // Printed first: a hook that dies between the two has its batch answered
+    // again, and a steer that arrives twice beats one that never arrives.
+    if let Some(steers) = steers {
+        PrintedBatches::add(&path, &steers.batch);
     }
     Ok(())
 }
 
-/// What a boundary brings its conversation from the store.
-#[derive(Default)]
-struct News {
-    steers: Option<(
-        crate::store::sqlite::SqliteStore,
-        crate::steer::ClaimedSteers,
-    )>,
-    /// Whether the next tool boundary should read again.
-    again: bool,
+/// Steer batches this conversation's hooks printed and no request has told
+/// the server about yet. Every hook is a fresh process, so they are lines in
+/// a file beside the delivery file.
+#[derive(Debug, Default)]
+struct PrintedBatches {
+    batches: Vec<crate::id::SteerBatchId>,
+    /// The file's lines moved aside for this request, so a hook printing in
+    /// parallel starts a new file and neither loses the other's batch.
+    claimed: Option<(std::path::PathBuf, std::path::PathBuf)>,
 }
 
-/// Claim the Session's unread steers for the conversation `thread`, after
-/// writing what changed on its Tasks as steers. `unrecorded`: no server
-/// recorded this boundary, so a provider start selects its conversation here.
-fn read_news(
-    delivery: &crate::context_block::ContextDelivery,
-    adapter: &crate::steer::SteerAdapter,
-    thread: &str,
-    input: &serde_json::Value,
-    unrecorded: bool,
-) -> Result<News> {
-    use crate::steer::NativeBoundary;
-    let path = crate::store::default_db_path();
-    anyhow::ensure!(path.exists(), "Machine registry is absent");
-    let store = crate::store::sqlite::SqliteStore::new(&path)?;
-    let event = input["hook_event_name"].as_str().unwrap_or("SessionStart");
-    let boundary = match event {
-        "SessionStart" => NativeBoundary::Select {
-            source: input["source"].as_str().unwrap_or("startup"),
-        },
-        // Fires for subagents too, so it only fills a missing selection.
-        _ => NativeBoundary::Activate { source: event },
-    };
-    if unrecorded && matches!(boundary, NativeBoundary::Select { .. }) {
-        store.with_provider_context(adapter, thread, boundary, || Ok(()))?;
+impl PrintedBatches {
+    fn file(delivery: &std::path::Path) -> std::path::PathBuf {
+        delivery.with_extension("printed")
     }
-    let started = matches!(boundary, NativeBoundary::Select { source: "startup" });
-    if let Err(error) =
-        crate::harness::task_updates::write(&store, &adapter.session).and_then(|()| match started {
-            true => store.baseline_task_updates(&adapter.session),
-            false => Ok(()),
-        })
-    {
-        tracing::warn!(session = adapter.session, %error, "Task updates unwritten at this boundary");
+
+    fn claim(delivery: &std::path::Path) -> Self {
+        let file = Self::file(delivery);
+        let aside = file.with_extension(format!("printed.{}", std::process::id()));
+        if std::fs::rename(&file, &aside).is_err() {
+            return Self::default();
+        }
+        let batches = std::fs::read_to_string(&aside)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| crate::id::SteerBatchId::parse(line).ok())
+            .collect();
+        Self {
+            batches,
+            claimed: Some((file, aside)),
+        }
     }
-    let steers = crate::steer::claim(&store, &delivery.repo, adapter, thread, boundary)?;
-    Ok(News {
-        again: steers.is_some(),
-        steers: steers.map(|steers| (store, steers)),
-    })
+
+    /// The server heard these, or it did not and the next request repeats them.
+    fn settle(self, answered: bool) {
+        let Some((file, aside)) = self.claimed else {
+            return;
+        };
+        if !answered {
+            for batch in &self.batches {
+                Self::append(&file, batch);
+            }
+        }
+        let _ = std::fs::remove_file(aside);
+    }
+
+    fn add(delivery: &std::path::Path, batch: &crate::id::SteerBatchId) {
+        Self::append(&Self::file(delivery), batch);
+    }
+
+    fn append(file: &std::path::Path, batch: &crate::id::SteerBatchId) {
+        use std::io::Write;
+        let wrote = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(file)
+            .and_then(|mut file| writeln!(file, "{batch}"));
+        if let Err(error) = wrote {
+            tracing::warn!(batch = %batch, error = %error, "printed steers not noted; they will arrive again");
+        }
+    }
 }
 
-/// One `session.boundary` request; false when the server did not answer,
+/// One `session.boundary` request, or `None` when the server did not answer,
 /// which is a recording gap and never a failed turn.
 fn ask_server(
     delivery: &std::path::Path,
@@ -417,7 +424,8 @@ fn ask_server(
     moment: crate::server::wire::BoundaryMoment,
     adapter: Option<&crate::steer::SteerAdapter>,
     input: &serde_json::Value,
-) -> bool {
+    printed: &[crate::id::SteerBatchId],
+) -> Option<crate::server::wire::SessionBoundaryAnswer> {
     use crate::server::wire::{BoundaryGap, Operation, ServerOperation, SessionBoundary};
     // Only a Session lf recorded has history to hold a gap; the server refuses
     // an adapter's callback that names no conversation.
@@ -434,24 +442,26 @@ fn ask_server(
             first: span.first_miss,
             last: span.last_miss,
         }),
-        printed: Vec::new(),
+        printed: printed.to_vec(),
         inbox: adapter.and_then(|_| claude_inbox()),
     }));
-    let answered = crate::server::socket_path().and_then(|socket| {
-        crate::server::client::hook_request(
-            &socket,
-            operation,
-            crate::server::boundary::HOOK_DEADLINE,
-        )
-    });
+    let answered = crate::server::socket_path()
+        .and_then(|socket| {
+            crate::server::client::hook_request(
+                &socket,
+                operation,
+                crate::server::boundary::HOOK_DEADLINE,
+            )
+        })
+        .and_then(|response| Ok(serde_json::from_value(response.result)?));
     match answered {
-        Ok(_) => {
+        Ok(answer) => {
             gap.recovered();
-            true
+            Some(answer)
         }
         Err(error) => {
             gap.note("session boundary", &format!("{error:#}"));
-            false
+            None
         }
     }
 }
@@ -597,7 +607,7 @@ fn write_output(mut bytes: &[u8]) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::load_delivery;
+    use super::{load_delivery, PrintedBatches};
     use crate::context_block::{ContextDelivery, ContextMoment};
 
     #[test]
@@ -617,6 +627,30 @@ mod tests {
         assert!(error.contains(&path.display().to_string()));
         assert!(error.contains("Decode provider context delivery"));
         assert!(!error.contains("PRIVATE_MALFORMED_CONTENT"));
+    }
+
+    #[test]
+    fn printed_batches_wait_for_a_request_the_server_answers() {
+        let home = tempfile::tempdir().unwrap();
+        let delivery = home.path().join("delivery.json");
+        let (one, two) = (
+            crate::id::SteerBatchId::new(),
+            crate::id::SteerBatchId::new(),
+        );
+        PrintedBatches::add(&delivery, &one);
+        // The request went unanswered; a hook beside it printed meanwhile.
+        let unanswered = PrintedBatches::claim(&delivery);
+        assert_eq!(unanswered.batches, std::slice::from_ref(&one));
+        PrintedBatches::add(&delivery, &two);
+        unanswered.settle(false);
+        let mut answered = PrintedBatches::claim(&delivery);
+        answered.batches.sort_by_key(|batch| batch.to_string());
+        let mut both = [one, two];
+        both.sort_by_key(|batch| batch.to_string());
+        assert_eq!(answered.batches, both);
+        answered.settle(true);
+        assert!(PrintedBatches::claim(&delivery).batches.is_empty());
+        assert_eq!(std::fs::read_dir(home.path()).unwrap().count(), 0);
     }
 
     #[test]

@@ -1,18 +1,22 @@
-//! `session.boundary`: what a held launch's hook reports at a turn or tool
-//! boundary, for the server to record. The hook opens no store for this; it
-//! reads the Session's steers and Task update from the store itself afterwards
-//! ([`crate::steer::claim`]).
+//! `session.boundary`: the store work a provider hook asks for at a turn or tool
+//! boundary. The hook opens nothing; the server records the boundary and
+//! answers the Session's pending steers, which count as delivered once the
+//! hook's next request says it printed them. Task changes since the Session's
+//! last update ride the same answer, so it hears them at its next turn.
 use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 
 use crate::context_block::ContextDelivery;
-use crate::server::wire::{BoundaryMoment, SessionBoundary, SessionBoundaryAnswer};
-use crate::steer::NativeBoundary;
+use crate::server::wire::{BoundaryMoment, SessionBoundary, SessionBoundaryAnswer, SteerBatch};
+use crate::steer::{NativeBoundary, SteerAdapter, SteerContext};
 use crate::store::sqlite::SqliteStore;
+use crate::store::{StoreError, StoreResult};
 
 /// How long a hook waits for the server before its turn goes on without it.
+/// An answer's steers the hook has not confirmed after this long are answered
+/// again.
 pub(crate) const HOOK_DEADLINE: Duration = Duration::from_secs(2);
 /// How long a pending Session move waits after its Stop is answered: the hook
 /// prints and exits, then the provider ends its turn.
@@ -32,7 +36,7 @@ pub(super) struct AfterStop {
     codex: Option<(PathBuf, crate::id::AgentSessionId)>,
 }
 
-/// Record the boundary; blocking.
+/// Record the boundary and claim its steers; blocking.
 pub(super) fn answer(
     store: &SqliteStore,
     boundary: &SessionBoundary,
@@ -43,7 +47,7 @@ pub(super) fn answer(
         adapter,
         callback,
         gap,
-        printed: _,
+        printed,
         inbox,
     } = boundary;
     let mut delivery = ContextDelivery::load(path)?;
@@ -110,7 +114,21 @@ pub(super) fn answer(
     }
     if *moment == BoundaryMoment::Event {
         crate::harness::pi::observe_native(store, adapter, callback)?;
-        return Ok((nothing, None));
+        // Pi takes a steer only while a turn runs; outside one it would be
+        // stored without starting a run, so the event answers none.
+        let running = callback["turn"].is_string() && callback["type"] != "agent_settled";
+        if !running {
+            let waiting =
+                store.confirm_session_steers(adapter, printed, HOOK_DEADLINE.as_secs())?;
+            return Ok((
+                SessionBoundaryAnswer {
+                    steers: None,
+                    update: None,
+                    waiting,
+                },
+                None,
+            ));
+        }
     }
     if *moment == BoundaryMoment::Stop {
         // The transcript is the only writer of usage rows; the exit read
@@ -120,6 +138,9 @@ pub(super) fn answer(
             &adapter.session,
             crate::transcript::facts::Moment::TurnEnd,
         );
+        // A turn end delivers nothing, so what it returns to pending waits
+        // for the next prompt, whose hook always asks.
+        store.confirm_session_steers(adapter, printed, HOOK_DEADLINE.as_secs())?;
         // Codex keeps its turns on its app-server; read them now that one
         // ended. A Claude Session records none.
         let codex = connection
@@ -132,18 +153,21 @@ pub(super) fn answer(
         };
         return Ok((nothing, Some(after)));
     }
-    // A provider start declares the conversation it now runs; every other
-    // boundary must name the selected one.
     let thread = thread.ok_or_else(no_thread)?;
-    let selects = match event {
-        "SessionStart" => NativeBoundary::Select {
-            source: callback["source"].as_str().unwrap_or("startup"),
+    let (steers, waiting) =
+        claim_steers(store, &delivery, adapter, thread, callback, event, printed)?;
+    let update = crate::harness::task_updates::claim(store, adapter, thread).unwrap_or_else(|error| {
+        tracing::warn!(session = adapter.session, %error, "Task update unread at this boundary");
+        None
+    });
+    Ok((
+        SessionBoundaryAnswer {
+            steers,
+            update,
+            waiting,
         },
-        "OpenCodeMessagesTransform" | "PiContext" => NativeBoundary::Activate { source: event },
-        _ => NativeBoundary::Turn,
-    };
-    store.with_provider_context(adapter, thread, selects, || Ok(()))?;
-    Ok((nothing, None))
+        None,
+    ))
 }
 
 /// After a Stop's answer: record a Codex Session's turns, refresh the Session's
@@ -212,6 +236,136 @@ async fn record_codex_turns(
     if let Err(error) = read {
         tracing::warn!(session, error = %format!("{error:#}"), "Codex turns unrecorded at turn end");
     }
+}
+
+/// Settle the batches earlier answers carried, then render the Session's next
+/// batch of pending steers. Also answers whether an earlier batch still waits
+/// for its hook.
+fn claim_steers(
+    store: &SqliteStore,
+    delivery: &ContextDelivery,
+    adapter: &SteerAdapter,
+    thread: &str,
+    callback: &serde_json::Value,
+    event: &str,
+    printed: &[crate::id::SteerBatchId],
+) -> StoreResult<(Option<SteerBatch>, bool)> {
+    let boundary = match event {
+        "SessionStart" => NativeBoundary::Select {
+            source: callback["source"].as_str().unwrap_or("startup"),
+        },
+        "OpenCodeMessagesTransform" | "PiContext" => NativeBoundary::Activate { source: event },
+        _ => NativeBoundary::Turn,
+    };
+    store.recover_prepared_steers(&adapter.session)?;
+    store.with_provider_context(adapter, thread, boundary, || {
+        let waiting = store.confirm_session_steers(adapter, printed, HOOK_DEADLINE.as_secs())?;
+        let invocation = callback["tool_use_id"]
+            .as_str()
+            .or_else(|| callback["adapter_invocation_id"].as_str())
+            .or_else(|| callback["turn_id"].as_str())
+            .map(str::to_owned)
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let boundary = format!(
+            "{event}:{}:{invocation}",
+            callback["turn_id"].as_str().unwrap_or("")
+        );
+        Ok((
+            emit_steers(store, &delivery.repo, adapter, thread, &boundary)?,
+            waiting,
+        ))
+    })
+}
+
+/// The batch of pending steers a wake carries to an idle conversation,
+/// rendered as a hook would print it. The waker confirms it once sent.
+pub(super) fn wake_steers(
+    store: &SqliteStore,
+    repo: &std::path::Path,
+    adapter: &SteerAdapter,
+    thread: &str,
+) -> Result<Option<SteerBatch>> {
+    store.recover_prepared_steers(&adapter.session)?;
+    let boundary = format!("wake:{}", uuid::Uuid::new_v4());
+    Ok(
+        store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
+            emit_steers(store, repo, adapter, thread, &boundary)
+        })?,
+    )
+}
+
+/// Render and record the Session's next batch of pending steers at `boundary`.
+fn emit_steers(
+    store: &SqliteStore,
+    repo: &std::path::Path,
+    adapter: &SteerAdapter,
+    thread: &str,
+    boundary: &str,
+) -> StoreResult<Option<SteerBatch>> {
+    let steers =
+        store.emit_session_steers(adapter, thread, boundary, |id, steers, remaining| {
+            let (text, excerpts) = render_steers(repo, &adapter.session, id, steers, remaining)
+                .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+            Ok(SteerContext { text, excerpts })
+        })?;
+    Ok(steers.map(|(batch, text)| SteerBatch { batch, text }))
+}
+
+fn excerpt(text: &str, bytes: usize) -> &str {
+    let mut end = text.len().min(bytes);
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
+}
+
+fn render_steers(
+    repo: &std::path::Path,
+    session: &str,
+    batch: &str,
+    steers: &[crate::steer::Steer],
+    remaining: usize,
+) -> Result<(String, Vec<crate::id::SteerId>)> {
+    let mut excerpts = Vec::new();
+    let mut text = format!("<lf:steers batch=\"{batch}\">\n");
+    for steer in steers {
+        let path = crate::prompt::write_prompt_log(
+            repo,
+            &serde_json::to_string_pretty(steer)?,
+            "steer",
+            None,
+        )?;
+        let path = path.strip_prefix(repo).unwrap_or(&path);
+        let mut item = format!(
+            "Steer {}. Source {} revision {}; author {}. Complete source: {}\n",
+            steer.id,
+            serde_json::to_string(excerpt(&steer.source, 96))?,
+            serde_json::to_string(excerpt(&steer.revision, 64))?,
+            serde_json::to_string(excerpt(&steer.author.to_string(), 96))?,
+            serde_json::to_string(path)?
+        );
+        let mut body = excerpt(&steer.text, 400);
+        while !body.is_empty()
+            && item.len() + crate::prompt::render_reference(body).len() + 32 > 1024
+        {
+            body = excerpt(body, body.len() - 1);
+        }
+        item.push_str(&crate::prompt::render_reference(body));
+        if body.len() != steer.text.len() {
+            excerpts.push(steer.id.clone());
+            item.push_str(" [excerpt; full source above]");
+        }
+        item.push('\n');
+        anyhow::ensure!(
+            item.len() <= 1024,
+            "Steer attribution and source pointer exceed the item budget"
+        );
+        text.push_str(&item);
+    }
+    text.push_str(&format!(
+        "{remaining} pending. Inspect: lf session steers {session} --json\n</lf:steers>\n"
+    ));
+    Ok((text, excerpts))
 }
 
 #[cfg(test)]
@@ -305,7 +459,7 @@ mod tests {
     }
 
     #[test]
-    fn start_and_compact_refresh_session_and_task_identity() {
+    fn start_and_compact_refresh_session_and_task_identity_without_steers() {
         let (_home, store, adapter, delivery) = fixture();
         let render = |moment, source| {
             let request = boundary(
@@ -314,7 +468,7 @@ mod tests {
                 &delivery,
                 serde_json::json!({"session_id":"native","hook_event_name":"SessionStart","source":source}),
             );
-            answer(&store, &request).unwrap();
+            assert!(answer(&store, &request).unwrap().0.steers.is_none());
             ContextDelivery::load(&delivery).unwrap()
         };
         let start = render(BoundaryMoment::Start, "startup");
@@ -376,6 +530,87 @@ mod tests {
         );
     }
 
+    /// Keep answered batches inside `HOOK_DEADLINE` however long the next
+    /// answer takes on a loaded Machine.
+    fn hold_within_deadline(store: &SqliteStore) {
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute("UPDATE steer_batches SET created_at=unixepoch()+3600", [])
+            .unwrap();
+    }
+
+    #[test]
+    fn a_steer_is_delivered_once_the_hook_says_it_printed_it() {
+        let (_home, store, adapter, delivery) = fixture();
+        let tool = |id: &str, printed: &[crate::id::SteerBatchId]| {
+            let mut tool = boundary(
+                BoundaryMoment::Tool,
+                &adapter,
+                &delivery,
+                serde_json::json!({"session_id":"native","hook_event_name":"PostToolUse","tool_use_id":id}),
+            );
+            tool.printed = printed.to_vec();
+            tool
+        };
+        let evidence = || {
+            store.session_steers("session", 0, 8).unwrap().items[0]
+                .evidence
+                .clone()
+        };
+        let (answered, after) = answer(&store, &tool("quiet", &[])).unwrap();
+        assert_eq!((answered.steers, answered.waiting), (None, false));
+        assert!(after.is_none());
+        store
+            .save_session_steer("session", "Fixture author", "KEEP_THE_API_SMALL")
+            .unwrap();
+        let (answered, _) = answer(&store, &tool("first", &[])).unwrap();
+        let steers = answered.steers.unwrap();
+        assert!(steers.text.contains("KEEP_THE_API_SMALL"));
+        assert_eq!(evidence(), "uncertain");
+        hold_within_deadline(&store);
+        // A hook running beside the one still printing gets nothing new and
+        // is told to ask again.
+        let (answered, _) = answer(&store, &tool("beside", &[])).unwrap();
+        assert_eq!((answered.steers, answered.waiting), (None, true));
+        let (answered, _) = answer(&store, &tool("second", &[steers.batch])).unwrap();
+        assert_eq!((answered.steers, answered.waiting), (None, false));
+        assert_eq!(evidence(), "emitted");
+    }
+
+    /// A Pi event is recorded, and answers steers only while a turn runs:
+    /// outside one, Pi would store the steer without starting a run.
+    #[test]
+    fn a_pi_event_answers_steers_only_during_a_turn() {
+        let (_home, store, adapter, delivery) = fixture_on("/pi/session.jsonl");
+        store
+            .save_session_steer("session", "Fixture author", "KEEP_THE_API_SMALL")
+            .unwrap();
+        let event = |callback: serde_json::Value| {
+            let mut callback = callback;
+            callback["sessionFile"] = "/pi/session.jsonl".into();
+            answer(
+                &store,
+                &boundary(BoundaryMoment::Event, &adapter, &delivery, callback),
+            )
+            .unwrap()
+        };
+        let (idle, after) =
+            event(serde_json::json!({"type":"ui_prompt_end","openTools":0,"pendingInput":0}));
+        assert_eq!(
+            (idle.steers, idle.waiting, after.is_none()),
+            (None, false, true)
+        );
+        let (running, _) = event(serde_json::json!({"type":"tool_execution_start",
+            "toolCallId":"tool","turn":"turn","openTools":1,"pendingInput":0}));
+        assert!(running.steers.unwrap().text.contains("KEEP_THE_API_SMALL"));
+        hold_within_deadline(&store);
+        let (settled, _) = event(serde_json::json!({"type":"agent_settled","turn":"turn",
+            "aborted":false,"events":[],"openTools":0,"pendingInput":0}));
+        assert_eq!((settled.steers, settled.waiting), (None, true));
+    }
+
     /// A checkout that moved since launch: the server points the delivery
     /// file at where the store now places the repository, and the hook
     /// renders the saved skill from there.
@@ -405,9 +640,118 @@ mod tests {
         assert_eq!(followed.skill_file, Some(moved.join("active.md")));
     }
 
+    /// Comments on the Session's Task reach its next prompt once, with no
+    /// watcher between: direction as a steer, anything else as a Task update.
     #[test]
-    fn a_foreign_conversation_is_refused() {
+    fn a_task_comment_rides_the_next_boundary_answer_once() {
         let (_home, store, adapter, delivery) = fixture();
+        let task = crate::durable::TaskId::new();
+        store
+            .create_task(&crate::work::task::NewTask {
+                repository_id: store.ensure_repository("/updates").unwrap(),
+                id: task.clone(),
+                project_id: None,
+                title: "Updates".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET interactive=1 WHERE id='session'",
+                [],
+            )
+            .unwrap();
+        let captured = store.session("session").unwrap().unwrap().captured;
+        store.bind_session("session", captured, &task).unwrap();
+        let prompt = |id: &str| {
+            boundary(
+                BoundaryMoment::Tool,
+                &adapter,
+                &delivery,
+                serde_json::json!({"session_id":"native","hook_event_name":"UserPromptSubmit",
+                    "prompt_id":id,"prompt":"go"}),
+            )
+        };
+        // The first boundary is the baseline: history before it is not news.
+        assert_eq!(answer(&store, &prompt("p-1")).unwrap().0.update, None);
+        for (id, body) in [
+            ("c-1", "use the staging bucket"),
+            ("c-2", "PR: https://example.test/pr/1"),
+        ] {
+            store
+                .append_task_comment(
+                    &task,
+                    &crate::work::task::comment::TaskComment {
+                        id: id.into(),
+                        body: body.into(),
+                        author: crate::work::task::comment::TaskCommentAuthor::Person {
+                            name: Some("jack".into()),
+                        },
+                        created_at: Some("2026-11-11T09:00:00Z".into()),
+                    },
+                )
+                .unwrap();
+        }
+        let answered = answer(&store, &prompt("p-2")).unwrap().0;
+        assert!(answered
+            .steers
+            .unwrap()
+            .text
+            .contains("use the staging bucket"));
+        let update = answered.update.unwrap();
+        assert!(update.contains("New comment from jack: PR: https://example.test/pr/1"));
+        assert!(!update.contains("staging bucket"), "direction arrives once");
+        assert_eq!(answer(&store, &prompt("p-3")).unwrap().0.update, None);
+    }
+
+    #[test]
+    fn a_steer_whose_hook_gave_up_is_answered_again() {
+        let (_home, store, adapter, delivery) = fixture();
+        let tool = |id: &str| {
+            boundary(
+                BoundaryMoment::Tool,
+                &adapter,
+                &delivery,
+                serde_json::json!({"session_id":"native","hook_event_name":"PostToolUse","tool_use_id":id}),
+            )
+        };
+        store
+            .save_session_steer("session", "Fixture author", "KEEP_THE_API_SMALL")
+            .unwrap();
+        let late = answer(&store, &tool("late")).unwrap().0.steers.unwrap();
+        // The hook stopped waiting before this answer; its deadline has passed.
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute("UPDATE steer_batches SET created_at=created_at-10", [])
+            .unwrap();
+        let again = answer(&store, &tool("next")).unwrap().0.steers.unwrap();
+        assert!(again.text.contains("KEEP_THE_API_SMALL"));
+        assert_ne!(again.batch, late.batch);
+        // The first hook printed after all: the steer arrived twice, and its
+        // late confirmation changes nothing.
+        let mut both = tool("after");
+        both.printed = vec![late.batch, again.batch];
+        let (answered, _) = answer(&store, &both).unwrap();
+        assert_eq!((answered.steers, answered.waiting), (None, false));
+        let page = store.session_steers("session", 0, 8).unwrap();
+        assert_eq!(
+            (page.items[0].evidence.as_str(), page.pending),
+            ("emitted", 0)
+        );
+    }
+
+    #[test]
+    fn a_foreign_conversation_is_refused_and_its_steer_waits() {
+        let (_home, store, adapter, delivery) = fixture();
+        store
+            .save_session_steer("session", "Fixture author", "NOT_FOR_A_CHILD")
+            .unwrap();
         let foreign = boundary(
             BoundaryMoment::Tool,
             &adapter,
@@ -415,6 +759,7 @@ mod tests {
             serde_json::json!({"session_id":"child","hook_event_name":"PostToolUse","tool_use_id":"t"}),
         );
         assert!(answer(&store, &foreign).is_err());
+        assert_eq!(store.session_steers("session", 0, 8).unwrap().pending, 1);
     }
 
     #[test]
@@ -571,16 +916,32 @@ mod tests {
 
     /// OpenCode reports a managed turn end with no callback body.
     #[test]
-    fn a_turn_end_naming_no_conversation_leaves_work_for_after() {
+    fn a_turn_end_naming_no_conversation_still_confirms_and_leaves_work_for_after() {
         let (_home, store, adapter, delivery) = fixture();
-        let stop = boundary(
+        store
+            .save_session_steer("session", "Fixture author", "PRINTED_BEFORE")
+            .unwrap();
+        let tool = boundary(
+            BoundaryMoment::Tool,
+            &adapter,
+            &delivery,
+            serde_json::json!({"session_id":"native","hook_event_name":"PostToolUse","tool_use_id":"t"}),
+        );
+        let printed = answer(&store, &tool).unwrap().0.steers.unwrap().batch;
+        let mut stop = boundary(
             BoundaryMoment::Stop,
             &adapter,
             &delivery,
             serde_json::json!({}),
         );
-        let (_, after) = answer(&store, &stop).unwrap();
+        stop.printed = vec![printed];
+        let (answered, after) = answer(&store, &stop).unwrap();
+        assert_eq!(answered.steers, None);
         assert_eq!(after.unwrap().session.as_deref(), Some("session"));
+        assert_eq!(
+            store.session_steers("session", 0, 8).unwrap().items[0].evidence,
+            "emitted"
+        );
         let bare_tool = boundary(
             BoundaryMoment::Tool,
             &adapter,
@@ -641,43 +1002,26 @@ mod tests {
                 let at = |moment, callback: serde_json::Value| {
                     boundary(moment, &adapter, &delivery, callback)
                 };
-                // What a held launch's hooks do at each boundary: report it,
-                // then claim the Session's steers themselves.
-                answer(
-                &store,
-                &at(
-                    BoundaryMoment::Start,
-                    serde_json::json!({"session_id":"native","hook_event_name":"SessionStart","source":"resume"}),
-                ),
-            )
-            .unwrap();
-                let claimed = crate::steer::claim(
-                    &store,
-                    &ContextDelivery::load(&delivery).unwrap().repo,
-                    &adapter,
-                    "native",
-                    NativeBoundary::Select { source: "resume" },
-                )
-                .unwrap()
-                .unwrap();
-                crate::steer::delivered(&store, "session", &claimed);
-                answer(
-                &store,
-                &at(
+                // A resumed conversation selects again and receives the steer.
+                let printed = answer(
+            &store,
+            &at(
+                BoundaryMoment::Start,
+                serde_json::json!({"session_id":"native","hook_event_name":"SessionStart","source":"resume"}),
+            ),
+        )
+        .unwrap()
+        .0
+        .steers
+        .unwrap()
+        .batch;
+                let mut prompt = at(
                     BoundaryMoment::Tool,
                     serde_json::json!({"session_id":"native","hook_event_name":"UserPromptSubmit",
-                    "prompt_id":"p-1","prompt":"go"}),
-                ),
-            )
-            .unwrap();
-                let quiet = NativeBoundary::Activate {
-                    source: "PostToolUse",
-                };
-                assert!(
-                    crate::steer::claim(&store, &delivery, &adapter, "native", quiet)
-                        .unwrap()
-                        .is_none()
+                "prompt_id":"p-1","prompt":"go"}),
                 );
+                prompt.printed = vec![printed];
+                answer(&store, &prompt).unwrap();
                 answer(
             &store,
             &at(
@@ -725,16 +1069,20 @@ mod tests {
             &delivery,
             serde_json::json!({"session_id":"native","hook_event_name":"PostToolUse","tool_use_id":"t1"}),
         );
-        answer(&store, &tool).unwrap();
-        // Nor does a hook's steer check with nothing to claim.
-        let quiet = NativeBoundary::Activate {
-            source: "PostToolUse",
-        };
-        assert!(
-            crate::steer::claim(&store, &delivery, &adapter, "native", quiet)
-                .unwrap()
-                .is_none()
-        );
+        let (answered, _) = answer(&store, &tool).unwrap();
+        assert_eq!(answered.steers, None);
+        assert!(!answered.waiting);
         writer.execute_batch("ROLLBACK").unwrap();
+        // A steer to hand over needs the write lock again.
+        store
+            .save_session_steer("session", "Fixture author", "NEXT")
+            .unwrap();
+        let tool = boundary(
+            BoundaryMoment::Tool,
+            &adapter,
+            &delivery,
+            serde_json::json!({"session_id":"native","hook_event_name":"PostToolUse","tool_use_id":"t2"}),
+        );
+        assert!(answer(&store, &tool).unwrap().0.steers.is_some());
     }
 }

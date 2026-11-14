@@ -1977,6 +1977,7 @@ fn task_planning_explain_validates_mutations_without_changing_checkpointed_stora
         );
     }
     let comment = read(&[
+        "task",
         "steer",
         "INF-123",
         "  Keep the draft  ",

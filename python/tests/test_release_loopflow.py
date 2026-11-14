@@ -254,12 +254,12 @@ UNAUTHENTICATED_401 = (
         (
             "submit",
             f"\n{AGREEMENT_403}\n",
-            f"Notarization upload failed: {AGREEMENT_403}; inspect Apple history before retrying",
+            f"Notarization upload failed: {AGREEMENT_403[:-1]}; inspect Apple history before retrying",
         ),
         (
             "wait",
             UNAUTHENTICATED_401,
-            f"Notarization submission-1 wait failed: {UNAUTHENTICATED_401}; "
+            f"Notarization submission-1 wait failed: {UNAUTHENTICATED_401[:-1]}; "
             "retry resumes the retained submission",
         ),
         (

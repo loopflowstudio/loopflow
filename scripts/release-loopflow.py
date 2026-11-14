@@ -152,7 +152,7 @@ def _notarytool_failed(
         if output:
             print(output, flush=True)
     if message := stderr or stdout:
-        what = f"{what}: {message.splitlines()[0].strip()}"
+        what = f"{what}: {message.splitlines()[0].strip().rstrip('.')}"
     return RuntimeError(f"{what}; {advice}")
 
 

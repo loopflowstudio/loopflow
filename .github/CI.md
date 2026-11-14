@@ -201,7 +201,7 @@ then what is safe next:
 
 ```text
 Error: HTTP status code: 403. A required agreement is missing or has expired. …
-RuntimeError: Notarization upload failed: Error: HTTP status code: 403. A required agreement is missing or has expired. …; inspect Apple history before retrying
+RuntimeError: Notarization upload failed: Error: HTTP status code: 403. A required agreement is missing or has expired …; inspect Apple history before retrying
 ```
 
 An upload that fails may still have landed, so check `xcrun notarytool history`

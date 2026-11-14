@@ -44,8 +44,9 @@ recovery operation is needed.</p>
 the launch would lose coverage. The diff does neither.</p>
 <h2>Evidence and next review</h2>
 <p>Recorded November 14: <code>uv run pytest python/tests/test_app_bundle.py</code>
-— 5 passed on macOS (1.66 s). The reviewed code diff is unchanged. This review
-did not rerun tests or observe a newly emitted system crash report.</p>
+— current compress pass: 4 passed on macOS (1.10 s), including real Mach-O
+builds and launches. The earlier review recorded 5 passed (1.66 s); the current
+checkout collects four tests. No newly emitted system crash report was inspected.</p>
 <p>Show the destination diff and focused result at the existing Graph review
 boundary. Usage docs and skill instructions need no change.</p>
 <h2>Questions</h2>

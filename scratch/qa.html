@@ -1,0 +1,29 @@
+<!doctype html><meta charset="utf-8"><title>LOO-716 QA</title>
+<style>body{font:15px/1.5 -apple-system,sans-serif;max-width:46em;margin:2em auto;padding:0 1em}pre{background:#f4f4f4;padding:.6em;overflow:auto}</style>
+<h1>LOO-716 QA: Sparkle control test crash identity</h1>
+<p>A test-only change, so the people it affects are developers who run the suite and whoever later reads the Machine's crash reports. Run on macOS on 2026-11-14 with <code>LF_*</code>/<code>REX_*</code> unset and stdin closed.</p>
+
+<h2>1. Run the suite, then read the crash report it leaves</h2>
+<pre>uv run pytest python/tests/test_app_bundle.py -v
+4 passed in 0.94s
+new in ~/Library/Logs/DiagnosticReports: BareSwiftPM-2026-11-14-083856.ips
+app_name: BareSwiftPM
+procPath: /private/var/folders/*/BareSwiftPM.app/Contents/MacOS/BareSwiftPM
+parentProc: python
+termination: Library missing</pre>
+<p>The deliberate dyld abort still happens, and its report now identifies itself as a test. No new <code>Loopflow-*.ips</code> appeared during any run.</p>
+
+<h2>2. Break production on purpose</h2>
+<pre>verify_rpath_libraries never raises (raise → print, line 78)
+  FAILED test_bare_swiftpm_binary_in_a_bundle_cannot_load_sparkle   1 failed, 3 passed
+install_app_executable skips the Frameworks rpath (line 57 → pass)
+  FAILED test_installed_app_executable_is_named_by_the_plist_and_loads_sparkle
+  FAILED test_launch_benchmark_bundle_embeds_sparkle                 2 failed, 2 passed</pre>
+<p>Each break was reverted with <code>git checkout -- scripts/app_bundle.py</code>. After the rename the control still catches a broken verifier, and the positive launches still catch missing embedding.</p>
+
+<h2>Result</h2>
+<ul>
+<li>Works: the suite passes, the control's crash report is named <code>BareSwiftPM</code>, and both families of tests fail on the matching production break.</li>
+<li>Fixed: nothing needed fixing.</li>
+<li>Out of scope: <code>Loopflow-*.ips</code> reports from before this change stay on disk and still look like product crashes. Their pytest path and <code>python</code> parent show where they came from. Stale branches that predate #1794 can still build a broken Dev app (incident option (c) in the plan, not selected).</li>
+</ul>

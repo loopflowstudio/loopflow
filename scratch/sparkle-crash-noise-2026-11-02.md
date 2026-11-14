@@ -1,106 +1,47 @@
 # Sparkle crash-report noise — LOO-716
 
-## Current direction — November 14, 2026
+## Design and remaining work
 
-Jack Heart approved starting implementation through PR review in the Task's
-primary conversation. This supersedes the earlier preparation-without-launch
-boundary. Rename the negative-control bundle and executable to `BareSwiftPM`,
-retain the real missing-Sparkle assertion and all positive launch checks, and
-run `uv run pytest python/tests/test_app_bundle.py`. Stop at the code Graph's
-interactive demo/review step; merging is not yet requested.
+Give the deliberate missing-Sparkle abort a recognizable test identity:
+`BareSwiftPM.app/Contents/MacOS/BareSwiftPM`. Retain the real dyld failure
+assertion and positive packaged-app launch checks. Publication and the code
+Graph's interactive demo/review remain; merging is outside the current scope.
 
-## Implementation plan
+`python/tests/test_app_bundle.py::_swiftpm_build` produces a Mach-O executable
+linked to synthetic Sparkle with only `@loader_path`. The negative control
+copies its returned executable without the framework; no Info.plist is involved.
+Using that return value avoids repeating the helper's build-product filename.
+The destination's bundle and executable names both identify the test.
 
-Maintainers reading macOS crash reports should recognize the deliberate
-missing-Sparkle abort as a test. Implemented: the negative control launches
-`BareSwiftPM.app/Contents/MacOS/BareSwiftPM`; correctly packaged Loopflow apps
-keep their existing names and launch checks.
+`scripts/app_bundle.py::install_app_executable` owns embedding and rpath repair
+for the production builders. Existing Dev and benchmark fixtures launch after
+removing their build directories. Keep those checks and the missing-input check.
+No production API, builder, report filter or system crash-report setting changes.
 
-### Current architecture and risk findings
+## Delete — do not maintain
 
-- `python/tests/test_app_bundle.py::_swiftpm_build` links a small Mach-O
-  executable to a synthetic Sparkle framework with only `@loader_path`.
-  Its build product is `LoopflowMac`, shared by the positive fixtures.
-- `test_bare_swiftpm_binary_in_a_bundle_cannot_load_sparkle` copied only that
-  executable to `Loopflow.app/Contents/MacOS/Loopflow` (now `BareSwiftPM`). It both checks
-  `verify_rpath_libraries` raises for missing Sparkle and launches the actual
-  executable, checking dyld's missing-library message. Only the destination
-  path changed; the linked dependency and rpath are unchanged. The November 2
-  reports below establish the naming problem.
-- `scripts/app_bundle.py::install_app_executable` reads `CFBundleExecutable`,
-  embeds Sparkle, adds the Frameworks rpath and verifies resolution. Install,
-  Dev, release, benchmark and third-party builders already use this owner.
-  No production launch path needs a change.
-- The same test file launches packaged Dev, benchmark and third-party bundles
-  after removing the build directory, proving they resolve embedded Sparkle.
-  Missing executable/framework errors are also covered. Preserve these checks.
-- The suite requires Darwin and `cc`; elsewhere it skips. A skip cannot prove
-  this outcome. The Wave's source-versus-installed evidence distinction applies:
-  these fixture launches prove test behavior, not a Desktop release repair.
+No obsolete code path, symbol or exclusive fixture remains to delete. The old
+negative-control destination is replaced directly. Drop duplicated plan/review
+explanations; retain the incident observations below and the earlier review at
+`be894af388dc64ce348f4418e825bc88be396061:scratch/concept-review.html`.
 
-### Chosen mechanism and alternatives
+## Review and checks — November 14, 2026
 
-Change only the negative control's destination bundle and executable basename
-to `BareSwiftPM`, with a short comment explaining the crash-report identity.
-Keep `_swiftpm_build`, its product name and the positive fixtures unchanged.
-The negative control launches directly and has no Info.plist to migrate.
+Review the destination diff alongside the focused pass. A bundle-only rename
+would leave an ambiguous executable; removing the actual launch would weaken
+coverage. Neither occurs. Old reports still need their pytest path and parent
+process to establish origin. Any new report from the control should identify
+`BareSwiftPM`; asynchronous system report creation is not a test condition.
+No new system crash report was inspected during this pass.
 
-Removing the real launch would lose the dyld regression check. Suppressing or
-deleting reports would hide evidence. Adding a production preflight or updating
-stale worktrees solves a different problem. None is part of this Task.
+`uv run pytest python/tests/test_app_bundle.py` — 4 passed on macOS in 1.10 s,
+including Mach-O compilation and real launches; gate/CI own later checks.
+The earlier recorded result was 5 passed in 1.66 s; the current checkout
+collects four tests and has no third-party bundle test. That earlier count is
+historical, not the current suite expectation. Non-Darwin or missing-cc skips
+cannot establish this outcome. Fixture launches prove no Desktop release repair.
 
-### Remaining review
-
-Code is complete. Remaining: publication and the code Graph's interactive
-demo/review step. Realign, November 14: origin/main has no commits past the
-checkout base and no open PR touches `python/tests/test_app_bundle.py`.
-
-Gate and headless demo: `uv run pytest python/tests/test_app_bundle.py`.
-Expected: all five tests pass on macOS; the negative control still reports
-`Library not loaded: @rpath/Sparkle.framework` from the `BareSwiftPM` executable,
-and the packaged apps exit successfully without their build directories.
-Review the destination path in the diff alongside the passing suite. Any crash
-report emitted by this control should identify `BareSwiftPM`; report creation
-is asynchronous, so polling or counting global reports is not a test condition.
-
-Done when deliberate aborts identify the test executable and maintainers keep
-the genuine launch-failure coverage. Success preserves diagnostic evidence with
-a recognizable name; failure would be renaming only the bundle while leaving
-the crashing executable named Loopflow, or weakening the dyld assertion.
-This serves Infrastructure's reliable diagnostic evidence; there is no new
-performance metric or additional product decision.
-
-Check: `uv run pytest python/tests/test_app_bundle.py` — 5 passed on macOS,
-November 14, 2026 (1.66 s); both missing-Sparkle assertions and positive launches retained.
-
-## Concept review — November 14, 2026
-
-Outcome for loop-or-next: nothing to change and no open product choice; advance.
-The implemented destination gives the deliberate abort its own identity at both
-the bundle and executable levels. No next implement direction is needed.
-
-Maintainer walkthrough: run the bundle suite, then investigate a Desktop exit.
-The negative control launches `BareSwiftPM` and retains the missing-library
-diagnostic; packaged fixtures launch successfully after their build directories
-are removed. A genuine Loopflow launch failure retains its product identity and
-its diagnostic evidence. Recovery remains the existing embedding/build path,
-followed by launching the repaired bundle; the test rename changes no recovery
-action. Older Loopflow-named test reports remain historical evidence and still
-need their pytest path and parent process to establish origin.
-
-The model is a filesystem identity, not a new crash-report category or lifecycle.
-`shutil.copy` sets the destination; `verify_rpath_libraries` and `subprocess.run`
-exercise it. The shared build product, production APIs, persistence and execution
-ownership need no changes. Existing usage docs and skill instructions remain
-accurate. Counterexamples checked against the diff: renaming only the bundle
-would leave the executable ambiguous; removing the actual launch would weaken
-coverage; globally filtering Loopflow reports would hide genuine failures.
-None occurs in the implemented change.
-
-The recorded five-test macOS pass above applies to the unchanged code diff;
-this review did not rerun it or observe a newly emitted system crash report.
-Review page: `scratch/concept-review.html`. Next show the destination diff and
-recorded focused pass at the Graph's existing review boundary.
+`lf context` — Wave memory and scratch are within token and byte targets.
 
 ## Incident evidence
 

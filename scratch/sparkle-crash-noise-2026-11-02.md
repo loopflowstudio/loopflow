@@ -12,21 +12,21 @@ interactive demo/review step; merging is not yet requested.
 ## Implementation plan
 
 Maintainers reading macOS crash reports should recognize the deliberate
-missing-Sparkle abort as a test. The negative control will launch
+missing-Sparkle abort as a test. Implemented: the negative control launches
 `BareSwiftPM.app/Contents/MacOS/BareSwiftPM`; correctly packaged Loopflow apps
-will retain their existing names and launch checks.
+keep their existing names and launch checks.
 
 ### Current architecture and risk findings
 
 - `python/tests/test_app_bundle.py::_swiftpm_build` links a small Mach-O
   executable to a synthetic Sparkle framework with only `@loader_path`.
   Its build product is `LoopflowMac`, shared by the positive fixtures.
-- `test_bare_swiftpm_binary_in_a_bundle_cannot_load_sparkle` copies only that
-  executable to `Loopflow.app/Contents/MacOS/Loopflow`. It both checks
+- `test_bare_swiftpm_binary_in_a_bundle_cannot_load_sparkle` copied only that
+  executable to `Loopflow.app/Contents/MacOS/Loopflow` (now `BareSwiftPM`). It both checks
   `verify_rpath_libraries` raises for missing Sparkle and launches the actual
-  executable, checking dyld's missing-library message. This destination path
-  is the test-only identity to replace; the linked dependency and rpath must
-  survive unchanged. The November 2 reports below establish the naming problem.
+  executable, checking dyld's missing-library message. Only the destination
+  path changed; the linked dependency and rpath are unchanged. The November 2
+  reports below establish the naming problem.
 - `scripts/app_bundle.py::install_app_executable` reads `CFBundleExecutable`,
   embeds Sparkle, adds the Frameworks rpath and verifies resolution. Install,
   Dev, release, benchmark and third-party builders already use this owner.
@@ -49,17 +49,11 @@ Removing the real launch would lose the dyld regression check. Suppressing or
 deleting reports would hide evidence. Adding a production preflight or updating
 stale worktrees solves a different problem. None is part of this Task.
 
-### Delete — do not maintain
-
-Replace the negative control's `Loopflow.app/Contents/MacOS/Loopflow`
-destination literal. Preserve the shared build fixture, both missing-Sparkle
-assertions and all positive launch checks; no symbols or fixtures need removal.
-
 ### Remaining review
 
-The test identity edit is implemented. Review the destination path and focused
-test result; publication and the interactive demo/review boundary remain with
-the code Graph.
+Code is complete. Remaining: publication and the code Graph's interactive
+demo/review step. Realign, November 14: origin/main has no commits past the
+checkout base and no open PR touches `python/tests/test_app_bundle.py`.
 
 Gate and headless demo: `uv run pytest python/tests/test_app_bundle.py`.
 Expected: all five tests pass on macOS; the negative control still reports

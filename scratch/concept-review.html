@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-715 · Browser lifetime concept review</title>
+<style>
+:root { color-scheme: light dark; font: 16px/1.5 system-ui,sans-serif; background: light-dark(#faf9f6,#181a1c); color: light-dark(#25272a,#e4e6e8); }
+body { max-width: 780px; margin: 36px auto; padding: 0 20px 40px; }
+header { font-size: .82rem; color: light-dark(#555,#b3b8bd); }
+h1 { font-size: 1.7rem; line-height: 1.2; margin-bottom: 12px; } h2 { font-size: 1.08rem; margin-top: 24px; }
+p { margin: 12px 0; } code { font-size: .86em; overflow-wrap: anywhere; }
+.callout { border-left: 3px solid light-dark(#956722,#d9b06a); padding-left: 16px; }
+table { border-collapse: collapse; width: 100%; font-size: .88rem; } th,td { text-align: left; vertical-align: top; padding: 10px 6px; border-bottom: 1px solid light-dark(#d3d5d7,#41464b); } th { font-weight: 600; }
+li { margin: 10px 0; } blockquote { margin: 12px 0; padding-left: 16px; border-left: 2px solid #888; }
+@media(max-width:500px) { body { margin-top: 20px; padding: 0 12px 24px; } table { font-size: .78rem; } th,td { padding: 8px 3px; } }
+</style>
+<header>LOO-715 · concept-review · November 14, 2026<br>
+Sources: scratch/loo-715-plan.md, scratch/loo-715-direction.md,
+scratch/desktop-exit-2026-11-02.md, BrowserPageView.swift,
+SessionsView.swift, MultiplexerStore.swift, BrowserPageLifecycleTests.swift,
+swift/README.md, browser-lifetime/README.md.</header>
+<h1>Keep browser use ordinary. Decide which crash evidence production keeps.</h1>
+<p>Jack Heart said “lets do it.” The required outcome is Desktop surviving first-paint closes while preserving history, pane moves and Undo. Production reporter policy remains open.</p>
+<p class="callout"><strong>Biggest mismatch:</strong> the README promises crash survival; the implemented change only observes lifetime. All 48 final window trials survived, including immediate release. No teardown candidate has demonstrated a repair.</p>
+<h2>Actions → concepts → APIs</h2>
+<table>
+<thead><tr><th>Action</th><th>Concept that stays</th><th>Existing state change</th></tr></thead>
+<tbody>
+<tr><td>Close A, then B</td><td>One Undo entry; B lives, A is disposable</td><td><code>closePane → closeBrowserTab → _record</code> returns A; <code>pages.release(A)</code></td></tr>
+<tr><td>Undo B</td><td>Same tab, live page and history</td><td><code>undoClose()</code> restores B; <code>view(for:url:)</code> reuses it</td></tr>
+<tr><td>Move / hide pane</td><td>Contents remain live</td><td>Reparent the view / collapse layout; hiding does not discard its tabs</td></tr>
+<tr><td>Workspace disappears</td><td>Native resources eventually die</td><td>Pool and container ownership end; destruction is logged</td></tr>
+<tr><td>Inspect an unexplained exit</td><td>Evidence, with uncertainty</td><td><code>lf doctor</code> reads launch journal and system log</td></tr>
+</tbody></table>
+<h2>Before → proposed outcome</h2>
+<p><strong>Existing:</strong> pool removal can precede native destruction; diagnostics now distinguish both. Native reporting can bypass exit hooks. <strong>Proposed, unbuilt:</strong> a demonstrated safe disposal path in the same pool, plus attributable crash evidence. No second cache, persistent lifecycle record or new user action.</p>
+<blockquote>Proposed usage copy: “Close a page, then Undo: its history returns. Moving or hiding a pane keeps its contents. Surviving a close during first paint remains an acceptance target under investigation.”</blockquote>
+<p><strong>Failure and recovery:</strong> relaunch restores access, not a repair or a promise of live page history after process death. Missing journal/report evidence stays unknown. Failed navigation, WebContent death and owner loss must still permit reclamation; a timeout or paint callback alone proves no safety.</p>
+<h2>Open decision for later review</h2>
+<ol><li>Which production reporter policy should follow the isolated comparison?<br>
+<strong>1a.</strong> Keep Ghostty's reporter; correlate local fatal envelopes in <code>lf doctor</code>.<br>
+<strong>1b.</strong> Disable it after proving signal-journal and macOS crash reports in a disposable diagnostic build.</li></ol>
+<p>Both experiments remain unfinished; no recommendation is established. Dumps and envelopes stay private. No install, merge, upload or OS upgrade. <strong>Review outcome: Blocked</strong> on this product choice; reproduction remains an independent engineering gap.</p>
+</html>

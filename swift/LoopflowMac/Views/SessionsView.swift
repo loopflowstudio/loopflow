@@ -346,7 +346,7 @@ final class SessionsWorkspace {
         return files(issue: issue, cwd: checkout, query: fileQuery, execution: execution)
     }
     let surfaces: GhosttySurfacePool
-    let pages = BrowserPages()
+    let pages: BrowserPages
     private var surfaceClosed: AnyCancellable?
 
     private var retainedStore: SessionsStore?
@@ -367,6 +367,7 @@ final class SessionsWorkspace {
         self.location = location
         self.localMachineId = localMachineId
         self.surfaces = surfaces
+        pages = BrowserPages(workspace: "\(key.kind.rawValue):\(key.id)")
         multiplexer = MultiplexerStore(taskId: key.kind == .task ? key.id : nil)
         // The workspace outlives SessionsView, including while a shell exits
         // on the Work screen or while another repository is selected.

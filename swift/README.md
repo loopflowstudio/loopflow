@@ -36,11 +36,16 @@ the Machine. Durations and command names only; the files stay on this machine.
 lf doctor                  # desktop-exit: how each bundle's last launch ended
 ```
 
-When Desktop goes away, its launch journal says how: a quit and who asked, an
-`exit()` and the frame that called it, a signal, or an uncaught exception. A
-launch with no record ended by SIGKILL, a crash the handlers missed, or power
-loss; doctor then asks the system log over the window since Desktop's last
-5-minute heartbeat. Stacks, vitals, hangs, memory pressure and failed `lf` reads
+When Desktop goes away, `desktop-exit` reports the available evidence for each
+bundle's recent launches. The launch journal can record a quit and who asked,
+an `exit()` and the frame that called it, a signal, or an uncaught exception.
+With no exit record, doctor asks the system log over the window since Desktop's
+last 5-minute heartbeat. A missing signal record or macOS crash report does not
+rule out a crash: a native crash reporter can intercept the fault and end the
+process before either is written. Exit status 1 alone does not identify the
+cause. Missing evidence leaves the cause unknown.
+
+Stacks, vitals, hangs, memory pressure and failed `lf` reads
 go to `~/.lf/logs/lf.log` (`LF_HOME` selects another). To search the system log
 yourself, call `/usr/bin/log`, since zsh's builtin `log` shadows it:
 
@@ -240,6 +245,18 @@ only the session pane. The session pane shows one conversation and switches when
 another opens. ⌘T adds a shell tab. The browser's tabs are the Task's Files, its
 Graph processes and http(s) pages. ⌘W closes the selected tab, or hides the pane.
 ⇧⌘T puts the last closed tab back where it was, its shell still running.
+
+Close a web page with **⌘W**, then press **⇧⌘T**: the same page returns with
+its Back/Forward history. Closing a page while it is still loading keeps Desktop
+open. Moving or hiding its pane keeps the page and history too. Undo holds only
+the latest close in that workspace; closing another tab or hiding another pane
+replaces it. Pages no longer open or held for Undo are released automatically.
+
+Browser lifetime diagnostics in `lf.log` record workspace, pool, tab and page
+identity, initial URL scheme and monotonic age. `retire` records the previous
+Undo entry losing pool ownership; `final-release` records the native view
+entering destruction. A container can keep it alive between those events.
+Workspace loss has its own record. No host, path, credentials or query is logged.
 
 **View → Toggle Files** shows a Task's checkout in the browser pane beside the
 retained terminal. Expand folders to read one page of up to 500 entries;
@@ -910,8 +927,9 @@ restart a process. Session panes capture their recorded location; changed
 readings invalidate old pane targets without changing focus. Unknown locations
 never open a local replacement. Window/content replacement rejects stale
 targets. `files`, `graph-log` and `browse` select browser
-tabs without changing focus or zoom. Each web page tab retains its `WKWebView`
-until the tab closes; `page-back`, `page-forward` and `reload`
+tabs without changing focus or zoom. Each web page tab keeps its live page while
+open or held for Undo, including through pane moves and hide/show.
+`page-back`, `page-forward` and `reload`
 (⌘R, the page's toolbar) act on the addressed page. ⌘[ and ⌘] stay Desktop
 navigation. Remote shells run on the recorded execution
 Machine; changed or missing checkouts refuse launch without opening a local
@@ -960,11 +978,17 @@ Window/Metal/PTY integration tests are optional display-session diagnostics:
 ```bash
 LOOPFLOW_NATIVE_TESTS=1 swift test --package-path swift --no-parallel
 uv run python scripts/test.py --ui-host  # optional XCUITest diagnostic
+uv run python scripts/benchmarks/browser-lifetime/run.py --compare  # disposable WebKit windows
 ```
 
 Headless runs report them as skipped, not passing, and they are never
 acceptance prerequisites for a headless Graph. See `release/UI_HOST_GATE.md`
 for optional hosted execution and cleanup.
+
+The [browser lifetime comparison](../scripts/benchmarks/browser-lifetime/README.md)
+records navigation/paint observations and reclamation separately. Its teardown
+variants are experimental; survival without a reproduced baseline crash proves
+no repair of the WebKit race.
 
 ```bash
 cargo build -p loopflow --bin lf # Real CLI transport proofs

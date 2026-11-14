@@ -5,8 +5,9 @@
 // with open(O_APPEND), write and close. The path is reopened, not a held fd,
 // because trimming replaces the journal file. The handler then restores the
 // previous disposition: a termination signal is raised again; a fault returns
-// and re-faults into whoever handled it before (Ghostty's crash reporter, or
-// the default crash report).
+// and re-faults into the previous signal disposition. A Mach exception handler
+// (including Ghostty's Breakpad) can intercept a fault before any BSD signal
+// arrives and call _exit, bypassing this journal and macOS crash reporting.
 
 import Darwin
 import Foundation

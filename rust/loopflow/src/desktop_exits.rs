@@ -3,7 +3,8 @@
 //! Desktop's launch journal (`desktop-cache/timings/launches.ndjson`) records
 //! each launch and at most one `exit` line: a quit and who asked, an `exit()` and
 //! its caller, a catchable signal, or an uncaught exception. A launch with no
-//! `exit` line ended where Desktop could not see it (SIGKILL, power loss), so the
+//! `exit` line ended where Desktop could not see it (a native crash reporter's
+//! `_exit`, SIGKILL, power loss), so the
 //! check asks macOS: runningboardd logs `termination reported by launchd
 //! (namespace, code, wait status)` for every app. Desktop writes a vitals line
 //! to lf.log every 300 s, so the query searches from the launch's last line (or
@@ -220,7 +221,7 @@ fn describe(
             },
             SystemRecord::Missing => (
                 format!(
-                "ended without a record between {} and {} (SIGKILL before the first heartbeat, power loss, or the system log rotated)",
+                "ended without a record between {} and {} (SIGKILL before the first heartbeat, a native crash reporter, power loss, or the system log rotated; cause unknown)",
                     clock(start, now),
                     clock(end, now)
                 ),
@@ -666,6 +667,8 @@ mod tests {
         assert!(missing
             .detail
             .contains(" (SIGKILL before the first heartbeat"));
+        assert!(missing.detail.contains("a native crash reporter"));
+        assert!(missing.detail.contains("cause unknown"));
     }
 
     #[test]

@@ -238,6 +238,62 @@ def test_notarization_retry_reuses_submission_after_checkout_cleanup(
     assert (retained / "Loopflow.dmg").read_bytes() == b"signed candidate"
 
 
+AGREEMENT_403 = (
+    "Error: HTTP status code: 403. A required agreement is missing or has expired. "
+    "This request requires an in-effect agreement that has not been signed or has expired."
+)
+UNAUTHENTICATED_401 = (
+    "Error: HTTP status code: 401. Unauthenticated. "
+    "Ensure that all authentication arguments are correct."
+)
+
+
+@pytest.mark.parametrize(
+    ("step", "stderr", "message"),
+    [
+        ("submit", f"\n{AGREEMENT_403}\n", f"Notarization upload failed: {AGREEMENT_403}"),
+        (
+            "wait",
+            UNAUTHENTICATED_401,
+            f"Notarization submission-1 wait failed: {UNAUTHENTICATED_401}",
+        ),
+        (
+            "submit",
+            "",
+            "Notarization upload failed; inspect Apple history before retrying",
+        ),
+    ],
+)
+def test_notarytool_failure_names_apples_message(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    step: str,
+    stderr: str,
+    message: str,
+) -> None:
+    dmg = tmp_path / "Loopflow.dmg"
+    dmg.write_bytes(b"signed candidate")
+    monkeypatch.setenv("LF_RELEASE_NOTARIZATION_DIR", str(tmp_path / "retained"))
+    for name in ("NOTARY_KEY", "NOTARY_KEY_ID", "NOTARY_ISSUER"):
+        monkeypatch.setenv(name, "fixture")
+
+    def capture(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if cmd[0] == "git":
+            return subprocess.CompletedProcess(cmd, 0, "source-commit\n", "")
+        if cmd[2] == step:
+            return subprocess.CompletedProcess(cmd, 1, "", stderr)
+        return subprocess.CompletedProcess(cmd, 0, '{"id":"submission-1"}', "")
+
+    monkeypatch.setattr(release_loopflow, "run_capture", capture)
+    with pytest.raises(RuntimeError) as failure:
+        release_loopflow._notarize_dmg(dmg)
+
+    assert str(failure.value) == message
+    if stderr:
+        assert stderr.strip() in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("changed", ["artifact", "source", "unknown"])
 def test_notarization_does_not_resubmit_uncertain_or_changed_artifacts(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, changed: str

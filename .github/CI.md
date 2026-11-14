@@ -193,6 +193,33 @@ Actions secrets (copied from Doppler `loopflow`/`prd`), and uploads `Loopflow-dm
 `lf install --dev` installs the newest green run with `gh`, app included on a Mac.
 The artifacts expire after 14 days; releases stay the durable channel.
 
+### Notarization
+
+When Apple rejects an upload or a wait, the `desktop-app` log prints
+notarytool's output above the traceback, and the exception carries its first
+line:
+
+```text
+Error: HTTP status code: 403. A required agreement is missing or has expired. …
+RuntimeError: Notarization upload failed: Error: HTTP status code: 403. A required agreement is missing or has expired. …
+```
+
+`.github/workflows/notarization-check.yml` runs `xcrun notarytool history`
+with the same secrets every morning (13:17 UTC), so a broken account shows up
+before a package build hits it. Run it by hand with
+`gh workflow run notarization-check.yml`. A red run opens one issue titled
+"Notarization is failing" quoting Apple's message, or comments on the open one;
+the next green run closes it.
+
+| Apple says | Fix |
+|---|---|
+| `403. A required agreement is missing or has expired` | The Account Holder accepts the new agreement at developer.apple.com. No code change; retrying fails until then. |
+| `401. Unauthenticated` | `NOTARY_KEY_ID`, `NOTARY_ISSUER` or `NOTARY_KEY` is wrong. Fix it in Doppler `loopflow`/`prd` and copy it to the Actions secrets. |
+
+If notarytool printed nothing, the error still says to inspect Apple history
+(`xcrun notarytool history`) before retrying, since the upload may have
+landed.
+
 Release candidates also run `cargo package --locked -p loopflow`. This compiles
 the extracted crates.io archive before tagging, so repository-only embedded
 files cannot pass on the strength of native binaries. Publication keeps the

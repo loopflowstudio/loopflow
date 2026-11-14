@@ -199,7 +199,7 @@ pub(crate) fn shipping_snapshot(
     let reason = match graph {
         None => "taking up its graph".to_string(),
         Some(graph) => match (&graph.position, graph.waiting_step()) {
-            (TaskGraphPosition::Run { step, .. }, _) => format!("running from {step}"),
+            (TaskGraphPosition::Run { at, .. }, _) => format!("running at {at}"),
             (_, Some(step)) => format!("{} (stand-in)", step.name),
             (TaskGraphPosition::At { step }, None) => format!("from {step}"),
         },
@@ -718,6 +718,7 @@ mod tests {
         assert_eq!(at("end"), ShipStep::Finished);
         let stopped = feature_at(TaskGraphPosition::Run {
             step: "demo".into(),
+            at: "implement".into(),
             lf_process_id: "gone".into(),
             running: false,
         });

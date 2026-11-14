@@ -182,6 +182,7 @@ pub(crate) async fn recover_history(
     ));
     let mut cursor = Value::Null;
     let mut count = 0;
+    let mut latest = None;
     loop {
         let result = rpc_request(
             &mut upstream,
@@ -192,36 +193,8 @@ pub(crate) async fn recover_history(
             }),
         )
         .await?;
-        if let Some(attachment) = store.session_attachment(session)? {
-            for turn in result["data"].as_array().into_iter().flatten() {
-                if turn
-                    .pointer("/error/codexErrorInfo")
-                    .and_then(Value::as_str)
-                    == Some("usageLimitExceeded")
-                {
-                    if let Some(id) = turn["id"].as_str() {
-                        let recovery = crate::session_recovery::SessionRecovery {
-                            agent_process_id: attachment.agent_process_id.clone(),
-                            thread: thread.clone(),
-                            failed_turn: id.into(),
-                            model: None,
-                            account: crate::server::recovery::account(
-                                store,
-                                "codex",
-                                thread.as_str(),
-                            )?,
-                            state: crate::session_recovery::RecoveryState::WaitingNative,
-                            reason: "Reading the rejected turn's native history".into(),
-                            retry_at: None,
-                            request: None,
-                            retry_turn: None,
-                        };
-                        store.with_session_attachment(session, &attachment, || {
-                            store.record_session_recovery(session, &recovery, "reported")
-                        })?;
-                    }
-                }
-            }
+        if let Some(turn) = result["data"].as_array().and_then(|turns| turns.last()) {
+            latest = Some(turn.clone());
         }
         count += result["data"]
             .as_array()
@@ -239,6 +212,36 @@ pub(crate) async fn recover_history(
             return Err(anyhow!("Native history returned a repeated cursor"));
         }
         cursor = next;
+    }
+    // A quota failure earlier in history is not a stalled conversation.
+    // Read every page before deciding whether its latest turn needs recovery.
+    if let Some(attachment) = store.session_attachment(session)? {
+        if let Some(turn) = latest {
+            if turn["status"] == "failed"
+                && turn
+                    .pointer("/error/codexErrorInfo")
+                    .and_then(Value::as_str)
+                    == Some("usageLimitExceeded")
+            {
+                if let Some(id) = turn["id"].as_str() {
+                    let recovery = crate::session_recovery::SessionRecovery {
+                        agent_process_id: attachment.agent_process_id.clone(),
+                        thread: thread.clone(),
+                        failed_turn: id.into(),
+                        model: None,
+                        account: crate::server::recovery::account(store, "codex", thread.as_str())?,
+                        state: crate::session_recovery::RecoveryState::WaitingNative,
+                        reason: "Reading the rejected turn's native history".into(),
+                        retry_at: None,
+                        request: None,
+                        retry_turn: None,
+                    };
+                    store.with_session_attachment(session, &attachment, || {
+                        store.record_session_recovery(session, &recovery, "reported")
+                    })?;
+                }
+            }
+        }
     }
     upstream.close(None).await?;
     Ok(count)
@@ -401,6 +404,71 @@ mod tests {
     use std::time::Duration;
     use tokio::net::{UnixListener, UnixStream};
     use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
+
+    #[tokio::test]
+    async fn recovery_only_reports_the_latest_native_turn() {
+        for failed in [false, true] {
+            let home = tempfile::tempdir_in("/tmp").unwrap();
+            let endpoint = home.path().join("native.sock");
+            let listener = UnixListener::bind(&endpoint).unwrap();
+            let store =
+                crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+            store.test_session("reader", &crate::session_record::new_artifact_key());
+            let process = store.test_lf_process();
+            let attachment = store
+                .claim_session_attachment("reader", None, &process, true)
+                .unwrap();
+            store
+                .record_session_connection(
+                    "reader",
+                    &attachment,
+                    endpoint.to_str().unwrap(),
+                    &"native".into(),
+                )
+                .unwrap();
+            let provider = tokio::spawn(async move {
+                let (socket, _) = listener.accept().await.unwrap();
+                let mut socket = accept_async(socket).await.unwrap();
+                let initialize = receive(&mut socket).await;
+                send(&mut socket, json!({"id":initialize["id"],"result":{}})).await;
+                assert_eq!(receive(&mut socket).await["method"], "initialized");
+                for (id, status, error, next) in [
+                    (
+                        "older",
+                        "failed",
+                        json!({"codexErrorInfo":"usageLimitExceeded"}),
+                        json!("last"),
+                    ),
+                    (
+                        "latest",
+                        if failed { "failed" } else { "completed" },
+                        if failed {
+                            json!({"codexErrorInfo":"usageLimitExceeded"})
+                        } else {
+                            Value::Null
+                        },
+                        Value::Null,
+                    ),
+                ] {
+                    let read = receive(&mut socket).await;
+                    send(&mut socket,json!({"id":read["id"],"result":{"data":[{"id":id,"status":status,"error":error,"items":[],"itemsView":"notLoaded"}],"nextCursor":next}})).await;
+                }
+                let _ = socket.next().await;
+            });
+            assert_eq!(
+                super::recover_history(&store, "reader", &"native".into(), &endpoint)
+                    .await
+                    .unwrap(),
+                2
+            );
+            provider.await.unwrap();
+            let recovery = store.session_recovery("reader").unwrap();
+            assert_eq!(
+                recovery.map(|r| r.failed_turn),
+                failed.then(|| "latest".into())
+            );
+        }
+    }
 
     type Provider = WebSocketStream<UnixStream>;
 

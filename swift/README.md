@@ -268,7 +268,9 @@ menus use the same actions for the clicked Task. Command-T adds a shell tab. The
 failed launch or stale connection. It keeps the provider's history and running
 process; a conversation open elsewhere still offers **Take back**. The control
 stays visible when the Session is the only pane. The same action is available
-through `lf desktop do refresh-session -p session`. A conversation stopped by a usage limit shows its recovery state above the
+through `lf desktop do refresh-session -p session`.
+
+A conversation stopped by a usage limit shows its recovery state above the
 pane: waiting, recovering, continued, or needing review. **Recover affected
 sessions** checks every waiting conversation at once. Desktop requests the check
 and shows the result; drafts and pending approvals stay in the native client.

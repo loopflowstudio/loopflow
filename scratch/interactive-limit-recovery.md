@@ -97,12 +97,20 @@ protocol. None of these fixtures mounts Desktop.
 
 ### Holder adaptation — November 14 (implementation)
 
+Integrated pinned main `114ff621767dea4525c9f89d638f82567ccab33e`, then
+`5fa27860813be006b01212d8bfc703c914388c49`, including #1939's canonical
+Claude capacity readings and #1898's planning repair. Both syncs stayed local.
+
+
 The Machine server owns recovery checks and native side connections; holders
 continue to own PTYs. Native boundaries retain the launch's account selection,
-guard availability and transcript location. They open no new watcher. One server
+guard availability, native home and transcript location. They open no new watcher. One server
 reader schedules recoverable conversations; a single attempt per conversation
 owns admission and broker work. Codex retains its authenticated side connection
-for native refresh callbacks after switching; no process per Session returns.
+for native refresh callbacks after switching. The same connection follows native
+thread changes; a late old-thread login confirmation cannot release its retry.
+The shared reader considers live interactive AgentProcesses, not headless workers.
+No process per Session returns.
 Dispatch remains in Session history, so server restart never resends uncertain
 input. Missing launch metadata waits rather than using the server's account
 restrictions. Credential preparation must finish save-back even after cancellation.
@@ -138,8 +146,18 @@ success from LOO-813 still establish no cause or physical-keyboard repair.
 
 Current focused checks (inherited LF_* unset, closed stdin):
 
-- `cargo test -p loopflow --lib recovery --jobs 4` — 32 passed after distinguishing read-only cancellation reconciliation from resends and restricting a generic native rejection to its actual model; `.lf/tmp/loo-811-reconcile/recovery-tests.log`. Existing large `__eh_frame` linker warning. Latest-main integration will need a fresh focused check.
-- `cargo clippy --all-targets --jobs 4 -- -D warnings` — running; `.lf/tmp/loo-811-reconcile/clippy.log`.
+- `cargo +stable test -p loopflow --lib recovery --jobs 4` — 35 passed on Rust 1.100.0; `.lf/tmp/loo-811-reconcile/final-recovery-tests.log`. Includes paginated latest-turn detection, live-reader restrictions, native thread changes, client-specific native homes, cancellation, late/lost/malformed login replies and model holds. Existing large `__eh_frame` linker warning.
+- `cargo +stable clippy --all-targets --jobs 4 -- -D warnings` — passed on Rust/Clippy 1.100.0; `.lf/tmp/loo-811-reconcile/stable-clippy.log`. Cargo 1.100 separately reports existing unused manifest dependencies `chrono-tz`, `rpassword`, `tokio-stream`; no dependency cleanup is included here.
+- `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter 'sessionRecoveryControlKeepsUncertaintyVisible|sessionEncodingKeepsRequiredNullableTurnFields'` — rebuilt the final helper and Desktop/tests; both headless checks passed. Reconciled the duplicate Session encoder and corrected the fixture-subscript edits exposed by the initial builds. `.lf/tmp/loo-811-reconcile/desktop-test.log`; existing Swift warnings remain.
+- `scripts/check_swift_multiplatform_boundaries.py` — passed. `server describe --json` refreshed the schema fixture against the final helper. `scripts/third_party.py refresh` refreshed the lockfile input hash; `pytest python/tests/test_third_party.py` — 9 passed.
+
+The gate selection reaches the recovery modules, provider-account/auth, native
+hook/context and fact writer, server boundary/wake/recovery, Session projection,
+CLI parsing/mutations, DTO/served reads, and their transport/lifecycle callers.
+Native bulk, held-lock cancellation, approval and continued-input cases need fresh
+receipts on this holder-based implementation; the November 9 passes below are
+not reused for them.
+
 
 November 9 publication, QA and concept-review commands and receipts: `253a13a2580c36539fffabe04f2139e6ebcfa33f:scratch/interactive-limit-recovery.md`, corresponding dated headings. They predate the holder adaptation and require renewed focused checks.
 

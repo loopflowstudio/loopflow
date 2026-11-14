@@ -17,7 +17,7 @@ struct WorkspacePanesTests {
             .appendingPathComponent("tests/fixtures/dto/session.json")
         var wire = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: Any])
         wire["id"] = id
-        wire["recovery": null, "task_primary"] = true
+        wire["task_primary"] = true
         wire["state"] = "unknown"
         wire["workspace"] = ["machine_id": location.machineId, "worktree": location.worktree,
                              "task_id": "task-a", "unavailable": NSNull()]

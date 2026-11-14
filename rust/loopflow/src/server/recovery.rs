@@ -18,6 +18,7 @@ use crate::store::sqlite::SqliteStore;
 pub(crate) struct NativeRecovery {
     pub selection: crate::provider_account::selection::AccountSelection,
     pub guarded: bool,
+    pub claude_home: Option<PathBuf>,
     pub transcript: Option<PathBuf>,
 }
 
@@ -56,9 +57,16 @@ pub(crate) fn record(
 
 fn clients(store: &SqliteStore) -> Result<Vec<Client>> {
     let conn = store.conn.lock().expect("store mutex poisoned");
-    let mut query = conn.prepare("SELECT s.id,p.id,a.capability,s.provider_thread,s.cwd,p.endpoint,p.inbox,e.payload FROM processes p INDEXED BY processes_unfinished JOIN agent_sessions s ON s.agent_process_id=p.id JOIN steer_adapters a ON a.agent_process_id=p.id JOIN session_events e ON e.session_id=s.id AND e.kind='observed' AND e.receipt_key='quota_client:'||p.id||':'||s.provider_thread WHERE p.completed_at IS NULL AND s.interactive=1 AND p.agent_interactive=1")?;
+    let mut query = conn.prepare("SELECT s.id,p.id,a.capability,s.provider_thread,s.cwd,p.endpoint,p.inbox,e.payload,p.pid,p.os_started_at FROM processes p INDEXED BY processes_unfinished JOIN agent_sessions s ON s.agent_process_id=p.id JOIN steer_adapters a ON a.agent_process_id=p.id JOIN session_events e ON e.session_id=s.id AND e.kind='observed' AND e.receipt_key='quota_client:'||p.id||':'||s.provider_thread WHERE p.completed_at IS NULL AND s.interactive=1 AND p.agent_interactive=1")?;
     let rows = query.query_map([], |row| {
-        Ok((
+        let live = row
+            .get::<_, Option<u32>>(8)?
+            .zip(row.get::<_, Option<i64>>(9)?)
+            .is_some_and(|(pid, start)| {
+                crate::journal::process_identity_evidence(pid, start)
+                    == crate::journal::ProcessIdentityEvidence::Live
+            });
+        Ok(live.then_some((
             SteerAdapter {
                 session: row.get(0)?,
                 agent_process_id: row.get(1)?,
@@ -69,20 +77,21 @@ fn clients(store: &SqliteStore) -> Result<Vec<Client>> {
             row.get::<_, Option<String>>(5)?,
             row.get::<_, Option<String>>(6)?,
             row.get::<_, String>(7)?,
-        ))
+        )))
     })?;
-    rows.map(|row| {
-        let (adapter, thread, cwd, endpoint, inbox, native) = row?;
-        Ok(Client {
-            adapter,
-            thread: thread.into(),
-            cwd: cwd.into(),
-            endpoint: endpoint.map(Into::into),
-            inbox: inbox.map(Into::into),
-            native: serde_json::from_str(&native)?,
+    rows.filter_map(Result::transpose)
+        .map(|row| {
+            let (adapter, thread, cwd, endpoint, inbox, native) = row?;
+            Ok(Client {
+                adapter,
+                thread: thread.into(),
+                cwd: cwd.into(),
+                endpoint: endpoint.map(Into::into),
+                inbox: inbox.map(Into::into),
+                native: serde_json::from_str(&native)?,
+            })
         })
-    })
-    .collect()
+        .collect()
 }
 
 pub(crate) fn account(
@@ -195,10 +204,10 @@ pub(super) fn start() {
                 }
             };
             for (store, client) in ready {
-                if jobs.contains_key(&client.adapter.agent_process_id) {
+                let key = client.adapter.agent_process_id.clone();
+                if jobs.contains_key(&key) {
                     continue;
                 }
-                let key = client.adapter.agent_process_id.clone();
                 let ticks = tick.subscribe();
                 jobs.insert(
                     key,
@@ -242,6 +251,15 @@ mod tests {
             .claim_session_attachment("limited", None, &process, true)
             .unwrap();
         let adapter = store.reserve_steer_adapter("limited", &attachment).unwrap();
+        let pid = std::process::id();
+        store
+            .record_agent_process_identity(
+                "limited",
+                &attachment,
+                pid,
+                crate::journal::process_started_at(pid).unwrap().unwrap(),
+            )
+            .unwrap();
         store
             .record_session_connection("limited", &attachment, "native.sock", &"native".into())
             .unwrap();
@@ -267,6 +285,7 @@ mod tests {
         let native = NativeRecovery {
             selection: selection.clone(),
             guarded: true,
+            claude_home: Some(home.path().join("native-claude")),
             transcript: None,
         };
         let callback = json!({"lf_recovery":native});
@@ -291,6 +310,10 @@ mod tests {
         let retained = clients(&reopened).unwrap();
         assert_eq!(retained.len(), 1);
         assert_eq!(retained[0].native.selection, selection);
+        assert_eq!(
+            retained[0].native.claude_home,
+            Some(home.path().join("native-claude"))
+        );
         assert_eq!(
             retained[0].adapter.agent_process_id,
             attachment.agent_process_id

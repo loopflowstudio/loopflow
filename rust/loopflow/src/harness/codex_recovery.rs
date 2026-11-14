@@ -22,6 +22,8 @@ use futures_util::StreamExt;
 struct Connection {
     client: Client,
     route: Option<provider_account::ProviderAccountRoute>,
+    resume_request: Option<Value>,
+    installed: bool,
     pin_pending: bool,
     failure: crate::store::RecordingGap,
     store: SqliteStore,
@@ -33,7 +35,7 @@ struct Connection {
 pub(crate) async fn run(
     store: SqliteStore,
     client: Client,
-    mut ticks: tokio::sync::watch::Receiver<u64>,
+    ticks: tokio::sync::watch::Receiver<u64>,
 ) -> Result<()> {
     store.with_provider_context(
         &client.adapter,
@@ -71,6 +73,8 @@ pub(crate) async fn run(
     let mut connection = Connection {
         client,
         route,
+        resume_request: None,
+        installed: false,
         pin_pending: false,
         failure: Default::default(),
         store,
@@ -78,49 +82,7 @@ pub(crate) async fn run(
         busy,
         recovery: Default::default(),
     };
-    let (mut writer, mut reader) = upstream.split();
-    connection.recovery_tick(&mut writer).await?;
-    loop {
-        tokio::select! {
-            changed = ticks.changed() => {
-                if changed.is_err() { break; }
-                let current = connection.store.with_provider_context(&connection.client.adapter,connection.client.thread.as_str(),crate::steer::NativeBoundary::Turn, || Ok(()));
-                if matches!(current, Err(crate::store::StoreError::InvalidAuthority(_))) { break; }
-                match connection.recovery_tick(&mut writer).await {
-                    Ok(()) => connection.failure.recovered(),
-                    Err(error) => connection.failure.note("Codex recovery", &error),
-                }
-            }
-            message = reader.next() => {
-                let Some(message) = message else { break };
-                let Message::Text(text) = message? else { continue };
-                let rpc: Value = serde_json::from_str(&text)?;
-                let ours = rpc["params"]["threadId"].as_str() == Some(connection.client.thread.as_str());
-                if ours && rpc["method"] == "turn/started" { connection.busy = true; }
-                if ours && rpc["method"] == "turn/completed" { connection.busy = false; }
-                if let Err(error) = connection.history.inbound(&rpc, Some(&connection.client.thread)).await.1 {
-                    connection.failure.note("Codex recovery history", &error);
-                }
-                if let Err(error) = connection.recovery_message(&rpc,&mut writer).await {
-                    connection.failure.note("Codex recovery", &error);
-                }
-            }
-        }
-        // Once no native login was installed, a settled attempt has no connection to retain.
-        let Ok(retained) = connection
-            .store
-            .session_recovery(&connection.client.adapter.session)
-        else {
-            continue;
-        };
-        if retained.is_none_or(|r| !r.can_retry() && r.request.is_none())
-            && connection.recovery.installing.is_none()
-            && connection.recovery.preparing.is_none()
-        {
-            break;
-        }
-    }
-    Ok(())
+    connection.serve(upstream, ticks).await
 }
 
 #[derive(Debug)]
@@ -219,6 +181,121 @@ fn prepare(
 }
 
 impl Connection {
+    async fn serve(
+        &mut self,
+        upstream: Upstream,
+        mut ticks: tokio::sync::watch::Receiver<u64>,
+    ) -> Result<()> {
+        let (mut writer, mut reader) = upstream.split();
+        self.recovery_tick(&mut writer).await?;
+        loop {
+            tokio::select! {
+                changed = ticks.changed() => {
+                    if changed.is_err() { break; }
+                    let current = self.store.with_provider_context(&self.client.adapter,self.client.thread.as_str(),crate::steer::NativeBoundary::Turn, || Ok(()));
+                    if matches!(current, Err(crate::store::StoreError::InvalidAuthority(_))) {
+                        if self.follow_selected(&mut writer).await? { continue; }
+                        // Replacement retires retry authority. A confirmed login
+                        // still owns callbacks until its native socket ends.
+                        if self.installed || self.recovery.installing.is_some() { continue; }
+                        break;
+                    }
+                    match self.recovery_tick(&mut writer).await {
+                        Ok(()) => self.failure.recovered(),
+                        Err(error) => self.failure.note("Codex recovery", &error),
+                    }
+                }
+                message = reader.next() => {
+                    let Some(message) = message else { break };
+                    let text = match message? {
+                        Message::Text(text) => text,
+                        Message::Close(_) => break,
+                        _ => continue,
+                    };
+                    let rpc: Value = serde_json::from_str(&text)?;
+                    if self.resume_request.is_some() && rpc.get("id") == self.resume_request.as_ref() {
+                        self.resume_request = None;
+                        // A failed subscription is no license to send: later turn
+                        // boundaries can report the selected conversation again.
+                        self.busy = rpc.get("error").is_some() || rpc.pointer("/result/thread/status/type").and_then(Value::as_str) == Some("active");
+                    }
+                    let ours = rpc["params"]["threadId"].as_str() == Some(self.client.thread.as_str());
+                    if ours && rpc["method"] == "turn/started" { self.busy = true; }
+                    if ours && rpc["method"] == "turn/completed" { self.busy = false; }
+                    if let Err(error) = self.history.inbound(&rpc, Some(&self.client.thread)).await.1 {
+                        self.failure.note("Codex recovery history", &error);
+                    }
+                    if let Err(error) = self.recovery_message(&rpc,&mut writer).await {
+                        self.failure.note("Codex recovery", &error);
+                    }
+                }
+            }
+            // Once no native login was installed, a settled attempt has no connection to retain.
+            let Ok(retained) = self.store.session_recovery(&self.client.adapter.session) else {
+                continue;
+            };
+            if !self.installed
+                && retained.is_none_or(|r| !r.can_retry() && r.request.is_none())
+                && self.recovery.installing.is_none()
+                && self.recovery.preparing.is_none()
+            {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    async fn follow_selected(&mut self, writer: &mut SplitSink<Upstream, Message>) -> Result<bool> {
+        let current = self
+            .store
+            .session_attachment(&self.client.adapter.session)?;
+        if current
+            .is_none_or(|current| current.agent_process_id != self.client.adapter.agent_process_id)
+        {
+            return Ok(false);
+        }
+        let Some((endpoint, thread)) = self
+            .store
+            .session_connection(&self.client.adapter.session)?
+        else {
+            return Ok(false);
+        };
+        if self
+            .client
+            .endpoint
+            .as_ref()
+            .is_none_or(|path| path != std::path::Path::new(&endpoint))
+            || thread == self.client.thread
+        {
+            return Ok(false);
+        }
+        self.client.thread = thread;
+        if let Some(session) = self.store.session(&self.client.adapter.session)? {
+            self.client.cwd = session.cwd;
+        }
+        self.busy = true;
+        self.pin_pending = self.route.is_some();
+        self.recovery.pending = None;
+        self.recovery.check_at = SystemTime::UNIX_EPOCH;
+        self.history = CodexStream::new(FactWriter::new(
+            self.store.clone(),
+            self.client.adapter.session.clone(),
+            None,
+            self.route.clone(),
+            Default::default(),
+        ));
+        let id = json!(format!("lf-follow-{}", uuid::Uuid::new_v4()));
+        writer
+            .send(Message::Text(
+                json!({"id":id,"method":"thread/resume","params":{"threadId":self.client.thread}})
+                    .to_string()
+                    .into(),
+            ))
+            .await?;
+        self.resume_request = Some(id);
+        Ok(true)
+    }
+
     async fn pin_route(&mut self) {
         if !self.pin_pending {
             return;
@@ -261,10 +338,11 @@ impl Connection {
             // Native identity advances before best-effort recording. A store
             // gap cannot leave token callbacks refreshing the displaced login.
             self.route = Some(prepared.route.clone());
+            self.installed = true;
             self.pin_pending = true;
             self.history.writer.set_route(prepared.route);
             self.pin_route().await;
-            if prepared.admission.check().is_err() {
+            if recovery.thread != self.client.thread || prepared.admission.check().is_err() {
                 recovery.state = RecoveryState::Uncertain;
                 recovery.reason = "The login changed but native retry admission ended; continue from the conversation".into();
                 self.save_recovery(&recovery, "unconfirmed")?;
@@ -612,7 +690,7 @@ impl Connection {
             if previous.request.is_some() {
                 return Ok(());
             }
-            recovery.account = previous.account.clone();
+            recovery.account = previous.account.clone().or(recovery.account);
         }
         let Some(account) = recovery.account.clone() else {
             recovery.reason = "This Session has no managed login to recover".into();
@@ -709,11 +787,25 @@ async fn recovery_fixture(home: &std::path::Path) -> (SqliteStore, Connection) {
     let attachment = store
         .claim_session_attachment("conversation", None, &process, true)
         .unwrap();
+    let pid = std::process::id();
+    store
+        .record_agent_process_identity(
+            "conversation",
+            &attachment,
+            pid,
+            crate::journal::process_started_at(pid).unwrap().unwrap(),
+        )
+        .unwrap();
     let adapter = store
         .reserve_steer_adapter("conversation", &attachment)
         .unwrap();
     store
-        .record_session_connection("conversation", &attachment, "fixture", &"thread".into())
+        .record_session_connection(
+            "conversation",
+            &attachment,
+            home.join("native.sock").to_str().unwrap(),
+            &"thread".into(),
+        )
         .unwrap();
     let client = Client {
         adapter,
@@ -724,6 +816,7 @@ async fn recovery_fixture(home: &std::path::Path) -> (SqliteStore, Connection) {
         native: crate::server::recovery::NativeRecovery {
             selection: Default::default(),
             guarded: true,
+            claude_home: None,
             transcript: None,
         },
     };
@@ -739,6 +832,8 @@ async fn recovery_fixture(home: &std::path::Path) -> (SqliteStore, Connection) {
         Connection {
             client,
             route: None,
+            resume_request: None,
+            installed: false,
             pin_pending: false,
             failure: Default::default(),
             store,
@@ -763,6 +858,51 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
     use tokio_tungstenite::{tungstenite::protocol::Role, WebSocketStream};
+
+    #[tokio::test]
+    async fn recovery_keeps_login_callbacks_after_a_native_thread_change() {
+        let home = tempfile::tempdir().unwrap();
+        let (store, mut connection) = recovery_fixture(home.path()).await;
+        // The previous case covers native confirmation and credential routing;
+        // here the installed connection must keep answering native callbacks.
+        connection.installed = true;
+        store
+            .with_provider_context(
+                &connection.client.adapter,
+                "new-thread",
+                crate::steer::NativeBoundary::Select { source: "clear" },
+                || Ok(()),
+            )
+            .unwrap();
+        let (client, server) = tokio::net::UnixStream::pair().unwrap();
+        let upstream = WebSocketStream::from_raw_socket(client, Role::Client, None).await;
+        let mut native = WebSocketStream::from_raw_socket(server, Role::Server, None).await;
+        let (tick, ticks) = tokio::sync::watch::channel(0);
+        let task = tokio::spawn(async move { connection.serve(upstream, ticks).await });
+        tick.send(1).unwrap();
+        let follow = tokio::time::timeout(Duration::from_secs(2), native.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let follow: Value = serde_json::from_str(follow.to_text().unwrap()).unwrap();
+        assert_eq!(follow["method"], "thread/resume");
+        assert_eq!(follow["params"]["threadId"], "new-thread");
+        futures_util::SinkExt::send(&mut native,tokio_tungstenite::tungstenite::Message::Text(json!({"id":follow["id"],"result":{"thread":{"id":"new-thread","status":{"type":"idle"}}}}).to_string().into())).await.unwrap();
+        for id in ["refresh-1", "refresh-2"] {
+            futures_util::SinkExt::send(&mut native,tokio_tungstenite::tungstenite::Message::Text(json!({"id":id,"method":"account/chatgptAuthTokens/refresh","params":{"previousAccountId":"fixture"}}).to_string().into())).await.unwrap();
+            let message = tokio::time::timeout(Duration::from_secs(2), native.next())
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            let reply: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
+            assert_eq!(reply["id"], id, "native callback lost after /new");
+        }
+        native.close(None).await.unwrap();
+        drop(native);
+        task.await.unwrap().unwrap();
+    }
 
     #[tokio::test]
     async fn cancelled_installation_retains_late_or_lost_reply_without_releasing_retry() {

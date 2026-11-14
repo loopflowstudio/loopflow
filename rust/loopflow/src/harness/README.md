@@ -105,7 +105,8 @@ in Session history. Complete native history can establish rejection before work,
 but cannot reserve the next input position. Previously dispatched attempts keep
 their fixed receipt; unknown delivery cannot be retried by reconnection or a
 Desktop request. Recovery dispatches only when the client has its native
-submission guard.
+submission guard. Hooks retain the client's account restrictions and native home;
+credential work uses that home rather than the Machine server's environment.
 
 The projection folds each failed turn's dispatch and correlated result; a late
 wait cannot replace them or hide a subsequent rejection. Checking again cannot

@@ -531,7 +531,7 @@ or change a route. No CLI command is needed.
 | The row says | What it means | What to do |
 |---|---|---|
 | **Waiting for capacity** | No eligible login has room for this model. The reset time shows when the provider gave one. | Wait, or [connect a login or change the route](subscriptions.md#route-a-repository), then **Recover affected sessions**. |
-| **Waiting for native conversation** | The open client cannot take the retry yet. The line below says why: it was opened by an older `lf`, it has not reported its model, or the chosen login could not be prepared. | For an older client, send your next message yourself; Loopflow does not restart it. Otherwise **Recover affected sessions** checks again. |
+| **Waiting for native conversation** | The open client cannot take the retry yet. The line below says why: it was opened by an older `lf`, it has not reported its model or native home, or the chosen login could not be prepared. | For an older client, send your next message yourself; Loopflow does not restart it. Otherwise **Recover affected sessions** checks again. |
 | **Recovering** | The stopped turn is being sent again, or is running. | Nothing. Checking again does not send it twice. |
 | **Continued** | The retried turn finished. | Carry on. |
 | **Review conversation** | Loopflow cannot tell whether the stopped turn reached the provider, or a tool may already have acted. It also appears when a switch was cancelled or timed out partway. | Read the end of the conversation and continue from what happened. Nothing is resent for you. |

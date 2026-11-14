@@ -10672,7 +10672,7 @@
             },
             "callback": {
               "$ref": "#/$defs/Untyped",
-              "description": "The JSON the provider sent the hook, unchanged."
+              "description": "The provider callback, with the hook's launch recovery metadata when available."
             },
             "delivery": {
               "description": "The Session's context delivery file.",
@@ -11458,19 +11458,6 @@
       ],
       "type": "object"
     },
-    "SessionStarted": {
-      "additionalProperties": false,
-      "description": "What `session.start` answers.",
-      "properties": {
-        "terminal_id": {
-          "$ref": "#/$defs/TerminalId"
-        }
-      },
-      "required": [
-        "terminal_id"
-      ],
-      "type": "object"
-    },
     "SessionRecovery": {
       "properties": {
         "account": {
@@ -11532,6 +11519,19 @@
         "retry_at",
         "request",
         "retry_turn"
+      ],
+      "type": "object"
+    },
+    "SessionStarted": {
+      "additionalProperties": false,
+      "description": "What `session.start` answers.",
+      "properties": {
+        "terminal_id": {
+          "$ref": "#/$defs/TerminalId"
+        }
+      },
+      "required": [
+        "terminal_id"
       ],
       "type": "object"
     },

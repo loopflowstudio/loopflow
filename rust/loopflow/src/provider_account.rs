@@ -763,6 +763,7 @@ impl ProviderAccountRoute {
     /// admission closes; each later native write checks the admission again.
     pub(crate) async fn activate_recovery(
         &self,
+        native: &Path,
         admitted: &(dyn Fn() -> Result<(), ProviderAccountError> + Sync),
     ) -> Result<Option<fs::File>, ProviderAccountError> {
         let AccountLogin::Stored { store, cause, .. } = &self.login else {
@@ -774,7 +775,7 @@ impl ProviderAccountRoute {
             store,
             self.provider,
             &self.account_id,
-            &activation::native_home(self.provider, None),
+            native,
             *cause,
             admitted,
         )
@@ -4004,6 +4005,30 @@ mod account_first_tests {
 
         assert!(error.to_string().contains("cli_auth_credentials_store"));
         assert_eq!(codex_login(&native), "first@example.com");
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn recovery_uses_the_clients_native_home_instead_of_the_servers() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&SHARED_ENV);
+        let (store, native) = shared_home(Provider::Claude, temp.path(), "first").await;
+        let ambient = temp.path().join("server-native");
+        fs::create_dir(&ambient).unwrap();
+        let original = claude_credential(&native);
+        fs::write(ambient.join(".credentials.json"), &original).unwrap();
+        std::env::set_var("CLAUDE_CONFIG_DIR", &ambient);
+        let route = ProviderAccountRoute::shared(
+            Provider::Claude,
+            parse_account_id("second").unwrap(),
+            store,
+            temp.path().join("second"),
+            false,
+        );
+        let _guard = route.activate_recovery(&native, &|| Ok(())).await.unwrap();
+        assert!(claude_credential(&native).contains("fixture-second"));
+        assert_eq!(claude_credential(&ambient), original);
     }
 
     #[allow(clippy::await_holding_lock)]

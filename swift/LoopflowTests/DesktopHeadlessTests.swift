@@ -598,7 +598,7 @@ struct DesktopHeadlessTests {
             value["id"] = id
             value["state"] = state
             value["availability"] = available ? "available" : NSNull()
-            value["recovery": NSNull(), "task_primary"] = primary
+            value["task_primary"] = primary
             return try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
         }
         let groups = TaskSessionGroups([

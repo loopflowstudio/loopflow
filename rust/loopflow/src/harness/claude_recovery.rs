@@ -9,7 +9,7 @@ use anyhow::Result;
 use serde_json::{json, Value};
 
 use super::recovery_gate::{read_transcript, RecoveryGate};
-use crate::provider_account::{self, LaunchCapacity, ProviderAccountRoute};
+use crate::provider_account::{self, ProviderAccountRoute};
 use crate::provider_auth::Provider;
 use crate::server::recovery::Client;
 use crate::session_recovery::{claude_rejected_model, RecoveryState, SessionRecovery};
@@ -36,8 +36,17 @@ pub(crate) fn boundary(
             crate::server::recovery::account(store, "codex", thread)
                 .map_err(|error| StoreError::InvalidData(error.to_string()))?
         } else {
-            LaunchCapacity::read(store)?
-                .login("claude", None, true)
+            let accounts = store.list_provider_accounts(Some("claude"))?;
+            input
+                .pointer("/lf_recovery/claude_home")
+                .and_then(Value::as_str)
+                .and_then(|home| {
+                    provider_account::activation::active_account(
+                        Provider::Claude,
+                        Path::new(home),
+                        &accounts,
+                    )
+                })
                 .map(|account| account.account_id.clone())
         }
     } else {
@@ -172,13 +181,13 @@ fn check_capacity(store: &SqliteStore, client: &Client, rows: &[Value]) -> Resul
     });
     recovery.retry_at = None;
     let phase = match route {
-        Ok(Some(route)) if client.native.guarded => {
+        Ok(Some(route)) if client.native.guarded && client.native.claude_home.is_some() => {
             return dispatch_recovery(store, client, recovery, &route, &runtime);
         }
         Ok(Some(_)) => {
             recovery.state = RecoveryState::WaitingNative;
             recovery.reason =
-                "This open Claude has no native recovery guard; continue from the conversation"
+                "This open Claude has no native recovery guard or native home; continue from the conversation"
                     .into();
             "admission"
         }
@@ -282,7 +291,12 @@ fn dispatch_recovery(
             admission.check()?;
             std::thread::sleep(Duration::from_millis(100));
         }
-        let guard = runtime.block_on(route.activate_recovery(&|| {
+        let native = client
+            .native
+            .claude_home
+            .as_ref()
+            .expect("checked native home");
+        let guard = runtime.block_on(route.activate_recovery(native, &|| {
             admission
                 .check()
                 .map_err(|error| provider_account::ProviderAccountError::Runtime(error.to_string()))
@@ -425,6 +439,7 @@ mod tests {
             native: NativeRecovery {
                 selection: Default::default(),
                 guarded: false,
+                claude_home: None,
                 transcript: Some(path),
             },
         };

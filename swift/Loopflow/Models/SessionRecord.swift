@@ -411,6 +411,7 @@ public struct SessionPage: Codable, Sendable, Hashable {
 extension SessionRecord {
     public func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(recovery, forKey: .recovery)
         try values.encode(transition, forKey: .transition)
         try values.encode(preview, forKey: .preview)
         try values.encode(primaryScope, forKey: .primaryScope)
@@ -478,38 +479,7 @@ extension SessionRecord {
         raw = try values.decode(Bool.self, forKey: .raw)
     }
 
-    public func encode(to encoder: Encoder) throws {
-        var values = encoder.container(keyedBy: CodingKeys.self)
-        try values.encode(recovery, forKey: .recovery)
-        try values.encode(transition, forKey: .transition)
-        try values.encode(preview, forKey: .preview)
-        try values.encode(primaryScope, forKey: .primaryScope)
-        try values.encode(availability, forKey: .availability)
-        try values.encode(programStatus, forKey: .programStatus)
-        try values.encode(agentProcessId, forKey: .agentProcessId)
-        try values.encode(taskPrimary, forKey: .taskPrimary)
-        try values.encode(taskIds, forKey: .taskIds)
-        try values.encode(id, forKey: .id)
-        try values.encode(interactive, forKey: .interactive)
-        try values.encode(work, forKey: .work)
-        try values.encode(workspace, forKey: .workspace)
-        try values.encode(waveId, forKey: .waveId)
-        try values.encode(workPath, forKey: .workPath)
-        try values.encode(actions, forKey: .actions)
-        try values.encode(title, forKey: .title)
-        try values.encode(titleSource, forKey: .titleSource)
-        try values.encode(graphMembership, forKey: .graphMembership)
-        try values.encode(detail, forKey: .detail)
-        try values.encode(provider, forKey: .provider)
-        try values.encode(account, forKey: .account)
-        try values.encode(model, forKey: .model)
-        try values.encode(blocked, forKey: .blocked)
-        try values.encode(cwd, forKey: .cwd)
-        try values.encode(state, forKey: .state)
-        try values.encode(readySummary, forKey: .readySummary)
-        try values.encode(openArgv, forKey: .openArgv)
-        try values.encode(terminalIds, forKey: .terminalIds)
-    }
+
 }
 
 public struct SessionRecovery: Codable, Sendable, Hashable {

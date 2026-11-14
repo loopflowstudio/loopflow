@@ -42,7 +42,7 @@ No child worktree. Removing the hook and retrying stacked cleanly.</td><td class
 <tr><td>10</td><td>Parent placed, then its worktree and branch deleted; stack on it</td>
 <td><pre>Error: stack parent b84160's branch qa/b84160-gone-parent is neither local nor on origin</pre></td><td class="ok">ok</td></tr>
 <tr><td>11</td><td>Re-stack child 4b3cb9 (stacked on 58af83, holding <code>parent.txt</code>) onto a different parent 58858f, then <code>lf sync</code></td>
-<td>Accepted; sync merge commit <b>deleted <code>parent.txt</code></b> from the child. The merge used the recorded fork (old parent's tip) as comparison base, so the new parent's lack of the file reads as a deletion.</td><td class="note">pre-existing</td></tr>
+<td>Accepted; sync merge commit <b>deleted <code>parent.txt</code></b> from the child. The merge used the recorded fork (old parent's tip) as comparison base, so the new parent's lack of the file reads as a deletion. <b>Fixed</b> below; not rerun as a QA scenario.</td><td class="note">fixed</td></tr>
 </table>
 
 <h2>Fixed</h2>
@@ -52,11 +52,12 @@ It now reads:</p>
 <p><code>rust/loopflow/src/ops/task.rs</code> note text and the matching assertion in <code>sync_tests.rs</code>.
 <code>cargo test -p loopflow --test integration -- sync_tests::stacking_</code>: 2 passed. <code>cargo fmt --check</code>, <code>git diff --check</code>: clean.</p>
 
+<p>Scenario 11: re-stacking onto a different parent now records HEAD's merge-base with the new parent's upstream as <code>base_commit</code>
+(<code>stack_existing_task</code>), so sync keeps the old parent's files as child content. Covered by
+<code>sync_tests::stacking_on_a_different_parent_keeps_inherited_files_on_sync</code>.</p>
+
 <h2>Still wrong, worst first</h2>
 <ol>
-<li><b>Re-parenting drops the old parent's files on sync</b> (scenario 11). Same flow on <code>origin/main</code>
-(<code>stack_existing_task</code> → <code>stack_task_placement</code> leaves <code>base_commit</code>); this branch makes it reachable
-with unpublished parents. Not fixed here: whether re-parenting should rebase the fork point or refuse is a product call.</li>
 <li><code>lf sync</code>'s checkpoint commit in a child added <code>.lf/prompts/</code> to <code>.gitignore</code> — expected housekeeping, but it lands as a child commit.</li>
 </ol>
 

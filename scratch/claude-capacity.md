@@ -221,8 +221,8 @@ unspecified.
 `cooldown_until`/`cooldown_reason` and `limited_until` on every limit row of
 the account, and advances `capacity_revision`. Readings (`used_percent`,
 `resets_at`, `observed_at`) stay. The message names what was released:
-"Cleared Claude login '…' account-wide cooldown and holds for fable until …",
-or "… has no active cooldown or window hold". The "observed windows still hold
+"Cleared cooldowns on Claude login '…': account-wide until …; for fable until …",
+or "… has no active cooldown". The "observed windows still hold
 it" branch goes: nothing holds after a clear.
 
 Clap help and `docs/subscriptions.md` say the same thing: it releases recorded
@@ -264,6 +264,8 @@ rejection that finds a window spent holds it again.
   half of `claude_usage_reconciliation_explains_overlapping_and_cleared_holds`
   that expects holds to remain after a clear.
 - `row_lines` / `render_table` reading `window.limited_until` directly.
+- `AccountLaunch.held_until`, unconditional healthy table launch lines, per-model
+  copies of login-wide blockers, and the separate eligibility predicate.
 - The docs sentence "Clearing cooldown retains … every observed window. The
   command reports any window holds that remain".
 
@@ -286,79 +288,17 @@ hold clearing, model-specific account reports and `next -a`. The shared
 `account.next` read carries a required nullable `agent`; Swift encodes it and
 its CLI argv too. No schema migration or live-row edits.
 
-The clear message currently uses the common hold formatter; item 1 of the
-concept review changes its wording.
 A paused or signed-out login still cannot route after clearing capacity holds.
 
-Remaining, in order:
+The concept review's four changes are implemented: `launches[].out_until`,
+unavailable-only table lines, shared login blockers and Codex wording, and
+eligibility derived from the common blocker list. Cooldown messages, DTO
+fixtures and docs follow those names. The review direction is retained at
+`55230a302574753a38d5781e6f368426ed504d10:scratch/claude-capacity.md`.
 
-1. The four items under "Next implement direction" below. None is in the code
-   at 784b221e13: `AccountLaunch.held_until` (`account_status.rs`), its
-   fixtures (`server_schema.json`) and `docs/subscriptions.md` still say
-   `held_until`; the table's `launches:` line (`render_table`, from
-   `launch_summary`) prints under every managed login; `launch_summary` repeats
-   a login-wide blocker per model and names Codex "launch out until";
-   `eligible` is `account_route_eligible(..) && identity` beside a separately
-   built blocker list, and `account_unavailable_reason` keeps its
-   "is unavailable" fallback; the clear says "Cleared … holds …" and
-   "has no active cooldown or window hold" (`account.rs::clear_account_cooldown`
-   and its test `claude_usage_reconciliation_explains_overlapping_and_cleared_holds`).
-2. Gate's boundary checks and the installed workflow below after delivery.
-
+Remaining: gate boundary checks and the installed workflow below after delivery.
 Historical writer retirement still needs a separate decision before removing
 the classifier.
-
-## Next implement direction (concept review, 2026-11-14)
-
-The three slices hold up: one classifier, one clear, one eligibility check.
-What's left is in how the answer is said. No code changed in the review.
-
-1. **One word for "can't launch until": `out`.** `AccountRow.held` already
-   means "pinned by `lf account use`", and the table prints that mark as
-   `held` on the line above `launches:`. A second `held_until` on the same row
-   means something else. Rename `launches[].held_until` to `out_until`, the
-   word the text already prints ("fable out until Wed 04:00"). The clear
-   command talks about cooldowns, the word in its flag and in the blockers
-   ("cooling for fable until …"):
-   - `Cleared cooldowns on Claude login '…': account-wide until …; for fable until …`
-   - `Claude login '…' has no active cooldown`
-   - docs: "`--clear-cooldown` releases every cooldown recorded against the
-     login: the account-wide one and each model's."
-   Prose that says a limit "holds back" a model stays; only the field and the
-   clear wording change. Fixtures, `server_schema.json` and the docs' `jq`
-   example follow.
-
-2. **`lf account` (the table) lists only what is out.** It now prints
-   `launches: fable, opus, sonnet, haiku` under every healthy login, doubling
-   the table. Before this change a second line appeared only for a login with
-   something out, and the docs still say "one row per login, then a line per
-   thing to fix". The table prints the line only when an entry is not
-   eligible, and only those entries (`fable out until Wed 04:00`). The full
-   `launches:` line belongs to `lf account <login|provider>`.
-
-3. **A login-wide blocker is said once.** A signed-out or paused login reads
-   `fable: credential is missing · opus: credential is missing · sonnet: … ·
-   haiku: …`. When every entry is blocked by the same non-capacity blocker,
-   the line is `launches: none · credential is missing` (or `routing is
-   explicit_only`), followed by any per-model `out until`. A Codex login reads
-   `launches: ready` or `launches: out until …`, not "launch out until".
-
-4. **`eligible` is `blockers.is_empty()`.** Credential, routing, capacity and
-   identity are the whole of both, so the two cannot differ today; compute
-   `eligible` from the blocker list built in `provider_account` so they cannot
-   differ later, and drop the unreachable "is unavailable" fallback in
-   `account_unavailable_reason` if nothing else reaches it. A test asserts
-   `account_route_eligible == account_launch_blockers(..).is_empty()` across
-   missing credential, paused, account-wide and model cooldowns.
-
-Left as is: `launch_summary` separating capacity blockers by their "cooling "
-prefix is string-matching its own output; acceptable while `out_until` carries
-the time, and gone if blockers ever become structured.
-
-Not decided by this design, taken as assumptions in `questions.md`: whether
-plain `lf account next` should check the configured default agent's model
-(LOO-900 kept it model-unspecified), and whether `--clear-cooldown` should
-spare account-wide polled windows.
 
 ## Acceptance check at gate
 
@@ -417,10 +357,8 @@ ordinary refresh):
 
 ## Local checks (2026-11-14)
 
-- `cargo build -p loopflow --bin lf` — passed; isolated candidate `account next -a claude:fable --json` reports Claude model `fable` and Codex model null.
-- `cargo nextest run -p loopflow --lib -E 'test(claude_capacity_) | test(claude_usage_reconciliation_) | test(lf::commands::account::account_status::tests::) | test(lf::commands::profile::tests::) | test(engine::account::tests::) | test(server::schema::tests::) | test(store::query_plans::tests::)'` — 43 passed.
-- `cargo clippy --all-targets -- -D warnings` — passed.
+- `cargo nextest run -p loopflow --lib -E 'test(claude_capacity_) | test(lf::commands::account::account_status::tests::) | test(claude_usage_reconciliation_explains_overlapping_and_cleared_holds) | test(server::schema::tests::)'` — 18 passed after the concept review changes; macOS linker warned about the test binary's large unwind section.
+- `cargo clippy --all-targets -- -D warnings` — passed after the concept review changes.
 - `cargo fmt --check` and `git diff --check` — passed.
+- Earlier CLI, routing, store, parser and Swift protocol checks are recorded at `55230a302574753a38d5781e6f368426ed504d10:scratch/claude-capacity.md`; unchanged Swift request encoding remains covered by its 20 passing protocol tests.
 - Gate: `documented_commands::`, `served_reads::account_holds_and_rotation_use_the_same_machine_state_as_the_cli`, remaining Swift/iOS and website boundaries; CI owns the suites. Installed workflow stays with verify after delivery.
-- `scripts/test_desktop.sh --filter ServerProtocolTests` — 20 passed, including non-null model argv and request encoding.
-- `cargo nextest run -p loopflow --lib -E 'test(lf::tests::) | test(lf::commands::read::tests::desktop_encodings_name_their_reads) | test(lf::commands::account::account_status::tests::account_report_fixture_preserves_missingness_and_readable_widths)'` — 46 passed, including the corrected fixture and non-null model encoding.

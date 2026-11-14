@@ -170,10 +170,12 @@ time its hold ends. It is the same check routing runs, so a login that reads
 `fable` here takes a `claude:fable` launch, and one that reads `fable out
 until Wed 04:00` is skipped until then. The usage windows below it are
 readings; `launches` is the verdict. A login that needs a login, or is paused,
-says so on this line in place of a time.
+says `launches: none · credential is missing` or names its routing state once,
+followed by any model cooldowns. Codex says `launches: ready` or
+`launches: out until <time>`.
 
-`lf account` shows one row per login, then a line per thing to fix with the
-command that fixes it. Naming a login shows that login alone: its auth, plan,
+`lf account` lists only unavailable models beneath each login, then things to
+fix with their commands. Naming a login shows that login alone: its auth, plan,
 each usage window with its age and source, and the browser profiles it
 connects through. Naming a provider shows stable account IDs beside full
 logins for every login. Codex rows show the credential's observed login, and report mismatches
@@ -209,16 +211,16 @@ does not imply successful authentication.
 `launches` has one entry per model a managed login can be asked for: each
 Claude family, and `model: null` for a launch that names no model, which every
 hold on the login blocks. A Codex login has the `null` entry alone, and local
-credentials have an empty list. Each entry carries `eligible`, `held_until`
+credentials have an empty list. Each entry carries `eligible`, `out_until`
 (null when nothing with a known end holds it) and `blockers`, the same
 sentences a refused launch prints:
 
 ```bash
 lf account claude --json |
   jq -r '.accounts[] | select(.scope == "managed") | .login as $l
-         | .launches[] | select(.model == "fable") | "\($l) \(.eligible) \(.blockers | join("; "))"'
-# personal@example.com true
-# work@example.com false cooling for fable until 2026-11-18T12:00:05Z
+         | .launches[] | select(.model == "fable") | "\($l) \(.eligible) \(.out_until) \(.blockers | join("; "))"'
+# personal@example.com true null
+# work@example.com false 1795003205 cooling for fable until 2026-11-18T12:00:05Z
 ```
 
 Cron-host requires accepted managed evidence:
@@ -309,15 +311,15 @@ once, and every open Claude follows; with no other login, it stays and says
 so. Once `paid-through` passes, an otherwise automatic login behaves as paused
 until the date is cleared.
 
-`--clear-cooldown` releases every hold recorded against the login: its
-account-wide cooldown and each window's hold, whatever model it is for. The
-login can route again at once if its credential and routing state allow it.
+`--clear-cooldown` releases every cooldown recorded against the
+login: the account-wide one and each model's. The login can route again at
+once if its credential and routing state allow it.
 
 ```
 $ lf account set work@ --clear-cooldown
-Cleared Claude login 'work@example.com' holds account-wide until 2026-11-18T12:00:00Z; for fable until 2026-11-18T12:00:05Z
+Cleared cooldowns on Claude login 'work@example.com': account-wide until 2026-11-18T12:00:00Z; for fable until 2026-11-18T12:00:05Z
 $ lf account set work@ --clear-cooldown
-Claude login 'work@example.com' has no active cooldown or window hold
+Claude login 'work@example.com' has no active cooldown
 ```
 
 Readings stay: each window keeps its percent used, reset time and age, and the

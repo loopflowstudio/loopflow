@@ -78,16 +78,16 @@
         "eligible": {
           "type": "boolean"
         },
-        "held_until": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
         "model": {
           "type": [
             "string",
+            "null"
+          ]
+        },
+        "out_until": {
+          "format": "int64",
+          "type": [
+            "integer",
             "null"
           ]
         }
@@ -95,7 +95,7 @@
       "required": [
         "model",
         "eligible",
-        "held_until",
+        "out_until",
         "blockers"
       ],
       "type": "object"
@@ -8781,32 +8781,32 @@
                   {
                     "blockers": [],
                     "eligible": true,
-                    "held_until": null,
-                    "model": "fable"
+                    "model": "fable",
+                    "out_until": null
                   },
                   {
                     "blockers": [],
                     "eligible": true,
-                    "held_until": null,
-                    "model": "opus"
+                    "model": "opus",
+                    "out_until": null
                   },
                   {
                     "blockers": [],
                     "eligible": true,
-                    "held_until": null,
-                    "model": "sonnet"
+                    "model": "sonnet",
+                    "out_until": null
                   },
                   {
                     "blockers": [],
                     "eligible": true,
-                    "held_until": null,
-                    "model": "haiku"
+                    "model": "haiku",
+                    "out_until": null
                   },
                   {
                     "blockers": [],
                     "eligible": true,
-                    "held_until": null,
-                    "model": null
+                    "model": null,
+                    "out_until": null
                   }
                 ],
                 "login": "maya@example.com",

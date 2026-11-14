@@ -51,31 +51,31 @@
         {
           "model": "fable",
           "eligible": true,
-          "held_until": null,
+          "out_until": null,
           "blockers": []
         },
         {
           "model": "opus",
           "eligible": true,
-          "held_until": null,
+          "out_until": null,
           "blockers": []
         },
         {
           "model": "sonnet",
           "eligible": true,
-          "held_until": null,
+          "out_until": null,
           "blockers": []
         },
         {
           "model": "haiku",
           "eligible": true,
-          "held_until": null,
+          "out_until": null,
           "blockers": []
         },
         {
           "model": null,
           "eligible": true,
-          "held_until": null,
+          "out_until": null,
           "blockers": []
         }
       ]
@@ -117,7 +117,7 @@
         {
           "model": null,
           "eligible": true,
-          "held_until": null,
+          "out_until": null,
           "blockers": []
         }
       ]
@@ -146,7 +146,7 @@
         {
           "model": "fable",
           "eligible": false,
-          "held_until": null,
+          "out_until": null,
           "blockers": [
             "credential is missing"
           ]
@@ -154,7 +154,7 @@
         {
           "model": "opus",
           "eligible": false,
-          "held_until": null,
+          "out_until": null,
           "blockers": [
             "credential is missing"
           ]
@@ -162,7 +162,7 @@
         {
           "model": "sonnet",
           "eligible": false,
-          "held_until": null,
+          "out_until": null,
           "blockers": [
             "credential is missing"
           ]
@@ -170,7 +170,7 @@
         {
           "model": "haiku",
           "eligible": false,
-          "held_until": null,
+          "out_until": null,
           "blockers": [
             "credential is missing"
           ]
@@ -178,7 +178,7 @@
         {
           "model": null,
           "eligible": false,
-          "held_until": null,
+          "out_until": null,
           "blockers": [
             "credential is missing"
           ]
@@ -209,7 +209,7 @@
         {
           "model": "fable",
           "eligible": false,
-          "held_until": null,
+          "out_until": null,
           "blockers": [
             "credential is missing"
           ]
@@ -217,7 +217,7 @@
         {
           "model": "opus",
           "eligible": false,
-          "held_until": null,
+          "out_until": null,
           "blockers": [
             "credential is missing"
           ]
@@ -225,7 +225,7 @@
         {
           "model": "sonnet",
           "eligible": false,
-          "held_until": null,
+          "out_until": null,
           "blockers": [
             "credential is missing"
           ]
@@ -233,7 +233,7 @@
         {
           "model": "haiku",
           "eligible": false,
-          "held_until": null,
+          "out_until": null,
           "blockers": [
             "credential is missing"
           ]
@@ -241,7 +241,7 @@
         {
           "model": null,
           "eligible": false,
-          "held_until": null,
+          "out_until": null,
           "blockers": [
             "credential is missing"
           ]
@@ -285,7 +285,7 @@
         {
           "model": "fable",
           "eligible": false,
-          "held_until": 1800000300,
+          "out_until": 1800000300,
           "blockers": [
             "routing is explicit_only",
             "cooling account-wide until 2027-01-15T08:05:00Z"
@@ -294,7 +294,7 @@
         {
           "model": "opus",
           "eligible": false,
-          "held_until": 1800000300,
+          "out_until": 1800000300,
           "blockers": [
             "routing is explicit_only",
             "cooling account-wide until 2027-01-15T08:05:00Z"
@@ -303,7 +303,7 @@
         {
           "model": "sonnet",
           "eligible": false,
-          "held_until": 1800000300,
+          "out_until": 1800000300,
           "blockers": [
             "routing is explicit_only",
             "cooling account-wide until 2027-01-15T08:05:00Z"
@@ -312,7 +312,7 @@
         {
           "model": "haiku",
           "eligible": false,
-          "held_until": 1800000300,
+          "out_until": 1800000300,
           "blockers": [
             "routing is explicit_only",
             "cooling account-wide until 2027-01-15T08:05:00Z"
@@ -321,7 +321,7 @@
         {
           "model": null,
           "eligible": false,
-          "held_until": 1800000300,
+          "out_until": 1800000300,
           "blockers": [
             "routing is explicit_only",
             "cooling account-wide until 2027-01-15T08:05:00Z"

@@ -1615,9 +1615,9 @@ async fn clear_account_cooldown(store: &SharedStore, account: &ProviderAccount) 
         account_login(account)
     );
     let message = if holds.is_empty() {
-        format!("{login} has no active cooldown or window hold")
+        format!("{login} has no active cooldown")
     } else {
-        format!("Cleared {login} holds {}", holds.join("; "))
+        format!("Cleared cooldowns on {login}: {}", holds.join("; "))
     };
     Ok(message)
 }
@@ -1858,7 +1858,7 @@ mod tests {
             let message = super::clear_account_cooldown(&store, &account)
                 .await
                 .unwrap();
-            assert!(message.starts_with("Cleared Claude login 'fixture@example.com' holds"));
+            assert!(message.starts_with("Cleared cooldowns on Claude login 'fixture@example.com':"));
             assert!(message.contains("for fable until 2100-01-02T00:00:05Z"));
             let current = store
                 .get_provider_account("claude", &account.account_id)
@@ -1878,7 +1878,7 @@ mod tests {
             assert!(super::clear_account_cooldown(&store, &current)
                 .await
                 .unwrap()
-                .contains("has no active cooldown or window hold"));
+                .contains("has no active cooldown"));
         }
     }
 

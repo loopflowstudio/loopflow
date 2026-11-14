@@ -135,11 +135,7 @@ pub(crate) fn account_route_eligible(
     model: Option<&str>,
     now: i64,
 ) -> bool {
-    let today = time::OffsetDateTime::from_unix_timestamp(now)
-        .expect("current timestamp is valid")
-        .date();
-    account.eligible_for_automatic_routing(today)
-        && account_held_until(account, limits, model, now).is_none()
+    account_launch_blockers(account, limits, model, now).is_empty()
 }
 
 /// When the first of `accounts` held back at `now` can take `model` again.
@@ -1695,15 +1691,7 @@ pub(crate) fn account_unavailable_reason(
     now: i64,
 ) -> String {
     let blockers = account_launch_blockers(account, limits, model, now);
-    format!(
-        "'{}' {}",
-        account_login(account),
-        if blockers.is_empty() {
-            "is unavailable".into()
-        } else {
-            blockers.join("; ")
-        }
-    )
+    format!("'{}' {}", account_login(account), blockers.join("; "))
 }
 
 pub(crate) fn account_launch_blockers(
@@ -5028,6 +5016,54 @@ mod inspection_tests {
     use crate::store::{
         open_ephemeral_store, AccountLimitWindow, ProviderAccountId, StorageConfig,
     };
+
+    #[test]
+    fn claude_capacity_eligibility_and_blockers_agree() {
+        use crate::provider_account::{account_launch_blockers, account_route_eligible};
+        use crate::store::{AccountLimitRow, CredentialState, RoutingState};
+
+        let now = 1_800_000_000;
+        let base = new_account(
+            Provider::Claude,
+            ProviderAccountId::parse("fixture").unwrap(),
+            std::path::PathBuf::from("/unused"),
+            None,
+        );
+        for state in ["ready", "missing", "paused", "account", "model"] {
+            let mut account = base.clone();
+            let mut limits = Vec::new();
+            match state {
+                "missing" => account.credential_state = CredentialState::Missing,
+                "paused" => account.routing_state = RoutingState::ExplicitOnly,
+                "account" => account.cooldown_until = Some(now + 300),
+                "model" => limits.push(AccountLimitRow {
+                    provider: "claude".into(),
+                    account_id: account.account_id.clone(),
+                    window: "seven_day_fable".into(),
+                    used_percent: 100,
+                    resets_at: Some(now + 300),
+                    plan: None,
+                    observed_at: now,
+                    source: "poll".into(),
+                    model: Some("fable".into()),
+                    limited_until: Some(now + 305),
+                }),
+                _ => {}
+            }
+            for model in [None, Some("fable"), Some("sonnet")] {
+                let eligible = account_route_eligible(&account, &limits, model, now);
+                assert_eq!(
+                    eligible,
+                    account_launch_blockers(&account, &limits, model, now).is_empty()
+                );
+                assert_eq!(
+                    eligible,
+                    state == "ready" || (state == "model" && model == Some("sonnet")),
+                    "{state} {model:?}"
+                );
+            }
+        }
+    }
 
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]

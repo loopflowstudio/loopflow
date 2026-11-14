@@ -1775,8 +1775,9 @@ fn a_run_that_ended_waiting_on_a_limit_starts_again_at_that_step_without_replayi
         .collect::<rusqlite::Result<_>>()
         .unwrap()
     };
+    // The last attempt started at the failed step.
     let steps = steps_of_latest_graph();
-    assert_eq!(steps.len(), 2, "{steps:?}");
+    assert_eq!(steps.len(), 1, "{steps:?}");
     // The step's Process ended waiting on a limit; the wait is over.
     let waiting: String = db
         .query_row(
@@ -2018,7 +2019,59 @@ sys.exit(code)
 }
 
 #[test]
-fn a_run_that_failed_after_moving_agents_starts_again_from_where_it_began() {
+fn a_failed_run_starts_again_at_the_step_that_failed() {
+    let task = GraphTask::new();
+    let failed = task.task_run(&["task", "run", "INF-123", "held-review"]);
+    assert!(!failed.success(), "{}", failed.text);
+    assert!(
+        failed.text.contains(
+            "The run of held-review from start failed (attempt 1 of 3); starting it again at graph show late."
+        ),
+        "{}",
+        failed.text
+    );
+    // The first attempt finished `task sync`; the retries start at the failed step.
+    let graphs = support::recorded_graphs(task.home.path());
+    assert_eq!(graphs.len(), 3);
+    assert_eq!(graphs[0].1.len(), 2);
+    for retry in &graphs[1..] {
+        assert_eq!(retry.1.len(), 1);
+        assert_eq!(
+            retry.1[0]["argv"],
+            serde_json::json!(["graph", "show", "late"])
+        );
+    }
+    let stopped = task.graph();
+    assert_eq!(stopped["position"]["step"], "start");
+    assert_eq!(stopped["position"]["at"], "graph show late");
+    assert_eq!(stopped["position"]["running"], false);
+    let status = task.text_status();
+    assert!(
+        status.contains("Graph held-review: stopped at graph show late"),
+        "{status}"
+    );
+}
+
+#[test]
+fn from_starts_a_stopped_run_where_it_names() {
+    let task = GraphTask::new();
+    let failed = task.task_run(&["task", "run", "INF-123", "held-review"]);
+    assert!(!failed.success(), "{}", failed.text);
+    fs::write(
+        task.repo.path().join(".lf/graphs/late.yaml"),
+        "- cmd: task sync --plan\n",
+    )
+    .unwrap();
+    task.task_run_ok(&["task", "run", "INF-123", "--from", "start"]);
+    let graphs = support::recorded_graphs(task.home.path());
+    let steps = &graphs.last().unwrap().1;
+    assert_eq!(steps.len(), 2);
+    assert_eq!(steps[0]["argv"], serde_json::json!(["sync", "--plan"]));
+    assert_eq!(task.graph()["position"], at("review"));
+}
+
+#[test]
+fn a_run_that_failed_after_moving_agents_starts_again_at_the_step_that_failed() {
     let task = GraphTask::new();
     let failed = task.task_run(&["task", "run", "INF-123", "held-review"]);
     assert!(!failed.success(), "{}", failed.text);
@@ -2042,17 +2095,16 @@ fn a_run_that_failed_after_moving_agents_starts_again_from_where_it_began() {
     task.task_run_ok(&["task", "run", "INF-123"]);
     let graphs = support::recorded_graphs(task.home.path());
     let steps = &graphs.last().unwrap().1;
-    assert_eq!(steps.len(), 2);
-    assert_eq!(steps[0]["argv"], serde_json::json!(["sync", "--plan"]));
+    assert_eq!(steps.len(), 1);
     assert_eq!(
-        steps[1]["argv"],
+        steps[0]["argv"],
         serde_json::json!(["graph", "show", "late"])
     );
     assert_eq!(task.graph()["position"], at("review"));
 }
 
 #[test]
-fn a_stopped_run_is_started_again_from_where_it_began() {
+fn a_stopped_run_is_started_again_at_the_step_that_failed() {
     let task = GraphTask::new();
     task.task_run_ok(&["task", "run", "INF-123", "gated"]);
     // Every attempt fails: the Task run gives up and the run holds the Task.
@@ -2062,6 +2114,7 @@ fn a_stopped_run_is_started_again_from_where_it_began() {
     let stopped = task.graph();
     assert_eq!(stopped["position"]["kind"], "run");
     assert_eq!(stopped["position"]["step"], "review");
+    assert_eq!(stopped["position"]["at"], "graph show late");
     assert_eq!(stopped["position"]["running"], false);
     let carrier = stopped["position"]["lf_process_id"]
         .as_str()
@@ -2073,7 +2126,7 @@ fn a_stopped_run_is_started_again_from_where_it_began() {
     );
     let status = task.text_status();
     assert!(
-        status.contains("Graph gated: stopped from review"),
+        status.contains("Graph gated: stopped at graph show late"),
         "{status}"
     );
 
@@ -2099,7 +2152,7 @@ fn a_stopped_run_is_started_again_from_where_it_began() {
         .unwrap(),
     );
     assert!(ran.success(), "{}", ran.text);
-    // The bare run started the stopped run again from the gate, not after review.
+    // The bare run started the stopped run again at the gate, not after review.
     assert_eq!(task.graph()["position"], at("accepted"));
     // The carrier of the latest Graph process is the run that just ended.
     let task_run = rusqlite::Connection::open(task.home.path().join("loopflow.db"))

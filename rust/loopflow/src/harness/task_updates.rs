@@ -252,10 +252,9 @@ fn position_text(position: Option<&TaskGraphPosition>) -> String {
         }
         Some(TaskGraphPosition::At { step }) if step == "start" => "At start".into(),
         Some(TaskGraphPosition::At { step }) => format!("At {step} · available for review"),
-        Some(TaskGraphPosition::Run { step, running, .. }) => format!(
-            "{} from {step}",
-            if *running { "Running" } else { "Stopped" }
-        ),
+        Some(TaskGraphPosition::Run { at, running, .. }) => {
+            format!("{} at {at}", if *running { "Running" } else { "Stopped" })
+        }
         None => "No Task workflow selected".into(),
     }
 }

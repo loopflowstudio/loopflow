@@ -126,6 +126,10 @@ behind: an unreachable branch, a hidden command, a second resolver. Find them
 first. If three building blocks exist for one job and none works, the change
 removes all three. It does not add a fourth.
 
+Treat the codebase as your own. Leave it better than you found it: delete the
+dead code you pass, merge the duplicate you notice, and make the clear
+improvement even when the task doesn't strictly need it.
+
 ## Flexibility
 
 Meet the caller where they are. When code breaks because it assumed a fixed

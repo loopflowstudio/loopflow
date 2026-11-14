@@ -530,6 +530,17 @@ mod tests {
         );
     }
 
+    /// Keep answered batches inside `HOOK_DEADLINE` however long the next
+    /// answer takes on a loaded Machine.
+    fn hold_within_deadline(store: &SqliteStore) {
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute("UPDATE steer_batches SET created_at=unixepoch()+3600", [])
+            .unwrap();
+    }
+
     #[test]
     fn a_steer_is_delivered_once_the_hook_says_it_printed_it() {
         let (_home, store, adapter, delivery) = fixture();
@@ -558,6 +569,7 @@ mod tests {
         let steers = answered.steers.unwrap();
         assert!(steers.text.contains("KEEP_THE_API_SMALL"));
         assert_eq!(evidence(), "uncertain");
+        hold_within_deadline(&store);
         // A hook running beside the one still printing gets nothing new and
         // is told to ask again.
         let (answered, _) = answer(&store, &tool("beside", &[])).unwrap();
@@ -593,6 +605,7 @@ mod tests {
         let (running, _) = event(serde_json::json!({"type":"tool_execution_start",
             "toolCallId":"tool","turn":"turn","openTools":1,"pendingInput":0}));
         assert!(running.steers.unwrap().text.contains("KEEP_THE_API_SMALL"));
+        hold_within_deadline(&store);
         let (settled, _) = event(serde_json::json!({"type":"agent_settled","turn":"turn",
             "aborted":false,"events":[],"openTools":0,"pendingInput":0}));
         assert_eq!((settled.steers, settled.waiting), (None, true));
@@ -980,12 +993,13 @@ mod tests {
         store
             .save_session_steer("session", "Fixture author", "TRACED")
             .unwrap();
-        let traced = crate::store::query_plans::statements(&store, || {
-            let at = |moment, callback: serde_json::Value| {
-                boundary(moment, &adapter, &delivery, callback)
-            };
-            // A resumed conversation selects again and receives the steer.
-            let printed = answer(
+        let traced = crate::store::query_plans::assert_no_empty_writes(&store, || {
+            crate::store::query_plans::statements(&store, || {
+                let at = |moment, callback: serde_json::Value| {
+                    boundary(moment, &adapter, &delivery, callback)
+                };
+                // A resumed conversation selects again and receives the steer.
+                let printed = answer(
             &store,
             &at(
                 BoundaryMoment::Start,
@@ -997,14 +1011,14 @@ mod tests {
         .steers
         .unwrap()
         .batch;
-            let mut prompt = at(
-                BoundaryMoment::Tool,
-                serde_json::json!({"session_id":"native","hook_event_name":"UserPromptSubmit",
+                let mut prompt = at(
+                    BoundaryMoment::Tool,
+                    serde_json::json!({"session_id":"native","hook_event_name":"UserPromptSubmit",
                 "prompt_id":"p-1","prompt":"go"}),
-            );
-            prompt.printed = vec![printed];
-            answer(&store, &prompt).unwrap();
-            answer(
+                );
+                prompt.printed = vec![printed];
+                answer(&store, &prompt).unwrap();
+                answer(
             &store,
             &at(
                 BoundaryMoment::Compact,
@@ -1012,7 +1026,7 @@ mod tests {
             ),
         )
         .unwrap();
-            answer(
+                answer(
             &store,
             &at(
                 BoundaryMoment::Tool,
@@ -1020,7 +1034,7 @@ mod tests {
             ),
         )
         .unwrap();
-            answer(
+                answer(
             &store,
             &at(
                 BoundaryMoment::Stop,
@@ -1028,6 +1042,7 @@ mod tests {
             ),
         )
         .unwrap();
+            })
         });
         let found = crate::store::query_plans::growing_scans(&store, &traced);
         assert!(found.is_empty(), "{}", found.join("\n"));

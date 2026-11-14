@@ -27,6 +27,57 @@ passed in 1m 45s. No disposable demo was launched.
 
 ## Current design and remaining work
 
+### November 14 revision against current main
+
+Jack Heart:
+
+> is this still relevant. we ve done other work in this area
+
+After the comparison and recommendation to retain interactive recovery while
+adapting the implementation to current architecture:
+
+> soudns good. let me know when its ready for review
+
+Continue this Task and PR #1862 to review, not merge. At the comparison,
+origin/main was `114ff62176`; the PR head `edee35dd57` was 57 main commits
+behind and GitHub reported conflicts. Its earlier demo readiness is stale.
+
+Retain automatic continuation of quota-stopped interactive Sessions on an
+eligible login for their selected model, Desktop Recover affected sessions,
+truthful progress/waits, drafts, approvals and once-only effects. Main still has
+Claude credential switching without continuation and no session.recover action.
+The Keychain repair is also absent from main.
+
+Reconcile first, then adapt the useful implementation and tests to current
+owners. Do not restore removed per-Session owners/watchers: #1887 introduced
+holders, #1890 moved wakeups, #1904 changed headless Work ownership and #1923
+unified steers. Keep #1937's refreshed Claude model-capacity semantics; #1906,
+#1908 and #1935 own headless agent fallback; #1900 owns sticky provider resume.
+These are merged foundations, not duplicate work for this Task. Recheck the
+ordinary-typing incident against current input paths rather than claiming the
+old fixture established a repair. Existing native results guide regressions;
+rerun relevant cases on the revised candidate. Refresh the PR description to
+the final remaining scope and stop at demo with current checks and any limits.
+
+The earlier design below describes the published November 9 implementation and
+must be reconciled during this pass. Keep production conversations untouched;
+use disposable validation and do not install, merge or enable Auto-Ship.
+
+User docs for this outcome, rewritten November 14 to lead with what Desktop
+shows and what to do per state: `docs/sessions.md#recover-after-a-usage-limit`,
+`docs/subscriptions.md#when-an-account-runs-out` (open-Session paragraphs) and
+`swift/README.md` (recovery row). Main rewrote all three files since the PR
+head; keep these sections through the merge. They name the five Desktop state
+labels and the row above the pane, so a relabel or move updates them.
+`rust/loopflow/src/harness/README.md#quota-recovery` still describes the
+November 9 owner/socket mechanism and needs rewriting once the implementation
+sits on main's holders.
+
+Open product question: a client opened by an older lf shows **Waiting for
+native conversation** with the **Recover affected sessions** button, yet the
+button cannot recover it. Should that row hide the button and say to reopen
+the Session, or keep the current wording?
+
 The existing Session/native conversation, failed turn and derived recovery reading
 remain the three concepts. Session history retains dispatch and correlated results;
 changing capacity observations cannot erase them. The current-thread reader picks

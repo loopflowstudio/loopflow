@@ -562,6 +562,307 @@ Sessions and Task human GraphSteps.
 Runs resumed interactively also appear, including those originally launched
 headlessly. Closing their client preserves the Session and its history.
 
+A conversation stopped by a usage limit shows its recovery state above the
+pane: waiting, recovering, continued, or needing review. **Recover affected
+sessions** appears while it waits and checks every waiting conversation at
+once. Desktop only requests the check and shows the result; it never relaunches
+a client, so drafts and pending approvals stay put. States and what to do:
+[Recover after a usage limit](../docs/sessions.md#recover-after-a-usage-limit).
+
+**Take back** transfers input
+from another terminal; `lf desktop do take-back-session -p session` uses the same
+action.
+**Reset session** starts a fresh provider thread in the same Session, seeded with
+its saved conversation. Reset and provider switching first read that history,
+then replace the current provider process. If the
+provider has not saved a transcript yet, the current terminal stays open; finish
+its first turn and retry the switch. A failed status observer reconnects on the
+next status event without replacing the conversation.
+Repository, Wave, Task and exact Session
+preparation all use `lf resume --prepare`; reset uses `lf session new` for its scope.
+
+Shell panes with Ghostty shell integration group each completed command and its
+output into a full-width block. A command that exited non-zero has a red
+background. Click anywhere in a block to select the whole unit; drag to select
+text instead. There is one selection at a time, and Command-C or the context
+menu copies it: a block copies its command and all of its output. Right-click
+keeps the selection it lands on. A selected block clears when you type or press
+Escape. Command-Up and Command-Down jump between prompts. The live prompt remains ungrouped;
+Session/provider panes keep their native TUI behavior and do not expose shell
+command blocks.
+Automatic integration depends on the configured shell; macOS `/bin/bash` is
+excluded by the pinned Ghostty build. A zsh shell still on the macOS default
+prompt gets a small dim directory line above each bold command, with the gap
+between blocks shared evenly; any other prompt is left as it is.
+
+Terminals start from Desktop's own terminal settings. A launcher's `NO_COLOR`,
+`TERM`, pager and agent variables do not reach them, so provider CLIs keep their
+colors however Desktop was opened.
+
+If macOS cannot provide Ghostty's display link, terminals use timer rendering.
+The app logs the CoreVideo error code; the user's Ghostty configuration is unchanged.
+
+A Task workspace holds three designated panes — session, shell and browser —
+arranged freely by dragging, zoom and hide; Wave and repository workspaces hold
+only the session pane. The session pane shows one conversation and switches when
+another opens. ⌘T adds a shell tab. The browser's tabs are the Task's Files, its
+Graph processes and http(s) pages. ⌘W closes the selected tab, or hides the pane.
+⇧⌘T restores the last closed tab's identity and history. Close ends its shell
+and jobs; New Shell starts fresh execution.
+
+**View → Toggle Files** shows a Task's checkout in the browser pane beside the
+retained terminal. Expand folders to read one page of up to 500 entries;
+**Load more** continues the directory and **Show ignored** includes ignored paths.
+Tracked, unchanged and untracked files remain available without an active PR.
+**Changes** optionally compares the worktree with the Task PR's
+recorded base; **HEAD** compares with its current commit. The displayed SHA pins
+the file list and selected diff. A recorded PR links above the file navigator.
+Use ↑/↓ in the navigator to select files; hover a row for its full path.
+Closing the pane keeps its drafts in this window.
+
+**Read** is where documents open: Markdown renders formatted, HTML as a live
+page that runs its scripts but never reaches the network. Links open in the
+browser. **Edit** retains editable UTF-8 drafts and selection in this window;
+**Diff** shows the draft comparison read-only.
+
+When an agent writes a `scratch/**/*.md` or `.html` file, Files reloads it if it
+is showing, or follows it. It takes the view only when nothing is selected, when
+the current document was itself followed, or when you haven't touched Files for
+two minutes. Edit, Diff, an unsaved draft or keyboard focus in Files keep your
+view; the page then opens as a tab beside it.
+
+Task headers show the recorded checkout;
+terminal and files follow that Task without a separate worktree selector.
+Changing Work assignment leaves the recorded checkout Machine and path intact.
+The browser retains its opening location through Close/Undo, including a first open
+without a Session link. New shell tabs use the Task's recorded location;
+existing tabs and file drafts keep their original locations.
+Unknown or changed owners stay unavailable without redirecting retained drafts.
+Remote paths are never opened or subscribed on the presentation Mac. Filesystem events
+on the execution Machine refresh retained documents, including hidden drafts. Disconnects
+retain drafts and show an error; Refresh reconnects. Stale owner readings are discarded.
+Switching files, hiding Files and returning to the Task keeps the draft.
+Files reached through symlinks remain readable within the checkout and show a
+read-only explanation. If a regular file becomes a symlink, its retained draft
+and Undo survive while editing, Save and autosave stop.
+
+Typing autosaves after two quiet seconds. Disable **Autosave Task Files** in the
+Settings → Editing for explicit **Save** (⌘S). Both modes receive filesystem changes live,
+including atomic replacements. Disjoint local edits survive; disk wins overlaps
+without a conflict dialog. Incoming updates reset Undo to the surviving local
+edits, so Undo cannot restore text the LLM replaced. IME composition completes
+before incoming changes apply. Missing or invalid files retain dirty drafts and
+cannot be saved. Unsaved drafts do not survive closing the window.
+
+**Open saved versions** opens recovery folders in the checkout's Git metadata,
+including files later renamed or deleted. Every completed Save retains its draft,
+receipt and displaced inode; no version is created for each keystroke. Ordinary
+reads and saves do not scan old recovery history. Inspect late writes explicitly
+with `lf task file ISSUE PATH --recoveries --json`. Retention has no automatic
+cleanup or size cap; each settled save can retain up to two file-sized versions.
+Removing the worktree removes its recovery. Each window holds separate drafts
+and receives the other's writes through the same disk-wins policy.
+
+Save preserves file mode and exact UTF-8 bytes, including BOM and line endings.
+Revision checks refuse already-observed changes before the editor reconciles
+and retries. Arbitrary writers can still race publication; this is not exclusion
+of concurrent writes, extended-attribute preservation or power-loss durability.
+Symlink paths cannot be saved. A symlink introduced during exchange is retained
+without changing its destination.
+Binary, missing, unsupported and over-1-MB files have explicit states. Extremely
+long lines retain the native editor's known responsiveness limitation.
+
+Select a repository, then a Task to open its conversation. Its workspace retains
+conversations, shells, file drafts and layout across visits. Use **+** for supporting
+panes; expand **Overview** for Task details. Active clients elsewhere require
+explicit **Take back**. The pane retains its last available screen and shows
+Rust's command beside the action. Passive reveal leaves the other client in control.
+With no saved screen, the pane explains where the conversation is controlled.
+
+Exiting a disposable CLI conversation retires it from navigation while keeping
+its provider history. Ctrl-C interruption is recorded; interrupted Graph reviews,
+Task conversations and repository/Wave primaries remain reachable.
+Stopping a response alone never closes the conversation or completes a review.
+
+Each Session or shell's **…** menu holds its pane actions. **Collapse** hides a pane while its process
+continues; **Expand** returns to it. **Focus** gives one conversation the content
+area; **Restore** brings back the panes and files. **Terminate** ends a shell.
+
+The sidebar lists Work without conversation counts.
+Repository and Wave conversations retain their own scopes. Shell-launched unscoped
+conversations stay out of the sidebar without deleting their history.
+**Available** means the conversation can be joined. Historical feedback remains
+readable without granting completion authority. Failed provider starts offer recovery.
+
+Search Work names and identifiers with **⌘K**. The repository name opens its
+conversation. Unscoped Sessions remain available through `lf session list --orphan`.
+Missing planning or selection readings retain known Work and show the read error.
+**Task details** opens the description, comments and Run history.
+
+Opening a Task enters its retained panes and opens its conversation.
+Navigation never starts its Graph. Returning preserves panes, drafts and focus, including historical
+conversations. Explicit bare CLI Task links still support inspection without
+conversation acquisition.
+The compact header shows the current Workflow position and available actions;
+**Overview** expands its graph and description above the multiplexer. Opening
+feedback stays inside the terminal area. Resolving a conversation installs its
+record and pane before ending preparation, including explicit Session links.
+Cached switches reuse their panes and drafts without preparing again.
+When the selected Task completes or is canceled, it stays visible with a green
+**Completed** or red **Canceled** header. Navigating away restores the ordinary
+sidebar filters. **Back** (⌘[) returns to the retained workspace and its sidebar
+row, preserving conversations, files and drafts without starting execution.
+The expanded graph scales to the window:
+`start` and `end` as circles, each node a box saying what you do there, one
+labelled arrow per edge, a loop back as an arc over its node. The current node
+or running edge is marked. The labels of the edges leaving the current node
+are buttons; each runs `lf -b task run` as a child of the app. No edge is offered while one runs. An edge whose Graph stopped holds the
+Task, is drawn stopped, and is offered again with the others leaving its
+node. **Move to** changes Workflow position; `end` requests completion.
+**Complete** changes Task status independently. **Retry completion** retries a
+failed request without replaying the Graph.
+Linear completion leaves the displayed Workflow and live Processes intact.
+Loading or unavailable Workflow readings remain explicit; a failed refresh keeps
+the last recorded graph with its actions disabled. Only a successful Task reading
+with no captured Workflow offers **Start**, which runs `lf -b task run ISSUE`.
+
+Use **⌘T** for a new shell tab and **View → Toggle Files** for Files.
+Choose **Graph processes** in **⌘K** to open the Graph process log. It lists every Graph process in the
+Task's checkout, newest first, whether an edge or a person started it; it is
+not the Workflow's history. One line each: Graph, state, when it started and
+how long it ran. A row opens to its id, graph and steps (the shape of
+`lf process show ID --json`). A Graph whose process exited early reads
+**stopped**. One whose process was killed has no exit record and keeps reading
+as running. **Task details → Debug** lists the Task's raw Sessions and Processes.
+Sessions list **Waiting** first and working ones in a compact group.
+The Wave page's **Workflow** opens its definition in the catalogue inspector.
+**Customize** or **Edit** opens the existing source editor; captured Task
+Workflows stay unchanged.
+**Session history** under the Graph reads nothing until expanded; it then lists that
+Task's complete recorded input history (`lf session usage --days 0 --task ID --json`) with each recorded
+outcome. Session rows show the provider recorded on their Run and a ready summary
+only when the Session recorded one.
+Below the Description, **Comments (n)** is collapsed and counts the Task's
+thread of steers and reports (`comments` in `lf task show ID --json`, read when
+the Task is shown and again on expanding). A failed read keeps the earlier
+thread marked **May be out of date** with **Retry**; the thread is never split
+out of the Description.
+Use **Inspect** or the row's context menu for details. Presentation changes never
+start a provider or resolve a Session.
+
+The toolbar above the workspace shows its Work ancestry. On the left it drills
+Wave → Task → Session: Wave and Task crumbs return to their details; the Task's
+issue ID links to Linear. The Task crumb keeps the exact conversation name
+without a sibling picker. Repository/Wave crumbs can choose among their Sessions. The pencil renames the Session in place through `lf session
+rename`; the shown name is the shared readback, and a rejected name stays in the
+field with its error. A remote Graph Session's name lives on its Machine and is not
+renamed here. Outside Task navigation, the Session shows its Graph membership
+beside the name. Task navigation keeps that provenance in inspection. On the right sit
+the Task's read-only worktree location and the Activity glyph.
+
+Each nonempty pane has a compact program header with its known provider,
+conversation or terminal title, directory and current reported status. Hovering
+the focused header reveals Close; its context menu offers zoom. Shell tabs share
+one tool pane. A lone terminal omits the redundant pane header. A neutral edge and subtle shadow
+distinguish the selected pane without recoloring its reported activity.
+Terminal surfaces sit inside the rounded edge, so text wraps before the border
+in both single and split panes.
+The workspace has square top corners without an outer border. Its rounded lower
+corners follow the pane radius plus its inset, keeping the gap even around nested corners.
+The workspace also leaves clearance from the native window's larger lower corners.
+
+Copy selected text with **⌘C**: the pane header briefly confirms the line count,
+without decorating the selected cells. Find navigation briefly emphasizes the
+current match for 160 ms; hiding a pane cancels the cue. Reduce Motion uses
+Find's persistent match styling. Programs that own selection may show their own
+copy confirmation; terminal feedback describes only a terminal-owned copy.
+
+```ini
+# In your Ghostty configuration; reopen Loopflow after editing.
+minimum-contrast = 1
+```
+
+The default is `3`. Set `1` to preserve original colors. Correction moves only
+low-contrast text toward black or white while retaining its alpha and channel
+ordering. It preserves more color than replacing text with black or white, but
+cannot guarantee exact hue or separation of nearly identical colors. Faint text
+may not reach the requested ratio. Graphics, images, transparent backdrops and
+custom postprocessing are outside the opaque-text contrast guarantee.
+
+Files and the Graph process log open beside retained Sessions and shells in the
+same multiplexer. Resize, zoom, close and Reopen preserve each pane’s content.
+Drag any pane divider to resize; it highlights on hover and snaps near 38.2% or
+61.8%. Showing a tool gives 61.8% to the existing pane and 38.2% to the tool.
+Both sides retain usable minimum sizes, including nested splits; small windows
+shrink those minimums together.
+
+Press **⌘K** to search Waves and planned Tasks across repositories, plus Workflows
+and Graphs in the selected repository. Empty search shows working Tasks first, then other Tasks, Waves and repositories; arrows select,
+Return opens and Escape returns focus to the previous terminal. Graph entries
+inspect the template. **Graph processes of ISSUE** opens the Task's log pane.
+Each repository retains up to 20 recent
+destinations for the window. Visited historical Tasks remain in recents after
+leaving their pages; opening one reads its exact identity again. This does not
+search all historical Tasks. Failed reads preserve the workspace and offer Retry.
+If a highlighted row disappears, Return opens the first remaining visible result;
+with no results it does nothing.
+
+With an unassigned Session selected, choose **Bind to Task…** beside the Session
+name. Review the named Task, then choose
+**Bind permanently**. Opening the picker leaves the conversation and terminal intact.
+
+```sh
+lf open loopflow://loopflow/task/LOO-303
+lf open loopflow://loopflow/task/LOO-303 --session SESSION_ID
+open 'loopflow://loopflow/task/LOO-303'
+```
+
+Work links and palette Task entries open retained workspaces, including Tasks
+outside the current plan, without starting a Task Graph. An incoming address
+resolves through `lf open --link --json`; the app never repeats repository
+selection. A Task address opens its primary conversation. An ambiguous or
+unknown address changes nothing and reports the qualified links; failed reads
+keep the current workspace visible. Only its repository window receives a link.
+Open Repo, Task links and the repository menu reuse one window per plan identity,
+including while it opens. Different repositories keep separate queued destinations;
+closing one needs no replacement window. A restored location that now selects another
+plan reports an error rather than restoring its panes into that plan.
+Reopening a Task keeps
+the selected conversation and pane layout. Loaded repository-qualified links reuse
+observed planning; successful opens do not present a Task-finding sheet.
+Add `session` to open an existing Task conversation in its terminal pane. A
+missing or unrelated Session leaves the current workspace intact and offers Retry.
+Opening a conversation does not complete a review or start a Task Graph.
+
+Wave details show the objective, the plan and its KRs, the Wave's Workflow,
+current Tasks and plan history. Completed Tasks start hidden.
+**Completed** adds the last 7 days. Click **7 Days** to edit the number inline;
+Enter or clicking away applies it, Escape cancels. Enter **0** for **All Tasks**
+(successful completions of any age); click that label to edit again. The checkbox
+hides history and remembers the range. Invalid input keeps the previous range. Canceled and duplicate history stays out of this list. Unresolved
+execution and retained Session access remain available. Templates fold composed Graphs;
+click a group or its disclosure control to expand it. Repeated uses disclose
+independently, and both return edges remain visible at folded boundaries. Tab to
+a disclosure, then use Right/Left to expand/collapse or Space/Return to toggle;
+this includes nested and empty groups and XOR paths. Inspecting a return names
+its target step even while the containing Graph is folded.
+Task previews use the same template view until an invocation exists, including
+Tasks with independent conversations. Captured invocations keep their expanded
+graph. Changing a template resets its disclosure; it does not change a capture.
+A Wave's planning adds no navigation tier. Task
+details include the directive, recorded condition, current KRs, Activity, PR and
+worktree references. Choose **Edit directive**, then
+**Save directive** to write through the shared planning API. Failed saves retain your
+text; an accepted write with unavailable readback retains the draft and explains
+what happened. Wave details expose Work outside the current plan. Failed and
+partial reads remain visible in the outline.
+
+Each terminal pane owns one native libghostty surface. Opening, failure and
+recovery actions stay in that pane. Sessions include interactive provider
+Sessions and Task human GraphSteps.
+Runs resumed interactively also appear, including those originally launched
+headlessly. Closing their client preserves the Session and its history.
+
 **Recover affected sessions** appears beside a waiting conversation. It checks
 affected Sessions together, showing native completion and remaining waits. See
 [Recover after a usage limit](../docs/sessions.md#recover-after-a-usage-limit)

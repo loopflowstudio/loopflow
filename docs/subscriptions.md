@@ -372,20 +372,17 @@ Running out of usage credits ("You're out of usage credits", Claude's
 the reset, never the account. A bare `claude` launch runs Fable, so Fable rests
 and the step goes on with Opus on the same account, in the same conversation.
 
-Open Claude and Codex Sessions track rejected turns and check eligible logins
-for the selected model. A failed native model keeps a short scoped hold even
-when a general usage poll shows room. Drafts stay in the client; uncertain work
-is never resent.
+Open Claude and Codex Sessions need nothing either. When one hits a limit and
+another eligible login has room for its model, the stopped turn continues on
+that login in the same conversation, with its history, draft and pending
+approval intact. A model that just failed rests briefly on that login even
+when a usage poll shows room. A turn that may already have reached the
+provider is never sent again.
 
-Clients launched with the native recovery guard can continue automatically on
-another eligible login. The guard checks the rejected turn inside native prompt
-submission before the broker prepares credentials. Cancelled preparation retains
-any refreshed login but cannot later admit a retry. Older clients without that
-guard keep waiting; they are not restarted automatically.
-
-Desktop's **Recover affected sessions** checks waiting conversations together.
-See [Recover after a usage limit](sessions.md#recover-after-a-usage-limit) for
-progress, capacity waits and the limits on automatic retry.
+When nothing has room, the conversations wait, and Desktop's **Recover
+affected sessions** checks them all again in one click. A client opened by an
+older `lf` keeps waiting and is not restarted. What each state means:
+[Recover after a usage limit](sessions.md#recover-after-a-usage-limit).
 
 To see what would fail next, and move it in one go:
 

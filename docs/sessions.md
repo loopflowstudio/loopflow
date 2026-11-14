@@ -216,37 +216,46 @@ again. Connecting logins and setting routes: [Ops](ops.md).
 
 ## Recover after a usage limit
 
-In Desktop, **Recover affected sessions** checks eligible logins for waiting
-Claude and Codex conversations together. Each conversation shows its wait reason
-and any known capacity reset. Keep it open to retain history, editable drafts
-and pending approvals.
+Three Task conversations are open on the same login when it runs out. Each
+turn stops with the provider's limit message, and Desktop shows a row above
+each conversation:
 
-When another eligible login has room, a native submission guard admits one
-retry in the same conversation. It checks that the rejected turn is still
-current before preparing credentials. Claude waits for its credential cache to
-expire while holding that submission. History, model and editable drafts remain
-in the native client; pending approvals remain answerable.
+```text
+Waiting for capacity
+No eligible login has capacity for this model
+Capacity reset: in 2 hours                      [Recover affected sessions]
+```
 
-The guard must already be loaded in the running client. Older clients without
-it keep waiting and explain why. Recovery never restarts them to install it.
+Leave them open. When another eligible login has room for a conversation's
+model, Loopflow switches to it and sends the stopped turn again in the same
+conversation. The row reads **Recovering** while that turn runs, then
+**Continued**. History, the selected model, a draft you were typing and an
+approval waiting for your answer are all where you left them, and your next
+message goes through as usual.
 
-Checking again does not resend a dispatched retry. Its progress follows the
-original attempt, even after a reconnect. Newer submitted input supersedes an
-old rejection; input submitted after recovery is admitted follows that retry.
+**Recover affected sessions** checks every waiting conversation now. One
+click covers all of them, Claude and Codex. Use it after you connect a login
+or change a route. No CLI command is needed.
 
-| What is waiting | What happens next |
-|---|---|
-| No eligible login has room for the selected model | Recovery waits for capacity and shows the reset time when known. Connect a login or adjust the account route if needed, then choose **Recover affected sessions** to check again. |
-| This client has no native recovery guard | Recovery waits without changing credentials or queuing a retry. Continue from the open conversation. |
-| Preparation was cancelled, timed out, or only partly installed credentials | Recovery keeps the attempt uncertain and does not resend it. Review the conversation and continue from what happened. |
-| A turn may have been delivered or a tool may already have acted | Recovery leaves the conversation intact and explains the uncertainty. Review its history and continue from what happened; the input is not automatically resent. |
+| The row says | What it means | What to do |
+|---|---|---|
+| **Waiting for capacity** | No eligible login has room for this model. The reset time shows when the provider gave one. | Wait, or [connect a login or change the route](subscriptions.md#route-a-repository), then **Recover affected sessions**. |
+| **Waiting for native conversation** | The open client cannot take the retry yet. The line below says why: it was opened by an older `lf`, it has not reported its model, or the chosen login could not be prepared. | For an older client, send your next message yourself; Loopflow does not restart it. Otherwise **Recover affected sessions** checks again. |
+| **Recovering** | The stopped turn is being sent again, or is running. | Nothing. Checking again does not send it twice. |
+| **Continued** | The retried turn finished. | Carry on. |
+| **Review conversation** | Loopflow cannot tell whether the stopped turn reached the provider, or a tool may already have acted. It also appears when a switch was cancelled or timed out partway. | Read the end of the conversation and continue from what happened. Nothing is resent for you. |
 
-Incomplete native history stays uncertain. Recovery does not replay completed
-tool actions or finished Graph steps. Capacity checks use the selected model
-and respect the Session's account restrictions; recovery
-does not change your preferences or answer approvals for you. See
-[Subscriptions](subscriptions.md#when-an-account-runs-out) for account routing
-and the separate model fallback available to headless Graph steps.
+A stopped turn is sent again once at most. If you type something new before
+recovery starts, your message wins and the old turn is dropped. A message you
+send after recovery starts runs after the retried turn.
+
+Recovery only uses logins the Session is allowed to use: `--only-account`
+still holds. It checks capacity for the Session's own model and never changes
+model, provider or your preferences. It does not answer approvals, replay a
+tool action that completed, or rerun a finished Graph step. To continue on a
+different model or provider instead, [move the Sessions](#move-what-a-limit-blocks).
+Headless Graph steps recover on their own path:
+[Subscriptions](subscriptions.md#when-an-account-runs-out).
 
 ## Move what a limit blocks
 

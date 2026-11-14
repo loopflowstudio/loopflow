@@ -152,6 +152,7 @@
             "label": "Jacks-MacBook-Pro-2"
           },
           "person": "Jack Heart",
+          "person_id": null,
           "person_key": "test@test.com"
         },
         "provider": "codex",
@@ -658,8 +659,10 @@
             "machine_id": "home_56b1a8e309681768d26f79bf86b9d93c",
             "machine_label": "Jacks-MacBook-Pro-2",
             "person": "Jack Heart",
+            "person_id": null,
             "person_key": "test@test.com",
-            "task_id": "task_9d1de6a17408459aa2db78181c5fb02a"
+            "task_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+            "writer_machine_id": "home_56b1a8e309681768d26f79bf86b9d93c"
           }
         ],
         "owner": {
@@ -668,6 +671,7 @@
             "label": "Jacks-MacBook-Pro-2"
           },
           "person": "Jack Heart",
+          "person_id": null,
           "person_key": "test@test.com"
         },
         "superseded_by": null
@@ -842,6 +846,7 @@
               "label": "Jacks-MacBook-Pro-2"
             },
             "person": "Jack Heart",
+            "person_id": null,
             "person_key": "test@test.com"
           },
           "provider": "codex",
@@ -1149,6 +1154,7 @@
             "label": "Jacks-MacBook-Pro-2"
           },
           "person": "Jack Heart",
+          "person_id": null,
           "person_key": "test@test.com"
         },
         "provider": "codex",
@@ -1626,8 +1632,10 @@
             "machine_id": "home_56b1a8e309681768d26f79bf86b9d93c",
             "machine_label": "Jacks-MacBook-Pro-2",
             "person": "Jack Heart",
+            "person_id": null,
             "person_key": "test@test.com",
-            "task_id": "task_9d1de6a17408459aa2db78181c5fb02a"
+            "task_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+            "writer_machine_id": "home_56b1a8e309681768d26f79bf86b9d93c"
           }
         ],
         "owner": {
@@ -1636,6 +1644,7 @@
             "label": "Jacks-MacBook-Pro-2"
           },
           "person": "Jack Heart",
+          "person_id": null,
           "person_key": "test@test.com"
         },
         "superseded_by": null
@@ -1795,6 +1804,7 @@
               "label": "Jacks-MacBook-Pro-2"
             },
             "person": "Jack Heart",
+            "person_id": null,
             "person_key": "test@test.com"
           },
           "provider": "codex",
@@ -2102,6 +2112,7 @@
             "label": "Jacks-MacBook-Pro-2"
           },
           "person": "Jack Heart",
+          "person_id": null,
           "person_key": "test@test.com"
         },
         "provider": "codex",
@@ -2551,8 +2562,10 @@
             "machine_id": "home_56b1a8e309681768d26f79bf86b9d93c",
             "machine_label": "Jacks-MacBook-Pro-2",
             "person": "Jack Heart",
+            "person_id": null,
             "person_key": "test@test.com",
-            "task_id": "task_9d1de6a17408459aa2db78181c5fb02a"
+            "task_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+            "writer_machine_id": "home_56b1a8e309681768d26f79bf86b9d93c"
           }
         ],
         "owner": {
@@ -2561,6 +2574,7 @@
             "label": "Jacks-MacBook-Pro-2"
           },
           "person": "Jack Heart",
+          "person_id": null,
           "person_key": "test@test.com"
         },
         "superseded_by": null
@@ -2720,6 +2734,7 @@
               "label": "Jacks-MacBook-Pro-2"
             },
             "person": "Jack Heart",
+            "person_id": null,
             "person_key": "test@test.com"
           },
           "provider": "codex",

@@ -233,12 +233,25 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             .await
         }
         SessionCommand::Rename { .. } => unreachable!("rename uses shared mutation dispatch"),
-        SessionCommand::Send { id, task, to } => {
+        SessionCommand::Send {
+            id,
+            task,
+            to,
+            arrived,
+        } => {
             let store = open_shared_store().await?;
             let to = crate::ops::task_ownership::resolve_machine(&store.sqlite, to)?;
+            if *arrived {
+                let task = task
+                    .as_deref()
+                    .expect("Clap requires --task with --arrived");
+                return crate::ops::human_session::moves::sent_task_arrived(&store, task, &to)
+                    .await;
+            }
             let moved = match (id, task) {
-                (_, Some(task)) => {
-                    crate::ops::human_session::moves::send_task(&store, task, &to).await?
+                (id, Some(task)) => {
+                    crate::ops::human_session::moves::send_task(&store, task, &to, id.as_deref())
+                        .await?
                 }
                 (Some(id), None) => crate::ops::human_session::moves::send(&store, id, &to).await?,
                 (None, None) => unreachable!("Clap requires a Session or a Task"),
@@ -253,6 +266,7 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             repository: Some(repository),
             origin,
             planning_key,
+            from,
             ..
         } => {
             let store = open_shared_store().await?;
@@ -267,6 +281,21 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             }
             let id = crate::durable::TaskId::parse(task)?;
             crate::ops::human_session::moves::arriving_task(&store, &main, &id, issue).await?;
+            if let Some(from) = from {
+                store.sqlite.record_move_checked(&id, from)?;
+            }
+            Ok(())
+        }
+        SessionCommand::Receive {
+            arrived: Some(task),
+            ..
+        } => {
+            let store = open_shared_store().await?;
+            let here = store.sqlite.local_machine()?.id;
+            anyhow::ensure!(
+                store.sqlite.task_move_arrived_on(task, &here)?,
+                "Task {task} did not arrive here"
+            );
             Ok(())
         }
         SessionCommand::Receive { check: true, .. } => {

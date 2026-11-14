@@ -5839,24 +5839,13 @@
     "OwnershipKind": {
       "oneOf": [
         {
-          "enum": [
-            "claim"
-          ],
-          "type": "string"
-        },
-        {
-          "const": "handoff",
-          "description": "Moves the claim to `machine_id`, keeping the person.",
+          "const": "claim",
+          "description": "Puts the Task on `machine_id`. A move is a claim by the same person\nnaming another Machine; entries an earlier lf wrote as `handoff`, and\nthe never-delivered `recorded` entries, read as claims.",
           "type": "string"
         },
         {
           "const": "unclaim",
           "description": "Stored and sent as `unclaim`, its released spelling.",
-          "type": "string"
-        },
-        {
-          "const": "recorded",
-          "description": "What a Machine knew before ownership existed; never delivered.",
           "type": "string"
         }
       ]
@@ -14152,6 +14141,13 @@
             "null"
           ]
         },
+        "person_id": {
+          "description": "The person's `people` id, where the entry named one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "person_key": {
           "type": [
             "string",
@@ -14162,6 +14158,7 @@
       "required": [
         "person",
         "person_key",
+        "person_id",
         "machine"
       ],
       "type": "object"
@@ -14204,7 +14201,7 @@
       "type": "object"
     },
     "TaskOwnershipEntry": {
-      "description": "One immutable entry in a Task's ownership log. `machine_id` names the\nclaimant, the handoff target, or the unclaiming Machine.",
+      "description": "One immutable entry in a Task's ownership log. `machine_id` names the\nMachine the Task is on after a claim, or the unclaiming Machine;\n`writer_machine_id` the Machine that wrote it.",
       "properties": {
         "at": {
           "format": "int64",
@@ -14235,6 +14232,13 @@
             "null"
           ]
         },
+        "person_id": {
+          "description": "The person's `people` id, their planning provider's identity for them.\nAbsent from entries released lf wrote and where the writer knew none.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "person_key": {
           "description": "The person's stable key; names are display only.",
           "type": [
@@ -14244,6 +14248,13 @@
         },
         "task_id": {
           "type": "string"
+        },
+        "writer_machine_id": {
+          "description": "Absent from entries released lf wrote, which name no writer (Task 538340\ndrops `written_here`, after which every entry names one).",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -14252,8 +14263,10 @@
         "kind",
         "person",
         "person_key",
+        "person_id",
         "machine_id",
         "machine_label",
+        "writer_machine_id",
         "at"
       ],
       "type": "object"

@@ -3500,15 +3500,21 @@ mod tests {
 
             // A changed Task reaches the watch through the shared invalidation
             // path, and a read on the same connection resolves its primary Session.
-            store
-                .conn
-                .lock()
-                .unwrap()
-                .execute(
-                    "UPDATE tasks SET primary_session_id=?2,issue_title='Updated subscribed Task' WHERE id=?1",
+            {
+                let mut conn = store.conn.lock().unwrap();
+                let tx = conn.transaction().unwrap();
+                tx.execute(
+                    "UPDATE tasks SET issue_title='Updated subscribed Task' WHERE id=?1",
+                    [task.id.as_str()],
+                )
+                .unwrap();
+                tx.execute(
+                    "INSERT INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
                     [task.id.as_str(), session.id.as_str()],
                 )
                 .unwrap();
+                tx.commit().unwrap();
+            }
             let view = request(
                 &mut client,
                 "view",

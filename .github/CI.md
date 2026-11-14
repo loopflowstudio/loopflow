@@ -195,6 +195,9 @@ package-smoke/lf --help
 package-smoke/lf list
 ```
 
+Both macOS packages build on Apple Silicon runners. The Intel CLI is
+cross-compiled for `x86_64-apple-darwin` and smoke-tested under Rosetta.
+
 Its `desktop-app` job builds Loopflow.app around the ARM64 package's exact `lf`,
 signs and notarizes the DMG with the `APPLE_CERTIFICATE_BASE64`,
 `APPLE_CERTIFICATE_PASSWORD`, `NOTARY_KEY`, `NOTARY_KEY_ID` and `NOTARY_ISSUER`

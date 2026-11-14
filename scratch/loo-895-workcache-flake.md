@@ -27,6 +27,9 @@ an unrelated change.
   None relies on the deadline running out to show that nothing happened. That
   includes `restartWaitsForFreshEvidence` line 101, where both argument cases
   expect the error to be set.
+- The one `Task.sleep` left (`unchangedPollDoesNotRewrite`, 20 ms) only spaces
+  out modification times so a rewrite would show. A slow runner makes it stricter,
+  not flaky, so it stays.
 - Openings start synchronously inside `WorkModel.refresh` → `openWarmConversations`.
   So `preparationCount > 0` already holds when the colliding test starts waiting.
 - Local probe on base: `swift test --package-path swift --skip-build --parallel

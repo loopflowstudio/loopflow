@@ -172,6 +172,7 @@ fn empty_writes<R>(store: &SqliteStore, run: impl FnOnce() -> R) -> (R, Vec<Stri
 
 /// Run `run` and return its result, failing with the call site of each write
 /// that took the lock and changed nothing (see `empty_writes`).
+#[track_caller]
 pub(crate) fn assert_no_empty_writes<R>(store: &SqliteStore, run: impl FnOnce() -> R) -> R {
     let (result, found) = empty_writes(store, run);
     assert!(

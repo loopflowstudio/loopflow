@@ -114,6 +114,26 @@ Docs match the built API. Merged origin/main through #1910 without conflicts.
 
 Remaining: gate (clippy `--all-targets`, `documented_commands::`), publish.
 
+## Concept review (2026-11-13)
+
+One concept, one name: an empty write is a transaction that held the write
+lock and changed no row; `assert_no_empty_writes` is the only public entry and
+the docs teach exactly it. Three of four call sites nest it around
+`statements()`; a combined helper would hide which check failed, so they stay
+separate. Open nit for gate, not a redesign: the private
+`query_plans::empty_writes` wrapper exists only for the self-test, which could
+call `contention::empty_writes::record` directly. No open product choice.
+
+## QA (2026-11-13)
+
+Four injected regressions (read-first dropped in `record_owner_viewer_hold`,
+IMMEDIATE read in `task_ownership`, empty autocommit UPDATE in
+`read_dashboard`, zero-statement dropped transaction in `boundary::answer`)
+each failed their test naming that function. Added `#[track_caller]` so the
+panic points at the test. `a_steer_is_delivered_once_the_hook_says_it_printed_it`
+failed under load (2 s `HOOK_DEADLINE` crossed between answers); it and the Pi
+test now pin `created_at` ahead. Report: `scratch/qa.html`.
+
 ## Exclusions
 
 - No production logging or metric for empty writes.

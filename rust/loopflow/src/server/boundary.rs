@@ -530,6 +530,17 @@ mod tests {
         );
     }
 
+    /// Keep answered batches inside `HOOK_DEADLINE` however long the next
+    /// answer takes on a loaded Machine.
+    fn hold_within_deadline(store: &SqliteStore) {
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute("UPDATE steer_batches SET created_at=unixepoch()+3600", [])
+            .unwrap();
+    }
+
     #[test]
     fn a_steer_is_delivered_once_the_hook_says_it_printed_it() {
         let (_home, store, adapter, delivery) = fixture();
@@ -558,6 +569,7 @@ mod tests {
         let steers = answered.steers.unwrap();
         assert!(steers.text.contains("KEEP_THE_API_SMALL"));
         assert_eq!(evidence(), "uncertain");
+        hold_within_deadline(&store);
         // A hook running beside the one still printing gets nothing new and
         // is told to ask again.
         let (answered, _) = answer(&store, &tool("beside", &[])).unwrap();
@@ -593,6 +605,7 @@ mod tests {
         let (running, _) = event(serde_json::json!({"type":"tool_execution_start",
             "toolCallId":"tool","turn":"turn","openTools":1,"pendingInput":0}));
         assert!(running.steers.unwrap().text.contains("KEEP_THE_API_SMALL"));
+        hold_within_deadline(&store);
         let (settled, _) = event(serde_json::json!({"type":"agent_settled","turn":"turn",
             "aborted":false,"events":[],"openTools":0,"pendingInput":0}));
         assert_eq!((settled.steers, settled.waiting), (None, true));

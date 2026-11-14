@@ -1,0 +1,23 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>LOO-845 QA</title>
+<style>body{font:15px/1.5 -apple-system,sans-serif;max-width:46em;margin:2em auto;padding:0 1em}pre{background:#f4f4f4;padding:.8em;overflow:auto}</style>
+<h1>LOO-845 QA: "Treat the codebase as your own"</h1>
+
+<p>The change is four lines of prose in <code>AGENTS.md</code> (Goals &gt; Simplicity). Its readers are agents launched in this repository, so QA means checking that a real launch delivers the paragraph and that it reads cleanly beside the rules around it.</p>
+
+<h2>1. Delivery to a launched agent</h2>
+<p>This QA step ran as an <code>lf</code>-launched Claude Session in the Task checkout. Its project instructions, loaded from <code>/Users/jack/src/loopflow.loo-845-agents-md-treat/AGENTS.md</code>, contain the new paragraph exactly as committed:</p>
+<pre>Treat the codebase as your own. Leave it better than you found it: delete the
+dead code you pass, merge the duplicate you notice, and make the clear
+improvement even when the task doesn't strictly need it.</pre>
+<p>The repository has no <code>CLAUDE.md</code>; the paragraph got there through the AGENTS.md path that lf launches use. Codex reads <code>AGENTS.md</code> natively.</p>
+
+<h2>2. Read in place</h2>
+<p>It sits after "A redesign deletes what it replaces" and before "## Flexibility". It doesn't repeat "Every line of code must earn its place" (a per-line standard) or the redesign rule (deleting earlier attempts). What it adds is cleanup of code the change passes. Nothing in Code Organization or Testing contradicts it. The builtin skills' "stay in scope" rules cover <em>unrelated</em> work and new outcomes; see the concept-review note in <code>scratch/plan.md</code>.</p>
+
+<h2>3. Mirrors</h2>
+<p><code>grep</code> found no copy of the Simplicity section to keep in sync. <code>design.md:56</code> in the builtins has its own redesign sentence, and it stays as it is because builtins run in other repos.</p>
+
+<h2>Result</h2>
+<p>Works: a real launch delivers the paragraph, and it reads cleanly in place. Fixed: nothing. Not reached: whether agents behave differently because of it, which no single run can show. Still wrong: nothing found.</p>

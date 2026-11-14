@@ -42,6 +42,9 @@ BUILDERS = re.compile(
     r"ninja|make|cmake|node|npm|npx|yarn|pnpm|uv$|python|go$|java|gradle|bazel)",
     re.IGNORECASE,
 )
+# Agents and the helpers they spawn sit in a checkout without building there.
+AGENTS = re.compile(r"^(codex|claude)$")
+SESSION_SERVER = re.compile(r"(^|/)lf session serve( |$)")
 
 
 class CleanupStopped(Exception):
@@ -79,6 +82,15 @@ class OpenPath:
 class Activity:
     processes: dict[int, Process]
     files: tuple[OpenPath, ...]
+    agents: frozenset[int] = frozenset()
+
+    def _under_agent(self, pid: int) -> bool:
+        # pid 0 (kernel_task) is its own parent.
+        while pid > 0 and pid in self.processes:
+            if pid in self.agents:
+                return True
+            pid = self.processes[pid].parent
+        return False
 
     def owners(self, candidate: Candidate) -> set[int]:
         return {file.pid for file in self.files if _within(file.path, candidate.path)}
@@ -92,6 +104,7 @@ class Activity:
             and _within(file.path, checkout)
             and file.pid in self.processes
             and BUILDERS.match(Path(self.processes[file.pid].command).name)
+            and not self._under_agent(file.pid)
             for file in self.files
         ):
             return "builder in checkout"
@@ -251,6 +264,20 @@ class Cleaner:
     def _activity(self) -> Activity:
         try:
             processes = self._processes()
+            # `comm` names the executable; `lf session serve` shows only in its arguments.
+            commands = (
+                line.split(maxsplit=1)
+                for line in self._command(["ps", "-ax", "-o", "pid=,command="]).splitlines()
+            )
+            agents = frozenset(
+                pid
+                for pid, process in processes.items()
+                if AGENTS.match(Path(process.command).name)
+            ) | frozenset(
+                int(fields[0])
+                for fields in commands
+                if len(fields) == 2 and fields[0].isdigit() and SESSION_SERVER.search(fields[1])
+            )
             output = self._command(["lsof", "-nP", "-Fpcfn"])
             files = []
             descriptor = ""
@@ -282,7 +309,7 @@ class Cleaner:
                         files.append(OpenPath(pid, descriptor, path))
             if not files:
                 raise RuntimeError("no paths returned")
-            return Activity(processes, tuple(files))
+            return Activity(processes, tuple(files), agents)
         except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
             raise CleanupStopped(f"open-file inspection failed; stopping cleanup: {exc}") from exc
 
@@ -319,7 +346,7 @@ class Cleaner:
             return 15
         if free < self.policy.cleanup_target_free_disk_bytes:
             return 60
-        return 240
+        return 120
 
     def _reservation(self, root: Path) -> str | None:
         for path, labels in self.usage_labels.items():
@@ -345,9 +372,9 @@ class Cleaner:
             outcome = evidence_outcome(candidate.path)
             if outcome == "saved":
                 return "explicitly saved evidence"
-            minutes = 1440 if outcome == "passed" else 7 * 1440
+            minutes = 360 if outcome == "passed" else 2 * 1440
         else:
-            minutes = 1440 if held or candidate.category != "build" else self._build_minutes()
+            minutes = 360 if held or candidate.category != "build" else self._build_minutes()
         if newest > time.time() - minutes * 60:
             return f"written in the last {minutes} minutes"
         if held and (not terminable or held != "held open"):

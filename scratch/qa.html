@@ -1,0 +1,51 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>LOO-842 QA: disk cleanup</title>
+<style>body{font:15px/1.5 -apple-system,sans-serif;max-width:860px;margin:2em auto;padding:0 1em}pre{background:#f4f4f4;padding:.8em;overflow:auto;font-size:13px}table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:.3em .6em;text-align:left}</style>
+<h1>LOO-842 QA: disk cleanup on this Mac</h1>
+<p>2026-11-11. Ran <code>disk_cleanup.py run --dry-run</code> with <code>/usr/bin/python3</code> (the launchd runner's interpreter) against the real Machine: once from the branch and once from main's copy of the scripts, back to back. 150 GiB free at the time. Dry run signals nothing and deletes nothing. It does overwrite <code>~/Library/Logs/loopflow-disk-cleanup.json</code>, as it already did before this change; the next hourly run rewrites it anyway.</p>
+
+<h2>1. Real Machine: branch vs main</h2>
+<table>
+<tr><th>reason</th><th>main</th><th>branch</th></tr>
+<tr><td>eligible</td><td>0</td><td>27 (13.1 GiB)</td></tr>
+<tr><td>written in the last N minutes</td><td>135</td><td>96</td></tr>
+<tr><td>builder in checkout</td><td>34</td><td>16</td></tr>
+<tr><td>not ignored</td><td>10</td><td>23</td></tr>
+<tr><td>held open</td><td>3</td><td>4</td></tr>
+<tr><td>unmarked demo / Chrome copy / saved</td><td>23</td><td>23</td></tr>
+</table>
+<p>The largest newly eligible roots: <code>loopflow.loo-828-tell-agents-who/target</code> 5.3 GiB, then nine <code>manabot.mtg-*/managym/target</code> roots, plus old gate runs, pytest and swift-test directories. "Not ignored" rises only because some <code>.venv</code> roots now get past the age check and stop at the next check instead; they're retained either way.</p>
+<p>The 16 remaining "builder in checkout" holds come from real non-agent jobs, traced by process ancestry:</p>
+<pre>loopflow.loo-593-decide-the-desktop   .venv/bin/python3 ×2, parent launchd, 3 d 5 h old
+manabot.search                        doppler → doppler → uv → python, parent launchd, 3 d 13 h
+manabot.c5fba4-frontier-self-play     doppler → doppler → uv → python3, parent launchd
+   (its codex tree's node / node_repl helpers: _under_agent = True, correctly ignored)</pre>
+<p>The c5fba4 checkout shows both cases at once: Codex's ChatGPT <code>cua_node</code> helpers, the exact holders named in the brief, no longer count, and the detached <code>uv run</code> job still holds the checkout.</p>
+
+<h2>2. Controlled checkouts</h2>
+<p>Three disposable Git checkouts under <code>/tmp/lf-qa-dc/src</code> (<code>LOOPFLOW_SRC</code>), each with an ignored 5 MB <code>target/</code> last written 2026-11-10. The holder was a compiled binary named <code>cargo</code> that sleeps, with its cwd in the checkout.</p>
+<table>
+<tr><th>checkout</th><th>holder</th><th>result</th></tr>
+<tr><td>proj</td><td>cargo, child of this Claude session's shell, no open files</td><td>eligible, owner_pids []</td></tr>
+<tr><td>proj2</td><td>same, with <code>target/debug/big</code> open</td><td>eligible, owner_pids [66398]: held output older than 6 h goes to owner teardown (unchanged rule)</td></tr>
+<tr><td>proj3</td><td>cargo started with <code>nohup … &amp;</code> from the shell, reparented to launchd</td><td>builder in checkout</td></tr>
+</table>
+<p>proj3 matters. A build an agent backgrounds through its shell loses its agent ancestry as soon as that shell exits, so it holds like a person's build. That's the safe side, and the same thing produces the three real holds above.</p>
+
+<h2>3. Tests</h2>
+<pre>uv run pytest python/tests/test_disk_cleanup.py -q   → 105 passed in 55.63s</pre>
+
+<h2>What works now</h2>
+<ul>
+<li>Agent helpers in a checkout no longer hold its builds; on this Mac that unlocks 13.1 GiB that main keeps.</li>
+<li>The tighter windows are in effect: the build retention line reads 120 minutes, and evidence/held output reads 360.</li>
+<li>Non-agent and orphaned jobs still hold their checkout.</li>
+</ul>
+<h2>Not reached</h2>
+<ul>
+<li>A real (non-dry) run of the branch. It would delete across the whole Machine, and the installed hourly job runs its own copy; it only picks up this code after <code>scripts/disk-cleanup.sh install</code> once the change lands.</li>
+<li>Whether the 2026-11-11 skips clear on the next scheduled run: that run still uses the installed version.</li>
+</ul>
+<h2>Still wrong</h2>
+<p>Nothing found in scope. One observation, not a defect: the three long-lived detached <code>uv</code>/<code>python</code> jobs (loo-593, manabot.search, c5fba4) are 3+ days old. The cleaner correctly keeps their checkouts, and nothing else will free them while they run.</p>

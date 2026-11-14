@@ -27,8 +27,8 @@ durable history are observation-only. Chrome-copy cleanup requires a separate
 machine opt-in and never terminates Chrome. Do not remove anything
 else, change retained source or history, or edit the removal log.
 
-Successful disposable evidence retains 24h; failed or unknown evidence retains
-seven days. Preserve `.cleanup-keep` and explicitly saved evidence. Native cache
+Successful disposable evidence retains 6h; failed or unknown evidence retains
+two days. Preserve `.cleanup-keep` and explicitly saved evidence. Native cache
 caps are private machine configuration: uv 8 GiB per cache, sccache 10 GiB,
 local Docker build cache 8 GiB. Preserve active cache users, Docker volumes,
 containers, unpublished images and remote engines. Reinstall the same runner

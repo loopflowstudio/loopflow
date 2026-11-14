@@ -248,6 +248,16 @@ Graphs with `lf graph list --processes`, then `lf process show <ID>`; the live
 process list cannot find a finished run. Stop the private server and every
 remaining child after the scenarios.
 
+For Task-run retries, a bare `lf task run` returns at registration; poll
+`lf task status <id>` (`Graph <name>: running|stopped at <step>`) rather than
+`lf task wait`, which blocks until the Task is done. `lf task show <id> --json`
+has the position at `.execution.work.graph.position`, and `lf process show
+<graph>` lists each attempt's steps. A Graph reads the Task's checkout, so a
+Graph file added on `main` is invisible until the branch has it. To make a step
+slow or failing, point `LF_BIN` at a wrapper that intercepts that step's argv;
+the stand-in step registers no process, so `lf task interrupt` reports it as
+"between steps".
+
 For watch recovery, save the baseline's opaque `checkpoint`, close the socket,
 then reconnect with the same operation and `select` plus `resume: <checkpoint>`.
 An unchanged watch sends its acknowledgement only; send a numeric `checkpoint`

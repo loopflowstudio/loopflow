@@ -63,8 +63,9 @@ pub fn run(
 }
 
 /// `lf --task ISSUE graph run`: carry the Task's Graph from the cursor its
-/// `lf task run`, this process's parent, set out from. The Graph writes where
-/// it left the Task: before the interactive step it stopped at, or at `end`.
+/// `lf task run`, this process's parent, recorded: where the run began, then
+/// the step after each one finished. The Graph writes where it left the Task:
+/// before the interactive step it stopped at, or at `end`.
 pub fn run_task_graph(cli: &Cli, repo: &Path, binding: Option<&WorkBinding>) -> Result<()> {
     let Some(WorkRef::Task(task)) = binding.map(|binding| &binding.work) else {
         anyhow::bail!("`lf graph run` carries a Task's Graph; `lf task run` starts it");
@@ -175,7 +176,8 @@ impl TaskRunStopped {
 
 /// Carry one Task run: start the Task's Graph as a child Graph process, and
 /// retry failed Graphs unless a provider refusal stopped them. Each attempt records
-/// its own GraphProcess beneath this process. A Graph held for a person or a
+/// its own GraphProcess beneath this process and sets out at the step the last
+/// one failed at. A Graph held for a person or a
 /// watcher, an interrupted one, and a launch refused before any Graph started
 /// are returned as they ended. Once someone interrupts the Task, nothing is
 /// started again.
@@ -292,8 +294,13 @@ pub fn run_task_graph_for(
             }
             return Err(exit_of(status).into());
         }
+        // The failed Graph checkpointed after each step it finished.
+        let again = store
+            .task_graph_row(&task.id)?
+            .and_then(|row| row.graph.step_name_of(&row.run?.0))
+            .map_or_else(String::new, |step| format!(" at {step}"));
         eprintln!(
-            "The run of {run} failed (attempt {attempt} of {TASK_RUN_ATTEMPTS}); starting it again."
+            "The run of {run} failed (attempt {attempt} of {TASK_RUN_ATTEMPTS}); starting it again{again}."
         );
         attempt += 1;
     }
@@ -532,7 +539,7 @@ fn execute(
             launcher: cli,
             position: Mutex::new(start.clone()),
             task,
-            task_run: task_run.is_some(),
+            task_run: task_run.cloned(),
             interrupt,
         };
         // A chapter rotation moving this checkout's Task excludes new work in it.
@@ -794,8 +801,9 @@ struct RunningGraph<'a> {
     /// Where the runner stands, as of its last checkpoint.
     position: Mutex<ExecutionCursor>,
     task: Option<crate::durable::TaskId>,
-    /// This Graph carries its Task's `lf task run`, which a stop keeps from merging.
-    task_run: bool,
+    /// The `lf task run` this Graph carries its Task for: a stop keeps it from
+    /// merging, and each checkpoint is where that run's next attempt sets out.
+    task_run: Option<LfProcessId>,
     /// The Task's latest interrupt when its run began; a later one stops the Graph.
     interrupt: Option<i64>,
 }
@@ -849,7 +857,7 @@ impl RunningGraph<'_> {
     /// and someone stopped shipping the Task. Read when the step is reached,
     /// so a stop made mid-run counts; an unreadable stop fails the step.
     fn stopped_landing(&self) -> Result<Option<String>> {
-        let Some(task) = self.task.as_ref().filter(|_| self.task_run) else {
+        let Some(task) = self.task.as_ref().filter(|_| self.task_run.is_some()) else {
             return Ok(None);
         };
         let Some(step) = self
@@ -1053,6 +1061,17 @@ fn answer_value(text: &str) -> Result<serde_json::Value, String> {
 impl SkillExecutor for &RunningGraph<'_> {
     async fn checkpoint(&self, cursor: &ExecutionCursor) -> Result<()> {
         *self.position.lock().expect("Graph position mutex poisoned") = cursor.clone();
+        // A Task run that fails starts again here, not where it began. A stale
+        // cursor reruns finished steps; that beats failing a finished step.
+        if let (Some(task), Some(carrier)) = (&self.task, &self.task_run) {
+            if let Err(error) = self
+                .store
+                .sqlite
+                .advance_task_graph_run(task, carrier, cursor)
+            {
+                tracing::warn!(%task, %error, "could not record where the Task run goes on");
+            }
+        }
         Ok(())
     }
 
@@ -1121,7 +1140,7 @@ impl SkillExecutor for &RunningGraph<'_> {
         let mut args = step_cli.step_args();
         // A Task run's step is the Task's own conversation, not a bare `lf`
         // in its checkout, so it names the Task.
-        if let Some(task) = self.task.as_ref().filter(|_| self.task_run) {
+        if let Some(task) = self.task.as_ref().filter(|_| self.task_run.is_some()) {
             args.extend(["--task".to_owned(), task.to_string()]);
         }
         args.extend(["skill".to_owned(), name.clone()]);
@@ -1290,7 +1309,7 @@ mod tests {
                 launcher: &cli,
                 position: Mutex::new(ExecutionCursor::default()),
                 task: None,
-                task_run: false,
+                task_run: None,
                 interrupt: None,
             };
             runtime.block_on(async {
@@ -1372,7 +1391,7 @@ mod tests {
                 launcher: &cli,
                 position: Mutex::new(ExecutionCursor::default()),
                 task: Some(task.id.clone()),
-                task_run: false,
+                task_run: None,
                 interrupt: Some(
                     runtime
                         .block_on(fixture.store.latest_interrupt_id(&work))

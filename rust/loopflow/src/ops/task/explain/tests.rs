@@ -209,13 +209,13 @@ fn run_takes_up_the_named_else_waves_else_repositorys_else_code_graph() {
             "Wave default stops at its interactive step",
             &none,
             false,
-            Ok(run("feature", true, "sync", Some("review"))),
+            Ok(run("feature", true, "sync --plan", Some("review"))),
         ),
         (
             "-b runs through to the end",
             &none,
             true,
-            Ok(run("feature", true, "sync", None)),
+            Ok(run("feature", true, "sync --plan", None)),
         ),
         (
             "a named Graph stops inside its first xor",

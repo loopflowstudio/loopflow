@@ -14067,8 +14067,11 @@
           "type": "object"
         },
         {
-          "description": "`lf task run` (`lf_process_id`) carries the Task on from `step`.\n`running` is read from that Process: a run that ended without\narriving stopped, and the next `lf task run` starts it again.",
+          "description": "`lf task run` (`lf_process_id`) carries the Task on from `step`, and\nruns `at`. `running` is read from that Process: a run that ended\nwithout arriving stopped, and the next `lf task run` starts it again\nat `at`; the steps before it stay done.",
           "properties": {
+            "at": {
+              "type": "string"
+            },
             "kind": {
               "const": "run",
               "type": "string"
@@ -14086,6 +14089,7 @@
           "required": [
             "kind",
             "step",
+            "at",
             "lf_process_id",
             "running"
           ],

@@ -176,10 +176,12 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
         let repo = store.ensure_repository("/repo").unwrap();
         let task = TaskId::new();
-        store.conn.lock().unwrap().execute(
-            "INSERT INTO tasks(id,repository_id,issue_identifier,created_at,worktree,branch) VALUES(?1,?2,'SHELL-1',1,'/repo.task','task')",
-            rusqlite::params![task.as_str(),repo.as_str()],
-        ).unwrap();
+        store.conn.lock().unwrap().execute_batch(&format!(
+            "INSERT INTO tasks(id,repository_id,issue_identifier,created_at) VALUES('{task}','{repo}','SHELL-1',1);
+             INSERT INTO task_checkouts(task_id,worktree,branch) VALUES('{task}','/repo.task','task');",
+            task = task.as_str(),
+            repo = repo.as_str(),
+        )).unwrap();
         assert!(store
             .create_desktop_shell("shell", &task, "/repo.task")
             .unwrap());

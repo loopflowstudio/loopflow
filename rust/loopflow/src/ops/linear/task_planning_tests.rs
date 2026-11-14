@@ -5654,7 +5654,7 @@ fn project_prose_save_delivers_and_settles_without_changing_managed_fields() {
     with_planning_task(|runtime, fixture, repo, task, state| {
         runtime.block_on(async {
             let conn = rusqlite::Connection::open(&fixture.database).unwrap();
-            conn.execute("UPDATE tasks SET worktree='/retained/task',branch='retained/branch' WHERE id=?1", [task.id.as_str()]).unwrap();
+            conn.execute("INSERT INTO task_checkouts(task_id,worktree,branch) VALUES(?1,'/retained/task','retained/branch') ON CONFLICT(task_id) DO UPDATE SET worktree=excluded.worktree,branch=excluded.branch", [task.id.as_str()]).unwrap();
             conn.execute("INSERT INTO processes(id,trace_id,command,cwd,started_at) VALUES('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222','lf run code','/retained/task',2)", []).unwrap();
             conn.execute("INSERT INTO task_graphs(task_id,graph,step,run_start,lf_process_id,updated_at) VALUES(?1,?2,'start','{\"index\":0}','11111111-1111-4111-8111-111111111111',3)", rusqlite::params![task.id.as_str(),json!({"name":"code","steps":[]}).to_string()]).unwrap();
             let workflow_before = fixture.store.sqlite.task_graph(&task.id).unwrap();

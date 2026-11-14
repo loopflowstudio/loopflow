@@ -2692,12 +2692,20 @@ fn completed_task_cleanup_signals_shell_owner_and_settles_jobs() {
     let job = fixture.wait_file("job").trim().parse::<u32>().unwrap();
     viewer.input("unfinished draft");
     until_out(&mut viewer, "unfinished draft");
-    fixture.sql().execute("UPDATE tasks SET issue_title='Completed shell',issue_description='',workspace_slug='task',base_commit='head',updated_at=1,planning_completed=1,planning_completed_at='2000-01-01T00:00:00Z' WHERE id=?1", [task]).unwrap();
+    fixture.sql().execute("UPDATE tasks SET issue_title='Completed shell',issue_description='',workspace_slug='task',updated_at=1,planning_completed=1,planning_completed_at='2000-01-01T00:00:00Z' WHERE id=?1", [task]).unwrap();
+    fixture
+        .sql()
+        .execute(
+            "UPDATE task_checkouts SET base_commit='head' WHERE task_id=?1",
+            [task],
+        )
+        .unwrap();
     fixture
         .sql()
         .execute(
             "INSERT INTO task_retirements(task_id,completion,checkout,branch,due_at,phase)
-        SELECT id,planning_completed_at,worktree,branch,0,'waiting' FROM tasks WHERE id=?1",
+        SELECT tasks.id,planning_completed_at,c.worktree,c.branch,0,'waiting'
+        FROM tasks JOIN task_checkouts c ON c.task_id=tasks.id WHERE tasks.id=?1",
             [task],
         )
         .unwrap();
@@ -2757,11 +2765,19 @@ impl Fixture {
             .ensure_repository(self.repo.path().to_str().unwrap())
             .unwrap();
         let machine = store.local_machine().unwrap().id;
-        self.sql().execute(
-            "INSERT INTO tasks(id,repository_id,issue_identifier,created_at,worktree,checkout_machine_id,branch)
-             VALUES(?1,?2,'SHELL-1',1,?3,?4,'task')",
-            rusqlite::params![task,repo.as_str(),self.repo.path().to_str().unwrap(),machine.as_str()],
-        ).unwrap();
+        self.sql()
+            .execute(
+                "INSERT INTO tasks(id,repository_id,issue_identifier,created_at)
+             VALUES(?1,?2,'SHELL-1',1)",
+                rusqlite::params![task, repo.as_str()],
+            )
+            .unwrap();
+        self.sql()
+            .execute(
+                "INSERT INTO task_checkouts(task_id,worktree,branch) VALUES(?1,?2,'task')",
+                rusqlite::params![task, self.repo.path().to_str().unwrap()],
+            )
+            .unwrap();
         machine
     }
 
@@ -3533,7 +3549,7 @@ printf '\r\naccepted: %s\r\n' "$answer"
     fixture
         .sql()
         .execute(
-            "UPDATE tasks SET primary_session_id=?2 WHERE id=?1",
+            "INSERT OR REPLACE INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
             rusqlite::params![task.task.id.as_str(), session],
         )
         .unwrap();
@@ -5045,7 +5061,14 @@ fn task_cleanup_ends_an_abandoned_tasks_held_terminal() {
     let home = fixture.home.path();
     let task = "task_5e55105e000040008000000000000008";
     fixture.shell_task(task);
-    fixture.sql().execute("UPDATE tasks SET issue_title='Abandoned held',issue_description='',workspace_slug='task',base_commit='head',updated_at=1 WHERE id=?1", [task]).unwrap();
+    fixture.sql().execute("UPDATE tasks SET issue_title='Abandoned held',issue_description='',workspace_slug='task',updated_at=1 WHERE id=?1", [task]).unwrap();
+    fixture
+        .sql()
+        .execute(
+            "UPDATE task_checkouts SET base_commit='head' WHERE task_id=?1",
+            [task],
+        )
+        .unwrap();
     let terminal = service.start_held(None, "abandoned", "sleep 600".to_owned());
     fixture
         .sql()

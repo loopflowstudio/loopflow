@@ -454,16 +454,16 @@ fn checkout_restores_a_missing_checkout_unless_occupied_terminal_or_remote() {
     let table = Table::new("restore-proof", false);
     let checkout = table.repo.path().join("missing-checkout");
     let db = rusqlite::Connection::open(table.home.path().join("loopflow.db")).unwrap();
-    db.execute("UPDATE tasks SET worktree=?1", [checkout.to_str().unwrap()])
-        .unwrap();
+    db.execute(
+        "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)
+         ON CONFLICT(task_id) DO UPDATE SET worktree=excluded.worktree",
+        [table.task.id.as_str(), checkout.to_str().unwrap()],
+    )
+    .unwrap();
     let sqlite = &table.store.sqlite;
-    let local = sqlite.local_machine().unwrap().id;
     let reset = || {
-        db.execute(
-            "UPDATE tasks SET planning_state=NULL,checkout_machine_id=?1",
-            [local.as_str()],
-        )
-        .unwrap()
+        db.execute("UPDATE tasks SET planning_state=NULL", [])
+            .unwrap()
     };
     let explain = || table.checkout(Some(table.task.id.as_str()), &none_options());
 
@@ -495,7 +495,7 @@ fn checkout_restores_a_missing_checkout_unless_occupied_terminal_or_remote() {
     sqlite
         .add_machine(&peer, "must-not-contact.invalid", "peer")
         .unwrap();
-    sqlite.handoff_task(&table.task.id, &peer).unwrap();
+    sqlite.move_claim(&table.task.id, &peer).unwrap();
     let report = explain();
     assert!(
         matches!(&report.resolution.execution_machine, ContextFact::Bound { value, .. } if value == peer.as_str()),

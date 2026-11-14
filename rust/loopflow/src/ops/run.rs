@@ -596,7 +596,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn explanation_preserves_remote_and_unknown_location_without_local_access() {
+    async fn explanation_binds_execution_to_the_local_checkout_only() {
         use crate::ops::context::{explain_context, ContextFact};
         let (directory, store) = test_store().await;
         let wave = Wave::new(
@@ -608,47 +608,39 @@ mod tests {
         let project = project(&wave, "runtime", "project-runtime");
         store.create_project(&project).await.unwrap();
         let task = task(&store, &wave, &project, "/not/a/local/checkout".into()).await;
-        let peer = crate::durable::MachineId::new();
-        store.add_machine(&peer, "peer", "peer").await.unwrap();
-        let conn = rusqlite::Connection::open(directory.path().join("loopflow.db")).unwrap();
-        for machine in [Some(peer.as_str()), None] {
-            conn.execute(
-                "UPDATE tasks SET checkout_machine_id=?2 WHERE id=?1",
-                rusqlite::params![task.id.as_str(), machine],
-            )
-            .unwrap();
-            let report = explain_context(
-                &store,
-                directory.path(),
-                WorkSelection {
-                    task: Some(task.id.as_str()),
-                    wave: None,
-                },
-                None,
-                None,
-            )
-            .await;
-            assert_eq!(
-                report.checkout,
-                ContextFact::Bound {
-                    value: "/not/a/local/checkout".into(),
-                    source: "recorded_checkout".into()
-                }
-            );
-            match machine {
-                Some(id) => assert_eq!(
-                    report.execution_machine,
-                    ContextFact::Bound {
-                        value: id.into(),
-                        source: "recorded_checkout".into()
-                    }
-                ),
-                None => assert!(matches!(
-                    report.execution_machine,
-                    ContextFact::Unavailable { .. }
-                )),
+        let local = store.local_machine().await.unwrap().id;
+        let selection = || WorkSelection {
+            task: Some(task.id.as_str()),
+            wave: None,
+        };
+        let report = explain_context(&store, directory.path(), selection(), None, None).await;
+        assert_eq!(
+            report.checkout,
+            ContextFact::Bound {
+                value: "/not/a/local/checkout".into(),
+                source: "recorded_checkout".into()
             }
-        }
+        );
+        assert_eq!(
+            report.execution_machine,
+            ContextFact::Bound {
+                value: local.to_string(),
+                source: "recorded_checkout".into()
+            }
+        );
+        let conn = rusqlite::Connection::open(directory.path().join("loopflow.db")).unwrap();
+        conn.execute(
+            "DELETE FROM task_checkouts WHERE task_id=?1",
+            [task.id.as_str()],
+        )
+        .unwrap();
+        let report = explain_context(&store, directory.path(), selection(), None, None).await;
+        assert_eq!(
+            report.execution_machine,
+            ContextFact::Unavailable {
+                reason: "No local execution location; peer execution has not been observed".into()
+            }
+        );
     }
 
     #[tokio::test]

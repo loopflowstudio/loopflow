@@ -138,7 +138,8 @@ fn checkout_restores_exact_task_history_from_a_dirty_checkout() {
     rusqlite::Connection::open(home.path().join("loopflow.db"))
         .unwrap()
         .execute(
-            "UPDATE tasks SET worktree=?2 WHERE id=?1",
+            "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)
+             ON CONFLICT(task_id) DO UPDATE SET worktree=excluded.worktree",
             rusqlite::params![fixture.task.id.as_str(), worktree.display().to_string()],
         )
         .unwrap();
@@ -301,7 +302,8 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
     rusqlite::Connection::open(home.path().join("loopflow.db"))
         .unwrap()
         .execute(
-            "UPDATE tasks SET worktree=?2 WHERE id=?1",
+            "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)
+             ON CONFLICT(task_id) DO UPDATE SET worktree=excluded.worktree",
             rusqlite::params![
                 task.task.id.as_str(),
                 missing_worktree.display().to_string()

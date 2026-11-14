@@ -195,23 +195,21 @@ prefixed_uuid_id!(
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum OwnershipKind {
+    /// Puts the Task on `machine_id`. A move is a claim by the same person
+    /// naming another Machine; entries an earlier lf wrote as `handoff`, and
+    /// the never-delivered `recorded` entries, read as claims.
+    #[serde(alias = "handoff", alias = "recorded")]
     Claim,
-    /// Moves the claim to `machine_id`, keeping the person.
-    Handoff,
     /// Stored and sent as `unclaim`, its released spelling.
     #[serde(rename = "unclaim")]
     Unassign,
-    /// What a Machine knew before ownership existed; never delivered.
-    Recorded,
 }
 
 impl OwnershipKind {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Claim => "claim",
-            Self::Handoff => "handoff",
             Self::Unassign => "unclaim",
-            Self::Recorded => "recorded",
         }
     }
 
@@ -225,7 +223,8 @@ impl OwnershipKind {
 }
 
 /// One immutable entry in a Task's ownership log. `machine_id` names the
-/// claimant, the handoff target, or the unclaiming Machine.
+/// Machine the Task is on after a claim, or the unclaiming Machine;
+/// `writer_machine_id` the Machine that wrote it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskOwnershipEntry {
     pub id: OwnershipEntryId,
@@ -234,9 +233,15 @@ pub struct TaskOwnershipEntry {
     pub person: Option<String>,
     /// The person's stable key; names are display only.
     pub person_key: Option<String>,
+    /// The person's `people` id, their planning provider's identity for them.
+    /// Absent from entries released lf wrote and where the writer knew none.
+    pub person_id: Option<String>,
     pub machine_id: Option<MachineId>,
     /// The Machine's label when written, or as best known on this Machine.
     pub machine_label: Option<String>,
+    /// Absent from entries released lf wrote, which name no writer (Task 538340
+    /// drops `written_here`, after which every entry names one).
+    pub writer_machine_id: Option<MachineId>,
     pub at: i64,
 }
 
@@ -262,6 +267,9 @@ impl MachineRef {
 pub struct TaskOwner {
     pub person: Option<String>,
     pub person_key: Option<String>,
+    /// The person's `people` id, where the entry named one.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub person_id: Option<String>,
     pub machine: MachineRef,
 }
 
@@ -282,6 +290,7 @@ impl TaskOwnershipEntry {
         TaskOwner {
             person: self.person.clone(),
             person_key: self.person_key.clone(),
+            person_id: self.person_id.clone(),
             machine: MachineRef {
                 id: self.machine_id.clone(),
                 label: self.machine_label.clone(),

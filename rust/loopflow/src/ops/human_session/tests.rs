@@ -1811,7 +1811,12 @@ impl ListFilters {
             rusqlite::params![project.as_str(), wave],
         )
         .unwrap();
-        db.execute("INSERT INTO tasks(id,repository_id,project_id,issue_identifier,worktree,checkout_machine_id,created_at) VALUES(?1,'repo_00000000000000000000000000000001',?2,'TEST-1',?3,(SELECT id FROM machines WHERE is_local=1),1)", rusqlite::params![task.as_str(), project.as_str(), repo.path().to_str().unwrap()]).unwrap();
+        db.execute("INSERT INTO tasks(id,repository_id,project_id,issue_identifier,created_at) VALUES(?1,'repo_00000000000000000000000000000001',?2,'TEST-1',1)", rusqlite::params![task.as_str(), project.as_str()]).unwrap();
+        db.execute(
+            "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)",
+            rusqlite::params![task.as_str(), repo.path().to_str().unwrap()],
+        )
+        .unwrap();
         for id in [
             "outside",
             "wave-primary",
@@ -1841,7 +1846,7 @@ impl ListFilters {
         )
         .unwrap();
         db.execute(
-            "UPDATE tasks SET primary_session_id='task-primary' WHERE id=?1",
+            "INSERT INTO task_primary_sessions(task_id,session_id) VALUES(?1,'task-primary')",
             [task.as_str()],
         )
         .unwrap();

@@ -12,12 +12,43 @@ use std::process::{Command, Stdio};
 
 pub const EXPECTED_MACHINE_ID_ENV: &str = "LF_EXPECTED_MACHINE_ID";
 
-pub fn selects_current_machine(target: &str) -> anyhow::Result<bool> {
+/// Whether `lf --machine <target> <args>` runs on this Machine: the target is
+/// this Machine, or the command is `task move X --machine <target>` and this
+/// Machine began moving X there without it arriving. Run here, a leaving move
+/// carries on and a sent move delivers what was sent; forwarded, the target
+/// would see a move from a Machine the forwarded personal settings do not name.
+pub fn runs_here(target: &str, lf_args: &[String]) -> anyhow::Result<bool> {
     let Some(store) = crate::store::read_existing_registry()? else {
         return Ok(false);
     };
-    let selected = crate::ops::task_ownership::resolve_machine(&store.sqlite, target)?;
-    Ok(selected == store.sqlite.local_machine()?.id)
+    let store = &store.sqlite;
+    let target = crate::ops::task_ownership::resolve_machine(store, target)?;
+    if target == store.local_machine()?.id {
+        return Ok(true);
+    }
+    let Ok(cli) = parse_remote_command(lf_args) else {
+        return Ok(false);
+    };
+    let Some(crate::lf::Commands::Task {
+        cmd:
+            crate::lf::TaskCommand::Move {
+                issue,
+                machine: Some(machine),
+                ..
+            },
+    }) = &cli.command
+    else {
+        return Ok(false);
+    };
+    if crate::ops::task_ownership::resolve_machine(store, machine)? != target {
+        return Ok(false);
+    }
+    let Some(task) = store.task_by_issue(issue)? else {
+        return Ok(false);
+    };
+    Ok(store
+        .task_move_in_flight(&task.id)?
+        .is_some_and(|moving| moving.to_machine_id == target))
 }
 
 pub fn run(
@@ -88,18 +119,8 @@ pub(super) fn run_with_io(
     );
     let runtime = tokio::runtime::Runtime::new()?;
     if let Some(id) = super::work_route::resumed_session(cli).filter(|_| !preview) {
-        // Resuming a Session that lives here, or moved elsewhere, moves it there first.
-        runtime.block_on(async {
-            let Some(store) = crate::store::open_existing_store().await? else {
-                return anyhow::Ok(());
-            };
-            let store: crate::store::SharedStore = std::sync::Arc::new(store);
-            let Some(session) = crate::ops::human_session::session_by_id(&store, id).await? else {
-                return Ok(());
-            };
-            let machine = resolve_target(target, forward_agent).await?;
-            super::session_move::relay(&store, &session, &machine).await
-        })?;
+        // Resuming a Session that lives here, or moved elsewhere, moves it (or its Task) there first.
+        super::session_move::move_session(id, target, forward_agent)?;
     }
     let source = if preview || resident_operation {
         None
@@ -134,7 +155,7 @@ pub(super) fn run_with_io(
                 target.id
             ));
         };
-        super::session_move::move_task(task, target.id.as_str())?;
+        super::session_move::move_task(task, target.id.as_str(), None)?;
     }
     // A Machine names no checkout: the destination resolves the repository's
     // own checkout from its identity. A path/name stays the caller's selection.

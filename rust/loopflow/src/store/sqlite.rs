@@ -59,6 +59,7 @@ mod steers;
 mod task_comments;
 mod task_content;
 mod task_details;
+pub(crate) mod task_moves;
 mod task_retirement;
 mod transport;
 pub(crate) use task_retirement::{TaskRetirement, ViewerHold, WORKSPACE_GRACE};
@@ -179,13 +180,12 @@ fn home_dir_in(conn: &Connection) -> StoreResult<PathBuf> {
         .ok_or_else(|| StoreError::InvalidData("store has no owning Machine path".into()))
 }
 
-/// Recorded checkout evidence remains usable without chapter metadata.
+/// A Task's checkout on this Machine, usable without chapter metadata.
 #[derive(Debug, Clone)]
 pub(crate) struct TaskCheckout {
     pub task_id: TaskId,
     pub issue_identifier: String,
     pub worktree: PathBuf,
-    pub machine_id: Option<crate::durable::MachineId>,
 }
 
 /// Stable identity fields for observation, independent of execution schema.
@@ -270,9 +270,21 @@ fn task_state_sql(conn: &Connection) -> StoreResult<(String, &'static str)> {
 pub(crate) fn read_task_branches(path: &Path) -> StoreResult<Vec<(String, bool)>> {
     let conn = open_unmigrated(path)?;
     let (open, _) = task_state_sql(&conn)?;
+    let checkouts: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='task_checkouts')",
+        [],
+        |row| row.get(0),
+    )?;
+    // A registry from before `task_checkouts` keeps the branch on the Task
+    // (removed by Task 538340).
+    let checkout_branches = if checkouts {
+        "SELECT task_id, branch FROM task_checkouts"
+    } else {
+        "SELECT id AS task_id, branch FROM tasks"
+    };
     let mut statement = conn.prepare(&format!(
         "SELECT b.branch,({open}) FROM tasks t JOIN \
-         (SELECT id AS task_id, branch FROM tasks UNION SELECT task_id, branch FROM task_prs) b \
+         ({checkout_branches} UNION SELECT task_id, branch FROM task_prs) b \
          ON b.task_id=t.id"
     ))?;
     let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
@@ -284,28 +296,34 @@ pub(crate) fn read_task_worktree_ownership(path: &Path) -> StoreResult<Vec<TaskW
     let (open, done) = task_state_sql(&conn)?;
     // Old registries still protect unfinished work, but cannot grant deletion
     // until they can establish this machine's positive checkout ownership.
-    let placed: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('tasks') WHERE name='checkout_machine_id')",
-        [],
-        |row| row.get(0),
-    )?;
-    let (local_flag, local_route): (bool, bool) = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('machines') WHERE name='is_local'), \
+    let (checkouts, placed, local_flag, local_route): (bool, bool, bool, bool) = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='task_checkouts'), \
+         EXISTS(SELECT 1 FROM pragma_table_info('tasks') WHERE name='checkout_machine_id'), \
+         EXISTS(SELECT 1 FROM pragma_table_info('machines') WHERE name='is_local'), \
          EXISTS(SELECT 1 FROM pragma_table_info('machines') WHERE name='route')",
         [],
-        |row| Ok((row.get(0)?, row.get(1)?)),
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
     )?;
-    let local = if placed && local_flag {
-        "COALESCE(t.checkout_machine_id=(SELECT id FROM machines WHERE is_local=1),0)"
-    } else if placed && local_route {
-        "COALESCE(t.checkout_machine_id=(SELECT id FROM machines WHERE route='local'),0)"
+    let query = if checkouts {
+        format!(
+            "SELECT t.id,c.worktree,({done}),({open}) FROM task_checkouts c \
+             JOIN tasks t ON t.id=c.task_id"
+        )
     } else {
-        "0"
+        // A registry from before `task_checkouts` (removed by Task 538340).
+        let local = if placed && local_flag {
+            "COALESCE(t.checkout_machine_id=(SELECT id FROM machines WHERE is_local=1),0)"
+        } else if placed && local_route {
+            "COALESCE(t.checkout_machine_id=(SELECT id FROM machines WHERE route='local'),0)"
+        } else {
+            "0"
+        };
+        format!(
+            "SELECT t.id,t.worktree,({done}) AND ({local}),({open}) FROM tasks t \
+             WHERE t.worktree IS NOT NULL AND t.worktree != ''"
+        )
     };
-    let mut statement = conn.prepare(&format!(
-        "SELECT t.id,t.worktree,({done}) AND ({local}),({open}) FROM tasks t \
-         WHERE t.worktree IS NOT NULL AND t.worktree != ''"
-    ))?;
+    let mut statement = conn.prepare(&query)?;
     let rows = statement.query_map([], |row| {
         Ok(TaskWorktreeOwnership {
             task: row.get(0)?,

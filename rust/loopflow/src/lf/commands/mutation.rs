@@ -279,7 +279,7 @@ fn task(repo: &Path, command: &TaskCommand, io: &mut CommandIo<'_>) -> Result<()
             json,
             ..
         } => {
-            let ownership = crate::lf::commands::session_move::move_task(issue, machine)?;
+            let ownership = crate::lf::commands::session_move::move_task(issue, machine, None)?;
             if *json {
                 writeln!(io.output, "{}", serde_json::to_string(&ownership)?)?;
             }

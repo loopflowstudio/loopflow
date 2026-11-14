@@ -7,7 +7,7 @@ The stopped ship loop and personal configuration stay untouched.
 ## Outcome and approach
 
 Stack on any placed Task branch, pushing to origin without force when absent or
-behind. Record an unpublished Task PR when needed; open no parent GitHub PR.
+behind, unless the parent's PR is published (see "Next implement direction"). Record an unpublished Task PR when needed; open no parent GitHub PR.
 Share parent selection between new and existing placements. Diverged origin
 remains the child's base and the stack message counts omitted local commits.
 Placement without a Task PR is intentional; publication owns its record until
@@ -105,3 +105,41 @@ clippy and hosted suites.
 - `cargo test -p loopflow --lib ops::task::tests::stacking_is_idempotent_and_preserves_history`: passed in 0.47 s; parent/fork update, retry and PR identity retained. Builds emitted the existing macOS unwind-section linker warning.
 - `cargo test -p loopflow --test integration documented_commands::`: 4 passed in 6.97 s.
 - `cargo fmt --all -- --check`, `git diff --check`: passed; clippy and hosted CI remain gate-owned. Store API callers also reach Task initialization, handoff, PR range and Graph fixtures; their suites remain gate/CI-owned.
+
+## Next implement direction (concept review, 2026-11-13)
+
+Read from source at `900acf7372`; no test was run in this step.
+
+1. **Stacking never moves a published PR's head.** `record_stack_parent` pushes
+   whenever origin is behind, including a parent whose PR is open on GitHub. That
+   push skips the fence every other Loopflow push shares
+   (`commit.rs::push_with_upstream_if_needed`: take the PR-mutation lock, clear a
+   head-pinned merge request and revoke Auto before the new head is visible).
+   Counterexample: parent PR open with Auto requested, parent has commits made
+   with `lf commit` and not pushed; `lf task run CHILD --stack-on PARENT` pushes
+   them and GitHub may merge a head nobody gated. The Task's wording covers
+   publishing a branch for a parent with no PR ("it shoudl always be safe to
+   publish a remote branch"), not adding commits to one under review.
+   Build: push only when the parent's record has no publication. For a published
+   parent that is ahead of origin, push nothing, base on `origin/<branch>` as
+   main does today, and reuse the left-out-commits note (name `lf commit -p` in
+   the parent as the way to include them). Don't route this push through the
+   fence: a child's command revoking the parent's Auto is a bigger surprise.
+   Test: published parent with a merge request and one unpushed commit; after
+   stacking, origin's branch and the merge request are unchanged and the stack
+   line counts 1 commit left out. Docs (`ops.md`, `delivery.md`, `agent-api.md`,
+   `--stack-on` help) say "pushed when the parent has no PR yet".
+2. **The preview speaks in the future, the result in the past.**
+   `checkout --explain` prints "Not run (based on already-fetched refs): pushed
+   INF-124's branch …" since the QA tense fix, and
+   `global_commands.rs:2737` still expects "pushes INF-124's branch parent-proof
+   to origin", so that hosted test fails as written. Give the preview its own
+   phrase ("stacking pushes …") and keep "pushed …" for the stack line.
+3. `docs/ops.md` lists why stacking stops without "has already merged";
+   `delivery.md` has it. Add it.
+
+Not for this Task, kept as an observation: the child points at the parent's PR
+row (`parent_pr_id`), though the rule people learn is "a Task with a branch".
+The abandoned-parent, retry and re-parenting repairs above all come from keeping
+that row in step with the Task. A child that named the parent Task and its fork
+would need no record written for the parent.

@@ -38,6 +38,7 @@ impl Observer {
             .cloned()
             .chain(self.tasks.keys().cloned())
             .collect();
+        let mut completed_now = store.completed_graph_steps(&watched.iter().collect::<Vec<_>>())?;
         let mut events = Vec::new();
         for task in watched {
             let first = !self.tasks.contains_key(&task);
@@ -75,19 +76,21 @@ impl Observer {
                     }
                 }
             }
-            let mut completed = HashSet::new();
-            for graph in store.task_graphs(&task)? {
-                for step in &graph.steps {
-                    if step.process.completed_at.is_none() {
-                        continue;
-                    }
-                    completed.insert(step.process.id.clone());
-                    if !first && !cursor.completed.contains(&step.process.id) {
-                        events.push(SubscriptionEvent::GraphStepFinished {
-                            task_id: task.clone(),
-                            graph_process_id: graph.id().clone(),
-                            step: graph.step_detail(step),
-                        });
+            let completed = completed_now.remove(&task).unwrap_or_default();
+            // Whole Graphs are read only for a Task with a step that finished since
+            // the last reading; the first reading only records what has finished.
+            if !first && !completed.is_subset(&cursor.completed) {
+                for graph in store.task_graphs(&task)? {
+                    for step in &graph.steps {
+                        if completed.contains(&step.process.id)
+                            && !cursor.completed.contains(&step.process.id)
+                        {
+                            events.push(SubscriptionEvent::GraphStepFinished {
+                                task_id: task.clone(),
+                                graph_process_id: graph.id().clone(),
+                                step: graph.step_detail(step),
+                            });
+                        }
                     }
                 }
             }
@@ -318,7 +321,7 @@ mod tests {
         let (dir, store, task) = fixture();
         let conn = rusqlite::Connection::open(dir.path().join("db")).unwrap();
         // Graph membership follows the Task checkout on the local Machine.
-        conn.execute("UPDATE tasks SET worktree='/repo/task',checkout_machine_id=(SELECT id FROM machines WHERE is_local=1) WHERE id=?1", [task.as_str()]).unwrap();
+        conn.execute("INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/repo/task') ON CONFLICT(task_id) DO UPDATE SET worktree=excluded.worktree", [task.as_str()]).unwrap();
         // The graph's session membership also works before Machine registration.
         let old = store.test_graph(
             "code",

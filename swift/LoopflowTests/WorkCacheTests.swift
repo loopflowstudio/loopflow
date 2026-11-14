@@ -5,7 +5,7 @@ import ViewInspector
 @testable import Loopflow
 @testable import LoopflowMac
 
-@Suite("Work cache")
+@Suite("Work cache", .timeLimit(.minutes(1)))
 @MainActor
 struct WorkCacheTests {
     private static let repo = "/src/loopflow"
@@ -351,15 +351,15 @@ struct WorkCacheTests {
         defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-home-a-\(repository.lowercased())") }
         let (registry, model) = try await loadWorkingTasks(from: source, repository: repository)
         let limit = SessionsWorkspaceRegistry.warmConversationLimit
-        await spin(for: .seconds(5)) { await source.preparedTasks.count < limit }
-        await spin(for: .seconds(5)) { registry.preparationCount > 0 }
+        await spin { await source.preparedTasks.count < limit }
+        await spin { registry.preparationCount > 0 }
 
         func key(_ id: String) -> WorkWorkspaceKey { WorkWorkspaceKey(repository: repository, kind: .task, id: id) }
         model.applySelectionPlans([fixtureViewPlan(
             owner: .init(repository: repository, kind: .repository, id: repository),
             members: Prefetch.working.map { fixtureViewContent(work: key($0), title: $0) })], reason: "")
         model.selectWorkingTasksDashboard()
-        await spin(for: .seconds(5)) { registry.preparationCount > 0 }
+        await spin { registry.preparationCount > 0 }
         let atLoad = await source.preparedTasks
         #expect(atLoad.count <= limit + 1) // Sixteen and a one-slot page, not the whole board.
         #expect(registry.openWork.count == Prefetch.working.count)
@@ -367,8 +367,8 @@ struct WorkCacheTests {
         let tiles = model.workingTaskMembers.map(\.work.id)
         let page = try #require(tiles.firstIndex { !atLoad.contains($0) })
         model.turnPage(.workingTasks, to: page)
-        await spin(for: .seconds(5)) { await !source.preparedTasks.contains(tiles[page]) }
-        await spin(for: .seconds(5)) { registry.preparationCount > 0 }
+        await spin { await !source.preparedTasks.contains(tiles[page]) }
+        await spin { registry.preparationCount > 0 }
         #expect(await source.preparedTasks.count == atLoad.count + 1)
         registry.prepareForQuit()
     }
@@ -380,15 +380,15 @@ struct WorkCacheTests {
         defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-home-a-\(repository.lowercased())") }
         let (registry, model) = try await loadWorkingTasks(from: source, repository: repository)
         let limit = SessionsWorkspaceRegistry.warmConversationLimit
-        await spin(for: .seconds(5)) { await source.preparedTasks.count < limit }
-        await spin(for: .seconds(5)) { registry.preparationCount > 0 }
+        await spin { await source.preparedTasks.count < limit }
+        await spin { registry.preparationCount > 0 }
 
         func key(_ id: String) -> WorkWorkspaceKey { WorkWorkspaceKey(repository: repository, kind: .task, id: id) }
         model.applySelectionPlans([fixtureViewPlan(
             owner: .init(repository: repository, kind: .repository, id: repository),
             members: Prefetch.working.map { fixtureViewContent(work: key($0), title: $0) })], reason: "")
         model.selectWorkingTasksDashboard()
-        await spin(for: .seconds(5)) { registry.preparationCount > 0 }
+        await spin { registry.preparationCount > 0 }
         let prepared = await source.preparedTasks
         let cold = try #require(model.workingTaskMembers.map(\.work.id).first { !prepared.contains($0) })
 
@@ -396,7 +396,7 @@ struct WorkCacheTests {
         let target = DesktopPaneTarget(repository: key(cold).repository, window: UUID().uuidString, work: key(cold),
                                        pane: pane.id, incarnation: pane.incarnation, tab: nil)
         _ = try DesktopAction.perform(DesktopActionRequest("focus", at: target), model: model, workspaces: registry)
-        await spin(for: .seconds(5)) { await !source.preparedTasks.contains(cold) }
+        await spin { await !source.preparedTasks.contains(cold) }
         #expect(await source.preparedFlags[cold] == "--start-if-free")
         registry.prepareForQuit()
     }
@@ -408,8 +408,8 @@ struct WorkCacheTests {
         defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-home-a-\(repository.lowercased())") }
         let (registry, model) = try await loadWorkingTasks(from: source, repository: repository)
         let limit = SessionsWorkspaceRegistry.warmConversationLimit
-        await spin(for: .seconds(5)) { await source.preparedTasks.count < limit }
-        await spin(for: .seconds(5)) { registry.preparationCount > 0 }
+        await spin { await source.preparedTasks.count < limit }
+        await spin { registry.preparationCount > 0 }
         #expect(await source.preparedTasks.count == limit) // Warm prefetch stops; five working Tasks remain.
 
         await source.holdPreparations()
@@ -421,7 +421,7 @@ struct WorkCacheTests {
             members: tiles.map { fixtureViewContent(work: key($0), title: $0) },
             slots: DashboardSlotLayout(root: .split(.vertical, tiles.map { _ in 1 }, tiles.indices.map { .slot($0) })))], reason: "")
         model.selectWorkingTasksDashboard()
-        await spin(for: .seconds(5)) { await source.preparedTasks.count < limit + 2 }
+        await spin { await source.preparedTasks.count < limit + 2 }
         #expect(registry.preparationCount == 2)
         let prepared = await source.preparedTasks
         let queued = try #require(working.first { !prepared.contains($0) })
@@ -439,7 +439,7 @@ struct WorkCacheTests {
         await source.releasePreparations()
         for id in working {
             let tile = try #require(registry.retained(key(id)))
-            await spin(for: .seconds(5)) { tile.multiplexer.pane(forSessionId: "conversation-" + id) == nil }
+            await spin { tile.multiplexer.pane(forSessionId: "conversation-" + id) == nil }
             #expect(tile.multiplexer.pane(forSessionId: "conversation-" + id) != nil)
             #expect(tile.conversationIntent == .start)
         }
@@ -476,6 +476,32 @@ struct WorkCacheTests {
         registry.prepareForQuit()
     }
 
+    @Test("A Wave named after another Wave's ID keeps its own primary without repeated preparation")
+    func collidingWaveNameSettlesBothPrimaries() async throws {
+        let source = try Source()
+        try await source.addWaveNamedAfterExistingID()
+        let repository = "repo_" + UUID().uuidString
+        defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-home-a-\(repository.lowercased())") }
+        let (registry, model) = try await loadWorkingTasks(from: source, repository: repository)
+        defer { registry.prepareForQuit() }
+        // Wait for all three primaries and a settled queue; stop at 8 so a runaway
+        // re-preparation fails the exact check below instead of the time limit.
+        await spin {
+            let count = await source.preparedPrimaries.count
+            return (count < 3 || registry.preparationCount > 0) && count < 8
+        }
+        let first = WorkWorkspaceKey(repository: repository, kind: .wave, id: "wave-1")
+        let second = WorkWorkspaceKey(repository: repository, kind: .wave, id: "wave-2")
+        #expect(registry.retained(first)?.multiplexer.sessionPane?.sessionId == "primary-wave:wave-1")
+        #expect(registry.retained(second)?.multiplexer.sessionPane?.sessionId == "primary-wave:wave-2")
+        // Preparations run concurrently; each scope must open exactly once, in any order.
+        #expect(await source.preparedPrimaries.sorted() == ["repository", "wave:wave-1", "wave:wave-2"])
+        // Repeated fresh frames cannot displace either pane and reopen it.
+        for _ in 0..<3 { await model.refresh() }
+        #expect(await source.preparedPrimaries.count == 3)
+        #expect(registry.preparationCount == 0)
+    }
+
     @Test("Repository and Wave primaries open on load beside the Task bound, before any selection")
     func loadOpensRepositoryAndWavePrimaries() async throws {
         let source = try Source()
@@ -488,9 +514,9 @@ struct WorkCacheTests {
         #expect(registry.warmPrimaries == [repositoryKey, wave])
         #expect(registry.recentTasks.count == SessionsWorkspaceRegistry.warmConversationLimit)
         await spin { await source.preparedPrimaries.count < 2 }
-        #expect(await source.preparedPrimaries == ["repository", "wave:product"]) // The selected repository leads.
+        #expect(await source.preparedPrimaries.sorted() == ["repository", "wave:wave-1"])
         let store = registry.sessionStore(repository: repository, repoPath: Self.repo, query: source.query)
-        let primaries = ["primary-repository", "primary-wave:product"]
+        let primaries = ["primary-repository", "primary-wave:wave-1"]
         await spin { store.sessions.filter({ primaries.contains($0.id) && $0.state == .prepared }).count < 2 }
         #expect(store.sessions.filter { primaries.contains($0.id) }.allSatisfy { $0.state == .prepared && $0.launchArguments.contains("--start-if-free") })
         for key in [repositoryKey, wave] {
@@ -499,7 +525,6 @@ struct WorkCacheTests {
             #expect(workspace.conversationError == nil)
             #expect(workspace.multiplexer.sessionPane?.sessionId?.hasPrefix("primary-") == true)
         }
-        #expect(registry.retained(wave)?.wave == "product")
         #expect(model.selection == nil)
         registry.prepareForQuit()
     }
@@ -849,7 +874,7 @@ private actor Source {
     private var failsOnce = false
     private(set) var preparedTasks: [String] = []
     private(set) var preparedFlags: [String: String] = [:]
-    /// Repository and Wave primaries prepared on load: "repository" or "wave:<name>".
+    /// Repository and Wave primaries prepared on load: "repository" or "wave:<id>".
     private(set) var preparedPrimaries: [String] = []
     private var holding: [String]?
     private(set) var reads = 0
@@ -876,6 +901,19 @@ private actor Source {
         for waiter in waiters { waiter.resume() }
     }
 
+    func addWaveNamedAfterExistingID() throws {
+        var wire = try JSONSerialization.jsonObject(with: Data(roadmap.utf8)) as! [String: Any]
+        var waves = wire["waves"] as! [[String: Any]]
+        var duplicate = waves[0]
+        var wave = duplicate["wave"] as! [String: Any]
+        wave["name"] = wave["id"]
+        wave["id"] = "wave-2"
+        duplicate["wave"] = wave
+        waves.append(duplicate)
+        wire["waves"] = waves
+        roadmap = String(decoding: try JSONSerialization.data(withJSONObject: wire), as: UTF8.self)
+    }
+
     func populateWorkingTasks(owned: Int) throws {
         var wire = try JSONSerialization.jsonObject(with: Data(roadmap.utf8)) as! [String: Any]
         var inventory = wire["tasks"] as! [String: Any]
@@ -893,7 +931,7 @@ private actor Source {
             runtime["status"] = state
             runtime["updated_at"] = String(format: "2026-11-04T10:00:%02dZ", index)
             runtime["owner"] = index == states.count - 1 ? NSNull() : [
-                "person": "Jack Heart", "person_key": "jack@loopflow.studio",
+                "person": "Jack Heart", "person_id": NSNull(), "person_key": "jack@loopflow.studio",
                 "machine": ["id": "home-a", "label": "laptop"]
             ] as [String: Any]
             row["runtime"] = runtime
@@ -990,15 +1028,15 @@ private actor Source {
             // A repository or Wave primary: Rust places it in the scope's own checkout.
             let wave = command.firstIndex(of: "--wave").map { command[$0 + 1] }
             let snapshot = try RegistryQuery.decode(RoadmapSnapshot.self, from: roadmap)
-            let waveId = try wave.map { name in try #require(snapshot.waves.first { $0.wave.name == name }).wave.id }
-            let scope = wave.map { "wave:" + $0 } ?? "repository"
+            let waveId = try wave.map { name in try #require(snapshot.waves.first { $0.wave.id == name } ?? snapshot.waves.first { $0.wave.name == name }).wave.id }
+            let scope = waveId.map { "wave:" + $0 } ?? "repository"
             let page = try JSONSerialization.jsonObject(with: Data(sessions.utf8)) as! [String: Any]
             var record = (page["entries"] as! [[String: Any]])[0]
             record["id"] = "primary-" + scope
             record["primary_scope"] = wave == nil ? "repository" : "wave"
             record["wave_id"] = waveId ?? NSNull()
             record["task_ids"] = []
-            record["task_primary"] = false
+            record["recovery": NSNull(), "task_primary"] = false
             record["workspace"] = ["machine_id": "home-a", "worktree": "/src/loopflow." + (wave ?? "repo"), "task_id": NSNull()]
             record["state"] = "closed"
             record["actions"] = sessionActionFixture(state: "closed")
@@ -1015,7 +1053,7 @@ private actor Source {
             var record = (page["entries"] as! [[String: Any]])[0]
             record["id"] = "conversation-" + id
             record["task_ids"] = [id]
-            record["task_primary"] = true
+            record["recovery": null, "task_primary"] = true
             record["workspace"] = ["machine_id": location.machineId, "worktree": location.worktree, "task_id": id]
             record["state"] = "closed"
             record["actions"] = sessionActionFixture(state: "closed")
@@ -1036,11 +1074,10 @@ private actor Source {
         }
     }
 }
-/// Yield while `condition` holds, for at most `timeout`; the assertion follows.
+/// Yield while `condition` holds. The suite's time limit cancels a wait whose event never arrives.
 @MainActor
-private func spin(for timeout: Duration = .seconds(3), while condition: @MainActor () async -> Bool) async {
-    let deadline = ContinuousClock.now + timeout
-    while await condition(), ContinuousClock.now < deadline { await Task.yield() }
+private func spin(while condition: @MainActor () async -> Bool) async {
+    while !Task.isCancelled, await condition() { await Task.yield() }
 }
 
 #endif

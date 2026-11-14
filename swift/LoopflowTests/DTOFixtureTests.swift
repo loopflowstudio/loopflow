@@ -18,6 +18,26 @@ struct DTOFixtureTests {
         #expect(card.liveness == .unknown)
         #expect(card.controlHolder == nil)
         #expect(card.lastLine == nil)
+        #expect(card.session.turn?.state == .ended)
+        #expect(card.session.turn?.id == "u1")
+        #expect(card.session.turn?.usage?.cachedInputTokens == 38000)
+        #expect(card.session.raw == false)
+    }
+
+    @Test func sessionEncodingKeepsRequiredNullableTurnFields() throws {
+        let session = try JSONDecoder().decode(SessionRecord.self, from: loadFixtureData("session.json"))
+        let encoded = try JSONEncoder().encode(session)
+        let object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        #expect(object["turn"] is NSNull)
+        #expect(try JSONDecoder().decode(SessionRecord.self, from: encoded) == session)
+
+        let turn = try JSONDecoder().decode(SessionTurn.self, from: Data(#"{"id":null,"state":"running","started_at":null,"ended_at":null,"model":null,"usage":null}"#.utf8))
+        let turnData = try JSONEncoder().encode(turn)
+        let turnObject = try #require(JSONSerialization.jsonObject(with: turnData) as? [String: Any])
+        for field in ["id", "started_at", "ended_at", "model", "usage"] {
+            #expect(turnObject[field] is NSNull)
+        }
+        #expect(try JSONDecoder().decode(SessionTurn.self, from: turnData) == turn)
     }
 
     @Test func screenReadsRejectSelectedAnswers() throws {
@@ -155,13 +175,17 @@ struct DTOFixtureTests {
         let links = try JSONDecoder().decode([WorkLink].self, from: data)
         #expect(links[0].conversation == .otherConversation)
         #expect(links[0].target.executionMachine != nil)
+        #expect(links[0].route.host == nil)
         #expect(links[1].target.kind == .wave)
-        #expect(links[1].route.hosts == [.terminal])
+        #expect(links[1].route.host == .terminal)
         #expect(try JSONDecoder().decode([WorkLink].self, from: JSONEncoder().encode(links)) == links)
         var wire = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
         wire[0].removeValue(forKey: "fallback_argv")
         #expect(throws: DecodingError.self) {
             try JSONDecoder().decode([WorkLink].self, from: JSONSerialization.data(withJSONObject: wire))
+        }
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(WorkLink.Route.self, from: Data(#"{"reason":"missing host"}"#.utf8))
         }
     }
 
@@ -230,7 +254,7 @@ struct DTOFixtureTests {
     @Test func desktopOpeningDoesNotConfuseLaunchWithUsability() throws {
         let data = try loadFixtureData("desktop_openings.json")
         let readings = try JSONDecoder().decode([DesktopOpening].self, from: data)
-        #expect(readings.map(\.status) == [.opening, .usable, .failed])
+        #expect(readings.map(\.status) == [.opening, .usable, .failed, .elsewhere])
         #expect(readings[0].reason == nil)
         #expect(readings[2].reason != nil)
         #expect(try JSONDecoder().decode([DesktopOpening].self, from: JSONEncoder().encode(readings)) == readings)
@@ -337,6 +361,7 @@ struct DTOFixtureTests {
         #expect(report.windows[1].viewParts.map(\.hidden) == [false, true, false])
         #expect(window.workspaces.first?.layout.children.first?.subject == "session-one")
         #expect(window.workspaces.first?.layout.children.first?.surface == "native-surface-incarnation")
+        #expect(window.workspaces.first?.layout.children.first?.attachment == .usable)
         #expect(window.workspaces.first?.layout.children.last?.surface == nil)
         #expect(window.list.first?.identifier == "LOO-519")
         #expect(window.actions.map(\.name) == ["back", "forward"])
@@ -381,7 +406,7 @@ struct DTOFixtureTests {
         let during = try completed.taskPart()
         let after = try arrived.taskPart()
         #expect(before.work.graph == during.work.graph)
-        guard case .run(_, _, true) = during.work.graph?.position else {
+        guard case .run(_, _, _, true) = during.work.graph?.position else {
             Issue.record("Completed Task lost its live run")
             return
         }
@@ -446,7 +471,7 @@ struct DTOFixtureTests {
         #expect(graph.name == "feature")
         #expect(graph.interactiveSteps.map(\.name) == ["review-design", "demo"])
         #expect(graph.interactiveSteps.map(\.description) == ["you review the plan", "you try the change"])
-        #expect(graph.position == .run(step: "review-design", lfProcessId: work.graphProcesses[0].id, running: true))
+        #expect(graph.position == .run(step: "review-design", at: "implement", lfProcessId: work.graphProcesses[0].id, running: true))
         #expect(graph.waitingStep == nil)
         #expect(try JSONDecoder().decode(TaskWork.self, from: JSONEncoder().encode(work)) == work)
         // Every position field is required.
@@ -753,6 +778,8 @@ struct DTOFixtureTests {
         #expect(tasks[3].reference.workspace?.branch == "jack-heart/now-available-research")
         // Start evidence is required: a prepared checkout is not started work.
         #expect(tasks.map { $0.runtime.map { $0.owner != nil } } == [false, true, nil, true])
+        // An owner is a person by id; the Git email only labels one without a name.
+        #expect(tasks.compactMap { $0.runtime?.owner }.map(\.personId) == ["linear:5c1d9e2a-viewer", nil])
         // The wire carries each Task once; Waves share them by the Task's Wave.
         #expect(roadmap.tasks.items.count == 4)
         #expect(roadmap.waves[1].tasks.items.isEmpty)
@@ -996,7 +1023,7 @@ struct DTOFixtureTests {
         let entries = try #require(JSONSerialization.jsonObject(with: loadFixtureData("subscribe_frames.json"))
             as? [[String: Any]])
         let scope = WorkScope(repo: "/src/loopflow", headless: false, task: "LOO-1",
-                              activity: WorkActivityScope(wave: nil, project: nil, task: "LOO-1"))
+                              activity: WorkActivityScope(wave: nil, project: nil, task: "LOO-1"), taskListWave: nil)
         let lines = try entries.map { try JSONSerialization.data(withJSONObject: try #require($0["frame"])) }
         let parts = try entries.map { try #require(WorkPart(rawValue: $0["part"] as? String ?? "")) }
         let frames = try zip(parts, lines).enumerated().map { index, entry in
@@ -1137,7 +1164,7 @@ struct TaskLifecycleCapture {
     func taskPart() throws -> WorkFrame.TaskPart {
         let line: [String: Any] = ["answers": NSNull(), "unavailable": NSNull(), "body": status]
         let frame = try WorkFrame.decode(
-            part: .task, scope: WorkScope(repo: nil, headless: false, task: "FIX-1", activity: nil),
+            part: .task, scope: WorkScope(repo: nil, headless: false, task: "FIX-1", activity: nil, taskListWave: nil),
             sequence: 1, line: JSONSerialization.data(withJSONObject: line))
         guard case .task(let part?) = frame.content else {
             throw CocoaError(.coderReadCorrupt)

@@ -45,3 +45,9 @@ native timeout. Claude's cache expires inside admission before taking the shared
 credential lock. Clients without the guard stay waiting; cancellation or partial
 installation retains the attempt as uncertain. Task fixtures use separate linked
 checkouts under their disposable root.
+
+2026-11-14 holder adaptation: keep the recovery button on Waiting for native
+conversation. It checks the other affected conversations too; the reason and
+sessions guide explain that an older client needs manual continuation. No client
+is restarted to install its guard. Recovery belongs in the Machine server,
+without restoring the deleted Task-update hooks or per-Session observer processes.

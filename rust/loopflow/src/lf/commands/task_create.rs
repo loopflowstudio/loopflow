@@ -85,24 +85,29 @@ pub fn create(
         )?;
     }
     if *run && approve {
-        // Batch callers wait for this exact launch, never whichever Graph is current later.
+        // The first Graph attempt identifies this launch's carrier. Batch callers
+        // wait for that run, including its retries, not just its first attempt.
         if let Some(launch) = creation::lookup(&id)?.and_then(|r| r.launch) {
             if let crate::engine::task::TaskRun::Running { graph_process, .. } =
                 serde_json::from_value(launch)?
             {
                 let store = crate::store::read_existing_registry()?
                     .ok_or_else(|| anyhow::anyhow!("Machine registry is unavailable"))?;
-                loop {
-                    let process = store.sqlite.lf_process(&graph_process)?.ok_or_else(|| {
+                let carrier = store
+                    .sqlite
+                    .lf_process(&graph_process)?
+                    .ok_or_else(|| {
                         anyhow::anyhow!("creation Graph {} is unavailable", graph_process)
+                    })?
+                    .parent_lf_process_id
+                    .ok_or_else(|| anyhow::anyhow!("creation Graph has no Task run"))?;
+                loop {
+                    let process = store.sqlite.lf_process(&carrier)?.ok_or_else(|| {
+                        anyhow::anyhow!("creation Task run {} is unavailable", carrier)
                     })?;
                     if process.completed_at.is_some() {
                         if process.exit_code != Some(0) {
-                            bail!(
-                                "Task Graph {} ended with {:?}",
-                                graph_process,
-                                process.exit_code
-                            );
+                            bail!("Task run {} ended with {:?}", carrier, process.exit_code);
                         }
                         break;
                     }

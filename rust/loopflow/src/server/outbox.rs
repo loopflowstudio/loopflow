@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use anyhow::{Context, Result};
 use tokio::sync::{mpsc, oneshot, OwnedSemaphorePermit, Semaphore};
 
-use super::wire::{ServerMessage, SubscriptionEvent, MAX_MESSAGE};
+use super::wire::{ServerMessage, SubscriptionEvent, MAX_BULK, MAX_MESSAGE};
 
 pub(super) const MAX_OPEN: usize = 256;
 pub(super) const MAX_WRITES: usize = 16;
@@ -37,14 +37,12 @@ pub(super) struct Retained {
 impl Materializing {
     pub async fn reserve() -> Result<Self> {
         Ok(Self(
-            process_budget()
-                .acquire_many_owned(MAX_MESSAGE as u32)
-                .await?,
+            process_budget().acquire_many_owned(MAX_BULK as u32).await?,
         ))
     }
 
     pub fn retain(mut self, bytes: usize) -> Result<Retained> {
-        anyhow::ensure!(bytes <= MAX_MESSAGE, "shared reading exceeds max_message");
+        anyhow::ensure!(bytes <= MAX_BULK, "shared reading exceeds max_bulk");
         let shared = SHARED
             .get_or_init(|| Arc::new(Semaphore::new(SHARED_RETAINED)))
             .clone()
@@ -127,6 +125,7 @@ impl Payload {
 
 type RequestSlots = (OwnedSemaphorePermit, Option<OwnedSemaphorePermit>);
 
+#[derive(Debug)]
 pub(super) struct Reservation {
     batch: AtomicBool,
     slots: Mutex<Option<RequestSlots>>,
@@ -178,12 +177,12 @@ impl Outbox {
         let local = self
             .local
             .clone()
-            .try_acquire_many_owned(MAX_MESSAGE as u32)
+            .try_acquire_many_owned(MAX_BULK as u32)
             .ok()?;
         let process = self
             .process
             .clone()
-            .try_acquire_many_owned(MAX_MESSAGE as u32)
+            .try_acquire_many_owned(MAX_BULK as u32)
             .ok()?;
         Some(Arc::new(Reservation {
             batch: AtomicBool::new(false),
@@ -196,12 +195,12 @@ impl Outbox {
         let local = self
             .local
             .clone()
-            .acquire_many_owned(MAX_MESSAGE as u32)
+            .acquire_many_owned(MAX_BULK as u32)
             .await?;
         let process = self
             .process
             .clone()
-            .acquire_many_owned(MAX_MESSAGE as u32)
+            .acquire_many_owned(MAX_BULK as u32)
             .await?;
         Ok(Arc::new(Reservation {
             batch: AtomicBool::new(false),
@@ -228,11 +227,19 @@ impl Outbox {
             ServerMessage::Error { id: Some(id), .. } => (id.clone(), true, false),
             _ => unreachable!("only request frames enter an outbox"),
         };
-        let mut bytes = Limited(Vec::new());
+        let limit = if matches!(&message, ServerMessage::Event { .. }) {
+            MAX_MESSAGE
+        } else {
+            MAX_BULK
+        };
+        let mut bytes = Limited {
+            bytes: Vec::new(),
+            limit,
+        };
         serde_json::to_writer(&mut bytes, &message)?;
         // Keep only one representation: readings are encoded; events wait for
         // their delivery sequence under the batch's producer headroom.
-        let size = bytes.0.len();
+        let size = bytes.bytes.len();
         let payload = match message {
             ServerMessage::Event { id, event, .. } => {
                 drop(bytes);
@@ -243,7 +250,7 @@ impl Outbox {
             }
             message => {
                 drop(message);
-                Payload::Line(String::from_utf8(bytes.0).expect("JSON is UTF-8"))
+                Payload::Line(String::from_utf8(bytes.bytes).expect("JSON is UTF-8"))
             }
         };
         reservation.shrink(size);
@@ -267,14 +274,19 @@ impl Outbox {
     }
 }
 
-struct Limited(Vec<u8>);
+struct Limited {
+    bytes: Vec<u8>,
+    limit: usize,
+}
 
 impl std::io::Write for Limited {
     fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        if bytes.len() > MAX_MESSAGE - self.0.len() {
-            return Err(std::io::Error::other("server message exceeds max_message"));
+        if bytes.len() > self.limit - self.bytes.len() {
+            return Err(std::io::Error::other(
+                "server message exceeds its carrier limit",
+            ));
         }
-        self.0.extend_from_slice(bytes);
+        self.bytes.extend_from_slice(bytes);
         Ok(bytes.len())
     }
 
@@ -290,33 +302,33 @@ mod tests {
     use tokio::sync::Semaphore;
 
     use super::{Materializing, Outbox, MAX_RETAINED, PROCESS_RETAINED};
-    use crate::server::wire::{ServerMessage, MAX_MESSAGE};
+    use crate::server::wire::{ServerMessage, MAX_BULK};
 
     #[test]
     fn shared_reading_retains_its_bytes_until_the_last_consumer_releases_it() {
-        let process = Arc::new(Semaphore::new(MAX_MESSAGE));
+        let process = Arc::new(Semaphore::new(MAX_BULK));
         let reading = Materializing(
             process
                 .clone()
-                .try_acquire_many_owned(MAX_MESSAGE as u32)
+                .try_acquire_many_owned(MAX_BULK as u32)
                 .unwrap(),
         );
         assert_eq!(process.available_permits(), 0);
         let producer = Arc::new(reading.retain(1024).unwrap());
         let consumer = producer.clone();
-        assert_eq!(process.available_permits(), MAX_MESSAGE - 1024);
+        assert_eq!(process.available_permits(), MAX_BULK - 1024);
         drop(producer);
-        assert_eq!(process.available_permits(), MAX_MESSAGE - 1024);
+        assert_eq!(process.available_permits(), MAX_BULK - 1024);
         drop(consumer);
-        assert_eq!(process.available_permits(), MAX_MESSAGE);
+        assert_eq!(process.available_permits(), MAX_BULK);
         let oversized = Materializing(
             process
                 .clone()
-                .try_acquire_many_owned(MAX_MESSAGE as u32)
+                .try_acquire_many_owned(MAX_BULK as u32)
                 .unwrap(),
         );
-        assert!(oversized.retain(MAX_MESSAGE + 1).is_err());
-        assert_eq!(process.available_permits(), MAX_MESSAGE);
+        assert!(oversized.retain(MAX_BULK + 1).is_err());
+        assert_eq!(process.available_permits(), MAX_BULK);
     }
 
     #[tokio::test]
@@ -351,7 +363,7 @@ mod tests {
                     ServerMessage::Response {
                         id: "large".into(),
                         trace_id: crate::id::TraceId::default(),
-                        result: serde_json::Value::String("x".repeat(MAX_MESSAGE / 2)),
+                        result: serde_json::Value::String("x".repeat(MAX_BULK / 2)),
                     },
                     reservation,
                 )
@@ -361,12 +373,12 @@ mod tests {
         let frame = receiver.recv().await.unwrap();
         assert_eq!(
             outbox.retained(),
-            MAX_MESSAGE + frame.payload.into_line(&mut 0).unwrap().len()
+            MAX_BULK + frame.payload.into_line(&mut 0).unwrap().len()
         );
         frame.delivered.send(()).unwrap();
         drop(frame.reservation);
         delivering.await.unwrap();
-        assert_eq!(outbox.retained(), MAX_MESSAGE);
+        assert_eq!(outbox.retained(), MAX_BULK);
         assert!(other.reserve().is_some(), "delivery frees process capacity");
         drop(held);
         assert_eq!(outbox.retained(), 0);
@@ -385,7 +397,7 @@ mod tests {
         let worker = waiting.clone();
         drop(receiver);
         drop(waiting);
-        assert_eq!(outbox.retained(), MAX_MESSAGE);
+        assert_eq!(outbox.retained(), MAX_BULK);
         assert_eq!(open.available_permits(), 0);
         assert_eq!(writes.available_permits(), 0);
         drop(worker);

@@ -14,6 +14,7 @@ struct WorkObservationRetry {
         switch frame.content {
         case .planning(let body): hasReading = body != nil
         case .selections(let body): hasReading = body != nil
+        case .taskList(let body): hasReading = body != nil
         case .peerPlanning(let body): hasReading = body != nil
         case .sessions(let body): hasReading = body != nil
         case .task(let body): hasReading = body != nil

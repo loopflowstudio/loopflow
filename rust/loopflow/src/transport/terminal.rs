@@ -1,4 +1,4 @@
-//! Repainting a viewer from the owner's terminal, and what a viewer was sent.
+//! Repainting a viewer from the held terminal, and what a viewer was sent.
 
 use crate::ghostty_vt::{Error, Terminal};
 
@@ -18,13 +18,13 @@ pub(super) const RESET_DRAWING: &[u8] =
 const HISTORY_ROWS: usize = 2000;
 const HISTORY_BYTES: usize = 768 * 1024;
 
-/// Bytes that make a viewer's terminal show the owner's screen: its scrollback
+/// Bytes that make a viewer's terminal show the held terminal's screen: its scrollback
 /// above, then the active screen with its styles, hyperlinks, cursor, modes and
 /// keyboard state. The viewer's own history is kept beneath.
 pub(super) fn repaint(terminal: &Terminal) -> Result<Vec<u8>, Error> {
     let mut bytes = b"\x1b[0m\x1b[?25h".to_vec();
     if !terminal.received_output() {
-        // Nothing to redraw: the owner's first output flows from the viewer's cursor.
+        // Nothing to redraw: the held terminal's first output flows from the viewer's cursor.
         return Ok(bytes);
     }
     // The formatter emits enabled modes, not every disabled mode. Leave the old
@@ -34,9 +34,9 @@ pub(super) fn repaint(terminal: &Terminal) -> Result<Vec<u8>, Error> {
     bytes.extend(RESET_MODES);
     bytes.extend(RESET_DRAWING);
     let retained_primary = if terminal.alternate_screen() {
-        // Switching only a disposable copy preserves the owner's parser,
+        // Switching only a disposable copy preserves the held terminal's parser,
         // continuation and replies. Paint primary first so a bare screen switch
-        // later reveals the owner's retained content and saved cursor.
+        // later reveals the held terminal's retained content and saved cursor.
         let mut primary = Terminal::decode(&terminal.encode()?)?;
         primary.write(b"\x18\x1b[?1049l\x1b[?1047l\x1b[?47l");
         Some(primary)
@@ -45,7 +45,7 @@ pub(super) fn repaint(terminal: &Terminal) -> Result<Vec<u8>, Error> {
     };
     let primary = retained_primary.as_ref().unwrap_or(terminal);
     bytes.extend(history(primary)?);
-    // Scroll the viewer's content and the owner's history out of the way.
+    // Scroll the viewer's content and the held terminal's history out of the way.
     let (_, rows) = primary.size();
     for _ in 0..rows {
         bytes.extend(b"\r\n");
@@ -138,7 +138,7 @@ mod tests {
     }
 
     #[test]
-    fn attaching_before_the_owner_draws_leaves_the_viewer_terminal_alone() {
+    fn attaching_before_the_held_terminal_draws_leaves_the_viewer_terminal_alone() {
         let fresh = Terminal::new(80, 24).unwrap();
         assert_eq!(repaint(&fresh).unwrap(), b"\x1b[0m\x1b[?25h");
         let mut viewer = viewer_showing(b"shell prompt> ");
@@ -155,26 +155,26 @@ mod tests {
 
     #[test]
     fn attaching_to_a_blank_screen_preserves_mode_only_output() {
-        let mut owner = Terminal::new(80, 24).unwrap();
-        owner.write(b"\x1b[?2004h\x1b[?1h\x1b[>5u");
-        assert!(owner.text().unwrap().trim().is_empty());
-        assert_eq!(owner.cursor(), (0, 0));
-        let mut viewer = viewer_showing(&repaint(&owner).unwrap());
+        let mut held = Terminal::new(80, 24).unwrap();
+        held.write(b"\x1b[?2004h\x1b[?1h\x1b[>5u");
+        assert!(held.text().unwrap().trim().is_empty());
+        assert_eq!(held.cursor(), (0, 0));
+        let mut viewer = viewer_showing(&repaint(&held).unwrap());
         let queries = b"\x1b[?2004$p\x1b[?1$p\x1b[?u";
-        owner.write(queries);
+        held.write(queries);
         viewer.write(queries);
-        assert_eq!(viewer.take_replies(), owner.take_replies());
+        assert_eq!(viewer.take_replies(), held.take_replies());
     }
 
     #[test]
-    fn redrawing_shows_the_owner_screen_and_keeps_the_viewers_scrollback() {
-        let mut owner = Terminal::new(80, 24).unwrap();
+    fn redrawing_shows_the_held_screen_and_keeps_the_viewers_scrollback() {
+        let mut held = Terminal::new(80, 24).unwrap();
         for line in 0..30 {
-            owner.write(format!("owner {line}\r\n").as_bytes());
+            held.write(format!("held {line}\r\n").as_bytes());
         }
         let mut viewer = viewer_showing(b"$ ls\r\nnotes.md\r\n$ lf resume\r\n");
-        viewer.write(&repaint(&owner).unwrap());
-        assert_eq!(viewer.text().unwrap(), owner.text().unwrap());
+        viewer.write(&repaint(&held).unwrap());
+        assert_eq!(viewer.text().unwrap(), held.text().unwrap());
         let viewer_rows = viewer.scrollback_rows();
         let viewer_history =
             String::from_utf8_lossy(&viewer.repaint_history(viewer_rows).unwrap()).into_owned();
@@ -182,9 +182,9 @@ mod tests {
             viewer_history.starts_with("$ ls\r\nnotes.md\r\n$ lf resume"),
             "{viewer_history:?}"
         );
-        // The owner's scrollback follows the viewer's own.
-        assert!(viewer_history.contains("owner 0\r\n"), "{viewer_history:?}");
-        assert!(viewer_history.contains("owner 5\r\n"), "{viewer_history:?}");
+        // The held terminal's scrollback follows the viewer's own.
+        assert!(viewer_history.contains("held 0\r\n"), "{viewer_history:?}");
+        assert!(viewer_history.contains("held 5\r\n"), "{viewer_history:?}");
     }
 
     #[test]
@@ -200,33 +200,33 @@ mod tests {
     #[test]
     fn reattachment_restores_default_modes_over_a_dirty_viewer() {
         for saved in [false, true] {
-            let mut owner = viewer_showing(b"ready\r\n> ");
+            let mut held = viewer_showing(b"ready\r\n> ");
             if saved {
-                owner = Terminal::decode(&owner.encode().unwrap()).unwrap();
+                held = Terminal::decode(&held.encode().unwrap()).unwrap();
             }
             let mut viewer = viewer_showing(
                 b"\x1b[?1049h\x1b[?25l\x1b[?2004h\x1b[?1h\x1b[?1004h\x1b[?1003h\x1b[?1006h\x1b[>5uold screen",
             );
-            viewer.write(&repaint(&owner).unwrap());
+            viewer.write(&repaint(&held).unwrap());
             let queries =
                 b"\x1b[?25$p\x1b[?2004$p\x1b[?1$p\x1b[?1004$p\x1b[?1003$p\x1b[?1006$p\x1b[?u";
-            owner.write(queries);
+            held.write(queries);
             viewer.write(queries);
-            assert_eq!(viewer.take_replies(), owner.take_replies());
+            assert_eq!(viewer.take_replies(), held.take_replies());
             assert!(!viewer.alternate_screen());
-            assert_eq!(viewer.cursor(), owner.cursor());
-            assert_eq!(viewer.text().unwrap(), owner.text().unwrap());
-            owner.write(b"typed after return");
+            assert_eq!(viewer.cursor(), held.cursor());
+            assert_eq!(viewer.text().unwrap(), held.text().unwrap());
+            held.write(b"typed after return");
             viewer.write(b"typed after return");
-            assert_eq!(viewer.text().unwrap(), owner.text().unwrap());
+            assert_eq!(viewer.text().unwrap(), held.text().unwrap());
         }
     }
 
     #[test]
     fn restores_alternate_screen_colors_links_and_input_modes() {
-        let mut owner = Terminal::new(80, 24).unwrap();
-        owner.write(b"\x1b[?1049h\x1b[?2004h\x1b[?1h\x1b[>1u\x1b[34m\x1b]8;;https://loopflow.studio\x1b\\hello\x1b]8;;\x1b\\");
-        let bytes = repaint(&owner).unwrap();
+        let mut held = Terminal::new(80, 24).unwrap();
+        held.write(b"\x1b[?1049h\x1b[?2004h\x1b[?1h\x1b[>1u\x1b[34m\x1b]8;;https://loopflow.studio\x1b\\hello\x1b]8;;\x1b\\");
+        let bytes = repaint(&held).unwrap();
         let text = String::from_utf8_lossy(&bytes).into_owned();
         assert!(text.contains("\x1b[?2004h"), "{text:?}");
         assert!(text.contains("\x1b[?1h"), "{text:?}");
@@ -239,53 +239,53 @@ mod tests {
         let restored = viewer_showing(&bytes);
         assert!(restored.alternate_screen());
         assert_eq!(restored.text().unwrap().trim_end(), "hello");
-        assert_eq!(restored.cursor(), owner.cursor());
+        assert_eq!(restored.cursor(), held.cursor());
     }
 
     #[test]
     fn alternate_attachment_retains_primary_screen_history_and_modes() {
         for saved in [false, true] {
-            let mut owner = Terminal::new(80, 24).unwrap();
+            let mut held = Terminal::new(80, 24).unwrap();
             for line in 0..30 {
-                owner.write(format!("primary {line}\r\n").as_bytes());
+                held.write(format!("primary {line}\r\n").as_bytes());
             }
-            owner.write(b"kept primary\x1b[?2004h\x1b[>5u\x1b[?1049h\x1b[Halternate\x1b[>1u");
+            held.write(b"kept primary\x1b[?2004h\x1b[>5u\x1b[?1049h\x1b[Halternate\x1b[>1u");
             if saved {
-                owner = Terminal::decode(&owner.encode().unwrap()).unwrap();
+                held = Terminal::decode(&held.encode().unwrap()).unwrap();
             }
             // Attachment must not complete or discard unfinished live input.
-            owner.write(b"\x1b[?1");
-            let before = owner.encode().unwrap();
+            held.write(b"\x1b[?1");
+            let before = held.encode().unwrap();
             let mut viewer = viewer_showing(b"old shell history\r\n");
-            viewer.write(&repaint(&owner).unwrap());
-            assert_eq!(owner.encode().unwrap(), before);
+            viewer.write(&repaint(&held).unwrap());
+            assert_eq!(held.encode().unwrap(), before);
             assert!(viewer.alternate_screen());
-            assert_eq!(viewer.text().unwrap(), owner.text().unwrap());
-            assert_eq!(viewer.cursor(), owner.cursor());
-            viewer.write(&owner.continuation().unwrap());
-            owner.write(b"h");
+            assert_eq!(viewer.text().unwrap(), held.text().unwrap());
+            assert_eq!(viewer.cursor(), held.cursor());
+            viewer.write(&held.continuation().unwrap());
+            held.write(b"h");
             viewer.write(b"h");
 
-            for terminal in [&mut owner, &mut viewer] {
+            for terminal in [&mut held, &mut viewer] {
                 terminal.write(b"\x1b[?2004$p\x1b[?1$p\x1b[?u");
             }
-            assert_eq!(viewer.take_replies(), owner.take_replies());
+            assert_eq!(viewer.take_replies(), held.take_replies());
             // No redraw accompanies the program's return to its primary screen.
-            owner.write(b"\x1b[?1049l");
+            held.write(b"\x1b[?1049l");
             viewer.write(b"\x1b[?1049l");
             assert!(!viewer.alternate_screen());
-            assert_eq!(viewer.text().unwrap(), owner.text().unwrap());
-            assert_eq!(viewer.cursor(), owner.cursor());
-            for terminal in [&mut owner, &mut viewer] {
+            assert_eq!(viewer.text().unwrap(), held.text().unwrap());
+            assert_eq!(viewer.cursor(), held.cursor());
+            for terminal in [&mut held, &mut viewer] {
                 terminal.write(b"\x1b[?2004$p\x1b[?1$p\x1b[?u");
             }
-            assert_eq!(viewer.take_replies(), owner.take_replies());
+            assert_eq!(viewer.take_replies(), held.take_replies());
             let history = viewer.repaint_history(viewer.scrollback_rows()).unwrap();
             let history = String::from_utf8(history).unwrap();
             assert!(history.starts_with("old shell history\r\n"), "{history:?}");
-            let owner_history = owner.repaint_history(owner.scrollback_rows()).unwrap();
+            let held_history = held.repaint_history(held.scrollback_rows()).unwrap();
             assert!(
-                history.contains(std::str::from_utf8(&owner_history).unwrap()),
+                history.contains(std::str::from_utf8(&held_history).unwrap()),
                 "{history:?}"
             );
         }
@@ -294,11 +294,11 @@ mod tests {
     #[test]
     fn program_colors_survive_attachment_and_snapshot_without_replacing_the_theme() {
         for saved in [false, true] {
-            let mut owner = Terminal::new(80, 24).unwrap();
-            owner.write(b"\x1b]4;1;rgb:12/34/56\x1b\\\x1b[31mP\x1b[0m\x1b[?1049h\x1b[H\x1b[31mA\x1b[32mT\x1b[0mD");
-            owner.write(b"\x1b[33mE");
-            let explicit_default = owner.foreground(3, 0);
-            owner.write(
+            let mut held = Terminal::new(80, 24).unwrap();
+            held.write(b"\x1b]4;1;rgb:12/34/56\x1b\\\x1b[31mP\x1b[0m\x1b[?1049h\x1b[H\x1b[31mA\x1b[32mT\x1b[0mD");
+            held.write(b"\x1b[33mE");
+            let explicit_default = held.foreground(3, 0);
+            held.write(
                 format!(
                     "\x1b]4;3;rgb:{:02x}/{:02x}/{:02x}\x1b\\",
                     explicit_default[0], explicit_default[1], explicit_default[2]
@@ -306,22 +306,22 @@ mod tests {
                 .as_bytes(),
             );
             if saved {
-                owner = Terminal::decode(&owner.encode().unwrap()).unwrap();
+                held = Terminal::decode(&held.encode().unwrap()).unwrap();
             }
             let mut viewer = Terminal::new(80, 24).unwrap();
             let theme = [0x87, 0x65, 0x43];
             viewer.set_theme(theme);
-            viewer.write(&repaint(&owner).unwrap());
-            assert_eq!(viewer.foreground(0, 0), owner.foreground(0, 0));
+            viewer.write(&repaint(&held).unwrap());
+            assert_eq!(viewer.foreground(0, 0), held.foreground(0, 0));
             assert_eq!(viewer.foreground(0, 0), [0x12, 0x34, 0x56]);
             assert_eq!(viewer.foreground(1, 0), theme);
             assert_eq!(viewer.foreground(2, 0), theme);
             assert_eq!(viewer.foreground(3, 0), explicit_default);
             // Forwarded indexed output uses the restored program palette too.
-            for terminal in [&mut owner, &mut viewer] {
+            for terminal in [&mut held, &mut viewer] {
                 terminal.write(b"\x1b[31mN\x1b[?1049l");
             }
-            assert_eq!(viewer.foreground(0, 0), owner.foreground(0, 0));
+            assert_eq!(viewer.foreground(0, 0), held.foreground(0, 0));
             viewer.write(RESET_MODES);
             assert_eq!(viewer.foreground(0, 0), theme);
         }
@@ -331,23 +331,23 @@ mod tests {
     fn reattachment_preserves_origin_relative_cursor_and_future_output() {
         for alternate in [false, true] {
             for saved in [false, true] {
-                let mut owner = Terminal::new(80, 24).unwrap();
+                let mut held = Terminal::new(80, 24).unwrap();
                 if alternate {
-                    owner.write(b"\x1b[?1049h");
+                    held.write(b"\x1b[?1049h");
                 }
                 for row in 1..=24 {
-                    owner.write(format!("\x1b[{row};1Hrow {row}").as_bytes());
+                    held.write(format!("\x1b[{row};1Hrow {row}").as_bytes());
                 }
-                owner.write(b"\x1b[5;20r\x1b[?69h\x1b[7;70s\x1b[?6h\x1b[3;8Hinside");
+                held.write(b"\x1b[5;20r\x1b[?69h\x1b[7;70s\x1b[?6h\x1b[3;8Hinside");
                 if saved {
-                    owner = Terminal::decode(&owner.encode().unwrap()).unwrap();
+                    held = Terminal::decode(&held.encode().unwrap()).unwrap();
                 }
-                let mut viewer = viewer_showing(&repaint(&owner).unwrap());
-                assert_eq!(viewer.cursor(), owner.cursor());
-                assert_eq!(viewer.text().unwrap(), owner.text().unwrap());
-                owner.write(b" next");
+                let mut viewer = viewer_showing(&repaint(&held).unwrap());
+                assert_eq!(viewer.cursor(), held.cursor());
+                assert_eq!(viewer.text().unwrap(), held.text().unwrap());
+                held.write(b" next");
                 viewer.write(b" next");
-                assert_eq!(viewer.text().unwrap(), owner.text().unwrap());
+                assert_eq!(viewer.text().unwrap(), held.text().unwrap());
             }
         }
     }
@@ -356,20 +356,20 @@ mod tests {
     fn reattachment_preserves_keyboard_stack_when_program_pops_a_mode() {
         for saved in [false, true] {
             for depth in [2, 10] {
-                let mut owner = Terminal::new(80, 24).unwrap();
+                let mut held = Terminal::new(80, 24).unwrap();
                 for flags in 1..=depth {
-                    owner.write(format!("\x1b[>{flags}u").as_bytes());
+                    held.write(format!("\x1b[>{flags}u").as_bytes());
                 }
                 if saved {
-                    owner = Terminal::decode(&owner.encode().unwrap()).unwrap();
+                    held = Terminal::decode(&held.encode().unwrap()).unwrap();
                 }
-                let mut viewer = viewer_showing(&repaint(&owner).unwrap());
+                let mut viewer = viewer_showing(&repaint(&held).unwrap());
                 for _ in 0..10 {
-                    for terminal in [&mut owner, &mut viewer] {
+                    for terminal in [&mut held, &mut viewer] {
                         terminal.write(b"\x1b[?u");
                     }
-                    assert_eq!(viewer.take_replies(), owner.take_replies());
-                    owner.write(b"\x1b[<u");
+                    assert_eq!(viewer.take_replies(), held.take_replies());
+                    held.write(b"\x1b[<u");
                     viewer.write(b"\x1b[<u");
                 }
             }
@@ -386,14 +386,14 @@ mod tests {
 
     #[test]
     fn reattachment_preserves_pending_wrap_after_a_wide_character() {
-        let mut owner = Terminal::new(80, 24).unwrap();
-        owner.write(b"\x1b[1;79H");
-        owner.write("界".as_bytes());
-        let mut viewer = viewer_showing(&repaint(&owner).unwrap());
-        assert_eq!(viewer.text().unwrap(), owner.text().unwrap());
-        owner.write(b"next");
+        let mut held = Terminal::new(80, 24).unwrap();
+        held.write(b"\x1b[1;79H");
+        held.write("界".as_bytes());
+        let mut viewer = viewer_showing(&repaint(&held).unwrap());
+        assert_eq!(viewer.text().unwrap(), held.text().unwrap());
+        held.write(b"next");
         viewer.write(b"next");
-        assert_eq!(viewer.text().unwrap(), owner.text().unwrap());
-        assert_eq!(viewer.cursor(), owner.cursor());
+        assert_eq!(viewer.text().unwrap(), held.text().unwrap());
+        assert_eq!(viewer.cursor(), held.cursor());
     }
 }

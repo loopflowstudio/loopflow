@@ -1,0 +1,30 @@
+--- a/src/build/SharedDeps.zig
++++ b/src/build/SharedDeps.zig
+@@ -583,15 +583,18 @@
+         // This is LGPL but since our source code is open source we are
+         // in compliance with the LGPL since end users can modify this
+         // build script to replace the bundled libintl with their own.
+-        if (b.lazyDependency("libintl", .{
+-            .target = target,
+-            .optimize = optimize,
+-        })) |libintl_dep| {
+-            step.root_module.linkLibrary(libintl_dep.artifact("intl"));
+-            try static_libs.append(
+-                b.allocator,
+-                libintl_dep.artifact("intl").getEmittedBin(),
+-            );
++        // Without i18n nothing calls it, so it is not linked.
++        if (self.config.i18n) {
++            if (b.lazyDependency("libintl", .{
++                .target = target,
++                .optimize = optimize,
++            })) |libintl_dep| {
++                step.root_module.linkLibrary(libintl_dep.artifact("intl"));
++                try static_libs.append(
++                    b.allocator,
++                    libintl_dep.artifact("intl").getEmittedBin(),
++                );
++            }
+         }
+     }
+ 

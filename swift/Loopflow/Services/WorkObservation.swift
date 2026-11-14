@@ -40,12 +40,15 @@ public struct WorkScope: Equatable, Sendable {
     /// Task identifier whose work is shown.
     public let task: String?
     public let activity: WorkActivityScope?
+    /// The Wave whose started Tasks the sidebar lists; nil lists the repository's.
+    public let taskListWave: String?
 
-    public init(repo: String?, headless: Bool, task: String?, activity: WorkActivityScope?) {
+    public init(repo: String?, headless: Bool, task: String?, activity: WorkActivityScope?, taskListWave: String?) {
         self.repo = repo
         self.headless = headless
         self.task = task
         self.activity = activity
+        self.taskListWave = taskListWave
     }
 }
 
@@ -69,6 +72,7 @@ public enum WorkRequest: Equatable, Sendable {
 /// One subscription a window runs, and the read behind it.
 public enum WorkPart: String, CaseIterable, Sendable {
     case task, sessions, planning, selections, activity
+    case taskList = "task_list"
     case peerPlanning = "peer_planning"
     case workActivity = "work_activity"
 
@@ -78,8 +82,10 @@ public enum WorkPart: String, CaseIterable, Sendable {
         case .planning: return .allPlans
         case .activity: return .processList
         case .selections: return scope.repo.map { .desktopViewList(directory: $0) }
+        case .taskList:
+            return scope.repo.map { .desktopViewGet(directory: $0, expression: TaskList.started.expression(wave: scope.taskListWave)) }
         case .peerPlanning: return scope.repo.map { .repoPlan(directory: $0) }
-        case .sessions: return scope.repo.map { .sessionList(directory: $0, headless: scope.headless, after: nil, limit: nil) }
+        case .sessions: return scope.repo.map { .sessionList(directory: $0, headless: scope.headless, after: nil, limit: nil, task: nil) }
         case .task:
             // Without a repository the Task resolves Machine-wide, from no checkout.
             return scope.task.map { .taskGet(directory: scope.repo ?? "/", issue: $0) }
@@ -131,6 +137,8 @@ public struct WorkFrame: Sendable {
     public enum Content: Sendable {
         case planning(Planning?)
         case selections([WorkViewPlan]?)
+        /// The sidebar's started Tasks, as the phone lists them.
+        case taskList(WorkViewPlan?)
         case peerPlanning(PeerPlanning?)
         case sessions(Sessions?)
         case task(TaskPart?)
@@ -142,6 +150,7 @@ public struct WorkFrame: Sendable {
             switch self {
             case .planning: WorkPart.planning.rawValue
             case .selections: WorkPart.selections.rawValue
+            case .taskList: WorkPart.taskList.rawValue
             case .peerPlanning: WorkPart.peerPlanning.rawValue
             case .sessions: WorkPart.sessions.rawValue
             case .task: WorkPart.task.rawValue
@@ -160,6 +169,8 @@ public struct WorkFrame: Sendable {
     /// Wire text of the parts a saved workspace keeps, exactly as a one-shot
     /// read would have printed them.
     public let wire: Wire?
+    /// When the observation handed this frame to its window.
+    public let received = ContinuousClock.now
 
     public struct Wire: Sendable {
         public let roadmap: String?
@@ -245,6 +256,9 @@ public struct WorkFrame: Sendable {
         case .selections:
             let read = try envelope([WorkViewPlan].self)
             return frame(read, .selections(read.body))
+        case .taskList:
+            let read = try envelope(WorkViewPlan.self)
+            return frame(read, .taskList(read.body))
         case .peerPlanning:
             let read = try envelope(PeerPlanningReading.self)
             return frame(read, .peerPlanning(read.body.map {
@@ -322,7 +336,7 @@ public final class WorkSubscriptions: @unchecked Sendable {
     private let lock = NSLock()
     private let continuation: AsyncThrowingStream<WorkFrame, any Error>.Continuation
     private var running: [WorkPart: Running] = [:]
-    private var scope = WorkScope(repo: nil, headless: false, task: nil, activity: nil)
+    private var scope = WorkScope(repo: nil, headless: false, task: nil, activity: nil, taskListWave: nil)
     private var sequence = 0
     private var generation = 0
     /// Checkpoints waiting on these parts' answers.

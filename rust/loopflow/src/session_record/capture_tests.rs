@@ -179,7 +179,8 @@ fn native_capture_replacement_retains_each_spawn_and_rejects_late_exit() {
             command.env_clear().args(["-c", "exit 42"]);
             command
         };
-        let (mut child, snapshot) = capture.spawn_native_agent(command())?;
+        let (mut child, snapshot) =
+            capture.spawn_native_agent(command(), crate::session::Holder::Caller)?;
         assert_eq!(snapshot, first);
         assert_eq!(child.wait()?.code(), Some(42));
         // Observed wait, not successful spawn or a finished capture, ends it.
@@ -188,7 +189,8 @@ fn native_capture_replacement_retains_each_spawn_and_rejects_late_exit() {
         assert_eq!(ended.pid, Some(child.id()));
         assert!(ended.completed_at.is_some());
 
-        let (mut child, snapshot) = capture.spawn_native_agent(command())?;
+        let (mut child, snapshot) =
+            capture.spawn_native_agent(command(), crate::session::Holder::Caller)?;
         let second = snapshot;
         assert_ne!(first.agent_process_id, second.agent_process_id);
         assert_eq!(second.lf_process_id.as_ref(), Some(&invocation));
@@ -209,11 +211,15 @@ fn native_capture_replacement_retains_each_spawn_and_rejects_late_exit() {
             .completed_at
             .is_none());
         // The child exited but without its wait receipt another launch is refused.
-        assert!(capture.spawn_native_agent(command()).is_err());
+        assert!(capture
+            .spawn_native_agent(command(), crate::session::Holder::Caller)
+            .is_err());
         capture.record_native_agent_exit(&second)?;
         assert_eq!(store.agent_process(&first.agent_process_id)?, Some(ended));
         capture.finish("completed")?;
-        assert!(capture.spawn_native_agent(command()).is_err());
+        assert!(capture
+            .spawn_native_agent(command(), crate::session::Holder::Caller)
+            .is_err());
         assert!(store
             .session_attachment(&session)?
             .unwrap()
@@ -281,7 +287,10 @@ fn a_failed_terminal_receipt_still_closes_only_the_owned_provider() {
             }
             assert!(capture.finish("failed").is_err());
             assert!(capture
-                .spawn_native_agent(std::process::Command::new("/bin/true"))
+                .spawn_native_agent(
+                    std::process::Command::new("/bin/true"),
+                    crate::session::Holder::Caller
+                )
                 .is_err());
             fs::remove_dir(&receipt)?;
             capture.finish("interrupted")?;
@@ -958,7 +967,7 @@ fn continuation_resumes_the_saved_thread_on_a_fresh_agent_process() {
         );
         assert!(saved.context.is_some());
         let current = store.session(&session.id)?.unwrap();
-        assert!(current.completed_at.is_some());
+        assert!(current.completed_at.is_none());
         assert!(store
             .session_history(&session.id, 0, 0)?
             .starts_with(&history));
@@ -980,6 +989,7 @@ fn continuation_resumes_the_saved_thread_on_a_fresh_agent_process() {
             manifest
         );
         next.finish("failed")?;
+        assert!(store.session(&session.id)?.unwrap().completed_at.is_some());
         Ok(())
     })
     .unwrap();
@@ -1158,6 +1168,59 @@ fn resume_dead_attachment_ends_its_agent_before_starting_another() {
         store.session_thread("conversation").unwrap(),
         Some("saved-thread".into())
     );
+}
+
+#[test]
+#[cfg(unix)]
+fn resume_of_a_bare_conversation_starts_beside_its_running_agent() {
+    use std::os::unix::process::CommandExt;
+
+    let ledger = crate::journal::TestLedgerGuard::new();
+    let (store, attachment, mut process, next) = attached_session(&ledger);
+    // `lf <skill>` in another terminal: an interactive agent, no Work named,
+    // no holder or owner, its lf still waiting.
+    let sql = rusqlite::Connection::open(ledger.home().join("loopflow.db")).unwrap();
+    sql.execute(
+        "UPDATE agent_sessions SET provider='claude',interactive=1,work_source=NULL",
+        [],
+    )
+    .unwrap();
+    sql.execute(
+        "UPDATE processes SET agent_interactive=1 WHERE id=?1",
+        [&attachment.agent_process_id],
+    )
+    .unwrap();
+    let mut agent = std::process::Command::new("sleep")
+        .arg("30")
+        .process_group(0)
+        .spawn()
+        .unwrap();
+    let started = crate::journal::process_started_at(agent.id())
+        .unwrap()
+        .unwrap();
+    store
+        .record_agent_process_identity("conversation", &attachment, agent.id(), started)
+        .unwrap();
+
+    let beside =
+        crate::process::resume_session_agent_process(&store, "conversation", &next).unwrap();
+    let first_running = agent.try_wait().unwrap().is_none();
+    let first_open: Option<i64> = sql
+        .query_row(
+            "SELECT completed_at FROM processes WHERE id=?1",
+            [&attachment.agent_process_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    agent.kill().unwrap();
+    agent.wait().unwrap();
+    process.kill().unwrap();
+    process.wait().unwrap();
+
+    assert!(first_running, "the first agent keeps running");
+    assert_eq!(first_open, None, "a running agent is not recorded as ended");
+    assert_ne!(beside.agent_process_id, attachment.agent_process_id);
+    assert_eq!(beside.lf_process_id, Some(next));
 }
 
 #[test]

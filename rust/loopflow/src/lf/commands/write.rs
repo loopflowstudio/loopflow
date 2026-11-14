@@ -204,7 +204,7 @@ writes! {
     TaskHold { directory: PathBuf, issue: String } => task::Hold;
     { issue, .. } => task::hold(directory, issue, None)?,
 
-    /// `lf task steer <issue> <message> --json`: direction for the Task's
+    /// `lf steer <issue> <message> --json`: direction for the Task's
     /// runs, whoever writes it.
     #[serde(rename = "task.steer")]
     TaskSteer {
@@ -238,7 +238,7 @@ writes! {
         machine: Option<String>,
     } => TaskMoveResult;
     { issue, wave, machine, .. } => match machine {
-        Some(machine) => TaskMoveResult::Machine(Box::new(super::session_move::move_task(issue, machine)?)),
+        Some(machine) => TaskMoveResult::Machine(Box::new(super::session_move::move_task(issue, machine, None)?)),
         None => TaskMoveResult::Wave(Box::new(crate::ops::task::task_move_membership(
             &task_repo(issue)?, issue, wave.as_deref(),
         )?)),
@@ -265,7 +265,7 @@ writes! {
         crate::ops::task::task_save(issue, path, revision, &content)?
     },
 
-    /// `lf [--wave <wave>] session steer [<id>] <message> --json`: a steer
+    /// `lf [--wave <wave>] steer [<id>] <message> --json`: a steer
     /// one Session, every Session of the Wave or, with neither, every Session
     /// of the repository reads at its next boundary.
     #[serde(rename = "session.steer")]
@@ -301,6 +301,30 @@ writes! {
         name: String,
     } => crate::ops::human_session::SessionRecord;
     { id, name, .. } => super::session::renamed(id, name)?,
+
+    /// `lf session observe-status --json <id> --terminal <terminal> --stream
+    /// <stream> --sequence <n> [--agent-process <id>]`, `records` on stdin: one
+    /// Program Status reading from the terminal showing the Session.
+    #[serde(rename = "session.status")]
+    SessionStatus {
+        directory: PathBuf,
+        id: String,
+        terminal: String,
+        agent_process: Option<String>,
+        stream: String,
+        sequence: i64,
+        records: crate::program_status::Records,
+    } => super::session::StatusRecorded;
+    {
+        id, terminal, agent_process, stream, sequence, records, ..
+    } => tokio::runtime::Runtime::new()?.block_on(super::session::status_recorded(
+        id,
+        terminal,
+        agent_process.as_deref(),
+        stream,
+        *sequence,
+        records,
+    ))?,
 
     /// `lf session bind --json --task <task> -- <id>`; with `preview`,
     /// `--dry-run`: the Task a bind would assign, assigning nothing.
@@ -421,7 +445,7 @@ writes! {
     WaveSync { directory: PathBuf, wave: String } => Option<crate::lf::commands::waves::WaveDetailSnapshot>;
     { wave, .. } => {
         let refreshed = super::ops::refresh_status(directory, Some(wave))?;
-        super::waves::desktop_status(directory, refreshed.as_deref().unwrap_or(wave))?
+        super::waves::desktop_status(directory, refreshed.wave().unwrap_or(wave))?
     },
 
     /// `lf wave plan bind <wave> <project> --json`: the tracker Project
@@ -1244,6 +1268,7 @@ impl Write {
             | Self::SessionSteer { directory, .. }
             | Self::SessionRename { directory, .. }
             | Self::SessionBind { directory, .. }
+            | Self::SessionStatus { directory, .. }
             | Self::SessionResume { directory, .. }
             | Self::SessionNew { directory, .. }
             | Self::SessionMove { directory, .. }
@@ -1306,7 +1331,7 @@ mod tests {
         use serde_json::json;
 
         let shipping: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../../tests/fixtures/dto/server/task_shipping.json"
+            "../../../tests/fixtures/dto/server/task_shipping.json"
         ))
         .unwrap();
         for expected in [

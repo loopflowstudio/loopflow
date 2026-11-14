@@ -11,8 +11,6 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use crate::id::LfProcessId;
-
 const MAX_ATTEMPTS: u32 = 8;
 
 #[derive(Debug)]
@@ -234,7 +232,7 @@ impl Status {
     /// intent to replace claims. Recovery may only ask for free claims.
     pub(super) fn connect(
         &mut self,
-        owner: &LfProcessId,
+        terminal: &crate::id::TerminalId,
         session: &crate::id::LfSessionId,
         initial: bool,
     ) -> Result<Option<(UnixStream, bool)>> {
@@ -267,7 +265,7 @@ impl Status {
         loop {
             self.publish(waiting, false, setup_error.as_deref());
             super::discard_reconnect_input()?;
-            let mut reason = "The exact owner did not acknowledge its connection".to_owned();
+            let mut reason = "The held terminal did not acknowledge its connection".to_owned();
             while self.attempts < MAX_ATTEMPTS {
                 let attempt = self.attempts;
                 self.attempts += 1;
@@ -282,10 +280,10 @@ impl Status {
                         return Ok(None);
                     }
                 }
-                let (owner, session) = (owner.clone(), session.clone());
+                let (terminal, session) = (terminal.clone(), session.clone());
                 let (send, receive) = mpsc::sync_channel(1);
                 std::thread::spawn(move || {
-                    let result = crate::server::client::bridge_existing(&session, &owner);
+                    let result = super::registry::connect(&terminal);
                     // Presentation cannot prevent the terminal from reconnecting.
                     let transition = crate::store::read_existing_registry()
                         .ok()

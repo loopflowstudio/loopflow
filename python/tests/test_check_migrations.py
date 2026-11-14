@@ -72,6 +72,20 @@ def test_merged_history_left_alone_passes(repo: Path):
     assert "no unmerged migration" in result.stdout
 
 
+def test_package_order_records_merge_order_without_unmerged_slugs(repo: Path):
+    merge(repo, "a_later_migration.sql", "CREATE TABLE later (id TEXT);", days_ago=0)
+    command = [sys.executable, "scripts/check_migrations.py", "--write-package-order"]
+    result = subprocess.run(command, cwd=repo, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    snapshot = repo / "rust/loopflow/migration-order.txt"
+    assert snapshot.read_text() == "task_graphs\na_later_migration\n"
+
+    (repo / MIGRATIONS / "unfinished.sql").write_text("CREATE TABLE unfinished (id TEXT);")
+    result = subprocess.run(command, cwd=repo, capture_output=True, text=True)
+    assert result.returncode != 0
+    assert snapshot.read_text() == "task_graphs\na_later_migration\n"
+
+
 def test_new_slugs_pass_and_are_named(repo: Path):
     (repo / MIGRATIONS / "add_note.sql").write_text("ALTER TABLE waves ADD note TEXT;\n")
     (repo / MIGRATIONS / "add_colour.sql").write_text("ALTER TABLE waves ADD colour TEXT;\n")

@@ -41,7 +41,7 @@ Each Task has:
 - **Its history.** Every conversation, Graph run and step, and what each cost.
 
 ```bash
-lf task steer <ID> "keep the retry budget at 3"   # reaches the next step, in its context
+lf steer <ID> "keep the retry budget at 3"   # reaches the next step, in its context
 lf task status <ID>                            # where it is in its workflow, and what it needs from you
 lf session usage --task <ID>                   # what it cost
 lf land --wait-and-fix                         # merge when checks pass; fix them if not
@@ -61,7 +61,7 @@ Audit auth changes on this branch. Fix missing validation and untested paths.
 - interactive: design   # you take part; leaves scratch/<task>.md
 - implement             # leaves commits on the branch
 - audit
-- gate                  # leaves passing checks
+- gate                  # publishes the PR, reviews it while CI runs
 ```
 
 ```bash
@@ -78,7 +78,7 @@ Loopflow ships reasonable Graphs for software engineering, and they are
 templates. Copy one with `lf graph customize pursue`, change it, or write down
 the way you work and share it.
 
-`pursue` starts by editing the actual user docs. An attached Loopflow Desktop
+`pursue` plans the change, then edits the actual user docs. An attached Loopflow Desktop
 shows them in Files; elsewhere, the conversation lists their paths. Edit or
 discuss what's being built while work continues.
 
@@ -117,7 +117,7 @@ You want to do something; here's how through `lf`.
 | run agents in parallel, each Task in its own worktree and branch | `lf task create "…" --run` |
 | run on Claude Code, Codex, OpenCode or Pi, per run or per Skill | `lf -a codex : "…"` |
 | use every Claude and Codex login you pay for, routed to the one with room | `lf account` |
-| open work in Desktop, Rex, cmux, Herdr, tmux or a terminal | `lf open --task <ID>` |
+| open a Task conversation here (a sibling tab from an agent) | `lf open --task <ID>` |
 | keep work already in progress: a dirty checkout, another tool's worktree | `lf task create --worktree . --title "…"` |
 | land when checks pass, with CI failures repaired for you | `lf land --wait-and-fix` |
 | see what agents cost, by Task, Wave or week | `lf session usage --weekly` |

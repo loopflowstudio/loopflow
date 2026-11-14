@@ -352,7 +352,7 @@ private final class ScriptedReader {
         let work = WorkReference.task(id: try #require(task.runtime?.workId))
         var session = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(
             renameFixtureRecord("ensured-\(issue)", title: "task-conversation", work: work))) as? [String: Any])
-        session["task_primary"] = true
+        session["recovery": NSNull(), "task_primary"] = true
         session["workspace"] = ["machine_id": try #require(workspace.machineId), "worktree": workspace.worktree,
                                 "task_id": task.id, "unavailable": NSNull()]
         sessions = [session]
@@ -386,7 +386,7 @@ private final class ScriptedReader {
     private func send(_ part: WorkPart, answers: Int, body: Any) {
         sequence += 1
         let line: [String: Any] = ["answers": answers, "unavailable": NSNull(), "body": body]
-        let scope = WorkScope(repo: repo, headless: false, task: task, activity: nil)
+        let scope = WorkScope(repo: repo, headless: false, task: task, activity: nil, taskListWave: nil)
         guard let data = try? JSONSerialization.data(withJSONObject: line),
               let frame = try? WorkFrame.decode(part: part, scope: scope, sequence: sequence, line: data) else { return }
         continuation?.yield(frame)

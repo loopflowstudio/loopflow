@@ -21,7 +21,7 @@ pub fn run(repo: &Path, issue: Option<&str>, once: bool) -> Result<()> {
         println!("{}", render(&reading));
         return Ok(());
     }
-    let subscribing = waves::subscribe_task_status(
+    let subscribing = waves::subscribe_task_pane(
         repo,
         issue,
         subscribe::Transport::Pull {

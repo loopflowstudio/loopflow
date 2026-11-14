@@ -4,6 +4,10 @@ Machine routing, client access and installation have separate owners. The local
 client connection is implemented; LOO-718 covers the mobile client and remote
 admission.
 
+Which processes run where, and what survives a server restart, is
+[What runs on a Machine](index.md#what-runs-on-a-machine). This page owns
+client admission and installation.
+
 ## Start from the action
 
 | Action | Concept | Surface |
@@ -27,15 +31,15 @@ Connecting a client does not rent a worker, move a Task, or select another provi
 
 If the server is replaced during an unfinished draft and a running Graph,
 Desktop retains the screen and local reading actions. Native status shows the
-connection recovering; input pauses until the same owner acknowledges. A newer
-viewer's control claim survives automatic recovery. **Move here** explicitly
-requests control from that owner. A lost acknowledgement is never a reason to
+connection recovering; input pauses until the server acknowledges the same
+held terminal. A newer viewer's control claim survives automatic recovery.
+**Move here** explicitly requests control. A lost acknowledgement is never a reason to
 repeat takeover or replay input. **Retry** repairs the connection only.
 
-The server may become unavailable while execution continues. Only the owner can
-establish that the Session ended. Existing owners retain their lifetime policy:
-drafts, active turns, pending requests and running Graphs already protect their
-owners. An API connection introduces no new retention authority.
+The server may become unavailable while execution continues: agents run in a
+holder and Graphs in their own processes. Only a child exit, reported by its
+holder, ends a held terminal. An API connection introduces no new retention
+authority.
 
 ## Boundaries through the implementation
 
@@ -46,10 +50,10 @@ phone ─ authenticated HTTPS/WSS ─ server (LOO-718)
 server read/subscription ─ shared Rust readers
 server write ─ request worker ─ Write::run ─┐
 CLI mutation ─ mutation dispatcher ─────────┴─ engine operations / shared Rust write functions
-server task.run, task.ship ─ engine::launch ─ detached `lf task run`, `lf ship` ─ Graph owners
-server attach ─ exact existing Session owner ─ provider / PTY
+server task.run, task.ship ─ engine::launch ─ detached `lf task run`, `lf ship` ─ Graph processes
+server session.start / attach ─ held terminal ─ holder ─ PTY ─ agent
 
-Desktop terminal preparation/launch ─ ordinary CLI ─ existing Session owners
+Desktop terminal preparation/launch ─ ordinary CLI ─ held terminals
 lf --machine host … ─ SSH ─ destination's ordinary lf command
 lf install ─ selected artifacts + OS registration of server
 lf desktop ─ app-owned automation socket ─ windows / panes
@@ -57,8 +61,9 @@ lf desktop ─ app-owned automation socket ─ windows / panes
 
 The server owns client admission, revision negotiation, framing, bounded
 delivery and connection diagnostics. Shared commands own resolution, defaults, mutation,
-attribution and recoverable outcomes. Session owners own providers, PTYs,
-terminal output and input/geometry claims. Graph processes own Graph execution.
+attribution and recoverable outcomes. Holders own PTYs and the agents on
+them; the server owns each held terminal's screen, views and input/geometry
+claims. Graph processes own Graph execution.
 CLI operations can run without the server. Desktop owns rendering and UI actions.
 
 Subscriptions carry complete readings of current state and typed events for
@@ -95,10 +100,10 @@ defines persistence, receipt lookup, admission budgets and recovery by error sco
 
 `task.create` shares its creation function and receipt with the CLI, covering
 both new Tasks and Session adoption; `run` requests the Task's Graph launch.
-`task.run` and `task.ship` start the same command a terminal would, detached
-under its own execution owner, and answer the typed value that process reports
+`task.run` and `task.ship` start the same command a terminal would as a plain
+detached process, and answer the typed value that process reports
 (`engine/launch.rs`); the request never carries the run. Desktop's Work operations
-use the shared protocol; execution stays with existing Session/Graph owners.
+use the shared protocol; execution stays with holders and Graph processes.
 Ghostty rendering and app-owned automation retain
 their boundaries.
 The server adds no scheduler, Work database, viewer registry or provider supervisor.
@@ -106,8 +111,8 @@ The server adds no scheduler, Work database, viewer registry or provider supervi
 Local peer credentials apply only to the private Unix socket. Remote access needs
 its own authenticated admission even over Tailscale. Never forward a trusted local
 socket and treat the proxy's UID as the phone's identity. Disabling remote access
-or revoking a client must preserve local access and existing execution owners;
-client credentials grant no permission to disregard owner control claims.
+or revoking a client must preserve local access and running agents; client
+credentials grant no permission to disregard another view's control claim.
 
 ## One namespace in three places
 
@@ -115,7 +120,7 @@ An operation's API kind, its `lf` spelling and any setting for it share one
 name (`task.create` is `lf task create`); the nouns are Loopflow's primitives.
 Old spellings live in `lf/aliases.rs` for one release.
 
-The [operation reference](../../rust/loopflow/src/server/README.md#local-protocol-revision-4)
+The [operation reference](../../rust/loopflow/src/server/README.md#local-protocol-revision-5)
 lists the served kinds and their CLI equivalents. `lf server describe --json`
 generates their schemas and result types from this build. App automation remains
 CLI-only; a served operation calls the same Rust owner as its CLI equivalent.
@@ -138,9 +143,9 @@ The current macOS package uses a signed app's bundled helper with SMAppService;
 Linux uses a user systemd service. Development data directories have separate
 supervisor identities. Registration lives under `installation/`, outside Machine routing.
 
-Server replacement must leave detached Session and Graph owners alive under the
-actual OS supervisor. `setsid()` alone proves no such isolation. Validate owners
-launched through the replaced executable, recovery acknowledgement, submission
+Server replacement must leave holders and Graph processes alive under the
+actual OS supervisor. `setsid()` alone proves no such isolation. Validate
+holders started by the replaced executable, recovery acknowledgement, submission
 of the retained draft and subsequent Graph progress. Final macOS replacement,
 Linux supervision and rendered Desktop continuity remain acceptance work.
 Sleep makes the host unavailable; logout and reboot do not preserve live
@@ -157,10 +162,12 @@ lets local clients request readiness from the selected installation; it does not
 select or install a different build. Machine has no service subcommands.
 
 Rust `server/`, Swift `ServerClient` / `ServerProtocol` and the shared fixtures
-under `tests/fixtures/dto/server/` speak revision 4: one connection per client,
+under `rust/loopflow/tests/fixtures/dto/server/` speak revision 5: one connection per client,
 a negotiated revision, requests multiplexed by id, newline-delimited JSON on the
-Unix socket. A revision-1 client is answered in its own framing with
-`incompatible` and nothing else. Machine identity fields, `LF_HOME`, SSH routing
+Unix socket and one text frame per message on the remote WebSocket carrier.
+Control messages are bounded at 1 MiB; terminals and larger messages travel on
+single-use ticketed connections bound to the requesting client. A revision-1
+client is answered in its own framing with `incompatible` and nothing else. Machine identity fields, `LF_HOME`, SSH routing
 and Work ownership are unchanged. Native terminal relays use `LF_SERVER` and
 `LF_SERVER_STATUS`.
 
@@ -173,7 +180,8 @@ the namespace change can recover to the same listener; old and new executables
 cannot listen concurrently. No socket alias or second path exists.
 No Work, credential or remote-setting files move in this local cutover.
 
-LOO-718 must move remote admission/pairing commands under `lf server` while
-retaining its credential/settings storage. The [local protocol](../../rust/loopflow/src/server/README.md)
-owns operation shapes and bounds. The working design records the precise handoff
-and acceptance still owed by the combined release.
+Remote admission lives under `lf server mobile`, with the owner's Tailscale
+node, user and endpoint saved in the Machine's `mobile.yaml`. This service state
+is separate from the typed preferences in `config.yaml`. The
+[protocol README](../../rust/loopflow/src/server/README.md) owns operation
+shapes, bounds and the ticket flow shared by both carriers.

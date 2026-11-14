@@ -38,33 +38,16 @@ struct SessionConnectionProofTests {
                      ["config", "user.email", "fixture@example.invalid"], ["commit", "--allow-empty", "-m", "Fixture"]] {
             _ = try await lf.run(args, executable: "/usr/bin/git")
         }
-        let output = root.appendingPathComponent("owner-output")
-        let errors = root.appendingPathComponent("owner-errors")
-        try Data().write(to: output); try Data().write(to: errors)
-        let stdout = try FileHandle(forWritingTo: output)
-        let stderr = try FileHandle(forWritingTo: errors)
-        defer { try? stdout.close(); try? stderr.close() }
-        let owner = lf.process(["session", "serve", "--terminal", "--", binary, "-i", "-a", "claude", ":", "proof"])
-        owner.standardInput = FileHandle.nullDevice
-        owner.standardOutput = stdout; owner.standardError = stderr
-        owner.terminationHandler = { _ in }
-        try owner.run()
-        defer { if owner.isRunning { owner.terminate() } }
-        try await wait { fm.fileExists(atPath: root.appendingPathComponent("launches").path) }
-        let ownerID = try String(contentsOf: output, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
-        let inventory = try await lf.run(["session", "list", "--json"])
-        let object = try JSONSerialization.jsonObject(with: Data(inventory.utf8))
-        let records = (object as? [[String: Any]]) ?? ((object as? [String: Any])?["entries"] as? [[String: Any]]) ?? []
-        let session = try #require(records.first?["id"] as? String)
+        // A Desktop pane relays this bare launch, so the server's holder keeps it.
         let server = LocalServerFixture(lf)
         _ = try await server.status()
         defer { Task { await server.stop() } }
         let manager = GhosttyManager.shared
         manager.initialize()
         try #require(manager.state == .ready)
-        let view = GhosttyMetalView(terminal: .session(session, machineId: "fixture"))
+        let view = GhosttyMetalView(terminal: .session("proof", machineId: "fixture"))
         view.workingDirectory = root.path
-        view.command = buildGhosttyShellCommand(argv: [binary, "session", "attach", ownerID, "--session", session], env: lf.environment)
+        view.command = buildGhosttyShellCommand(argv: [binary, "-i", "-a", "claude", ":", "proof"], env: lf.environment)
         let mount = GhosttyTerminalMount(terminal: view)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 480),
                               styleMask: [.titled], backing: .buffered, defer: false)

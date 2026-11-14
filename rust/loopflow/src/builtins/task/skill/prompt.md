@@ -37,8 +37,9 @@ to it. Put general lessons in the shared skill and local rules in the local one.
 No miscellaneous `.lf/` learning notes.
 
 Checks are headless and machine-runnable. Implement and compress run focused
-tests; gate runs acceptance and affected suites once; unavailable checks go to
-CI. Judgment belongs to demo and review. Scratch keeps one command/result line.
+tests; gate starts CI for the suites and selects a few high-risk tests, including
+acceptance. Unavailable checks go to capable CI. Judgment belongs to demo and
+review. Keep one command/result line in scratch, or the PR body after cleanup.
 
 ## Workflow
 

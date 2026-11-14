@@ -256,7 +256,11 @@ final class WorkNavigation {
     var waveRatios: [Board: WaveViewRatios] = [:]
     var boardSections: [Board: WaveBoardSection] = [:]
     var showsSlotHints = false
-    var sidebarFilter: SidebarFilter = .working
+    var sidebarFilter: SidebarFilter = .working {
+        willSet {
+            if newValue != sidebarFilter { Perf.begin(Perf.hierarchyInteraction, "filter", id: "outline") }
+        }
+    }
     var sidebarFocusRequested = false
     enum Content { case overview, details, terminals }
     enum Palette: Equatable {

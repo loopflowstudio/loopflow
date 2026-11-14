@@ -343,6 +343,10 @@ final class GhosttySurfacePool {
         return view.programStatus.incarnation == source
     }
 
+    func connectionReading(for id: TerminalIdentity) -> ServerConnectionReading? {
+        views[id]?.connectionReading
+    }
+
     func title(for id: TerminalIdentity) -> String? {
         views[id]?.terminalTitle
     }
@@ -568,6 +572,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     private var inputEnabled = true
     private var serverConnection: ServerConnection?
     private var connectionReadonly = false
+    var connectionReading: ServerConnectionReading? { serverConnection?.reading }
     var connectionAcceptsInput: Bool { serverConnection?.reading.acceptsInput ?? true }
     private let connectionLabel = NSTextField(labelWithString: "")
     private lazy var retryConnection = NSButton(title: "Retry connection", target: self, action: #selector(retryServerConnection))
@@ -1744,6 +1749,7 @@ final class GhosttySurfacePool {
     func programStatus(for id: TerminalIdentity) -> ProgramStatusSurface? { nil }
     func associateProgramStatus(_ records: [SessionRecord]) {}
     func ownsCopyConfirmation(_ notification: Notification, terminal: TerminalIdentity) -> Bool { false }
+    func connectionReading(for id: TerminalIdentity) -> ServerConnectionReading? { nil }
     func title(for id: TerminalIdentity) -> String? { nil }
     func scrollToBottom(_ id: TerminalIdentity) {}
     func screen(_ id: TerminalIdentity) -> String? { nil }

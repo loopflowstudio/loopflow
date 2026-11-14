@@ -4,6 +4,13 @@ November 8, 2026. Direction in the recovery conversation: "can we get that insta
 
 ## Remaining work
 
+November 14: the recovery path is being moved from the removed Session watchers
+to the Machine server's native connections, with holders retaining terminals.
+November 9 results below are historical. The current design owns fresh focused
+checks and the remaining gate/native cases, including callback continuity across
+a server restart after Codex token handoff.
+
+
 [interactive-limit-recovery.md](interactive-limit-recovery.md) owns the expanded
 scope, native counterexamples and remaining preservation cases. Guarded runtime
 admission is now integrated through the Session owners and broker. Two native

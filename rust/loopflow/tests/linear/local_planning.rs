@@ -907,13 +907,20 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
         .as_str()
         .unwrap()
         .starts_with(&format!("jack/{}-", &id.trim_start_matches("task_")[..6])));
-    // A bare run may return as its Graph registers; it stops before the
-    // interactive step, where a person takes part.
+    // A bare run returns as its Graph registers. Arrival at the interactive
+    // step precedes process completion; wait for both before reading its state.
     lf(repo.path(), home.path(), &["task", "run", id]);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
     let status = loop {
         let status = lf(repo.path(), home.path(), &["desktop", "task", id, "--json"]);
-        if status["execution"]["work"]["graph"]["position"]["kind"] == "at" {
+        let work = &status["execution"]["work"];
+        if work["graph"]["position"]["kind"] == "at"
+            && work["processes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|process| !process["completed_at"].is_null())
+        {
             break status;
         }
         assert!(std::time::Instant::now() < deadline, "{status}");
@@ -2571,6 +2578,52 @@ fn ordinary_task_creation_returns_resolvable_identifier_without_a_public_retry_t
 }
 
 #[test]
+fn wave_sync_without_an_initiative_shows_local_planning() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(repo.path().join(".lf")).unwrap();
+    std::fs::write(
+        repo.path().join(".lf/config.yaml"),
+        "planning:\n  provider: linear\n  team: fixture-team\n",
+    )
+    .unwrap();
+    lf(
+        repo.path(),
+        home.path(),
+        &["wave", "add", "inbox", "--json"],
+    );
+    lf(
+        repo.path(),
+        home.path(),
+        &[
+            "task",
+            "create",
+            "--wave",
+            "inbox",
+            "--title",
+            "Saved plan",
+            "--json",
+        ],
+    );
+    let synced = lf(
+        repo.path(),
+        home.path(),
+        &["wave", "sync", "inbox", "--json"],
+    );
+    assert_eq!(synced["wave"]["name"], "inbox");
+    assert!(synced.to_string().contains("Saved plan"), "{synced}");
+    let Value::String(text) = lf(repo.path(), home.path(), &["wave", "sync", "inbox"]) else {
+        panic!("wave sync prints text");
+    };
+    assert!(
+        text.starts_with(
+            "inbox: no Linear Initiative; showing local planning (lf wave plan connect inbox)\n"
+        ),
+        "{text}"
+    );
+}
+
+#[test]
 fn planning_sync_tracks_creation_errors_uncertainty_conflicts_and_settlement() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
@@ -3474,6 +3527,7 @@ fn graph_defaults_follow_task_wave_and_repository() {
         ("repository", "repo-review"),
         ("wave", "wave-review"),
         ("explicit", "task-review"),
+        ("code", "default-review"),
     ] {
         repo.create_file(
             &format!(".lf/graphs/{name}.yaml"),
@@ -3528,17 +3582,20 @@ fn graph_defaults_follow_task_wave_and_repository() {
             "create",
             "--no-wave",
             "--title",
-            "Invalid default",
+            "Fallback default",
             "--json",
         ],
     )["task"]
         .clone();
     let standalone_id = standalone["id"].as_str().unwrap();
-    let refused = command(repo.path(), home.path(), &["task", "run", standalone_id])
-        .output()
-        .unwrap();
-    assert!(!refused.status.success());
-    assert!(String::from_utf8_lossy(&refused.stderr).contains("invalid graph name"));
+    let fallback = run_until_waiting(
+        repo.path(),
+        home.path(),
+        &["task", "run", standalone_id],
+        standalone_id,
+    );
+    assert_eq!(fallback["name"], "code");
+    assert_eq!(fallback["position"]["step"], "default-review");
     repo.create_file(".lf/config.yaml", "graph: repository\n");
     let explicit = lf(
         repo.path(),

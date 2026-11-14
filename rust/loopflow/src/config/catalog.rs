@@ -232,6 +232,12 @@ definitions! {
 
 definitions! {
     #[derive(schemars::JsonSchema)]
+    ClaudeConfig, CLAUDE_DEFINITIONS, "claude.", {};
+    model: Option<String> = "null", Launch, Replace, Portable, NextLaunch, Agents, "Starting model for bare claude; explicit harness:model selections win, and unset inherits Claude configuration";
+}
+
+definitions! {
+    #[derive(schemars::JsonSchema)]
     CodexConfig, CODEX_DEFINITIONS, "codex.", {};
     service_tier: Option<super::CodexServiceTier> = "null", Launch, Replace, Portable, NextLaunch, Agents, "Codex launch tier: default (standard) or priority (fast); unset inherits provider configuration";
 }
@@ -244,11 +250,13 @@ definitions! {
         #[serde(skip)] context_budget_sources: BTreeMap<BudgetKey, String> = BTreeMap::new();
     };
     agent: Option<String> = "null", Launch, Replace, Portable, NextLaunch, Agents, "Harness[:model] choice; every choice precedes every fallback";
-    default_agent: Option<String> = "null", Launch, Replace, Portable, NextLaunch, Agents, "Harness[:model] when no applicable agent choice exists; a comma list names the providers a step falls through to";
+    default_agent: Option<String> = "null", Launch, Replace, Portable, NextLaunch, Agents, "Harness[:model] tried first when no applicable agent choice exists; the rest of agents stays behind it";
+    agents: Vec<String> = "[]", Launch, Replace, Portable, NextLaunch, Agents, "Ordered harness[:model] entries Loopflow may pick; a headless step refused by a usage limit moves to the next";
     context: ContextConfig = "{}", Launch, Merge, Portable, NextLaunch, Agents, "Files and other inputs supplied to the agent";
     yolo: bool = "false", Launch, Replace, Portable, NextLaunch, Agents, "Skip agent permission prompts: Claude, Codex and OpenCode; Pi keeps its own tool policy";
     chrome: Option<bool> = "null", Launch, Replace, HostLocal, NextLaunch, Agents, "Claude Chrome integration; unset leaves Claude's own setting; Codex, OpenCode and Pi have no equivalent";
     codex: CodexConfig = "{}", Launch, Merge, Portable, NextLaunch, Agents, "Codex launch preferences; omitted values inherit provider configuration";
+    claude: ClaudeConfig = "{}", Launch, Merge, Portable, NextLaunch, Agents, "Claude launch preferences; omitted values inherit provider configuration";
     isolate: bool = "false", Launch, Replace, Portable, Inactive, Agents, "Ignored: every launch runs in the provider's shared home; kept readable for the released lf until Task e1f359";
     summaries: Vec<SummaryConfig> = "[]", Launch, AppendReset, ReferencedAssets, Inactive, Agents, "Parsed summary requests; no runtime consumer";
     summary_tokens: usize = "5000", Launch, Replace, Portable, Inactive, Agents, "Parsed summary budget; no runtime consumer";
@@ -284,6 +292,7 @@ fn all_definitions() -> impl Iterator<Item = &'static Definition> {
         .iter()
         .chain(CONTEXT_DEFINITIONS)
         .chain(CODEX_DEFINITIONS)
+        .chain(CLAUDE_DEFINITIONS)
 }
 
 /// The definition owning `key`, in any spelling `config::keys` accepts.
@@ -299,16 +308,24 @@ pub fn definition(key: &str) -> Option<&'static Definition> {
         .max_by_key(|definition| definition.key.len())
 }
 
+/// Every setting at its built-in default. Validation asks for this once per
+/// value it checks, so the tree is parsed from the catalogue once per process.
 pub fn defaults() -> Value {
-    let mut values = Value::Mapping(Default::default());
-    for definition in all_definitions() {
-        super::settings::insert(
-            &mut values,
-            &definition.key.split('.').collect::<Vec<_>>(),
-            serde_yaml_ng::from_str(definition.default).expect("catalogue default is valid YAML"),
-        );
-    }
-    values
+    static DEFAULTS: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
+    DEFAULTS
+        .get_or_init(|| {
+            let mut values = Value::Mapping(Default::default());
+            for definition in all_definitions() {
+                super::settings::insert(
+                    &mut values,
+                    &definition.key.split('.').collect::<Vec<_>>(),
+                    serde_yaml_ng::from_str(definition.default)
+                        .expect("catalogue default is valid YAML"),
+                );
+            }
+            values
+        })
+        .clone()
 }
 
 /// Full paths and their own policies, grouped for CLI and Desktop browsing.

@@ -57,19 +57,36 @@ pub(crate) fn account_held_until(
     model: Option<&str>,
     now: i64,
 ) -> Option<i64> {
+    account_hold_deadlines(account, limits, model, now)
+        .map(|(_, until)| until)
+        .max()
+}
+
+// Routing and its explanations read the same active scopes and deadlines.
+fn account_hold_deadlines<'a>(
+    account: &'a ProviderAccount,
+    limits: &'a [AccountLimitRow],
+    model: Option<&'a str>,
+    now: i64,
+) -> impl Iterator<Item = (Option<&'a str>, i64)> + 'a {
     let scoped = limits
         .iter()
-        .filter(|limit| {
-            limit.provider == account.provider && limit.account_id == account.account_id
+        .filter(move |limit| {
+            limit.provider == account.provider
+                && limit.account_id == account.account_id
+                && limit_affects(limit.model.as_deref(), model)
         })
-        .filter(|limit| limit_affects(limit.model.as_deref(), model))
-        .filter_map(|limit| limit.limited_until);
+        .filter_map(|limit| {
+            limit
+                .limited_until
+                .map(|until| (limit.model.as_deref(), until))
+        });
     account
         .cooldown_until
         .into_iter()
+        .map(|until| (None, until))
         .chain(scoped)
-        .filter(|until| *until > now)
-        .max()
+        .filter(move |(_, until)| *until > now)
 }
 
 pub(crate) fn account_route_eligible(
@@ -110,10 +127,17 @@ pub(crate) struct LaunchCapacity {
     now: i64,
 }
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static CAPACITY_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 impl LaunchCapacity {
     pub(crate) fn read(
         store: &crate::store::sqlite::SqliteStore,
     ) -> crate::store::StoreResult<Self> {
+        #[cfg(test)]
+        CAPACITY_READS.set(CAPACITY_READS.get() + 1);
         let accounts = store.list_provider_accounts(None)?;
         let active = [Provider::Claude, Provider::Codex]
             .into_iter()
@@ -331,11 +355,19 @@ pub(crate) struct RateLimitSignal {
 impl RateLimitSignal {
     /// A limit reached with nothing more said: no reset time, no windows.
     fn stated(limit: crate::agent::SpentLimit) -> Self {
+        let reason = if limit.model.is_none()
+            && !limit.credits
+            && limit.reason.to_ascii_lowercase().contains("weekly limit")
+        {
+            "rejected: seven_day".to_owned()
+        } else {
+            limit.reason
+        };
         Self {
             utilization_percent: None,
             resets_at: None,
             limited: true,
-            reason: limit.reason,
+            reason,
             windows: Vec::new(),
             model: limit.model,
             credits: limit.credits,
@@ -857,26 +889,28 @@ async fn record_rate_limit_signal(
             .max(now)
             + RESET_GRACE_SECS
     });
+    let included = signal
+        .windows
+        .iter()
+        .any(|window| window.window == "seven_day_overage_included")
+        || signal.reason.rsplit(": ").next() == Some("seven_day_overage_included");
     let scope = signal
         .model
-        .clone()
-        .or_else(|| signal.credits.then(|| launched_model_family(launched)));
-    // A limit on one model holds back only that model's window; the account
-    // itself cools only when every model is limited.
+        .as_deref()
+        .map(claude_model_family)
+        .filter(|model| !included || crate::config::CLAUDE_MODEL_FAMILIES.contains(&model.as_str()))
+        .or_else(|| (signal.credits || included).then(|| launched_model_family(launched)));
     let scoped = scope.is_some();
-    store
-        .record_provider_account_health(
-            provider.as_str(),
-            account_id,
-            signal.utilization_percent,
-            cooldown_until.filter(|_| !scoped),
-            signal.limited.then_some(signal.reason.as_str()),
-        )
-        .await?;
     let mut windows = signal.windows.clone();
     if scoped && signal.limited && windows.is_empty() {
         windows.push(crate::store::AccountLimitWindow {
-            window: signal.reason.clone(),
+            window: scope
+                .as_deref()
+                .filter(|model| {
+                    !signal.credits && crate::config::CLAUDE_MODEL_FAMILIES.contains(model)
+                })
+                .map(|model| format!("seven_day_{model}"))
+                .unwrap_or_else(|| signal.reason.clone()),
             used_percent: 100,
             resets_at: signal.resets_at,
             plan: None,
@@ -885,26 +919,48 @@ async fn record_rate_limit_signal(
         });
     }
     for window in &mut windows {
-        if signal.credits && window.model.is_none() {
+        window.model = window.model.as_deref().map(claude_model_family);
+        if included || (signal.credits && window.model.is_none()) {
             window.model = scope.clone();
         }
         if signal.limited && window.model == scope {
             window.limited_until = cooldown_until;
         }
+        if window.window == "seven_day_overage_included" {
+            if let Some(model) = window
+                .model
+                .as_deref()
+                .filter(|model| crate::config::CLAUDE_MODEL_FAMILIES.contains(model))
+            {
+                window.window = format!("seven_day_{model}");
+            }
+        }
     }
-    if !windows.is_empty() {
-        store
-            .upsert_provider_account_limits(provider.as_str(), account_id, &windows, "stream")
-            .await?;
-    }
+    store
+        .record_provider_account_capacity(
+            provider.as_str(),
+            account_id,
+            crate::store::AccountCapacity {
+                utilization_percent: signal.utilization_percent,
+                cooldown_until: cooldown_until.filter(|_| !scoped),
+                cooldown_reason: signal.limited.then(|| signal.reason.clone()),
+                windows,
+            },
+        )
+        .await?;
+
     Ok(())
 }
 
 /// The model family a launch of `model` runs, as limit scopes spell it.
 fn launched_model_family(model: Option<&str>) -> String {
-    let Some(model) = model.map(str::to_ascii_lowercase) else {
-        return crate::config::CLAUDE_DEFAULT_MODEL_FAMILY.to_string();
-    };
+    model
+        .map(claude_model_family)
+        .unwrap_or_else(|| crate::config::CLAUDE_DEFAULT_MODEL_FAMILY.to_owned())
+}
+
+pub(crate) fn claude_model_family(model: &str) -> String {
+    let model = model.to_ascii_lowercase();
     crate::config::CLAUDE_MODEL_FAMILIES
         .into_iter()
         .find(|family| model.contains(family))
@@ -924,6 +980,14 @@ async fn record_stated_limit(
 ) -> Result<(), ProviderAccountError> {
     let signal = RateLimitSignal::stated(limit);
     record_rate_limit_signal(store, provider, account_id, &signal, launched).await?;
+    refresh_claude_capacity(store, provider, account_id).await
+}
+
+async fn refresh_claude_capacity(
+    store: &SharedStore,
+    provider: Provider,
+    account_id: &ProviderAccountId,
+) -> Result<(), ProviderAccountError> {
     // Codex reports its windows on the stream; its poll is a whole app-server
     // exchange.
     if provider != Provider::Claude {
@@ -935,39 +999,15 @@ async fn record_stated_limit(
     else {
         return Ok(());
     };
+    let revision = store
+        .provider_account_capacity_revision(&account.provider, &account.account_id)
+        .await?;
     if let Ok(usage) = crate::subscription::poll_account(&account).await {
-        save_polled_usage(store, &account, &usage.windows).await?;
+        store
+            .reconcile_provider_account_capacity(&account, revision, &usage.windows)
+            .await?;
     }
     Ok(())
-}
-
-/// Save a usage reading of `account`, clearing its cooldown when the reading
-/// has account-wide windows and none is spent. Only a rejection sets that cooldown,
-/// and a rejection can be about something the account still has room for; a
-/// spent model's window holds that model by itself. Returns whether it cleared.
-pub(crate) async fn save_polled_usage(
-    store: &SharedStore,
-    account: &ProviderAccount,
-    polled: &[crate::store::AccountLimitWindow],
-) -> Result<bool, ProviderAccountError> {
-    store
-        .upsert_provider_account_limits(&account.provider, &account.account_id, polled, "poll")
-        .await?;
-    let cooling = account
-        .cooldown_until
-        .is_some_and(|until| until > now_unix());
-    let account_wide: Vec<_> = polled
-        .iter()
-        .filter(|window| window.model.is_none())
-        .collect();
-    let spent = account_wide.iter().any(|window| window.used_percent >= 100);
-    if !cooling || account_wide.is_empty() || spent {
-        return Ok(false);
-    }
-    store
-        .clear_provider_account_cooldown(&account.provider, &account.account_id)
-        .await?;
-    Ok(true)
 }
 
 #[cfg(test)]
@@ -1196,7 +1236,7 @@ fn spent_limit_reason(input: &str) -> Option<crate::agent::SpentLimit> {
     crate::agent::subscription_limit_text(details["last_assistant_message"].as_str()?)
 }
 
-/// Record the native failed prompt. The Session observer owns account work
+/// Record the native failed prompt. The Machine server owns account work
 /// and continuation, outside the lifetime of the provider's failure hook.
 pub fn record_limit() {
     let recorded = (|| -> anyhow::Result<()> {
@@ -1220,7 +1260,13 @@ pub(crate) async fn record_session_limit(
         // A rejected native prompt is stronger than an account-wide usage poll.
         // Hold this model briefly even when the generic windows have room.
         let mut signal = RateLimitSignal::stated(limit.clone());
-        record_stated_limit(&store, provider, account, limit, Some(model)).await?;
+        if limit.model.is_some() || limit.credits {
+            record_stated_limit(&store, provider, account, limit, Some(model)).await?;
+        } else {
+            // A generic native rejection names no account-wide window. Poll
+            // Claude's actual windows, then hold only this rejected model.
+            refresh_claude_capacity(&store, provider, account).await?;
+        }
         signal.model = Some(launched_model_family(Some(model)));
         signal.windows = vec![crate::store::AccountLimitWindow {
             window: format!("rejected:{model}"),
@@ -1263,6 +1309,7 @@ pub(crate) async fn session_recovery_route(
     model: &str,
     directory: &Path,
     wave: Option<&WaveId>,
+    selection: &selection::AccountSelection,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
     Ok(select_route(
         provider,
@@ -1271,7 +1318,7 @@ pub(crate) async fn session_recovery_route(
         wave,
         Some(model),
         Some(directory),
-        true,
+        Some(selection),
     )
     .await?
     .map(|route| route.launching(Some(model))))
@@ -1319,7 +1366,7 @@ pub(crate) async fn resolve_provider_account_exact(
         wave_id,
         model,
         directory,
-        false,
+        None,
     )
     .await?
     .map(|route| route.launching(model));
@@ -1340,8 +1387,15 @@ async fn select_route(
     wave_id: Option<&WaveId>,
     model: Option<&str>,
     directory: Option<&Path>,
-    require_capacity: bool,
+    recovery_selection: Option<&selection::AccountSelection>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
+    let require_capacity = recovery_selection.is_some();
+    let ambient_selection = if recovery_selection.is_none() {
+        selection::AccountSelection::from_env()?
+    } else {
+        Default::default()
+    };
+    let selection = recovery_selection.unwrap_or(&ambient_selection);
     ensure_supported(provider)?;
     let store = route_store().await?;
     let resumed = match (&store, agent_session) {
@@ -1352,13 +1406,16 @@ async fn select_route(
         _ => false,
     };
     let exact_account_id = exact_account_id.filter(|_| !resumed);
-    if !selection::AccountSelection::from_env()?.is_default() {
+    if !selection.is_default() {
         return resolve_selected_provider_account(
             provider,
-            exact_account_id,
+            LaunchAsk {
+                exact_account_id,
+                model,
+                selection: Some(selection),
+            },
             wave_id,
             store,
-            model,
             directory,
             require_capacity,
         )
@@ -1518,20 +1575,17 @@ async fn held_login<'a>(
 
 async fn resolve_selected_provider_account(
     provider: Provider,
-    exact_account_id: Option<&ProviderAccountId>,
+    ask: LaunchAsk<'_>,
     wave_id: Option<&WaveId>,
     local_store: Option<SharedStore>,
-    model: Option<&str>,
     directory: Option<&Path>,
     require_capacity: bool,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
+    let model = ask.model;
     let repo_id = launch_repo_id(directory)?;
     let Some(candidates) = ordered_selected_candidates(
         provider,
-        LaunchAsk {
-            exact_account_id,
-            model,
-        },
+        ask,
         repo_id.as_ref(),
         wave_id,
         local_store.as_ref(),
@@ -1590,6 +1644,7 @@ async fn resolve_selected_provider_account(
 struct LaunchAsk<'a> {
     exact_account_id: Option<&'a ProviderAccountId>,
     model: Option<&'a str>,
+    selection: Option<&'a selection::AccountSelection>,
 }
 
 async fn ordered_selected_candidates(
@@ -1603,6 +1658,7 @@ async fn ordered_selected_candidates(
     let LaunchAsk {
         exact_account_id,
         model,
+        selection,
     } = ask;
     let mut catalog = match &local_store {
         Some(store) => store.list_provider_accounts(None).await?,
@@ -1650,7 +1706,12 @@ async fn ordered_selected_candidates(
         }
     }
     catalog.retain(|account| account.home.is_some());
-    let selection = selection::AccountSelection::from_env()?;
+    let ambient = if selection.is_none() {
+        selection::AccountSelection::from_env()?
+    } else {
+        Default::default()
+    };
+    let selection = selection.unwrap_or(&ambient);
     let selected = selection.resolved_accounts(&catalog)?;
     if candidates.is_empty() {
         if selection.is_restricted() || exact_account_id.is_some() {
@@ -1745,20 +1806,37 @@ pub(crate) fn account_unavailable_reason(
             routing.as_str()
         );
     }
-    if let Some(until) = account_held_until(account, limits, model, now) {
-        return format!(
-            "'{}' cooling{}{}",
-            account_login(account),
-            match model {
-                Some(model) if account.cooldown_until.is_none_or(|cooling| cooling <= now) => {
-                    format!(" for {model}")
-                }
-                _ => String::new(),
-            },
-            format_reset_time(until)
-        );
+    let holds = account_capacity_holds(account, limits, model, now);
+    if !holds.is_empty() {
+        return format!("'{}' cooling {}", account_login(account), holds.join("; "));
     }
     format!("'{}' is unavailable", account_login(account))
+}
+
+/// Active capacity holds, with each scope's own deadline.
+pub(crate) fn account_capacity_holds(
+    account: &ProviderAccount,
+    limits: &[AccountLimitRow],
+    model: Option<&str>,
+    now: i64,
+) -> Vec<String> {
+    let mut holds = std::collections::BTreeMap::<Option<&str>, i64>::new();
+    for (scope, until) in account_hold_deadlines(account, limits, model, now) {
+        holds
+            .entry(scope)
+            .and_modify(|current| *current = (*current).max(until))
+            .or_insert(until);
+    }
+    holds
+        .into_iter()
+        .map(|(scope, until)| {
+            let scope = scope.map_or_else(
+                || "account-wide".to_string(),
+                |scope| format!("for {scope}"),
+            );
+            format!("{scope}{}", format_reset_time(until))
+        })
+        .collect()
 }
 
 #[derive(Debug)]
@@ -2505,10 +2583,9 @@ mod tests {
         assert_eq!(account.cooldown_reason.as_deref(), Some("five_hour"));
     }
 
-    /// November 7: a bare `claude` step ran Fable, which needs usage credits,
-    /// and the rejection cooled the whole account for three days.
+    /// Included weekly allocations hold only the launched model.
     #[tokio::test]
-    async fn a_credits_rejection_holds_the_launched_model_and_never_the_account() {
+    async fn claude_usage_reconciliation_included_rejection_scopes_the_launched_model() {
         let temp = tempdir().unwrap();
         let store = Arc::new(
             crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
@@ -2540,7 +2617,7 @@ mod tests {
                 limited_until: None,
             }],
             model: None,
-            credits: true,
+            credits: false,
         };
         let launch = |model: Option<&str>| {
             ProviderAccountRoute::shared(
@@ -2607,7 +2684,7 @@ mod tests {
             None,
         );
         account.cooldown_until = Some(now_unix() + 3 * 24 * 3600);
-        account.cooldown_reason = Some("rejected: seven_day_overage_included".into());
+        account.cooldown_reason = Some("rejected: weekly".into());
         store.upsert_provider_account(&account).await.unwrap();
         let window =
             |name: &str, used_percent, model: Option<&str>| crate::store::AccountLimitWindow {
@@ -2620,14 +2697,35 @@ mod tests {
             };
 
         // A reading without account-wide windows says nothing.
-        assert!(!save_polled_usage(&store, &account, &[]).await.unwrap());
+        let revision = store
+            .provider_account_capacity_revision("claude", &account.account_id)
+            .await
+            .unwrap();
+        assert!(store
+            .reconcile_provider_account_capacity(&account, revision, &[])
+            .await
+            .unwrap());
         let spent = [window("weekly", 100, None)];
-        assert!(!save_polled_usage(&store, &account, &spent).await.unwrap());
+        let revision = store
+            .provider_account_capacity_revision("claude", &account.account_id)
+            .await
+            .unwrap();
+        assert!(store
+            .reconcile_provider_account_capacity(&account, revision, &spent)
+            .await
+            .unwrap());
         let room = [
             window("weekly", 93, None),
             window("weekly:fable", 100, Some("fable")),
         ];
-        assert!(save_polled_usage(&store, &account, &room).await.unwrap());
+        let revision = store
+            .provider_account_capacity_revision("claude", &account.account_id)
+            .await
+            .unwrap();
+        assert!(store
+            .reconcile_provider_account_capacity(&account, revision, &room)
+            .await
+            .unwrap());
         let stored = store
             .get_provider_account("claude", &account.account_id)
             .await
@@ -4560,10 +4658,16 @@ mod account_first_tests {
         let preferred =
             selection::AccountSelection::from_flags(&["codex=first@".into()], &[]).unwrap();
         let guard = preferred.activate().unwrap();
-        let route = session_recovery_route(Provider::Codex, "gpt-5", Path::new("/"), None)
-            .await
-            .unwrap()
-            .unwrap();
+        let route = session_recovery_route(
+            Provider::Codex,
+            "gpt-5",
+            Path::new("/"),
+            None,
+            &selection::AccountSelection::from_env().unwrap(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
         assert_eq!(route.account_id().as_str(), "second");
         record_session_limit(
             Provider::Codex,
@@ -4574,12 +4678,18 @@ mod account_first_tests {
         .await
         .unwrap();
         assert_eq!(
-            session_recovery_route(Provider::Codex, "gpt-5", Path::new("/"), None)
-                .await
-                .unwrap()
-                .unwrap()
-                .account_id()
-                .as_str(),
+            session_recovery_route(
+                Provider::Codex,
+                "gpt-5",
+                Path::new("/"),
+                None,
+                &selection::AccountSelection::from_env().unwrap()
+            )
+            .await
+            .unwrap()
+            .unwrap()
+            .account_id()
+            .as_str(),
             "second"
         );
         drop(guard);
@@ -4587,7 +4697,14 @@ mod account_first_tests {
             selection::AccountSelection::from_flags(&[], &["codex=first@".into()]).unwrap();
         let _guard = restricted.activate().unwrap();
         assert!(matches!(
-            session_recovery_route(Provider::Codex, "gpt-5", Path::new("/"), None).await,
+            session_recovery_route(
+                Provider::Codex,
+                "gpt-5",
+                Path::new("/"),
+                None,
+                &selection::AccountSelection::from_env().unwrap()
+            )
+            .await,
             Err(ProviderAccountError::NoEligibleAccount {
                 retry_at: Some(_),
                 ..
@@ -4599,32 +4716,47 @@ mod account_first_tests {
             .await
             .unwrap()
             .unwrap();
-        save_polled_usage(
-            &store,
-            &account,
-            &[crate::store::AccountLimitWindow {
-                window: "five_hour".into(),
-                used_percent: 20,
-                resets_at: None,
-                plan: None,
-                model: None,
-                limited_until: None,
-            }],
+        let revision = store
+            .provider_account_capacity_revision(&account.provider, &account.account_id)
+            .await
+            .unwrap();
+        store
+            .reconcile_provider_account_capacity(
+                &account,
+                revision,
+                &[crate::store::AccountLimitWindow {
+                    window: "five_hour".into(),
+                    used_percent: 20,
+                    resets_at: None,
+                    plan: None,
+                    model: None,
+                    limited_until: None,
+                }],
+            )
+            .await
+            .unwrap();
+        assert!(session_recovery_route(
+            Provider::Codex,
+            "gpt-5",
+            Path::new("/"),
+            None,
+            &selection::AccountSelection::from_env().unwrap()
         )
         .await
-        .unwrap();
-        assert!(
-            session_recovery_route(Provider::Codex, "gpt-5", Path::new("/"), None)
-                .await
-                .is_err()
-        );
+        .is_err());
         assert_eq!(
-            session_recovery_route(Provider::Codex, "another-model", Path::new("/"), None)
-                .await
-                .unwrap()
-                .unwrap()
-                .account_id()
-                .as_str(),
+            session_recovery_route(
+                Provider::Codex,
+                "another-model",
+                Path::new("/"),
+                None,
+                &selection::AccountSelection::from_env().unwrap()
+            )
+            .await
+            .unwrap()
+            .unwrap()
+            .account_id()
+            .as_str(),
             "first"
         );
         let limits = store.provider_account_limits(Some("codex")).await.unwrap();

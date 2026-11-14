@@ -27,11 +27,24 @@ _DESKTOP_BUILD_INPUTS = (
     "rust/loopflow/build.rs",
     "rust/loopflow/ghostty-vt",
 )
+IOS_INPUTS = (
+    "swift/Loopflow/",
+    "swift/LoopflowiOS",
+    "swift/ios.yml",
+    "swift/project.yml",
+    "scripts/test_ios.py",
+    "tests/fixtures/dto/",
+    "rust/loopflow/src/server/",
+    "rust/loopflow/src/transport/wire.rs",
+    "rust/loopflow/src/lf/commands/read.rs",
+    "rust/loopflow/src/lf/commands/write.rs",
+)
 _UI_INPUTS = (
     "swift/",
     "scripts/build_xcode_ci.py",
     "scripts/swift_cache.py",
     *_DESKTOP_BUILD_INPUTS,
+    *IOS_INPUTS,
 )
 _SWIFT_TEST_INPUTS = (
     *_DESKTOP_BUILD_INPUTS,

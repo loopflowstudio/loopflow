@@ -21,7 +21,7 @@ other implementation and proof gaps.
 
 ```bash
 lf task create --title "Fix the parser" --json
-lf task steer <id> "Keep quoted input"
+lf steer <id> "Keep quoted input"
 lf checkout <id>
 ```
 
@@ -225,7 +225,7 @@ mutation journal grows with every edit, so `lf repo plan journal` reads it on
 request: every change, losing values included, and the ranked candidate IDs, which
 are not applied or published evidence; rejected projections retain their failure reasons.
 Journal read failures fail the status read; Desktop keeps its last reading with the
-error, rather than inventing an empty plan. Foreground CLI, headless Run and Desktop connections own Git exchange
+error, rather than inventing an empty plan. Foreground CLI, headless Session and Desktop connections own Git exchange
 for their lifetimes; Linear checks run at the boundaries described below. A short save attempts exchange before returning. No resident,
 whole-store callback, scheduler or implicit turn/Graph replay is involved.
 
@@ -457,8 +457,8 @@ alternative, into a graph the Graph process holds in memory. One cursor and its 
 counters identify loop passes. Subgraphs and passes are display lenses over the
 step processes, with no separate record or process.
 
-Every Graph naming a Task, or run in its checkout, is equally that Task's
-work; none is selected or privileged. Taskless and Task execution share the
+Every Graph started for a Task, by naming it or in its checkout, is equally that
+Task's work; none is selected or privileged. Taskless and Task execution share the
 Graph runner. `lf graph` runs an `interactive:` step in place, with the person at a
 terminal, else headless. Each `task run` starts a fresh Graph as a child Graph process
 (hidden `lf --task ISSUE graph run`), and a fresh one again when that Graph process
@@ -477,13 +477,16 @@ A later edit to the YAML applies to Tasks that take it up afterwards; taking one
 up again replaces the row and starts over at `start`.
 
 While `lf task run` carries the Task, the row also holds `run_start`, the cursor
-that run began from, and `lf_process_id`, that Task run. Whether it still runs is
-read from the Process, never stored. The run's child Graph process writes where it
-left the Task: before the interactive step it stopped at, or `end`. A run that
-stops leaves the Task on it; the next `lf task run` starts it again from
-`run_start`. Without one, `lf task run` continues after the step the Task waits
-at; `--from STEP` (a step id, skill or composed graph name) starts anywhere, and
-starting from an interactive step only puts the Task there. `-b task run` runs
+the run's next attempt sets out from, and `lf_process_id`, that Task run. Whether
+it still runs is read from the Process, never stored. `lf task run` writes
+`run_start`; the child Graph process overwrites it after every step with the
+cursor of the next one (loop counts, iterate direction, pending verdict and route
+included), so a failed attempt and the next `lf task run` start at the step that
+failed and the steps before it never rerun. The child Graph process writes where
+it left the Task: before the interactive step it stopped at, or `end`. With no
+run, `lf task run` continues after the step the Task waits at; `--from STEP` (a
+step id, skill or composed graph name) starts anywhere, and starting from an
+interactive step only puts the Task there. `-b task run` runs
 straight through headless, and `lf ship` repeats it until `end`. Other Graphs in
 the checkout never move the Task. Graph processes and Task events keep the
 history; there is no move log.
@@ -498,6 +501,9 @@ or terminating Processes. Reopening supersedes old requests. Ordinary reads do
 not execute completion. Task state is derived: `active` at an interactive step
 with nothing running, `moving` while a run carries it with an interactive step
 ahead, `shipping` once Auto-Ship is approved and running; abandonment is its own mark.
+An unfinished Graph or step in the Task's work also makes it `moving` (or
+`shipping` when approved), including a Graph started before checkout adoption.
+That execution does not add the Graph to the Task's history.
 
 On-demand team checks acquire issue membership/state independently of
 comment and state delivery. Delivery receipts retain their original provider revision,
@@ -626,7 +632,7 @@ Task selects its primary conversation without reopening the Task; earlier usage
 attribution remains unchanged.
 
 ```bash
-lf task steer INF-124 "keep the public name"
+lf steer INF-124 "keep the public name"
 lf --wave product wave-operate "recover the stopped release Task"
 ```
 

@@ -2,16 +2,25 @@
   {
     "url": "loopflow://repo/task/task-a?session=session-a&diff=true",
     "status": "opening",
-    "reason": null
+    "reason": null,
+    "revision": "receipt-opening"
   },
   {
     "url": "loopflow://repo/task/task-a?session=session-a&diff=true",
     "status": "usable",
-    "reason": null
+    "reason": null,
+    "revision": "receipt-usable"
   },
   {
     "url": "loopflow://repo/task/task-a?session=session-a&diff=true",
     "status": "failed",
-    "reason": "Session is no longer associated with this Task."
+    "reason": "Session is no longer associated with this Task.",
+    "revision": "receipt-failed"
+  },
+  {
+    "url": "loopflow://repo/task/task-a?session=session-a&diff=true",
+    "status": "elsewhere",
+    "reason": "Conversation input is held by another client.",
+    "revision": "receipt-elsewhere"
   }
 ]

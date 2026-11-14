@@ -20,6 +20,7 @@ use std::process::Command;
 use anyhow::{anyhow, bail, Context, Result};
 use serde::Serialize;
 
+use crate::durable::TaskId;
 use crate::graph::compiled::CompiledGraph;
 use crate::graph::ConcreteStep;
 use crate::id::{LfProcessId, TraceId};
@@ -149,8 +150,10 @@ pub enum PrSurface {
 
 /// The world's `claude`. `--resume <id>` prints `resumed <id>: <n> lines`
 /// after reading the world transcript (exit 1 when there is none), then answers
-/// each input line with `reply <id>: <line>` until `quit` or EOF. A new
-/// conversation (`--session-id <id>`) echoes the same way. Transcripts are
+/// each input line with `reply <id>: <line>` until `quit` or EOF. When stdin
+/// is not the terminal it holds the opening turn, as for Claude: after it the
+/// stand-in reads its terminal. A new conversation (`--session-id <id>`)
+/// echoes the same way. Transcripts are
 /// never written. It needs only `sh` and `grep`, which the Desktop benchmark's
 /// exec policy allows.
 pub const STUB_CLAUDE: &str = r#"#!/bin/sh
@@ -177,10 +180,15 @@ if [ -z "$new" ]; then
 else
   echo "started $id"
 fi
-while IFS= read -r input; do
-  [ "$input" = quit ] && exit 0
-  echo "reply $id: $input"
-done
+answer() {
+  while IFS= read -r input; do
+    [ "$input" = quit ] && exit 0
+    echo "reply $id: $input"
+  done
+}
+answer
+# Like Claude: an opening turn arrives on stdin, then keys come from the terminal.
+if [ -t 1 ] && [ ! -t 0 ]; then exec < /dev/tty; answer; fi
 "#;
 
 /// How a recorded Graph ended: every step succeeded, or the step at this
@@ -612,7 +620,7 @@ impl World {
             bail!("nothing remains of {requested}; complete the Task instead");
         };
         // The run's Graph records the steps up to the next interactive one.
-        let steps: Vec<ConcreteStep> = captured.steps[start.cursor().index..]
+        let steps: Vec<ConcreteStep> = captured.steps[start.cursor.index..]
             .iter()
             .enumerate()
             .take_while(|(offset, step)| {
@@ -621,7 +629,7 @@ impl World {
             .map(|(_, step)| step.clone())
             .collect();
         let stops_at = captured
-            .after(&start)
+            .after(&start.place)
             .and_then(|next| captured.next_interactive(&next))
             .unwrap_or(END)
             .to_owned();
@@ -644,7 +652,7 @@ impl World {
         if !store.sqlite.start_task_graph_run(
             &task.id,
             &row,
-            &start.cursor(),
+            &start.cursor,
             &run.id,
             stops_at == END,
         )? {
@@ -653,7 +661,8 @@ impl World {
         let name = captured.name.clone();
         let argv = vec!["lf", "--task", issue, "graph", "run"];
         self.graph(
-            &store, &trace, &run.id, &checkout, argv, &name, &steps, started, minutes, outcome,
+            &store, &task.id, &trace, &run.id, &checkout, argv, &name, &steps, started, minutes,
+            outcome,
         )?;
         if outcome == Outcome::Succeeded {
             store
@@ -702,6 +711,7 @@ impl World {
     fn graph(
         &self,
         store: &SharedStore,
+        task: &TaskId,
         trace: &TraceId,
         parent: &LfProcessId,
         cwd: &Path,
@@ -744,7 +754,9 @@ impl World {
         }
         // Its steps finish while it runs, so exit forgets none of them.
         store.sqlite.record_process(&graph)?;
-        store.sqlite.record_graph_process(&graph.id, &compiled)?;
+        store
+            .sqlite
+            .record_graph_process(&graph.id, &compiled, Some(task))?;
         for (process, key) in records {
             store.sqlite.record_process(&process)?;
             store

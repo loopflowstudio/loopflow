@@ -26,6 +26,7 @@
         {
           "dashboard_id": "picked",
           "repo": "repo_11111111111111111111111111111111",
+          "repo_path": "/src/fixture",
           "saved_revision": 3,
           "selection": {
             "id": "root",
@@ -184,6 +185,7 @@
               "states": [
                 "backlog"
               ],
+              "identifier": "LOO-1",
               "primary_session": null,
               "location": null,
               "argv": null,

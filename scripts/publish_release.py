@@ -249,7 +249,7 @@ def _stage_github_release(artifacts: ReleaseArtifacts) -> None:
 
 def _publish_crate() -> None:
     result = subprocess.run(
-        ["cargo", "publish", "-p", "loopflow"],
+        ["cargo", "publish", "--locked", "-p", "loopflow"],
         cwd=ROOT,
         capture_output=True,
         text=True,

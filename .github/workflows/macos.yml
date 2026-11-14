@@ -81,8 +81,10 @@ jobs:
         # naming its slow tests below. Main keeps a hang guard so runner
         # variance never reds it; there, test_desktop.sh ends the run and
         # names the test when one outlives its own limit. The suite
-        # took 161 s on 2026-10-22; raise this only together with a measured reason.
-        timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 20 }}
+        # passed all 814 tests in 296 s on 2026-11-10 (run 42909084608),
+        # but setup/teardown made the step 309 s. Allow six minutes including
+        # that overhead; raise this only together with a measured reason.
+        timeout-minutes: ${{ github.event_name == 'pull_request' && 6 || 20 }}
       - name: Name unfinished and slowest Swift tests
         if: failure()
         run: python3 scripts/swift_test_report.py "$RUNNER_TEMP/swift-tests/events.jsonl" >> "$GITHUB_STEP_SUMMARY"
@@ -127,6 +129,9 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
+          fetch-depth: 0
+      - name: Fetch canonical migration history
+        run: git fetch --no-tags origin main:refs/remotes/origin/main
       # Claims name their person by Git user.email; repository-local test identities win.
       - name: Give tests a fallback Git identity
         run: git config --global user.email ci@loopflow.invalid && git config --global user.name "Loopflow CI"
@@ -159,6 +164,9 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
+          fetch-depth: 0
+      - name: Fetch canonical migration history
+        run: git fetch --no-tags origin main:refs/remotes/origin/main
       # Claims name their person by Git user.email; repository-local test identities win.
       - name: Give tests a fallback Git identity
         run: git config --global user.email ci@loopflow.invalid && git config --global user.name "Loopflow CI"
@@ -207,6 +215,17 @@ jobs:
       - name: Record Xcode source timestamps
         if: github.ref == 'refs/heads/main' && steps.xcode-cache.outputs.cache-hit != 'true'
         run: uv run python scripts/swift_cache.py save --build-system xcode
+      - name: Test the iOS app on Simulator
+        run: uv run python scripts/test_ios.py -resultBundlePath "$RUNNER_TEMP/ios-tests.xcresult"
+        timeout-minutes: 20
+      - name: Preserve iOS failure results
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ios-tests-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ios-tests.xcresult
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Save Xcode build
         if: github.ref == 'refs/heads/main' && steps.xcode-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6

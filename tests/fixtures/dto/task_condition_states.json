@@ -117,6 +117,7 @@
       "provider": "codex",
       "owner": {
         "person": "Jack Heart",
+        "person_id": null,
         "person_key": "jack@loopflow.studio",
         "machine": {
           "id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b",
@@ -402,6 +403,7 @@
       "provider": "codex",
       "owner": {
         "person": "Jack Heart",
+        "person_id": null,
         "person_key": "jack@loopflow.studio",
         "machine": {
           "id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b",
@@ -661,6 +663,7 @@
       "provider": "codex",
       "owner": {
         "person": "Jack Heart",
+        "person_id": null,
         "person_key": "jack@loopflow.studio",
         "machine": {
           "id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b",
@@ -756,6 +759,7 @@
       "provider": "codex",
       "owner": {
         "person": "Jack Heart",
+        "person_id": null,
         "person_key": "jack@loopflow.studio",
         "machine": {
           "id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b",
@@ -1016,6 +1020,7 @@
       "provider": "codex",
       "owner": {
         "person": "Jack Heart",
+        "person_id": null,
         "person_key": "jack@loopflow.studio",
         "machine": {
           "id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b",
@@ -1111,6 +1116,7 @@
       "provider": "codex",
       "owner": {
         "person": "Jack Heart",
+        "person_id": null,
         "person_key": "jack@loopflow.studio",
         "machine": {
           "id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b",

@@ -70,5 +70,7 @@
     "source": "codex",
     "text": "Case-Sensitive text"
   },
-  "transition": null
+  "transition": null,
+  "turn": null,
+  "raw": false
 }

@@ -516,7 +516,8 @@
               "worktree": "/repo.task"
             },
             "tabs": [],
-            "selected_tab": null
+            "selected_tab": null,
+            "attachment": "usable"
           },
           {
             "pane": null,
@@ -559,7 +560,8 @@
                     }
                   }
                 ],
-                "selected_tab": "shell-tab"
+                "selected_tab": "shell-tab",
+                "attachment": null
               },
               {
                 "pane": "browser",
@@ -602,17 +604,20 @@
                     "commands": null
                   }
                 ],
-                "selected_tab": "page-1"
+                "selected_tab": "page-1",
+                "attachment": null
               }
             ],
             "location": null,
             "tabs": [],
-            "selected_tab": null
+            "selected_tab": null,
+            "attachment": null
           }
         ],
         "location": null,
         "tabs": [],
-        "selected_tab": null
+        "selected_tab": null,
+        "attachment": null
       },
       "focused_pane": "session",
       "zoomed_pane": "browser",

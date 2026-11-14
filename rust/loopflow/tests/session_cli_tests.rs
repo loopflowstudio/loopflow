@@ -41,17 +41,6 @@ fn install_codex_fixture(home: &std::path::Path, thread: Option<&str>) {
     }
 }
 
-/// Every Session row, whatever its mode or state.
-const EVERY_SESSION: &[&str] = &[
-    "session",
-    "list",
-    "--all",
-    "--interactive",
-    "all",
-    "--history",
-    "--json",
-];
-
 fn run(home: &std::path::Path, args: &[&str]) -> Output {
     command(home, args).output().unwrap()
 }
@@ -96,12 +85,17 @@ fn session_cli_uses_one_truthful_resolution_contract() {
         &["session", "serve-graph"],
         &["session", "ensure"],
         &["session", "connect", "missing-session"],
-        &["session", "attach", "missing-session"],
+        &["session", "serve", "--", "/bin/cat"],
     ] {
         let output = run(home.path(), args);
         assert!(!output.status.success());
         assert!(String::from_utf8_lossy(&output.stderr).contains("unrecognized subcommand"));
     }
+    // A relay that names no host is told the form it takes.
+    let output = run(home.path(), &["session", "attach", "missing-session"]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr)
+        .contains("lf session attach names `--terminal TERMINAL_ID`"));
     let output = run(
         home.path(),
         &[
@@ -237,14 +231,14 @@ fn prepared_conversation_keeps_captured_input_without_a_run_before_provider_star
     assert_eq!(inspected["artifact_key"], run_id.as_str());
     assert_eq!(inspected["caller_artifact_key"], CALLER);
     assert!(inspected["recorded_outcome"].is_null());
-    let listed = run(home.path(), EVERY_SESSION);
+    let listed = run(home.path(), &["session", "card", &id, "--json"]);
     assert!(
         listed.status.success(),
         "{}",
         String::from_utf8_lossy(&listed.stderr)
     );
     let listed: serde_json::Value = serde_json::from_slice(&listed.stdout).unwrap();
-    assert!(listed[0].get("run_id").is_none());
+    assert!(listed["session"].get("run_id").is_none());
     assert!(!dir.join("events.jsonl").exists());
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     assert_eq!(
@@ -400,7 +394,7 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
         let mut reopened = second.wait_with_output().unwrap();
         reopened.stdout = std::fs::read(metadata_stdout).unwrap();
         reopened.stderr = std::fs::read(metadata_stderr).unwrap();
-        let active = run(home.path(), EVERY_SESSION);
+        let active = run(home.path(), &["session", "card", id, "--json"]);
         // Release the owned provider before asserting, including on the failure path.
         first.stdin.take().unwrap().write_all(b"done\n").unwrap();
         let first = first.wait_with_output().unwrap();
@@ -439,15 +433,10 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
         let state = |output: std::process::Output| {
             assert!(output.status.success(), "{output:?}");
             let rows: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-            rows.as_array()
-                .unwrap()
-                .iter()
-                .find(|row| row["id"] == id)
-                .unwrap_or_else(|| panic!("{rows}"))["state"]
-                .clone()
+            rows["session"]["state"].clone()
         };
         assert_eq!(state(active), "active");
-        let ended = run(home.path(), EVERY_SESSION);
+        let ended = run(home.path(), &["session", "card", id, "--json"]);
         assert_ne!(state(ended), "active");
         if !resume {
             let manifest: serde_json::Value =
@@ -809,16 +798,10 @@ fn available_lists_only_conversations_ready_for_input() {
 }
 
 fn listed(home: &std::path::Path, id: &str) -> serde_json::Value {
-    let output = run(
-        home,
-        &["desktop", "sessions", "--all", "--history", "--json"],
-    );
+    let output = run(home, &["session", "card", id, "--json"]);
     assert!(output.status.success(), "{output:?}");
-    let sessions: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).unwrap();
-    sessions
-        .into_iter()
-        .find(|session| session["id"] == id)
-        .unwrap_or_else(|| panic!("Session {id} is not listed"))
+    let card: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    card["session"].clone()
 }
 
 fn rename(home: &std::path::Path, args: &[&str]) -> serde_json::Value {
@@ -901,6 +884,8 @@ fn terminal_titles_follow_session_rename_and_reconnect_without_provider_accounts
         ("claude", "timeout", false),
     ] {
         let home = tempfile::tempdir().unwrap();
+        let _server =
+            loopflow_test_support::MachineServer::start(env!("CARGO_BIN_EXE_lf"), home.path());
         let bin = home.path().join("bin");
         fs::create_dir(&bin).unwrap();
         let repo = loopflow_test_support::TestRepo::new();
@@ -976,9 +961,7 @@ while [ ! -f "$LF_HOME/release" ]; do sleep 0.02; done
 printf 'latest agent message: done\n'
 "#,
         );
-        if provider == "codex" {
-            install_codex_fixture(home.path(), None);
-        }
+        // A bare launch runs plain `codex`, configured by argv like Claude.
         write_script(
             "cmux",
             r#"#!/bin/sh
@@ -1084,7 +1067,6 @@ exit 2
                 );
             } else {
                 assert!(args.contains("tui.terminal_title=[]"), "{args}");
-                assert!(args.contains("--remote\n"), "{args}");
             }
             if first {
                 let renamed = inspect(&["session", "rename", &id, "Release notes", "--json"]);
@@ -1095,7 +1077,8 @@ exit 2
                     "{args}"
                 );
             }
-            if first && provider == "claude" {
+            // A provider's start hook names its thread; these stand-ins run none.
+            if first {
                 let store =
                     loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db"))
                         .unwrap();
@@ -1114,16 +1097,8 @@ exit 2
                 terminal.contains("latest agent message: done"),
                 "{terminal}"
             );
-            let listed = inspect(&["session", "list", "--all", "--history", "--json"]);
-            assert_eq!(
-                listed
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .find(|row| row["id"] == id)
-                    .unwrap()["title"],
-                "Release notes"
-            );
+            let card = inspect(&["session", "card", &id, "--json"]);
+            assert_eq!(card["session"]["title"], "Release notes");
         }
     }
 }
@@ -1238,15 +1213,11 @@ fn session_names_survive_capture_replacement() {
     assert_eq!(readback["title"], "Launch notes");
     assert_eq!(readback["title_source"], "human");
     // A capture never appears as a second conversation.
-    let all: Vec<serde_json::Value> = serde_json::from_slice(
-        &run(
-            home.path(),
-            &["session", "list", "--all", "--history", "--json"],
-        )
-        .stdout,
-    )
-    .unwrap();
-    assert_eq!(all.len(), 1, "{all:?}");
+    let count: i64 = rusqlite::Connection::open(home.path().join("loopflow.db"))
+        .unwrap()
+        .query_row("SELECT count(*) FROM agent_sessions", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(count, 1);
     assert_eq!(readback["state"], "closed", "the exited orphan is retired");
 
     assert!(!home
@@ -1282,6 +1253,75 @@ fn session_inventory_pages_are_explicit_bounded_and_complete() {
         assert!(
             !run(home.path(), args).status.success(),
             "accepted {args:?}"
+        );
+    }
+}
+
+#[test]
+fn session_subscription_headless_filter_excludes_completed_conversations() {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let home = tempfile::tempdir().unwrap();
+    let database = home.path().join("loopflow.db");
+    let _store = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(loopflow::store::open_ephemeral_store(
+            &loopflow::store::StorageConfig::sqlite(database.clone()),
+        ))
+        .unwrap();
+    let db = rusqlite::Connection::open(database).unwrap();
+    for (id, interactive, completed) in [
+        ("interactive", true, None),
+        ("headless", false, None),
+        ("closed", true, Some(2)),
+        ("closed-headless", false, Some(2)),
+    ] {
+        db.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,interactive,completed_at,cwd)
+            VALUES(?1,?1,'human',1,0,?2,?3,?4)",
+            rusqlite::params![id, interactive, completed, home.path().to_str().unwrap()]).unwrap();
+    }
+    for headless in [false, true] {
+        let mut child = command(
+            home.path(),
+            &[
+                "session",
+                "list",
+                "--all",
+                "--no-raw",
+                "--json",
+                "--subscribe",
+            ],
+        )
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+        let request = serde_json::json!({"id":1,"args":{"repo":null,"task":null,"search":null,"headless":headless}});
+        writeln!(child.stdin.take().unwrap(), "{request}").unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let frame = String::from_utf8(output.stdout)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .find(|frame| frame["answers"] == 1)
+            .unwrap();
+        assert!(frame["unavailable"].is_null(), "{frame}");
+        let ids = frame["body"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["id"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            ids,
+            if headless {
+                vec!["headless", "interactive"]
+            } else {
+                vec!["interactive"]
+            }
         );
     }
 }
@@ -1583,7 +1623,7 @@ fn provider_switch_stops_startup_output_before_codex_opens() {
     let provider = home.path().join("bin/codex");
     let script = fs::read_to_string(&provider).unwrap().replace(
         "#!/bin/sh\n",
-        "#!/bin/sh\ncase \" $* \" in *' --remote '*) printf 'NATIVE_TERMINAL_READY\\n' >&2; sleep 1;; esac\n",
+        "#!/bin/sh\ncase \" $* \" in *' app-server '*) ;; *) printf 'NATIVE_TERMINAL_READY\\n' >&2; sleep 1;; esac\n",
     );
     fs::write(&provider, script).unwrap();
 
@@ -1845,8 +1885,10 @@ fn program_status_cli_observes_available_without_completing_work() {
             last = Some(frame);
         }
     };
-    let mut observer = Child(
-        command(
+    // Each snapshot is its own command, as Desktop sends each one to the server.
+    let agent_process = attachment.agent_process_id.to_string();
+    let observe = |stream: &str, sequence: i64, records: &serde_json::Value| {
+        let mut observer = command(
             home.path(),
             &[
                 "session",
@@ -1855,16 +1897,23 @@ fn program_status_cli_observes_available_without_completing_work() {
                 "--terminal",
                 "fixture-pane",
                 "--agent-process",
-                attachment.agent_process_id.as_str(),
+                &agent_process,
+                "--stream",
+                stream,
+                "--sequence",
+                &sequence.to_string(),
             ],
         )
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .unwrap(),
-    );
-    let mut input = observer.0.stdin.take().unwrap();
+        .unwrap();
+        let mut input = observer.stdin.take().unwrap();
+        input.write_all(records.to_string().as_bytes()).unwrap();
+        drop(input);
+        observer.wait_with_output().unwrap()
+    };
     let records = |state: &str| {
         serde_json::json!({"seen":true,"records":[{
         "state":state,"id":"worker","kind":if state=="blocked" { Some("question") } else { None },
@@ -1882,10 +1931,8 @@ fn program_status_cli_observes_available_without_completing_work() {
             .unwrap()
             .clone()
     };
-    // The pipe also fragments a JSON frame across reads.
-    let blocked = records("blocked").to_string() + "\n";
-    input.write_all(&blocked.as_bytes()[..17]).unwrap();
-    input.write_all(&blocked.as_bytes()[17..]).unwrap();
+    let first = observe("pane-1", 1, &records("blocked"));
+    assert!(first.status.success(), "{first:?}");
     let item = watch_for(Some("blocked"));
     assert_eq!(item["availability"], "available");
     assert_eq!(
@@ -1907,19 +1954,28 @@ fn program_status_cli_observes_available_without_completing_work() {
     );
     let page: serde_json::Value = serde_json::from_slice(&page.stdout).unwrap();
     assert_eq!(page["entries"][0]["id"], id);
+    let mut sequence = 1;
     for state in ["working", "idle", "done", "blocked", "working"] {
-        writeln!(input, "{}", records(state)).unwrap();
+        sequence += 1;
+        assert!(observe("pane-1", sequence, &records(state))
+            .status
+            .success());
         let item = watch_for(Some(state));
         if matches!(state, "working" | "done") {
             assert!(item["availability"].is_null());
         }
     }
-    writeln!(input, "{}", serde_json::json!({"seen":true,"records":[]})).unwrap();
+    sequence += 1;
+    let empty = serde_json::json!({"seen":true,"records":[]});
+    assert!(observe("pane-1", sequence, &empty).status.success());
     assert_eq!(
         watch_for(None)["program_status"]["records"],
         serde_json::json!([])
     );
-    writeln!(input, "{}", records("done")).unwrap();
+    sequence += 1;
+    assert!(observe("pane-1", sequence, &records("done"))
+        .status
+        .success());
     watch_for(Some("done"));
     drop(subscription.0.stdin.take());
     assert!(subscription.0.wait().unwrap().success());
@@ -1933,12 +1989,23 @@ fn program_status_cli_observes_available_without_completing_work() {
         .is_none());
     let mut invalid = records("blocked");
     invalid["records"][0]["msg"] = serde_json::json!("bad\ncontrol");
-    writeln!(input, "{invalid}").unwrap();
-    drop(input);
-    assert!(!observer.0.wait().unwrap().success());
+    assert!(!observe("pane-1", sequence + 1, &invalid).status.success());
+    // A snapshot that arrives late never replaces a newer one.
+    let late = observe("pane-1", sequence - 1, &records("working"));
+    assert!(!late.status.success());
+    assert!(String::from_utf8_lossy(&late.stderr).contains("Program Status stream replaced"));
     assert_eq!(
         read_session()["program_status"]["records"][0]["state"],
         "done"
+    );
+    // A second observer of the same provider replaces the first.
+    assert!(observe("pane-2", 1, &records("idle")).status.success());
+    assert!(!observe("pane-1", sequence + 2, &records("working"))
+        .status
+        .success());
+    assert_eq!(
+        read_session()["program_status"]["records"][0]["state"],
+        "idle"
     );
     provider.0.kill().unwrap();
     provider.0.wait().unwrap();
@@ -1950,16 +2017,7 @@ fn program_status_cli_observes_available_without_completing_work() {
     store
         .claim_session_attachment(&id, attachment.as_ref(), &lf_process_id, true)
         .unwrap();
-    let stale = run(
-        home.path(),
-        &[
-            "session",
-            "observe-status",
-            &id,
-            "--terminal",
-            "fixture-pane",
-        ],
-    );
+    let stale = observe("pane-3", 1, &records("idle"));
     assert!(!stale.status.success());
     assert!(String::from_utf8_lossy(&stale.stderr).contains("Session provider changed"));
     let item = read_session();
@@ -2027,13 +2085,210 @@ fn instruction_inspection_reports_recorded_reasons_and_missing_evidence() {
 }
 
 #[test]
-fn retired_title_hooks_never_block_their_provider() {
+fn retired_hooks_never_block_their_provider() {
     let home = tempfile::tempdir().unwrap();
-    let output = command(home.path(), &["__session-title", "claude"])
-        .stdin(std::process::Stdio::null())
-        .output()
+    // A removed callback, and a removed value of one that remains.
+    for args in [
+        &["__session-title", "claude"][..],
+        &["__context-block", "--moment", "task-updates"],
+    ] {
+        let output = command(home.path(), args)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        // Claude treats exit 2 at Stop as "keep working", so each exits 0.
+        assert!(output.status.success(), "{args:?}: {output:?}");
+        assert!(String::from_utf8_lossy(&output.stderr).contains("restart the Session"));
+    }
+}
+
+/// Starts `lf` as a terminal's foreground job, as a login shell would, and
+/// returns the terminal's other end with the launch.
+#[cfg(unix)]
+fn spawn_in_terminal(
+    home: &std::path::Path,
+    cwd: &std::path::Path,
+    bin: &std::path::Path,
+    args: &[&str],
+) -> (std::fs::File, std::process::Child) {
+    use std::fs;
+    use std::os::fd::{AsRawFd, FromRawFd};
+    use std::os::unix::process::CommandExt;
+    use std::process::Stdio;
+
+    let mut master = -1;
+    let mut slave = -1;
+    // SAFETY: valid output pointers; null selects default PTY settings.
+    assert_eq!(
+        unsafe {
+            libc::openpty(
+                &mut master,
+                &mut slave,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        },
+        0
+    );
+    // SAFETY: openpty returned independently owned descriptors.
+    let master = unsafe { fs::File::from_raw_fd(master) };
+    // SAFETY: the fresh slave descriptor is owned only by this File.
+    let slave = unsafe { fs::File::from_raw_fd(slave) };
+    // SAFETY: fcntl only changes this fixture's own descriptor. lf must not
+    // inherit the master, or closing it here would not hang the terminal up.
+    unsafe { libc::fcntl(master.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) };
+    let mut launch = Command::new(env!("CARGO_BIN_EXE_lf"));
+    launch
+        .env_clear()
+        .args(args)
+        .current_dir(cwd)
+        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+        .env("LF_HOME", home)
+        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+        .env("RUST_LOG", "off")
+        .env("HOME", home)
+        .env("CLAUDE_CONFIG_DIR", home.join("claude"))
+        .env("TERM", "xterm-256color")
+        .stdin(Stdio::from(slave.try_clone().unwrap()))
+        .stdout(Stdio::from(slave.try_clone().unwrap()))
+        .stderr(Stdio::from(slave));
+    // SAFETY: setsid and TIOCSCTTY are async-signal-safe.
+    unsafe {
+        launch.pre_exec(|| {
+            if libc::setsid() < 0 || libc::ioctl(0, libc::TIOCSCTTY as _, 0) < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    let child = launch.spawn().unwrap();
+    (master, child)
+}
+
+/// Writes a stand-in `claude` that runs `body` after answering `--version`.
+#[cfg(unix)]
+fn bare_claude(bin: &std::path::Path, body: &str) {
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::create_dir_all(bin).unwrap();
+    let provider = bin.join("claude");
+    fs::write(
+        &provider,
+        format!(
+            "#!/bin/sh\nif [ \"$1\" = --version ]; then echo \"2.1.0 (Claude Code)\"; exit 0; fi\n{body}"
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&provider, fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+/// A closed terminal hangs up a bare launch and its provider together; lf
+/// still records the provider's exit.
+#[cfg(unix)]
+#[test]
+fn a_closed_terminal_finishes_a_bare_launchs_agent() {
+    use std::io::Read;
+    use std::os::fd::AsRawFd;
+    use std::time::{Duration, Instant};
+
+    let home = tempfile::tempdir().unwrap();
+    let bin = home.path().join("bin");
+    let repo = loopflow_test_support::TestRepo::new();
+    bare_claude(
+        &bin,
+        "touch \"$LF_HOME/ready\"\nwhile :; do sleep 0.02; done\n",
+    );
+
+    let (mut master, mut child) = spawn_in_terminal(
+        home.path(),
+        repo.path(),
+        &bin,
+        &["-a", "claude", ":", "Wait for the terminal"],
+    );
+    // SAFETY: fcntl only changes this fixture's own descriptor.
+    unsafe { libc::fcntl(master.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK) };
+    let mut output = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !home.path().join("ready").exists()
+        && Instant::now() < deadline
+        && child.try_wait().unwrap().is_none()
+    {
+        let mut chunk = [0; 4096];
+        if let Ok(read) = master.read(&mut chunk) {
+            output.extend_from_slice(&chunk[..read]);
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        home.path().join("ready").exists(),
+        "provider never started: {}",
+        String::from_utf8_lossy(&output)
+    );
+
+    drop(master);
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while child.try_wait().unwrap().is_none() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    if child.try_wait().unwrap().is_none() {
+        // SAFETY: only this fixture's own session leader is signaled.
+        unsafe { libc::kill(child.id() as i32, libc::SIGKILL) };
+        panic!("lf outlived its closed terminal");
+    }
+
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let (agents, open): (i64, i64) = db
+        .query_row(
+            "SELECT count(*), count(*) FILTER (WHERE completed_at IS NULL)
+             FROM processes WHERE kind='agent'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
         .unwrap();
-    // Claude treats exit 2 at Stop as "keep working", so a removed callback exits 0.
-    assert!(output.status.success(), "{output:?}");
-    assert!(String::from_utf8_lossy(&output.stderr).contains("restart the Session"));
+    assert_eq!((agents, open), (1, 0), "agent rows (all, unfinished)");
+}
+
+/// A bare provider hung up exits lf as it would exit the shell alone: 129,
+/// whether lf started the conversation or reopened it.
+#[cfg(unix)]
+#[test]
+fn a_hung_up_bare_provider_exits_lf_with_its_own_status() {
+    use std::io::Read;
+
+    let home = tempfile::tempdir().unwrap();
+    let bin = home.path().join("bin");
+    let repo = loopflow_test_support::TestRepo::new();
+    bare_claude(&bin, "kill -HUP $$\n");
+
+    let run = |args: &[&str]| {
+        let (mut master, mut child) = spawn_in_terminal(home.path(), repo.path(), &bin, args);
+        let mut output = Vec::new();
+        // The terminal reports EIO once lf and its provider have closed it.
+        let _ = master.read_to_end(&mut output);
+        (
+            child.wait().unwrap().code(),
+            String::from_utf8_lossy(&output).into_owned(),
+        )
+    };
+    // A hang-up ends the conversation as the person meant it: the record
+    // says completed even though the shell sees the provider's status.
+    let ended = || -> (String, bool) {
+        rusqlite::Connection::open(home.path().join("loopflow.db"))
+            .unwrap()
+            .query_row(
+                "SELECT id, completed_at IS NOT NULL FROM agent_sessions",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap()
+    };
+    let (fresh, output) = run(&["-a", "claude", ":", "Hang up"]);
+    assert_eq!(fresh, Some(129), "fresh launch: {output}");
+    let (id, completed) = ended();
+    assert!(completed, "fresh launch recorded a failure: {output}");
+    let (resumed, output) = run(&["session", "resume", &id]);
+    assert_eq!(resumed, Some(129), "resume: {output}");
+    assert!(ended().1, "resume recorded a failure: {output}");
 }

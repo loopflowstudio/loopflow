@@ -126,6 +126,10 @@ behind: an unreachable branch, a hidden command, a second resolver. Find them
 first. If three building blocks exist for one job and none works, the change
 removes all three. It does not add a fourth.
 
+Treat the codebase as your own. Leave it better than you found it: delete the
+dead code you pass, merge the duplicate you notice, and make the clear
+improvement even when the task doesn't strictly need it.
+
 ## Flexibility
 
 Meet the caller where they are. When code breaks because it assumed a fixed
@@ -168,7 +172,7 @@ Use `uv` for Python. Never use pip directly.
 uv run python scripts/test.py --list                     # suites this branch reaches
 cargo test -p loopflow --lib skills::catalog::           # one focused Rust module
 uv run pytest python/tests/test_gate_bounded.py          # one focused Python file
-uv run python scripts/test.py --reuse-passing --rust-filter 'test(skills::catalog::)'  # gate: affected suites once per tree
+uv run python scripts/test.py --reuse-passing --rust-filter 'test(skills::catalog::)'  # gate: a few named tests; CI runs the suites
 cargo fmt
 cargo clippy --all-targets -- -D warnings
 uv sync
@@ -239,7 +243,7 @@ that carry DTO values are not DTOs.
 docstring or none.
 
 **`*_test.py` / `test_*.py`:** short tests, one behavior each; assert on
-results, not mock calls; delete flaky tests rather than adding retries.
+results, not mock calls; no flaky tests (see Testing).
 
 **Typer CLI code:** lowercase short flags only; pass args through to the
 underlying tool; default to sensible behavior (whole repo as context).
@@ -261,9 +265,14 @@ plan, code and memory and keeps open findings with the work.
 - Edit it in place until it merges; `build.rs` orders it by origin/main's first-parent history. Once on origin/main it is immutable: fix forward.
 - Destructive change is staged: a new migration is additive against origin/main's schema, or a contract (`-- expand: <migration>`, `-- exports: <where>`) that drops only what its expand step superseded once that step has been on origin/main for the window `check_migrations.py` measures (`STAGING_DAYS`), exporting the data first. A rebuild that keeps every column is additive. CI measures; nothing at runtime refuses.
 - Test the merged frontier against the finished migration, not the steps between.
-- Tables read by Work projections use `store_revision_<table>_<insert|update|delete>` triggers to advance their domain in `store_revisions` inside the write.
+- Tables read by Work projections use `store_revision_<table>_<insert|update|delete>` triggers to advance their domain in `store_revisions` inside the write. An observation stamp is a reading time, not a change: planning update triggers compare every other column and count a stamp only when it goes NULL ↔ value (`planning_update_triggers_compare_every_column`); a new column joins its table's `WHEN` clause.
 - Runtime migration preflights recognize draft markers inside release batches and keep external lock guards through commit or rollback. Upgrade fixtures start before the whole release batch.
 - Seed a released schema from SQL under `rust/loopflow/tests/fixtures/migrations/`; test sources name only current columns.
+
+**Load:** one Machine runs hundreds of concurrent agents over about 10,000
+recorded Tasks and every steer, turn and event they wrote. Every agent shares
+one SQLite write lock. Check new queries with `EXPLAIN QUERY PLAN` against a
+store that size.
 
 **Harness, transport and hook code (`rust/loopflow/src/harness/**`, `transport*`):**
 lf is a session manager, context adder and hook interjector on top of a
@@ -298,6 +307,8 @@ them.
 - Public APIs get `# Panics` / `# Errors` / `# Safety` sections where they aren't obvious.
 
 **Rust tests:**
+- Unix-socket fixtures use short `/tmp` directories: canonicalizing macOS
+  `/var/folders` paths can exceed the socket address limit.
 - External terminal-host tests use an isolated socket, configuration, state directory
   and process group. Check native identity and command replay separately: stable
   pane IDs do not prove that the same processes survived a host restart.
@@ -318,13 +329,16 @@ them.
 - Every test binary runs with `HOME` under the temp directory (`support`'s ctor), so an inherited `lf` cannot reach `~/.codex` or `~/.claude`. A fixture that calls `env_clear` sets its own `HOME`: with none, `lf` asks the OS for the account's real one.
 - Claude's stand-in endpoints (`LF_TEST_CLAUDE_*`) exist only under `cfg(test)`: a real `lf` calls the provider. A detached child that must reach them is the test binary re-executed behind an `LF_BIN` script; its ctor drops `CLAUDE_CONFIG_DIR`, so pass the home in a fixture variable.
 - With `LF_HOME` unset, `lf_home_dir` finds the account's real `~/.lf` even under an isolated `HOME`, so a fixture changing `LF_HOME` holds the env lock.
+- A fixture that launches an agent for a Task or a Wave holds a `loopflow_test_support::MachineServer` for its `LF_HOME`. Without one the launch runs `lf install server`, which registers a launchd or systemd job for the temporary home.
+- A headless fixture that expects turn hooks or `LF_PROVIDER_CONTEXT` launches managed: its command names the Task (`--task`), with a connected fixture account and a `MachineServer`. Plain `lf -b <skill>` in a Task's checkout is bare: two context hooks, a steer check that reads the store (`LF_BARE_STEER`), no turn hooks, no server. A managed interactive launch, held by the server, keeps every hook; a bare one has the same hooks as `-b`, at a terminal or held in a Desktop pane.
 - Claims name their person by the repository's Git `user.email`; fixtures set a repository-local identity (`TestRepo` does).
 - Fixtures that change process environment share `loopflow_test_support::env_lock`.
 - macOS SMAppService fixtures register temporary bundles with LaunchServices and launch bundle-owned update code through it. An external test runner writing a registered app can fail App Management; it does not model an app update. Cleanup unregisters the unique service job and LaunchServices entry.
 - `SqliteStore::open_ephemeral` applies every migration; don't replay one with `apply_migration_for_test`.
 - Fake `gh` scripts route `api graphql` calls by query name; renaming a query means grepping `rust/loopflow/tests/` for the old name.
 - Tests that redirect process-wide stdout/stderr run in isolated child processes.
-- Lifetime tests start a terminal owner with `Fixture::serve(true, …)`; a `--json` viewer on a pipe dies with its stdin and hides retirement bugs. With `RUST_LOG` set, diagnostics go to stderr, not `logs/lf.log`.
+- Lifetime tests start a held terminal beside a `MachineServer` and view it from a PTY; a `--json` viewer on a pipe dies with its stdin and hides retirement bugs. With `RUST_LOG` set, diagnostics go to stderr, not `logs/lf.log`.
+- Native Claude fixtures consume prompt-file stdin, then read `/dev/tty` in a held terminal. Resume acknowledgments must recognize the new viewer's input, not the initial prompt.
 - Native library fixtures use `TestLedgerGuard` so invocation and capture share a store; pin blocking workers with `journal::with_test_ledger`.
 
 # Documentation
@@ -363,6 +377,13 @@ Test what people would notice, not implementation details. A test that wouldn't
 fail when the feature breaks isn't worth keeping. Use a mix of smoke tests,
 edge cases at real boundaries, and tests of what users expect.
 
+No flaky tests. A test that fails and then passes with nothing changed is
+broken, whichever branch it shows up on: make it deterministic or delete it, in
+the change where it failed. Rerunning is never the fix, and neither is a retry,
+a longer timeout or a wider tolerance. Usual causes: reading state before the
+thing that writes it has finished, asserting an exact duration or timestamp,
+depending on test order, a shared port or path.
+
 Mock network, databases, file systems (when testing logic), subprocesses and
 slow operations. Don't mock to check internal wiring: assert on results, not on
 calls. Elaborate mock setup means the code does too much, the test checks the
@@ -379,14 +400,15 @@ function pointer.
 - **realign:** reconcile the plan; test only a repair or a real doubt.
 - **lint:** formatting and static analysis.
 - **rebase:** no tests when conflict-free; one focused test after conflicts.
-- **gate:** affected suites and automated acceptance once, reusing results only for identical content and command plan.
+- **gate:** publish first so CI runs the suites, then review. A few named tests locally: feedback on a fix, a CI failure, a risk no suite covers.
 - **CI / release:** the full matrix and deployment checks.
 - **qa / demo / review:** the real product, as people use it.
 
 Required checks run headless, with no display, permission dialog or person.
 Desktop uses app builds and view tests. A check that can't run here goes to
 gate or CI; it never blocks an earlier step. Real failures still get fixed.
-Scratch keeps one line per check: command, result, and who runs it later.
+Scratch keeps one line per check: command, result, and who runs it later;
+once gate clears scratch, the PR body keeps them.
 
 Swift async process fixtures install `terminationHandler` before `run()` and
 await its completion. Don't call blocking `waitUntilExit()` on a cooperative

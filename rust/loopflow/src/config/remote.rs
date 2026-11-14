@@ -132,13 +132,12 @@ pub fn outgoing(repo: Option<&Path>, origin: &str) -> Result<Profile> {
         return Ok(profile);
     }
     let global_path = crate::store::lf_home_dir().join("config.yaml");
-    let global = project(&super::files::read(&global_path)?);
+    let global = _read_preferences(&global_path, SettingScope::Global)?;
     let repository_path = repo.map(super::files::private_path).transpose()?;
     let repository_values = repository_path
         .as_deref()
-        .map(super::files::read)
+        .map(|path| _read_preferences(path, SettingScope::Repository))
         .transpose()?
-        .map(|value| project(&value))
         .unwrap_or(Value::Mapping(Default::default()));
     let metadata = crate::store::lf_home_dir().join("profile-outgoing.yaml");
     let revision = super::files::update(&metadata, |value| {
@@ -163,6 +162,48 @@ pub fn outgoing(repo: Option<&Path>, origin: &str) -> Result<Profile> {
         repository_values,
         definitions: super::definitions::discover()?,
     })
+}
+
+fn _read_preferences(path: &Path, scope: SettingScope) -> Result<Value> {
+    let mut value = super::files::read(path)?;
+    let waves = (scope == SettingScope::Repository)
+        .then(|| value.as_mapping_mut().and_then(|map| map.remove("waves")))
+        .flatten();
+    super::settings::filter_file_preferences(&mut value, path, ConfigSource::Personal, scope);
+    if let Some(waves) = waves {
+        if let Some(waves) = waves.as_mapping() {
+            let mut kept = serde_yaml_ng::Mapping::new();
+            for (id, settings) in waves {
+                let Some(id) = id
+                    .as_str()
+                    .filter(|id| crate::id::WaveId::parse(id).is_ok())
+                else {
+                    super::reader::warn_setting(path, &["waves".into()], "invalid Wave ID");
+                    continue;
+                };
+                if !settings.is_mapping() {
+                    super::reader::warn_setting(
+                        path,
+                        &["waves".into(), id.into()],
+                        "settings must be a mapping",
+                    );
+                    continue;
+                }
+                let mut settings = settings.clone();
+                super::settings::filter_file_preferences(
+                    &mut settings,
+                    &PathBuf::from(format!("{}#waves.{id}", path.display())),
+                    ConfigSource::Personal,
+                    SettingScope::Wave,
+                );
+                kept.insert(id.into(), settings);
+            }
+            value["waves"] = kept.into();
+        } else {
+            super::reader::warn_setting(path, &["waves".into()], "settings must be a mapping");
+        }
+    }
+    Ok(project(&value))
 }
 
 fn validate_document(value: &Value, scope: SettingScope) -> Result<()> {
@@ -549,6 +590,23 @@ mod tests {
         assert!(saved.get("docs").is_none());
         assert_eq!(saved["context"]["docs"], Value::Sequence(vec![]));
         assert_eq!(saved["context"]["paste"], Value::Bool(true));
+    }
+
+    #[test]
+    fn forwarding_skips_bad_file_settings_without_rewriting_them() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("config.yaml");
+        let text = "default_agent: codex\nworkflow: review\nyolo: perhaps\nbroken: [unclosed\nclaude: {model: opus, future: true}\nskills: {qa: {agent: 'claude:opus', chrome: perhaps}}\n";
+        std::fs::write(&path, text).unwrap();
+        let value = super::_read_preferences(&path, super::SettingScope::Global).unwrap();
+        assert_eq!(value["default_agent"], "codex");
+        assert_eq!(value["graph"], "review");
+        assert_eq!(value["claude"]["model"], "opus");
+        assert_eq!(value["skills"]["qa"]["agent"], "claude:opus");
+        assert!(value.get("yolo").is_none());
+        assert!(value["claude"].get("future").is_none());
+        super::validate_document(&value, super::SettingScope::Global).unwrap();
+        assert_eq!(std::fs::read_to_string(path).unwrap(), text);
     }
 
     #[test]

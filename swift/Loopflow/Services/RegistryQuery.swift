@@ -54,8 +54,9 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     case creationGet(requestID: String)
     case processList
     case desktopViewList(directory: String)
-    case sessionList(directory: String, headless: Bool, after: String?, limit: Int?)
+    case sessionList(directory: String, headless: Bool, after: String?, limit: Int?, task: String?)
     case taskGet(directory: String, issue: String)
+    case viewSelect(expression: String?)
     case taskDetail(directory: String, issue: String)
     case sessionCard(id: String)
     case planBoard(directory: String, wave: String?, task: String?, all: Bool)
@@ -115,12 +116,14 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             return ["process", "list", "--json"]
         case .desktopViewList:
             return ["desktop", "view", "list", "--json"]
-        case .sessionList(_, let headless, let after, let limit):
+        case .sessionList(_, let headless, let after, let limit, let task):
             if let limit {
-                return ["session", "list", "--json", "--page"] + (headless ? ["--interactive", "all"] : [])
+                return ["session", "list", "--json", "--page"] + (headless ? ["--headless"] : [])
                     + ["--limit", String(limit)] + (after.map { ["--after", $0] } ?? [])
+                    + (task.map { ["--task", $0] } ?? [])
             }
-            return ["session", "list"] + (headless ? ["--interactive", "all"] : []) + ["--json", "--limit", "0"]
+            return ["session", "list"] + (headless ? ["--headless"] : [])
+                + (task.map { ["--task", $0] } ?? []) + ["--json", "--limit", "0"]
         case .taskDetail(_, let issue):
             return ["task", "detail", issue, "--json"]
         case .sessionCard(let id):
@@ -141,6 +144,8 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             return ["wave", "list", "--all", "--json"]
         case .machineSelf:
             return ["machine", "self", "--json"]
+        case .viewSelect(let expression):
+            return ["desktop", "view", "list", "--all", "--json"] + (expression.map { ["--expression", $0] } ?? [])
         case .desktopPortfolio:
             return ["desktop", "portfolio", "--json"]
         case .configSettings(_, let wave, let skill, let graph, let step):
@@ -228,8 +233,8 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         case .creationGet(let requestID): TaggedFields("creation.get", ["request_id": requestID])
         case .processList: TaggedFields("process.list")
         case .desktopViewList(let directory): TaggedFields("desktop.view.list", ["directory": directory])
-        case .sessionList(let directory, let headless, let after, let limit):
-            TaggedFields("session.list", ["directory": directory, "headless": headless, "after": after, "limit": limit])
+        case .sessionList(let directory, let headless, let after, let limit, let task):
+            TaggedFields("session.list", ["directory": directory, "headless": headless, "after": after, "limit": limit, "task": task])
         case .taskDetail(let directory, let issue):
             TaggedFields("task.detail", ["directory": directory, "issue": issue])
         case .sessionCard(let id):
@@ -246,6 +251,8 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             TaggedFields("task.file", ["issue": issue, "path": path])
         case .waveList: TaggedFields("wave.list")
         case .machineSelf: TaggedFields("machine.self")
+        case .viewSelect(let expression):
+            TaggedFields("view.select", ["expression": expression])
         case .desktopPortfolio: TaggedFields("desktop.portfolio")
         case .configSettings(let directory, let wave, let skill, let graph, let step):
             TaggedFields("config.settings", ["directory": directory, "wave": wave, "skill": skill, "graph": graph, "step": step])
@@ -324,8 +331,13 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     /// Session of the repository reads at its next boundary.
     case sessionSteer(directory: String, session: String?, wave: String?, message: String)
     case sessionRename(directory: String, id: String, name: String)
+    /// One Program Status reading from the terminal showing a Session. `stream`
+    /// names the observer and `sequence` counts its readings from 1.
+    case sessionStatus(directory: String, id: String, terminal: String, agentProcess: String?, stream: String,
+                       sequence: Int, records: ProgramStatusRecords)
     /// With `preview`, the Task a bind would assign, assigning nothing.
     case sessionBind(directory: String, id: String, task: String, preview: Bool)
+    /// Start the Session's provider process as its own `lf` process, assigning nothing.
     /// The repository's conversation when it names no Session, Task or Wave.
     case sessionResume(directory: String, id: String?, task: String?, wave: String?, agent: String?, intent: SessionOpenIntent)
     case sessionNew(directory: String, requestID: String, id: String, agent: String?)
@@ -422,7 +434,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
                 + [graph].compactMap { $0 } + argument("--from", from) + ["--json"]
         case .taskShip(_, let issue): return ["--task", issue, "ship", "--json"]
         case .taskHold(_, let issue): return ["task", "hold", issue, "--json"]
-        case .taskSteer(_, let issue, let message): return ["task", "steer", issue, message, "--json"]
+        case .taskSteer(_, let issue, let message): return ["steer", issue, message, "--json"]
         case .taskReport(_, let issue, let message): return ["task", "report", issue, message, "--json"]
         case .taskInterrupt(_, let issue): return ["task", "interrupt", issue, "--json"]
         case .taskMove(_, let issue, let wave, let machine):
@@ -431,8 +443,11 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .taskSave(_, let issue, let path, let revision, _):
             return ["task", "save", issue, path, "--revision", revision, "--json"]
         case .sessionSteer(_, let session, let wave, let message):
-            return argument("--wave", wave) + ["session", "steer"] + [session].compactMap { $0 } + [message, "--json"]
+            return argument("--wave", wave) + ["steer"] + [session].compactMap { $0 } + [message, "--json"]
         case .sessionRename(_, let id, let name): return ["session", "rename", "--json", "--", id, name]
+        case .sessionStatus(_, let id, let terminal, let agentProcess, let stream, let sequence, _):
+            return ["session", "observe-status", "--json", id, "--terminal", terminal, "--stream", stream,
+                    "--sequence", String(sequence)] + argument("--agent-process", agentProcess)
         case .sessionBind(_, let id, let task, let preview):
             return ["session", "bind", "--json", "--task", task] + (preview ? ["--dry-run"] : []) + ["--", id]
         case .sessionResume(let directory, let id, let task, let wave, let agent, let intent):
@@ -592,6 +607,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     public var input: String? {
         switch self {
         case .taskSave(_, _, _, _, let content): content
+        case .sessionStatus(_, _, _, _, _, _, let records):
+            (try? JSONEncoder().encode(records)).map { String(decoding: $0, as: UTF8.self) }
         case .desktopDashboardSlots(_, _, _, let slots): slots
         case .desktopLayoutSave(_, _, let layout): layout
         default: nil
@@ -637,6 +654,10 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             TaggedFields("session.steer", ["directory": directory, "session": session, "wave": wave, "message": message])
         case .sessionRename(let directory, let id, let name):
             TaggedFields("session.rename", ["directory": directory, "id": id, "name": name])
+        case .sessionStatus(let directory, let id, let terminal, let agentProcess, let stream, let sequence, let records):
+            TaggedFields("session.status", ["directory": directory, "id": id, "terminal": terminal,
+                                            "agent_process": agentProcess, "stream": stream, "sequence": sequence,
+                                            "records": records])
         case .sessionBind(let directory, let id, let task, let preview):
             TaggedFields("session.bind", ["directory": directory, "id": id, "task": task, "preview": preview])
         case .sessionResume(let directory, let id, let task, let wave, let agent, let intent):
@@ -1283,7 +1304,7 @@ public struct RegistryQuery: Sendable {
     public func sessionPage(includingHeadless: Bool = false, after: String? = nil,
                             cwd: String? = nil) async throws -> SessionPage {
         try Self.decode(SessionPage.self, from: await serve(
-            .sessionList(directory: cwd ?? "/", headless: includingHeadless, after: after, limit: 100)))
+            .sessionList(directory: cwd ?? "/", headless: includingHeadless, after: after, limit: 100, task: nil)))
     }
 
     /// The repository or Wave's retained conversation; explicit opening only.
@@ -1312,15 +1333,20 @@ public struct RegistryQuery: Sendable {
     }
 
     /// Prepare without launching. Resume transfers control; Start and reveal never
-    /// replace input. Only Start may create the first provider thread.
+    /// replace input. Only Start may create the first provider thread. Naming the
+    /// Session's Task or Wave as `work` makes its `open_argv` resume managed.
     public func prepareSession(
         id: String,
+        work: WorkReference? = nil,
         agent: String? = nil,
         cwd: String? = nil,
         intent: SessionOpenIntent = .start
     ) async throws -> SessionRecord {
         try Self.decode(SessionRecord.self, from: await write(
-            .sessionResume(directory: cwd ?? "/", id: id, task: nil, wave: nil, agent: agent, intent: intent)))
+            .sessionResume(directory: cwd ?? "/", id: id,
+                           task: work?.kind == .task ? work?.id : nil,
+                           wave: work?.kind == .wave ? work?.id : nil,
+                           agent: agent, intent: intent)))
     }
 
     /// Give one Session a human-assigned name and return the authoritative
@@ -1426,8 +1452,8 @@ public struct RegistryQuery: Sendable {
 /// `lf task create REQUEST --run --json`: the created Task, the graph it took
 /// up and its admitted conversation, nil after a headless run. Both are nil
 /// when the run failed after the Task was filed.
-public struct TaskCreateReceipt: Decodable, Sendable, Hashable {
-    public struct CreatedTask: Decodable, Sendable, Hashable {
+public struct TaskCreateReceipt: Codable, Sendable, Hashable {
+    public struct CreatedTask: Codable, Sendable, Hashable {
         public let id: String
         public let identifier: String
         public let title: String

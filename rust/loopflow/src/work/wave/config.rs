@@ -126,7 +126,7 @@ fn read_wave_file(repo: &Path, name: &str) -> Result<Option<(PathBuf, Mapping)>,
     let path = config_path(repo, name);
     match crate::observe::read_to_string(&path) {
         Ok(content) => {
-            let mapping = parse_mapping(&path, &content)?;
+            let mapping = parse_mapping(&path, &content);
             return Ok(Some((path, mapping)));
         }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
@@ -141,7 +141,7 @@ fn read_wave_file(repo: &Path, name: &str) -> Result<Option<(PathBuf, Mapping)>,
     let Some((frontmatter, _)) = split_frontmatter(&content) else {
         return Ok(Some((path, Mapping::new())));
     };
-    let mut mapping = parse_mapping(&path, &frontmatter)?;
+    let mut mapping = parse_mapping(&path, &frontmatter);
     let shared = crate::config::wave_config_keys();
     mapping.retain(|key, _| {
         key.as_str()
@@ -150,17 +150,12 @@ fn read_wave_file(repo: &Path, name: &str) -> Result<Option<(PathBuf, Mapping)>,
     Ok(Some((path, mapping)))
 }
 
-fn parse_mapping(path: &Path, content: &str) -> Result<Mapping, WaveConfigError> {
-    let mapping = serde_yaml_ng::from_str::<Option<Mapping>>(content)
-        .map(Option::unwrap_or_default)
-        .map_err(|source| WaveConfigError::Parse {
-            path: path.to_path_buf(),
-            source,
-        })?;
+fn parse_mapping(path: &Path, content: &str) -> Mapping {
+    let mapping = crate::config::reader::parse(content, path);
     let mut document = Value::Mapping(mapping);
     crate::config::keys::fold(&mut document);
     match document {
-        Value::Mapping(mapping) => Ok(mapping),
+        Value::Mapping(mapping) => mapping,
         _ => unreachable!("folding keeps a mapping"),
     }
 }

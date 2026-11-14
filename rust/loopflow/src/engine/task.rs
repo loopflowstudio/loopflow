@@ -186,7 +186,7 @@ pub fn hold(directory: &Path, issue: &str, reason: Option<&str>) -> Result<Hold>
     })
 }
 
-/// `task.steer`: direction for the Task's runs, as `lf task steer <issue>
+/// `task.steer`: direction for the Task's runs, as `lf steer <issue>
 /// <message>` does. The delivery is [`super::session::steer`]'s Task scope:
 /// the entry joins the Task's thread and the store saves it as the Task's
 /// steer, which every Session on the Task, now or later, reads at its next
@@ -249,7 +249,9 @@ pub fn ownership(directory: &Path, issue: &str, change: OwnershipChange) -> Resu
         _ => "unassign",
     };
     let spell = |task: &str| spell_task(task, verb);
-    if let Some(ownership) = remote(directory, issue, spell)? {
+    let writer = crate::lf::commands::work_route::remote_ownership_writer(issue)
+        .map_err(|error| Error::refused(&error, ErrorCode::Unavailable))?;
+    if let Some(ownership) = remote_on(writer, directory, spell)? {
         return Ok(ownership);
     }
     let repo = crate::ops::task::task_repository(directory, Some(issue)).map_err(written)?;
@@ -302,9 +304,19 @@ fn remote<T: DeserializeOwned>(
     issue: &str,
     spell: impl FnOnce(&str) -> Vec<String>,
 ) -> Result<Option<T>> {
-    let Some(route) = crate::lf::commands::work_route::remote_task(issue)
-        .map_err(|error| Error::refused(&error, ErrorCode::Unavailable))?
-    else {
+    let route = crate::lf::commands::work_route::remote_task(issue)
+        .map_err(|error| Error::refused(&error, ErrorCode::Unavailable))?;
+    remote_on(route, directory, spell)
+}
+
+/// What the command `spell` names prints on `route`'s Machine; `None` when
+/// it runs here.
+fn remote_on<T: DeserializeOwned>(
+    route: Option<crate::durable::TaskExecutionRoute>,
+    directory: &Path,
+    spell: impl FnOnce(&str) -> Vec<String>,
+) -> Result<Option<T>> {
+    let Some(route) = route else {
         return Ok(None);
     };
     let args = spell(route.task_id.as_str());
@@ -373,7 +385,7 @@ mod tests {
     #[test]
     fn results_match_the_shared_fixtures_without_defaults() {
         let running: TaskRun = result(include_str!(
-            "../../../../tests/fixtures/dto/server/task_running.json"
+            "../../tests/fixtures/dto/server/task_running.json"
         ));
         let text = running.render().unwrap();
         assert!(text.contains("running as Graph process"));
@@ -400,11 +412,11 @@ mod tests {
             .unwrap()
             .contains("this run may merge the PR; `lf task hold LOO-1` withdraws"));
         let shipping: TaskShip = result(include_str!(
-            "../../../../tests/fixtures/dto/server/task_shipping.json"
+            "../../tests/fixtures/dto/server/task_shipping.json"
         ));
         assert!(shipping.render().unwrap().starts_with("LOO-1 shipping"));
         let held: Hold = result(include_str!(
-            "../../../../tests/fixtures/dto/server/task_held.json"
+            "../../tests/fixtures/dto/server/task_held.json"
         ));
         assert_eq!(held.render(), "LOO-1 stopped shipping");
         // A missing field is an error, never a default.

@@ -69,14 +69,13 @@ shows and what to do per state: `docs/sessions.md#recover-after-a-usage-limit`,
 `swift/README.md` (recovery row). Main rewrote all three files since the PR
 head; keep these sections through the merge. They name the five Desktop state
 labels and the row above the pane, so a relabel or move updates them.
-`rust/loopflow/src/harness/README.md#quota-recovery` still describes the
-November 9 owner/socket mechanism and needs rewriting once the implementation
-sits on main's holders.
+`rust/loopflow/src/harness/README.md#quota-recovery` now describes the
+Machine server's connections and holder-preserved terminals.
 
-Open product question: a client opened by an older lf shows **Waiting for
-native conversation** with the **Recover affected sessions** button, yet the
-button cannot recover it. Should that row hide the button and say to reopen
-the Session, or keep the current wording?
+November 14 reversible choice: keep the bulk recovery button on Waiting for
+native conversation. It can still recheck the other affected conversations;
+the reason and guide explain manual continuation for an older client. The
+client is never restarted just to install its guard.
 
 The existing Session/native conversation, failed turn and derived recovery reading
 remain the three concepts. Session history retains dispatch and correlated results;
@@ -96,106 +95,53 @@ a second request for dispatched work, and starts no Process. Separate native
 fixtures now exercise automatic admission and pending approvals through the served
 protocol. None of these fixtures mounts Desktop.
 
+### Holder adaptation — November 14 (implementation)
+
+The Machine server owns recovery checks and native side connections; holders
+continue to own PTYs. Native boundaries retain the launch's account selection,
+guard availability and transcript location. They open no new watcher. One server
+reader schedules recoverable conversations; a single attempt per conversation
+owns admission and broker work. Codex retains its authenticated side connection
+for native refresh callbacks after switching; no process per Session returns.
+Dispatch remains in Session history, so server restart never resends uncertain
+input. Missing launch metadata waits rather than using the server's account
+restrictions. Credential preparation must finish save-back even after cancellation.
+
+Delete — do not maintain:
+
+- `harness/claude_updates.rs` and `harness/observer_measurement.rs`, and their
+  exclusive fixtures: main removed these watchers.
+- `CodexObserver`, `Recorder`, `spawn_observer`, `run_observer`, and the old
+  Task-update polling loop in `codex_connection.rs`. Preserve guarded recovery,
+  native input correlation and late-install cancellation on server connections.
+- `task_updates::watch`, `ContextMoment::TaskUpdates` and Pi watcher dispatch.
+  Main's shared server wake and steer path stays authoritative.
+- `record_native_limit`'s unconditional shared-login switch: guarded native
+  admission replaces it; headless stream fallback and manual switches remain.
+- Environment-dependent interactive route selection: pass the Session's saved
+  account selection to the surviving broker path; never change server env.
+
 ### Remaining verification
 
-Both providers now use the guarded runtime envelope and broker integration.
-Unsupported cases retain their wait or uncertainty. New input either wins with
-no old retry or follows an admitted recovery. The two-Task served/native bulk,
-held-lock cancellation and approval cases pass; they do not replace gate or demo.
+The November 9 native and publication receipts below establish the earlier
+candidate, not the holder adaptation. Gate owns the revised candidate's
+served/DTO/Swift matrix and disposable native bulk, approval, cancellation and
+continued-input cases. Include a Machine-server restart while Codex is using
+supplied-token login: retention of dispatch does not establish transfer of
+its native token-refresh callback connection. Do not infer that from the
+metadata-only reopen test.
 
-1. Publication checks passed after the fixture repairs below. Runtime admission,
-   restricted routes, distinct models, repeated reports, hold expiry, lost/late
-   installation replies and retained attempts have focused coverage; the affected
-   lifecycle, transport, hook, projection, DTO and Swift checks also ran.
-2. Demo/review: rendered Desktop, physical keyboard input after reopen and the
-   installed/real-login observations below. No production switch or installation
-   occurred in the disposable checks.
+Demo/review retains rendered Desktop, physical keyboard input after reopen,
+and installed/real-login behavior. No production switch or installation has
+occurred. The reported x/z invisibility, paste revealing xzy, and later Reset
+success from LOO-813 still establish no cause or physical-keyboard repair.
 
-The ordinary-typing incident remains unresolved. The LOO-813 handoff reported
-physical x/z invisible in Desktop and a passive owner snapshot; pasting y then
-revealed xzy, and both affected conversations subsequently worked after Reset.
-Those observations do not establish the cause. A disposable reproduction must
-exercise physical keyboard input after reopen; quota retry/draft fixtures and
-the separate installation inventory do not establish its repair.
+Current focused checks (inherited LF_* unset, closed stdin):
 
-Installed/real-login refresh, token rotation, unsuffixed Keychain repair and the
-other observations remain in [live-recovery.md](live-recovery.md). No isolated
-real-login environment was available. Headless checks continue in disposable
-environments; configured observations and judgment of the complete experience
-remain for demo/review. No new product decision is needed for reversible work.
+- `cargo test -p loopflow --lib recovery --jobs 4` — 32 passed after distinguishing read-only cancellation reconciliation from resends and restricting a generic native rejection to its actual model; `.lf/tmp/loo-811-reconcile/recovery-tests.log`. Existing large `__eh_frame` linker warning. Latest-main integration will need a fresh focused check.
+- `cargo clippy --all-targets --jobs 4 -- -D warnings` — running; `.lf/tmp/loo-811-reconcile/clippy.log`.
 
-### Publication review — November 9
-
-Review repaired required nullable recovery decoding in Rust and Swift, including
-encoding nulls and completing inline/screen/server fixtures. Added a disposable
-Codex socket/store test for cancellation after login is sent: late success pins
-the new account, error/lost replies retain uncertainty, and none releases or
-resends the retry. The route test now covers repeated reports and hold expiry.
-No retry algorithm changed. `lf sync` merged cleanly; remote main remained
-`8155d1fcde597154ee9746ad72280bf6687a7da8` at the later publication read.
-
-All commands used inherited LF_* unset and closed stdin; Rust used stable 1.99.1
-and canonical TMPDIR. Full commands/filters are in the named local logs.
-
-- `scripts/test.py --reuse-passing --rust-filter` (affected selection; `.lf/tmp/loo-811-expanded-publish-gate.log`) — architecture, 654 Python + one separate observation check and 73 website checks passed. Initial Rust compile caught the new test reaching a private type; moved it into that type's unit tests. The 801-test Desktop run found one absent recovery key in a screen fixture; completed screen, inline and server fixtures.
-- `cargo nextest run -p loopflow` (same selection plus context/schema/screen callers; `.lf/tmp/loo-811-publish-rust.log`) — 869/870 passed; the only failure was generated schema example key order. Regenerated with `target/debug/lf server describe --json`; the focused schema rerun passed. Existing grace-expiry transport test passed in 63.394s; no timeout or leak. New cancellation, repeated-limit and expiry tests passed.
-- `cargo clippy --all-targets --jobs 4 -- -D warnings` — passed; `.lf/tmp/loo-811-publish-final-checks.log`. Existing large `__eh_frame` linker warning occurred in test linking, not clippy.
-- `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter 'DTOFixtureTests|sessionRecovery|uncertainRecovery'` — 59 passed after fixture repair; same final-check log. The full build also reported main's existing nil-coalescing warning in TaskWorkView.
-- `scripts/check_swift_multiplatform_boundaries.py`, `cargo fmt --check`, `git diff --check` — passed. `scripts/third_party.py refresh` updated the Cargo.lock input hash; Python inventory tests passed.
-
-After integration with main `9c3403a885356276c52c345b426dc9d7b4714be7`
-(merge `14f80557f`), the focused served bulk-recovery check passed. Additional
-checks and exact filters are in `.lf/tmp/loo-811-publish-post-sync.log`:
-
-- `cargo nextest run -p loopflow` — 134 affected typed-write, screen, event, subscription, DTO and served-read checks passed.
-- `cargo clippy --all-targets --jobs 4 -- -D warnings`, CLI build and formatting — passed.
-- `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter 'ServerProtocolTests|ServerClientTests|SessionsStoreTests|WorkspaceSessionLifecycleTests|DTOFixtureTests|sessionRecovery|uncertainRecovery'` — 124 passed; Swift boundaries and diff whitespace passed. Main's existing Swift warnings remain.
-
-Prior six-case native QA remains applicable: production edits in this review
-change DTO decoding/encoding, not native dispatch or credentials. Rendered
-Desktop, ordinary physical typing after reopen, installed and real-login checks
-remain for demo. This publication neither merges nor completes the Task.
-
-### QA — November 9, merged candidate
-
-[qa.html](qa.html) records the public CLI walkthrough, headless Desktop checks
-and six supplemental native scenarios on `16efb4f8e.dirty`, SHA256
-`473e1d7353201b8a6ca85633c056ac74ee29926fc608eedadb41481ab282f963`.
-No runtime defect surfaced. The first private-Machine walkthrough omitted an
-agent preference; adding `-a codex` corrected the probe. Empty-state/errors,
-reopening a prepared Session created by installed `28b0af568`, and recovery
-reads across a private-server restart passed without provider login or seeded rows.
-
-- `cargo build -p loopflow --bin lf < /dev/null` (inherited LF_* unset) — passed.
-- `uv run python scripts/test_network.py uv run --offline python .lf/tmp/loo-811-qa-expanded/public_cli.py < /dev/null` — passed; prepared metadata only, no native conversation.
-- `scripts/test_desktop.sh -Xswiftc -gnone --filter 'sessionRecoveryControlKeepsUncertaintyVisible|DesktopHeadlessTests' < /dev/null` (inherited LF_* unset) — 17 passed, including recovery-button tap, uncertain state and Work navigation; automated checks, no mounted window.
-- `uv run python scripts/test_network.py uv run --offline --script scratch/native_recovery_probe.py --lf target/debug/lf --<provider> /Users/jack/.local/bin/<provider> <case flags> --output .lf/tmp/loo-811-qa-expanded/<provider>-<case> < /dev/null` — six passed: both providers with no flag, `--approval`, and `--cancel`. Native versions: Codex 0.167.0 and Claude 2.1.322. Synthetic logins/local responses only; both bulk cases continued each Task Session once, kept drafts and completed later input. Approvals executed once after recovery; held-lock cancellation prevented retries and account changes.
-- `uv run python .lf/tmp/loo-811-qa-expanded/check_receipts.py` — six matching candidate receipts, seven successful-scenario roots removed, zero remaining probe processes, nine scoped Keychain items absent. The failed setup's root is also absent.
-- `git diff --check`, `lf context` — passed after the report and skill edits; both context budgets fit. Broader suites and clippy remain at gate.
-
-QA changed no runtime code. Publication checks are recorded above; rendered
-Desktop, physical typing and installed/real-login recovery remain unverified.
-
-### Concept review — November 9, after runtime integration
-
-No design change or open product choice. Keep the Session, rejected native turn
-and derived recovery reading; the attempt stays in Session history and credential
-ownership stays with the broker. The Desktop action requests a check, while native
-admission orders recovery against newer input. An account installation, RPC reply
-or unrelated completed turn cannot establish continuation. Cancellation after an
-installation was sent can change the login without continuing the request; retain
-that distinction and uncertainty rather than offering another automatic send.
-
-The earlier late-wait and unguarded-input mismatches have implementation and
-focused checks. Remaining failures of acceptance are observations to obtain, not
-new product decisions: gate covers the matrix above; demo covers rendered Desktop,
-ordinary typing after reopen and configured live behavior. Loop-or-next can
-advance. No runtime code changed in this review.
-
-`scratch/concept-review.html` now shows the current interaction and those limits.
-Usage wording in `docs/sessions.md` and the harness/subscription/Desktop docs
-matches the guarded continuation design; no replacement usage or skill workflow
-is proposed. The full preservation matrix remains necessary for acceptance.
+November 9 publication, QA and concept-review commands and receipts: `253a13a2580c36539fffabe04f2139e6ebcfa33f:scratch/interactive-limit-recovery.md`, corresponding dated headings. They predate the holder adaptation and require renewed focused checks.
 
 ## Runtime integration — November 9
 

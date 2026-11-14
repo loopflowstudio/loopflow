@@ -1,7 +1,6 @@
 //! Claude keeps drafts, approvals and its inbox. Recovery observes the failed
 //! prompt and joins the inbox UUID to a successful Stop, never a socket write.
 use std::io::Write;
-use std::os::unix::net::UnixStream;
 use std::path::Path;
 
 use std::time::{Duration, SystemTime};
@@ -12,6 +11,7 @@ use serde_json::{json, Value};
 use super::recovery_gate::{read_transcript, RecoveryGate};
 use crate::provider_account::{self, LaunchCapacity, ProviderAccountRoute};
 use crate::provider_auth::Provider;
+use crate::server::recovery::Client;
 use crate::session_recovery::{claude_rejected_model, RecoveryState, SessionRecovery};
 use crate::steer::{NativeBoundary, SteerAdapter};
 use crate::store::sqlite::SqliteStore;
@@ -32,9 +32,14 @@ pub(crate) fn boundary(
         "started"
     };
     let account = if phase == "started" {
-        LaunchCapacity::read(store)?
-            .login("claude", None, true)
-            .map(|account| account.account_id.clone())
+        if store.session_connection(&adapter.session)?.is_some() {
+            crate::server::recovery::account(store, "codex", thread)
+                .map_err(|error| StoreError::InvalidData(error.to_string()))?
+        } else {
+            LaunchCapacity::read(store)?
+                .login("claude", None, true)
+                .map(|account| account.account_id.clone())
+        }
     } else {
         None
     };
@@ -78,111 +83,52 @@ pub(crate) fn record_limit(input: &Value) -> Result<()> {
     store.with_provider_context(&adapter, thread, NativeBoundary::Turn, || {
         store.record_session_recovery(&adapter.session, &recovery, "rejected")
     })?;
-    check_capacity(&store, &adapter, thread, &rows)
+    Ok(())
 }
 
-#[derive(Debug)]
-pub(super) struct Recovery {
-    check_at: SystemTime,
-    requested: i64,
-}
-impl Default for Recovery {
-    fn default() -> Self {
-        Self {
-            check_at: SystemTime::UNIX_EPOCH,
-            requested: 0,
-        }
-    }
-}
-
-impl Recovery {
-    pub(super) fn tick(
-        &mut self,
-        store: &SqliteStore,
-        adapter: &SteerAdapter,
-        thread: &str,
-        path: &Path,
-    ) -> Result<()> {
-        let Some(mut recovery) = store
-            .session_recovery(&adapter.session)?
-            .filter(|r| r.thread.as_str() == thread)
-        else {
+/// Called by the Machine's shared recovery reader, never a native watcher.
+pub(crate) fn check(store: &SqliteStore, client: &Client) -> Result<()> {
+    let adapter = &client.adapter;
+    let thread = client.thread.as_str();
+    let Some(path) = &client.native.transcript else {
+        return Ok(());
+    };
+    let Some(mut recovery) = store
+        .session_recovery(&adapter.session)?
+        .filter(|r| r.thread == client.thread)
+    else {
+        return Ok(());
+    };
+    let rows = read_transcript(path)?;
+    if let Some(request) = &recovery.request {
+        let mut matching = rows
+            .iter()
+            .filter(|row| row["type"] == "user" && row["uuid"] == *request);
+        let Some(prompt) = matching.next().and_then(|row| row["promptId"].as_str()) else {
             return Ok(());
         };
-        let requested = store.recovery_request_revision(&adapter.session)?;
-        if requested != self.requested {
-            self.requested = requested;
-            self.check_at = SystemTime::UNIX_EPOCH;
-        }
-        if recovery.state == RecoveryState::Continued
-            || (recovery.state == RecoveryState::Uncertain && recovery.request.is_none())
+        if matching.next().is_none()
+            && recovery.retry_turn.as_deref() == Some(prompt)
+            && store.has_recovery_phase(&adapter.session, &recovery, "admitted")?
+            && store
+                .recovery_boundary(&adapter.session, thread, prompt, "stopped")?
+                .is_some()
         {
-            return Ok(());
-        }
-        // Capacity polling waits a minute; dispatched attempts still observe
-        // every tick so a correlated Stop can settle as soon as it arrives.
-        if recovery.request.is_none() && SystemTime::now() < self.check_at {
-            return Ok(());
-        }
-        let rows = read_transcript(path)?;
-        if let Some(request) = &recovery.request {
-            let mut matching = rows
-                .iter()
-                .filter(|row| row["type"] == "user" && row["uuid"] == *request);
-            let Some(prompt) = matching.next().and_then(|row| row["promptId"].as_str()) else {
-                return Ok(());
-            };
-            if matching.next().is_some()
-                || recovery.retry_turn.as_deref() != Some(prompt)
-                || !store.has_recovery_phase(&adapter.session, &recovery, "admitted")?
-                || store
-                    .recovery_boundary(&adapter.session, thread, prompt, "stopped")?
-                    .is_none()
-            {
-                return Ok(());
-            }
             recovery.state = RecoveryState::Continued;
             recovery.reason = "The native retry completed".into();
             store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
                 store.record_session_recovery(&adapter.session, &recovery, "settled")
             })?;
-            return Ok(());
         }
-        self.check_at = SystemTime::now() + Duration::from_secs(60);
-        if confirm_rejection(store, adapter, thread, &rows, &mut recovery)?.is_none()
-            || recovery.account.is_none()
-        {
-            return Ok(());
-        }
-        let reason = rows
-            .iter()
-            .rev()
-            .find(|row| row["isApiErrorMessage"] == true)
-            .and_then(|row| row.pointer("/message/content"))
-            .and_then(Value::as_array)
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(|item| item["text"].as_str())
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            });
-        if let Some(reason) = reason {
-            provider_account::start_limit_recording(&json!({"session_id":thread,
-                "prompt_id":recovery.failed_turn,"transcript_path":path,"last_assistant_message":reason}).to_string())?;
-        }
-        Ok(())
+        return Ok(());
     }
+    check_capacity(store, client, &rows)
 }
 
-/// Runs only in the detached limit recorder; network work cannot stall the
-/// native watcher or the provider's failure hook.
-fn check_capacity(
-    store: &SqliteStore,
-    adapter: &SteerAdapter,
-    thread: &str,
-    rows: &[Value],
-) -> Result<()> {
+/// Broker work runs outside the native hook and keeps rotated credentials.
+fn check_capacity(store: &SqliteStore, client: &Client, rows: &[Value]) -> Result<()> {
+    let adapter = &client.adapter;
+    let thread = client.thread.as_str();
     let Some(mut recovery) = store
         .session_recovery(&adapter.session)?
         .filter(|recovery| recovery.thread.as_str() == thread && recovery.can_retry())
@@ -219,14 +165,15 @@ fn check_capacity(
                 &model,
                 Path::new(&session.cwd),
                 session.wave_id.as_ref(),
+                &client.native.selection,
             )
             .await?,
         )
     });
     recovery.retry_at = None;
     let phase = match route {
-        Ok(Some(route)) if std::env::var("LF_RECOVERY_GUARD").as_deref() == Ok("1") => {
-            return dispatch_recovery(store, adapter, recovery, &route, &runtime);
+        Ok(Some(route)) if client.native.guarded => {
+            return dispatch_recovery(store, client, recovery, &route, &runtime);
         }
         Ok(Some(_)) => {
             recovery.state = RecoveryState::WaitingNative;
@@ -267,23 +214,21 @@ fn check_capacity(
 /// retained, and any failure leaves it uncertain instead of sending again.
 fn dispatch_recovery(
     store: &SqliteStore,
-    adapter: &SteerAdapter,
+    client: &Client,
     mut recovery: SessionRecovery,
     route: &ProviderAccountRoute,
     runtime: &tokio::runtime::Runtime,
 ) -> Result<()> {
-    let thread = recovery.thread.to_string();
-    let thread = thread.as_str();
+    let adapter = &client.adapter;
+    let thread = client.thread.as_str();
     let gate = RecoveryGate::new(&adapter.session, &recovery)?;
     let prompt = gate.prompt();
-    let (Ok(path), Ok(token)) = (
-        std::env::var("CLAUDE_CODE_MESSAGING_SOCKET"),
-        std::env::var("CLAUDE_CODE_MESSAGING_TOKEN"),
-    ) else {
+    let Some(key) = &client.inbox else {
         return Ok(());
     };
-    let mut socket = UnixStream::connect(path)?;
-    socket.set_write_timeout(Some(Duration::from_secs(2)))?;
+    let Some((mut socket, token)) = crate::server::wake::open_inbox(key, thread)? else {
+        return Ok(());
+    };
     recovery.request = Some(gate.attempt().into());
     recovery.state = RecoveryState::Recovering;
     recovery.reason = "Waiting for native submission to admit recovery".into();
@@ -400,8 +345,9 @@ fn confirm_rejection(
 
 #[cfg(test)]
 mod tests {
-    use super::Recovery;
+    use super::check;
     use crate::id::LfProcessId;
+    use crate::server::recovery::{Client, NativeRecovery};
     use crate::session_recovery::{RecoveryState, SessionRecovery};
     use crate::store::sqlite::SqliteStore;
     use serde_json::json;
@@ -470,14 +416,19 @@ mod tests {
             .record_recovery_boundary("reader", "thread", "unrelated", "stopped", None)
             .unwrap();
         let reconnected = SqliteStore::new(&database).unwrap();
-        // A capacity backoff must not delay completion of an existing attempt.
-        let mut observer = Recovery {
-            check_at: std::time::SystemTime::now() + std::time::Duration::from_secs(60),
-            ..Default::default()
+        let client = Client {
+            adapter: adapter.clone(),
+            thread: "thread".into(),
+            cwd: home.path().into(),
+            endpoint: None,
+            inbox: None,
+            native: NativeRecovery {
+                selection: Default::default(),
+                guarded: false,
+                transcript: Some(path),
+            },
         };
-        observer
-            .tick(&reconnected, &adapter, "thread", &path)
-            .unwrap();
+        check(&reconnected, &client).unwrap();
         assert_eq!(
             reconnected.session_recovery("reader").unwrap(),
             Some(fact.clone())
@@ -485,9 +436,7 @@ mod tests {
         store
             .record_recovery_boundary("reader", "thread", "retry", "stopped", None)
             .unwrap();
-        observer
-            .tick(&reconnected, &adapter, "thread", &path)
-            .unwrap();
+        check(&reconnected, &client).unwrap();
         let completed = reconnected.session_recovery("reader").unwrap().unwrap();
         assert_eq!(completed.state, RecoveryState::Continued);
         assert_eq!(completed.request, fact.request);

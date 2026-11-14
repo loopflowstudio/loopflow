@@ -1518,7 +1518,7 @@ fn read_text_file(path: &Path) -> Option<String> {
 /// Ensure an entry exists in the repo's root .gitignore.
 ///
 /// Adds the entry on a new line if not already present.
-fn ensure_gitignore_entry(repo_root: &Path, entry: &str) -> Result<(), CoreError> {
+pub(crate) fn ensure_gitignore_entry(repo_root: &Path, entry: &str) -> Result<(), CoreError> {
     let gitignore_path = repo_root.join(".gitignore");
     let content = if gitignore_path.exists() {
         fs::read_to_string(&gitignore_path)?

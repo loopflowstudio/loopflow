@@ -504,7 +504,7 @@ struct WorkModelStreamTests {
             .deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto/task_work.json")
         let work = try String(contentsOf: workURL, encoding: .utf8)
         let shown = WorkScope(repo: "/src/loopflow", headless: false, task: found.task.task.identifier,
-                              activity: nil)
+                              activity: nil, taskListWave: nil)
         await feed.send(try fixture.frame("task", sequence: 2, answers: scope.id, scope: shown,
             body: "{\"overview\":\(work),\"comments\":{\"identifier\":\"\(found.task.task.identifier)\",\"comments\":[],\"conflicts\":{},\"pending_sync\":[],\"refresh_error\":null},\"graph_processes\":[],\"execution\":null}"))
         try await eventually { model.taskWork[found.task.id].value?.graph != nil }
@@ -537,7 +537,7 @@ struct WorkModelStreamTests {
         func peers(_ sequence: Int, _ answers: Int, repo: String, statuses: String) throws -> WorkFrame {
             let body = #"{"transport":"git","destinations":\#(statuses)}"#
             return try fixture.frame("peer_planning", sequence: sequence, answers: answers,
-                                     scope: WorkScope(repo: repo, headless: false, task: nil, activity: nil),
+                                     scope: WorkScope(repo: repo, headless: false, task: nil, activity: nil, taskListWave: nil),
                                      body: body)
         }
         await feed.send(try fixture.planningFrame(sequence: 1, answers: scope.id))
@@ -946,26 +946,14 @@ struct WorkModelStreamTests {
         await feed.send(try fixture.planningFrame(sequence: 1, answers: answers))
         await feed.send(try sessionFrame(2, turn: "Previous result", available: true))
         try await eventually { preview() == "Previous result" }
-        model.applySelectionPlans([fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"), members: [
-            fixtureViewContent(work: .init(repository: "repo", kind: .task, id: "preview-task"), title: "Preview")
-        ])], reason: "")
-        model.navigation.sidebarFilter = .available
-        #expect(model.sidebarTaskIDs == ["preview-task"])
         await feed.send(try sessionFrame(3, turn: nil))
         try await eventually { preview() == "Summary · brief" }
         await feed.send(try sessionFrame(4, turn: "New turn output"))
         try await eventually { preview() == "New turn output" }
-        model.navigation.sidebarFilter = .busy
-        #expect(model.sidebarTaskIDs == ["preview-task"])
         await feed.fail(RegistryQueryError("reader exited"))
         try await eventually { model.sessions.errorMessage == "reader exited" }
         #expect(model.sessions.value?.first?.preview?.text == "New turn output")
         #expect(preview() == "Summary · brief")
-        #expect(model.sidebarTaskIDs.isEmpty)
-        model.navigation.sidebarFilter = .available
-        #expect(model.sidebarTaskIDs.isEmpty)
-        model.navigation.sidebarFilter = .working
-        #expect(model.sidebarTaskIDs == ["preview-task"])
         #expect(model.roadmap.value != nil)
         #expect(!model.roadmap.isLoading)
 
@@ -1107,7 +1095,7 @@ private struct WorkTestFixture {
         }
     }
 
-    static let scope = WorkScope(repo: "/src/loopflow", headless: false, task: nil, activity: nil)
+    static let scope = WorkScope(repo: "/src/loopflow", headless: false, task: nil, activity: nil, taskListWave: nil)
 
     /// One line of `part`'s subscription, as the transport hands it to the window.
     func frame(
@@ -1155,7 +1143,7 @@ private struct WorkTestFixture {
 
     func sessionsFrame(sequence: Int, answers: Int?, repo: String, entries: String) throws -> WorkFrame {
         try frame("sessions", sequence: sequence, answers: answers,
-                  scope: WorkScope(repo: repo, headless: false, task: nil, activity: nil), body: entries)
+                  scope: WorkScope(repo: repo, headless: false, task: nil, activity: nil, taskListWave: nil), body: entries)
     }
 
     /// A live-process reading: a frame that confirms and changes no Work.

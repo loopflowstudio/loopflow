@@ -290,9 +290,10 @@ macro_rules! uuid_id {
 uuid_id!(WaveId);
 uuid_id!(TraceId);
 uuid_id!(LfProcessId);
+// One PTY a holder keeps, for its whole life. Not a Process; never reused.
+uuid_id!(TerminalId);
 uuid_id!(AgentProcessId);
 uuid_id!(SteerId);
-uuid_id!(SteerBatchId);
 
 // One claim, not a Process identity. Never reused after attachment transfer.
 uuid_id!(AttachmentToken);

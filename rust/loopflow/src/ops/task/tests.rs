@@ -499,6 +499,107 @@ fn explicit_reconciliation_recovers_merged_delivery_without_completing_work() {
 }
 
 #[test]
+fn adopting_a_checkout_with_a_running_graph_prevents_another_run() {
+    let _ledger = crate::journal::TestLedgerGuard::new();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let repo = loopflow_test_support::TestRepo::new();
+    let adopted = loopflow_test_support::TestRepo::new();
+    let mut fixture = runtime.block_on(task_fixture_at("ADOPT-LIVE", repo.path().into()));
+    let graph = fixture.store.sqlite.test_graph(
+        "code",
+        adopted.path().to_str().unwrap(),
+        &[("implement", None)],
+        None,
+    );
+    fixture.task.worktree = Some(adopted.path().into());
+    let conn = rusqlite::Connection::open(&fixture.database_path).unwrap();
+    conn.execute(
+        "UPDATE task_checkouts SET worktree=?1 WHERE task_id=?2",
+        rusqlite::params![adopted.path().to_str().unwrap(), fixture.task.id.as_str()],
+    )
+    .unwrap();
+
+    // Use this process's identity without launching a provider or a watcher.
+    conn.execute(
+        "UPDATE processes SET pid=?1,os_started_at=?2 WHERE id=?3 OR parent_lf_process_id=?3",
+        rusqlite::params![
+            std::process::id(),
+            crate::journal::process_started_at(std::process::id())
+                .unwrap()
+                .unwrap(),
+            graph
+        ],
+    )
+    .unwrap();
+    let assert_running = |state| {
+        let snapshot = runtime
+            .block_on(super::snapshot::read_task_snapshot(
+                &fixture.store,
+                fixture.task.clone(),
+            ))
+            .unwrap();
+        assert_eq!(snapshot.execution.state, state);
+        assert_eq!(snapshot.status, TaskState::Moving);
+        assert_eq!(
+            fixture
+                .store
+                .sqlite
+                .task_detail_facts(&[&fixture.task])
+                .unwrap()
+                .states[&fixture.task.id],
+            TaskState::Moving
+        );
+        assert_eq!(
+            snapshot.actions.recommended,
+            Some(crate::ops::task_actions::TaskAction::NoAction)
+        );
+        assert!(snapshot.execution.reason.contains(graph.as_str()));
+        let error =
+            super::select_task_run(&fixture.store, &fixture.task, adopted.path(), None, None)
+                .unwrap_err();
+        assert!(error.to_string().contains(graph.as_str()), "{error}");
+        assert!(fixture
+            .store
+            .sqlite
+            .task_graphs(&fixture.task.id)
+            .unwrap()
+            .is_empty());
+    };
+    assert_running(crate::ops::task_execution::TaskExecutionState::Running);
+    conn.execute(
+        "UPDATE processes SET pid=NULL,os_started_at=NULL WHERE id=?1 OR parent_lf_process_id=?1",
+        [&graph],
+    )
+    .unwrap();
+    assert_running(crate::ops::task_execution::TaskExecutionState::Unknown);
+    // An exited owner does not hide its still-open step.
+    conn.execute(
+        "UPDATE processes SET completed_at=started_at,outcome='interrupted' WHERE id=?1",
+        [&graph],
+    )
+    .unwrap();
+    assert_running(crate::ops::task_execution::TaskExecutionState::Unknown);
+    conn.execute(
+        "UPDATE processes SET completed_at=started_at,outcome='interrupted' WHERE parent_lf_process_id=?1",
+        [&graph],
+    ).unwrap();
+    let snapshot = runtime
+        .block_on(super::snapshot::read_task_snapshot(
+            &fixture.store,
+            fixture.task.clone(),
+        ))
+        .unwrap();
+    assert_eq!(
+        snapshot.execution.state,
+        crate::ops::task_execution::TaskExecutionState::Idle
+    );
+    assert_eq!(snapshot.status, TaskState::Idle);
+    assert!(
+        super::select_task_run(&fixture.store, &fixture.task, adopted.path(), None, None).is_ok()
+    );
+}
+
+#[test]
 fn a_dead_graph_is_history_while_a_live_graph_process_retains_the_checkout() {
     let _ledger = crate::journal::TestLedgerGuard::new();
     let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -737,7 +838,7 @@ fn task_checkout_machine_survives_without_lifecycle_reconciliation() {
     rusqlite::Connection::open(&fixture.database_path)
         .unwrap()
         .execute(
-            "UPDATE tasks SET base_commit=?2 WHERE id=?1",
+            "UPDATE task_checkouts SET base_commit=?2 WHERE task_id=?1",
             rusqlite::params![fixture.task.id.as_str(), pr.base_commit],
         )
         .unwrap();
@@ -861,17 +962,11 @@ fn task_checkout_machine_survives_without_lifecycle_reconciliation() {
 }
 
 #[test]
-fn task_checkout_machine_unknown_or_remote_never_reads_a_local_path() {
+fn task_without_a_local_checkout_never_reads_a_local_path() {
     let repo = loopflow_test_support::TestRepo::new();
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let fixture = runtime.block_on(task_fixture_at("LOCATION-1", repo.path().into()));
     std::fs::write(repo.path().join("note.md"), "local file").unwrap();
-    let remote = crate::durable::MachineId::new();
-    fixture
-        .store
-        .sqlite
-        .add_machine(&remote, "remote", "remote")
-        .unwrap();
     let connection = rusqlite::Connection::open(&fixture.database_path).unwrap();
     connection
         .execute(
@@ -890,48 +985,42 @@ fn task_checkout_machine_unknown_or_remote_never_reads_a_local_path() {
             ],
         )
         .unwrap();
-    for machine in [None, Some(remote.as_str())] {
-        connection
-            .execute(
-                "UPDATE tasks SET checkout_machine_id=?1 WHERE id=?2",
-                rusqlite::params![machine, fixture.task.id.as_str()],
-            )
-            .unwrap();
-        crate::ops::linear::LINEAR_TEST_CONTEXT.sync_scope(
-            crate::ops::linear::LinearTestContext {
-                path: fixture.database_path.clone(),
-                store: fixture.store.clone(),
-                graphql_url: "http://127.0.0.1:1".into(),
-            },
-            || {
-                let expected = if machine.is_none() {
-                    "Machine is unknown"
-                } else {
-                    "belongs to Machine"
-                };
-                assert!(super::task_file("LOCATION-1", "note.md", false)
-                    .unwrap_err()
-                    .to_string()
-                    .contains(expected));
-                assert!(super::task_changes("LOCATION-1", "head", None)
-                    .unwrap_err()
-                    .to_string()
-                    .contains(expected));
-                assert!(super::task_files("LOCATION-1", "", None, false)
-                    .unwrap_err()
-                    .to_string()
-                    .contains(expected));
-                let work = fixture.store.sqlite.task_work(&fixture.task.id).unwrap();
-                assert_eq!(
-                    work.sessions
-                        .iter()
-                        .map(|s| s.id.as_str())
-                        .collect::<Vec<_>>(),
-                    ["bound"]
-                );
-            },
-        );
-    }
+    connection
+        .execute(
+            "DELETE FROM task_checkouts WHERE task_id=?1",
+            [fixture.task.id.as_str()],
+        )
+        .unwrap();
+    crate::ops::linear::LINEAR_TEST_CONTEXT.sync_scope(
+        crate::ops::linear::LinearTestContext {
+            path: fixture.database_path.clone(),
+            store: fixture.store.clone(),
+            graphql_url: "http://127.0.0.1:1".into(),
+        },
+        || {
+            let expected = "not checked out on this Machine";
+            assert!(super::task_file("LOCATION-1", "note.md", false)
+                .unwrap_err()
+                .to_string()
+                .contains(expected));
+            assert!(super::task_changes("LOCATION-1", "head", None)
+                .unwrap_err()
+                .to_string()
+                .contains(expected));
+            assert!(super::task_files("LOCATION-1", "", None, false)
+                .unwrap_err()
+                .to_string()
+                .contains(expected));
+            let work = fixture.store.sqlite.task_work(&fixture.task.id).unwrap();
+            assert_eq!(
+                work.sessions
+                    .iter()
+                    .map(|s| s.id.as_str())
+                    .collect::<Vec<_>>(),
+                ["bound"]
+            );
+        },
+    );
     assert_eq!(
         std::fs::read_to_string(repo.path().join("note.md")).unwrap(),
         "local file"
@@ -1216,35 +1305,24 @@ async fn parent_run_cannot_override_task_worktree_resolution() {
 }
 
 #[tokio::test]
-async fn checkout_resolution_respects_machine_identity() {
+async fn checkout_resolution_reads_only_this_machines_checkouts() {
     let repo = loopflow_test_support::TestRepo::new();
     let fixture = task_fixture_at("LOCATION-1", repo.path().canonicalize().unwrap()).await;
-    let peer = crate::durable::MachineId::new();
-    fixture
-        .store
-        .add_machine(&peer, "peer", "peer")
+    let resolved = super::task_for_checkout(&fixture.store, repo.path())
         .await
+        .unwrap()
         .unwrap();
+    assert_eq!(resolved.id, fixture.task.id);
     let conn = rusqlite::Connection::open(&fixture.database_path).unwrap();
     conn.execute(
-        "UPDATE tasks SET checkout_machine_id=?2 WHERE id=?1",
-        rusqlite::params![fixture.task.id.as_str(), peer.as_str()],
+        "DELETE FROM task_checkouts WHERE task_id=?1",
+        [fixture.task.id.as_str()],
     )
     .unwrap();
     assert!(super::task_for_checkout(&fixture.store, repo.path())
         .await
         .unwrap()
         .is_none());
-    conn.execute(
-        "UPDATE tasks SET checkout_machine_id=NULL WHERE id=?1",
-        [fixture.task.id.as_str()],
-    )
-    .unwrap();
-    assert!(super::task_for_checkout(&fixture.store, repo.path())
-        .await
-        .unwrap_err()
-        .to_string()
-        .contains("Machine is unknown"));
 }
 
 #[tokio::test(start_paused = true)]
@@ -1516,7 +1594,7 @@ async fn watched_landing_completes_task_only_from_merged_pr_evidence() {
     rusqlite::Connection::open(database_path)
         .unwrap()
         .execute(
-            "UPDATE tasks SET branch=?2 WHERE id=?1",
+            "UPDATE task_checkouts SET branch=?2 WHERE task_id=?1",
             rusqlite::params![task.id.as_str(), pr.branch],
         )
         .unwrap();
@@ -1863,11 +1941,11 @@ async fn stacking_is_idempotent_and_preserves_history() {
     store.update_task_pr(&parent).await.unwrap();
     let events = store.task_events_after(&fixture.task.id, 0).await.unwrap();
     store
-        .stack_task_placement(&fixture.task, &parent.id)
+        .stack_task_placement(&fixture.task, &parent.id, &fixture.task.base_commit)
         .await
         .unwrap();
     store
-        .stack_task_placement(&fixture.task, &parent.id)
+        .stack_task_placement(&fixture.task, &parent.id, &fixture.task.base_commit)
         .await
         .unwrap();
     assert_eq!(
@@ -1876,7 +1954,7 @@ async fn stacking_is_idempotent_and_preserves_history() {
     );
     // Both self-parenting and a reverse edge preserve the accepted dependency.
     assert!(store
-        .stack_task_placement(&parent_task, &parent.id)
+        .stack_task_placement(&parent_task, &parent.id, &parent_task.base_commit)
         .await
         .is_err());
     let mut published_child = store
@@ -1887,7 +1965,7 @@ async fn stacking_is_idempotent_and_preserves_history() {
     published_child.publication = parent.publication.clone();
     store.update_task_pr(&published_child).await.unwrap();
     assert!(store
-        .stack_task_placement(&parent_task, &child.id)
+        .stack_task_placement(&parent_task, &child.id, &parent_task.base_commit)
         .await
         .unwrap_err()
         .to_string()
@@ -1915,25 +1993,75 @@ async fn stacking_is_idempotent_and_preserves_history() {
     next.branch = next_task.branch.clone();
     next.slug = next_task.workspace_slug.clone();
     store.seed_task(&next_task, &next).await.unwrap();
-    let selected = super::select_existing_stack_parent(store, &current, "STACK-3")
+    let selected = super::select_stack_parent(store, &current, "STACK-3")
         .await
-        .unwrap();
+        .unwrap()
+        .pr
+        .expect("STACK-3 has a PR record");
     store
-        .stack_task_placement(&current, &selected.id)
+        .stack_task_placement(&current, &selected.id, "new-parent-fork")
         .await
         .unwrap();
+    let placement = store.get_task(&current.id).await.unwrap().unwrap();
+    assert_eq!(placement.base_commit, "new-parent-fork");
+    assert_eq!(placement.parent_pr_id, Some(selected.id));
     let moved = store.get_task_pr(&child.id).await.unwrap().unwrap();
     assert_eq!(moved.parent_pr_id, Some(next.id));
-    assert_eq!(moved.base_commit, child.base_commit);
+    assert_eq!(moved.base_commit, "new-parent-fork");
     assert_eq!(moved.id, child.id);
     assert_eq!(
         store.task_events_after(&fixture.task.id, 0).await.unwrap(),
         events
     );
     assert!(store
-        .stack_task_placement(&current, &parent.id)
+        .stack_task_placement(&current, &parent.id, &current.base_commit)
         .await
         .is_err());
+}
+
+#[tokio::test]
+async fn stacking_retry_keeps_a_merged_parent_without_republishing_its_branch() {
+    let repo = loopflow_test_support::TestRepo::new();
+    let parent = task_fixture_at("FIX-1", repo.path().canonicalize().unwrap()).await;
+    let mut pr = parent
+        .store
+        .active_task_pr(&parent.task.id)
+        .await
+        .unwrap()
+        .unwrap();
+    pr.publication = Some(PrPublication {
+        requested_at: pr.created_at,
+        presentation: None,
+        github: Some(GithubPr {
+            number: 42,
+            url: "https://github.com/fixture/repo/pull/42".into(),
+            head_sha: None,
+        }),
+        merge: None,
+    });
+    pr.merge_commit = Some(repo.head_sha());
+    parent.store.update_task_pr(&pr).await.unwrap();
+    let child = Task {
+        id: TaskId::new(),
+        parent_pr_id: Some(pr.id.clone()),
+        ..parent.task.clone()
+    };
+
+    // Cleanup can leave the branch locally or delete it entirely.
+    for local_branch in [false, true] {
+        if local_branch {
+            repo.create_branch(&pr.branch);
+        }
+        let (selected, note) =
+            super::record_stack_parent(&parent.store, repo.path(), &child, "FIX-1")
+                .await
+                .unwrap();
+        assert_eq!(selected, pr);
+        assert_eq!(note, None);
+        assert!(
+            !super::ref_exists(repo.bare_path(), &format!("refs/heads/{}", pr.branch)).unwrap()
+        );
+    }
 }
 
 #[tokio::test]
@@ -2137,7 +2265,7 @@ async fn task_preparation_refuses_an_unresolvable_base_before_allocating_placeme
 }
 
 #[tokio::test]
-async fn task_preparation_rejects_unpublished_parent_before_allocating_child() {
+async fn task_preparation_stacks_on_an_unpushed_parent_branch_without_a_pr() {
     let repo = loopflow_test_support::TestRepo::new();
     let parent = task_fixture_at("FIX-1", repo.path().canonicalize().unwrap()).await;
     for selector in ["FIX-1", parent.task.id.as_str(), "FIX-1-issue"] {
@@ -2158,11 +2286,107 @@ async fn task_preparation_rejects_unpublished_parent_before_allocating_child() {
             "{error}"
         );
     }
+    // Placed through a Graph kickoff: a local branch, no Task PR row, nothing on origin.
+    repo.create_branch(&parent.task.branch);
+    repo.create_file("parent.txt", "parent work");
+    repo.stage_all();
+    repo.commit("Parent work");
+    let parent_tip = repo.head_sha();
+    repo.checkout("main");
+    let db = rusqlite::Connection::open(&parent.database_path).unwrap();
+    db.execute(
+        "DELETE FROM task_prs WHERE task_id=?1",
+        [parent.task.id.as_str()],
+    )
+    .unwrap();
     let child = Task {
         id: TaskId::new(),
         ..parent.task.clone()
     };
-    let result = super::prepare_task_placement(
+    let options = super::TaskProcessOptions {
+        name: Some("child-task".into()),
+        stack_on: Some("FIX-1".into()),
+        ..Default::default()
+    };
+
+    db.execute(
+        "DELETE FROM task_checkouts WHERE task_id=?1",
+        [parent.task.id.as_str()],
+    )
+    .unwrap();
+    let error = super::prepare_task_placement(&parent.store, repo.path(), &child, None, &options)
+        .await
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("FIX-1 has no placed branch"),
+        "{error}"
+    );
+    db.execute(
+        "INSERT INTO task_checkouts(task_id,worktree,branch,base_commit) VALUES(?1,?2,?3,?4)",
+        [
+            parent.task.id.as_str(),
+            &parent.task.worktree.as_ref().unwrap().display().to_string(),
+            &parent.task.branch,
+            &parent.task.base_commit,
+        ],
+    )
+    .unwrap();
+
+    let prepared =
+        super::prepare_task_placement(&parent.store, repo.path(), &child, None, &options)
+            .await
+            .unwrap();
+    let remote = std::process::Command::new("git")
+        .current_dir(repo.bare_path())
+        .args(["rev-parse", &format!("refs/heads/{}", parent.task.branch)])
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&remote.stdout).trim(), parent_tip);
+    assert_eq!(prepared.plan.base_ref, parent_tip);
+    let recorded = parent
+        .store
+        .active_task_pr(&parent.task.id)
+        .await
+        .unwrap()
+        .expect("stacking records the parent's PR");
+    assert_eq!(recorded.branch, parent.task.branch);
+    assert!(recorded.publication.is_none());
+    assert_eq!(prepared.pr(&child.id).parent_pr_id, Some(recorded.id));
+}
+
+#[tokio::test]
+async fn task_preparation_stacks_on_a_placed_parent_with_an_abandoned_pr() {
+    let repo = loopflow_test_support::TestRepo::new();
+    let parent = task_fixture_at("FIX-1", repo.path().canonicalize().unwrap()).await;
+    repo.create_branch(&parent.task.branch);
+    repo.create_file("parent.txt", "parent work");
+    repo.stage_all();
+    repo.commit("Parent work");
+    let parent_tip = repo.head_sha();
+    repo.checkout("main");
+    let mut previous = parent
+        .store
+        .active_task_pr(&parent.task.id)
+        .await
+        .unwrap()
+        .unwrap();
+    previous.publication = Some(PrPublication {
+        requested_at: previous.created_at,
+        presentation: None,
+        github: Some(GithubPr {
+            number: 42,
+            url: "https://github.com/fixture/repo/pull/42".into(),
+            head_sha: Some(parent_tip.clone()),
+        }),
+        merge: None,
+    });
+    previous.abandoned_at = Some(previous.created_at);
+    parent.store.update_task_pr(&previous).await.unwrap();
+    let child = Task {
+        id: TaskId::new(),
+        ..parent.task.clone()
+    };
+    let prepared = super::prepare_task_placement(
         &parent.store,
         repo.path(),
         &child,
@@ -2173,23 +2397,388 @@ async fn task_preparation_rejects_unpublished_parent_before_allocating_child() {
             ..Default::default()
         },
     )
-    .await;
-    assert!(result
-        .unwrap_err()
-        .to_string()
-        .contains("open the parent PR"));
-    let retained = parent
+    .await
+    .unwrap();
+
+    assert_eq!(prepared.plan.base_ref, parent_tip);
+    let recorded = parent
         .store
-        .get_task(&parent.task.id)
+        .active_task_pr(&parent.task.id)
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(retained.worktree, parent.task.worktree);
-    assert_eq!(parent.store.list_tasks(None).await.unwrap().len(), 1);
+    assert_eq!(recorded.sequence, previous.sequence + 1);
+    assert_eq!(recorded.branch, parent.task.branch);
+    assert!(!recorded.is_settled());
+    assert!(recorded.publication.is_none());
+    assert_eq!(prepared.pr(&child.id).parent_pr_id, Some(recorded.id));
     assert_eq!(
-        parent.store.task_prs(&parent.task.id).await.unwrap().len(),
-        1
+        parent.store.get_task_pr(&previous.id).await.unwrap(),
+        Some(previous)
     );
+}
+
+#[tokio::test]
+async fn task_preparation_stacks_without_moving_a_published_parents_merge_request() {
+    let repo = loopflow_test_support::TestRepo::new();
+    let parent = task_fixture_at("FIX-1", repo.path().canonicalize().unwrap()).await;
+    repo.create_branch(&parent.task.branch);
+    repo.create_file("published.txt", "reviewed work");
+    repo.stage_all();
+    repo.commit("Published parent work");
+    repo.push_new_branch(&parent.task.branch);
+    let published_tip = repo.head_sha();
+    let mut pr = parent
+        .store
+        .active_task_pr(&parent.task.id)
+        .await
+        .unwrap()
+        .unwrap();
+    pr.publication = Some(PrPublication {
+        requested_at: pr.created_at,
+        presentation: Some(PrPresentation {
+            title: "Parent work".into(),
+            body: "Reviewed parent changes".into(),
+            head_sha: published_tip.clone(),
+        }),
+        github: Some(GithubPr {
+            number: 42,
+            url: "https://github.com/fixture/repo/pull/42".into(),
+            head_sha: Some(published_tip.clone()),
+        }),
+        merge: Some(PrMergeRequest {
+            mode: PrMergeMode::Auto,
+            requested_at: pr.created_at,
+            head_sha: published_tip.clone(),
+        }),
+    });
+    parent.store.update_task_pr(&pr).await.unwrap();
+    let saved = parent.store.get_task_pr(&pr.id).await.unwrap();
+    repo.create_file("unreviewed.txt", "local work");
+    repo.stage_all();
+    repo.commit("Unreviewed parent work");
+    let local_tip = repo.head_sha();
+    repo.checkout("main");
+    let child = Task {
+        id: TaskId::new(),
+        ..parent.task.clone()
+    };
+    let prepared = super::prepare_task_placement(
+        &parent.store,
+        repo.path(),
+        &child,
+        None,
+        &super::TaskProcessOptions {
+            name: Some("child-task".into()),
+            stack_on: Some("FIX-1".into()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(prepared.plan.base_ref, published_tip);
+    assert_eq!(prepared.pr(&child.id).parent_pr_id, Some(pr.id.clone()));
+    let (_, note) = super::record_stack_parent(&parent.store, repo.path(), &child, "FIX-1")
+        .await
+        .unwrap();
+    let note = note.unwrap();
+    assert!(
+        note.contains("leaves out 1 local FIX-1 commit not on origin"),
+        "{note}"
+    );
+    assert!(note.contains("lf commit -p"), "{note}");
+    assert_eq!(
+        crate::git::rev_parse(repo.bare_path(), &parent.task.branch).unwrap(),
+        published_tip
+    );
+    assert_eq!(
+        crate::git::rev_parse(repo.path(), &parent.task.branch).unwrap(),
+        local_tip
+    );
+    assert_eq!(parent.store.get_task_pr(&pr.id).await.unwrap(), saved);
+}
+
+#[tokio::test]
+#[allow(clippy::await_holding_lock)] // Serializes PATH while GitHub is replaced by a fixture.
+async fn task_preparation_stacks_on_a_published_parent_without_a_remote_branch() {
+    let _ledger = crate::journal::TestLedgerGuard::new();
+    let _environment = EnvRestore::capture(&["PATH"]);
+    let bin = tempfile::tempdir().unwrap();
+    let gh = bin.path().join("gh");
+    std::fs::write(
+        &gh,
+        r#"#!/bin/sh
+fixture="$(dirname "$0")"
+case "$*" in
+  --version) echo 'gh fixture' ;;
+  *--cache*) exit 1 ;;
+  *repos/fixture/repo/pulls/42*) touch "$fixture/read"; cat "$fixture/rest.json" ;;
+  *--disable-auto*) rm "$fixture/armed" ;;
+  *LoopflowPrMerge*) cat "$fixture/pr.json" ;;
+  *) exit 1 ;;
+esac
+"#,
+    )
+    .unwrap();
+    std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let prior_path = std::env::var_os("PATH").unwrap_or_default();
+    std::env::set_var(
+        "PATH",
+        std::env::join_paths(
+            std::iter::once(bin.path().to_path_buf()).chain(std::env::split_paths(&prior_path)),
+        )
+        .unwrap(),
+    );
+    for (remote_state, changed_head) in [
+        ("open", false),
+        ("open", true),
+        ("merged", true),
+        ("closed", true),
+        ("unreadable", true),
+    ] {
+        let repo = loopflow_test_support::TestRepo::new();
+        let parent = task_fixture_at("FIX-1", repo.path().canonicalize().unwrap()).await;
+        repo.create_branch(&parent.task.branch);
+        repo.create_file("published.txt", "reviewed work");
+        repo.stage_all();
+        repo.commit("Published parent work");
+        repo.push_new_branch(&parent.task.branch);
+        let published_tip = repo.head_sha();
+        let mut pr = parent
+            .store
+            .active_task_pr(&parent.task.id)
+            .await
+            .unwrap()
+            .unwrap();
+        pr.publication = Some(PrPublication {
+            requested_at: pr.created_at,
+            presentation: Some(PrPresentation {
+                title: "Parent work".into(),
+                body: "Reviewed parent changes".into(),
+                head_sha: published_tip.clone(),
+            }),
+            github: Some(GithubPr {
+                number: 42,
+                url: "https://github.com/fixture/repo/pull/42".into(),
+                head_sha: Some(published_tip.clone()),
+            }),
+            merge: Some(PrMergeRequest {
+                mode: PrMergeMode::Auto,
+                requested_at: pr.created_at,
+                head_sha: published_tip.clone(),
+            }),
+        });
+        parent.store.update_task_pr(&pr).await.unwrap();
+        if changed_head {
+            repo.create_file("unreviewed.txt", "local work");
+            repo.stage_all();
+            repo.commit("Unreviewed parent work");
+        } else {
+            // The push exposes the branch, not uncommitted edits.
+            repo.create_file("draft.txt", "uncommitted work");
+        }
+        let local_tip = repo.head_sha();
+        // Keep Git transport local while exercising the GitHub observation path.
+        for args in [
+            vec![
+                "config".into(),
+                format!("url.{}.insteadOf", repo.bare_path().display()),
+                "https://github.com/fixture/repo.git".into(),
+            ],
+            vec![
+                "remote".into(),
+                "set-url".into(),
+                "origin".into(),
+                "https://github.com/fixture/repo.git".into(),
+            ],
+        ] {
+            assert!(std::process::Command::new("git")
+                .current_dir(repo.path())
+                .args(args)
+                .status()
+                .unwrap()
+                .success());
+        }
+        let read = bin.path().join("read");
+        if read.exists() {
+            std::fs::remove_file(&read).unwrap();
+        }
+        let rest = if remote_state == "unreadable" {
+            "invalid response".into()
+        } else {
+            serde_json::json!({
+                "number": 42, "html_url": "https://github.com/fixture/repo/pull/42",
+                "state": if remote_state == "open" { "open" } else { "closed" },
+                "merged": remote_state == "merged", "merge_commit_sha": published_tip,
+                "merged_at": "2026-11-13T00:00:00Z", "head": {"sha": published_tip}
+            })
+            .to_string()
+        };
+        std::fs::write(bin.path().join("rest.json"), rest).unwrap();
+        assert!(std::process::Command::new("git")
+            .current_dir(repo.path())
+            .args(["push", "origin", "--delete", &parent.task.branch])
+            .output()
+            .unwrap()
+            .status
+            .success());
+        std::fs::write(bin.path().join("armed"), "").unwrap();
+        std::fs::write(bin.path().join("pr.json"), serde_json::json!({
+            "data": {"repository": {
+                "mergeCommitAllowed": true, "squashMergeAllowed": true, "rebaseMergeAllowed": true,
+                "pullRequest": {
+                    "id": "PR_fixture", "number": 42, "url": "https://github.com/fixture/repo/pull/42",
+                    "state": "OPEN", "isDraft": false, "headRefName": parent.task.branch,
+                    "headRefOid": published_tip, "mergedAt": null, "mergeCommit": null,
+                    "mergeStateStatus": "CLEAN", "isMergeQueueEnabled": false, "isInMergeQueue": false,
+                    "autoMergeRequest": {"enabledAt": "2026-11-13T00:00:00Z"}, "mergeQueueEntry": null
+                }
+            }}
+        }).to_string()).unwrap();
+        // Reject exposing a changed head while GitHub Auto is still armed.
+        if changed_head && matches!(remote_state, "open" | "unreadable") {
+            let hook = repo.bare_path().join("hooks/pre-receive");
+            std::fs::write(
+                &hook,
+                format!("#!/bin/sh\ntest ! -f '{}/armed'\n", bin.path().display()),
+            )
+            .unwrap();
+            std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let child = Task {
+            id: TaskId::new(),
+            ..parent.task.clone()
+        };
+        let prepared = super::prepare_task_placement(
+            &parent.store,
+            repo.path(),
+            &child,
+            None,
+            &super::TaskProcessOptions {
+                name: Some("child-task".into()),
+                stack_on: Some("FIX-1".into()),
+                ..Default::default()
+            },
+        )
+        .await;
+        assert!(read.exists(), "missing fresh read for {remote_state}");
+        if remote_state == "merged" {
+            assert!(prepared.unwrap_err().to_string().contains("already merged"));
+            assert!(crate::git::rev_parse(repo.bare_path(), &parent.task.branch).is_err());
+            assert!(bin.path().join("armed").exists());
+            assert_eq!(
+                parent
+                    .store
+                    .get_task_pr(&pr.id)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .phase(),
+                crate::work::task::PrPhase::Merged
+            );
+            continue;
+        }
+        let prepared = prepared.unwrap();
+        assert_eq!(prepared.plan.base_ref, local_tip);
+        if remote_state == "closed" {
+            let recorded = parent
+                .store
+                .active_task_pr(&parent.task.id)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_ne!(recorded.id, pr.id);
+            assert_eq!(recorded.sequence, pr.sequence + 1);
+            assert!(recorded.publication.is_none());
+            assert_eq!(prepared.pr(&child.id).parent_pr_id, Some(recorded.id));
+            assert_eq!(
+                parent
+                    .store
+                    .get_task_pr(&pr.id)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .phase(),
+                crate::work::task::PrPhase::Abandoned
+            );
+            assert_eq!(
+                crate::git::rev_parse(repo.bare_path(), &parent.task.branch).unwrap(),
+                local_tip
+            );
+            assert!(bin.path().join("armed").exists());
+            continue;
+        }
+        assert_eq!(prepared.pr(&child.id).parent_pr_id, Some(pr.id.clone()));
+        assert_eq!(
+            crate::git::rev_parse(repo.bare_path(), &parent.task.branch).unwrap(),
+            local_tip
+        );
+        assert_eq!(repo.head_sha(), local_tip);
+        assert_eq!(bin.path().join("armed").exists(), !changed_head);
+        let saved = parent.store.get_task_pr(&pr.id).await.unwrap().unwrap();
+        pr.github_observation = saved.github_observation.clone();
+        pr.updated_at = saved.updated_at;
+        if changed_head {
+            pr.publication.as_mut().unwrap().merge = None;
+        }
+        assert_eq!(saved, pr);
+    }
+}
+
+#[tokio::test]
+async fn task_preparation_stacks_on_origin_when_the_parent_branch_diverged() {
+    let repo = loopflow_test_support::TestRepo::new();
+    let parent = task_fixture_at("FIX-1", repo.path().canonicalize().unwrap()).await;
+    let git = |args: &[&str]| {
+        let output = std::process::Command::new("git")
+            .current_dir(repo.path())
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+    };
+    repo.create_branch(&parent.task.branch);
+    repo.create_file("origin.txt", "work only origin has");
+    repo.stage_all();
+    repo.commit("Origin parent work");
+    let origin_tip = repo.head_sha();
+    repo.push_new_branch(&parent.task.branch);
+    git(&["reset", "--hard", "HEAD~1"]);
+    repo.create_file("local.txt", "work only this Machine has");
+    repo.stage_all();
+    repo.commit("Local parent work");
+    repo.checkout("main");
+    let child = Task {
+        id: TaskId::new(),
+        ..parent.task.clone()
+    };
+    let options = super::TaskProcessOptions {
+        name: Some("child-task".into()),
+        stack_on: Some("FIX-1".into()),
+        ..Default::default()
+    };
+
+    let prepared =
+        super::prepare_task_placement(&parent.store, repo.path(), &child, None, &options)
+            .await
+            .unwrap();
+    assert_eq!(prepared.plan.base_ref, origin_tip);
+    let (_, note) = super::record_stack_parent(&parent.store, repo.path(), &child, "FIX-1")
+        .await
+        .unwrap();
+    assert_eq!(
+        note.as_deref(),
+        Some(format!(
+            "this Task bases on origin/{} and leaves out 1 local FIX-1 commit not on origin; run `lf commit -p` in FIX-1's checkout to include them",
+            parent.task.branch
+        ).as_str())
+    );
+    let remote = std::process::Command::new("git")
+        .current_dir(repo.bare_path())
+        .args(["rev-parse", &format!("refs/heads/{}", parent.task.branch)])
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&remote.stdout).trim(), origin_tip);
 }
 
 #[test]

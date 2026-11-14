@@ -105,14 +105,13 @@ Provider delivery converges independently; there is no cross-system atomic switc
 ## Durable communication
 
 ```bash
-lf task steer INF-123 "keep the public name"
-lf --wave infrastructure session steer "preserve native history"
-lf session steer "retain source attribution"
-lf session steer SESSION "inspect the last failure"
+lf steer INF-123 "keep the public name"
+lf --wave infrastructure steer "preserve native history"
+lf --repo . steer "retain source attribution"
+lf steer SESSION "inspect the last failure"
 lf session steers SESSION --json --limit 32
 lf session steers SESSION --after 42 --json
 lf session steers SESSION --source STEER_ID
-lf session steers SESSION --retry STEER_ID
 ```
 
 Steers retain immutable source revisions and authorship. Task steers and
@@ -121,8 +120,9 @@ Linear delivery receipts remain separate. Repository and Wave steers are
 Machine-local and report unavailable shared planning exchange for those scopes.
 
 Each Session selects its steers from its repository, Task association and
-Wave ancestors. Peers receive independent receipts. Saving a steer starts no turn;
-an idle Session receives pending steers on its next supported provider boundary.
+Wave ancestors. Peers receive independent receipts. An idle managed Session is
+woken with pending steers by the Machine server; any other Session receives them
+on its next supported provider boundary.
 Startup, user continuation, tools and compaction share the receipt path. Task
 brief references contain no consumed steers.
 
@@ -152,7 +152,7 @@ These examples use current command spellings; the lifecycle contract is above.
 
 ```bash
 lf -b implement
-lf session list --interactive false --task INF-123 --json
+lf session list --headless --task INF-123 --json
 lf resume SESSION
 lf session rename SESSION "Migration review"
 lf session bind SESSION --task INF-123

@@ -1835,18 +1835,20 @@ mod tests {
                 [&attachment.agent_process_id],
             )
             .unwrap();
-        let ended = store.read_dashboard(&repo, &id).unwrap().unwrap();
-        assert!(ended.resolution.unavailable.is_empty());
-        assert!(ended.arrangement.order.is_empty());
-        // The same Task is still open; only its current attention departed.
-        assert_eq!(
-            store
-                .resolve_selection(&repo, &selection())
-                .unwrap()
-                .members
-                .len(),
-            3
-        );
+        crate::store::query_plans::assert_no_empty_writes(&store, || {
+            let ended = store.read_dashboard(&repo, &id).unwrap().unwrap();
+            assert!(ended.resolution.unavailable.is_empty());
+            assert!(ended.arrangement.order.is_empty());
+            // The same Task is still open; only its current attention departed.
+            assert_eq!(
+                store
+                    .resolve_selection(&repo, &selection())
+                    .unwrap()
+                    .members
+                    .len(),
+                3
+            );
+        });
     }
 
     #[test]

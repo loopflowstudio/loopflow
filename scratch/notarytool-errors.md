@@ -27,6 +27,16 @@ Errors arrive as plain text on stderr even with `--output-format json`. The
 agreement was unsigned at planning time, so the check's first run will be red
 until someone accepts it at developer.apple.com.
 
+## Message shape
+
+Apple's line says why; the advice says what is safe next. Every message carries
+the advice (concept review, 2026-11-13):
+
+```text
+Notarization upload failed: Error: HTTP status code: 403. …; inspect Apple history before retrying
+Notarization upload failed; inspect Apple history before retrying   # notarytool printed nothing
+```
+
 ## Demo / remaining
 
 1. `uv run pytest python/tests/test_release_loopflow.py -k notarytool`: the
@@ -43,7 +53,7 @@ alerting beyond the issue.
 
 ## Checks
 
-- `uv run pytest python/tests/test_release_loopflow.py` — 17 passed (compress).
+- `uv run pytest python/tests/test_release_loopflow.py` — 17 passed (implement, advice always kept).
 - `actionlint .github/workflows/notarization-check.yml` — clean (compress).
 - Step shell with stub `xcrun`/`gh`: red+no issue → create, red+open → comment,
   green+open → close, green+none → nothing; exit codes match (implement).

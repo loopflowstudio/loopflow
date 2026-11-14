@@ -196,13 +196,16 @@ The artifacts expire after 14 days; releases stay the durable channel.
 ### Notarization
 
 When Apple rejects an upload or a wait, the `desktop-app` log prints
-notarytool's output above the traceback, and the exception carries its first
-line:
+notarytool's output above the traceback. The exception carries its first line,
+then what is safe next:
 
 ```text
 Error: HTTP status code: 403. A required agreement is missing or has expired. …
-RuntimeError: Notarization upload failed: Error: HTTP status code: 403. A required agreement is missing or has expired. …
+RuntimeError: Notarization upload failed: Error: HTTP status code: 403. A required agreement is missing or has expired. …; inspect Apple history before retrying
 ```
+
+An upload that fails may still have landed, so check `xcrun notarytool history`
+before retrying. A failed wait keeps its submission; rerunning resumes it.
 
 `.github/workflows/notarization-check.yml` runs `xcrun notarytool history`
 with the same secrets every morning (13:17 UTC), so a broken account shows up
@@ -215,10 +218,6 @@ the next green run closes it.
 |---|---|
 | `403. A required agreement is missing or has expired` | The Account Holder accepts the new agreement at developer.apple.com. No code change; retrying fails until then. |
 | `401. Unauthenticated` | `NOTARY_KEY_ID`, `NOTARY_ISSUER` or `NOTARY_KEY` is wrong. Fix it in Doppler `loopflow`/`prd` and copy it to the Actions secrets. |
-
-If notarytool printed nothing, the error still says to inspect Apple history
-(`xcrun notarytool history`) before retrying, since the upload may have
-landed.
 
 Release candidates also run `cargo package --locked -p loopflow`. This compiles
 the extracted crates.io archive before tagging, so repository-only embedded

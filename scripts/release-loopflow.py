@@ -146,16 +146,16 @@ def _write_submission(path: Path, receipt: dict[str, object]) -> None:
 def _notarytool_failed(
     result: subprocess.CompletedProcess, what: str, advice: str
 ) -> RuntimeError:
-    """Print notarytool's output and name Apple's first line in the error."""
+    """Print notarytool's output; the error names Apple's first line, then what is safe next."""
     stdout = (result.stdout or "").strip()
     stderr = (result.stderr or "").strip()
     for output in (stdout, stderr):
         if output:
             print(output, flush=True)
     message = stderr or stdout
-    if not message:
-        return RuntimeError(f"{what}; {advice}")
-    return RuntimeError(f"{what}: {message.splitlines()[0].strip()}")
+    if message:
+        what = f"{what}: {message.splitlines()[0].strip()}"
+    return RuntimeError(f"{what}; {advice}")
 
 
 def _notarize_dmg(dmg_path: Path) -> int:

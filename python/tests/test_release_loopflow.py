@@ -251,11 +251,16 @@ UNAUTHENTICATED_401 = (
 @pytest.mark.parametrize(
     ("step", "stderr", "message"),
     [
-        ("submit", f"\n{AGREEMENT_403}\n", f"Notarization upload failed: {AGREEMENT_403}"),
+        (
+            "submit",
+            f"\n{AGREEMENT_403}\n",
+            f"Notarization upload failed: {AGREEMENT_403}; inspect Apple history before retrying",
+        ),
         (
             "wait",
             UNAUTHENTICATED_401,
-            f"Notarization submission-1 wait failed: {UNAUTHENTICATED_401}",
+            f"Notarization submission-1 wait failed: {UNAUTHENTICATED_401}; "
+            "retry resumes the retained submission",
         ),
         (
             "submit",

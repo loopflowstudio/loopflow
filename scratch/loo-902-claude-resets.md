@@ -13,16 +13,20 @@ at-limit dialog inside a live conversation.
 $ lf account claude=jack@
   …
   resets: 2 usable (live)
-    weekly  full-reset-2611        1 of 1 left · usable now · clears seven_day (70% used), Fable (18% used) · ends 2026-12-10
-    fable   launch-2610-fable-6mo  1 of 1 left · usable now · returns what Fable used to the weekly limit · ends 2027-03-09
-    fable   launch-2610-fable      0 of 1 left
+    weekly  full-reset-2611        1 of 1 left · usable now · clears weekly (70% used), weekly:fable (18% used) · ends 2026-12-10
+    fable   launch-2610-fable-6mo  1 of 1 left · usable now · clears weekly:fable (18% used) · returns it to the weekly limit · ends 2027-03-09
+    fable   launch-2610-fable      0 of 1 left · unavailable
 $ lf account redeem-reset claude=jack@ --scope fable
+fable · launch-2610-fable-6mo · weekly 70% · weekly:fable 100%
 Reset attempt 4b0e…; retry with --idempotency-key 4b0e… --reset-id launch-2610-fable-6mo
 reset · fable · launch-2610-fable-6mo
-  before  seven_day 70% · seven_day_fable 100%
-  after   seven_day 61% · seven_day_fable 0%
+  before  weekly 70% · weekly:fable 100%
+  after   weekly 61% · weekly:fable 0%
 $ lf --account claude=jack@ -m fable …      # routes to the login again
 ```
+
+The Fable line is the target of direction 3 below; today it prints
+"returns what Fable used to the weekly limit" in place of `clears`.
 
 ## What Claude offers (established 2026-11-14)
 
@@ -173,8 +177,9 @@ pub struct Reset {
 
 ## Next implement direction (concept review, 2026-11-14)
 
-The built change matches the Target except where noted here. Each item is a
-change to make; the first two are what a person would notice.
+The built change matches the Target except where noted here. None of the six
+is built yet (checked 2026-11-14 against `4840fed886`). Each item is a change
+to make; the first two are what a person would notice.
 
 1. **A reset block lf can't decode must not cost the usage read.** Every
    Claude poll now sends `?cedar_ember=1&skip_spend=1` (one read; the
@@ -286,7 +291,7 @@ key-before-request line, `served_reads.rs` spelling test.
   `provider_account/activation.rs`, `docs/subscriptions.md`. Keep this
   change inside `redeem_reset`, `print_reset_usage` and the reset section of
   the doc; avoid `provider_account.rs`.
-- LOO-901 (no PR found on 2026-11-14) owns rejection normalization: the
+- LOO-901 (no PR found on 2026-11-14, rechecked after realign) owns rejection normalization: the
   free-text window rows `lf account claude --cached` shows today
   ("You've hit your Fable limit · resets Nov 16…") are its to fix. If the
   post-reset routing test below fails because of such a row, record it there

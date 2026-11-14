@@ -76,6 +76,36 @@ stack preparation uses the published base, origin and local heads remain intact,
 the full parent PR record (including its merge request) is unchanged, and the
 stack note counts one omitted commit with the parent push command.
 
+### Next implement direction (concept review, 2026-11-13, third pass)
+
+Counterexample, read from the code (not run): GitHub closes a PR when its head
+branch is deleted, and squash landing deletes the branch. So a parent the store
+still shows Open (GitHub number recorded) whose `origin/<branch>` is gone after
+`fetch --prune` has merged or closed on GitHub; the store has not read it yet
+(Auto landed between observations). `record_stack_parent` today trusts the
+store: it pushes the merged branch back to origin, and on a changed head calls
+`disable_auto_merge` on a PR that can no longer merge. That bypasses two rules
+above: a merged parent refuses, a closed PR falls back to the placed branch.
+The fixture `gh` never reports the PR closed, so the regression passes.
+
+1. In `record_stack_parent`, when the selected parent's PR is Open and origin
+   lacks its branch, read the PR fresh first (`reconcile_task_pr_observation`,
+   `PrReadFreshness::Fresh`; it takes and releases the parent mutation lock
+   itself) and select again. Merged then refuses; closed stacks as an
+   unpublished parent with a new record. Still Open, or GitHub unreadable:
+   restore through the fence as now, on the store's reading. No new refusal.
+   The fence stays, per “Implement publication for that case while respecting
+   the parent’s commit-fence behavior”.
+2. Regression: fixture `gh` reports the PR merged, remote branch absent, store
+   Open. Stacking refuses with the merged message; origin gains no branch and
+   `--disable-auto` is never called. Same for closed: branch pushed, a new
+   unpublished parent record, the old one abandoned.
+3. “Commit fence” is internal; no doc on main uses it. In `docs/agent-api.md`,
+   `docs/dev/delivery.md`, `docs/ops.md` and `docs/work.md`, say what happens:
+   “If Auto was requested for an earlier head, stacking turns Auto off before
+   pushing.” Add that a parent whose PR merged or closed on GitHub is read
+   first. The preview line may say the PR is read from GitHub at execution.
+
 Not for this Task: the child names the parent's PR row (`parent_pr_id`), though
 the taught concept is a Task with a branch. Keeping the row current caused the
 abandoned-parent, retry and re-parenting repairs. A parent Task plus fork could

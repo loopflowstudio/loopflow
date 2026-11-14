@@ -57,7 +57,7 @@ Recording is per connection, not thread-local: Work reads such as
 `registered_task_status` go through `journal::request::spawn_blocking` and
 tokio, so the statement that ends a transaction may run off the test's thread.
 A `#[cfg(test)]` registry keyed by the connection's handle address holds the
-call sites while `empty_writes` runs. (`statements()` is thread-local and has
+call sites while `assert_no_empty_writes` runs. (`statements()` is thread-local and has
 the same blind spot; leave it unless a test needs it.)
 
 Call site: the innermost `loopflow::` frame outside `store::contention` and
@@ -98,19 +98,20 @@ known call site with that Task's ID until it lands.
 ## Docs
 
 Written: `docs/dev/data.md` "Query cost and the write lock", the paragraph
-after the foreign-key one (`empty_writes` example, failure text, what is not
+after the foreign-key one (`assert_no_empty_writes` example, failure text, what is not
 reported, how to fix). Implement keeps the example's signature and failure
 text true, or edits the doc.
 
 ## Status
 
 Built: `contention::empty_writes` (per-connection registry keyed by handle
-address, `PROGRESS_STEPS = 1` in test builds), `query_plans::empty_writes` (self-test only) and
-`assert_no_empty_writes`, the self-test, and assertions in both query_plans
+address, `PROGRESS_STEPS = 1` in test builds), `assert_no_empty_writes`, the self-test, and assertions in both query_plans
 path tests, the boundary sequence, `task_detail_reads_capacity_once_for_all_sessions`
 (now `multi_thread`, `block_in_place` around `registered_task_status`) and
 `query_selection_uses_current_reported_attention_and_prunes_ended_activity`.
-Docs match the built API. Merged origin/main through #1910 without conflicts.
+Docs match the built API. Merged origin/main through #1925 without conflicts. Gate removed the
+self-test-only `query_plans::empty_writes` wrapper; the self-test calls
+`contention::empty_writes::record`.
 
 Remaining: gate (clippy `--all-targets`, `documented_commands::`), publish.
 
@@ -120,9 +121,7 @@ One concept, one name: an empty write is a transaction that held the write
 lock and changed no row; `assert_no_empty_writes` is the only public entry and
 the docs teach exactly it. Three of four call sites nest it around
 `statements()`; a combined helper would hide which check failed, so they stay
-separate. Open nit for gate, not a redesign: the private
-`query_plans::empty_writes` wrapper exists only for the self-test, which could
-call `contention::empty_writes::record` directly. No open product choice.
+separate. No open product choice.
 
 ## QA (2026-11-13)
 
@@ -144,7 +143,7 @@ test now pin `created_at` ahead. Report: `scratch/qa.html`.
 
 `cargo test -p loopflow --lib store::query_plans:: server::boundary::tests::
 store::contention::` and the human_session/selections tests named above pass
-with `empty_writes` assertions, and reintroducing an empty write on any of
+with `assert_no_empty_writes`, and reintroducing an empty write on any of
 those paths (e.g. dropping the read-first check in `record_owner_viewer_hold`)
 fails with that function's name.
 
@@ -163,7 +162,7 @@ fails with that function's name.
 
 ## Checks
 
-- Focused (17 tests: query_plans, contention, boundary, human_session, selections): pass after compress (322 s, load ~600).
-- `cargo clippy -p loopflow --lib -- -D warnings`: clean.
-- Gate: `test(documented_commands::)` for `docs/dev/data.md`, plus
-  `cargo clippy --all-targets -- -D warnings`.
+- Gate (after #1925 merge): `nextest -E 'test(store::query_plans::) | test(store::contention::) | test(server::boundary::tests::) | test(task_detail_reads_capacity_once_for_all_sessions) | test(query_selection_uses_current_reported_attention_and_prunes_ended_activity) | test(documented_commands::)'`: 34 passed, by hand after the runner stopped at the 32 GiB disk floor.
+- `cargo clippy --all-targets -- -D warnings`: clean. `cargo fmt --check`: clean.
+- `website/dev.py test` with the candidate `lf` on PATH: pass.
+- iOS suite: selected by the `server/` path, but the `boundary.rs` change is test-only; left to CI.

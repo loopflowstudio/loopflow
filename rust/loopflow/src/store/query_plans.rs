@@ -162,19 +162,14 @@ pub(crate) fn statements(store: &SqliteStore, run: impl FnOnce()) -> Vec<String>
     TRACED.with(|traced| traced.borrow_mut().take().unwrap())
 }
 
-/// Run `run` and return the call site of each write transaction it ends on
-/// `store`'s connection that took the write lock and changed no row: an
-/// `IMMEDIATE` transaction that only read, or an autocommit write that matched
-/// nothing. Each one made every other writer on the Machine wait for nothing.
-fn empty_writes<R>(store: &SqliteStore, run: impl FnOnce() -> R) -> (R, Vec<String>) {
-    super::contention::empty_writes::record(&store.conn, run)
-}
-
 /// Run `run` and return its result, failing with the call site of each write
-/// that took the lock and changed nothing (see `empty_writes`).
+/// transaction it ends on `store`'s connection that took the write lock and
+/// changed no row: an `IMMEDIATE` transaction that only read, or an autocommit
+/// write that matched nothing. Each one made every other writer on the Machine
+/// wait for nothing.
 #[track_caller]
 pub(crate) fn assert_no_empty_writes<R>(store: &SqliteStore, run: impl FnOnce() -> R) -> R {
-    let (result, found) = empty_writes(store, run);
+    let (result, found) = super::contention::empty_writes::record(&store.conn, run);
     assert!(
         found.is_empty(),
         "took the write lock and changed nothing:\n  {}",
@@ -304,10 +299,10 @@ pub(crate) fn foreign_key_lookups(store: &SqliteStore) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        assert_no_empty_writes, empty_writes, foreign_key_lookups, growing_scans, statements,
-        GROWING, MEASURED,
+        assert_no_empty_writes, foreign_key_lookups, growing_scans, statements, GROWING, MEASURED,
     };
     use crate::durable::TaskId;
+    use crate::store::contention::empty_writes;
     use crate::store::sqlite::{SqliteStore, ViewerHold};
     use rusqlite::params;
 
@@ -332,7 +327,7 @@ mod tests {
             .execute_batch("CREATE TABLE probe(x); INSERT INTO probe VALUES (1);")
             .unwrap();
 
-        let ((), found) = empty_writes(&store, || take_the_lock_for_nothing(&store));
+        let ((), found) = empty_writes::record(&store.conn, || take_the_lock_for_nothing(&store));
         assert_eq!(found.len(), 3, "{found:?}");
         assert!(
             found

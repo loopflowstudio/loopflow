@@ -661,8 +661,7 @@ fn ssh_prepared_viewer_reuses_held_terminal_without_an_extra_pty_and_releases_on
         .collect();
     assert!(terminals.is_empty(), "extra SSH PTY: {terminals:?}");
 
-    // A quiet viewer's heartbeats are host and relay rules (`host_tests`,
-    // `relay_tests`); here the hold reads viewed while the pane is open.
+    // Here the hold reads viewed while the pane is open.
     wait_hold(&terminal, "viewed");
     // Initial dimensions, then a real local resize, both traverse the same stream.
     pane.input("stty size\r");

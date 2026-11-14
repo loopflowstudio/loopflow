@@ -1261,23 +1261,20 @@ async fn select_stack_parent(
             }
         }
     }
-    let pr = store
+    let pr = match store
         .active_task_pr(&parent_task.id)
         .await
-        .map_err(|error| task_error(format!("failed to read stack parent PR: {error}")))?;
-    match pr.as_ref().map(TaskPr::phase) {
-        Some(PrPhase::Merged) => {
+        .map_err(|error| task_error(format!("failed to read stack parent PR: {error}")))?
+    {
+        Some(pr) if pr.phase() == PrPhase::Merged => {
             return Err(task_error(format!(
                 "stack parent {requested} already merged; place this Task without --stack-on"
             )))
         }
-        Some(PrPhase::Abandoned) => {
-            return Err(task_error(format!(
-                "stack parent {requested}'s PR was abandoned; it has no live branch to stack on"
-            )))
-        }
-        _ => {}
-    }
+        // A closed PR is spent: the placed branch decides, as for a parent that never published.
+        Some(pr) if pr.phase() == PrPhase::Abandoned => None,
+        pr => pr,
+    };
     if pr.is_none() && (parent_task.worktree.is_none() || parent_task.branch.is_empty()) {
         return Err(task_error(format!(
             "stack parent {requested} has no placed branch; run `lf checkout {requested}` first"

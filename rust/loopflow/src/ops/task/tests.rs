@@ -2373,6 +2373,70 @@ async fn task_preparation_stacks_on_an_unpushed_parent_branch_without_a_pr() {
 }
 
 #[tokio::test]
+async fn task_preparation_stacks_on_a_placed_parent_with_an_abandoned_pr() {
+    let repo = loopflow_test_support::TestRepo::new();
+    let parent = task_fixture_at("FIX-1", repo.path().canonicalize().unwrap()).await;
+    repo.create_branch(&parent.task.branch);
+    repo.create_file("parent.txt", "parent work");
+    repo.stage_all();
+    repo.commit("Parent work");
+    let parent_tip = repo.head_sha();
+    repo.checkout("main");
+    let mut previous = parent
+        .store
+        .active_task_pr(&parent.task.id)
+        .await
+        .unwrap()
+        .unwrap();
+    previous.publication = Some(PrPublication {
+        requested_at: previous.created_at,
+        presentation: None,
+        github: Some(GithubPr {
+            number: 42,
+            url: "https://github.com/fixture/repo/pull/42".into(),
+            head_sha: Some(parent_tip.clone()),
+        }),
+        merge: None,
+    });
+    previous.abandoned_at = Some(previous.created_at);
+    parent.store.update_task_pr(&previous).await.unwrap();
+    let child = Task {
+        id: TaskId::new(),
+        ..parent.task.clone()
+    };
+    let prepared = super::prepare_task_placement(
+        &parent.store,
+        repo.path(),
+        &child,
+        None,
+        &super::TaskProcessOptions {
+            name: Some("child-task".into()),
+            stack_on: Some("FIX-1".into()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(prepared.plan.base_ref, parent_tip);
+    let recorded = parent
+        .store
+        .active_task_pr(&parent.task.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(recorded.sequence, previous.sequence + 1);
+    assert_eq!(recorded.branch, parent.task.branch);
+    assert!(!recorded.is_settled());
+    assert!(recorded.publication.is_none());
+    assert_eq!(prepared.pr(&child.id).parent_pr_id, Some(recorded.id));
+    assert_eq!(
+        parent.store.get_task_pr(&previous.id).await.unwrap(),
+        Some(previous)
+    );
+}
+
+#[tokio::test]
 async fn task_preparation_stacks_on_origin_when_the_parent_branch_diverged() {
     let repo = loopflow_test_support::TestRepo::new();
     let parent = task_fixture_at("FIX-1", repo.path().canonicalize().unwrap()).await;

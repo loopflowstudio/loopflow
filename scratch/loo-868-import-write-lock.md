@@ -38,7 +38,10 @@ validating the local export twice inside `merge`, the winners/heads passes.
 
 Built in `planning_peers.rs`: `Import::read` (`plan` in a deferred tx) and
 `Import::write` (`BEGIN IMMEDIATE`, planning-revision recheck, route, apply).
-Remaining: the competing-writer probe on a store copy (gate) and the PR-body number.
+QA (2026-11-13) ran the competing-writer probe and found the write phase
+re-preparing `retain`'s and `observe`'s statements per change (each prepare
+compiles `planning_peer_changes`' triggers); they use `prepare_cached` now.
+Remaining: the PR-body number (below).
 
 Departures from the plan below:
 
@@ -66,13 +69,19 @@ Departures from the plan below:
 - Compress (shared `Import::read`, `record_revision`, `touched_records` in status): same 45 passed; clippy clean.
 - Recompute test fails with the recheck disabled ("remote" overwrites "local"); passes with it.
 - `cargo clippy -p loopflow --all-targets -- -D warnings`, `cargo fmt`: clean (implement).
-- Competing-writer probe on a store copy, 2,000 unrouted: not run; gate.
+- Competing-writer probe (QA, throwaway example, deleted): `~/.lf` copy, manabot
+  destination, N chained peer title edits on the 261 Tasks with full field history,
+  second connection looping `BEGIN IMMEDIATE; COMMIT`. Machine load ~75; medians of
+  six interleaved runs, longest writer wait: 200 unseen 465 → 286 → 222 ms;
+  2,000 unseen 1,079 → 662 → 337 ms (base → split → + cached statements).
+  Details in `scratch/qa.html`.
+- After `prepare_cached`: same 45 focused tests passed; clippy clean (QA).
 - Integration callers (`machine_commands`, `planning_foreground_tests`): CI.
 
 ## Approach: plan under a read snapshot, write under the lock
 
 Split the body into two private functions over one `ImportPlan` (shipped as
-`Import::plan` and `Import::write`):
+`Import::read`/`Import::plan` and `Import::write`):
 
 - `plan_import(conn, repo, destination, incoming, in_conflict) -> ImportPlan`
   reads only. It runs in a deferred transaction (as `export_peer_planning` does
@@ -195,7 +204,8 @@ a probe on the copy shows which records and fields lack history.
 
 ## Exclusions
 
-- `export_peer_planning` locking (LOO-859, merged in #1901).
+- `export_peer_planning` locking (LOO-859, merged in #1901), beyond making its
+  read transaction `Deferred` as its comment already intended (`scratch/questions.md`).
 - The `in_conflict` full recompute.
 - The `incomplete planning record` behavior above.
 

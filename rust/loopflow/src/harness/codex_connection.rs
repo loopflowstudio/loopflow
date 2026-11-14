@@ -229,7 +229,10 @@ pub(crate) async fn recover_history(
                         thread: thread.clone(),
                         failed_turn: id.into(),
                         model: None,
-                        account: crate::server::recovery::account(store, "codex", thread.as_str())?,
+                        account: store.provider_session_account(
+                            crate::provider_auth::Provider::Codex,
+                            thread,
+                        )?,
                         state: crate::session_recovery::RecoveryState::WaitingNative,
                         reason: "Reading the rejected turn's native history".into(),
                         retry_at: None,

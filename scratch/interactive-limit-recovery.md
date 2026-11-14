@@ -151,6 +151,14 @@ Current focused checks (inherited LF_* unset, closed stdin):
 - `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter 'sessionRecoveryControlKeepsUncertaintyVisible|sessionEncodingKeepsRequiredNullableTurnFields'` — rebuilt the final helper and Desktop/tests; both headless checks passed. Reconciled the duplicate Session encoder and corrected the fixture-subscript edits exposed by the initial builds. `.lf/tmp/loo-811-reconcile/desktop-test.log`; existing Swift warnings remain.
 - `scripts/check_swift_multiplatform_boundaries.py` — passed. `server describe --json` refreshed the schema fixture against the final helper. `scripts/third_party.py refresh` refreshed the lockfile input hash; `pytest python/tests/test_third_party.py` — 9 passed.
 
+November 14 compression after the holder adaptation: Session-account lookup uses
+the store's existing `provider_session_account`; Claude boundaries no longer
+carry a Codex branch (Codex hooks supply no `prompt_id`, and nothing read it);
+each capacity check reads the retained recovery once; `LaunchAsk` always carries
+its account selection. `cargo test -p loopflow --lib recovery --jobs 4` — 35
+passed; `--lib provider_account::` — 74 passed; `cargo clippy -p loopflow
+--all-targets -- -D warnings` — passed. Logs: `.lf/tmp/loo-811-compress-holder/`.
+
 The gate selection reaches the recovery modules, provider-account/auth, native
 hook/context and fact writer, server boundary/wake/recovery, Session projection,
 CLI parsing/mutations, DTO/served reads, and their transport/lifecycle callers.

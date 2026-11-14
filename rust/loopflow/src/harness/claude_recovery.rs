@@ -31,26 +31,22 @@ pub(crate) fn boundary(
     } else {
         "started"
     };
-    let account = if phase == "started" {
-        if store.session_connection(&adapter.session)?.is_some() {
-            crate::server::recovery::account(store, "codex", thread)
-                .map_err(|error| StoreError::InvalidData(error.to_string()))?
-        } else {
+    // The login that receives this prompt, read from the client's own home.
+    let home = input
+        .pointer("/lf_recovery/claude_home")
+        .and_then(Value::as_str)
+        .filter(|_| phase == "started");
+    let account = match home {
+        Some(home) => {
             let accounts = store.list_provider_accounts(Some("claude"))?;
-            input
-                .pointer("/lf_recovery/claude_home")
-                .and_then(Value::as_str)
-                .and_then(|home| {
-                    provider_account::activation::active_account(
-                        Provider::Claude,
-                        Path::new(home),
-                        &accounts,
-                    )
-                })
-                .map(|account| account.account_id.clone())
+            provider_account::activation::active_account(
+                Provider::Claude,
+                Path::new(home),
+                &accounts,
+            )
+            .map(|account| account.account_id.clone())
         }
-    } else {
-        None
+        None => None,
     };
     store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
         store.record_recovery_boundary(&adapter.session, thread, prompt, phase, account.as_ref())
@@ -109,42 +105,52 @@ pub(crate) fn check(store: &SqliteStore, client: &Client) -> Result<()> {
         return Ok(());
     };
     let rows = read_transcript(path)?;
-    if let Some(request) = &recovery.request {
-        let mut matching = rows
-            .iter()
-            .filter(|row| row["type"] == "user" && row["uuid"] == *request);
-        let Some(prompt) = matching.next().and_then(|row| row["promptId"].as_str()) else {
-            return Ok(());
-        };
-        if matching.next().is_none()
-            && recovery.retry_turn.as_deref() == Some(prompt)
-            && store.has_recovery_phase(&adapter.session, &recovery, "admitted")?
-            && store
-                .recovery_boundary(&adapter.session, thread, prompt, "stopped")?
-                .is_some()
-        {
-            recovery.state = RecoveryState::Continued;
-            recovery.reason = "The native retry completed".into();
-            store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
-                store.record_session_recovery(&adapter.session, &recovery, "settled")
-            })?;
+    let Some(request) = &recovery.request else {
+        if recovery.can_retry() {
+            check_capacity(store, client, &rows, recovery)?;
         }
         return Ok(());
+    };
+    let mut matching = rows
+        .iter()
+        .filter(|row| row["type"] == "user" && row["uuid"] == *request);
+    let Some(prompt) = matching.next().and_then(|row| row["promptId"].as_str()) else {
+        return Ok(());
+    };
+    if matching.next().is_none()
+        && recovery.retry_turn.as_deref() == Some(prompt)
+        && store.has_recovery_phase(&adapter.session, &recovery, "admitted")?
+        && store
+            .recovery_boundary(&adapter.session, thread, prompt, "stopped")?
+            .is_some()
+    {
+        recovery.state = RecoveryState::Continued;
+        recovery.reason = "The native retry completed".into();
+        store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
+            store.record_session_recovery(&adapter.session, &recovery, "settled")
+        })?;
     }
-    check_capacity(store, client, &rows)
+    Ok(())
 }
 
 /// Broker work runs outside the native hook and keeps rotated credentials.
-fn check_capacity(store: &SqliteStore, client: &Client, rows: &[Value]) -> Result<()> {
+fn check_capacity(
+    store: &SqliteStore,
+    client: &Client,
+    rows: &[Value],
+    mut recovery: SessionRecovery,
+) -> Result<()> {
     let adapter = &client.adapter;
     let thread = client.thread.as_str();
-    let Some(mut recovery) = store
-        .session_recovery(&adapter.session)?
-        .filter(|recovery| recovery.thread.as_str() == thread && recovery.can_retry())
+    let Some(model) = claude_rejected_model(rows, &recovery.failed_turn)
+        .filter(|model| Some(model) == recovery.model.as_ref())
     else {
-        return Ok(());
-    };
-    let Some(model) = confirm_rejection(store, adapter, thread, rows, &mut recovery)? else {
+        recovery.state = RecoveryState::Uncertain;
+        recovery.reason =
+            "Newer input or incomplete native history; continue from the conversation".into();
+        store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
+            store.record_session_recovery(&adapter.session, &recovery, "uncertain")
+        })?;
         return Ok(());
     };
     let Some(account) = &recovery.account else {
@@ -334,27 +340,6 @@ fn dispatch_recovery(
         tracing::warn!(%error, "Claude recovery admission stopped");
     }
     Ok(())
-}
-
-fn confirm_rejection(
-    store: &SqliteStore,
-    adapter: &SteerAdapter,
-    thread: &str,
-    rows: &[Value],
-    recovery: &mut SessionRecovery,
-) -> Result<Option<String>> {
-    let Some(model) = claude_rejected_model(rows, &recovery.failed_turn)
-        .filter(|model| Some(model) == recovery.model.as_ref())
-    else {
-        recovery.state = RecoveryState::Uncertain;
-        recovery.reason =
-            "Newer input or incomplete native history; continue from the conversation".into();
-        store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
-            store.record_session_recovery(&adapter.session, recovery, "uncertain")
-        })?;
-        return Ok(None);
-    };
-    Ok(Some(model))
 }
 
 #[cfg(test)]

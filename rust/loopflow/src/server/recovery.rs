@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
 use anyhow::Result;
-use rusqlite::{params, OptionalExtension};
+use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 
@@ -92,17 +92,6 @@ fn clients(store: &SqliteStore) -> Result<Vec<Client>> {
             })
         })
         .collect()
-}
-
-pub(crate) fn account(
-    store: &SqliteStore,
-    provider: &str,
-    thread: &str,
-) -> Result<Option<crate::store::ProviderAccountId>> {
-    let account: Option<String> = store.conn.lock().expect("store mutex poisoned").query_row("SELECT account_id FROM provider_session_accounts WHERE provider=?1 AND provider_session_id=?2",params![provider,thread],|row|row.get(0)).optional()?;
-    account
-        .map(|account| crate::store::ProviderAccountId::parse(&account).map_err(anyhow::Error::msg))
-        .transpose()
 }
 
 #[derive(Default)]

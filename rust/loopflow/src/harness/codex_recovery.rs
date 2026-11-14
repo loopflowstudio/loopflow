@@ -43,7 +43,7 @@ pub(crate) async fn run(
         crate::steer::NativeBoundary::Turn,
         || Ok(()),
     )?;
-    let account = crate::server::recovery::account(&store, "codex", client.thread.as_str())?;
+    let account = store.provider_session_account(Provider::Codex, &client.thread)?;
     let route = match account {
         Some(account) => {
             provider_account::session_account_route(Provider::Codex, &client.thread, &account)
@@ -63,13 +63,7 @@ pub(crate) async fn run(
     )
     .await?;
     let busy = result["thread"]["status"]["type"] == "active";
-    let history = CodexStream::new(FactWriter::new(
-        store.clone(),
-        client.adapter.session.clone(),
-        None,
-        route.clone(),
-        Default::default(),
-    ));
+    let history = history(&store, &client, route.clone());
     let mut connection = Connection {
         client,
         route,
@@ -85,6 +79,21 @@ pub(crate) async fn run(
     connection.serve(upstream, ticks).await
 }
 
+/// Native history recorded beside the conversation, attributed to `route`.
+fn history(
+    store: &SqliteStore,
+    client: &Client,
+    route: Option<provider_account::ProviderAccountRoute>,
+) -> CodexStream {
+    CodexStream::new(FactWriter::new(
+        store.clone(),
+        client.adapter.session.clone(),
+        None,
+        route,
+        Default::default(),
+    ))
+}
+
 #[derive(Debug)]
 struct HistoryRead {
     id: Value,
@@ -93,7 +102,7 @@ struct HistoryRead {
 }
 
 #[derive(Debug)]
-pub(super) struct Recovery {
+struct Recovery {
     pending: Option<HistoryRead>,
     check_at: SystemTime,
     requested: i64,
@@ -277,13 +286,7 @@ impl Connection {
         self.pin_pending = self.route.is_some();
         self.recovery.pending = None;
         self.recovery.check_at = SystemTime::UNIX_EPOCH;
-        self.history = CodexStream::new(FactWriter::new(
-            self.store.clone(),
-            self.client.adapter.session.clone(),
-            None,
-            self.route.clone(),
-            Default::default(),
-        ));
+        self.history = history(&self.store, &self.client, self.route.clone());
         let id = json!(format!("lf-follow-{}", uuid::Uuid::new_v4()));
         writer
             .send(Message::Text(
@@ -308,7 +311,7 @@ impl Connection {
         }
     }
 
-    pub(super) async fn recovery_message(
+    async fn recovery_message(
         &mut self,
         rpc: &Value,
         writer: &mut SplitSink<Upstream, Message>,
@@ -356,7 +359,7 @@ impl Connection {
         }
         if rpc["method"] == "account/chatgptAuthTokens/refresh" {
             let response = match &self.route {
-                Some(route) => route.refresh_codex_auth_tokens().await.ok(),
+                Some(route) => route.prepare_codex_auth_tokens(&|| Ok(())).await.ok(),
                 None => None,
             };
             let reply = match response {
@@ -431,10 +434,7 @@ impl Connection {
         Ok(())
     }
 
-    pub(super) async fn recovery_tick(
-        &mut self,
-        writer: &mut SplitSink<Upstream, Message>,
-    ) -> Result<()> {
+    async fn recovery_tick(&mut self, writer: &mut SplitSink<Upstream, Message>) -> Result<()> {
         self.pin_route().await;
         if self
             .recovery
@@ -629,8 +629,9 @@ impl Connection {
         };
         let session = self.client.adapter.session.clone();
         let retained = self.store.session_recovery(&session)?;
-        if let Some(mut recovery) =
-            retained.filter(|r| r.failed_turn == failed && r.request.is_some())
+        if let Some(mut recovery) = retained
+            .clone()
+            .filter(|r| r.failed_turn == failed && r.request.is_some())
         {
             if let Some(turn) = turns
                 .iter()
@@ -684,13 +685,9 @@ impl Connection {
             self.save_recovery(&recovery, "model")?;
             return Ok(());
         };
-        let session = self.client.adapter.session.clone();
-        let previous = self.store.session_recovery(&session)?;
-        if let Some(previous) = previous.as_ref().filter(|old| old.key() == recovery.key()) {
-            if previous.request.is_some() {
-                return Ok(());
-            }
-            recovery.account = previous.account.clone().or(recovery.account);
+        // The login that received the rejected turn outlives later switches.
+        if let Some(previous) = retained.filter(|old| old.key() == recovery.key()) {
+            recovery.account = previous.account.or(recovery.account);
         }
         let Some(account) = recovery.account.clone() else {
             recovery.reason = "This Session has no managed login to recover".into();
@@ -908,7 +905,7 @@ mod tests {
     async fn cancelled_installation_retains_late_or_lost_reply_without_releasing_retry() {
         for reply in ["success", "error", "lost", "malformed"] {
             let home = tempfile::tempdir().unwrap();
-            let (store, mut recorder) = recovery_fixture(home.path()).await;
+            let (store, mut connection) = recovery_fixture(home.path()).await;
             let shared = Arc::new(Store::from_sqlite_for_test(store.clone()));
             let account = parse_account_id("replacement").unwrap();
             shared
@@ -928,8 +925,8 @@ mod tests {
                 false,
             );
             let mut recovery = SessionRecovery {
-                agent_process_id: recorder.client.adapter.agent_process_id.clone(),
-                thread: recorder.client.thread.clone(),
+                agent_process_id: connection.client.adapter.agent_process_id.clone(),
+                thread: connection.client.thread.clone(),
                 failed_turn: "rejected".into(),
                 model: Some("model".into()),
                 account: None,
@@ -963,7 +960,7 @@ mod tests {
                 .unwrap();
             let admission = gate.accept().unwrap();
             recovery.retry_turn = Some("retry".into());
-            recorder.recovery.preparing = Some(std::thread::spawn(move || {
+            connection.recovery.preparing = Some(std::thread::spawn(move || {
                 Ok(Prepared {
                     admission,
                     route,
@@ -974,7 +971,13 @@ mod tests {
                     ),
                 })
             }));
-            while !recorder.recovery.preparing.as_ref().unwrap().is_finished() {
+            while !connection
+                .recovery
+                .preparing
+                .as_ref()
+                .unwrap()
+                .is_finished()
+            {
                 tokio::task::yield_now().await;
             }
             let (client, server) = tokio::net::UnixStream::pair().unwrap();
@@ -982,13 +985,13 @@ mod tests {
                 .await
                 .split();
             let mut native = WebSocketStream::from_raw_socket(server, Role::Server, None).await;
-            recorder.recovery_tick(&mut writer).await.unwrap();
+            connection.recovery_tick(&mut writer).await.unwrap();
             let sent = native.next().await.unwrap().unwrap();
             let sent: Value = serde_json::from_str(sent.to_text().unwrap()).unwrap();
             assert_eq!(sent["method"], "account/login/start");
             // Native cancellation happens after the account installation was sent.
             hook.shutdown(std::net::Shutdown::Write).unwrap();
-            recorder.recovery_tick(&mut writer).await.unwrap();
+            connection.recovery_tick(&mut writer).await.unwrap();
             assert_eq!(
                 store
                     .session_recovery("conversation")
@@ -1005,18 +1008,21 @@ mod tests {
                 } else {
                     json!({"id":sent["id"],"error":{"code":-32603,"message":"failed"}})
                 };
-                recorder.recovery_message(&rpc, &mut writer).await.unwrap();
+                connection
+                    .recovery_message(&rpc, &mut writer)
+                    .await
+                    .unwrap();
                 let mut response = String::new();
                 hook.read_to_string(&mut response).unwrap();
                 assert!(response.is_empty(), "cancelled retry was released");
             }
             let pinned = shared
-                .provider_session_account(Provider::Codex, &recorder.client.thread)
+                .provider_session_account(Provider::Codex, &connection.client.thread)
                 .await
                 .unwrap();
             assert_eq!(pinned, (reply == "success").then_some(account));
             for _ in 0..2 {
-                recorder.recovery_tick(&mut writer).await.unwrap();
+                connection.recovery_tick(&mut writer).await.unwrap();
             }
             let retained = store.session_recovery("conversation").unwrap().unwrap();
             assert_eq!(retained.state, RecoveryState::Uncertain);

@@ -509,13 +509,8 @@ impl ProviderAccountRoute {
 
     /// Supply the private native server from the existing credential broker.
     /// The lock and native refresh complete before returning; no refresh grant
-    /// enters the observer or a second credential store.
-    pub(crate) async fn refresh_codex_auth_tokens(
-        &self,
-    ) -> Result<secrecy::SecretString, ProviderAccountError> {
-        self.prepare_codex_auth_tokens(&|| Ok(())).await
-    }
-
+    /// enters the server's connection or a second credential store. `admitted`
+    /// stops the wait for the credential lock once native admission closes.
     pub(crate) async fn prepare_codex_auth_tokens(
         &self,
         admitted: &(dyn Fn() -> Result<(), ProviderAccountError> + Sync),
@@ -1423,12 +1418,14 @@ async fn select_route(
     recovery_selection: Option<&selection::AccountSelection>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
     let require_capacity = recovery_selection.is_some();
-    let ambient_selection = if recovery_selection.is_none() {
-        selection::AccountSelection::from_env()?
-    } else {
-        Default::default()
+    let ambient;
+    let selection = match recovery_selection {
+        Some(selection) => selection,
+        None => {
+            ambient = selection::AccountSelection::from_env()?;
+            &ambient
+        }
     };
-    let selection = recovery_selection.unwrap_or(&ambient_selection);
     ensure_supported(provider)?;
     let store = route_store().await?;
     let resumed = match (&store, agent_session) {
@@ -1445,7 +1442,7 @@ async fn select_route(
             LaunchAsk {
                 exact_account_id,
                 model,
-                selection: Some(selection),
+                selection,
             },
             wave_id,
             store,
@@ -1673,11 +1670,11 @@ async fn resolve_selected_provider_account(
 }
 
 /// What a launch asks of the route: the login it names and the model it runs.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 struct LaunchAsk<'a> {
     exact_account_id: Option<&'a ProviderAccountId>,
     model: Option<&'a str>,
-    selection: Option<&'a selection::AccountSelection>,
+    selection: &'a selection::AccountSelection,
 }
 
 async fn ordered_selected_candidates(
@@ -1739,12 +1736,6 @@ async fn ordered_selected_candidates(
         }
     }
     catalog.retain(|account| account.home.is_some());
-    let ambient = if selection.is_none() {
-        selection::AccountSelection::from_env()?
-    } else {
-        Default::default()
-    };
-    let selection = selection.unwrap_or(&ambient);
     let selected = selection.resolved_accounts(&catalog)?;
     if candidates.is_empty() {
         if selection.is_restricted() || exact_account_id.is_some() {
@@ -1952,12 +1943,14 @@ pub(crate) async fn inspect_provider_route(
     provider: Provider,
     model: Option<&str>,
 ) -> Result<Option<Vec<ProviderAccount>>, ProviderAccountError> {
-    if !selection::AccountSelection::from_env()?.is_default() {
+    let selection = selection::AccountSelection::from_env()?;
+    if !selection.is_default() {
         return Ok(ordered_selected_candidates(
             provider,
             LaunchAsk {
+                exact_account_id: None,
                 model,
-                ..LaunchAsk::default()
+                selection: &selection,
             },
             repo_id,
             None,

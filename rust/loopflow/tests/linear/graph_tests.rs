@@ -686,7 +686,11 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
         if upstream == "parent-task" {
             let parent_pr = publish_stack_fixture_pr(&runtime, &child.store, &parent.id);
             runtime
-                .block_on(child.store.stack_task_placement(&child.task, &parent_pr.id))
+                .block_on(child.store.stack_task_placement(
+                    &child.task,
+                    &parent_pr.id,
+                    &child.task.base_commit,
+                ))
                 .unwrap();
         }
         write_skill(repo.path(), "identity-proof", "Prove checkout identity.");

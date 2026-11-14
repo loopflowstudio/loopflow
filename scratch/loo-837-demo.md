@@ -85,6 +85,23 @@ Then demo; no interactive judgment collected in this headless run.
 `scratch/qa.html`: 11 CLI scenarios with the branch `lf`. Unpushed, behind,
 diverged, rejected-push, missing-branch, retry and late-stack paths behave as
 documented. Fixed: the push note now reads "pushed <id>'s branch … to origin"
-(it printed after the push). Open, pre-existing on main: re-stacking a child
-onto a different parent keeps the old fork as `base_commit`, so `lf sync`
-deletes the old parent's files from the child.
+(it printed after the push). Scenario 11 found that re-stacking a child
+onto a different parent kept the old fork as `base_commit`, so `lf sync`
+deleted the old parent's files. The repair below resolves that finding.
+
+## Re-parenting repair (2026-11-13)
+
+Replace the old fork when an existing stack selects a different parent PR: use
+HEAD's merge-base with the selected parent's upstream branch. Write parent and
+fork together; identical retries retain the saved fork. Sync then treats the old
+parent's inherited files as child content and merges the new parent's work.
+Delete — do not maintain: the parent-only placement update when replacing a
+stack dependency. Keep checkout/history, PR identity, cycle checks and retry behavior.
+Focused coverage: CLI re-parenting, sync retaining both parents' files and child
+edits, and an identical retry retaining the new comparison base. Gate retains
+clippy and hosted suites.
+
+- `cargo test -p loopflow --test integration -- sync_tests::stacking_`: 3 passed in 19.47 s after compress. The re-parenting CLI test now checks the fork and parent branch on select and on an identical retry, then both parents' files and child edits after sync; PR identity stays with the lib test below. The three stacking tests share `commit_file`. Production code unchanged by compress.
+- `cargo test -p loopflow --lib ops::task::tests::stacking_is_idempotent_and_preserves_history`: passed in 0.47 s; parent/fork update, retry and PR identity retained. Builds emitted the existing macOS unwind-section linker warning.
+- `cargo test -p loopflow --test integration documented_commands::`: 4 passed in 6.97 s.
+- `cargo fmt --all -- --check`, `git diff --check`: passed; clippy and hosted CI remain gate-owned. Store API callers also reach Task initialization, handoff, PR range and Graph fixtures; their suites remain gate/CI-owned.

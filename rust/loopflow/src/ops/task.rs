@@ -1202,8 +1202,20 @@ async fn stack_existing_task(
     fetch_task_refs(main_repo)?;
     let (parent, note) = record_stack_parent(store, main_repo, task, requested).await?;
     let _mutation = lock_task_pr_mutation(task.worktree()?)?;
+    let base_commit = if task
+        .parent_pr_id
+        .as_ref()
+        .is_some_and(|id| id != &parent.id)
+    {
+        // The old parent's fork makes its inherited files look deleted on the
+        // new parent. Compare from shared history so those files stay child work.
+        let (_, upstream) = resolve_upstream_base(main_repo, &parent.branch)?;
+        merge_base(task.worktree()?, "HEAD", &upstream).map_err(task_error)?
+    } else {
+        task.base_commit.clone()
+    };
     store
-        .stack_task_placement(task, &parent.id)
+        .stack_task_placement(task, &parent.id, &base_commit)
         .await
         .map_err(|error| task_error(error.to_string()))?;
     eprintln!(

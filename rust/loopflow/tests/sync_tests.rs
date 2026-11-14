@@ -40,6 +40,12 @@ fn lf(dir: &std::path::Path, args: &[&str]) -> std::process::Output {
     output
 }
 
+fn commit_file(dir: &std::path::Path, file: &str, contents: &str) {
+    std::fs::write(dir.join(file), contents).unwrap();
+    git(dir, &["add", file]);
+    git(dir, &["commit", "-m", file]);
+}
+
 /// Publish `parent`'s PR at `head`, stack `child` on it, then record the
 /// parent's `merge` commit when given.
 fn stack_on_published_parent(
@@ -64,7 +70,11 @@ fn stack_on_published_parent(
         .block_on(parent.store.update_task_pr(&parent_pr))
         .unwrap();
     runtime
-        .block_on(parent.store.stack_task_placement(child, &parent.pr.id))
+        .block_on(
+            parent
+                .store
+                .stack_task_placement(child, &parent.pr.id, &child.base_commit),
+        )
         .unwrap();
     if let Some(merge) = merge {
         parent_pr.merge_commit = Some(merge.to_string());
@@ -832,9 +842,7 @@ fn stacking_retry_replaces_an_abandoned_parent_and_syncs() {
         let repo = TestRepo::new();
         let _env = EnvGuard::with_lf_home(&[], home.path());
         let parent_path = repo.create_named_worktree("parent");
-        std::fs::write(parent_path.join("parent.txt"), "parent work\n").unwrap();
-        git(&parent_path, &["add", "parent.txt"]);
-        git(&parent_path, &["commit", "-m", "parent work"]);
+        commit_file(&parent_path, "parent.txt", "parent work\n");
         let parent_tip = git(&parent_path, &["rev-parse", "HEAD"]);
         let parent =
             support::register_task_with_pr(home.path(), &parent_path, "parent", &repo.head_sha());
@@ -910,14 +918,73 @@ fn stacking_retry_replaces_an_abandoned_parent_and_syncs() {
 }
 
 #[test]
+fn stacking_on_a_different_parent_keeps_inherited_files_on_sync() {
+    let home = tempfile::TempDir::new().unwrap();
+    let repo = TestRepo::new();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let main = repo.head_sha();
+    let parent_path = repo.create_named_worktree("parent");
+    commit_file(&parent_path, "inherited.txt", "old parent work\n");
+    commit_file(&parent_path, "edited.txt", "old parent version\n");
+    let parent_tip = git(&parent_path, &["rev-parse", "HEAD"]);
+    let parent = support::register_task_without_pr(home.path(), &parent_path, "parent", &main);
+    let next_path = repo.create_named_worktree("next");
+    commit_file(&next_path, "next.txt", "new parent work\n");
+    support::register_sibling_task(&parent, "INF-125", "next", &next_path);
+    let child_path = repo.create_named_worktree("child");
+    git(&child_path, &["merge", "--ff-only", "parent"]);
+    let child = support::register_sibling_task(&parent, "INF-124", "child", &child_path);
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime
+        .block_on(parent.store.sync_task_placement(
+            &child.id,
+            &parent_tip,
+            false,
+            time::OffsetDateTime::now_utc(),
+        ))
+        .unwrap();
+    lf(
+        &child_path,
+        &["checkout", "INF-124", "--stack-on", "INF-123"],
+    );
+    commit_file(&child_path, "edited.txt", "child version\n");
+    commit_file(&child_path, "child.txt", "child work\n");
+    let original_head = git(&child_path, &["rev-parse", "HEAD"]);
+
+    // Selecting INF-125 replaces the old parent's fork; repeating it keeps the new one.
+    for _ in 0..2 {
+        lf(
+            &child_path,
+            &["checkout", "INF-124", "--stack-on", "INF-125"],
+        );
+        let stacked = task_stack(&child_path).unwrap().unwrap();
+        assert_eq!(stacked.fork_base, main);
+        assert_eq!(stacked.parent_branch.as_deref(), Some("next"));
+    }
+    assert_eq!(git(&child_path, &["rev-parse", "HEAD"]), original_head);
+
+    lf(&child_path, &["sync"]);
+    for (file, contents) in [
+        ("inherited.txt", "old parent work\n"),
+        ("edited.txt", "child version\n"),
+        ("child.txt", "child work\n"),
+        ("next.txt", "new parent work\n"),
+    ] {
+        assert_eq!(
+            std::fs::read_to_string(child_path.join(file)).unwrap(),
+            contents
+        );
+    }
+    assert!(loopflow::git::is_ancestor(&child_path, &original_head, "HEAD").unwrap());
+}
+
+#[test]
 fn stacking_on_an_unpushed_parent_pushes_its_branch_and_sync_follows_it() {
     let home = tempfile::TempDir::new().unwrap();
     let repo = TestRepo::new();
     let _env = EnvGuard::with_lf_home(&[], home.path());
     let parent_path = repo.create_named_worktree("parent");
-    std::fs::write(parent_path.join("parent.txt"), "parent work\n").unwrap();
-    git(&parent_path, &["add", "parent.txt"]);
-    git(&parent_path, &["commit", "-m", "parent work"]);
+    commit_file(&parent_path, "parent.txt", "parent work\n");
     let parent_tip = git(&parent_path, &["rev-parse", "HEAD"]);
     let parent =
         support::register_task_without_pr(home.path(), &parent_path, "parent", &repo.head_sha());

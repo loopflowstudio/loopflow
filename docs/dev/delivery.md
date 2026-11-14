@@ -86,6 +86,9 @@ creating a child does not delete inherited files or add a cleanup commit.
 After the parent merges, `lf sync` merges current main using the recorded fork
 as the comparison base. Child edits and original commit identities survive squash
 landing without replay.
+Selecting a different parent for an existing stack keeps the checkout intact.
+The next `lf sync` retains files inherited from the old parent as child work
+and merges the new parent's changes; repeating the same selection keeps its fork.
 The child retains its Task, PR, branch and Session identity and its own design.
 
 ## Commit and publish

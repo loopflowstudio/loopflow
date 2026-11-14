@@ -1964,11 +1964,11 @@ async fn stacking_is_idempotent_and_preserves_history() {
     store.update_task_pr(&parent).await.unwrap();
     let events = store.task_events_after(&fixture.task.id, 0).await.unwrap();
     store
-        .stack_task_placement(&fixture.task, &parent.id)
+        .stack_task_placement(&fixture.task, &parent.id, &fixture.task.base_commit)
         .await
         .unwrap();
     store
-        .stack_task_placement(&fixture.task, &parent.id)
+        .stack_task_placement(&fixture.task, &parent.id, &fixture.task.base_commit)
         .await
         .unwrap();
     assert_eq!(
@@ -1977,7 +1977,7 @@ async fn stacking_is_idempotent_and_preserves_history() {
     );
     // Both self-parenting and a reverse edge preserve the accepted dependency.
     assert!(store
-        .stack_task_placement(&parent_task, &parent.id)
+        .stack_task_placement(&parent_task, &parent.id, &parent_task.base_commit)
         .await
         .is_err());
     let mut published_child = store
@@ -1988,7 +1988,7 @@ async fn stacking_is_idempotent_and_preserves_history() {
     published_child.publication = parent.publication.clone();
     store.update_task_pr(&published_child).await.unwrap();
     assert!(store
-        .stack_task_placement(&parent_task, &child.id)
+        .stack_task_placement(&parent_task, &child.id, &parent_task.base_commit)
         .await
         .unwrap_err()
         .to_string()
@@ -2022,19 +2022,22 @@ async fn stacking_is_idempotent_and_preserves_history() {
         .pr
         .expect("STACK-3 has a PR record");
     store
-        .stack_task_placement(&current, &selected.id)
+        .stack_task_placement(&current, &selected.id, "new-parent-fork")
         .await
         .unwrap();
+    let placement = store.get_task(&current.id).await.unwrap().unwrap();
+    assert_eq!(placement.base_commit, "new-parent-fork");
+    assert_eq!(placement.parent_pr_id, Some(selected.id));
     let moved = store.get_task_pr(&child.id).await.unwrap().unwrap();
     assert_eq!(moved.parent_pr_id, Some(next.id));
-    assert_eq!(moved.base_commit, child.base_commit);
+    assert_eq!(moved.base_commit, "new-parent-fork");
     assert_eq!(moved.id, child.id);
     assert_eq!(
         store.task_events_after(&fixture.task.id, 0).await.unwrap(),
         events
     );
     assert!(store
-        .stack_task_placement(&current, &parent.id)
+        .stack_task_placement(&current, &parent.id, &current.base_commit)
         .await
         .is_err());
 }

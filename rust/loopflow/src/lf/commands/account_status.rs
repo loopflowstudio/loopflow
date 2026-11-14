@@ -54,7 +54,8 @@ pub struct AccountRow {
     pub expires_at: Option<i64>,
     pub windows: Vec<AccountLimitRow>,
     pub verified_windows: Vec<String>,
-    pub reset_credits: Option<crate::subscription::RateLimitResetCredits>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub resets: Option<crate::subscription::Resets>,
     /// Signed in to the provider's shared home.
     pub active: bool,
     /// Held there by `lf account use`.
@@ -286,7 +287,7 @@ async fn local_rows(
             expires_at: snapshot.and_then(|s| s.expires_at),
             windows: vec![],
             verified_windows: vec![],
-            reset_credits: None,
+            resets: None,
             active: false,
             held: false,
         });
@@ -538,9 +539,7 @@ async fn managed_rows(
             cooldown_until,
             expires_at: access_expires_at,
             windows,
-            reset_credits: live_usage
-                .as_ref()
-                .and_then(|usage| usage.reset_credits.clone()),
+            resets: live_usage.as_ref().and_then(|usage| usage.resets.clone()),
             verified_windows: live_usage
                 .map(|u| u.windows.into_iter().map(|w| w.window).collect())
                 .unwrap_or_default(),
@@ -819,7 +818,7 @@ fn row_lines(row: &AccountRow, now: i64) -> Vec<String> {
         };
         lines.push(format!(
             "  {}: {usage} · {freshness} · {reset}",
-            window.window
+            crate::subscription::usage_window_label(&window.window)
         ));
         if let Some(until) = window.limited_until.filter(|until| *until > now) {
             lines.push(format!(
@@ -839,25 +838,62 @@ fn row_lines(row: &AccountRow, now: i64) -> Vec<String> {
             window.plan.as_deref().unwrap_or("unknown")
         ));
     }
-    if row.provider == Provider::Codex && row.scope == Scope::Managed {
-        match &row.reset_credits {
-            Some(credits) => {
-                lines.push(format!(
-                    "  banked resets: {} available (live)",
-                    credits.available_count
-                ));
-                for credit in credits.credits.iter().flatten() {
-                    let expiry = credit
-                        .expires_at
-                        .map(timestamp)
-                        .unwrap_or_else(|| "unknown".into());
-                    lines.push(format!(
-                        "    {}: {} · expires {expiry}",
-                        credit.id, credit.status
+    if row.scope == Scope::Managed {
+        match &row.resets {
+            Some(resets) => {
+                lines.push(match &resets.unavailable {
+                    Some(reason) => format!("  resets: unavailable ({reason})"),
+                    None => format!("  resets: {} usable (live)", resets.usable),
+                });
+                for reset in resets.resets.iter().flatten() {
+                    let mut line = format!("    {}  {}", reset.scope, reset.id);
+                    if let (Some(left), Some(total)) = (reset.left, reset.total) {
+                        line.push_str(&format!("  {left} of {total} left"));
+                    }
+                    line.push_str(&format!(
+                        " · {}",
+                        if reset.usable_now {
+                            "usable now"
+                        } else {
+                            reset.unavailable_reason.as_deref().unwrap_or("unavailable")
+                        }
                     ));
+                    if reset.gives_back_weekly {
+                        line.push_str(" · returns what Fable used to the weekly limit");
+                    } else if !reset.clears.is_empty() {
+                        line.push_str(" · clears ");
+                        line.push_str(
+                            &reset
+                                .clears
+                                .iter()
+                                .map(|name| {
+                                    let window = row.windows.iter().find(|w| w.window == *name);
+                                    let label = crate::subscription::usage_window_label(name);
+                                    match window {
+                                        Some(w) if w.resets_at.is_none_or(|at| at > now) => {
+                                            format!("{label} ({}% used)", w.used_percent)
+                                        }
+                                        _ => format!("{label} (unknown)"),
+                                    }
+                                })
+                                .collect::<Vec<_>>()
+                                .join(", "),
+                        );
+                    }
+                    if let Some(expiry) = reset.expires_at {
+                        line.push_str(&format!(" · ends {}", timestamp(expiry)));
+                    }
+                    lines.push(line);
                 }
             }
-            None => lines.push("  banked resets: unknown".into()),
+            None => lines.push(
+                if row.verification == Verification::NotChecked {
+                    "  resets: unknown"
+                } else {
+                    "  resets: not reported"
+                }
+                .into(),
+            ),
         }
     }
     lines
@@ -1074,6 +1110,70 @@ fn wrap_line(line: &str, width: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::{login_browser, render, render_login, render_table, AccountReport, RouteNote};
+
+    #[test]
+    fn reset_status_uses_one_record_for_both_providers() {
+        use crate::provider_auth::Provider;
+        use crate::subscription::{Reset, Resets};
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/dto/server/account_report.json"
+        ))
+        .unwrap();
+        let mut report: AccountReport = serde_json::from_value(fixture["result"].clone()).unwrap();
+        let now = 1794009600;
+        for provider in [Provider::Claude, Provider::Codex] {
+            let row = &mut report.accounts[0];
+            row.provider = provider;
+            row.verification = super::Verification::Accepted;
+            row.windows[0].window = "seven_day".into();
+            row.resets = Some(Resets {
+                usable: 1,
+                unavailable: None,
+                resets: Some(vec![
+                    Reset {
+                        id: "weekly-reset".into(),
+                        scope: "weekly".into(),
+                        label: None,
+                        left: Some(1),
+                        total: Some(1),
+                        usable_now: true,
+                        unavailable_reason: None,
+                        clears: vec!["seven_day".into()],
+                        gives_back_weekly: false,
+                        expires_at: Some(1794614400),
+                    },
+                    Reset {
+                        id: "fable-reset".into(),
+                        scope: "fable".into(),
+                        label: None,
+                        left: Some(0),
+                        total: Some(1),
+                        usable_now: false,
+                        unavailable_reason: Some("unavailable".into()),
+                        clears: vec!["seven_day_fable".into()],
+                        gives_back_weekly: true,
+                        expires_at: None,
+                    },
+                ]),
+            });
+            let text = render(&report, 500, now);
+            for expected in [
+                "resets: 1 usable (live)",
+                "1 of 1 left · usable now · clears weekly (12% used)",
+                "0 of 1 left · unavailable · returns what Fable used to the weekly limit",
+            ] {
+                assert!(text.contains(expected), "{text}");
+            }
+        }
+        report.accounts[0].resets.as_mut().unwrap().unavailable = Some("tier".into());
+        assert!(render(&report, 500, now).contains("resets: unavailable (tier)"));
+        report.accounts[0].resets = None;
+        assert!(render(&report, 500, now).contains("resets: not reported"));
+        report.accounts[0].verification = super::Verification::NotChecked;
+        assert!(render(&report, 500, now).contains("resets: unknown"));
+        report.accounts[0].scope = super::Scope::Local;
+        assert!(!render(&report, 500, now).contains("resets:"));
+    }
 
     #[tokio::test]
     #[allow(clippy::await_holding_lock)]

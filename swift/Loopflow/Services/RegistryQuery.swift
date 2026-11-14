@@ -369,7 +369,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
                     clearPlan: Bool, paidThrough: String?, clearPaidThrough: Bool, clearCooldown: Bool,
                     chromeProfiles: [String], clearChromeProfiles: Bool)
     /// `file` is a path on the Machine; the token never travels in the request.
-    case accountRedeemReset(provider: String, email: String, idempotencyKey: String?, creditId: String?)
+    case accountRedeemReset(provider: String, email: String, idempotencyKey: String?, resetId: String?, scope: String?)
     case accountUse(login: String)
     case accountPause(login: String)
     case accountUnpause(login: String)
@@ -573,9 +573,9 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
                                 ("--clear-cooldown", clearCooldown), ("--clear-chrome-profiles", clearChromeProfiles)])
             for profile in chromeProfiles { argv += ["--chrome-profile", profile] }
             return argv
-        case .accountRedeemReset(let provider, let email, let idempotencyKey, let creditId):
+        case .accountRedeemReset(let provider, let email, let idempotencyKey, let resetId, let scope):
             return ["account", "redeem-reset", Self.accountTarget(provider, email)] + argument("--idempotency-key", idempotencyKey)
-                + argument("--credit-id", creditId) + ["--json"]
+                + argument("--reset-id", resetId) + argument("--scope", scope) + ["--json"]
         case .accountUse(let login): return ["account", "use", login]
         case .accountPause(let login): return ["account", "pause", login]
         case .accountUnpause(let login): return ["account", "unpause", login]
@@ -707,9 +707,9 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
                                          "paid_through": paidThrough, "clear_paid_through": clearPaidThrough,
                                          "clear_cooldown": clearCooldown, "chrome_profiles": chromeProfiles,
                                          "clear_chrome_profiles": clearChromeProfiles])
-        case .accountRedeemReset(let provider, let email, let idempotencyKey, let creditId):
+        case .accountRedeemReset(let provider, let email, let idempotencyKey, let resetId, let scope):
             TaggedFields("account.redeem_reset", ["provider": provider, "email": email,
-                                                  "idempotency_key": idempotencyKey, "credit_id": creditId])
+                                                  "idempotency_key": idempotencyKey, "reset_id": resetId, "scope": scope])
         case .accountUse(let login): TaggedFields("account.use", ["login": login])
         case .accountPause(let login): TaggedFields("account.pause", ["login": login])
         case .accountUnpause(let login): TaggedFields("account.unpause", ["login": login])

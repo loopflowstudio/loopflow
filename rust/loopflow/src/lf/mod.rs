@@ -3299,16 +3299,19 @@ pub enum AccountCommand {
         #[arg(long)]
         clear_chrome_profiles: bool,
     },
-    /// Spend one banked Codex reset for this login
+    /// Spend one banked Claude or Codex reset for this login
     RedeemReset {
         #[arg(value_parser = parse_account_target)]
         login: String,
         /// Reuse this key when retrying the same redemption
         #[arg(long)]
         idempotency_key: Option<String>,
-        /// Opaque credit ID returned by live status (otherwise the service chooses)
+        /// Reset ID returned by live status; pass it with the same key on retries
         #[arg(long)]
-        credit_id: Option<String>,
+        reset_id: Option<String>,
+        /// Select a reset scope (weekly, fable, session, full, or Codex reset type)
+        #[arg(long)]
+        scope: Option<String>,
         #[arg(long)]
         json: bool,
     },

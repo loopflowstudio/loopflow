@@ -1030,13 +1030,13 @@ done
         serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
     };
     let live = run(&["account", "codex", "--json"]);
-    assert_eq!(live["accounts"][0]["reset_credits"]["availableCount"], 2);
+    assert_eq!(live["accounts"][0]["resets"]["usable"], 2);
     assert_eq!(
-        live["accounts"][0]["reset_credits"]["credits"][0]["status"],
-        "available"
+        live["accounts"][0]["resets"]["resets"][0]["usable_now"],
+        true
     );
     let cached = run(&["account", "codex", "--cached", "--json"]);
-    assert!(cached["accounts"][0]["reset_credits"].is_null());
+    assert!(cached["accounts"][0]["resets"].is_null());
     assert!(
         !native.join("spent").exists(),
         "status cannot spend a reset"
@@ -1062,18 +1062,18 @@ done
     assert!(text.status.success());
     let text = String::from_utf8(text.stdout).unwrap();
     assert!(text.contains("alreadyRedeemed"));
-    assert!(text.contains("Before:\n  session: 0% used, 100% left"));
-    assert!(text.contains("After:\n  unknown;"));
+    assert!(text.contains("  before  session 0%"));
+    assert!(text.contains("  after   unknown;"));
     std::fs::remove_file(native.join("fail-refresh")).unwrap();
     let retried = run(&args);
     assert_eq!(retried["outcome"], "alreadyRedeemed");
-    assert_eq!(retried["after"]["reset_credits"]["availableCount"], 1);
+    assert_eq!(retried["after"]["resets"]["usable"], 1);
     assert_eq!(retried["after"]["windows"][0]["used_percent"], 0);
     for outcome in ["nothingToReset", "noCredit"] {
         std::fs::write(native.join("outcome"), outcome).unwrap();
         let report = run(&args);
         assert_eq!(report["outcome"], outcome);
-        assert_eq!(report["after"]["reset_credits"]["availableCount"], 1);
+        assert_eq!(report["after"]["resets"]["usable"], 1);
     }
     let windows = runtime
         .block_on(store.provider_account_limits(Some("codex")))
@@ -1091,7 +1091,7 @@ done
     std::fs::remove_file(native.join("lose-response")).unwrap();
     let recovered = run(&args);
     assert_eq!(recovered["outcome"], "alreadyRedeemed");
-    assert_eq!(recovered["after"]["reset_credits"]["availableCount"], 1);
+    assert_eq!(recovered["after"]["resets"]["usable"], 1);
     // Changed native identity refuses the spend even though the service still reports active@.
     let wrong = BASE64_URL_SAFE_NO_PAD
         .encode(serde_json::json!({"email":"wrong@example.com","sub":"wrong-user"}).to_string());

@@ -2588,12 +2588,14 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             provider,
             email,
             idempotency_key,
-            credit_id,
+            reset_id,
+            scope,
         } => {
             let mut spelled = words(&["account", "redeem-reset", &format!("{provider}={email}")]);
             for (flag, value) in [
                 ("--idempotency-key", idempotency_key),
-                ("--credit-id", credit_id),
+                ("--reset-id", reset_id),
+                ("--scope", scope),
             ] {
                 if let Some(value) = value {
                     spelled.extend(words(&[flag, value]));

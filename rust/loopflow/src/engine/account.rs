@@ -14,7 +14,7 @@ use crate::lf::commands::account::account_status::AccountReport;
 use crate::lf::commands::profile::NextLaunch;
 use crate::provider_auth::Provider;
 use crate::store::{AccountLimitWindow, ProviderAccountId};
-use crate::subscription::RateLimitResetCredits;
+use crate::subscription::Resets;
 
 /// The login a write selected, as the caller named it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -44,7 +44,8 @@ pub struct Settings {
 #[serde(deny_unknown_fields)]
 pub struct UsageSnapshot {
     pub windows: Vec<AccountLimitWindow>,
-    pub reset_credits: Option<RateLimitResetCredits>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub resets: Option<Resets>,
 }
 
 /// What `account.redeem_reset` spent, and the usage before and after.
@@ -57,6 +58,13 @@ pub struct Redemption {
     /// Retry this attempt with the same key; a new key is a new spend.
     pub idempotency_key: String,
     pub outcome: String,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub scope: Option<String>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub reset_id: Option<String>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub reason: Option<String>,
+    pub newer_observation_kept: bool,
     pub before: UsageSnapshot,
     /// Null when the refresh after the spend failed; `refresh_error` says why.
     pub after: Option<UsageSnapshot>,
@@ -155,19 +163,21 @@ fn change(
     Ok(account)
 }
 
-/// `account.redeem_reset`: spend one banked Codex reset for a managed login.
+/// `account.redeem_reset`: spend one banked Claude or Codex reset for a managed login.
 /// The attempt's key is in the result; a retry passes it back.
 pub fn redeem_reset(
     provider: &str,
     email: &str,
     idempotency_key: Option<&str>,
-    credit_id: Option<&str>,
+    reset_id: Option<&str>,
+    scope: Option<&str>,
 ) -> Result<Redemption> {
     block_on(handlers::redeem_reset(
         provider,
         email,
         idempotency_key,
-        credit_id,
+        reset_id,
+        scope,
     ))
     .map_err(|error| Error::outcome_unknown(&error))
 }

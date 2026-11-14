@@ -281,10 +281,10 @@
             "null"
           ]
         },
-        "reset_credits": {
+        "resets": {
           "anyOf": [
             {
-              "$ref": "#/$defs/RateLimitResetCredits"
+              "$ref": "#/$defs/Resets"
             },
             {
               "type": "null"
@@ -336,7 +336,7 @@
         "expires_at",
         "windows",
         "verified_windows",
-        "reset_credits",
+        "resets",
         "active",
         "held"
       ],
@@ -7361,76 +7361,6 @@
       ],
       "type": "object"
     },
-    "RateLimitResetCredit": {
-      "properties": {
-        "description": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "expiresAt": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "grantedAt": {
-          "format": "int64",
-          "type": "integer"
-        },
-        "id": {
-          "type": "string"
-        },
-        "resetType": {
-          "type": "string"
-        },
-        "status": {
-          "type": "string"
-        },
-        "title": {
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "id",
-        "resetType",
-        "status",
-        "grantedAt",
-        "expiresAt",
-        "title",
-        "description"
-      ],
-      "type": "object"
-    },
-    "RateLimitResetCredits": {
-      "description": "Wire fields from `account/rateLimits/read`. Missing details are not an empty list.",
-      "properties": {
-        "availableCount": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "credits": {
-          "items": {
-            "$ref": "#/$defs/RateLimitResetCredit"
-          },
-          "type": [
-            "array",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "availableCount",
-        "credits"
-      ],
-      "type": "object"
-    },
     "Read": {
       "description": "A read an app serves inside its own process.\nOn the wire each read is a resource-named `kind` (`task.get`); `desktop.*`\nreads are Desktop's own arrangement state.",
       "oneOf": [
@@ -8733,7 +8663,7 @@
                 "observed_plan": "max",
                 "provider": "claude",
                 "recovery": null,
-                "reset_credits": null,
+                "resets": null,
                 "routing": "automatic",
                 "scope": "managed",
                 "source": "managed home",
@@ -9054,13 +8984,34 @@
         "login": {
           "type": "string"
         },
+        "newer_observation_kept": {
+          "type": "boolean"
+        },
         "outcome": {
           "type": "string"
         },
         "provider": {
           "$ref": "#/$defs/Provider"
         },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "refresh_error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reset_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scope": {
           "type": [
             "string",
             "null"
@@ -9073,6 +9024,10 @@
         "login",
         "idempotency_key",
         "outcome",
+        "scope",
+        "reset_id",
+        "reason",
+        "newer_observation_kept",
         "before",
         "after",
         "refresh_error"
@@ -9189,6 +9144,109 @@
         "app",
         "title",
         "msg"
+      ],
+      "type": "object"
+    },
+    "Reset": {
+      "additionalProperties": false,
+      "properties": {
+        "clears": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "expires_at": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "gives_back_weekly": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "left": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "scope": {
+          "type": "string"
+        },
+        "total": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "unavailable_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "usable_now": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "scope",
+        "label",
+        "left",
+        "total",
+        "usable_now",
+        "unavailable_reason",
+        "clears",
+        "gives_back_weekly",
+        "expires_at"
+      ],
+      "type": "object"
+    },
+    "Resets": {
+      "additionalProperties": false,
+      "description": "Provider-neutral reset entitlements. Missing details are not an empty list.",
+      "properties": {
+        "resets": {
+          "items": {
+            "$ref": "#/$defs/Reset"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "unavailable": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "usable": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "usable",
+        "resets",
+        "unavailable"
       ],
       "type": "object"
     },
@@ -15359,10 +15417,10 @@
       "additionalProperties": false,
       "description": "An account's windows and banked resets at one instant.",
       "properties": {
-        "reset_credits": {
+        "resets": {
           "anyOf": [
             {
-              "$ref": "#/$defs/RateLimitResetCredits"
+              "$ref": "#/$defs/Resets"
             },
             {
               "type": "null"
@@ -15378,7 +15436,7 @@
       },
       "required": [
         "windows",
-        "reset_credits"
+        "resets"
       ],
       "type": "object"
     },
@@ -18270,23 +18328,18 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf account redeem-reset <provider>=<email> [--idempotency-key]\n[--credit-id] --json`: spend one banked Codex reset.",
+          "description": "`lf account redeem-reset <provider>=<email> [--idempotency-key]\n[--reset-id] [--scope] --json`: spend one banked Claude or Codex reset.",
           "examples": [
             {
-              "credit_id": null,
               "email": "maya@example.com",
               "idempotency_key": "4b0e1f2a-9c3d-4e5f-8a6b-7c8d9e0f1a2b",
               "kind": "account.redeem_reset",
-              "provider": "codex"
+              "provider": "claude",
+              "reset_id": "fable-reset",
+              "scope": "fable"
             }
           ],
           "properties": {
-            "credit_id": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
             "email": {
               "type": "string"
             },
@@ -18302,6 +18355,18 @@
             },
             "provider": {
               "type": "string"
+            },
+            "reset_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "scope": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [
@@ -18309,7 +18374,8 @@
             "provider",
             "email",
             "idempotency_key",
-            "credit_id"
+            "reset_id",
+            "scope"
           ],
           "type": "object",
           "x-result": {
@@ -18319,9 +18385,10 @@
             "account_id": "codex:maya@example.com",
             "after": null,
             "before": {
-              "reset_credits": {
-                "availableCount": 1,
-                "credits": null
+              "resets": {
+                "resets": null,
+                "unavailable": null,
+                "usable": 1
               },
               "windows": [
                 {
@@ -18336,9 +18403,13 @@
             },
             "idempotency_key": "4b0e1f2a-9c3d-4e5f-8a6b-7c8d9e0f1a2b",
             "login": "maya@example.com",
+            "newer_observation_kept": false,
             "outcome": "redeemed",
             "provider": "codex",
-            "refresh_error": "rate limits unavailable after the spend"
+            "reason": null,
+            "refresh_error": "rate limits unavailable after the spend",
+            "reset_id": null,
+            "scope": null
           }
         },
         {

@@ -131,7 +131,7 @@ pub(crate) fn served<T>(operation: impl FnOnce() -> T) -> T {
     SERVED.sync_scope((), operation)
 }
 
-fn is_served() -> bool {
+pub(crate) fn is_served() -> bool {
     SERVED.try_with(|()| ()).is_ok()
 }
 
@@ -219,24 +219,24 @@ pub(crate) async fn run_async(cmd: &AccountCommand) -> Result<()> {
         AccountCommand::RedeemReset {
             login,
             idempotency_key,
-            credit_id,
+            reset_id,
+            scope,
             json,
         } => {
             let (provider, login) = Target::parse_login(login, "redeem-reset")?;
             let redemption = redeem_reset(
                 provider.unwrap_or(Provider::Codex).as_str(), &login,
-                idempotency_key.as_deref(), credit_id.as_deref(),
+                idempotency_key.as_deref(), reset_id.as_deref(), scope.as_deref(),
             ).await?;
             if *json {
                 narrate!("{}", serde_json::to_string_pretty(&redemption)?);
             } else {
-                narrate!("{}: {} (attempt {})", redemption.login, redemption.outcome, redemption.idempotency_key);
-                narrate!("Before:");
-                print_reset_usage(&redemption.before);
-                narrate!("After:");
+                narrate!("{} · {} · {}{}", redemption.outcome, redemption.scope.as_deref().unwrap_or("provider choice"), redemption.reset_id.as_deref().unwrap_or("provider choice"), redemption.reason.as_ref().map(|r| format!(" · {r}")).unwrap_or_default());
+                if redemption.newer_observation_kept { narrate!("A newer capacity observation was kept."); }
+                print_reset_usage("before", &redemption.before);
                 match (&redemption.after, &redemption.refresh_error) {
-                    (Some(usage), _) => print_reset_usage(usage),
-                    (None, error) => narrate!("  unknown; {}", error.as_deref().unwrap_or("")),
+                    (Some(usage), _) => print_reset_usage("after", usage),
+                    (None, error) => narrate!("  after   unknown; {}", error.as_deref().unwrap_or("")),
                 }
             }
             Ok(())
@@ -661,97 +661,114 @@ pub(crate) async fn redeem_reset(
     provider: &str,
     email: &str,
     key: Option<&str>,
-    credit_id: Option<&str>,
+    reset_id: Option<&str>,
+    scope: Option<&str>,
 ) -> Result<crate::engine::account::Redemption> {
     use crate::engine::account::{Redemption, UsageSnapshot};
+    let provider = parse_managed_provider(provider)?;
     anyhow::ensure!(
-        parse_managed_provider(provider)? == Provider::Codex,
-        "banked resets are available only for Codex"
-    );
-    anyhow::ensure!(
-        key.is_none_or(|value| !value.trim().is_empty()),
+        key.is_none_or(|v| !v.trim().is_empty()),
         "idempotency key must not be empty"
     );
     anyhow::ensure!(
-        credit_id.is_none_or(|value| !value.trim().is_empty()),
-        "credit ID must not be empty"
+        reset_id.is_none_or(|v| !v.trim().is_empty()),
+        "reset ID must not be empty"
     );
+    anyhow::ensure!(
+        scope.is_none_or(|v| !v.trim().is_empty()),
+        "scope must not be empty"
+    );
+    if provider == Provider::Claude {
+        anyhow::ensure!(
+            key.is_none_or(|k| crate::subscription::valid_reset_key(k, 64, true)),
+            "Claude idempotency key must contain 1–64 letters, digits, underscores or hyphens"
+        );
+        anyhow::ensure!(
+            key.is_none() || reset_id.is_some(),
+            "Claude retry requires --idempotency-key and --reset-id together"
+        );
+    }
     let store = open_account_store().await?;
-    let accounts = store.list_provider_accounts(Some("codex")).await?;
+    let accounts = store
+        .list_provider_accounts(Some(provider.as_str()))
+        .await?;
     let account = match match_account(&accounts.iter().collect::<Vec<_>>(), email) {
         AccountMatch::One(account) => account,
         AccountMatch::Ambiguous(_) => anyhow::bail!("ambiguous login prefix; use a full email"),
-        AccountMatch::None => anyhow::bail!("no managed Codex login matches {email}"),
+        AccountMatch::None => anyhow::bail!("no managed {provider} login matches {email}"),
     };
     let home = account
         .home
         .as_deref()
         .context("account has no managed credential home")?;
-    let _lock = acquire_managed_login_lock(home, Provider::Codex, &account.account_id)?;
+    let _lock = acquire_managed_login_lock(home, provider, &account.account_id)?;
+    let retry = key.is_some();
     let key = key
         .map(str::to_owned)
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    // Print before the request so a lost reply can be retried without another spend.
-    if is_served() {
-        tracing::info!("Reset attempt {key}; retry this attempt with --idempotency-key {key}");
-    } else {
-        diagnose!("Reset attempt {key}; retry this attempt with --idempotency-key {key}");
-    }
     let revision = store
         .provider_account_capacity_revision(&account.provider, &account.account_id)
         .await?;
-    let redemption = crate::subscription::redeem_codex_reset(account, &accounts, &key, credit_id)
-        .await
-        .with_context(|| {
-            format!("reset outcome unconfirmed; retry only with --idempotency-key {key}")
-        })?;
-    let usage = redemption.after.as_ref().unwrap_or(&redemption.before);
-    store
-        .reconcile_provider_account_capacity(account, revision, &usage.windows)
-        .await
-        .with_context(|| {
-            format!(
-                "reset outcome {}; failed to save usage; attempt {key}",
-                redemption.outcome
+    let redemption = match provider {
+        Provider::Claude => {
+            crate::subscription::redeem_claude_reset(
+                account, &accounts, &key, reset_id, scope, retry,
             )
-        })?;
+            .await
+        }
+        Provider::Codex => {
+            crate::subscription::redeem_codex_reset(
+                account, &accounts, &key, reset_id, scope, retry,
+            )
+            .await
+        }
+        _ => unreachable!("parse_managed_provider accepts only Claude and Codex"),
+    }
+    .with_context(|| {
+        format!(
+            "reset attempt {key}; retry only with --idempotency-key {key}{}",
+            reset_id
+                .map(|id| format!(" --reset-id {id}"))
+                .unwrap_or_default()
+        )
+    })?;
+    // Only the post-request observation can establish recovered capacity.
+    let mut newer_observation_kept = false;
+    if let Ok(usage) = &redemption.after {
+        newer_observation_kept = !store
+            .reconcile_provider_account_capacity(account, revision, &usage.windows)
+            .await
+            .with_context(|| {
+                format!(
+                    "reset outcome {}; failed to save usage; attempt {key}",
+                    redemption.outcome
+                )
+            })?;
+    }
     let snapshot = |usage: &SubscriptionUsage| UsageSnapshot {
         windows: usage.windows.clone(),
-        reset_credits: usage.reset_credits.clone(),
+        resets: usage.resets.clone(),
     };
     Ok(Redemption {
-        provider: Provider::Codex,
+        provider,
         account_id: account.account_id.clone(),
         login: account_login(account).to_string(),
         idempotency_key: key,
         outcome: redemption.outcome,
+        scope: redemption.scope,
+        reset_id: redemption.reset_id,
+        reason: redemption.reason,
+        newer_observation_kept,
         before: snapshot(&redemption.before),
         after: redemption.after.as_ref().ok().map(snapshot),
         refresh_error: redemption.after.as_ref().err().map(ToString::to_string),
     })
 }
 
-fn print_reset_usage(usage: &crate::engine::account::UsageSnapshot) {
-    let now = OffsetDateTime::now_utc().unix_timestamp();
-    for window in &usage.windows {
-        if window.resets_at.is_some_and(|reset| reset <= now) {
-            narrate!("  {}: usage unknown; reset passed", window.window);
-        } else {
-            narrate!(
-                "  {}: {}% used, {}% left",
-                window.window,
-                window.used_percent,
-                100u8.saturating_sub(window.used_percent)
-            );
-        }
-    }
+fn print_reset_usage(label: &str, usage: &crate::engine::account::UsageSnapshot) {
     narrate!(
-        "  banked resets: {}",
-        usage
-            .reset_credits
-            .as_ref()
-            .map(|credits| credits.available_count.to_string())
-            .unwrap_or_else(|| "unknown".into())
+        "  {label:<7} {}",
+        crate::subscription::reset_usage_text(&usage.windows)
     );
 }
 

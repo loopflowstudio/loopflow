@@ -531,32 +531,134 @@ writer per conversation, so use `lf resume` while it is still running.
 A Codex home whose `config.toml` sets `cli_auth_credentials_store` to anything
 but `file` cannot be switched; set it to `file`.
 
-## Banked Codex resets
+## Resets
+
+Claude and Codex both bank resets: one-time grants that clear a usage window
+before its date. See what a login holds, then spend one:
 
 ```bash
-lf account codex
-lf account redeem-reset codex=work@example.com
-# Retry an interrupted attempt with the key printed before its request:
-lf account redeem-reset codex=work@example.com --idempotency-key <same-key>
-
+lf account claude=personal@
+lf account redeem-reset claude=personal@ --scope fable
 ```
 
-Live status shows the provider's available reset count and any returned credit
-statuses and expiry times. `--cached` reports resets as unknown. A missing detail
-list does not mean zero credits; the provider's count is authoritative.
+```
+$ lf account claude=personal@
+  …
+  weekly: 70% used, 30% left · live · resets 2026-11-18T20:00:00Z
+  weekly:fable: 100% used, 0% left · live · resets 2026-11-18T20:00:00Z
+  resets: 2 usable (live)
+    weekly  full-reset-2611        1 of 1 left · usable now · clears weekly (70% used), weekly:fable (100% used) · ends 2026-12-10
+    fable   launch-2610-fable-6mo  1 of 1 left · usable now · returns what Fable used to the weekly limit · ends 2027-03-09
+    fable   launch-2610-fable      0 of 1 left · unavailable
 
-Only `redeem-reset` spends a credit. It requires a named managed Codex login,
-validates identity, reports usage before and after, and supports `--json`.
-`--credit-id <id>` selects a particular returned credit; otherwise Codex chooses.
-Status, routing and Graph launches never redeem resets.
+$ lf account redeem-reset claude=personal@ --scope fable
+fable · launch-2610-fable-6mo · weekly 70% · weekly:fable 100%
+Reset attempt 4b0e9c1e-…; retry with --idempotency-key 4b0e9c1e-… --reset-id launch-2610-fable-6mo
+reset · fable · launch-2610-fable-6mo
+  before  weekly 70% · weekly:fable 100%
+  after   weekly 61% · weekly:fable 0%
+```
 
-Each attempt prints an idempotency key before sending the request. Reuse it
-if the reply is lost. `reset` confirms a spend; `alreadyRedeemed` confirms that
-the same attempt completed earlier. `nothingToReset` and `noCredit` report no
-spend. If the following usage refresh fails, the command retains the confirmed
-outcome and reports the after-state as unknown. It never guesses new capacity.
-The [Codex app-server protocol](https://learn.chatgpt.com/docs/app-server#8-earned-rate-limit-resets-chatgpt)
-owns these outcomes and retry semantics.
+The next launch that asks for Fable can take this login again. Nothing else
+needs clearing.
+
+### What a login holds
+
+Live `lf account <login>` lists each reset with its scope, ID, how many are
+left, whether it can be spent now, the windows it clears with their current
+usage, and when it ends. A reset that can't be spent says why, in the
+provider's word (`cooldown`, `needs_limit`, `unavailable`, …).
+
+| Scope | Provider | Clears |
+|---|---|---|
+| `weekly` | Claude | The overall weekly window, and the model windows inside it |
+| `fable` | Claude | Fable's weekly window, returning what Fable used to the overall weekly limit |
+| `session` | Claude | The five-hour window |
+| `full` | Claude | Session and weekly together |
+| the credit's `reset_type` | Codex | What Codex says that type clears |
+
+| Line | Meaning |
+|---|---|
+| `resets: 2 usable (live)` | The provider's count, read just now |
+| `resets: 0 usable (live)` | Resets exist but none can be spent; each line gives its reason |
+| `resets: unavailable (tier)` | Claude says this login can't use resets, and why |
+| `resets: not reported` | The provider answered without reset information. Unknown, not zero |
+| `resets: unknown` | `--cached`, which asks no provider |
+
+Codex may return a count without the list behind it; the count stands. Logins
+Loopflow doesn't manage, and Claude API keys, have no resets line.
+
+`lf account --json` carries the same record for both providers in each row's
+`resets`: `usable`, `unavailable`, and `resets[]` with `id`, `scope`, `label`,
+`left`, `total`, `usable_now`, `unavailable_reason`, `clears`,
+`gives_back_weekly` and `expires_at`. `clears` uses the window names of the
+row's `windows` (`seven_day`, `seven_day_fable`). A null `resets` is unknown.
+
+### Spend one
+
+```bash
+lf account redeem-reset claude=personal@ --scope weekly
+lf account redeem-reset claude=personal@ --reset-id full-reset-2611
+lf account redeem-reset codex=work@example.com
+```
+
+`redeem-reset` takes one managed login and spends one reset. `--scope` takes
+the first usable reset of that scope in the provider's order; `--reset-id`
+names one. With neither, a Claude login whose usable resets share one scope
+spends from it, and one with several scopes stops, lists them and spends
+nothing. Codex chooses its own credit when given neither; `--scope` filters by
+`reset_type` when Codex returned the list.
+
+The provider lets a reset be spent before any limit is reached, and so does
+`redeem-reset`: naming the login and scope is the decision. It prints the reset
+it chose and the usage that reset would clear, then the attempt line, then
+sends the request. Most resets come one to a grant, so read `lf account
+<login>` first. Status, routing and Graph launches never spend one.
+
+After the provider answers, Loopflow reads the login's usage again and records
+it, exactly as `lf account` does. That reading is what frees the login:
+launches route to it again, and a resumed conversation uses it. A
+window omitted from that reading keeps its saved observation. A limit reported
+while the reset is in flight takes precedence; the result says a newer
+observation was kept.
+
+| Outcome | Spent | Meaning |
+|---|---|---|
+| `reset` | yes | The windows are cleared |
+| `alreadyRedeemed` (Codex), `already_used` (Claude) | no | This attempt, or this reset, was spent earlier |
+| `nothingToReset` (Codex), `not_limited` (Claude) | no | The provider found nothing to clear |
+| `noCredit` (Codex) | no | No credit is left |
+| `cooldown`, `ineligible`, `unavailable` (Claude) | no | Refused; the line adds the provider's reason, such as `expired`, `paused` or `not_next_grant` |
+
+These are the provider's words, unchanged, and each exits 0. `--json` prints
+`login`, `scope`, `reset_id`, `outcome`, `reason`, `idempotency_key`, `before`,
+`after`, `refresh_error` and `newer_observation_kept`.
+
+### When it doesn't go through
+
+| What happened | What you see | Next |
+|---|---|---|
+| No usable reset, or none in that scope | An error listing the resets and the scopes that are usable. Nothing sent | Pick a listed scope, or wait out the reason shown |
+| Resets not reported or unavailable | An error with the provider's reason. Nothing sent | — |
+| The reply was lost: a timeout, a server error, a rate limit or an answer Loopflow doesn't recognize | An error naming the key and reset ID. The spend is unconfirmed | Run the printed retry command |
+| The login was refused | The login needs signing in | `lf account connect <provider>=<login>`, then the retry command |
+| The usage read after a confirmed outcome failed | The outcome, with after-usage unknown and the read's error | `lf account <login>` |
+
+Each attempt prints its key before the request goes out:
+
+```bash
+lf account redeem-reset claude=personal@ --idempotency-key <key> --reset-id launch-2610-fable-6mo
+```
+
+A retry with the same key and reset ID repeats the same request instead of
+making a new one, keeping the provider's attempt identity. A Codex retry
+needs only the key. Loopflow never guesses capacity: a spend it couldn't
+confirm changes nothing until a usage read shows it.
+
+Codex's outcomes and retry rules come from the
+[Codex app-server protocol](https://learn.chatgpt.com/docs/app-server#8-earned-rate-limit-resets-chatgpt).
+Claude publishes none; Loopflow uses the same operation as Claude Code's
+at-limit dialog.
 
 ## Use subscriptions over SSH
 
@@ -665,8 +767,8 @@ consumers must migrate; the removed interfaces have no compatibility aliases.
   expose `set_auth_browser_profiles` / `list_auth_browser_profiles` in place of
   the account-access methods. In the list method, a missing account filter lists
   both scopes; filter binding rows when selecting a local service.
-- Include `plan: Option<String>` and `reset_credits: Option<RateLimitResetCredits>`
-  when constructing `SubscriptionUsage`. Read
+- Include `plan: Option<String>` and `resets: Option<Resets>` when constructing
+  `SubscriptionUsage`. Read
   the account's stored `home` instead of the removed `subscription::account_home`
   path constructor.
 - Include `observed_credential_digest: Option<String>` in `ProviderAccount`.

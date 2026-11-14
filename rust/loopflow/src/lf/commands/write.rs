@@ -665,24 +665,29 @@ writes! {
     )?,
 
     /// `lf account redeem-reset <provider>=<email> [--idempotency-key]
-    /// [--credit-id] --json`: spend one banked Codex reset.
+    /// [--reset-id] [--scope] --json`: spend one banked Claude or Codex reset.
     #[serde(rename = "account.redeem_reset")]
     AccountRedeemReset {
         provider: String,
         email: String,
         idempotency_key: Option<String>,
-        credit_id: Option<String>,
+        #[serde(deserialize_with = "Option::deserialize")]
+        reset_id: Option<String>,
+        #[serde(deserialize_with = "Option::deserialize")]
+        scope: Option<String>,
     } => crate::engine::account::Redemption;
     {
         provider,
         email,
         idempotency_key,
-        credit_id,
+        reset_id,
+        scope,
     } => crate::engine::account::redeem_reset(
         provider,
         email,
         idempotency_key.as_deref(),
-        credit_id.as_deref(),
+        reset_id.as_deref(),
+        scope.as_deref(),
     )?,
 
     /// Hold one login on this Machine, or release holds with `auto`.
@@ -1420,7 +1425,7 @@ mod tests {
             r#"{"kind":"account.disconnect","provider":"claude","email":null}"#,
             r#"{"kind":"account.connect","provider":"codex","email":"maya@example.com","chrome_profile":"Profile 1","import":false,"api_key":false}"#,
             r#"{"kind":"account.set","provider":"codex","email":"maya@example.com","login_email":null,"plan":null,"clear_plan":false,"paid_through":null,"clear_paid_through":false,"clear_cooldown":true,"chrome_profiles":[],"clear_chrome_profiles":false}"#,
-            r#"{"kind":"account.redeem_reset","provider":"codex","email":"maya@example.com","idempotency_key":null,"credit_id":null}"#,
+            r#"{"kind":"account.redeem_reset","provider":"codex","email":"maya@example.com","idempotency_key":null,"reset_id":null,"scope":null}"#,
             r#"{"kind":"account.use","login":"claude=maya@example.com"}"#,
             r#"{"kind":"graph.run","directory":"/r","name":"code","message":null,"agent":null}"#,
             r#"{"kind":"skill.run","directory":"/r","name":"debug","message":"the failing test","agent":"claude"}"#,

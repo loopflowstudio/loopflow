@@ -44,7 +44,7 @@
       "verified_windows": [
         "session"
       ],
-      "reset_credits": null,
+      "resets": null,
       "active": true,
       "held": true
     },
@@ -65,17 +65,21 @@
       "expires_at": null,
       "windows": [],
       "verified_windows": [],
-      "reset_credits": {
-        "availableCount": 2,
-        "credits": [
+      "resets": {
+        "usable": 2,
+        "unavailable": null,
+        "resets": [
           {
             "id": "credit-fixture",
-            "resetType": "codexRateLimits",
-            "status": "available",
-            "grantedAt": 1799900000,
-            "expiresAt": 1800100000,
-            "title": null,
-            "description": null
+            "scope": "codexRateLimits",
+            "label": null,
+            "left": null,
+            "total": null,
+            "usable_now": true,
+            "unavailable_reason": null,
+            "clears": [],
+            "gives_back_weekly": false,
+            "expires_at": 1800100000
           }
         ]
       },
@@ -99,7 +103,7 @@
       "expires_at": 1790000000,
       "windows": [],
       "verified_windows": [],
-      "reset_credits": null,
+      "resets": null,
       "active": false,
       "held": false
     },
@@ -120,7 +124,7 @@
       "expires_at": null,
       "windows": [],
       "verified_windows": [],
-      "reset_credits": null,
+      "resets": null,
       "active": false,
       "held": false
     },
@@ -154,7 +158,7 @@
         }
       ],
       "verified_windows": [],
-      "reset_credits": null,
+      "resets": null,
       "active": false,
       "held": false
     },
@@ -175,7 +179,7 @@
       "expires_at": 1790000000,
       "windows": [],
       "verified_windows": [],
-      "reset_credits": null,
+      "resets": null,
       "active": false,
       "held": false
     },
@@ -196,7 +200,7 @@
       "expires_at": null,
       "windows": [],
       "verified_windows": [],
-      "reset_credits": null,
+      "resets": null,
       "active": false,
       "held": false
     }

@@ -175,19 +175,15 @@ from an env var; nothing timing-based is committed.
 - Competing-writer wait on the store copy for the 2,000-unseen case drops
   from ~430 ms to the write phase; the number goes in the PR body.
 
-## Tests (focused)
+## Tests
 
-- New, `planning_peers.rs`: plan an import, then make a local edit to a touched
-  record on the same store, then apply; the result equals a fresh import of the
-  same document (exercises the moved-revision recompute). Calls the private
-  functions directly; no production hook.
-- New: import a moved revision with nothing unseen and nothing unrouted inside
-  `query_plans::assert_no_empty_writes`; only the import row changes.
-- New: record-scoped export plan uses `planning_peer_changes_object`
-  (`EXPLAIN QUERY PLAN`), alongside the existing query-plan checks.
-- `cargo test -p loopflow --lib store::sqlite::planning_peers:: store::sqlite::planning_write::`
-  — run by implement.
-- Competing-writer probe on a store copy — run by gate; result in the PR body.
+Built (`planning_peers.rs` tests): `a_local_edit_made_while_an_import_plans_survives_as_if_it_came_first`
+(moved-revision recompute, calls `Import::read`/`write` directly),
+`a_moved_revision_with_nothing_new_writes_only_the_imported_revision`
+(`query_plans::assert_no_empty_writes`, from #1926, now on main),
+`an_import_reads_planning_history_by_record` (`growing_scans` over the traced
+import: no growing scan of `planning_peer_changes`). Remaining: the
+competing-writer probe (gate, see Demo).
 
 ## Open finding (out of scope)
 

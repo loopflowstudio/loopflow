@@ -72,9 +72,9 @@ Changes to Task/Graph membership or execution reads also include
 `test(performance_tests::)` in the gate's Rust filter. Its planning and status
 checks catch per-Task and per-Graph SQL growth beyond focused store tests.
 
-Store-wide schema or trigger changes also run `binary(two_people)` and
-`binary(transport_tests)`: shared planning exchanges and detached owner lifetimes
-exercise writers beyond the changed store module.
+Store-wide schema or trigger changes also run `binary(two_people)`,
+`test(transport::)` and `binary(transport_tests)`: shared planning exchanges,
+viewer holds and owner lifetimes exercise writers beyond the changed store module.
 Task storage changes also run `binary(session_lifecycle_tests)`: creation and
 promotion cover absent checkouts and primary Sessions. When moving nullable
 columns into separate tables, update fixture reads to handle absent rows and
@@ -107,7 +107,7 @@ Terminal-title changes run `test(transport::output::tests::)` and
 lookup completes in a deterministic output test; a live attachment can miss that
 startup race locally.
 
-Viewer readiness changes also run `test(transport::viewer_tests::)` and
+Viewer readiness changes also run `test(transport::relay_tests::)` and
 `test(session_cli_tests::terminal_titles_follow_session_rename_and_reconnect_without_provider_accounts)`.
 A provider may exit before its viewer sends readiness; final output and exit
 status must survive that acknowledgement failing.
@@ -220,7 +220,7 @@ Omit `--rust-filter` (the whole workspace) only to reproduce a CI
   repository-local identities still win. Do not inject `GIT_CONFIG_GLOBAL` to
   repair a test: it hides missing setup in that private home.
 - Changes to the test environment constructor reach the library suites too.
-  Run `store::tests::` and `transport::viewer_tests::` from an empty cwd: they
+  Run `store::tests::` and `transport::relay_tests::` from an empty cwd: they
   exercise claims for absent repositories and children with cleared environments.
   Such children set both `HOME` and `PATH` before the constructor adds its
   Keychain stand-in; an absent PATH would otherwise contain only the stand-in.

@@ -4106,6 +4106,20 @@ mod tests {
         .is_err());
     }
 
+    /// A provider running across an lf upgrade keeps the Stop hook an older lf
+    /// declared, so that spelling still reaches the turn-end boundary.
+    #[test]
+    fn a_retained_stop_hook_spelling_reaches_the_turn_end() {
+        let cli = Cli::try_parse_from(["lf", "__planning-check"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::ContextBlock {
+                delivery: None,
+                moment: crate::context_block::ContextMoment::Stop,
+            })
+        ));
+    }
+
     #[test]
     fn only_provider_side_commands_are_hidden_and_the_root_hides_no_flag() {
         let root = Cli::command();

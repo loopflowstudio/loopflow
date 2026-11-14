@@ -259,8 +259,9 @@ impl super::SqliteStore {
         wave: Option<&str>,
         repo: Option<&str>,
     ) -> StoreResult<Vec<CiIncidentReportRow>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let conn = conn.unchecked_transaction()?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        // One snapshot that only reads: a savepoint, not the write lock.
+        let conn = conn.savepoint()?;
         let mut statement = conn.prepare(&format!(
             "SELECT
                 ci.identity, ci.landing_id, ci.task_id, ci.pr_id,

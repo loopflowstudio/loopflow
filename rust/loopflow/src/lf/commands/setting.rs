@@ -32,6 +32,13 @@ pub fn declare(
         Some(value) => crate::engine::config::set(destination, key, value)?,
         None => crate::engine::config::unset(destination, key)?,
     };
+    // The comma spelling still saves until LOO-875 removes it.
+    if let Some(warning) = value
+        .filter(|_| key.rsplit('.').next() == Some("default_agent"))
+        .and_then(crate::config::settings::old_default_agent_warning)
+    {
+        eprintln!("warning: {}: {warning}", saved.path.display());
+    }
     if json {
         println!("{}", serde_json::to_string_pretty(&saved)?);
     } else {

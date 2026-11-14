@@ -457,4 +457,287 @@ mod tests {
         assert_eq!(config.port().unwrap(), 8443);
         assert_eq!(serde_json::to_value(config).unwrap(), value);
     }
+
+    // ---- Saved setup under a private LF home ----
+
+    use super::super::remote::{manage, Control};
+    use super::{configured, save, TailscaleIdentity};
+    use crate::lf::commands::graph::EnvVarGuard;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    /// A private `LF_HOME` holding unrelated preferences beside mobile setup.
+    struct Home {
+        dir: tempfile::TempDir,
+        guards: Vec<EnvVarGuard>,
+    }
+
+    const PREFERENCES: &str = "agent: claude\n";
+
+    impl Home {
+        fn new() -> Self {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::write(dir.path().join("config.yaml"), PREFERENCES).unwrap();
+            let guards = vec![EnvVarGuard::set("LF_HOME", dir.path().to_str().unwrap())];
+            Self { dir, guards }
+        }
+
+        fn saved(&self) -> PathBuf {
+            self.dir.path().join("mobile.yaml")
+        }
+
+        fn persisted(&self) -> serde_json::Value {
+            serde_yaml_ng::from_str(&std::fs::read_to_string(self.saved()).unwrap()).unwrap()
+        }
+
+        fn status_file(&self) -> PathBuf {
+            self.dir.path().join("tailscale-status.json")
+        }
+
+        /// Put a stand-in `tailscale` first on PATH: this Machine is node1 of
+        /// user 1 at fixture.tail.ts.net on 127.0.0.1.
+        fn tailscale(&mut self) {
+            use std::os::unix::fs::PermissionsExt;
+            let bin = self.dir.path().join("bin");
+            std::fs::create_dir_all(&bin).unwrap();
+            let certificate =
+                rcgen::generate_simple_self_signed(vec!["fixture.tail.ts.net".into()]).unwrap();
+            let pem = self.dir.path().join("certificate.pem");
+            std::fs::write(
+                &pem,
+                format!(
+                    "{}{}",
+                    certificate.cert.pem(),
+                    certificate.signing_key.serialize_pem()
+                ),
+            )
+            .unwrap();
+            std::fs::write(self.status_file(), status(1).to_string()).unwrap();
+            let cli = bin.join("tailscale");
+            std::fs::write(
+                &cli,
+                format!(
+                    "#!/bin/sh\ncase \"$1\" in\nstatus) cat '{}' ;;\ncert) cat '{}' ;;\n*) exit 1 ;;\nesac\n",
+                    self.status_file().display(),
+                    pem.display()
+                ),
+            )
+            .unwrap();
+            std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let path = format!(
+                "{}:{}",
+                bin.display(),
+                std::env::var("PATH").unwrap_or_default()
+            );
+            self.guards.push(EnvVarGuard::set("PATH", &path));
+        }
+    }
+
+    fn status(user: u64) -> serde_json::Value {
+        json!({"BackendState":"Running", "Self":{"ID":"node1", "DNSName":"fixture.tail.ts.net.", "UserID":user, "TailscaleIPs":["127.0.0.1"]}, "User":{user.to_string():{"LoginName":"owner@example.com"}}})
+    }
+
+    fn approval(port: u16) -> Configuration {
+        Configuration {
+            enabled: true,
+            endpoint: format!("https://fixture.tail.ts.net:{port}"),
+            owner: TailscaleIdentity {
+                node: "node1".into(),
+                user: 1,
+            },
+        }
+    }
+
+    fn with_home(body: impl FnOnce(&mut Home)) {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let mut home = Home::new();
+        body(&mut home);
+        assert_eq!(
+            std::fs::read_to_string(home.dir.path().join("config.yaml")).unwrap(),
+            PREFERENCES,
+            "mobile setup touches only mobile.yaml"
+        );
+    }
+
+    #[test]
+    fn offline_disable_keeps_the_approval_clears_obsolete_settings_and_spares_a_damaged_file() {
+        with_home(|home| {
+            // With no server running, status reads the saved approval.
+            save(&approval(8443)).unwrap();
+            let offline = super::status().unwrap();
+            assert!(offline.configuration.unwrap().enabled);
+            assert!(!offline.ready);
+            assert!(offline.error.is_some());
+
+            super::disable().unwrap();
+            let mut disabled = serde_json::to_value(approval(8443)).unwrap();
+            disabled["enabled"] = json!(false);
+            assert_eq!(
+                home.persisted(),
+                disabled,
+                "disable keeps the owner and address"
+            );
+            assert!(super::status().unwrap().error.is_none());
+
+            let obsolete = json!({"enabled":true,"endpoint":"https://obsolete.tail.ts.net:8443"});
+            std::fs::write(home.saved(), serde_yaml_ng::to_string(&obsolete).unwrap()).unwrap();
+            super::disable().unwrap();
+            assert_eq!(
+                home.persisted(),
+                json!({}),
+                "disable clears obsolete settings"
+            );
+
+            let damaged = "enabled: [unfinished";
+            std::fs::write(home.saved(), damaged).unwrap();
+            assert!(super::disable().is_err());
+            assert_eq!(std::fs::read_to_string(home.saved()).unwrap(), damaged);
+        });
+    }
+
+    /// The server's mobile manager for this home, and a way to ask it things.
+    struct Manager {
+        /// Runs the manager until the test drops it.
+        _runtime: tokio::runtime::Runtime,
+        requests: tokio::sync::mpsc::Sender<Control>,
+    }
+
+    impl Manager {
+        fn start() -> Self {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            let (requests, received) = tokio::sync::mpsc::channel(4);
+            runtime.spawn(manage(
+                configured(),
+                received,
+                Arc::from("instance"),
+                Arc::new("executable".to_owned()),
+                Arc::new(tokio::sync::Semaphore::new(
+                    crate::server::wire::MAX_CONNECTIONS,
+                )),
+                Default::default(),
+                Default::default(),
+                Default::default(),
+                None,
+            ));
+            Self {
+                _runtime: runtime,
+                requests,
+            }
+        }
+
+        fn status(&self) -> super::Status {
+            let (reply, answer) = tokio::sync::oneshot::channel();
+            self.requests
+                .blocking_send(Control::Status { reply })
+                .unwrap();
+            answer.blocking_recv().unwrap()
+        }
+
+        /// The status once restoring the saved approval has been tried.
+        fn restored(&self) -> super::Status {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            loop {
+                let status = self.status();
+                if status.ready || status.error.is_some() {
+                    return status;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "restoration never ran"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
+
+        fn configure(&self, configuration: Option<Configuration>) -> Option<Configuration> {
+            let (reply, answer) = tokio::sync::oneshot::channel();
+            self.requests
+                .blocking_send(Control::Configure {
+                    configuration,
+                    reply,
+                })
+                .unwrap();
+            answer.blocking_recv().unwrap().unwrap()
+        }
+    }
+
+    fn port(config: &Configuration) -> u16 {
+        config.port().unwrap()
+    }
+
+    fn listening(port: u16) -> bool {
+        std::net::TcpStream::connect(("127.0.0.1", port)).is_ok()
+    }
+
+    #[test]
+    fn restoration_keeps_the_saved_address_and_setup_moves_off_an_occupied_port() {
+        with_home(|home| {
+            home.tailscale();
+            let occupied = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+            let saved = approval(occupied.local_addr().unwrap().port());
+            save(&saved).unwrap();
+
+            // Restoring never changes the address phones already have.
+            let manager = Manager::start();
+            let restoring = manager.restored();
+            assert!(!restoring.ready);
+            assert!(restoring.error.is_some());
+            assert_eq!(restoring.configuration.unwrap().endpoint, saved.endpoint);
+
+            // Explicit setup replaces obsolete settings and takes a free port
+            // for the same owner.
+            let obsolete = json!({"enabled":true,"endpoint":"https://obsolete.tail.ts.net:8443"});
+            std::fs::write(home.saved(), serde_yaml_ng::to_string(&obsolete).unwrap()).unwrap();
+            let repaired = manager.configure(Some(saved.clone())).unwrap();
+            assert_ne!(port(&repaired), port(&saved));
+            assert_eq!(repaired.owner, saved.owner);
+            assert!(listening(port(&repaired)));
+            let ready = manager.status();
+            assert!(ready.ready);
+            assert_eq!(
+                serde_json::to_value(ready.configuration).unwrap(),
+                serde_json::to_value(&repaired).unwrap()
+            );
+            assert_eq!(home.persisted(), serde_json::to_value(&repaired).unwrap());
+            // Setting up the same approval again keeps the live listener.
+            assert_eq!(
+                manager.configure(Some(repaired.clone())).unwrap().endpoint,
+                repaired.endpoint
+            );
+
+            // Turning access off closes the listener and saves it disabled.
+            assert!(manager.configure(None).is_none());
+            assert!(!listening(port(&repaired)));
+            let off = manager.status();
+            assert!(!off.ready);
+            assert!(!off.configuration.unwrap().enabled);
+            assert_eq!(home.persisted()["enabled"], false);
+            drop(occupied);
+        });
+    }
+
+    #[test]
+    fn a_saved_approval_does_not_follow_a_new_tailscale_owner() {
+        with_home(|home| {
+            home.tailscale();
+            let saved = approval(0);
+            save(&saved).unwrap();
+            std::fs::write(home.status_file(), status(2).to_string()).unwrap();
+            let manager = Manager::start();
+            let restored = manager.restored();
+            assert!(!restored.ready);
+            assert!(
+                restored
+                    .error
+                    .as_deref()
+                    .unwrap()
+                    .contains("Tailscale account changed"),
+                "{restored:?}"
+            );
+            assert_eq!(restored.configuration.unwrap().owner, saved.owner);
+        });
+    }
 }

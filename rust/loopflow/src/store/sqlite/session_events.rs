@@ -329,51 +329,6 @@ impl SqliteStore {
         Ok(None)
     }
 
-    /// A late provider acknowledgement must not rewind the last observed reading.
-    pub(crate) fn latest_task_update(&self, session: &str) -> StoreResult<Option<Value>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let observation: Option<String> = conn
-            .query_row(
-                "SELECT json_extract(payload,'$.observation') FROM session_events
-             WHERE session_id=?1 AND kind='observed' AND json_valid(payload)
-               AND json_extract(payload,'$.source')='task_update'
-               AND json_extract(payload,'$.state') IN ('baseline','dispatched')
-             ORDER BY seq DESC LIMIT 1",
-                [crate::id::canonical_session(session)],
-                |row| row.get(0),
-            )
-            .optional()?;
-        observation
-            .map(|value| serde_json::from_str(&value).map_err(Into::into))
-            .transpose()
-    }
-
-    /// Baseline and dispatch share a receipt: only one observer can claim a
-    /// reading, even across overlapping relays or a new captured input.
-    /// Call under the native owner's authority fence before writing provider bytes.
-    pub(crate) fn record_task_update(
-        &self,
-        session: &str,
-        key: &str,
-        state: &str,
-        observation: &Value,
-    ) -> StoreResult<bool> {
-        let phase = match state {
-            "baseline" | "dispatched" => "observed",
-            state => state,
-        };
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.execute(
-            "INSERT INTO session_events(session_id,kind,receipt_key,task_id,wave_id,observed_at,payload,captured_event)
-             SELECT id,'observed',?2,task_id,wave_id,unixepoch(),?3,current_capture
-             FROM agent_sessions WHERE id=?1
-             ON CONFLICT DO NOTHING",
-            params![crate::id::canonical_session(session), format!("task_update:{key}:{phase}"),
-                serde_json::json!({"source":"task_update","key":key,"state":state,
-                    "observation":observation}).to_string()],
-        )? != 0)
-    }
-
     /// One `store-gap` observation for boundaries missed from `first_miss` to
     /// `last_miss`.
     pub(crate) fn record_recording_gap(
@@ -513,8 +468,14 @@ impl SqliteStore {
         payload: &Value,
     ) -> StoreResult<i64> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let payload = serde_json::to_string(payload)?;
+        // Providers replay receipts they have sent before; a retained one
+        // answers without the write lock.
+        if let Some(seq) = retained_event_in(&conn, session, thread, turn, kind, &payload)? {
+            return Ok(seq);
+        }
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let seq = record_event_in(&tx, session, thread, turn, kind, payload)?;
+        let seq = record_event_in(&tx, session, thread, turn, kind, &payload)?;
         tx.commit()?;
         Ok(seq)
     }
@@ -661,7 +622,7 @@ impl SqliteStore {
             thread,
             turn,
             SessionEventKind::Started,
-            &serde_json::json!({}),
+            "{}",
         )?;
         // An uncorrelated observation can acquire its origin once. Repeated
         // evidence must match every field, including an explicitly absent bind.
@@ -759,7 +720,7 @@ impl SqliteStore {
                  (?5 IS NULL OR (CASE WHEN e.kind IN ('observed','captured') THEN e.wave_id ELSE origin.wave_id END)
                      IN (SELECT id FROM wave_addresses WHERE id=?12 OR slug=?5))
                  AND (?6 IS NULL OR (CASE WHEN e.kind IN ('observed','captured') THEN e.task_id ELSE origin.task_id END)
-                     IN (SELECT t.id FROM tasks t JOIN projects p ON p.id=t.project_id
+                     IN (SELECT t.id FROM projects p CROSS JOIN tasks t ON t.project_id=p.id
                          WHERE p.id=?13 OR p.project_slug=?6 OR p.external_project_id=?14))
                  AND (?7 IS NULL OR (CASE WHEN e.kind IN ('observed','captured') THEN e.task_id ELSE origin.task_id END)
                      IN (SELECT id FROM tasks WHERE id=?15 OR issue_identifier=?16 OR external_issue_id=?17))))
@@ -851,15 +812,16 @@ const INSERT_NATIVE_EVENT: &str = "INSERT INTO session_events(session_id,provide
     VALUES(?1,?2,?3,?4,?5,?6,?7)";
 
 /// Insert only the observation. Work and capture require correlated origin evidence.
-fn record_event_in(
-    tx: &rusqlite::Transaction<'_>,
+/// The retained receipt's sequence, or an error when it says something else.
+fn retained_event_in(
+    conn: &rusqlite::Connection,
     session: &str,
     thread: &AgentSessionId,
     turn: &str,
     kind: SessionEventKind,
-    payload: &Value,
-) -> StoreResult<i64> {
-    let existing: Option<(i64, String)> = tx
+    payload: &str,
+) -> StoreResult<Option<i64>> {
+    let existing: Option<(i64, String)> = conn
         .query_row(
             "SELECT seq,payload FROM session_events
              WHERE session_id=?1 AND provider_thread=?2 AND provider_turn=?3 AND kind=?4 AND receipt_key=''",
@@ -867,15 +829,26 @@ fn record_event_in(
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?;
-    let payload = serde_json::to_string(payload)?;
-    if let Some((seq, saved)) = existing {
-        if saved == payload {
-            return Ok(seq);
-        }
-        return Err(StoreError::InvalidData(format!(
+    match existing {
+        None => Ok(None),
+        Some((seq, saved)) if saved == payload => Ok(Some(seq)),
+        Some(_) => Err(StoreError::InvalidData(format!(
             "Conflicting {} receipt for conversation {session}, turn {turn}",
             kind.as_str()
-        )));
+        ))),
+    }
+}
+
+fn record_event_in(
+    tx: &rusqlite::Transaction<'_>,
+    session: &str,
+    thread: &AgentSessionId,
+    turn: &str,
+    kind: SessionEventKind,
+    payload: &str,
+) -> StoreResult<i64> {
+    if let Some(seq) = retained_event_in(tx, session, thread, turn, kind, payload)? {
+        return Ok(seq);
     }
     tx.execute(
         INSERT_NATIVE_EVENT,
@@ -1097,7 +1070,7 @@ mod tests {
             .unwrap();
             conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", rusqlite::params![project.as_str(),wave]).unwrap();
             conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
-            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,issue_title,issue_description,workspace_slug,worktree,created_at,updated_at) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1','Proof','','',NULL,1,1)", rusqlite::params![task.as_str(),project.as_str()]).unwrap();
+            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,issue_title,issue_description,workspace_slug,created_at,updated_at) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1','Proof','','',1,1)", rusqlite::params![task.as_str(),project.as_str()]).unwrap();
         }
         let attachment = store
             .claim_session_attachment(&session.id, None, &process, false)

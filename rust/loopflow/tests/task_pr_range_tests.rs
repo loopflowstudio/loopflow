@@ -966,7 +966,11 @@ fn publishing_after_parent_squash_preserves_the_fork_for_sync() {
     });
     runtime.block_on(parent.store.update_task_pr(&pr)).unwrap();
     runtime
-        .block_on(parent.store.stack_task_placement(&child, &parent.pr.id))
+        .block_on(
+            parent
+                .store
+                .stack_task_placement(&child, &parent.pr.id, &child.base_commit),
+        )
         .unwrap();
     fs::write(child_path.join("child.txt"), "child work\n").unwrap();
     for args in [vec!["add", "."], vec!["commit", "-m", "child work"]] {

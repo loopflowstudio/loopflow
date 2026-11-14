@@ -1,17 +1,15 @@
 //! Session-viewer holds and one checkout cleanup intent pinned to Task closure.
 use rusqlite::{params, Connection, OptionalExtension};
 
-use super::transport::Transport;
 use super::SqliteStore;
 use crate::durable::TaskId;
-use crate::id::{LfProcessId, TerminalId};
+use crate::id::TerminalId;
 use crate::store::{StoreError, StoreResult};
-use crate::transport::Host;
 
 pub(crate) const WORKSPACE_GRACE: i64 = 15 * 60;
 const VIEWED: &str = "Retained by an open Task Session viewer";
 
-/// What a serving owner knows about its own viewers, recorded on its Process.
+/// What a held terminal's host knows about its viewers, recorded on the terminal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ViewerHold {
     /// A connected viewer, observed at this wall-clock second.
@@ -35,10 +33,10 @@ impl ViewerHold {
     }
 }
 
-/// One Session host's dated viewing evidence, retained after it ends.
+/// One held terminal's dated viewing evidence, retained after it ends.
 #[derive(Debug)]
-pub(crate) struct OwnerHold {
-    pub owner: Host,
+pub(crate) struct TerminalHold {
+    pub terminal: TerminalId,
     pub hold: ViewerHold,
     pub ended: bool,
 }
@@ -55,34 +53,13 @@ pub(crate) struct TaskRetirement {
 }
 
 impl SqliteStore {
-    /// Current Session launchers belong to their owner even after an exec handoff
-    /// starts a new trace without a Process parent.
-    pub(crate) fn owner_session_launchers(
-        &self,
-        owner: &LfProcessId,
-    ) -> StoreResult<Vec<LfProcessId>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(
-            "WITH agents AS (
-                SELECT p.parent_lf_process_id,p.attached_lf_process_id FROM agent_sessions s
-                JOIN processes p ON p.id=s.agent_process_id
-                WHERE s.transport_lf_process_id=?1 AND s.completed_at IS NULL)
-             SELECT parent_lf_process_id FROM agents WHERE parent_lf_process_id IS NOT NULL
-             UNION SELECT attached_lf_process_id FROM agents WHERE attached_lf_process_id IS NOT NULL",
-        )?;
-        let launchers = query
-            .query_map([owner], |row| row.get(0))?
-            .collect::<rusqlite::Result<_>>()?;
-        Ok(launchers)
-    }
-
-    /// Completion and each newly launched owner or held terminal receive the
-    /// same viewing grace.
+    /// Completion and each newly launched held terminal receive the same
+    /// viewing grace.
     pub(crate) fn task_close_candidates(
         &self,
         task: &TaskId,
         now: i64,
-    ) -> StoreResult<Vec<(Host, bool)>> {
+    ) -> StoreResult<Vec<(TerminalId, bool)>> {
         let due = |viewed: &str| {
             format!(
                 "(tw.abandoned_at IS NOT NULL OR (tw.planning_completed=1
@@ -95,95 +72,77 @@ impl SqliteStore {
         };
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(
-            "SELECT DISTINCT p.id,NULL,tw.abandoned_at IS NOT NULL FROM tasks tw JOIN agent_sessions s ON ({members})
-             JOIN processes p ON p.id=s.transport_lf_process_id
-             WHERE tw.id=?1 AND s.interactive=1 AND s.completed_at IS NULL AND p.completed_at IS NULL
-               AND NOT EXISTS(SELECT 1 FROM desktop_shells sh WHERE sh.owner=p.id)
-               AND {owner_due}
-             UNION SELECT DISTINCT NULL,t.id,tw.abandoned_at IS NOT NULL FROM tasks tw
+            "SELECT DISTINCT t.id,tw.abandoned_at IS NOT NULL FROM tasks tw
              JOIN agent_sessions s ON ({members})
              JOIN held_terminals t ON t.id=s.held_terminal_id
              WHERE tw.id=?1 AND s.interactive=1 AND s.completed_at IS NULL AND t.ended_at IS NULL
                AND {terminal_due}",
             members = super::task_work::session_membership("s"),
-            owner_due = due("COALESCE(p.viewer_hold_at,p.started_at)"),
             terminal_due = due("COALESCE(t.viewer_hold_at,t.created_at)"),
         ))?;
-        let hosts = query
+        let terminals = query
             .query_map(params![task.as_str(), now, super::WORKSPACE_GRACE], |r| {
-                Ok((
-                    r.get::<_, Option<LfProcessId>>(0)?,
-                    r.get::<_, Option<TerminalId>>(1)?,
-                    r.get(2)?,
-                ))
+                Ok((r.get(0)?, r.get(1)?))
             })?
-            .map(|row| {
-                let (owner, terminal, abandoned) = row?;
-                Ok((host(owner, terminal)?, abandoned))
-            })
-            .collect::<StoreResult<_>>()?;
-        Ok(hosts)
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(terminals)
     }
 
     /// Record one observation for both Session activity and checkout retention.
     /// Renewed viewing resets checkout cleanup in this same transaction.
-    pub(crate) fn record_owner_viewer_hold<'a>(
+    pub(crate) fn record_viewer_hold(
         &self,
-        owner: impl Into<Transport<'a>>,
+        terminal: &TerminalId,
         hold: Option<ViewerHold>,
     ) -> StoreResult<()> {
-        let owner = owner.into();
         let mut conn = self.conn.lock().expect("store mutex poisoned");
+        // Viewers report on every poll and nearly every report repeats the
+        // last one: read first and take no write lock when nothing changes.
+        if !viewer_hold_changes(&conn, terminal, hold)?
+            && viewer_retirements(&conn, terminal, hold)?.is_empty()
+        {
+            return Ok(());
+        }
         let tx = conn.transaction()?;
-        tx.execute(
-            &format!(
-                "UPDATE {} SET viewer_hold=?2,viewer_hold_at=?3,viewed=?4
-             WHERE id=?1 AND (viewer_hold IS NOT ?2 OR viewer_hold_at IS NOT ?3 OR viewed IS NOT ?4)",
-                owner.table()
-            ),
-            params![
-                owner.as_str(),
-                hold.map(ViewerHold::as_str),
-                hold.map(ViewerHold::at),
-                matches!(hold, Some(ViewerHold::Viewed(_))),
-            ],
-        )?;
-        match hold {
-            Some(ViewerHold::Viewed(_)) => hold_viewer_retirements(&tx, owner, None)?,
-            // A return and departure can both reach the recorder between polls.
-            Some(ViewerHold::Absent(at)) => hold_viewer_retirements(&tx, owner, Some(at))?,
-            None => {}
+        if viewer_hold_changes(&tx, terminal, hold)? {
+            tx.execute(
+                "UPDATE held_terminals SET viewer_hold=?2,viewer_hold_at=?3,viewed=?4 WHERE id=?1",
+                params![
+                    terminal,
+                    hold.map(ViewerHold::as_str),
+                    hold.map(ViewerHold::at),
+                    matches!(hold, Some(ViewerHold::Viewed(_))),
+                ],
+            )?;
+        }
+        let reason = matches!(hold, Some(ViewerHold::Viewed(_))).then_some(VIEWED);
+        for task in viewer_retirements(&tx, terminal, hold)? {
+            hold_retirement(&tx, &task, reason)?;
         }
         tx.commit()?;
         Ok(())
     }
 
     /// Only Session viewers retain a checkout. Shell receipts own cleanup, not retention.
-    pub(crate) fn task_viewer_holds(&self, task: &TaskId) -> StoreResult<Vec<OwnerHold>> {
+    pub(crate) fn task_viewer_holds(&self, task: &TaskId) -> StoreResult<Vec<TerminalHold>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(
-            "SELECT p.id,NULL,p.viewer_hold,p.completed_at IS NOT NULL,p.viewer_hold_at FROM processes p
-             WHERE p.viewer_hold IS NOT NULL
-               AND p.id IN (SELECT s.transport_lf_process_id FROM agent_sessions s WHERE s.id IN ({sessions}))
-             UNION ALL
-             SELECT NULL,t.id,t.viewer_hold,t.ended_at IS NOT NULL,t.viewer_hold_at FROM held_terminals t
+            "SELECT t.id,t.viewer_hold,t.ended_at IS NOT NULL,t.viewer_hold_at FROM held_terminals t
              WHERE t.viewer_hold IS NOT NULL
                AND t.id IN (SELECT s.held_terminal_id FROM agent_sessions s WHERE s.id IN ({sessions}))
-             ORDER BY 1,2",
+             ORDER BY 1",
             sessions = super::task_work::session_ids("?1")
         ))?;
         let rows = query.query_map([task.as_str()], |r| {
             Ok((
-                r.get::<_, Option<LfProcessId>>(0)?,
-                r.get::<_, Option<TerminalId>>(1)?,
-                r.get::<_, String>(2)?,
-                r.get::<_, bool>(3)?,
-                r.get::<_, i64>(4)?,
+                r.get::<_, TerminalId>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, bool>(2)?,
+                r.get::<_, i64>(3)?,
             ))
         })?;
         rows.map(|row| {
-            let (owner, terminal, hold, ended, at) = row?;
-            let owner = host(owner, terminal)?;
+            let (terminal, hold, ended, at) = row?;
             let hold = match hold.as_str() {
                 "viewed" => ViewerHold::Viewed(at),
                 "absent" => ViewerHold::Absent(at),
@@ -193,27 +152,34 @@ impl SqliteStore {
                     )))
                 }
             };
-            Ok(OwnerHold { owner, hold, ended })
+            Ok(TerminalHold {
+                terminal,
+                hold,
+                ended,
+            })
         })
         .collect()
     }
 
     pub(crate) fn pending_retirements(&self) -> StoreResult<Vec<TaskId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
+        // Start from the few live held terminals, then probe their checkouts by index:
+        // joining every Task to every Session took half a second at 1,200
+        // Tasks and 16,000 Sessions.
         let mut query = conn.prepare(&format!(
-            "SELECT task_id FROM task_retirements WHERE phase!='retired'
-             UNION SELECT id FROM tasks WHERE abandoned_at IS NOT NULL AND worktree IS NOT NULL
-               AND checkout_machine_id=(SELECT id FROM machines WHERE is_local=1)
-               AND NOT EXISTS(SELECT 1 FROM task_retirements WHERE task_id=tasks.id)
-             UNION SELECT tw.id FROM tasks tw JOIN agent_sessions s ON ({members})
-               LEFT JOIN processes p ON p.id=s.transport_lf_process_id
-               LEFT JOIN held_terminals t ON t.id=s.held_terminal_id
-               WHERE (tw.planning_completed=1 OR tw.abandoned_at IS NOT NULL)
-                 AND s.completed_at IS NULL AND s.interactive=1
-                 AND ((p.id IS NOT NULL AND p.completed_at IS NULL)
-                     OR (t.id IS NOT NULL AND t.ended_at IS NULL))
+            "WITH hosted AS MATERIALIZED (
+                 SELECT s.cwd,s.task_id,s.primary_scope FROM held_terminals t
+                     CROSS JOIN agent_sessions s ON s.held_terminal_id=t.id
+                     WHERE t.ended_at IS NULL AND s.completed_at IS NULL AND s.interactive=1)
+             SELECT task_id FROM task_retirements WHERE phase!='retired'
+             UNION SELECT a.id FROM tasks a INDEXED BY tasks_abandoned
+               CROSS JOIN task_checkouts c ON c.task_id=a.id
+               WHERE a.abandoned_at IS NOT NULL
+               AND NOT EXISTS(SELECT 1 FROM task_retirements WHERE task_id=a.id)
+             UNION SELECT tw.id FROM hosted h CROSS JOIN tasks tw ON tw.id IN ({members})
+               WHERE tw.planning_completed=1 OR tw.abandoned_at IS NOT NULL
              ORDER BY 1",
-            members = super::task_work::session_membership("s")
+            members = super::task_work::session_tasks("h")
         ))?;
         let tasks = query
             .query_map([], |r| Ok(TaskId::from_raw(r.get::<_, String>(0)?)))?
@@ -251,10 +217,9 @@ impl SqliteStore {
         };
         let grace = if abandoned { 0 } else { WORKSPACE_GRACE };
         tx.execute("INSERT INTO task_retirements(task_id,completion,checkout,branch,due_at,phase)
-            SELECT id,CASE WHEN abandoned_at IS NOT NULL THEN 'abandoned:'||abandoned_at ELSE planning_completed_at END,
-                worktree,branch,?2+?3,'waiting' FROM tasks
-            WHERE id=?1 AND (abandoned_at IS NOT NULL OR (planning_completed=1 AND planning_completed_at IS NOT NULL))
-                AND worktree IS NOT NULL
+            SELECT t.id,CASE WHEN t.abandoned_at IS NOT NULL THEN 'abandoned:'||t.abandoned_at ELSE t.planning_completed_at END,
+                c.worktree,c.branch,?2+?3,'waiting' FROM tasks t JOIN task_checkouts c ON c.task_id=t.id
+            WHERE t.id=?1 AND (t.abandoned_at IS NOT NULL OR (t.planning_completed=1 AND t.planning_completed_at IS NOT NULL))
             ON CONFLICT(task_id) DO NOTHING", params![task.as_str(),now,grace])?;
         match hold {
             Some(ViewerHold::Viewed(_)) => hold_retirement(&tx, task, Some(VIEWED))?,
@@ -317,44 +282,54 @@ impl SqliteStore {
     }
 }
 
-/// A Session host read as its owner column and its terminal column, one set.
-fn host(owner: Option<LfProcessId>, terminal: Option<TerminalId>) -> StoreResult<Host> {
-    match (owner, terminal) {
-        (Some(owner), None) => Ok(Host::Owner(owner)),
-        (None, Some(terminal)) => Ok(Host::Terminal(terminal)),
-        _ => Err(StoreError::InvalidData(
-            "a Session host is an owner or a terminal".into(),
-        )),
-    }
+fn viewer_hold_changes(
+    conn: &Connection,
+    terminal: &TerminalId,
+    hold: Option<ViewerHold>,
+) -> StoreResult<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM held_terminals WHERE id=?1
+         AND (viewer_hold IS NOT ?2 OR viewer_hold_at IS NOT ?3 OR viewed IS NOT ?4))",
+        params![
+            terminal,
+            hold.map(ViewerHold::as_str),
+            hold.map(ViewerHold::at),
+            matches!(hold, Some(ViewerHold::Viewed(_))),
+        ],
+        |row| row.get(0),
+    )?)
 }
 
-/// Use current Session membership, never shell receipts or input ownership.
-/// The caller records viewing and revokes cleanup in the same transaction.
-fn hold_viewer_retirements(
+/// The retirements this hold resets and does not already show reset. Uses
+/// current Session membership, never shell receipts or input ownership.
+fn viewer_retirements(
     conn: &Connection,
-    owner: Transport<'_>,
-    absent_since: Option<i64>,
-) -> StoreResult<()> {
+    terminal: &TerminalId,
+    hold: Option<ViewerHold>,
+) -> StoreResult<Vec<TaskId>> {
+    // A return and departure can both reach the recorder between polls.
+    let (absent_since, reason) = match hold {
+        Some(ViewerHold::Viewed(_)) => (None, Some(VIEWED)),
+        Some(ViewerHold::Absent(at)) => (Some(at), None),
+        None => return Ok(Vec::new()),
+    };
     let mut query = conn.prepare(&format!(
-        "WITH owned AS MATERIALIZED (
-             SELECT task_id,cwd,primary_scope FROM agent_sessions WHERE {}=?1
-         )
-         SELECT h.task_id FROM task_retirements h WHERE h.phase!='retired'
-         AND (?2 IS NULL OR h.due_at < ?2+?3)
-         AND h.task_id IN (SELECT tw.id FROM owned s JOIN tasks tw ON ({}))",
-        owner.session_column(),
-        super::task_work::session_membership("s")
+        // CROSS JOIN starts from the held terminal's own Sessions.
+        "SELECT DISTINCT h.task_id FROM agent_sessions s CROSS JOIN task_retirements h
+         ON h.task_id IN ({}) AND h.phase!='retired'
+         WHERE s.held_terminal_id=?1 AND (?2 IS NULL OR h.due_at < ?2+?3)
+         AND (h.due_at IS NOT NULL OR h.phase!='waiting' OR h.reason IS NOT ?4
+              OR h.retry_at IS NOT NULL OR h.failures!=0)
+         ORDER BY h.task_id",
+        super::task_work::session_tasks("s")
     ))?;
     let tasks = query
         .query_map(
-            params![owner.as_str(), absent_since, WORKSPACE_GRACE],
+            params![terminal, absent_since, WORKSPACE_GRACE, reason],
             |r| Ok(TaskId::from_raw(r.get::<_, String>(0)?)),
         )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    for task in tasks {
-        hold_retirement(conn, &task, absent_since.is_none().then_some(VIEWED))?;
-    }
-    Ok(())
+    Ok(tasks)
 }
 
 // A returning viewer resets checkout cleanup, including its retry deadline.
@@ -371,7 +346,7 @@ fn hold_retirement(conn: &Connection, task: &TaskId, reason: Option<&str>) -> St
 
 #[cfg(test)]
 mod tests {
-    use super::{SqliteStore, TaskId, ViewerHold, WORKSPACE_GRACE};
+    use super::{SqliteStore, TaskId, TerminalId, ViewerHold, WORKSPACE_GRACE};
     use rusqlite::params;
 
     fn fixture() -> (tempfile::TempDir, SqliteStore, TaskId) {
@@ -379,15 +354,22 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
         let repo = store.ensure_repository("/repo").unwrap();
         let task = TaskId::new();
-        store.conn.lock().unwrap().execute("INSERT INTO tasks(id,repository_id,issue_identifier,created_at,worktree,branch,planning_completed,planning_completed_at) VALUES(?1,?2,'SHELL-1',1,'/repo.task','task',1,'completion-1')", params![task.as_str(),repo.as_str()]).unwrap();
+        store.conn.lock().unwrap().execute_batch(&format!("INSERT INTO tasks(id,repository_id,issue_identifier,created_at,planning_completed,planning_completed_at) VALUES('{task}','{repo}','SHELL-1',1,1,'completion-1');
+            INSERT INTO task_checkouts(task_id,worktree,branch) VALUES('{task}','/repo.task','task');", task=task.as_str(), repo=repo.as_str())).unwrap();
         (home, store, task)
     }
 
-    fn session_owner(store: &SqliteStore, task: &TaskId, session: &str) -> crate::id::LfProcessId {
-        let owner = store.test_lf_process();
+    fn terminal(store: &SqliteStore) -> TerminalId {
+        let terminal = TerminalId::new();
+        store.create_terminal(&terminal, "build").unwrap();
+        terminal
+    }
+
+    fn session_terminal(store: &SqliteStore, task: &TaskId, session: &str) -> TerminalId {
+        let terminal = terminal(store);
         store.test_session(session, &crate::session_record::new_artifact_key());
-        store.conn.lock().unwrap().execute("UPDATE agent_sessions SET task_id=?1,interactive=1,transport_lf_process_id=?2 WHERE id=?3", params![task.as_str(),owner,session]).unwrap();
-        owner
+        store.conn.lock().unwrap().execute("UPDATE agent_sessions SET task_id=?1,interactive=1,held_terminal_id=?2 WHERE id=?3", params![task.as_str(),terminal,session]).unwrap();
+        terminal
     }
 
     fn held(store: &SqliteStore, task: &TaskId) -> Vec<(ViewerHold, bool)> {
@@ -416,10 +398,11 @@ mod tests {
     fn returning_viewers_reset_retirement_and_retry_without_a_sweep() {
         for hold in [ViewerHold::Viewed(1200), ViewerHold::Absent(1201)] {
             let (_home, store, task) = fixture();
-            let viewer = session_owner(&store, &task, "passive");
-            let shell = store.test_lf_process();
+            let viewer = session_terminal(&store, &task, "passive");
+            let shell = crate::id::TerminalId::new();
+            store.create_terminal(&shell, "build").unwrap();
             store
-                .create_desktop_shell("explicit", &task, "/repo.task")
+                .create_desktop_shell("explicit", &task, "/repo.task", None)
                 .unwrap();
             store.bind_desktop_shell("explicit", &shell).unwrap();
             let intent = store
@@ -432,14 +415,16 @@ mod tests {
                 .fail_retirement(&task, 1100, "owner not settled")
                 .unwrap();
             // The recorder may see only the departure after a brief return.
-            store.record_owner_viewer_hold(&viewer, Some(hold)).unwrap();
+            store.record_viewer_hold(&viewer, Some(hold)).unwrap();
             let viewed: bool = store
                 .conn
                 .lock()
                 .unwrap()
-                .query_row("SELECT viewed FROM processes WHERE id=?1", [&viewer], |r| {
-                    r.get(0)
-                })
+                .query_row(
+                    "SELECT viewed FROM held_terminals WHERE id=?1",
+                    [&viewer],
+                    |r| r.get(0),
+                )
                 .unwrap();
             assert_eq!(viewed, matches!(hold, ViewerHold::Viewed(_)));
             let returned = store.task_retirement(&task).unwrap().unwrap();
@@ -452,9 +437,8 @@ mod tests {
                 ),
                 (None, None, 0)
             );
-            assert!(store.shell_should_close(&shell).unwrap());
             store
-                .record_owner_viewer_hold(&viewer, Some(ViewerHold::Absent(1201)))
+                .record_viewer_hold(&viewer, Some(ViewerHold::Absent(1201)))
                 .unwrap();
             assert_eq!(
                 store.task_retirement(&task).unwrap().unwrap().phase,
@@ -472,14 +456,13 @@ mod tests {
     #[test]
     fn abandoned_checkout_remains_pending_after_its_last_conversation_ends() {
         let (_home, store, task) = fixture();
-        let owner = session_owner(&store, &task, "abandoned");
+        let owner = session_terminal(&store, &task, "abandoned");
         store
             .conn
             .lock()
             .unwrap()
             .execute(
-                "UPDATE tasks SET planning_completed=0,abandoned_at=1,
-            checkout_machine_id=(SELECT id FROM machines WHERE is_local=1) WHERE id=?1",
+                "UPDATE tasks SET planning_completed=0,abandoned_at=1 WHERE id=?1",
                 [task.as_str()],
             )
             .unwrap();
@@ -488,7 +471,7 @@ mod tests {
             .conn
             .lock()
             .unwrap()
-            .execute("UPDATE processes SET completed_at=1 WHERE id=?1", [&owner])
+            .execute("UPDATE held_terminals SET ended_at=1 WHERE id=?1", [&owner])
             .unwrap();
         assert!(store.pending_retirements().unwrap().contains(&task));
         store
@@ -504,43 +487,46 @@ mod tests {
     }
 
     #[test]
-    fn viewer_evidence_records_absence_and_follows_current_session_owners() {
+    fn viewer_evidence_records_absence_and_follows_current_session_terminals() {
         let (_home, store, task) = fixture();
-        let first = session_owner(&store, &task, "first");
-        let second = session_owner(&store, &task, "second");
-        let unrelated = store.test_lf_process();
+        let first = session_terminal(&store, &task, "first");
+        let second = session_terminal(&store, &task, "second");
+        let unrelated = terminal(&store);
         store
-            .record_owner_viewer_hold(&unrelated, Some(ViewerHold::Viewed(100)))
+            .record_viewer_hold(&unrelated, Some(ViewerHold::Viewed(100)))
             .unwrap();
         assert!(held(&store, &task).is_empty());
         store
-            .record_owner_viewer_hold(&first, Some(ViewerHold::Viewed(100)))
+            .record_viewer_hold(&first, Some(ViewerHold::Viewed(100)))
             .unwrap();
         store
-            .record_owner_viewer_hold(&second, Some(ViewerHold::Viewed(100)))
+            .record_viewer_hold(&second, Some(ViewerHold::Viewed(100)))
             .unwrap();
         assert_eq!(held(&store, &task).len(), 2);
         // One viewer's exit leaves the other Session's viewer holding.
-        store.record_owner_viewer_hold(&first, None).unwrap();
+        store.record_viewer_hold(&first, None).unwrap();
         assert_eq!(held(&store, &task), vec![(ViewerHold::Viewed(100), false)]);
-        // An ended owner retains its dated evidence; it cannot hold indefinitely.
+        // An ended terminal retains its dated evidence; it cannot hold indefinitely.
         let conn = store.conn.lock().unwrap();
-        conn.execute("UPDATE processes SET completed_at=1 WHERE id=?1", [&second])
-            .unwrap();
+        conn.execute(
+            "UPDATE held_terminals SET ended_at=1 WHERE id=?1",
+            [&second],
+        )
+        .unwrap();
         drop(conn);
         assert_eq!(held(&store, &task), vec![(ViewerHold::Viewed(100), true)]);
         store
-            .record_owner_viewer_hold(&second, Some(ViewerHold::Absent(110)))
+            .record_viewer_hold(&second, Some(ViewerHold::Absent(110)))
             .unwrap();
         assert_eq!(held(&store, &task), vec![(ViewerHold::Absent(110), true)]);
-        // A replacement owner speaks for the Session; the old one no longer does.
-        let replacement = store.test_lf_process();
+        // A replacement terminal speaks for the Session; the old one no longer does.
+        let replacement = terminal(&store);
         store
             .conn
             .lock()
             .unwrap()
             .execute(
-                "UPDATE agent_sessions SET transport_lf_process_id=?1 WHERE id='second'",
+                "UPDATE agent_sessions SET held_terminal_id=?1 WHERE id='second'",
                 [&replacement],
             )
             .unwrap();
@@ -550,22 +536,33 @@ mod tests {
     #[test]
     fn viewer_holds_do_not_scan_session_history_for_every_retirement() {
         let (_home, store, task) = fixture();
-        let viewer = session_owner(&store, &task, "viewed");
+        let viewer = session_terminal(&store, &task, "viewed");
         store.reconcile_task_retirement(&task, 100, None).unwrap();
         let repo = store.ensure_repository("/repo").unwrap();
         for n in 0..32 {
             let other = TaskId::new();
-            store.conn.lock().unwrap().execute(
-                "INSERT INTO tasks(id,repository_id,issue_identifier,created_at,worktree,branch,planning_completed,planning_completed_at)
-                 VALUES(?1,?2,?3,1,?4,?3,1,'completion-1')",
-                params![other.as_str(), repo.as_str(), format!("OTHER-{n}"), format!("/repo.other-{n}")],
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO tasks(id,repository_id,issue_identifier,created_at,planning_completed,planning_completed_at)
+                 VALUES(?1,?2,?3,1,1,'completion-1')",
+                params![other.as_str(), repo.as_str(), format!("OTHER-{n}")],
             ).unwrap();
+            conn.execute(
+                "INSERT INTO task_checkouts(task_id,worktree,branch) VALUES(?1,?2,?3)",
+                params![
+                    other.as_str(),
+                    format!("/repo.other-{n}"),
+                    format!("OTHER-{n}")
+                ],
+            )
+            .unwrap();
+            drop(conn);
             store.reconcile_task_retirement(&other, 100, None).unwrap();
-            session_owner(&store, &other, &format!("other-{n}"));
+            session_terminal(&store, &other, &format!("other-{n}"));
         }
         crate::performance::testing::observe(&store.conn.lock().unwrap());
         let (result, work) = crate::performance::testing::measure(|| {
-            store.record_owner_viewer_hold(&viewer, Some(ViewerHold::Viewed(1200)))
+            store.record_viewer_hold(&viewer, Some(ViewerHold::Viewed(1200)))
         });
         result.unwrap();
         assert_eq!(store.task_retirement(&task).unwrap().unwrap().due_at, None);
@@ -718,7 +715,7 @@ mod tests {
             .lock()
             .unwrap()
             .execute(
-                "UPDATE tasks SET worktree='/repo.new' WHERE id=?1",
+                "UPDATE task_checkouts SET worktree='/repo.new' WHERE task_id=?1",
                 [task.as_str()],
             )
             .unwrap();

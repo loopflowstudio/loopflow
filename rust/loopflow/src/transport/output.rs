@@ -31,7 +31,7 @@ impl Output {
     pub fn new(terminal: bool) -> Result<Self> {
         if terminal {
             Ok(Self::Terminal(Box::new(Terminal {
-                terminal: ghostty_vt::Terminal::new(80, 24).context("Open the owner's terminal")?,
+                terminal: ghostty_vt::Terminal::new(80, 24).context("Open the held terminal")?,
                 pending_reports: Vec::new(),
                 directory: None,
                 changed_directory: None,
@@ -50,7 +50,7 @@ impl Output {
             terminal
                 .terminal
                 .resize(cols, rows)
-                .context("Resize the owner's terminal")?;
+                .context("Resize the held terminal")?;
         }
         Ok(())
     }
@@ -60,8 +60,7 @@ impl Output {
         let Self::Terminal(terminal) = self else {
             return Ok(None);
         };
-        let mut bytes =
-            terminal::repaint(&terminal.terminal).context("Repaint the owner's screen")?;
+        let mut bytes = terminal::repaint(&terminal.terminal).context("Repaint the held screen")?;
         bytes.extend(self.state());
         bytes.extend(
             terminal
@@ -241,7 +240,7 @@ impl Output {
         Some(reports)
     }
 
-    /// The retained terminal, for the snapshot an ending owner leaves behind.
+    /// The retained terminal, for the snapshot an ending held terminal leaves behind.
     pub fn terminal(&self) -> Option<&ghostty_vt::Terminal> {
         match self {
             Self::Terminal(terminal) => Some(&terminal.terminal),

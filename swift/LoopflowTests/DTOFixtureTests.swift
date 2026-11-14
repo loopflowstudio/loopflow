@@ -406,7 +406,7 @@ struct DTOFixtureTests {
         let during = try completed.taskPart()
         let after = try arrived.taskPart()
         #expect(before.work.graph == during.work.graph)
-        guard case .run(_, _, true) = during.work.graph?.position else {
+        guard case .run(_, _, _, true) = during.work.graph?.position else {
             Issue.record("Completed Task lost its live run")
             return
         }
@@ -471,7 +471,7 @@ struct DTOFixtureTests {
         #expect(graph.name == "feature")
         #expect(graph.interactiveSteps.map(\.name) == ["review-design", "demo"])
         #expect(graph.interactiveSteps.map(\.description) == ["you review the plan", "you try the change"])
-        #expect(graph.position == .run(step: "review-design", lfProcessId: work.graphProcesses[0].id, running: true))
+        #expect(graph.position == .run(step: "review-design", at: "implement", lfProcessId: work.graphProcesses[0].id, running: true))
         #expect(graph.waitingStep == nil)
         #expect(try JSONDecoder().decode(TaskWork.self, from: JSONEncoder().encode(work)) == work)
         // Every position field is required.
@@ -778,6 +778,8 @@ struct DTOFixtureTests {
         #expect(tasks[3].reference.workspace?.branch == "jack-heart/now-available-research")
         // Start evidence is required: a prepared checkout is not started work.
         #expect(tasks.map { $0.runtime.map { $0.owner != nil } } == [false, true, nil, true])
+        // An owner is a person by id; the Git email only labels one without a name.
+        #expect(tasks.compactMap { $0.runtime?.owner }.map(\.personId) == ["linear:5c1d9e2a-viewer", nil])
         // The wire carries each Task once; Waves share them by the Task's Wave.
         #expect(roadmap.tasks.items.count == 4)
         #expect(roadmap.waves[1].tasks.items.isEmpty)

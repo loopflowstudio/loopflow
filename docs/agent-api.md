@@ -94,7 +94,7 @@ lf checkout INF-123                    # ensure Work and worktree only
 lf task run INF-123                    # place an existing Task, start its Graph, return once it runs
 lf task create --wave <wave> --title "add passkeys"  # file the issue; run it with `lf task run`
 pbpaste | lf task create --wave <wave>               # report from stdin; first line is the title
-lf task run INF-124 --stack-on INF-123 # dependent work before the parent PR merges
+lf task run INF-124 --stack-on INF-123 # dependent work before the parent lands
 ```
 
 The contract every agent runs under: **delegation must make the problem
@@ -103,8 +103,16 @@ hand off the whole seed, and never delegate the one blocker between you and
 completion — resolve that inline. The current process and worktree are the
 default execution surface.
 
-`--stack-on` forks the child's worktree from the parent Task's active PR, records
-the fork commit, and inherits the parent's files. Scratch follows the same Git
+`--stack-on` forks the child's worktree from the parent Task's branch, records
+the fork commit, and inherits the parent's files. The parent needs a placed
+branch, not a PR. When the parent has no PR yet, its branch is pushed to origin
+if needed, never forced. A published parent's missing remote branch is restored
+after reading its PR from GitHub: a merged PR stops stacking; a closed PR uses
+a new unpublished parent record. If Auto was requested for an earlier head,
+stacking turns Auto off before pushing. The same clean head keeps its merge
+request. When its remote branch exists, the child uses `origin/<branch>` and
+reports any local commits left out. Run `lf commit -p`
+in the parent's checkout to include them. Scratch follows the same Git
 merge behavior as other content, including edits to existing notes. The child's PR targets the parent's branch until
 merge, then `lf sync` merges main using the recorded fork as the comparison base.
 Child edits survive the parent's squash landing without replay.
@@ -121,10 +129,18 @@ ends, printing its output. Unlike the harness's own subagent, it can run another
 harness or model, leaves a recorded Session, and counts its cost to the Task.
 The harness's subagent stays available for quick lookups.
 
-The agent that starts a child directs it and answers for its result. A plain
-`lf -b` child receives no steers; its brief is all it gets, so the brief says
-what to do, what done looks like and where the result goes. A finished `lf -b`
-child can't be resumed; start another whose brief carries what the first returned.
+The agent that starts a child directs it and answers for its result. The brief
+says what to do, what done looks like and where the result goes. Redirect a
+running child with a steer:
+
+```bash
+lf session list --headless                        # the child's Session ID
+lf steer SESSION 'skip the vendored code'
+```
+
+The child reads the steer after its next tool call, with no Machine server
+involved. A finished
+`lf -b` child can't be resumed; start another whose brief carries what the first returned.
 A child does the work itself and starts no children unless its brief says to.
 
 A child job that recurs belongs in a skill under `.lf/skills/`, so the next
@@ -134,9 +150,11 @@ Work that ends in its own PR is a Task; wait for it with `lf task wait`.
 ## Steer
 
 ```bash
-lf task steer INF-123 "keep the public API"      # save a Task steer, from a person or an agent Session
-lf session steers SESSION --json                 # inspect delivery
-lf session steers SESSION --retry STEER_ID        # retry one delivery
+lf steer INF-123 "keep the public API"   # every Session on the Task; joins its thread
+lf steer SESSION "skip the vendored code"   # one conversation
+lf --wave parser steer "tokenizer first"    # every Session on the Wave
+lf --repo . steer "hold merges"             # every Session in the repository
+lf session steers SESSION --json            # what that Session has read
 lf --wave <wave> wave-operate "prioritize the parser"
 lf --wave <wave> wave-operate "recover the failed parser Graph"
 ```
@@ -147,19 +165,24 @@ conversations associated through the checkout or `--task`. Repository and Wave
 steers apply downward through the Work tree; direct Session steers apply only
 to that Session. Repository and Wave steers currently remain Machine-local.
 
-Delivery occurs at the next supported provider boundary. Idle Sessions stay idle.
+A running Session reads a steer after its next tool call. An idle one the
+Machine server holds is woken; an idle bare one reads it at its next prompt.
 Each new Session receives applicable steers at launch; continuing or compacting
-the same Session preserves its delivery history. The context stays bounded, with
+the same Session keeps what it has read. The context stays bounded, with
 complete sources available for excerpts.
 
-A saved steer is not proof of delivery. A completed provider write is not proof
-the model received or followed it. Uncertain writes remain visible and require
-explicit retry; retry saves another attempt without starting a turn.
+`lf session steers SESSION` shows each steer as pending or delivered. Delivered
+means lf printed it into the conversation, not that the model followed it; to
+say it again, steer again.
+
+Task updates arrive the same way. When a Task's position, a run or a comment
+that is not direction changes, lf saves a steer for the Task's interactive
+conversations, marked as an observation and not a request.
 
 Keep routine agent progress in working notes and the Session response. `lf task report`
 from an agent Session marks its entry as progress, excluded from steers. Use
-`lf task steer` only to save a deliberate steer. Tracker comments from people
-and `lf task steer` remain steers, even through the same account. Other
+`lf steer` only to save a deliberate steer. Tracker comments from people
+and `lf steer` remain steers, even through the same account. Other
 integrations should mark progress with
 `<!-- loopflow-progress:<source-id> -->`; historical unmarked comments remain
 eligible because their authorship cannot be inferred safely.

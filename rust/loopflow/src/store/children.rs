@@ -132,11 +132,17 @@ impl Store {
         .await
     }
 
-    pub async fn stack_task_placement(&self, task: &Task, parent: &TaskPrId) -> StoreResult<()> {
+    pub async fn stack_task_placement(
+        &self,
+        task: &Task,
+        parent: &TaskPrId,
+        base_commit: &str,
+    ) -> StoreResult<()> {
         let task = task.clone();
         let parent = parent.clone();
+        let base_commit = base_commit.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.stack_task_placement(&task, &parent)
+            store.stack_task_placement(&task, &parent, &base_commit)
         })
         .await
     }
@@ -288,10 +294,11 @@ impl Store {
         task_id: &TaskId,
         observation: crate::linear::LinearIssueObservation,
         observed_at: OffsetDateTime,
+        planning_connected: bool,
     ) -> StoreResult<LinearObservationOutcome> {
         let task_id = task_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.apply_linear_observation(&task_id, &observation, observed_at)
+            store.apply_linear_observation(&task_id, &observation, observed_at, planning_connected)
         })
         .await
     }

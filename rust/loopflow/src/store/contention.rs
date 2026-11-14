@@ -20,7 +20,9 @@ const SLOW_WRITE: Duration = if cfg!(test) {
 };
 
 /// VM steps between checks for a newly taken write lock: microseconds apart.
-const PROGRESS_STEPS: i32 = 1000;
+/// Tests check after every step, so a transaction that took the lock and only
+/// read is seen holding it before it rolls back (see `empty_writes`).
+const PROGRESS_STEPS: i32 = if cfg!(test) { 1 } else { 1000 };
 
 const SLOW_WRITE_MESSAGE: &str = "held the store write lock";
 const LOCK_FAILURE: &str = "database is locked";
@@ -52,36 +54,58 @@ impl Handle {
 pub(crate) fn watch_write_holds(conn: &Connection) -> rusqlite::Result<()> {
     // SAFETY: the handle outlives every hook installed below; see `Handle`.
     let handle = Handle(unsafe { conn.handle() });
-    let since = Arc::new(Mutex::new(None::<Instant>));
+    #[cfg(test)]
+    let connection = handle.0 as usize;
+    let hold = Arc::new(Mutex::new(Hold::default()));
 
-    let stepping = since.clone();
+    let stepping = hold.clone();
     conn.progress_handler(
         PROGRESS_STEPS,
         Some(move || {
-            let mut since = stepping.lock().expect("write hold mutex poisoned");
-            if since.is_none() && handle.writing() {
-                *since = Some(Instant::now());
+            let mut hold = stepping.lock().expect("write hold mutex poisoned");
+            if hold.since.is_none() && handle.writing() {
+                hold.since = Some(Instant::now());
             }
             false
         }),
     )?;
     // Short writes finish before a progress step; a changed row proves the lock.
-    let changing = since.clone();
+    let changing = hold.clone();
     conn.update_hook(Some(move |_, _: &str, _: &str, _| {
-        changing
-            .lock()
-            .expect("write hold mutex poisoned")
-            .get_or_insert_with(Instant::now);
+        let mut hold = changing.lock().expect("write hold mutex poisoned");
+        hold.since.get_or_insert_with(Instant::now);
+        hold.changed = true;
     }))?;
-    let committing = since.clone();
+    // A commit hook runs only for a transaction that took the write lock.
+    let committing = hold.clone();
     conn.commit_hook(Some(move || {
-        report(committing.lock().expect("write hold mutex poisoned").take());
+        let hold = std::mem::take(&mut *committing.lock().expect("write hold mutex poisoned"));
+        #[cfg(test)]
+        if !hold.changed {
+            empty_writes::note(connection);
+        }
+        report(hold.since);
         false
     }))?;
+    // A rollback hook also runs when a read ends, so only a seen lock counts.
     conn.rollback_hook(Some(move || {
-        report(since.lock().expect("write hold mutex poisoned").take());
+        let hold = std::mem::take(&mut *hold.lock().expect("write hold mutex poisoned"));
+        #[cfg(test)]
+        if hold.since.is_some() && !hold.changed {
+            empty_writes::note(connection);
+        }
+        report(hold.since);
     }))?;
     Ok(())
+}
+
+/// The write transaction a connection is in, as its hooks have seen it.
+#[derive(Default)]
+struct Hold {
+    since: Option<Instant>,
+    // Only tests read it, to find writes that changed nothing.
+    #[cfg_attr(not(test), allow(dead_code))]
+    changed: bool,
 }
 
 fn report(since: Option<Instant>) {
@@ -101,7 +125,12 @@ fn report(since: Option<Instant>) {
 fn call_site() -> String {
     let own = |name: &str| {
         name.strip_prefix(concat!(module_path!(), "::"))
-            .is_some_and(|rest| matches!(rest, "watch_write_holds" | "report" | "call_site"))
+            .is_some_and(|rest| {
+                matches!(
+                    rest,
+                    "watch_write_holds" | "report" | "call_site" | "empty_writes::note"
+                )
+            })
     };
     std::backtrace::Backtrace::force_capture()
         .to_string()
@@ -133,6 +162,38 @@ fn frame_function(line: &str) -> Option<String> {
         name = outer;
     }
     Some(name.to_owned())
+}
+
+/// Write transactions that took the lock and changed no row, recorded per
+/// connection while a test asks: the transaction may end on another thread.
+#[cfg(test)]
+pub(crate) mod empty_writes {
+    use std::collections::BTreeMap;
+    use std::sync::Mutex;
+
+    use rusqlite::Connection;
+
+    /// Call sites by connection handle address, for connections being watched.
+    static RECORDED: Mutex<BTreeMap<usize, Vec<String>>> = Mutex::new(BTreeMap::new());
+
+    pub(super) fn note(connection: usize) {
+        if let Some(sites) = RECORDED.lock().unwrap().get_mut(&connection) {
+            sites.push(super::call_site());
+        }
+    }
+
+    /// The call site of each write transaction on `conn` that ends during `run`
+    /// without changing a row.
+    pub(crate) fn record<R>(conn: &Mutex<Connection>, run: impl FnOnce() -> R) -> (R, Vec<String>) {
+        // SAFETY: only the address is kept, as a key, while `conn` is open.
+        let connection = unsafe { conn.lock().unwrap().handle() } as usize;
+        RECORDED.lock().unwrap().insert(connection, Vec::new());
+        let result = run();
+        (
+            result,
+            RECORDED.lock().unwrap().remove(&connection).unwrap(),
+        )
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -222,8 +283,6 @@ mod tests {
 
     fn slow_write_in_named_function(store: &SqliteStore) {
         let mut conn = store.conn.lock().unwrap();
-        conn.execute("CREATE TABLE IF NOT EXISTS held(x)", [])
-            .unwrap();
         let tx = conn.transaction().unwrap();
         // A changed row starts the clock; DDL alone may never tick the progress handler.
         tx.execute("INSERT INTO held VALUES (0)", []).unwrap();
@@ -236,6 +295,14 @@ mod tests {
     fn a_slow_writer_names_itself_and_doctor_groups_it_by_binary() {
         let dir = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&dir.path().join("loopflow.db")).unwrap();
+        // Outside the watched span: on a loaded Machine the DDL alone can hold
+        // the lock past `SLOW_WRITE`.
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute("CREATE TABLE held(x)", [])
+            .unwrap();
         let log = Captured::default();
         let writer = log.clone();
         let subscriber = tracing_subscriber::fmt()

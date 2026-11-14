@@ -203,8 +203,8 @@ struct TaskWorkflowHeader: View {
         case .at(TaskGraph.start): return ("Start", help)
         case .at(TaskGraph.end): return nil
         case .at(let step): return ("Continue", "\(help): continue after \(step)")
-        case .run(_, _, true): return nil
-        case .run(let step, _, false): return ("Run again", "\(help): run again from \(step)")
+        case .run(_, _, _, true): return nil
+        case .run(_, let at, _, false): return ("Run again", "\(help): run again at \(at)")
         }
     }
 
@@ -222,7 +222,7 @@ struct TaskWorkflowHeader: View {
     private func positionLabel(_ workflow: TaskGraph) -> String {
         switch workflow.position {
         case .at(let step): return "\(workflow.name) · \(step)"
-        case .run(let step, _, let running):
+        case .run(let step, _, _, let running):
             let to = WorkflowDefinition(workflow).runs.first { $0.from == step }?.to
             return "\([step, to].compactMap { $0 }.joined(separator: " → ")) · \(running ? "running" : "stopped")"
         }
@@ -442,9 +442,9 @@ struct TaskWorkflowBar: View {
         case .at(TaskGraph.start): return "Not started"
         case .at(TaskGraph.end): return "At its end"
         case .at(let step): return "At \(step) · yours"
-        case .run(let from, let process, let running):
+        case .run(let from, let at, let process, let running):
             let to = WorkflowDefinition(workflow).runs.first { $0.from == from }?.to
-            guard running else { return to.map { "Stopped before \($0)" } ?? "Stopped from \(from)" }
+            guard running else { return "Stopped at \(at)" + (to.map { " before \($0)" } ?? "") }
             let step = model.graphProcesses[process]?.presentation.reason
             return [[from, to].compactMap { $0 }.joined(separator: " → "), step].compactMap { $0 }.joined(separator: " · ")
         }
@@ -456,7 +456,7 @@ struct TaskWorkflowBar: View {
         let names = workflow.interactiveSteps.map(\.name) + [TaskGraph.end]
         let (at, going): (String, Bool) = switch workflow.position {
         case .at(let step): (step, false)
-        case .run(let from, _, let running):
+        case .run(let from, _, _, let running):
             (WorkflowDefinition(workflow).runs.first { $0.from == from }?.to ?? TaskGraph.start, running)
         }
         let here = names.firstIndex(of: at) ?? -1
@@ -1040,9 +1040,9 @@ struct TaskRunPosition: View {
         case .at(TaskGraph.start): return "\(workflow.name) · not started"
         case .at(TaskGraph.end): return "\(workflow.name) · at end"
         case .at(let step): return "\(step) · available for review"
-        case .run(let from, _, let running):
+        case .run(_, let at, _, let running):
             if let execution, execution.state != .idle { return execution.reason }
-            return "\(running ? "Running" : "Stopped") from \(from)"
+            return "\(running ? "Running" : "Stopped") at \(at)"
         }
     }
 

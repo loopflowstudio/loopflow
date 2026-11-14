@@ -1,31 +1,27 @@
+# Every run is bounded, however it is started. A test still running at five
+# minutes is killed and reported as TIMEOUT; the slowest test in the merge
+# queue takes about 100 s. A run still going at twenty minutes stops: CI's
+# partitions finish in ten, and a local run that needs longer is selecting too
+# much. The whole workspace is about six hours of test time, so only CI's
+# partitions run all of it.
+[profile.default]
+slow-timeout = { period = "60s", terminate-after = 5 }
+global-timeout = "20m"
+# Five failures stop a local run and kill what is still running: past that the
+# run is telling you about the branch or the machine, not about test six. CI
+# passes --no-fail-fast, so its partitions always report every failure.
+fail-fast = { max-fail = 5, terminate = "immediate" }
+
 [[profile.default.overrides]]
 filter = 'test(every_receipt_at_fleet_fanout_is_recorded_exactly_once)'
 threads-required = "num-test-threads"
 
 # Pull requests: a test that runs past 2 minutes fails on the PR that made it
-# slow, naming itself. The merge queue and main use `default`, which only
-# reports slow tests, so runner variance never ejects ready work.
+# slow, naming itself. The merge queue and main use `default`, whose five
+# minutes leave room for runner variance.
 [profile.pr]
 slow-timeout = { period = "60s", terminate-after = 2 }
 
 [[profile.pr.overrides]]
 filter = 'test(every_receipt_at_fleet_fanout_is_recorded_exactly_once)'
 threads-required = "num-test-threads"
-
-# Tests already slower than the budget on 2026-10-22, each allowed about 1.5x
-# its slowest of five merge-queue runs. Make one fast, then delete its entry
-# (LOO-566).
-[[profile.pr.overrides]]
-# 288-350 s: drives a real native runner through a full turn.
-filter = 'test(native_runner_is_quiet_until_its_turn_ends)'
-slow-timeout = { period = "60s", terminate-after = 8 }
-
-[[profile.pr.overrides]]
-# 246-253 s.
-filter = 'test(linear_on_demand_shares_checks_and_excludes_finished_tasks)'
-slow-timeout = { period = "60s", terminate-after = 6 }
-
-[[profile.pr.overrides]]
-# 150 s.
-filter = 'test(process_membership_does_not_read_events_that_name_no_process)'
-slow-timeout = { period = "60s", terminate-after = 4 }

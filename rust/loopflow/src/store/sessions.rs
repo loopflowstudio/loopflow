@@ -90,21 +90,6 @@ impl Store {
         .await
     }
 
-    pub async fn retarget_unpublished_capture(
-        &self,
-        artifact_key: &str,
-        provider: &str,
-        model: Option<&str>,
-    ) -> StoreResult<()> {
-        let artifact_key = artifact_key.to_owned();
-        let provider = provider.to_string();
-        let model = model.map(str::to_string);
-        run_sqlite(&self.sqlite, move |store| {
-            store.retarget_unpublished_capture(&artifact_key, &provider, model.as_deref())
-        })
-        .await
-    }
-
     pub async fn bind_session(
         &self,
         id: &str,

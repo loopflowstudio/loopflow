@@ -196,8 +196,10 @@ provider generation in caller provenance, turn origin and Program Status.
 | --- | --- |
 | `processes` | Durable `id`, lf/agent kind, nullable Unix PID/birth, immutable parent, command, cwd and terminal evidence. Agent rows own served Session, provider/launch mode, endpoint, attachment/token and exit reference. Lf rows retain incoming agent provenance. Admit, attach, finish, filter/page. |
 | `agent_sessions` | Stable ID, purpose and independent interactive flag; title/provenance, request/feedback, typed Task/Wave ancestry, native identity and current AgentProcess reference; reserve, resume, bind and rename; historical feedback/completion retained |
-| `tasks` | Wave planning row, issue, durable disposition and worktree/delivery facts |
-| `task_ownership` | Append-only `claim`/`handoff`/`unclaim` entries (`own_…`; `lf task unassign` writes `unclaim`, shown as unassign) with person, Machine and time; migration-only `recorded` entries are never delivered |
+| `tasks` | Shared planning row: identity, repository, project, title, description, state, rank and provider revision; no Machine-local column |
+| `task_checkouts` | This Machine's checkout of a Task (worktree path, branch, base commit, parent PR); absent on every other Machine |
+| `task_primary_sessions` | The conversation this Machine opens for a Task, with or without a checkout; absent on every other Machine |
+| `task_ownership` | Append-only `claim`/`unclaim` entries (`own_…`; `lf task unassign` writes `unclaim`, shown as unassign) with person, the Machine they name, the Machine that wrote them and time; a move is a claim naming another Machine, and earlier `handoff` entries read as one |
 | `projects` | A Wave's plan: stable local identity, optional provider binding, status, prose, KRs and targets; the default graph belongs to the Wave |
 | `waves` | Stable identity and repository address; objective, memory and instruments are read from checkout files |
 
@@ -219,12 +221,14 @@ A recorded AgentProcess alone decides whether its Session is active: completed
 means closed; otherwise exact PID/birth evidence is live, dead or unknown. Unknown
 is never Available and never ages into replacement or checkout-cleanup authority.
 Every owned launch records an AgentProcess before exec, including native terminals.
-Sessions without one remain unknown; client files are not read. The Session's
-`transport_lf_process_id` names its detached terminal owner. The
-execution child owns capture settlement and the frozen provider attachment;
-viewers receive separate revocable input tokens. Passive viewing takes no claim.
-Saved sockets are offered only for live records; a live endpoint's connection
-failure is an error, not permission to start another agent. Input completion uses
+Sessions without one remain unknown; client files are not read. A held
+Session names its terminal in `held_terminal_id`; `transport_lf_process_id`
+names an owner only for a conversation an earlier build started, which
+`lf resume` restarts held. The execution child owns capture settlement and the
+frozen provider attachment; viewers receive separate revocable input tokens.
+Passive viewing takes no claim. A view is offered only for a live held
+terminal; a connection failure is an error, not permission to start another
+agent. Input completion uses
 its latest turn's LfProcess completion (the capture owner before any turn), not
 attachment exit events. Events retain
 turn outcomes and history, not process liveness.
@@ -263,8 +267,8 @@ row, seeded with a log of its current AgentSession, which stays in its history.
 Scope locks serialize admission. Primary grants no Graph, review or process authority, and
 the Wave's goal and memory reach it as ordinary Wave context.
 
-A Task's primary is one of its own conversations, named by
-`tasks.primary_session_id`; its row carries no scope mark and it stays a Task
+A Task's primary is one of its own conversations, named by its
+Machine-local `task_primary_sessions` row; the Session row carries no scope mark and it stays a Task
 member. `lf resume --task ISSUE` keeps the selected primary. Without one, it
 selects an unfinished interactive member by latest native human input, falling
 back to interactive opening and creation time; it creates one when none exists.
@@ -398,12 +402,15 @@ boundaries and retained paths after removal. It neither follows causal ancestry
 nor rewrites recorded work or usage. Session inventory exposes `task_ids` so
 Desktop navigation uses the same membership as Task status.
 
-No Graph is privileged: every one naming the Task, or run in its checkout,
-is equally its work. `task status`'s `work` contains all Sessions, Graphs and
-Processes, including headless and closed history. Its `execution` and Task Graph
-record observe the most recently launched Graph only: `none`, `latest` or
-`finished`. The one control is `start`, available whenever the Task can run,
-even when an earlier Graph exists.
+No Graph is privileged: every one started for the Task, by naming it or in its
+checkout, is equally its work. The Graph records that Task when it starts, so
+reading a Task's Graphs costs the same however many other Graphs ran.
+`task status`'s `work` contains all Sessions, Graphs and Processes, including
+headless and closed history. Its Task Graph record observes the most recently
+launched Graph: `none`, `latest` or `finished`. Execution also reports an open
+Graph in the Task's work, including one started before checkout adoption. The
+`start` control is available whenever the Task can run, even when an earlier
+Graph exists.
 
 Cleanup, abandon, restore and landing repair treat all Task Graphs alike and ask
 one question of one gate: does OS process evidence show any of the work's
@@ -432,8 +439,8 @@ and releases its attachment without reporting a provider turn.
 
 A step is told nothing about its Graph and writes nothing about it. The Graph process
 writes GraphProcess, and only by appending: `graph_processes` holds one row per Graph process
-(Graph process, Graph name, graph as compiled at launch) and `graph_process_steps` one
-row per step it started (child Process, graph node key, per-edge iterations). The
+(Graph process, Graph name, graph as compiled at launch, the Task it started for
+or none) and `graph_process_steps` one row per step it started (child Process, graph node key, per-edge iterations). The
 Graph process finds a step's Process as its own newest child. Running, finished and each
 step's result are read from the Processes. Nothing reads the record back to resume,
 and no command changes a running Graph; the control is ending its Graph process.

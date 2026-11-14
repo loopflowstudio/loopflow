@@ -4,7 +4,7 @@ use base64::prelude::*;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use loopflow::agent::{run_agent, AgentConfig, AgentProcessResult, ProcessConfig};
+use loopflow::agent::{run_agent, AgentConfig, AgentFailure, AgentProcessResult, ProcessConfig};
 use loopflow::error::CoreError;
 use loopflow::profile::{ProviderRoute, RouteScope};
 use loopflow::provider_auth::Provider;
@@ -187,6 +187,90 @@ fn launch_captures_stderr() {
 }
 
 #[test]
+fn model_unavailable_result_falls_through_or_stops_without_spending_quota() {
+    for (case, fallbacks, expected_launches, stop) in [
+        ("fallback", vec!["claude:opus"], "fable\nopus\n", None),
+        (
+            "pinned",
+            vec![],
+            "fable\n",
+            Some("No fallback remains. Change an `agent` or `-a` pin"),
+        ),
+        (
+            "exhausted",
+            vec!["claude:opus"],
+            "fable\nopus\n",
+            Some("Nothing is left in its order after claude:fable, claude:opus"),
+        ),
+    ] {
+        let home = TempDir::new().unwrap();
+        let script = claude_script(
+            r#"model = sys.argv[sys.argv.index('--model') + 1]
+with open(os.environ['LF_TEST_LAUNCHES'], 'a') as launches:
+    launches.write(model + '\n')
+failed = model == 'fable' or os.environ['LF_TEST_CASE'] == 'exhausted'
+text = 'Fable 5 is currently unavailable. Switch to another model.' if failed else 'finished on ' + model"#,
+        );
+        let _env = EnvGuard::with_lf_home(&[("claude", &script)], home.path());
+        let _lf = branch_lf();
+        let _directory = support::InDirectory::enter(home.path());
+        support::register_claude_login(home.path(), "fixture");
+        let launches = home.path().join("launches");
+        let launch = AgentConfig {
+            agent: Some("claude:fable".into()),
+            fallback_agents: fallbacks.into_iter().map(str::to_owned).collect(),
+            cwd: Some(home.path().to_path_buf()),
+            env: BTreeMap::from([
+                ("LF_TEST_LAUNCHES".into(), launches.display().to_string()),
+                ("LF_TEST_CASE".into(), case.into()),
+            ]),
+            ..base_launch()
+        };
+        let result = run_agent(
+            &launch,
+            &ProcessConfig {
+                wait_for_capacity: true,
+                ..base_process()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(launches).unwrap(),
+            expected_launches
+        );
+        let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+        let reason: String = db
+            .query_row(
+                "SELECT reason FROM agent_limit_recoveries ORDER BY rowid DESC LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        if let Some(stop) = stop {
+            assert_ne!(result.exit_code, 0);
+            assert_eq!(result.failure, Some(AgentFailure::ModelUnavailable));
+            assert!(reason.contains(stop), "{case}: {reason}");
+        } else {
+            assert_eq!(result.exit_code, 0, "{}", result.stderr);
+            assert_eq!(result.stdout, "finished on opus");
+            assert!(reason.contains("continuing on claude:opus"), "{reason}");
+        }
+        let store =
+            loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+        assert!(store
+            .provider_account_limits(Some("claude"))
+            .unwrap()
+            .is_empty());
+        let account = store
+            .get_provider_account("claude", &ProviderAccountId::parse("fixture").unwrap())
+            .unwrap()
+            .unwrap();
+        assert_eq!(account.cooldown_until, None);
+        assert_eq!(account.cooldown_reason, None);
+    }
+}
+
+#[test]
 fn launch_scopes_process_environment_to_child() {
     let _env = EnvGuard::new(&[(
         "claude",
@@ -333,6 +417,74 @@ impl Drop for RestoreEnv {
 
 fn branch_lf() -> RestoreEnv {
     RestoreEnv::set("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+}
+
+#[test]
+fn pre_spawn_account_refusal_falls_through_to_codex() {
+    let home = TempDir::new().unwrap();
+    let codex = support::codex_socket_script(LIMITED_CODEX);
+    let _env = EnvGuard::with_lf_home(
+        &[("codex", &codex), ("claude", "#!/bin/sh\nexit 99\n")],
+        home.path(),
+    );
+    let _lf = branch_lf();
+    let _directory = support::InDirectory::enter(home.path());
+    let (_runtime, _accounts, _) = two_codex_accounts(home.path(), "primary", "backup");
+    let store =
+        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    for name in ["first", "second"] {
+        support::register_claude_login(home.path(), name);
+        let mut account = store
+            .get_provider_account("claude", &ProviderAccountId::parse(name).unwrap())
+            .unwrap()
+            .unwrap();
+        account.cooldown_until = Some(time::OffsetDateTime::now_utc().unix_timestamp() + 3_600);
+        account.cooldown_reason = Some("rate_limit_reached".into());
+        store.upsert_provider_account(&account).unwrap();
+    }
+    let launches = home.path().join("launches");
+    let result = run_agent(
+        &AgentConfig {
+            agent: Some("claude:fable".into()),
+            fallback_agents: vec!["codex:gpt-6.1-sol".into()],
+            cwd: Some(home.path().to_path_buf()),
+            env: BTreeMap::from([("LAUNCHES".into(), launches.display().to_string())]),
+            ..base_launch()
+        },
+        &ProcessConfig {
+            wait_for_capacity: true,
+            ..base_process()
+        },
+    )
+    .expect("a refused account selection can move a never-spawned reservation");
+    assert_eq!(result.exit_code, 0, "{}", result.stderr);
+    assert!(result.stdout.contains("finished on primary"));
+    assert_eq!(
+        std::fs::read_to_string(launches).unwrap(),
+        "start primary\n"
+    );
+    let rows = store.processes_since(0).unwrap();
+    let agents: Vec<_> = rows
+        .iter()
+        .filter_map(loopflow::process::ProcessEntry::as_agent)
+        .collect();
+    assert_eq!(agents.len(), 2);
+    assert!(agents.iter().all(|agent| agent.completed_at.is_some()));
+    let refused = agents.iter().find(|agent| agent.pid.is_none()).unwrap();
+    assert!(refused.os_started_at.is_none());
+    let launched = agents.iter().find(|agent| agent.pid.is_some()).unwrap();
+    assert!(launched.os_started_at.is_some());
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    for (agent, expected) in [(refused, "reserved"), (launched, "exited")] {
+        let state: String = db
+            .query_row(
+                "SELECT spawn_state FROM processes WHERE id=?1",
+                [&agent.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(state, expected);
+    }
 }
 
 fn run_limited_step(
@@ -640,6 +792,12 @@ fn direct_native_codex_launch_preserves_account_policy_and_literal_input() {
         std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(&path))).unwrap(),
     );
     support::register_codex_account(home.path());
+    // A bare Codex runs as plain `codex`; the app-server belongs to Work,
+    // which starts beside the Machine server.
+    let _server = loopflow_test_support::MachineServer::start(
+        loopflow_test_support::lf_binary(),
+        home.path(),
+    );
     let launch = AgentConfig {
         agent: Some("codex:model".into()),
         system_prompt: "Keep these instructions".into(),
@@ -647,8 +805,7 @@ fn direct_native_codex_launch_preserves_account_policy_and_literal_input() {
         cwd: Some(home.path().into()),
         skip_permissions: true,
         provider_account_id: Some(ProviderAccountId::parse("fixture").unwrap()),
-        // A bare Codex runs as plain `codex`; the app-server belongs to a held Session.
-        holder: loopflow::session::Holder::Owner,
+        holder: loopflow::session::Holder::Server,
         ..Default::default()
     };
     let result = run_agent(&launch, &ProcessConfig::default()).unwrap();

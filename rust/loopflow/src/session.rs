@@ -230,14 +230,10 @@ impl WorkSource {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Holder {
     /// A bare launch: the terminal it runs in, or the caller waiting on a
-    /// headless run. It behaves as the harness alone would, with only the two
-    /// context hooks, no server and no steers.
+    /// headless run. It behaves as the harness alone would, with no server:
+    /// two context hooks, and a steer check that reads the store itself.
     #[default]
     Caller,
-    /// A bare conversation a per-Session owner holds (a Desktop shell's
-    /// relay, a framed `lf ssh` viewer). Its hooks say when it can take a
-    /// reply, so it gets every hook and steers, without the server check.
-    Owner,
     /// Task, Wave or repository work: every hook and steers, beside a
     /// Machine server that must be up before the agent starts.
     Server,
@@ -246,17 +242,15 @@ pub enum Holder {
 impl Holder {
     /// `work`: the launch's Work was selected with `--task` or `--wave`, or
     /// the Session it reopens is not bare (`SqliteStore::is_bare`).
-    pub(crate) fn of(work: bool, interactive: bool) -> Self {
+    pub(crate) fn of(work: bool) -> Self {
         if work {
             Self::Server
-        } else if interactive && crate::transport::current().is_some() {
-            Self::Owner
         } else {
             Self::Caller
         }
     }
 
-    /// Whether the provider reports its turn and tool boundaries and takes steers.
+    /// Whether the provider reports its turn boundaries to the Machine server.
     pub(crate) fn reports_turns(self) -> bool {
         self != Self::Caller
     }
@@ -324,7 +318,7 @@ pub(crate) struct SessionSummary {
     pub transition: Option<crate::store::sqlite::provider_transitions::ProviderTransition>,
     pub preview: Option<SessionPreview>,
     pub terminal_id: Option<String>,
-    /// Its execution owner or held terminal runs with no viewer attached.
+    /// Its held terminal or detached process runs with no viewer attached.
     pub unviewed: bool,
     /// Its agent runs in a terminal a holder keeps; any number of views attach.
     pub held: bool,

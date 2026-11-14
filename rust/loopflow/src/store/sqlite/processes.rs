@@ -43,7 +43,7 @@ pub(super) const FORGETTABLE: &str = "p.kind='lf' AND p.completed_at IS NOT NULL
     AND NOT EXISTS(SELECT 1 FROM task_graphs WHERE lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM waves WHERE project_activation_lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM ci_incidents WHERE repair_lf_process_id=p.id)
-    AND NOT EXISTS(SELECT 1 FROM tasks WHERE ship_lf_process_id=p.id OR ship_approved_lf_process_id=p.id OR ship_stopped_lf_process_id=p.id)
+    AND NOT EXISTS(SELECT 1 FROM task_ship_events WHERE lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM agent_sessions WHERE transport_lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM relocated_task_processes WHERE process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM desktop_shells WHERE owner=p.id)";
@@ -207,8 +207,8 @@ fn process_query(
             UNION
             SELECT op.id FROM graph_process_steps gs JOIN processes op ON op.id=gs.lf_process_id
             JOIN tasks tw ON {tasks}{value}{close}
-            WHERE tw.worktree!=''
-              AND (op.cwd=rtrim(tw.worktree,'/') OR instr(op.cwd,rtrim(tw.worktree,'/')||'/')=1)
+            JOIN task_checkouts c ON c.task_id=tw.id
+            WHERE op.cwd=rtrim(c.worktree,'/') OR instr(op.cwd,rtrim(c.worktree,'/')||'/')=1
         )"
         ));
     }
@@ -366,7 +366,7 @@ pub(super) fn attach_in(
         // A best-effort start receipt can lose to a held write lock; the
         // attaching lf's row lands here instead, never a self-rooted agent.
         if let Some(start) = crate::journal::current_start_record(process) {
-            super::record_process_in(tx, &start, crate::transport::held_terminal())?;
+            super::record_process_in(tx, &start, crate::transport::current())?;
         }
         tx.execute(
             "INSERT INTO processes(id,kind,trace_id,parent_lf_process_id,command,repo,cwd,
@@ -1009,6 +1009,7 @@ impl SqliteStore {
         crate::store::canonical_ids::session_fence_file(Path::new(&database), &locator)
     }
 
+    #[cfg(test)]
     pub(crate) fn try_lock_session_attachment(&self, session: &str) -> StoreResult<Option<File>> {
         let file = self.session_fence_file(session)?;
         match file.try_lock_exclusive() {
@@ -1132,7 +1133,7 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if let Some(start) = repairer.and_then(crate::journal::current_start_record) {
-            super::record_process_in(&tx, &start, crate::transport::held_terminal())?;
+            super::record_process_in(&tx, &start, crate::transport::current())?;
         }
         let released = tx.execute(
             &format!(
@@ -1278,7 +1279,7 @@ impl SqliteStore {
     }
 
     /// Whether this interactive Session runs as the foreground program of the
-    /// terminal that started it (`lf <skill>`): no holder or owner keeps it,
+    /// terminal that started it (`lf <skill>`): no holder keeps it,
     /// so nothing else may stop it, and another launch on its thread runs
     /// beside it.
     pub(crate) fn runs_in_its_terminal(&self, session: &str) -> StoreResult<bool> {
@@ -1287,7 +1288,7 @@ impl SqliteStore {
         };
         Ok(record.interactive
             && self.is_bare(&record)?
-            && self.session_transport(session)?.is_none())
+            && self.session_terminal(session)?.is_none())
     }
 
     /// Resume excludes takeover from observation through settlement and claim.
@@ -1401,8 +1402,9 @@ impl SqliteStore {
         Ok(attachment)
     }
 
-    /// Invocation-owned retry: settle before reserving, retain native history,
-    /// and select the next thread atomically with the new process identity.
+    /// Invocation-owned retry: retire a never-launched reservation or settle an
+    /// observed exit, retaining native history and selecting the next thread
+    /// atomically with the new process identity.
     pub(crate) fn replace_session_agent_process(
         &self,
         session: &str,
@@ -1411,12 +1413,12 @@ impl SqliteStore {
         close: impl FnOnce() -> StoreResult<bool>,
     ) -> StoreResult<SessionAttachment> {
         let _dispatch = self.lock_session_attachment(session)?;
-        let ended = {
+        let (ended, reserved) = {
             let conn = self.conn.lock().expect("store mutex poisoned");
             require_attachment_in(&conn, session, expected)?;
-            agent_process_progress_in(&conn, &expected.agent_process_id)?.0
+            agent_process_progress_in(&conn, &expected.agent_process_id)?
         };
-        if !ended && !close()? {
+        if !ended && !reserved && !close()? {
             return Err(no_observed_exit());
         }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
@@ -1424,9 +1426,9 @@ impl SqliteStore {
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
         tx.execute(
             "UPDATE processes SET completed_at=COALESCE(completed_at,?2),
-                spawn_state=CASE WHEN completed_at IS NULL THEN 'exited' ELSE spawn_state END
+                spawn_state=CASE WHEN completed_at IS NULL AND NOT ?3 THEN 'exited' ELSE spawn_state END
              WHERE id=?1",
-            params![expected.agent_process_id, now],
+            params![expected.agent_process_id, now, reserved],
         )?;
         let next = attach_in(
             &tx,
@@ -2189,7 +2191,7 @@ mod discovery_tests {
             .unwrap();
             // A Graph process recorded both Processes as steps in the first Task's checkout.
             conn.execute(
-                "UPDATE tasks SET worktree='/repo.first',checkout_machine_id=(SELECT id FROM machines WHERE is_local=1) WHERE id=?1",
+                "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/repo.first') ON CONFLICT(task_id) DO UPDATE SET worktree=excluded.worktree",
                 [first.as_str()],
             )
             .unwrap();

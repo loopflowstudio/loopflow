@@ -422,7 +422,7 @@ trust_level="trusted"
     (root / "scratch/context.md").write_text("NATIVE_CONTEXT_AFTER_RESUME")
     # Prompt and tool hooks deliver a steer saved between turns.
     subprocess.run(
-        [str(lf), "session", "steer", session_id, "NATIVE_STEER_BETWEEN_TURNS"],
+        [str(lf), "steer", session_id, "NATIVE_STEER_BETWEEN_TURNS"],
         env=env,
         cwd=root,
         stdin=subprocess.DEVNULL,

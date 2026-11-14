@@ -1,6 +1,6 @@
-//! The last screen a Session's owner had, kept after it ends.
+//! The last screen a Session's held terminal had, kept after it ends.
 //!
-//! An ending owner writes `<Machine home>/screens/<session>.ghostsnp`: one
+//! An ending terminal's host writes `<Machine home>/screens/<session>.ghostsnp`: one
 //! header line naming the Ghostty revision, then Ghostty's own snapshot stream
 //! (`GHOSTSNP`, format v1), which carries both screens, their scrollback, styles,
 //! hyperlinks, modes and unfinished input. The format promises no compatibility
@@ -14,7 +14,7 @@ use anyhow::{Context, Result};
 use crate::ghostty_vt::{self, Terminal};
 
 use super::output::Output;
-use super::Host;
+use crate::id::TerminalId;
 
 const HEADER: &str = "lf-terminal-snapshot/1 ghostty=";
 
@@ -25,33 +25,29 @@ fn path(session: &str) -> PathBuf {
     ))
 }
 
-/// Write the owner's terminal for whoever reopens its Session before the
-/// provider is back. Pipe owners and ownerless commands leave nothing.
-pub(super) fn leave(owner: &Host, output: &Output) {
-    let Some(terminal) = output.terminal() else {
+/// Write the terminal for whoever reopens its Session before the provider is
+/// back. A terminal with no Session or shell leaves nothing.
+pub(super) fn leave(terminal: &TerminalId, output: &Output) {
+    let Some(screen) = output.terminal() else {
         return;
     };
     let written = || -> Result<Option<PathBuf>> {
         let store = crate::journal::process_ledger()?;
-        let shell = match owner.owner() {
-            Some(owner) => store.is_shell_owner(owner)?,
-            None => false,
-        };
-        let session = if shell {
-            owner.to_string()
-        } else if let Some(session) = store.transport_session(owner.transport())? {
+        let session = if store.is_shell_terminal(terminal)? {
+            terminal.to_string()
+        } else if let Some(session) = store.terminal_session(terminal)? {
             session
         } else {
             return Ok(None);
         };
-        write(&session, terminal).map(Some)
+        write(&session, screen).map(Some)
     };
     match written() {
         Ok(Some(path)) => {
-            tracing::info!(%owner, path = %path.display(), "Terminal snapshot written")
+            tracing::info!(%terminal, path = %path.display(), "Terminal snapshot written")
         }
-        Ok(None) => tracing::debug!(%owner, "No Session to leave a terminal snapshot for"),
-        Err(error) => tracing::warn!(%error, %owner, "Terminal snapshot not written"),
+        Ok(None) => tracing::debug!(%terminal, "No Session to leave a terminal snapshot for"),
+        Err(error) => tracing::warn!(%error, %terminal, "Terminal snapshot not written"),
     }
 }
 
@@ -68,7 +64,7 @@ fn write(session: &str, terminal: &Terminal) -> Result<PathBuf> {
 }
 
 /// Bytes that show the Session's last screen in the terminal running this
-/// command, if its owner left a snapshot this lf can decode.
+/// command, if its held terminal left a snapshot this lf can decode.
 pub(super) fn last_screen(session: &str) -> Option<Vec<u8>> {
     let path = path(session);
     let bytes = std::fs::read(&path).ok()?;

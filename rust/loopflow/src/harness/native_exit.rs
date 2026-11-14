@@ -296,56 +296,78 @@ mod tests {
         }
     }
 
+    /// A failed provider's own code reaches the person, the launcher record and
+    /// the capture, whether it exited or a signal ended it.
     #[test]
     fn a_failed_provider_exit_carries_its_own_code_and_says_so() {
-        let ledger = TestLedgerGuard::new();
-        let home = ledger.home();
-        journal::with_runtime(home, &["lf".into(), "-i".into()], || {
-            let capture = crate::session_record::SessionRecorder::begin_at(
-                home,
-                SessionCaptureSpec {
-                    harness: "claude".into(),
-                    model: None,
-                    surface: "tui".into(),
+        for (status, code, outcome) in [
+            (3 << 8, 3, "failed"),
+            (7 << 8, 7, "failed"),
+            (130 << 8, 130, "interrupted"),
+            (libc::SIGINT, 130, "interrupted"),
+            (libc::SIGKILL, 137, "failed"),
+        ] {
+            let ledger = TestLedgerGuard::new();
+            let home = ledger.home();
+            journal::with_runtime(home, &["lf".into(), "-i".into()], || {
+                let capture = crate::session_record::SessionRecorder::begin_at(
+                    home,
+                    SessionCaptureSpec {
+                        harness: "claude".into(),
+                        model: None,
+                        surface: "tui".into(),
+                        cwd: home.into(),
+                        repo: None,
+                        worktree: None,
+                        skill: None,
+                        subjects: vec![],
+                        graph: SessionGraphMembership::Independent,
+                        work: None,
+                    },
+                )
+                .unwrap();
+                let store = SqliteStore::new(&home.join("loopflow.db")).unwrap();
+                let session = store
+                    .session_for_artifact(&capture.artifact_key())
+                    .unwrap()
+                    .unwrap();
+                let launcher = journal::current_lf_process_id().unwrap();
+                let attachment = store
+                    .claim_session_attachment(&session.id, None, &launcher, true)
+                    .unwrap();
+                let exit = NativeExit {
+                    session: session.id.to_string(),
+                    attachment,
+                    provider: "claude".into(),
+                    client: false,
                     cwd: home.into(),
-                    repo: None,
-                    worktree: None,
-                    skill: None,
-                    subjects: vec![],
-                    graph: SessionGraphMembership::Independent,
-                    work: None,
-                },
-            )
+                    capture: Some(capture.hand_off(None, false, None)),
+                    capture_key: Some(capture.artifact_key()),
+                    account: None,
+                    diagnostics: (home.join("absent.log"), 0),
+                };
+                let settled = settle(&exit, ExitStatus::from_raw(status));
+                assert_eq!(settled.code, code, "{status}");
+                assert_eq!(settled.lines, [format!("claude exited with {code}.")]);
+                let launcher = store.lf_process(&launcher).unwrap().unwrap();
+                assert_eq!(launcher.exit_code, Some(i32::from(code)), "{status}");
+                assert_eq!(launcher.outcome.as_deref(), Some(outcome), "{status}");
+                let captured: String = store
+                    .conn
+                    .lock()
+                    .unwrap()
+                    .query_row(
+                        "SELECT json_extract(payload,'$.evidence.outcome') FROM session_events
+                         WHERE session_id=?1 AND json_extract(payload,'$.source')='terminal.json'",
+                        [session.id.as_str()],
+                        |r| r.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(captured, "failed", "{status}");
+                Ok::<_, anyhow::Error>(())
+            })
             .unwrap();
-            let store = SqliteStore::new(&home.join("loopflow.db")).unwrap();
-            let session = store
-                .session_for_artifact(&capture.artifact_key())
-                .unwrap()
-                .unwrap();
-            let launcher = journal::current_lf_process_id().unwrap();
-            let attachment = store
-                .claim_session_attachment(&session.id, None, &launcher, true)
-                .unwrap();
-            let exit = NativeExit {
-                session: session.id.to_string(),
-                attachment,
-                provider: "claude".into(),
-                client: false,
-                cwd: home.into(),
-                capture: Some(capture.hand_off(None, false, None)),
-                capture_key: Some(capture.artifact_key()),
-                account: None,
-                diagnostics: (home.join("absent.log"), 0),
-            };
-            let settled = settle(&exit, ExitStatus::from_raw(3 << 8));
-            assert_eq!(settled.code, 3);
-            assert_eq!(settled.lines, ["claude exited with 3."]);
-            let launcher = store.lf_process(&launcher).unwrap().unwrap();
-            assert_eq!(launcher.exit_code, Some(3));
-            assert_eq!(launcher.outcome.as_deref(), Some("failed"));
-            Ok::<_, anyhow::Error>(())
-        })
-        .unwrap();
+        }
     }
 
     #[test]

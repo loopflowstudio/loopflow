@@ -343,12 +343,11 @@ pub(crate) fn capture(conn: &Connection, table: &str, target: &str) -> StoreResu
 }
 
 pub(crate) fn retain(conn: &Connection, id: &str, change: &PlanningMutation) -> StoreResult<()> {
+    // An import retains thousands of changes under the write lock; preparing
+    // an insert compiles the table's triggers, so prepare each statement once.
     let existing: Option<String> = conn
-        .query_row(
-            "SELECT mutation FROM planning_peer_changes WHERE id=?1",
-            [id],
-            |row| row.get(0),
-        )
+        .prepare_cached("SELECT mutation FROM planning_peer_changes WHERE id=?1")?
+        .query_row([id], |row| row.get(0))
         .optional()?;
     if let Some(existing) = existing {
         if serde_json::from_str::<PlanningMutation>(&existing)? != *change {
@@ -358,14 +357,14 @@ pub(crate) fn retain(conn: &Connection, id: &str, change: &PlanningMutation) -> 
         }
         return Ok(());
     }
-    conn.execute(
+    conn.prepare_cached(
         "INSERT INTO planning_peer_changes(id,record_table,mutation) VALUES(?1,?2,?3)",
-        params![
-            id,
-            table(&change.edit.change),
-            serde_json::to_string(change)?
-        ],
-    )?;
+    )?
+    .execute(params![
+        id,
+        table(&change.edit.change),
+        serde_json::to_string(change)?
+    ])?;
     Ok(())
 }
 
@@ -374,18 +373,29 @@ pub(crate) fn observe<'a>(
     edit: &WorkEdit,
     ids: impl IntoIterator<Item = &'a str>,
 ) -> StoreResult<()> {
-    conn.execute(
+    conn.prepare_cached(
         "DELETE FROM planning_peer_observed WHERE id IN
          (SELECT id FROM planning_peer_changes WHERE object_id=?1 AND field=?2)",
-        params![edit.target, edit.change.field()],
-    )?;
+    )?
+    .execute(params![edit.target, edit.change.field()])?;
+    let mut insert =
+        conn.prepare_cached("INSERT OR IGNORE INTO planning_peer_observed(id) VALUES(?1)")?;
     for id in ids {
-        conn.execute(
-            "INSERT OR IGNORE INTO planning_peer_observed(id) VALUES(?1)",
-            [id],
-        )?;
+        insert.execute([id])?;
     }
     Ok(())
+}
+
+/// The repository's planning identity. Registering one reads its Git
+/// locator, so only an unregistered repository pays that under the lock.
+fn registered_repository_in(
+    conn: &Connection,
+    repo: &str,
+) -> StoreResult<crate::durable::RepositoryId> {
+    match super::repositories::repository_id_in(conn, repo)? {
+        Some(id) => Ok(id),
+        None => super::repositories::ensure_repository_in(conn, repo),
+    }
 }
 
 pub(crate) fn ensure_record(
@@ -395,9 +405,6 @@ pub(crate) fn ensure_record(
     id: &str,
     edits: &[WorkEdit],
 ) -> StoreResult<bool> {
-    if table == "waves" {
-        super::repositories::ensure_repository_in(conn, repo)?;
-    }
     let exists = conn.query_row(
         &format!("SELECT EXISTS(SELECT 1 FROM {} WHERE id=?1)", table),
         [id],
@@ -410,6 +417,7 @@ pub(crate) fn ensure_record(
     match table {
         "waves" => {
             crate::id::WaveId::parse(id).map_err(|e| StoreError::InvalidData(e.to_string()))?;
+            registered_repository_in(conn, repo)?;
             let name = edits
                 .iter()
                 .rev()
@@ -459,7 +467,7 @@ pub(crate) fn ensure_record(
                     _ => None,
                 })
                 .ok_or_else(missing)?;
-            let repository = super::repositories::ensure_repository_in(conn, repo)?;
+            let repository = registered_repository_in(conn, repo)?;
             conn.execute("INSERT INTO tasks(id,project_id,issue_identifier,created_at,updated_at,workspace_slug,repository_id) VALUES(?1,?2,?3,unixepoch(),unixepoch(),'',?4)",params![id,project,identifier,repository.as_str()])?;
         }
         "task_comments" => {
@@ -882,7 +890,7 @@ mod tests {
         {
             let conn = b.conn.lock().unwrap();
             conn.execute(
-                "UPDATE tasks SET worktree='/retained',branch='local-branch' WHERE id=?1",
+                "INSERT INTO task_checkouts(task_id,worktree,branch) VALUES(?1,'/retained','local-branch') ON CONFLICT(task_id) DO UPDATE SET worktree=excluded.worktree,branch=excluded.branch",
                 [task.as_str()],
             )
             .unwrap();

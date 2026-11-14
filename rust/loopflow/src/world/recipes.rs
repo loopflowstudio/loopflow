@@ -226,8 +226,8 @@ fn portfolio(world: &World) -> Result<()> {
         "Additive migrations should not lock out older lf.",
     )?;
     let failed = world.checkout(&failed)?;
-    // `code` sets out on `pursue`, which fails at `sync` (its fourth step).
-    world.task_run(&failed, "code", 0.02, 6, Outcome::FailedAt(3))?;
+    // `code` sets out on `pursue`, which fails at `sync` (its fifth step).
+    world.task_run(&failed, "code", 0.02, 6, Outcome::FailedAt(4))?;
 
     world.task(
         Some("systems"),

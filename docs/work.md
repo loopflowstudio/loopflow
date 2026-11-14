@@ -11,12 +11,13 @@ Waves.
 pbpaste | lf task create                     # first line is the title, the rest its notes
 lf task run LOO-12                           # returns once its Graph is running
 lf task run LOO-12 --open                    # continue its Graph and open its conversation
-lf task run LOO-13 --stack-on LOO-12         # builds on LOO-12's open PR before it merges
+lf task run LOO-13 --stack-on LOO-12         # builds on LOO-12's branch before it lands
 lf capture-tasks                             # talk it through; the Session files the Tasks
 ```
 
 A Task adopts existing work or gets its own worktree beside your repository, its own branch and at
-most one pull request. A stacked Task forks from its parent's PR; `lf sync`
+most one pull request. A stacked Task forks from its parent's branch on origin,
+pushing it when absent or when an unpublished parent is ahead; `lf sync`
 carries the child through the parent's updates and squash merge.
 
 `lf task run`, `lf ship`, and an explicit `lf task checkout` start the Task's
@@ -50,6 +51,10 @@ Fix the reported host or attachment problem, then use
 Every agent that works on a Task starts from the same place: the Task's notes
 and thread, its checkout and `scratch/`, and, in a Wave, the Wave's goal,
 memory and KRs.
+
+Run `lf incident` in a Task checkout to investigate a failure, including after
+the Task is done. A named Graph keeps the checkout's Task context and records
+its own run; it leaves the Task's Graph position and completion unchanged.
 
 ### Recover a creation whose reply was lost
 
@@ -92,6 +97,11 @@ provider history and live attachment. The selected Session becomes the Task's
 primary conversation; `lf open --task LOO-12` and `lf resume --task LOO-12` find it.
 Pass `--session` explicitly to keep a conversation. An agent reads its own
 Session ID from its lf context block.
+A Graph belongs to the Task it was started for. Graphs that ran in an adopted
+checkout before the Task adopted it stay unattached; `lf task status` lists the
+Graphs launched for the Task from then on. While an earlier Graph still runs
+in that checkout, status shows the Task moving and reports its execution;
+`lf task run` starts no other Graph until it finishes.
 Without `--run`, `lf task create --worktree` adopts only the checkout; it selects
 no conversation. `--run` then uses ordinary Task conversation admission.
 Opening a conversation more recently never selects it. Explicit-source retries
@@ -125,7 +135,7 @@ checkout is adopted. Closed or headless Sessions cannot become primary.
 ## Steer it while it runs
 
 ```bash
-lf task steer LOO-12 "keep the retry budget at 3"   # reaches its agents at their next step or turn
+lf steer LOO-12 "keep the retry budget at 3"   # reaches its agents at their next step or turn
 lf task status LOO-12 --json                        # the thread: your steers, teammates', the agents' reports
 lf task interrupt LOO-12                          # stop its running Graph
 lf task unassign LOO-12                           # nobody owns it: ship and CI repair stop; live processes finish
@@ -247,6 +257,15 @@ Each Task is one item in the tracker, and the tracker is where coworkers work:
 In Linear, a Wave is an Initiative and its planning is a Linear Project. Offline,
 commands save locally and deliver on the next connected command;
 `lf task sync LOO-12` retries one Task.
+
+A Wave not yet connected to an Initiative has nothing to exchange. Its Tasks
+stay local and `lf wave sync` shows them without asking Linear, until
+`lf wave plan connect billing` connects one:
+
+```text
+$ lf wave sync billing
+billing: no Linear Initiative; showing local planning (lf wave plan connect billing)
+```
 
 ## Waves
 
@@ -444,7 +463,8 @@ position; retry it alone if it fails. `lf task reopen` keeps the same PR.
 **Sync.** `lf task sync LOO-12` looks for its tracker creation now and re-sends
 it with its saved ID when absent; between syncs, every `lf` command looks for an
 uncertain creation once per window. `--retry-updates` retries saved field
-changes after reading the tracker again. `lf wave sync` refreshes from Linear first.
+changes after reading the tracker again. `lf wave sync` refreshes from Linear
+first; a Wave with no Initiative skips the refresh and still succeeds.
 
 ```bash
 lf task sync LOO-403 --retry-updates

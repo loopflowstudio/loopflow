@@ -128,6 +128,36 @@ pub(crate) async fn configured_destination(store: &Store, repo: &str) -> OpsResu
     Ok(Some(id))
 }
 
+/// A Task moving here from another of the person's Machines brings their
+/// planning key, so a personal Git plan reads the same journal on both. A
+/// Machine that already plans under another key refuses: keys never change.
+pub(crate) async fn adopt_personal_key(store: &Store, repo: &Path, key: &str) -> OpsResult<()> {
+    use crate::config::{load_config, GitPlan, PlanningConfig};
+    let config = load_config(Some(repo))
+        .map_err(message)?
+        .unwrap_or_default();
+    if !matches!(
+        config.planning_transport(),
+        PlanningConfig::Git {
+            plan: GitPlan::Personal,
+            ..
+        }
+    ) {
+        return Ok(());
+    }
+    match store.planning_user_key().await.map_err(message)? {
+        Some(saved) if saved == key => Ok(()),
+        Some(saved) => Err(message(format!(
+            "this Machine plans under planning key {saved}, the sending Machine under {key}; \
+             a personal plan follows one key, so this Machine cannot read the Task's plan"
+        ))),
+        None => store
+            .provision_planning_user_key(key)
+            .await
+            .map_err(message),
+    }
+}
+
 /// The first personal connection creates the key; a concurrent creator's key wins.
 async fn provisioned_user_key(store: &Store) -> OpsResult<String> {
     if let Some(key) = store.planning_user_key().await.map_err(message)? {

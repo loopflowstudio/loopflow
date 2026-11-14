@@ -480,6 +480,24 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: WaveCommand,
     },
+    /// Direct running agents: a Session, a Task's Sessions, or with `--wave` or `--repo` every Session there
+    ///
+    /// The steer is saved; each Session it applies to reads it after its next
+    /// tool call, or when it is next woken or prompted. No turn starts. A Task
+    /// steer also joins the Task's thread. `lf session steers SESSION` shows
+    /// what a Session has read.
+    #[command(
+        allow_missing_positional = true,
+        after_help = "lf steer SESSION 'skip the vendored code'\nlf steer LOO-12 'keep the public API'\nlf --wave parser steer 'prioritize the tokenizer'\nlf --repo . steer 'hold merges until the release is cut'"
+    )]
+    Steer {
+        /// A Session or Task ID; omit it with `--wave` or `--repo`
+        target: Option<String>,
+        message: String,
+        /// Print the saved steer, or for a Task its thread with the entry
+        #[arg(long = "json", id = "steer_json")]
+        json: bool,
+    },
     /// Ship the Task: run every remaining step to merge and completion, standing in at each interactive step
     ///
     /// Returns once the Task is shipping and runs on to its end (`-b` waits for
@@ -531,7 +549,7 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: DesktopCommand,
     },
-    /// Live Loopflow processes: call trees, Graphs that ran, rollover and pruning
+    /// Live Loopflow processes: call trees, Graphs that ran and pruning
     Process {
         #[command(subcommand)]
         cmd: commands::process::ProcessCommand,
@@ -1162,7 +1180,7 @@ impl Commands {
             Self::Machine { cmd } => cmd.changes_work(),
             Self::Account { cmd, cached, .. } => account_changes_work(cmd.as_ref(), *cached),
             Self::Server { .. } | Self::Holder { .. } => false,
-            Self::Commit { .. } | Self::Sync(_) => true,
+            Self::Commit { .. } | Self::Sync(_) | Self::Steer { .. } => true,
             Self::Repo { cmd, .. } => cmd.as_ref().is_some_and(|cmd| cmd.changes_work()),
             Self::Config { cmd } => cmd.changes_work(),
             Self::Self_ { cmd } => cmd.changes_work(),
@@ -1197,7 +1215,7 @@ impl TaskCommand {
             | Self::File { .. }
             | Self::Wait { .. } => false,
             Self::Retire { .. } => true,
-            Self::Steer { .. } | Self::Report { .. } => true,
+            Self::Report { .. } => true,
             Self::Sweep { apply, .. } => *apply,
             Self::Sync { .. }
             | Self::Checkout { .. }
@@ -1252,12 +1270,10 @@ impl SessionCommand {
             | Self::Usage(_)
             | Self::Retention { .. } => false,
             Self::History { cmd, .. } => cmd.as_ref().is_some_and(|cmd| cmd.changes_work()),
-            Self::Steers { retry, .. } => retry.is_some(),
+            Self::Steers { .. } => false,
             Self::Bind { dry_run, .. } => !dry_run,
-            Self::Serve { .. }
-            | Self::Resume { .. }
+            Self::Resume { .. }
             | Self::New { .. }
-            | Self::Steer { .. }
             | Self::Rename { .. }
             | Self::Move { .. }
             | Self::Send { .. }
@@ -1777,32 +1793,11 @@ pub enum SessionCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Run the process a Session lives in while terminals come and go
-    Serve {
-        /// Relay the execution to an attached terminal
-        #[arg(long)]
-        terminal: bool,
-        /// The command this process executes
-        #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
-        argv: Vec<String>,
-    },
-    /// Save a steer for this Session, or without one for the current Wave's or
-    /// repository's Sessions, without starting a turn
-    #[command(allow_missing_positional = true)]
-    Steer {
-        id: Option<String>,
-        message: String,
-        /// Print the saved steer
-        #[arg(long)]
-        json: bool,
-    },
-    /// Inspect steer delivery or retry delivery
+    /// See which steers a Session has read and which wait
     Steers {
         id: String,
         #[arg(long)]
         json: bool,
-        #[arg(long)]
-        retry: Option<String>,
         #[arg(long, default_value_t = 0)]
         after: i64,
         #[arg(long, default_value_t = 32)]
@@ -1920,11 +1915,12 @@ pub enum SessionCommand {
     /// Hand a Session to another Machine: commit and push its branch, stop it
     /// here and print the move for `lf session receive` there
     #[command(
-        after_help = "Everyday spelling: `lf --machine <machine> resume <session>` sends, receives and resumes in one step. `lf task move <task> --machine <machine>` moves a Task with its Session. Run send and receive by hand to retry a move whose receive failed:\n  lf session send <session|--task <task>> --to <machine> | lf --machine <machine> session receive"
+        after_help = "Everyday spelling: `lf --machine <machine> resume <session>` sends, receives and resumes in one step. `lf task move <task> --machine <machine>` moves a Task with its Session; run it again to deliver a Task that was sent but did not arrive. Run send and receive by hand to retry a Session whose receive failed:\n  lf session send <session> --to <machine> | lf --machine <machine> session receive"
     )]
     Send {
-        /// Session ID or provider conversation ID
-        #[arg(required_unless_present = "task", conflicts_with = "task")]
+        /// Session ID or provider conversation ID; with --task, the Task's
+        /// conversation to carry
+        #[arg(required_unless_present = "task")]
         id: Option<String>,
         /// Send this Task with its Session, as `lf task move --machine` does
         #[arg(long)]
@@ -1932,6 +1928,9 @@ pub enum SessionCommand {
         /// The Machine it moves to, by label or id
         #[arg(long)]
         to: String,
+        /// Send nothing: record that the Task this Machine sent arrived there
+        #[arg(long, hide = true, requires = "task")]
+        arrived: bool,
     },
     /// Admit a Session `lf session send` printed, read from stdin: check out its
     /// branch and place its conversation so it resumes here
@@ -1939,9 +1938,30 @@ pub enum SessionCommand {
         /// Read no move; exit non-zero unless this Machine can receive one
         #[arg(long)]
         check: bool,
-        /// With --check, also require that this Machine knows the Task
-        #[arg(long, requires = "check")]
+        /// With --check, also take in this Task from planning when this
+        /// Machine has not saved it yet
+        #[arg(long, requires_all = ["check", "issue", "repository"])]
         task: Option<String>,
+        /// The Task's identifier in planning, such as LOO-12
+        #[arg(long, requires = "task")]
+        issue: Option<String>,
+        /// The Task's repository
+        #[arg(long, requires = "task")]
+        repository: Option<crate::durable::RepositoryId>,
+        /// Where a Machine without the repository clones it from
+        #[arg(long, requires = "task")]
+        origin: Option<String>,
+        /// The sending Machine's planning key, adopted by a Machine with none
+        /// so a personal Git plan reads the same journal
+        #[arg(long, requires = "task")]
+        planning_key: Option<String>,
+        /// The Machine the Task moves from, which a retry here asks for it
+        #[arg(long, requires = "task")]
+        from: Option<crate::durable::MachineId>,
+        /// Read no move; exit non-zero unless this Task's last move arrived
+        /// here. A Machine that sent it asks before taking it back.
+        #[arg(long, hide = true, value_name = "TASK", conflicts_with = "check")]
+        arrived: Option<crate::durable::TaskId>,
         #[arg(long)]
         json: bool,
     },
@@ -2018,7 +2038,8 @@ pub enum WaveCommand {
         #[command(subcommand)]
         cmd: Option<WavePlanCommand>,
     },
-    /// Refresh one Wave's planning from its provider (Git or Linear), then show its status
+    /// Refresh one Wave's planning from its provider (Git or Linear), then show its status;
+    /// a Wave with no Linear Initiative shows its local planning
     Sync {
         /// Wave name (default: the ambient wave)
         wave: Option<String>,
@@ -2201,7 +2222,7 @@ pub enum TaskCommand {
         issue: Option<String>,
         #[arg(long)]
         name: Option<String>,
-        /// Fork this Task's worktree from another Task's active PR
+        /// Fork from another Task's branch; push if absent or an unpublished parent is ahead
         #[arg(long = "stack-on", value_name = "PARENT_TASK")]
         stack_on: Option<String>,
         #[arg(long)]
@@ -2220,8 +2241,9 @@ pub enum TaskCommand {
     #[command(
         after_help = "A Task runs the graph it took up: its Wave's default, its repository's \
 `graph:`, or `code`. A run stops before each interactive step, where the Task waits for its \
-conversation; the next `lf task run` continues after it. `-i` runs every step with you in this \
-terminal instead. A run that reaches `end`, as `-b` does, approves Auto-Ship like `lf ship`, \
+conversation; the next `lf task run` continues after it. A run that fails starts again at the \
+step that failed; the steps before it stay done, and --from reruns them. `-i` runs every step \
+with you in this terminal instead. A run that reaches `end`, as `-b` does, approves Auto-Ship like `lf ship`, \
 which may merge the PR, unless someone stopped shipping; then it waits at the landing step \
 until `lf ship`. Add --open to open its primary conversation locally when the launch returns, \
 using lf open's ordinary host selection. Preview and --quote open nothing."
@@ -2235,7 +2257,7 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         from: Option<String>,
         #[arg(long)]
         name: Option<String>,
-        /// Fork this Task's worktree from another Task's active PR
+        /// Fork from another Task's branch; push if absent or an unpublished parent is ahead
         #[arg(long = "stack-on", value_name = "PARENT_TASK")]
         stack_on: Option<String>,
         #[arg(long)]
@@ -2485,7 +2507,7 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
     },
     /// Change Task membership, or move the Task to another Machine, preserving its recorded work
     #[command(
-        after_help = "`--machine` stops the Task's Graph, commits and pushes its worktree, and hands it off with its Workflow position and Session; `lf task run` there runs its route again. A worktree mid-merge or mid-rebase refuses to move.\n  lf task move LOO-12 --machine mini"
+        after_help = "`--machine` stops the Task's Graph, commits and pushes its worktree, and moves it with its Session, then continues the Graph on that Machine at the step that was running. The terminal showing the Session prints `lf resume --task <ID>` to open it there. A worktree mid-merge or mid-rebase refuses to move. A move that was sent but did not arrive shows in `lf task status`; the same command delivers it.\n  lf task move LOO-12 --machine mini"
     )]
     Move {
         issue: String,
@@ -2502,16 +2524,6 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         #[arg(long, value_name = "LABEL_OR_ID")]
         machine: Option<String>,
         #[arg(long, requires = "machine")]
-        json: bool,
-    },
-    /// Direct the Task's runs: a thread entry its Sessions read at their next step or turn
-    Steer {
-        issue: String,
-        message: String,
-        #[arg(short = 'w', long)]
-        wave: Option<String>,
-        /// Print the thread with the entry
-        #[arg(long)]
         json: bool,
     },
     /// Post progress to the Task's thread; an agent's report carries its Session's provenance
@@ -2585,7 +2597,6 @@ impl TaskCommand {
             | Self::Save { issue, .. }
             | Self::Delete { issue }
             | Self::Update { issue, .. }
-            | Self::Steer { issue, .. }
             | Self::Report { issue, .. }
             | Self::Interrupt { issue, .. }
             | Self::Wait { issue, .. } => Some(issue),
@@ -2621,7 +2632,6 @@ impl TaskCommand {
             | Self::Save { issue, .. }
             | Self::Delete { issue }
             | Self::Update { issue, .. }
-            | Self::Steer { issue, .. }
             | Self::Report { issue, .. }
             | Self::Interrupt { issue, .. }
             | Self::Wait { issue, .. } => Some(issue),
@@ -3799,9 +3809,9 @@ mod tests {
             Cli::try_parse_from(["lf", "wave", "new-chapter", "October", "--plan", "p.json"])
                 .is_err()
         );
-        assert!(
-            Cli::try_parse_from(["lf", "session", "steer", "session_1", "m", "--repo"]).is_err()
-        );
+        assert!(Cli::try_parse_from(["lf", "steer", "session_1", "m", "--repo"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "session", "steer", "session_1", "m"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "task", "steer", "LOO-1", "m"]).is_err());
         assert!(Cli::try_parse_from(["lf", "wave", "serve", "product"]).is_err());
         assert!(Cli::try_parse_from(["lf", "wave", "place", "product", "mini"]).is_err());
         assert!(Cli::try_parse_from(["lf", "task", "admission", "LOO-1"]).is_err());
@@ -3811,16 +3821,10 @@ mod tests {
             vec!["lf", "list"],
             vec!["lf", "wave", "list", "--json"],
             vec!["lf", "pr", "checks"],
-            vec!["lf", "session", "steer", "keep attribution"],
-            vec![
-                "lf",
-                "--repo",
-                "loopflow",
-                "session",
-                "steer",
-                "keep attribution",
-            ],
-            vec!["lf", "session", "steer", "session_1", "keep attribution"],
+            vec!["lf", "--wave", "product", "steer", "keep attribution"],
+            vec!["lf", "--repo", "loopflow", "steer", "keep attribution"],
+            vec!["lf", "steer", "session_1", "keep attribution"],
+            vec!["lf", "steer", "LOO-1", "keep attribution"],
             vec!["lf", "wave", "rename", "product", "--title", "Product"],
             vec!["lf", "task", "move", "LOO-1", "--machine", "mini"],
             vec![
@@ -4078,6 +4082,20 @@ mod tests {
             "implement",
         ])
         .is_err());
+    }
+
+    /// A provider running across an lf upgrade keeps the Stop hook an older lf
+    /// declared, so that spelling still reaches the turn-end boundary.
+    #[test]
+    fn a_retained_stop_hook_spelling_reaches_the_turn_end() {
+        let cli = Cli::try_parse_from(["lf", "__planning-check"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::ContextBlock {
+                delivery: None,
+                moment: crate::context_block::ContextMoment::Stop,
+            })
+        ));
     }
 
     #[test]
@@ -4519,30 +4537,20 @@ mod tests {
     }
 
     #[test]
-    fn task_steer_and_report_take_a_message() {
-        let steer = Cli::try_parse_from([
-            "lf",
-            "task",
-            "steer",
-            "INF-123",
-            "take the smaller approach",
-        ])
-        .expect("parse task steer");
-        let Some(Commands::Task {
-            cmd:
-                TaskCommand::Steer {
-                    issue,
-                    message,
-                    json,
-                    wave: _,
-                },
+    fn steer_and_task_report_take_a_message() {
+        let steer = Cli::try_parse_from(["lf", "steer", "INF-123", "take the smaller approach"])
+            .expect("parse steer");
+        let Some(Commands::Steer {
+            target,
+            message,
+            json,
         }) = steer.command
         else {
-            panic!("expected task steer command");
+            panic!("expected steer command");
         };
-        assert_eq!(issue, "INF-123");
+        assert_eq!(target.as_deref(), Some("INF-123"));
         assert_eq!(message, "take the smaller approach");
-        assert!(Cli::try_parse_from(["lf", "task", "steer", "INF-123"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "steer"]).is_err());
         assert!(matches!(
             Cli::try_parse_from(["lf", "task", "report", "INF-123", "landed"])
                 .unwrap()

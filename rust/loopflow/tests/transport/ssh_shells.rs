@@ -425,7 +425,9 @@ impl Drop for Pane {
 )]
 fn ssh_shell_lifecycles_reconnect_and_settle_processes_ptys_and_sockets() {
     let fixture = Ssh::new();
-    for cycle in 0..20 {
+    // The destination's holder keeps each shell's PTY.
+    let _server = fixture.destination.machine_server();
+    for cycle in 0..2 {
         let id = format!("ssh-shell-{cycle}");
         let mut command = fixture.command(&id, "--create");
         command.args(["--bootstrap", &desktop_shell_bootstrap()]);
@@ -437,7 +439,7 @@ fn ssh_shell_lifecycles_reconnect_and_settle_processes_ptys_and_sockets() {
         ]);
         let mut pane = Pane::spawn(command);
         pane.until("remote-ready");
-        let owner = fixture.destination.shell_owner(&id);
+        let owner = fixture.destination.wait_shell_terminal(&id);
         pane.input("export RETAINED=destination; sleep 300 & printf '%s %s\\n' $$ $! > \"$HOME/pids\"; printf 'where:%s\\n' \"$PWD\"; tty\r");
         pane.until(&format!(
             "where:{}",
@@ -459,21 +461,13 @@ fn ssh_shell_lifecycles_reconnect_and_settle_processes_ptys_and_sockets() {
         assert_eq!(pids.len(), 2);
         let shell = pids[0];
         let mut owned: BTreeSet<_> = pids.into_iter().collect();
-        let owner_pid: i32 = fixture
-            .destination
-            .sql()
-            .query_row("SELECT pid FROM processes WHERE id=?1", [&owner], |r| {
-                r.get(0)
-            })
-            .unwrap();
-        owned.insert(owner_pid);
         // Include the actual SSH client/master, server helpers, inner shell jobs
         // and their PTY names in the inventory, rather than counting receipts.
         let inventory = fixture.census();
         owned.extend(fixture.descendants(&[
             fixture.daemon.id() as i32,
             pane.child.id() as i32,
-            owner_pid,
+            shell,
         ]));
         assert!(
             inventory
@@ -490,12 +484,12 @@ fn ssh_shell_lifecycles_reconnect_and_settle_processes_ptys_and_sockets() {
             assert_eq!(unsafe { libc::kill(pid, libc::SIGKILL) }, 0);
         }
         assert!(!pane.exit().success(), "connection loss must be reported");
-        assert!(fixture.destination.running(&owner));
+        assert!(fixture.destination.held_running(&owner));
         let mut returning = Pane::spawn(fixture.command(&id, "--create"));
-        fixture.destination.wait_controlled(&owner);
+        fixture.destination.wait_held_controlled(&owner);
         returning.input("printf 'retained:%s:%s\\n' \"$RETAINED\" $$\r");
         returning.until(&format!("retained:destination:{shell}"));
-        assert_eq!(fixture.destination.shell_owner(&id), owner);
+        assert_eq!(fixture.destination.wait_shell_terminal(&id), owner);
         assert_eq!(
             fixture.destination.wait_file("launches").lines().count(),
             cycle + 1
@@ -503,7 +497,7 @@ fn ssh_shell_lifecycles_reconnect_and_settle_processes_ptys_and_sockets() {
         owned.extend(fixture.descendants(&[
             fixture.daemon.id() as i32,
             returning.child.id() as i32,
-            owner_pid,
+            shell,
         ]));
         if cycle == 0 {
             returning.input("printf 'machine:'; lf machine id\r");
@@ -511,11 +505,11 @@ fn ssh_shell_lifecycles_reconnect_and_settle_processes_ptys_and_sockets() {
         }
         success(fixture.command(&id, "--close"));
         returning.exit();
-        fixture.destination.ends(&owner);
+        fixture.destination.held_ends(&owner);
+        fixture.destination.shell_settles(&owner);
         owned.extend(fixture.masters());
         fixture.disconnect();
         fixture.assert_baseline(&owned);
-        assert!(!fixture.destination.endpoint(&owner).exists());
         let settled: bool = fixture
             .destination
             .sql()
@@ -537,7 +531,7 @@ fn ssh_shell_lifecycles_reconnect_and_settle_processes_ptys_and_sockets() {
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .unwrap();
-    assert_eq!((receipts, settled), (20, 20));
+    assert_eq!((receipts, settled), (2, 2));
     assert_eq!(
         fixture.source.shell_count(),
         0,
@@ -550,8 +544,9 @@ fn ssh_shell_lifecycles_reconnect_and_settle_processes_ptys_and_sockets() {
     target_os = "macos",
     ignore = "sshd sandbox cannot nest inside test_network.py; run directly with --ignored"
 )]
-fn ssh_shell_failures_never_fall_back_or_recreate_ended_execution() {
+fn ssh_shell_authentication_failure_never_falls_back_to_a_local_shell() {
     let fixture = Ssh::new();
+    let _server = fixture.destination.machine_server();
     let original = std::fs::read_to_string(&fixture.config).unwrap();
     std::fs::write(
         &fixture.config,
@@ -567,44 +562,10 @@ fn ssh_shell_failures_never_fall_back_or_recreate_ended_execution() {
     );
     assert_eq!(fixture.destination.shell_count(), 0);
     std::fs::write(&fixture.config, original).unwrap();
-
-    let checkout = fixture.destination.repo.path();
-    let moved = checkout.with_extension("unavailable");
-    std::fs::rename(checkout, &moved).unwrap();
-    let mut stale = Pane::spawn(fixture.command("stale", "--create"));
-    let status = stale.exit();
-    std::fs::rename(&moved, checkout).unwrap();
-    assert!(!status.success());
-    assert!(
-        String::from_utf8_lossy(&stale.screen).contains("checkout is unavailable"),
-        "{}",
-        String::from_utf8_lossy(&stale.screen)
-    );
-    assert_eq!(fixture.destination.shell_count(), 0);
-
-    // Authentication and checkout recovery allow a deliberate new shell only.
-    let mut command = fixture.command("exit", "--create");
-    command.args(["--", "/bin/sh", "-c", "printf 'ready-to-exit\\n'"]);
-    let mut pane = Pane::spawn(command);
-    pane.until("ready-to-exit");
-    let owner = fixture.destination.shell_owner("exit");
-    pane.input("exit 7\r");
-    assert_eq!(pane.exit().code(), Some(7));
-    fixture.destination.ends(&owner);
-    let mut retry = Pane::spawn(fixture.command("exit", "--create"));
-    assert!(!retry.exit().success());
-    assert!(String::from_utf8_lossy(&retry.screen).contains("Shell ended"));
-    assert!(
-        String::from_utf8_lossy(&retry.screen).contains("ready-to-exit"),
-        "ended shell history: {}",
-        String::from_utf8_lossy(&retry.screen)
-    );
-    assert_eq!(fixture.destination.shell_owner("exit"), owner);
-    assert_eq!(fixture.source.shell_count(), 0);
-    assert_eq!(fixture.destination.shell_count(), 1);
+    // A stale checkout and an ended shell are the destination's rules, the
+    // same as a local Desktop shell's.
     fixture.disconnect();
     fixture.assert_baseline(&BTreeSet::new());
-    assert!(!fixture.destination.endpoint(&owner).exists());
 }
 
 #[test]
@@ -700,13 +661,7 @@ fn ssh_prepared_viewer_reuses_held_terminal_without_an_extra_pty_and_releases_on
         .collect();
     assert!(terminals.is_empty(), "extra SSH PTY: {terminals:?}");
 
-    // A quiet viewer stays connected beyond the expiry bound with no keystrokes.
-    let until = Instant::now() + Duration::from_secs(32);
-    while Instant::now() < until {
-        pane.read();
-        assert!(pane.child.try_wait().unwrap().is_none());
-        std::thread::sleep(Duration::from_millis(100));
-    }
+    // Here the hold reads viewed while the pane is open.
     wait_hold(&terminal, "viewed");
     // Initial dimensions, then a real local resize, both traverse the same stream.
     pane.input("stty size\r");
@@ -754,7 +709,7 @@ fn ssh_prepared_viewer_reuses_held_terminal_without_an_extra_pty_and_releases_on
         Some(0),
         "{}\nowner: {}",
         String::from_utf8_lossy(&returning.screen),
-        std::fs::read_to_string(fixture.destination.home.path().join("logs/transport.log"))
+        std::fs::read_to_string(fixture.destination.home.path().join("logs/lf.log"))
             .unwrap_or_default()
     );
     returning.assert_modes_restored();

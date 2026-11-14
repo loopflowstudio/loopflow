@@ -2144,4 +2144,4 @@ pub(crate) async fn record_program_status(
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

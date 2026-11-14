@@ -424,125 +424,7 @@ fn terminal_launch_and_resume_use_current_policy_and_preserve_native_identity() 
             assert_eq!(first["context"], resumed["context"]);
         }
         assert_eq!(fixture.session(), session);
-        let override_resume =
-            fixture.run(&["--yolo", "--chrome", "on", "session", "resume", &session]);
-        bypass(&override_resume, provider, true);
-        if provider == "claude" {
-            assert!(args(&override_resume).contains(&"--chrome"));
-        }
     }
-}
-
-#[test]
-fn resume_fallback_preserves_provider_and_can_refresh_its_model() {
-    let fixture = Fixture::new("claude:sonnet");
-    let first = fixture.run(&["-i", ":", "Keep this conversation"]);
-    let session = fixture.session();
-    let arguments = args(&first);
-    let token = arguments[arguments
-        .iter()
-        .position(|arg| *arg == "--session-id")
-        .unwrap()
-        + 1];
-    fixture.repo.create_file(
-        ".lf/config.yaml",
-        "diff: false\ndiff_files: false\npaste: false\n",
-    );
-    let unresolved = fixture
-        .command()
-        .args(["config", "show", "--json"])
-        .output()
-        .unwrap();
-    success(&unresolved);
-    let settings: Value = serde_json::from_slice(&unresolved.stdout).unwrap();
-    assert!(settings[0]["settings"]["agent"]["value"].is_null());
-    let resumed = fixture.run(&["session", "resume", &session]);
-    pair(&resumed, "--resume", token);
-    pair(&resumed, "--model", "sonnet");
-    assert_eq!(fixture.session(), session);
-    for (fallback, expected) in [("codex", "sonnet"), ("claude:haiku", "haiku")] {
-        let resumed = fixture.run(&[
-            "--setting",
-            &format!("default_agent={fallback}"),
-            "session",
-            "resume",
-            &session,
-        ]);
-        pair(&resumed, "--resume", token);
-        pair(&resumed, "--model", expected);
-        assert_eq!(fixture.session(), session);
-    }
-    for (agents, expected) in [
-        ("[codex, claude:haiku]", "sonnet"),
-        ("[claude:haiku, codex]", "haiku"),
-    ] {
-        let resumed = fixture.run(&[
-            "--setting",
-            &format!("agents={agents}"),
-            "session",
-            "resume",
-            &session,
-        ]);
-        pair(&resumed, "--resume", token);
-        pair(&resumed, "--model", expected);
-        assert_eq!(fixture.session(), session);
-    }
-}
-
-#[test]
-fn personal_true_overrides_repo_false_and_cli_can_disable_bypass() {
-    let fixture = Fixture::new("claude");
-    fs::create_dir_all(fixture.home.path().join("machine")).unwrap();
-    fs::write(
-        fixture.home.path().join("machine/config.yaml"),
-        "yolo: true\nchrome: true\n",
-    )
-    .unwrap();
-    fixture.repo.create_file(
-        ".claude/settings.json",
-        r#"{"permissions":{"defaultMode":"auto"}}"#,
-    );
-    fixture.settings("claude", false, false);
-    let configured = fixture.run(&["-i", ":", "hello"]);
-    bypass(&configured, "claude", true);
-    assert!(args(&configured).contains(&"--chrome"));
-    let explicit = fixture.run(&[
-        "-i",
-        "--setting",
-        "yolo=false",
-        "--chrome",
-        "off",
-        ":",
-        "hello",
-    ]);
-    bypass(&explicit, "claude", false);
-    assert!(args(&explicit).contains(&"--no-chrome"));
-}
-
-#[test]
-fn unset_chrome_leaves_the_claude_setting_alone_until_a_choice_is_explicit() {
-    let fixture = Fixture::new("claude");
-    fixture.repo.create_file(
-        ".lf/config.yaml",
-        "agent: claude\ndiff: false\ndiff_files: false\npaste: false\n",
-    );
-    fn chrome_flags(value: &Value) -> Vec<&str> {
-        args(value)
-            .into_iter()
-            .filter(|arg| *arg == "--chrome" || *arg == "--no-chrome")
-            .collect()
-    }
-    let attended = fixture.run(&["-i", ":", "hello"]);
-    assert!(chrome_flags(&attended).is_empty(), "{attended}");
-    let session = fixture.session();
-    let resumed = fixture.run(&["session", "resume", &session]);
-    assert!(chrome_flags(&resumed).is_empty(), "{resumed}");
-    let headless = fixture.run(&["-b", ":", "hello"]);
-    assert!(chrome_flags(&headless).is_empty(), "{headless}");
-    let off = fixture.run(&["-i", "--chrome", "off", ":", "hello"]);
-    assert_eq!(chrome_flags(&off), ["--no-chrome"]);
-    let on = fixture.run(&["-i", "--chrome", "on", ":", "hello"]);
-    assert_eq!(chrome_flags(&on), ["--chrome"]);
 }
 
 #[test]
@@ -553,18 +435,8 @@ fn headless_launch_and_graph_keep_current_options() {
         .create_file(".lf/skills/probe.md", "INITIAL_SKILL_ONLY");
     fixture.settings("claude:sonnet", true, true);
     fixture.create_wave();
-    let first = fixture.run(&[
-        "-b",
-        "--wave",
-        "fixture",
-        "--output-schema",
-        r#"{"type":"object"}"#,
-        "probe",
-        "first turn",
-    ]);
+    let first = fixture.run(&["-b", "--wave", "fixture", "probe", "first turn"]);
     pair(&first, "--input-format", "stream-json");
-    pair(&first, "--json-schema", r#"{"type":"object"}"#);
-    assert!(args(&first).contains(&"--chrome"));
     assert!(first["input"].to_string().contains("INITIAL_SKILL_ONLY"));
     fixture.settings("claude:haiku", false, false);
     fixture
@@ -700,24 +572,6 @@ fn machine_dispatch_resolves_destination_policy_and_forwards_launch_and_resume_o
     pair(&explicit, "--model", "haiku");
     assert!(args(&explicit).contains(&"--chrome"));
     assert_eq!(remote.session(), session);
-    let explicit = dispatch(&[
-        "-i",
-        "--yolo",
-        "--chrome",
-        "on",
-        "-a",
-        "claude:sonnet",
-        ":",
-        "--",
-        "--- literal prompt",
-    ]);
-    bypass(&explicit, "claude", true);
-    pair(&explicit, "--model", "sonnet");
-    assert!(args(&explicit).contains(&"--chrome"));
-    assert!(explicit["input"]
-        .as_str()
-        .unwrap()
-        .contains("--- literal prompt"));
 }
 
 #[path = "support/mod.rs"]

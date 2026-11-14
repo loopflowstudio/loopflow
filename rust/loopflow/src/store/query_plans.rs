@@ -60,6 +60,7 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          ('processes','agent_process_unfinished','77 1'),
          ('processes','processes_agent_session','18327 1'),
          ('processes','processes_attachment_exit','17586 1'),
+         ('processes','processes_completed','170063 2 1'),
          ('processes','processes_cwd','169394 134'),
          ('processes','processes_held_terminal','135 3'),
          ('processes','processes_parent','169394 7 1 1'),
@@ -77,6 +78,7 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          ('repository_plans','sqlite_autoindex_repository_plans_1','53 1'),
          ('session_events','session_capture_caller','17360 15'),
          ('session_events','session_capture_key','17360 1'),
+         ('session_events','session_capture_window','17723 1'),
          ('session_events','session_event_input','20942 15 14'),
          ('session_events','session_event_receipt','278035 51 37 20 7 1'),
          ('session_events','session_events_captured_event','197461 8'),
@@ -87,10 +89,12 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          ('session_events','session_events_turn','278035 51 37 20 1'),
          ('session_events','session_events_wave','112829 201'),
          ('session_events','session_input_membership','17340 2 1 1'),
+         ('session_events','session_input_outcome_window','34882 1'),
          ('session_events','session_observation_receipt','176447 41 1'),
          ('session_events','session_process_membership','64427 10 3'),
          ('session_events','session_provider_transitions','3805 1 1'),
          ('session_events','session_turn_events','84228 45 45 3 1 1'),
+         ('session_events','session_turn_window','85815 2 1 1 1 1'),
          ('session_steers','session_steers_steer','43400 34'),
          ('session_steers','sqlite_autoindex_session_steers_1','43400 6 1'),
          ('steer_adapters','sqlite_autoindex_steer_adapters_1','13914 1'),
@@ -140,13 +144,16 @@ fn trace(event: rusqlite::trace::TraceEvent<'_>) {
     if let rusqlite::trace::TraceEvent::Profile(statement, _) = event {
         TRACED.with(|traced| {
             if let Some(traced) = traced.borrow_mut().as_mut() {
-                traced.extend(statement.expanded_sql());
+                traced.push(statement.sql().into_owned());
             }
         });
     }
 }
 
-/// Every statement `run` executes on `store`'s connection, with its values bound.
+/// Every statement `run` executes on `store`'s connection, as prepared, with
+/// its parameters unbound. SQLite never folds a parameter into the plan, so
+/// `?6 AND …` keeps its index where the literal `0 AND …` would plan as a scan
+/// that never runs.
 pub(crate) fn statements(store: &SqliteStore, run: impl FnOnce()) -> Vec<String> {
     TRACED.with(|traced| *traced.borrow_mut() = Some(Vec::new()));
     store.conn.lock().unwrap().trace_v2(
@@ -420,6 +427,47 @@ mod tests {
             store.session_steers("viewed", 0, 10).unwrap();
             store.session_steer_source("viewed", &steer.id).unwrap();
         });
+        let scans = growing_scans(&store, &traced);
+        assert!(scans.is_empty(), "{}", scans.join("\n"));
+    }
+
+    #[test]
+    fn session_history_reads_plan_by_window() {
+        let (_home, store, task, _viewer) = fixture();
+        let input = crate::session_record::new_artifact_key();
+        store.test_session("history", &input);
+        store
+            .record_session_event(
+                "history",
+                &"thread".into(),
+                "turn",
+                crate::session::SessionEventKind::Completed,
+                &serde_json::json!({"status":"completed"}),
+            )
+            .unwrap();
+        let mut traced = statements(&store, || {
+            store
+                .recent_conversation_history(None, None, None, 100, 50)
+                .unwrap();
+            store
+                .pending_conversation_history(None, None, None, 100, true)
+                .unwrap();
+            store.input_history(&input).unwrap();
+        });
+        // A Task drill's window is the Task (Desktop Task history, `task.context`).
+        // Its selector resolution scans `tasks` for short-id prefixes once per
+        // drill, whatever the history holds; only the history read is checked.
+        let drill = statements(&store, || {
+            store
+                .pending_conversation_history(None, None, Some(task.as_str()), 0, true)
+                .unwrap();
+        });
+        let history = drill
+            .into_iter()
+            .filter(|sql| sql.starts_with("WITH windowed"));
+        let before = traced.len();
+        traced.extend(history);
+        assert!(traced.len() > before, "the drill reads history");
         let scans = growing_scans(&store, &traced);
         assert!(scans.is_empty(), "{}", scans.join("\n"));
     }

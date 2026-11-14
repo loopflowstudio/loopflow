@@ -20,6 +20,8 @@
   presence and a visible window flag did not imply unoccluded rendering.
   An 800×600 page was occluded and never supplied animation callbacks. The final
   probe reports unavailable; no additional survival count justifies a workaround.
+  At realign the sole display reported `Display Asleep: Yes`; waking it needs a
+  person at the Machine, not a harness change.
 - Reversible experiment placement: the synthetic envelope candidate lives under
   `#[cfg(test)]` in `desktop_exits` until reporter review. Production integration
   would require executable and kernel process-birth fields currently absent from

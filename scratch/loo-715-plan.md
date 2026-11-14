@@ -39,12 +39,12 @@ review precedes shipping. Production reporter policy remains Jack's decision.
   authority for Undo; the pool owns native lifetime, not a second tab model.
   A hidden pane is not a discarded tab, even after its Undo entry is displaced;
   workspace loss disposes all its pages.
-- Compared checkout `4e9ade2d04` with local `origin/main` `53a62ddfa7` on November 14:
-  `BrowserPageView.swift` and `desktop_exits.rs` are unchanged. `SessionsView.swift`
-  has substantial intervening changes, including retained conversations and
-  shared-server work. Integrate current workspace ownership before editing it;
-  do not transplant the old file. Launch identity and database-skew repairs are
-  already separate delivered work, not prerequisites to reinvent here.
+- The branch is merged onto `origin/main` `114ff62176`; a fresh fetch on November 14
+  showed nothing newer. Upstream since the original checkout changed
+  `SessionsView.swift` workspace ownership (retained conversations, shared
+  server), already integrated; `BrowserPageView.swift` and `desktop_exits.rs`
+  were untouched upstream. Launch identity and database skew are delivered
+  separately.
 
 ## API findings and alternatives
 
@@ -235,7 +235,11 @@ route before review for shipping.
 ## Remaining, in order
 
 1. Obtain an unoccluded display session with animation callbacks and reproduce
-   the baseline. Current host supplies an occluded console session. Run the new
+   the baseline. At realign on November 14, `system_profiler SPDisplaysDataType`
+   reported the only display (3456×2234 built-in) `Display Asleep: Yes` while
+   the console session was logged in — the likely cause of every occluded,
+   callback-free trial. A woken, unlocked display is the input; this work does
+   not unlock the screen. Run the new
    SwiftUI/animation/window scenarios there; if they still survive, use an
    isolated Dev Desktop to observe the actual release trigger. No live Desktop
    crash and no screen unlock is part of this work. This is the missing input

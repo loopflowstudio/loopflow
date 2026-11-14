@@ -1,0 +1,1 @@
+- Sync assumption: retain LOO-858's held-terminal transport fixtures where main's test split depends on the removed owner and local-child APIs; combine independent server, store and registry checks.

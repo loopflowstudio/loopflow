@@ -72,9 +72,9 @@ Changes to Task/Graph membership or execution reads also include
 `test(performance_tests::)` in the gate's Rust filter. Its planning and status
 checks catch per-Task and per-Graph SQL growth beyond focused store tests.
 
-Store-wide schema or trigger changes also run `binary(two_people)` and
-`binary(transport_tests)`: shared planning exchanges and held-terminal lifetimes
-exercise writers beyond the changed store module.
+Store-wide schema or trigger changes also run `binary(two_people)`,
+`test(transport::)` and `binary(transport_tests)`: shared planning exchanges,
+viewer holds and held-terminal lifetimes exercise writers beyond the changed store module.
 Fixture database seeding changes include
 `test(concurrent_copies_share_one_initialized_machine)` and
 `test(two_task_research_runs_leave_distinct_uncommitted_artifacts_for_the_next_prompt)`:

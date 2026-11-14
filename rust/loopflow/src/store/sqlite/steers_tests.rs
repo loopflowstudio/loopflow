@@ -131,6 +131,101 @@ fn pending_requests_hold_the_terminal_until_the_current_attachment_settles_them(
     assert_eq!(store.terminal_retention(&terminal).unwrap(), None);
 }
 
+/// The retention of a held terminal after `setup` changes its store.
+fn retention_after(
+    setup: impl FnOnce(&rusqlite::Connection, &LfProcessId),
+) -> Option<crate::store::sqlite::sessions::TerminalRetention> {
+    let (_home, store, _adapter, terminal) = native_fixture();
+    let owner = store
+        .session_attachment("session")
+        .unwrap()
+        .unwrap()
+        .lf_process_id
+        .unwrap();
+    {
+        let conn = store.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE processes SET held_terminal_id=?1 WHERE id=?2",
+            params![terminal, owner],
+        )
+        .unwrap();
+        setup(&conn, &owner);
+    }
+    store.terminal_retention(&terminal).unwrap()
+}
+
+/// A process under `parent`; a Graph when `graph` names its Graph.
+fn insert_process(
+    conn: &rusqlite::Connection,
+    parent: Option<&LfProcessId>,
+    graph: bool,
+) -> LfProcessId {
+    let id = LfProcessId::new();
+    conn.execute(
+        "INSERT INTO processes(id,trace_id,started_at,parent_lf_process_id) VALUES(?1,'fixture',1,?2)",
+        params![id, parent],
+    )
+    .unwrap();
+    if graph {
+        conn.execute(
+            "INSERT INTO graph_processes(lf_process_id,graph,compiled) VALUES(?1,'fixture','{}')",
+            [&id],
+        )
+        .unwrap();
+    }
+    id
+}
+
+/// An idle terminal holds nothing; a Graph in it, a captured Graph step,
+/// a headless run or a finished Session each name what holds it.
+#[test]
+fn terminal_retention_names_the_graph_run_or_absence_that_holds_an_idle_terminal() {
+    use crate::store::sqlite::sessions::TerminalRetention::{
+        HeadlessRun, NoOpenSession, RunningGraph,
+    };
+    assert_eq!(retention_after(|_, _| {}), None);
+    assert_eq!(
+        retention_after(|conn, owner| {
+            insert_process(conn, Some(owner), true);
+        }),
+        Some(RunningGraph)
+    );
+    // The Session's current capture comes from a step of a Graph it doesn't own.
+    let step = retention_after(|conn, _| {
+        let graph = insert_process(conn, None, true);
+        let step = insert_process(conn, Some(&graph), false);
+        conn.execute(
+            "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,lf_process_id)
+             SELECT session_id,kind,receipt_key||':step',observed_at,payload,?1 FROM session_events
+             WHERE seq=(SELECT current_capture FROM agent_sessions WHERE id='session')",
+            [&step],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE agent_sessions SET current_capture=last_insert_rowid()",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO graph_process_steps(graph_lf_process_id,lf_process_id,node,iterations)
+             VALUES(?1,?2,0,'[]')",
+            params![graph, step],
+        )
+        .unwrap();
+    });
+    assert_eq!(step, Some(RunningGraph));
+    let run = retention_after(|conn, _| {
+        conn.execute("UPDATE agent_sessions SET interactive=0", [])
+            .unwrap();
+    });
+    assert_eq!(run, Some(HeadlessRun));
+    let completed = retention_after(|conn, _| {
+        conn.execute("UPDATE agent_sessions SET completed_at=1", [])
+            .unwrap();
+    });
+    assert_eq!(completed, Some(NoOpenSession));
+}
+
 #[test]
 fn silent_native_turns_follow_the_provider_through_attachment_handoff() {
     let (_home, store, adapter, terminal) = native_fixture();

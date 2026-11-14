@@ -79,9 +79,10 @@ server package. On macOS, run that command directly with `-- --ignored`:
 Apple's sshd sandbox cannot nest inside `test_network.py`'s sandbox, so these
 tests are explicitly ignored in its default suite. Linux runs them normally
 inside network isolation. No system SSH configuration, keys or installed lf are used.
-Twenty cycles exercise the Desktop runtime through Machine routing, abrupt transport loss,
+Two cycles exercise the Desktop runtime through Machine routing, abrupt transport loss,
 reattachment to the same shell, Close and process/PTY/socket settlement;
-a separate case covers failed authentication, stale checkout and shell exit.
+a separate case covers failed authentication. Stale checkout and shell exit
+are covered by local Desktop shell tests.
 These are real SSH protocol checks on one Machine, not a two-Machine or installed
 Desktop demonstration. `ops::task::retirement::tests` covers Session viewer
 holds, bounded disconnected absence, cancellation, unconfirmed job cleanup and
@@ -871,6 +872,9 @@ For executable-resolution failures, reproduce with the compiled test binary:
 unset `LF_BIN` and `CARGO_BIN_EXE_lf`, and use a PATH containing Git but no `lf`.
 Verify the repair in that same environment. A pass under a developer's installed
 Loopflow can hide the CI failure.
+Include `server::service::tests::continuing_a_session_resumes_exactly_it_and_a_missing_one_is_refused`
+when changing Session continuation requests: constructing a launch request also
+resolves `lf`, even when the test never starts it.
 Include direct provider-harness startup tests in this check: even an expected
 spawn failure first resolves the conversation's `lf`. Pin a fixture executable
 under the environment lock and restore the pin afterward.

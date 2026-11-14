@@ -630,6 +630,20 @@ fn conversation_cleanup_owns_grace_membership_and_work() {
             .map(|(_, abandoned)| abandoned)
     };
     assert_eq!(request(), Some(false));
+    // A conversation resumed after its checkout retired still closes, and the
+    // finished retirement stays finished.
+    conn.execute(
+        "INSERT INTO task_retirements(task_id,completion,checkout,branch,due_at,phase)
+         VALUES(?1,'2000-01-01T00:00:00Z','/removed','retired',0,'retired')",
+        [task.as_str()],
+    )
+    .unwrap();
+    assert_eq!(request(), Some(false));
+    let phase: String = conn
+        .query_row("SELECT phase FROM task_retirements", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(phase, "retired");
+    conn.execute("DELETE FROM task_retirements", []).unwrap();
     // Returning holds cleanup even with no checkout or retirement row.
     store
         .record_viewer_hold(&terminal, Some(ViewerHold::Viewed(now())))

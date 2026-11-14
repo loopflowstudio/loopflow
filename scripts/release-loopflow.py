@@ -11,7 +11,6 @@ it uses whatever Developer ID Application identity is in the keychain.
 Publisher preparation retains the submitted DMG and Apple submission ID outside
 the generated checkout. Retry the same `lf release run` after a wait timeout;
 it resumes that submission and staples a copy of the exact submitted image.
-Notarization failures and their fixes: `.github/CI.md`, "Notarization".
 """
 
 from __future__ import annotations
@@ -143,17 +142,6 @@ def _write_submission(path: Path, receipt: dict[str, object]) -> None:
     temporary.replace(path)
 
 
-def _notarytool_failed(result: subprocess.CompletedProcess, what: str, advice: str) -> RuntimeError:
-    """Print notarytool's output; the error names Apple's first line, then what is safe next."""
-    stdout, stderr = result.stdout.strip(), result.stderr.strip()
-    for output in (stdout, stderr):
-        if output:
-            print(output, flush=True)
-    if message := stderr or stdout:
-        what = f"{what}: {message.splitlines()[0].strip().rstrip('.')}"
-    return RuntimeError(f"{what}; {advice}")
-
-
 def _notarize_dmg(dmg_path: Path) -> int:
     key = os.environ.get("NOTARY_KEY")
     key_id = os.environ.get("NOTARY_KEY_ID")
@@ -213,8 +201,9 @@ def _notarize_dmg(dmg_path: Path) -> int:
                 timeout=30 * 60,
             )
             if result.returncode:
-                raise _notarytool_failed(
-                    result, "Notarization upload failed", "inspect Apple history before retrying"
+                raise RuntimeError(
+                    "Notarization upload did not return a receipt; "
+                    "inspect Apple history before retrying"
                 )
             receipt["submission_id"] = json.loads(result.stdout)["id"]
             _write_submission(receipt_path, receipt)
@@ -235,10 +224,8 @@ def _notarize_dmg(dmg_path: Path) -> int:
             timeout=30 * 60,
         )
         if result.returncode:
-            raise _notarytool_failed(
-                result,
-                f"Notarization {submission_id} wait failed",
-                "retry resumes the retained submission",
+            raise RuntimeError(
+                f"Notarization {submission_id} wait failed; retry resumes the retained submission"
             )
         status = json.loads(result.stdout)["status"]
         if status != "Accepted":

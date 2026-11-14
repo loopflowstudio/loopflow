@@ -78,7 +78,9 @@ exercise writers beyond the changed store module.
 Task storage changes also run `binary(session_lifecycle_tests)`: creation and
 promotion cover absent checkouts and primary Sessions. When moving nullable
 columns into separate tables, update fixture reads to handle absent rows and
-direct SQL writes to seed the new tables. Include `test(ops::task::tests::)`:
+direct SQL writes and shared fixture lookups to use the new tables. Run
+`test(performance_tests::)` to check that seeded Graphs still belong to their
+Tasks. Include `test(ops::task::tests::)`:
 checkout adoption must still find a running Graph and prevent a second run.
 Store query changes also run `test(store::query_plans::tests::)`. Missing-key
 fixtures must use prefixes outside generated UUID keys, not short hex strings

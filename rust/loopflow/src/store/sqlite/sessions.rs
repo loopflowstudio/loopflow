@@ -201,7 +201,7 @@ fn inventory_query(
     }
     if let Some(primary) = filter.primary {
         use crate::session::SessionPrimary;
-        let task = "EXISTS (SELECT 1 FROM tasks t WHERE t.primary_session_id=s.id)";
+        let task = "EXISTS (SELECT 1 FROM task_primary_sessions t WHERE t.session_id=s.id)";
         sql.push_str(&match primary {
             SessionPrimary::All => {
                 format!(" AND (s.primary_scope IN ('wave','repository') OR {task})")
@@ -262,7 +262,7 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         a.primary_scope,
         {available},
         COALESCE(({task_state}) IN ('done','abandoned'),0),
-        s.id IN (SELECT primary_session_id FROM tasks WHERE primary_session_id IS NOT NULL),
+        s.id IN (SELECT session_id FROM task_primary_sessions),
         (SELECT act.program_status FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id),a.agent_process_id,p.completed_at,p.pid,p.os_started_at,(SELECT terminal_id FROM processes WHERE id=p.attached_lf_process_id AND completed_at IS NULL),
         (SELECT act.preview FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id
          AND json_extract(act.preview,'$.provider_thread')=a.provider_thread
@@ -413,7 +413,7 @@ fn read_summary(
 fn task_primary_in(conn: &Connection, task: &TaskId) -> StoreResult<Option<LfSession>> {
     conn.query_row(
         &format!(
-            "{SESSION_SELECT} WHERE s.id=(SELECT primary_session_id FROM tasks WHERE id=?1)
+            "{SESSION_SELECT} WHERE s.id=(SELECT session_id FROM task_primary_sessions WHERE task_id=?1)
              AND s.completed_at IS NULL"
         ),
         [task.as_str()],
@@ -514,7 +514,8 @@ fn ensure_primary_session_in(
             [&session.id],
         )?,
         PrimaryScope::Task(task) => conn.execute(
-            "UPDATE tasks SET primary_session_id=?2 WHERE id=?1",
+            "INSERT INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)
+             ON CONFLICT(task_id) DO UPDATE SET session_id=excluded.session_id",
             params![task.as_str(), session.id],
         )?,
     };
@@ -598,9 +599,10 @@ pub(super) fn choose_task_primary_in(
 ) -> StoreResult<()> {
     let chosen = conn.execute(
         &format!(
-            "UPDATE tasks SET primary_session_id=?2 WHERE id=?1 AND ?2 IN (
+            "INSERT INTO task_primary_sessions(task_id,session_id) SELECT ?1,?2 WHERE ?2 IN (
                     SELECT s.id FROM agent_sessions s WHERE s.interactive=1
-                    AND s.completed_at IS NULL AND s.id IN ({}))",
+                    AND s.completed_at IS NULL AND s.id IN ({}))
+                 ON CONFLICT(task_id) DO UPDATE SET session_id=excluded.session_id",
             super::task_work::session_ids("?1")
         ),
         params![task.as_str(), session],
@@ -1437,7 +1439,7 @@ impl SqliteStore {
         // Binding may have selected a directory while an opening prepared the
         // old scope's workspace. Its explicit choice wins over that preparation.
         let updated = tx.execute(
-            "UPDATE agent_sessions SET cwd=CASE WHEN work_source='bound' THEN cwd ELSE ?3 END WHERE id=?1 AND current_capture IS ?2 AND completed_at IS NULL AND (primary_scope IS NOT NULL OR EXISTS(SELECT 1 FROM tasks WHERE primary_session_id=agent_sessions.id))",
+            "UPDATE agent_sessions SET cwd=CASE WHEN work_source='bound' THEN cwd ELSE ?3 END WHERE id=?1 AND current_capture IS ?2 AND completed_at IS NULL AND (primary_scope IS NOT NULL OR EXISTS(SELECT 1 FROM task_primary_sessions WHERE session_id=agent_sessions.id))",
             params![session.id, session.captured, cwd.to_string_lossy()],
         )?;
         if updated != 1 {
@@ -1456,7 +1458,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let task: Option<String> = conn
             .query_row(
-                "SELECT id FROM tasks WHERE primary_session_id=?1",
+                "SELECT task_id FROM task_primary_sessions WHERE session_id=?1",
                 [id],
                 |row| row.get(0),
             )
@@ -1701,6 +1703,25 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// `task`'s conversation left with it: complete it here, bound to the Task
+    /// as it arrives there, rather than naming a Machine. It resumes wherever
+    /// the Task runs, even after its checkout here is gone.
+    pub(crate) fn complete_task_conversation(&self, id: &str, task: &TaskId) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let updated = conn.execute(
+            "UPDATE agent_sessions SET completed_at=COALESCE(completed_at,?3),moved_to_machine_id=NULL,
+                wave_id=CASE WHEN task_id IS NULL THEN (SELECT p.wave_id FROM tasks t
+                    LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?2) ELSE wave_id END,
+                task_id=COALESCE(task_id,?2)
+             WHERE id=?1",
+            params![id, task.as_str(), crate::store::rows::now_unix()],
+        )?;
+        if updated != 1 {
+            return Err(StoreError::NotFound);
+        }
+        Ok(())
+    }
+
     /// The Machine a Session here moved to; `None` when it never left.
     pub fn session_moved_to(&self, id: &str) -> StoreResult<Option<crate::durable::MachineId>> {
         let canonical = crate::id::canonical_session(id);
@@ -1713,34 +1734,6 @@ impl SqliteStore {
         .optional()?
         .flatten()
         .map(|machine| crate::durable::MachineId::parse(&machine).map_err(invalid))
-        .transpose()
-    }
-
-    /// Where a Task's conversation went when it moved without its Task: the
-    /// latest of its Sessions that moved, while none is open here.
-    pub fn task_conversation_moved_to(
-        &self,
-        task: &TaskId,
-    ) -> StoreResult<Option<(String, crate::durable::MachineId)>> {
-        let ids = super::task_work::session_ids("?1");
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.query_row(
-            &format!(
-                "SELECT id,moved_to_machine_id FROM agent_sessions
-                 WHERE id IN ({ids}) AND moved_to_machine_id IS NOT NULL
-                 AND NOT EXISTS(SELECT 1 FROM agent_sessions WHERE id IN ({ids}) AND completed_at IS NULL)
-                 ORDER BY completed_at DESC LIMIT 1"
-            ),
-            [task.as_str()],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-        )
-        .optional()?
-        .map(|(id, machine)| {
-            Ok((
-                id,
-                crate::durable::MachineId::parse(&machine).map_err(invalid)?,
-            ))
-        })
         .transpose()
     }
 
@@ -2172,6 +2165,42 @@ mod metadata_tests {
     use crate::session::{GraphProcessSummaryState, SessionFilter};
 
     #[test]
+    fn a_released_tasks_primary_session_stays_its_conversation_here() {
+        use crate::store::migrations::{apply_before_migration, migration_section_sql};
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_before_migration(&conn, "task_machine_local");
+        conn.execute_batch(
+            "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_1','/repo',1);
+             INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd)
+             VALUES('primary','Primary','human',1,0,'/repo');
+             INSERT INTO tasks(id,repository_id,issue_identifier,created_at,primary_session_id)
+             VALUES('task_1','repo_1','FIX-1',1,'primary');
+             INSERT INTO tasks(id,repository_id,issue_identifier,created_at)
+             VALUES('task_2','repo_1','FIX-2',1);",
+        )
+        .unwrap();
+        conn.execute_batch(&migration_section_sql("task_machine_local"))
+            .unwrap();
+        let primaries = || {
+            let mut query = conn
+                .prepare("SELECT task_id,session_id FROM task_primary_sessions")
+                .unwrap();
+            query
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<(String, String)>>>()
+                .unwrap()
+        };
+        assert_eq!(primaries(), [("task_1".into(), "primary".into())]);
+        conn.execute_batch(
+            "PRAGMA foreign_keys=ON; DELETE FROM agent_sessions WHERE id='primary';",
+        )
+        .unwrap();
+        assert_eq!(primaries(), []);
+    }
+
+    #[test]
     fn session_inventory_distinguishes_primary_sessions_from_unassigned_tasks() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
@@ -2186,16 +2215,20 @@ mod metadata_tests {
             )
             .unwrap();
             for primary in [Some("primary"), None] {
+                let task = crate::durable::TaskId::new();
                 conn.execute(
-                    "INSERT INTO tasks(repository_id,id,created_at,primary_session_id,issue_identifier)
-                     VALUES(?1,?2,1,?3,?2)",
-                    params![
-                        repository.as_str(),
-                        crate::durable::TaskId::new().as_str(),
-                        primary
-                    ],
+                    "INSERT INTO tasks(repository_id,id,created_at,issue_identifier)
+                     VALUES(?1,?2,1,?2)",
+                    params![repository.as_str(), task.as_str()],
                 )
                 .unwrap();
+                if let Some(primary) = primary {
+                    conn.execute(
+                        "INSERT INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
+                        params![task.as_str(), primary],
+                    )
+                    .unwrap();
+                }
             }
         }
         let rows = store
@@ -2224,7 +2257,12 @@ mod metadata_tests {
             .unwrap();
             conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(), wave]).unwrap();
             conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
-            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1',?3,1,(SELECT id FROM machines WHERE is_local=1))", params![task.as_str(), project.as_str(), session.cwd.to_str().unwrap()]).unwrap();
+            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,created_at) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1',1)", params![task.as_str(), project.as_str()]).unwrap();
+            conn.execute(
+                "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)",
+                params![task.as_str(), session.cwd.to_str().unwrap()],
+            )
+            .unwrap();
         }
         assert_eq!(store.task_work(&task).unwrap().sessions.len(), 1);
         let exclusion = store.lock_checkout(&session.cwd).unwrap();

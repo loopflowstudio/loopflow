@@ -58,8 +58,8 @@ impl SqliteStore {
             parent_prs: keyed(
                 &snapshot,
                 &format!(
-                    "{TASK_PR_COLUMNS} WHERE id IN (SELECT parent_pr_id FROM tasks
-                     WHERE id IN (SELECT value FROM json_each(?1)))"
+                    "{TASK_PR_COLUMNS} WHERE id IN (SELECT parent_pr_id FROM task_checkouts
+                     WHERE task_id IN (SELECT value FROM json_each(?1)))"
                 ),
                 &json,
                 |row| {

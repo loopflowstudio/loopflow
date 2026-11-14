@@ -54,10 +54,6 @@ pub fn run(args: &ShellArgs) -> Result<()> {
             .task_checkout(&task)?
             .ok_or_else(|| anyhow!("Task has no checkout"))?;
         ensure!(
-            checkout.machine_id.as_ref() == Some(&store.local_machine()?.id),
-            "Task checkout belongs to another Machine; reopen the Task"
-        );
-        ensure!(
             checkout.worktree == *expected,
             "The Task checkout changed; reopen the Task. No shell was retargeted."
         );

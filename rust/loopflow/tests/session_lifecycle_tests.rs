@@ -11,6 +11,7 @@ use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
 use loopflow_test_support::{MachineServer, TestRepo};
+use rusqlite::OptionalExtension;
 use serde_json::Value;
 
 struct Fixture {
@@ -334,7 +335,9 @@ fn task_conversation_starts_at_launch_not_creation() {
         };
         let stored: (Option<String>, Option<String>) = db
             .query_row(
-                "SELECT primary_session_id,worktree FROM tasks WHERE id=?1",
+                "SELECT p.session_id,c.worktree FROM tasks
+                 LEFT JOIN task_checkouts c ON c.task_id=tasks.id
+                 LEFT JOIN task_primary_sessions p ON p.task_id=tasks.id WHERE tasks.id=?1",
                 [id],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -361,7 +364,7 @@ fn task_conversation_starts_at_launch_not_creation() {
         let session = ensured["id"].as_str().unwrap().to_owned();
         let primary: String = db
             .query_row(
-                "SELECT primary_session_id FROM tasks WHERE id=?1",
+                "SELECT session_id FROM task_primary_sessions WHERE task_id=?1",
                 [id],
                 |row| row.get(0),
             )
@@ -2897,10 +2900,11 @@ fn promotion_background_run_does_not_claim_primary() {
     let primary: Option<String> = fixture
         .db()
         .query_row(
-            "SELECT primary_session_id FROM tasks WHERE id=?1",
+            "SELECT session_id FROM task_primary_sessions WHERE task_id=?1",
             [task],
             |row| row.get(0),
         )
+        .optional()
         .unwrap();
     assert_eq!(primary, None);
     let bound: Option<String> = fixture

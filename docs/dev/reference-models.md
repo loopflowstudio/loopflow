@@ -196,8 +196,10 @@ provider generation in caller provenance, turn origin and Program Status.
 | --- | --- |
 | `processes` | Durable `id`, lf/agent kind, nullable Unix PID/birth, immutable parent, command, cwd and terminal evidence. Agent rows own served Session, provider/launch mode, endpoint, attachment/token and exit reference. Lf rows retain incoming agent provenance. Admit, attach, finish, filter/page. |
 | `agent_sessions` | Stable ID, purpose and independent interactive flag; title/provenance, request/feedback, typed Task/Wave ancestry, native identity and current AgentProcess reference; reserve, resume, bind and rename; historical feedback/completion retained |
-| `tasks` | Wave planning row, issue, durable disposition and worktree/delivery facts |
-| `task_ownership` | Append-only `claim`/`handoff`/`unclaim` entries (`own_…`; `lf task unassign` writes `unclaim`, shown as unassign) with person, Machine and time; migration-only `recorded` entries are never delivered |
+| `tasks` | Shared planning row: identity, repository, project, title, description, state, rank and provider revision; no Machine-local column |
+| `task_checkouts` | This Machine's checkout of a Task (worktree path, branch, base commit, parent PR); absent on every other Machine |
+| `task_primary_sessions` | The conversation this Machine opens for a Task, with or without a checkout; absent on every other Machine |
+| `task_ownership` | Append-only `claim`/`unclaim` entries (`own_…`; `lf task unassign` writes `unclaim`, shown as unassign) with person, the Machine they name, the Machine that wrote them and time; a move is a claim naming another Machine, and earlier `handoff` entries read as one |
 | `projects` | A Wave's plan: stable local identity, optional provider binding, status, prose, KRs and targets; the default graph belongs to the Wave |
 | `waves` | Stable identity and repository address; objective, memory and instruments are read from checkout files |
 
@@ -265,8 +267,8 @@ row, seeded with a log of its current AgentSession, which stays in its history.
 Scope locks serialize admission. Primary grants no Graph, review or process authority, and
 the Wave's goal and memory reach it as ordinary Wave context.
 
-A Task's primary is one of its own conversations, named by
-`tasks.primary_session_id`; its row carries no scope mark and it stays a Task
+A Task's primary is one of its own conversations, named by its
+Machine-local `task_primary_sessions` row; the Session row carries no scope mark and it stays a Task
 member. `lf resume --task ISSUE` keeps the selected primary. Without one, it
 selects an unfinished interactive member by latest native human input, falling
 back to interactive opening and creation time; it creates one when none exists.

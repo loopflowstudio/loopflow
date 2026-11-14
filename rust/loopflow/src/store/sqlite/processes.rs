@@ -43,7 +43,7 @@ pub(super) const FORGETTABLE: &str = "p.kind='lf' AND p.completed_at IS NOT NULL
     AND NOT EXISTS(SELECT 1 FROM task_graphs WHERE lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM waves WHERE project_activation_lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM ci_incidents WHERE repair_lf_process_id=p.id)
-    AND NOT EXISTS(SELECT 1 FROM tasks WHERE ship_lf_process_id=p.id OR ship_approved_lf_process_id=p.id OR ship_stopped_lf_process_id=p.id)
+    AND NOT EXISTS(SELECT 1 FROM task_ship_events WHERE lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM agent_sessions WHERE transport_lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM relocated_task_processes WHERE process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM desktop_shells WHERE owner=p.id)";
@@ -207,8 +207,8 @@ fn process_query(
             UNION
             SELECT op.id FROM graph_process_steps gs JOIN processes op ON op.id=gs.lf_process_id
             JOIN tasks tw ON {tasks}{value}{close}
-            WHERE tw.worktree!=''
-              AND (op.cwd=rtrim(tw.worktree,'/') OR instr(op.cwd,rtrim(tw.worktree,'/')||'/')=1)
+            JOIN task_checkouts c ON c.task_id=tw.id
+            WHERE op.cwd=rtrim(c.worktree,'/') OR instr(op.cwd,rtrim(c.worktree,'/')||'/')=1
         )"
         ));
     }
@@ -2189,7 +2189,7 @@ mod discovery_tests {
             .unwrap();
             // A Graph process recorded both Processes as steps in the first Task's checkout.
             conn.execute(
-                "UPDATE tasks SET worktree='/repo.first',checkout_machine_id=(SELECT id FROM machines WHERE is_local=1) WHERE id=?1",
+                "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/repo.first') ON CONFLICT(task_id) DO UPDATE SET worktree=excluded.worktree",
                 [first.as_str()],
             )
             .unwrap();

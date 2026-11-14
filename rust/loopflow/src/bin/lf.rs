@@ -1130,21 +1130,45 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                 if let Some(error) = &status.planning_error {
                     println!("Planning: {error}");
                 }
-                // A Task another Machine runs is read from its ownership; this
-                // Machine's records are what it left behind.
+                // A move in flight reads as that, with its retry; a Task another
+                // Machine runs is read from its ownership. This Machine's records
+                // are what it left behind.
                 let elsewhere = match (&status.task, &status.ownership) {
                     (Some(task), Some(ownership)) => {
-                        loopflow::ops::task_ownership::runs_elsewhere_here(ownership)?
+                        loopflow::ops::task_ownership::moving_here(&task.id, &task.identifier)?
+                            .or(loopflow::ops::task_ownership::runs_elsewhere_here(
+                                ownership,
+                            )?)
                             .map(|line| format!("{}  {line}", task.identifier))
                     }
                     _ => None,
                 };
-                if let Some(line) = elsewhere {
+                if let Some(line) = &elsewhere {
                     println!("{line}");
-                } else if let Some(execution) = &status.execution {
-                    print_task_snapshot(execution, false)?;
-                } else {
-                    println!("No execution allocated.");
+                }
+                if let Some(task) = &status.task {
+                    if let Some(check) =
+                        loopflow::ops::task_ownership::checked_here(&task.id, &task.identifier)?
+                    {
+                        println!("{}  {check}", task.identifier);
+                    }
+                }
+                match status.task.as_ref().filter(|task| task.worktree.is_none()) {
+                    // Under the line naming where it runs, indented; alone, by name.
+                    Some(task) => println!(
+                        "{}  {}",
+                        if elsewhere.is_some() {
+                            ""
+                        } else {
+                            task.identifier.as_str()
+                        },
+                        loopflow::ops::task_ownership::not_checked_out_here()
+                    ),
+                    None if elsewhere.is_none() => match &status.execution {
+                        Some(execution) => print_task_snapshot(execution, false)?,
+                        None => println!("No execution allocated."),
+                    },
+                    None => {}
                 }
             }
             Ok(())
@@ -1667,9 +1691,8 @@ fn run() -> anyhow::Result<()> {
         })?
     {
         let args = reorder_args(std::iter::once("lf".to_string()).chain(command).collect());
-        if loopflow::lf::commands::ssh::selects_current_machine(
-            remote.machine.as_deref().expect("machine selector"),
-        )? {
+        let machine = remote.machine.as_deref().expect("machine selector");
+        if loopflow::lf::commands::ssh::runs_here(machine, &args[1..])? {
             raw_args = args;
         } else {
             let cli = loopflow::lf::commands::ssh::parse_remote_command(&args[1..])?;
@@ -1692,10 +1715,7 @@ fn run() -> anyhow::Result<()> {
             ctrlc::set_handler(|| loopflow::agent::exit_on_interrupt())
                 .expect("failed to set Ctrl+C handler");
             return loopflow::lf::commands::ssh::run(
-                remote
-                    .machine
-                    .as_deref()
-                    .expect("remote invocation has a machine"),
+                machine,
                 remote.forward_agent,
                 &cli,
                 &args[1..],

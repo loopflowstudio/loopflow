@@ -264,6 +264,7 @@ model pin stays put and stops with advice to change the pin.
 
 ```bash
 lf account                         # every login, its capacity and when it resets
+lf account next -a claude:fable    # the login a Fable launch takes, or what holds each one back
 lf set --global agents claude,codex # let headless steps move to Codex when Claude is out
 lf gate -a codex                    # run this one on another harness
 lf --only-account claude=work@ gate # stay inside the logins you name

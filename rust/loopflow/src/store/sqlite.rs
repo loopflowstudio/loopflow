@@ -25,37 +25,49 @@ fn is_model_weekly_window(window: &str, model: Option<&str>) -> bool {
     })
 }
 
+// The bucket a limit row describes: the name and scope a poll writes for a
+// known Claude row, otherwise the row's own.
+fn limit_bucket(provider: &str, window: &str, model: Option<&str>) -> (String, Option<String>) {
+    (provider == "claude")
+        .then(|| crate::provider_account::canonical_claude_window(window, model))
+        .flatten()
+        .unwrap_or_else(|| (window.to_owned(), model.map(str::to_owned)))
+}
+
 // Historical aliases can coexist with canonical observations. Prefer the newer
 // reading; at equal second-resolution timestamps retain the stricter reading.
 fn reconcile_legacy_account_windows(limits: Vec<AccountLimitRow>) -> Vec<AccountLimitRow> {
     let mut winners = std::collections::HashMap::new();
-    let key = |row: &AccountLimitRow| {
-        let model = row.model.as_deref()?;
-        (row.provider == "claude"
-            && crate::config::CLAUDE_MODEL_FAMILIES.contains(&model)
-            && (is_model_weekly_window(&row.window, Some(model))
-                || row.window == "seven_day_overage_included"))
-            .then(|| (row.account_id.clone(), model.to_owned()))
-    };
-    for (index, row) in limits.iter().enumerate() {
-        if let Some(key) = key(row) {
-            let rank = (
-                row.observed_at,
-                row.limited_until,
-                row.used_percent,
-                row.window != "seven_day_overage_included",
-            );
-            let winner = winners.entry(key).or_insert((rank, index));
-            if rank > winner.0 {
-                *winner = (rank, index);
-            }
+    let buckets: Vec<_> = limits
+        .iter()
+        .map(|row| limit_bucket(&row.provider, &row.window, row.model.as_deref()))
+        .collect();
+    for (index, (row, bucket)) in limits.iter().zip(&buckets).enumerate() {
+        let rank = (
+            row.observed_at,
+            row.limited_until,
+            row.used_percent,
+            bucket.0 == row.window,
+        );
+        let winner = winners
+            .entry((&row.provider, &row.account_id, bucket))
+            .or_insert((rank, index));
+        if rank > winner.0 {
+            *winner = (rank, index);
         }
     }
+    let kept: std::collections::HashSet<_> =
+        winners.into_values().map(|(_, index)| index).collect();
     limits
         .into_iter()
+        .zip(buckets)
         .enumerate()
-        .filter(|(index, row)| key(row).is_none_or(|key| winners[&key].1 == *index))
-        .map(|(_, row)| row)
+        .filter(|(index, _)| kept.contains(index))
+        .map(|(_, (mut row, (window, model)))| {
+            row.window = window;
+            row.model = model;
+            row
+        })
         .collect()
 }
 
@@ -1256,8 +1268,9 @@ impl SqliteStore {
         provider: &str,
         account_id: &ProviderAccountId,
     ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let changed = conn.execute(
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let changed = transaction.execute(
             "UPDATE provider_accounts SET cooldown_until = NULL, cooldown_reason = NULL,
              capacity_revision = capacity_revision + 1, updated_at = ?3 WHERE provider = ?1 AND account_id = ?2",
             params![provider, account_id.as_str(), now_unix()],
@@ -1265,6 +1278,11 @@ impl SqliteStore {
         if changed == 0 {
             return Err(StoreError::NotFound);
         }
+        transaction.execute(
+            "UPDATE provider_account_limits SET limited_until=NULL WHERE provider=?1 AND account_id=?2",
+            params![provider, account_id.as_str()],
+        )?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -1422,50 +1440,64 @@ impl SqliteStore {
         if current_revision != revision {
             return Ok(false);
         }
-        let cause = cooldown_reason
-            .as_deref()
-            .and_then(|reason| reason.rsplit(": ").next());
+        let prior = {
+            let mut statement = transaction.prepare(
+                "SELECT provider, account_id, window, used_percent, resets_at, plan, observed_at, source, model, limited_until
+                 FROM provider_account_limits WHERE provider=?1 AND account_id=?2",
+            )?;
+            let rows = statement.query_map(
+                params![account.provider, account.account_id.as_str()],
+                read_account_limit_row,
+            )?;
+            let mut prior = Vec::new();
+            for row in rows {
+                prior.push(row??);
+            }
+            prior
+        };
+        let key = |name: &str, model: Option<&str>| limit_bucket(&account.provider, name, model);
+        let cause = cooldown_reason.as_deref().map(|reason| {
+            if account.provider == "claude" {
+                reason
+            } else {
+                reason.rsplit(": ").next().unwrap_or(reason)
+            }
+        });
+        let cause_matches = |window: &crate::store::AccountLimitWindow| {
+            cause.is_some_and(|cause| {
+                key(cause, window.model.as_deref()) == key(&window.window, window.model.as_deref())
+            })
+        };
         let mut windows = windows.to_vec();
         for window in &mut windows {
+            let bucket = key(&window.window, window.model.as_deref());
+            let matching: Vec<_> = prior
+                .iter()
+                .filter(|row| key(&row.window, row.model.as_deref()) == bucket)
+                .collect();
             if window.used_percent >= 100 && window.limited_until.is_none() {
-                let prior: Option<i64> = transaction.query_row(
-                    "SELECT MAX(limited_until) FROM provider_account_limits WHERE provider=?1
-                     AND account_id=?2 AND (window=?3 OR
-                        (window='seven_day_overage_included' AND model=?4 AND ?3='seven_day_'||model))",
-                    params![account.provider, account.account_id.as_str(), window.window, window.model],
-                    |row| row.get(0),
+                window.limited_until = matching
+                    .iter()
+                    .filter_map(|row| row.limited_until)
+                    .max()
+                    .or_else(|| cause_matches(window).then_some(cooldown_until).flatten());
+            }
+            for row in matching {
+                transaction.execute(
+                    "DELETE FROM provider_account_limits WHERE provider=?1 AND account_id=?2 AND window=?3",
+                    params![account.provider, account.account_id.as_str(), row.window],
                 )?;
-                window.limited_until = prior.or_else(|| {
-                    (cause == Some(window.window.as_str()))
-                        .then_some(cooldown_until)
-                        .flatten()
-                });
             }
         }
         let recovered = windows.iter().any(|window| {
-            if cause != Some(window.window.as_str()) {
-                return false;
-            }
-            // A matching model window replaces a broad hold even when still
-            // spent; a global hold requires room in its own window.
-            is_model_weekly_window(&window.window, window.model.as_deref())
-                || (matches!(
-                    window.window.as_str(),
-                    "five_hour" | "seven_day" | "weekly" | "session"
-                ) && window.model.is_none()
-                    && window.used_percent < 100)
+            cause_matches(window)
+                && (is_model_weekly_window(&window.window, window.model.as_deref())
+                    || (matches!(
+                        window.window.as_str(),
+                        "five_hour" | "seven_day" | "weekly" | "session"
+                    ) && window.model.is_none()
+                        && window.used_percent < 100))
         });
-        for window in &windows {
-            if account.provider == "claude"
-                && is_model_weekly_window(&window.window, window.model.as_deref())
-            {
-                transaction.execute(
-                    "DELETE FROM provider_account_limits WHERE provider=?1 AND account_id=?2
-                     AND window='seven_day_overage_included' AND model=?3",
-                    params![account.provider, account.account_id.as_str(), window.model],
-                )?;
-            }
-        }
         write_account_windows(
             &transaction,
             &account.provider,
@@ -2992,6 +3024,127 @@ mod account_observation_tests {
     }
 
     #[test]
+    fn claude_capacity_historical_names_reconcile_and_refresh() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&directory.path().join("registry.db")).unwrap();
+        let mut account = account();
+        account.cooldown_until = None;
+        store.upsert_provider_account(&account).unwrap();
+        for (name, model, canonical, scope) in [
+            ("seven_day_overage_included", Some("fable"), "seven_day_fable", Some("fable")),
+            ("rejected: seven_day_overage_included", Some("fable"), "seven_day_fable", Some("fable")),
+            ("blocked: seven_day_fable", Some("fable"), "seven_day_fable", Some("fable")),
+            ("limited: seven_day_overage_included", Some("fable"), "seven_day_fable", Some("fable")),
+            ("rate_limit_reached: seven_day_fable", Some("fable"), "seven_day_fable", Some("fable")),
+            ("You've hit your Fable limit · resets Nov 18 at 4am (America/Los_Angeles)", Some("fable"), "seven_day_fable", Some("fable")),
+            ("You've reached your Fable limit. Run /usage-credits to continue or switch models with /model.", Some("fable"), "seven_day_fable", Some("fable")),
+            ("weekly:fable", None, "seven_day_fable", Some("fable")),
+            ("weekly", None, "seven_day", None),
+            ("session", None, "five_hour", None),
+        ] {
+            store.upsert_provider_account_limits("claude", &account.account_id, &[window(name, 100, model)], "stream").unwrap();
+            let rows = store.provider_account_limits(None).unwrap();
+            assert_eq!(rows.len(), 1, "{name}");
+            assert_eq!(rows[0].window, canonical);
+            assert_eq!(rows[0].model.as_deref(), scope);
+            assert!(rows[0].limited_until.is_some());
+            let revision = store.provider_account_capacity_revision("claude", &account.account_id).unwrap();
+            store.reconcile_provider_account_capacity(&account, revision, &[window(canonical, 16, scope)]).unwrap();
+            let rows = store.provider_account_limits(None).unwrap();
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].used_percent, 16);
+            assert_eq!(rows[0].limited_until, None);
+            let conn = store.conn.lock().unwrap();
+            let raw: String = conn.query_row("SELECT window FROM provider_account_limits", [], |row| row.get(0)).unwrap();
+            assert_eq!(raw, canonical);
+            conn.execute("DELETE FROM provider_account_limits", []).unwrap();
+        }
+    }
+
+    #[test]
+    fn claude_capacity_historical_unknown_credit_and_mismatched_rows_stay() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&directory.path().join("registry.db")).unwrap();
+        let account = account();
+        store.upsert_provider_account(&account).unwrap();
+        for (name, model) in [
+            ("rejected: overage", Some("fable")),
+            ("You're out of usage credits. Run /usage-credits to keep using Fable 5.2 or /model to switch models.", Some("fable")),
+            ("rejected: seven_day_overage_included", Some("future")),
+            ("rejected: seven_day_fable", Some("sonnet")),
+            ("unknown", None),
+        ] {
+            store.upsert_provider_account_limits("claude", &account.account_id, &[window(name, 100, model)], "stream").unwrap();
+        }
+        let before = store.provider_account_limits(None).unwrap();
+        let revision = store
+            .provider_account_capacity_revision("claude", &account.account_id)
+            .unwrap();
+        store
+            .reconcile_provider_account_capacity(
+                &account,
+                revision,
+                &[window("seven_day_fable", 16, Some("fable"))],
+            )
+            .unwrap();
+        let after = store.provider_account_limits(None).unwrap();
+        for row in before {
+            assert!(after.contains(&row), "{row:?}");
+        }
+    }
+
+    #[test]
+    fn claude_capacity_clear_releases_all_holds_and_supersedes_polls() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&directory.path().join("registry.db")).unwrap();
+        let account = account();
+        store.upsert_provider_account(&account).unwrap();
+        store
+            .upsert_provider_account_limits(
+                "claude",
+                &account.account_id,
+                &[
+                    window("seven_day", 100, None),
+                    window("seven_day_fable", 100, Some("fable")),
+                    window("unknown", 100, Some("opus")),
+                ],
+                "stream",
+            )
+            .unwrap();
+        let before = store.provider_account_limits(None).unwrap();
+        let revision = store
+            .provider_account_capacity_revision("claude", &account.account_id)
+            .unwrap();
+        store
+            .clear_provider_account_cooldown("claude", &account.account_id)
+            .unwrap();
+        let current = store
+            .get_provider_account("claude", &account.account_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(current.cooldown_until, None);
+        assert_eq!(current.cooldown_reason, None);
+        let after = store.provider_account_limits(None).unwrap();
+        for (mut before, after) in before.into_iter().zip(after) {
+            before.limited_until = None;
+            assert_eq!(before, after);
+        }
+        assert!(
+            store
+                .provider_account_capacity_revision("claude", &account.account_id)
+                .unwrap()
+                > revision
+        );
+        assert!(!store
+            .reconcile_provider_account_capacity(
+                &account,
+                revision,
+                &[window("seven_day", 100, None)]
+            )
+            .unwrap());
+    }
+
+    #[test]
     fn claude_usage_reconciliation_keeps_only_matching_aliases_and_scopes() {
         let directory = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&directory.path().join("registry.db")).unwrap();
@@ -3197,6 +3350,11 @@ mod account_observation_tests {
             ),
             ("usage credits", vec![window("seven_day", 66, None)], false),
             ("rejected", vec![window("seven_day", 66, None)], false),
+            (
+                "unknown: seven_day",
+                vec![window("seven_day", 66, None)],
+                false,
+            ),
             ("rejected: seven_day", vec![], false),
         ] {
             let mut account = account();
@@ -3309,7 +3467,7 @@ mod account_observation_tests {
                 "claude",
                 &account.account_id,
                 &[
-                    window("seven_day_overage_included", 100, Some("fable")),
+                    window("rejected: seven_day_overage_included", 100, Some("fable")),
                     window("seven_day_fable", 11, Some("fable")),
                 ],
                 "stream",
@@ -3328,13 +3486,21 @@ mod account_observation_tests {
             11
         );
         let conn = store.conn.lock().unwrap();
+        conn.execute("UPDATE provider_account_limits SET observed_at=observed_at+2 WHERE window='rejected: seven_day_overage_included'", []).unwrap();
+        drop(conn);
+        let rows = store.provider_account_limits(None).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].window, "seven_day_fable");
+        assert_eq!(rows[0].used_percent, 100);
+        assert_eq!(rows[0].limited_until, Some(1_900_000_005));
+        let conn = store.conn.lock().unwrap();
         conn.execute_batch("WITH RECURSIVE accounts(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM accounts WHERE n<10000)
             INSERT INTO provider_accounts(provider,account_id,credential_state,created_at,updated_at)
             SELECT 'claude', 'fixture-'||n, 'connected', 1, 1 FROM accounts;").unwrap();
         for sql in [
             "SELECT capacity_revision FROM provider_accounts WHERE provider='claude' AND account_id='primary'",
-            "DELETE FROM provider_account_limits WHERE provider='claude' AND account_id='primary' AND window='seven_day_overage_included' AND model='fable'",
-            "SELECT MAX(limited_until) FROM provider_account_limits WHERE provider='claude' AND account_id='primary' AND (window='seven_day_fable' OR (window='seven_day_overage_included' AND model='fable' AND 'seven_day_fable'='seven_day_'||model))",
+            "DELETE FROM provider_account_limits WHERE provider='claude' AND account_id='primary' AND window='seven_day_fable'",
+            "SELECT provider, account_id, window, used_percent, resets_at, plan, observed_at, source, model, limited_until FROM provider_account_limits WHERE provider='claude' AND account_id='primary'",
         ] {
             let plan: Vec<String> = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap()
                 .query_map([], |row| row.get(3)).unwrap().collect::<Result<_, _>>().unwrap();
@@ -3439,7 +3605,7 @@ mod account_observation_tests {
         let rows = store.provider_account_limits(None).unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!(
-            rows.iter().find(|row| row.window == "weekly"),
+            rows.iter().find(|row| row.window == "seven_day"),
             Some(&previous)
         );
     }

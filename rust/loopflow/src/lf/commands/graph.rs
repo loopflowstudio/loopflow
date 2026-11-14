@@ -554,6 +554,7 @@ fn execute(
             .record_graph_process(
                 &running.process,
                 &crate::graph::compiled::CompiledGraph::new(graph_name, items),
+                running.task.as_ref(),
             )
             .context("could not record the Graph; no steps launched")?;
         drop(admission);

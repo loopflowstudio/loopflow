@@ -28,7 +28,8 @@ receipts.
 
 Tests use the production entry through `transport_tests::desktop_shell_` and
 `transport_tests::ssh_shells::`, including no-replay, same-execution recovery,
-Close and job settlement. `returning_task_viewer_resets_cleanup_without_another_sweep`
-covers a returning passive viewer and a brief return/leave before the next sweep.
+Close and job settlement. The store's
+`returning_viewers_reset_retirement_and_retry_without_a_sweep` covers a returning
+passive viewer and a brief return/leave before the next sweep.
 See [transport](../transport/README.md#task-shells-and-completed-workspaces)
 for the viewer and retirement timing contract.

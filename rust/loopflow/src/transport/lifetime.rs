@@ -17,7 +17,12 @@ use crate::process::SessionAttachment;
 use crate::store::sqlite::{SqliteStore, ViewerHold};
 use crate::store::RecordingGap;
 
-pub(super) const POLL: Duration = Duration::from_secs(2);
+/// How often the recorder retries a failed write and rechecks shell Close and
+/// native clients while nothing changes.
+#[cfg(not(test))]
+const POLL: Duration = Duration::from_secs(2);
+#[cfg(test)]
+const POLL: Duration = Duration::from_millis(100);
 
 /// The exec'd native client whose attachment the watcher checks. Store reads
 /// never run in the terminal's descriptor loop.
@@ -345,14 +350,15 @@ mod tests {
         assert_eq!(read(), None);
         conn.execute_batch("DROP TRIGGER reject_viewer_change")
             .unwrap();
-        let deadline = Instant::now() + super::POLL * 3;
+        // Retries come every POLL; the deadline only bounds a broken retry.
+        let deadline = Instant::now() + Duration::from_secs(5);
         while read().is_none() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(20));
         }
         assert_eq!(read(), Some(123));
         // After recovery the recorder waits for changes; departure must wake it.
         viewing.send(Some(ViewerHold::Absent(124)));
-        let deadline = Instant::now() + super::POLL * 3;
+        let deadline = Instant::now() + Duration::from_secs(5);
         while read() != Some(124) && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(20));
         }

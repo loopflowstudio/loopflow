@@ -45,7 +45,7 @@ impl Read for Stream {
 
 impl Write for Stream {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + super::pace().stall;
         loop {
             match self.output.write(bytes) {
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,

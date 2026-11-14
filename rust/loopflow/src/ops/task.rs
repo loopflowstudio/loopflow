@@ -744,6 +744,13 @@ pub(crate) fn select_task_run(
             )));
         }
     }
+    // A Graph that was running in the checkout before the Task adopted it.
+    if let Some(execution) =
+        crate::ops::task_execution::open_graph_execution(&store.sqlite, &task.id)
+            .map_err(task_error)?
+    {
+        return Err(task_error(execution.reason));
+    }
     let step = row.as_ref().map_or(START, |row| row.step.as_str());
     let start = match (from, row.as_ref().and_then(|row| row.run.as_ref())) {
         (Some(name), _) => Some(
@@ -2604,7 +2611,7 @@ async fn live_execution(store: &SharedStore, task: &Task) -> OpsResult<Option<St
         let name = graph.name.clone();
         let facts = store
             .sqlite
-            .graph_execution_facts([&graph])
+            .graph_execution_facts([&graph], &[&task.id])
             .map_err(task_error)?;
         let (execution, _) = crate::ops::task_execution::execution_of_latest_graph(
             &store.sqlite,

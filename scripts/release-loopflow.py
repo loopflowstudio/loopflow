@@ -147,13 +147,11 @@ def _notarytool_failed(
     result: subprocess.CompletedProcess, what: str, advice: str
 ) -> RuntimeError:
     """Print notarytool's output; the error names Apple's first line, then what is safe next."""
-    stdout = (result.stdout or "").strip()
-    stderr = (result.stderr or "").strip()
+    stdout, stderr = result.stdout.strip(), result.stderr.strip()
     for output in (stdout, stderr):
         if output:
             print(output, flush=True)
-    message = stderr or stdout
-    if message:
+    if message := stderr or stdout:
         what = f"{what}: {message.splitlines()[0].strip()}"
     return RuntimeError(f"{what}; {advice}")
 

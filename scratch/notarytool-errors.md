@@ -53,7 +53,7 @@ alerting beyond the issue.
 
 ## Checks
 
-- `uv run pytest python/tests/test_release_loopflow.py` — 17 passed (implement, advice always kept).
+- `uv run pytest python/tests/test_release_loopflow.py` — 17 passed (compress, after dropping impossible `None` guards in `_notarytool_failed`).
 - `actionlint .github/workflows/notarization-check.yml` — clean (compress).
 - Step shell with stub `xcrun`/`gh`: red+no issue → create, red+open → comment,
   green+open → close, green+none → nothing; exit codes match (implement).

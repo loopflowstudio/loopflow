@@ -419,6 +419,74 @@ fn branch_lf() -> RestoreEnv {
     RestoreEnv::set("LF_BIN", env!("CARGO_BIN_EXE_lf"))
 }
 
+#[test]
+fn pre_spawn_account_refusal_falls_through_to_codex() {
+    let home = TempDir::new().unwrap();
+    let codex = support::codex_socket_script(LIMITED_CODEX);
+    let _env = EnvGuard::with_lf_home(
+        &[("codex", &codex), ("claude", "#!/bin/sh\nexit 99\n")],
+        home.path(),
+    );
+    let _lf = branch_lf();
+    let _directory = support::InDirectory::enter(home.path());
+    let (_runtime, _accounts, _) = two_codex_accounts(home.path(), "primary", "backup");
+    let store =
+        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    for name in ["first", "second"] {
+        support::register_claude_login(home.path(), name);
+        let mut account = store
+            .get_provider_account("claude", &ProviderAccountId::parse(name).unwrap())
+            .unwrap()
+            .unwrap();
+        account.cooldown_until = Some(time::OffsetDateTime::now_utc().unix_timestamp() + 3_600);
+        account.cooldown_reason = Some("rate_limit_reached".into());
+        store.upsert_provider_account(&account).unwrap();
+    }
+    let launches = home.path().join("launches");
+    let result = run_agent(
+        &AgentConfig {
+            agent: Some("claude:fable".into()),
+            fallback_agents: vec!["codex:gpt-6.1-sol".into()],
+            cwd: Some(home.path().to_path_buf()),
+            env: BTreeMap::from([("LAUNCHES".into(), launches.display().to_string())]),
+            ..base_launch()
+        },
+        &ProcessConfig {
+            wait_for_capacity: true,
+            ..base_process()
+        },
+    )
+    .expect("a refused account selection can move a never-spawned reservation");
+    assert_eq!(result.exit_code, 0, "{}", result.stderr);
+    assert!(result.stdout.contains("finished on primary"));
+    assert_eq!(
+        std::fs::read_to_string(launches).unwrap(),
+        "start primary\n"
+    );
+    let rows = store.processes_since(0).unwrap();
+    let agents: Vec<_> = rows
+        .iter()
+        .filter_map(loopflow::process::ProcessEntry::as_agent)
+        .collect();
+    assert_eq!(agents.len(), 2);
+    assert!(agents.iter().all(|agent| agent.completed_at.is_some()));
+    let refused = agents.iter().find(|agent| agent.pid.is_none()).unwrap();
+    assert!(refused.os_started_at.is_none());
+    let launched = agents.iter().find(|agent| agent.pid.is_some()).unwrap();
+    assert!(launched.os_started_at.is_some());
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    for (agent, expected) in [(refused, "reserved"), (launched, "exited")] {
+        let state: String = db
+            .query_row(
+                "SELECT spawn_state FROM processes WHERE id=?1",
+                [&agent.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(state, expected);
+    }
+}
+
 fn run_limited_step(
     home: &std::path::Path,
     limited: &str,

@@ -1402,8 +1402,9 @@ impl SqliteStore {
         Ok(attachment)
     }
 
-    /// Invocation-owned retry: settle before reserving, retain native history,
-    /// and select the next thread atomically with the new process identity.
+    /// Invocation-owned retry: retire a never-launched reservation or settle an
+    /// observed exit, retaining native history and selecting the next thread
+    /// atomically with the new process identity.
     pub(crate) fn replace_session_agent_process(
         &self,
         session: &str,
@@ -1412,12 +1413,12 @@ impl SqliteStore {
         close: impl FnOnce() -> StoreResult<bool>,
     ) -> StoreResult<SessionAttachment> {
         let _dispatch = self.lock_session_attachment(session)?;
-        let ended = {
+        let (ended, reserved) = {
             let conn = self.conn.lock().expect("store mutex poisoned");
             require_attachment_in(&conn, session, expected)?;
-            agent_process_progress_in(&conn, &expected.agent_process_id)?.0
+            agent_process_progress_in(&conn, &expected.agent_process_id)?
         };
-        if !ended && !close()? {
+        if !ended && !reserved && !close()? {
             return Err(no_observed_exit());
         }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
@@ -1425,9 +1426,9 @@ impl SqliteStore {
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
         tx.execute(
             "UPDATE processes SET completed_at=COALESCE(completed_at,?2),
-                spawn_state=CASE WHEN completed_at IS NULL THEN 'exited' ELSE spawn_state END
+                spawn_state=CASE WHEN completed_at IS NULL AND NOT ?3 THEN 'exited' ELSE spawn_state END
              WHERE id=?1",
-            params![expected.agent_process_id, now],
+            params![expected.agent_process_id, now, reserved],
         )?;
         let next = attach_in(
             &tx,

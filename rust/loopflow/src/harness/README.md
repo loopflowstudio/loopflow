@@ -27,6 +27,10 @@ panic. A failed receipt write remains a headless caller error. Retrying that
 write can record the same outcome but cannot reopen the runtime or change its
 result.
 
+Account selection can refuse before a provider requests a spawn. Fallback retires
+that reservation without recording an OS exit. Once a spawn is requested, retry
+still needs an observed exit or confirmed shutdown before replacing it.
+
 Native exit handles attachment cleanup separately and adopts a plain
 `SessionRecorder` from `CaptureHandoff` to finish recording. It does not reconstruct
 live runtime state. Recording failures there are logged; the provider's exit

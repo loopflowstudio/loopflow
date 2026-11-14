@@ -1691,6 +1691,9 @@ pub(crate) fn account_unavailable_reason(
     now: i64,
 ) -> String {
     let blockers = account_launch_blockers(account, limits, model, now);
+    if blockers.is_empty() {
+        return format!("'{}' is unavailable", account_login(account));
+    }
     format!("'{}' {}", account_login(account), blockers.join("; "))
 }
 

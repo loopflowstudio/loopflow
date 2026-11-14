@@ -358,7 +358,7 @@ ordinary refresh):
 ## Local checks (2026-11-14)
 
 - `cargo nextest run -p loopflow --lib -E 'test(claude_capacity_) | test(lf::commands::account::account_status::tests::) | test(claude_usage_reconciliation_explains_overlapping_and_cleared_holds) | test(server::schema::tests::)'` — 18 passed after the concept review changes; macOS linker warned about the test binary's large unwind section.
-- `cargo clippy --all-targets -- -D warnings` — passed after the concept review changes.
+- After compress (`limit_bucket` shared by read and refresh, `launch_summary` without the per-model non-cooling branch, "is unavailable" fallback restored): `cargo nextest run -p loopflow --lib -E 'test(claude_capacity_) | test(claude_usage_reconciliation_) | test(lf::commands::account::account_status::tests::) | test(inspection_tests::)'` — 23 passed; `cargo clippy --all-targets -- -D warnings` — passed.
 - `cargo fmt --check` and `git diff --check` — passed.
 - Earlier CLI, routing, store, parser and Swift protocol checks are recorded at `55230a302574753a38d5781e6f368426ed504d10:scratch/claude-capacity.md`; unchanged Swift request encoding remains covered by its 20 passing protocol tests.
 - Gate: `documented_commands::`, `served_reads::account_holds_and_rotation_use_the_same_machine_state_as_the_cli`, remaining Swift/iOS and website boundaries; CI owns the suites. Installed workflow stays with verify after delivery.

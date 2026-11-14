@@ -255,10 +255,6 @@ remain eligible, including when reopening a conversation on those models. The
 `cooldown_until` covers the account-wide cooldown alone; read `launches` to
 learn whether a model can start.
 
-If a launch is refused with "no eligible managed claude account" while
-`lf account claude` shows room, refresh once and read `launches` again: both
-now come from the same check, and a login the refresh shows with room routes.
-
 A refresh clears an old rejection only when the corresponding usage window
 establishes recovery. Overall weekly room alone does not clear a Fable limit;
 Fable room does not clear an account-wide limit. Included quota does not clear

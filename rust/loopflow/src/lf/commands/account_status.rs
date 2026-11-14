@@ -105,59 +105,43 @@ fn account_launches(
 }
 
 fn launch_summary(row: &AccountRow, unavailable_only: bool) -> String {
-    let show_models = row.launches.iter().any(|launch| launch.model.is_some());
-    let entries: Vec<_> = row
-        .launches
-        .iter()
-        .filter(|launch| !show_models || launch.model.is_some())
-        .filter(|launch| !unavailable_only || !launch.eligible)
-        .collect();
-    let ready = entries
-        .iter()
-        .filter(|launch| launch.eligible)
-        .map(|launch| launch.model.as_deref().unwrap_or("ready"))
-        .collect::<Vec<_>>()
-        .join(", ");
+    // Claude's model-less entry repeats every model's hold; it stands alone on Codex.
+    let named = row.launches.iter().any(|launch| launch.model.is_some());
+    let entries = || {
+        row.launches
+            .iter()
+            .filter(move |launch| launch.model.is_some() == named)
+    };
     let mut parts = Vec::new();
-    if !ready.is_empty() {
-        parts.push(ready);
+    if !unavailable_only {
+        let ready: Vec<_> = entries()
+            .filter(|launch| launch.eligible)
+            .map(|launch| launch.model.as_deref().unwrap_or("ready"))
+            .collect();
+        if !ready.is_empty() {
+            parts.push(ready.join(", "));
+        }
     }
-    let common: Vec<_> = entries
-        .first()
+    // Credential, routing and identity blockers hold every model of the login.
+    let login_wide: Vec<_> = entries()
+        .next()
         .into_iter()
         .flat_map(|launch| &launch.blockers)
         .filter(|blocker| !blocker.starts_with("cooling "))
-        .filter(|blocker| {
-            entries
-                .iter()
-                .all(|launch| launch.blockers.contains(blocker))
-        })
+        .cloned()
         .collect();
-    if !common.is_empty() {
+    if !login_wide.is_empty() {
         parts.push("none".into());
-        parts.extend(common.iter().map(|blocker| (*blocker).clone()));
+        parts.extend(login_wide);
     }
-    for launch in entries.iter().filter(|launch| !launch.eligible) {
-        let name = launch
-            .model
-            .as_deref()
-            .map(|model| format!("{model} "))
-            .unwrap_or_default();
+    for launch in entries() {
         if let Some(until) = launch.out_until {
+            let name = launch
+                .model
+                .as_deref()
+                .map(|model| format!("{model} "))
+                .unwrap_or_default();
             parts.push(format!("{name}out until {}", local_time(until)));
-        }
-        // Credential and routing blockers still matter after a hold ends.
-        let other: Vec<_> = launch
-            .blockers
-            .iter()
-            .filter(|blocker| !blocker.starts_with("cooling ") && !common.contains(blocker))
-            .cloned()
-            .collect();
-        if !other.is_empty() {
-            parts.push(match &launch.model {
-                Some(model) => format!("{model}: {}", other.join("; ")),
-                None => other.join("; "),
-            });
         }
     }
     parts.join(" · ")

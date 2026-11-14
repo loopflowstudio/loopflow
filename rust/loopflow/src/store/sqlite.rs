@@ -25,41 +25,47 @@ fn is_model_weekly_window(window: &str, model: Option<&str>) -> bool {
     })
 }
 
+// The bucket a limit row describes: the name and scope a poll writes for a
+// known Claude row, otherwise the row's own.
+fn limit_bucket(provider: &str, window: &str, model: Option<&str>) -> (String, Option<String>) {
+    (provider == "claude")
+        .then(|| crate::provider_account::canonical_claude_window(window, model))
+        .flatten()
+        .unwrap_or_else(|| (window.to_owned(), model.map(str::to_owned)))
+}
+
 // Historical aliases can coexist with canonical observations. Prefer the newer
 // reading; at equal second-resolution timestamps retain the stricter reading.
 fn reconcile_legacy_account_windows(limits: Vec<AccountLimitRow>) -> Vec<AccountLimitRow> {
     let mut winners = std::collections::HashMap::new();
-    let key = |row: &AccountLimitRow| {
-        (row.provider == "claude")
-            .then(|| {
-                crate::provider_account::canonical_claude_window(&row.window, row.model.as_deref())
-            })
-            .flatten()
-            .map(|(window, model)| (row.account_id.clone(), window, model))
-    };
-    for (index, row) in limits.iter().enumerate() {
-        if let Some(key) = key(row) {
-            let rank = (
-                row.observed_at,
-                row.limited_until,
-                row.used_percent,
-                key.1 == row.window,
-            );
-            let winner = winners.entry(key).or_insert((rank, index));
-            if rank > winner.0 {
-                *winner = (rank, index);
-            }
+    let buckets: Vec<_> = limits
+        .iter()
+        .map(|row| limit_bucket(&row.provider, &row.window, row.model.as_deref()))
+        .collect();
+    for (index, (row, bucket)) in limits.iter().zip(&buckets).enumerate() {
+        let rank = (
+            row.observed_at,
+            row.limited_until,
+            row.used_percent,
+            bucket.0 == row.window,
+        );
+        let winner = winners
+            .entry((&row.provider, &row.account_id, bucket))
+            .or_insert((rank, index));
+        if rank > winner.0 {
+            *winner = (rank, index);
         }
     }
+    let kept: std::collections::HashSet<_> =
+        winners.into_values().map(|(_, index)| index).collect();
     limits
         .into_iter()
+        .zip(buckets)
         .enumerate()
-        .filter(|(index, row)| key(row).is_none_or(|key| winners[&key].1 == *index))
-        .map(|(_, mut row)| {
-            if let Some((_, window, model)) = key(&row) {
-                row.window = window;
-                row.model = model;
-            }
+        .filter(|(index, _)| kept.contains(index))
+        .map(|(_, (mut row, (window, model)))| {
+            row.window = window;
+            row.model = model;
             row
         })
         .collect()
@@ -1449,14 +1455,7 @@ impl SqliteStore {
             }
             prior
         };
-        let key = |name: &str, model: Option<&str>| {
-            if account.provider == "claude" {
-                crate::provider_account::canonical_claude_window(name, model)
-            } else {
-                None
-            }
-            .unwrap_or_else(|| (name.to_owned(), model.map(str::to_owned)))
-        };
+        let key = |name: &str, model: Option<&str>| limit_bucket(&account.provider, name, model);
         let cause = cooldown_reason.as_deref().map(|reason| {
             if account.provider == "claude" {
                 reason

@@ -492,7 +492,8 @@ struct WorkCacheTests {
         let second = WorkWorkspaceKey(repository: repository, kind: .wave, id: "wave-2")
         #expect(registry.retained(first)?.multiplexer.sessionPane?.sessionId == "primary-wave:wave-1")
         #expect(registry.retained(second)?.multiplexer.sessionPane?.sessionId == "primary-wave:wave-2")
-        #expect(await source.preparedPrimaries == ["repository", "wave:wave-1", "wave:wave-2"])
+        // Concurrent preparations can reach the source in either order.
+        #expect(await source.preparedPrimaries.sorted() == ["repository", "wave:wave-1", "wave:wave-2"])
         // Repeated fresh frames cannot displace either pane and reopen it.
         for _ in 0..<3 { await model.refresh() }
         #expect(await source.preparedPrimaries.count == 3)
@@ -511,7 +512,7 @@ struct WorkCacheTests {
         #expect(registry.warmPrimaries == [repositoryKey, wave])
         #expect(registry.recentTasks.count == SessionsWorkspaceRegistry.warmConversationLimit)
         await spin { await source.preparedPrimaries.count < 2 }
-        #expect(await source.preparedPrimaries == ["repository", "wave:wave-1"]) // The selected repository leads.
+        #expect(await source.preparedPrimaries.sorted() == ["repository", "wave:wave-1"])
         let store = registry.sessionStore(repository: repository, repoPath: Self.repo, query: source.query)
         let primaries = ["primary-repository", "primary-wave:wave-1"]
         await spin { store.sessions.filter({ primaries.contains($0.id) && $0.state == .prepared }).count < 2 }

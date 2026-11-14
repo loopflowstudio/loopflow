@@ -317,9 +317,11 @@ if '--version' in sys.argv:
 home = os.environ['LF_HOME']
 streamed = '--input-format' in sys.argv
 message = json.loads(sys.stdin.readline()) if streamed else None
-with open(os.path.join(home, 'ready.tmp'), 'w') as ready:
+with open(os.path.join(home, 'ready'), 'w') as ready:
     ready.write('ready')
-os.replace(os.path.join(home, 'ready.tmp'), os.path.join(home, 'ready'))
+if streamed:
+    with open(os.path.join(home, 'stream-ready'), 'w') as ready:
+        ready.write('ready')
 while not os.path.exists(os.path.join(home, 'release')):
     time.sleep(0.02)
 if not streamed:
@@ -2638,7 +2640,9 @@ fn provider_completion_preserves_a_live_run_and_its_graph_process_records_the_ar
         caller: task.home.path().join("unused"),
     };
     let deadline = Instant::now() + Duration::from_secs(30);
-    while !task.home.path().join("ready").exists() {
+    // The native Task conversation also writes `ready`. Wait for the Graph's
+    // headless provider before moving the Task out of its launch Wave.
+    while !task.home.path().join("stream-ready").exists() {
         assert!(
             held.child.try_wait().unwrap().is_none() && Instant::now() < deadline,
             "{}",

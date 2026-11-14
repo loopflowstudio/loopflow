@@ -13,6 +13,10 @@ Name the Rust modules and integration binaries the diff can reach before
 building anything: the changed module's own tests, its direct callers, and any
 boundary check its owner README names (see below).
 
+Provider fixtures that launch a Task conversation beside a Graph must signal
+readiness for the process the test exercises. A shared marker can arrive from
+the conversation before the Graph's provider starts.
+
 Markdown changes under `docs/`, builtins or skills, and README or AGENTS edits,
 also run `cargo test -p loopflow --test integration documented_commands::`.
 It checks command examples and maintained copy, including design documents;

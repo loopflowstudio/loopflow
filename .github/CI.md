@@ -62,7 +62,7 @@ main. Green moves `last-green` to the tested commit. Red leaves `last-green`
 where it was, fails the run and names both commits in the run summary:
 
 ```
-macOS failure on 286889bbec; last-green stays at 9206f321d9.
+macOS failure on 286889bbec; last-green stays at 5c1eee745d.
 ```
 
 Nothing reverts automatically. The next push to main tests the batch again from

@@ -69,3 +69,4 @@ CI.md updated. Done-when grep is clean.
 - `actionlint .github/workflows/macos-main.yml` — passed locally after dropping dispatch.
 - `uv run pytest python/tests` collection still passes without the deleted test — gate.
 - Real red/green settle — CI on main after merge.
+- compress: diff already minimal (inline settle, push-only trigger); remaining `bisect` hits are shipped release notes and `git/mod.rs` crash-state detection, both out of scope. No edits.

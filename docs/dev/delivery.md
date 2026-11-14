@@ -71,8 +71,10 @@ lf task run INF-124
 The parent needs only a placed branch. Until it publishes a PR, stacking pushes
 the branch if origin lacks it or is behind, never forcing, and records an
 unpublished Task PR for it without opening one on GitHub. A published parent's
-missing remote branch is restored through the commit fence: a changed head
-revokes Auto before pushing; the same clean head keeps its merge request.
+missing remote branch is restored after reading its PR from GitHub: a merged
+PR stops stacking; a closed PR uses a new unpublished parent record. If Auto
+was requested for an earlier head, stacking turns Auto off before pushing.
+The same clean head keeps its merge request.
 When the published parent is ahead of origin, or origin's branch has diverged,
 the child bases on `origin/<branch>` and the stack line counts the local commits
 it leaves out. Run `lf commit -p` in the parent's checkout to include them. The

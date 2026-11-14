@@ -2522,7 +2522,7 @@ async fn task_preparation_stacks_without_moving_a_published_parents_merge_reques
 #[tokio::test]
 #[allow(clippy::await_holding_lock)] // Serializes PATH while GitHub is replaced by a fixture.
 async fn task_preparation_stacks_on_a_published_parent_without_a_remote_branch() {
-    let _environment_lock = crate::journal::test_env_lock();
+    let _ledger = crate::journal::TestLedgerGuard::new();
     let _environment = EnvRestore::capture(&["PATH"]);
     let bin = tempfile::tempdir().unwrap();
     let gh = bin.path().join("gh");
@@ -2531,6 +2531,9 @@ async fn task_preparation_stacks_on_a_published_parent_without_a_remote_branch()
         r#"#!/bin/sh
 fixture="$(dirname "$0")"
 case "$*" in
+  --version) echo 'gh fixture' ;;
+  *--cache*) exit 1 ;;
+  *repos/fixture/repo/pulls/42*) touch "$fixture/read"; cat "$fixture/rest.json" ;;
   *--disable-auto*) rm "$fixture/armed" ;;
   *LoopflowPrMerge*) cat "$fixture/pr.json" ;;
   *) exit 1 ;;
@@ -2547,7 +2550,13 @@ esac
         )
         .unwrap(),
     );
-    for changed_head in [false, true] {
+    for (remote_state, changed_head) in [
+        ("open", false),
+        ("open", true),
+        ("merged", true),
+        ("closed", true),
+        ("unreadable", true),
+    ] {
         let repo = loopflow_test_support::TestRepo::new();
         let parent = task_fixture_at("FIX-1", repo.path().canonicalize().unwrap()).await;
         repo.create_branch(&parent.task.branch);
@@ -2587,6 +2596,43 @@ esac
             repo.commit("Unreviewed parent work");
         }
         let local_tip = repo.head_sha();
+        // Keep Git transport local while exercising the GitHub observation path.
+        for args in [
+            vec![
+                "config".into(),
+                format!("url.{}.insteadOf", repo.bare_path().display()),
+                "https://github.com/fixture/repo.git".into(),
+            ],
+            vec![
+                "remote".into(),
+                "set-url".into(),
+                "origin".into(),
+                "https://github.com/fixture/repo.git".into(),
+            ],
+        ] {
+            assert!(std::process::Command::new("git")
+                .current_dir(repo.path())
+                .args(args)
+                .status()
+                .unwrap()
+                .success());
+        }
+        let read = bin.path().join("read");
+        if read.exists() {
+            std::fs::remove_file(&read).unwrap();
+        }
+        let rest = if remote_state == "unreadable" {
+            "invalid response".into()
+        } else {
+            serde_json::json!({
+                "number": 42, "html_url": "https://github.com/fixture/repo/pull/42",
+                "state": if remote_state == "open" { "open" } else { "closed" },
+                "merged": remote_state == "merged", "merge_commit_sha": published_tip,
+                "merged_at": "2026-11-13T00:00:00Z", "head": {"sha": published_tip}
+            })
+            .to_string()
+        };
+        std::fs::write(bin.path().join("rest.json"), rest).unwrap();
         assert!(std::process::Command::new("git")
             .current_dir(repo.path())
             .args(["push", "origin", "--delete", &parent.task.branch])
@@ -2608,7 +2654,7 @@ esac
             }}
         }).to_string()).unwrap();
         // Reject exposing a changed head while GitHub Auto is still armed.
-        if changed_head {
+        if changed_head && matches!(remote_state, "open" | "unreadable") {
             let hook = repo.bare_path().join("hooks/pre-receive");
             std::fs::write(
                 &hook,
@@ -2632,9 +2678,54 @@ esac
                 ..Default::default()
             },
         )
-        .await
-        .unwrap();
+        .await;
+        assert!(read.exists(), "missing fresh read for {remote_state}");
+        if remote_state == "merged" {
+            assert!(prepared.unwrap_err().to_string().contains("already merged"));
+            assert!(crate::git::rev_parse(repo.bare_path(), &parent.task.branch).is_err());
+            assert!(bin.path().join("armed").exists());
+            assert_eq!(
+                parent
+                    .store
+                    .get_task_pr(&pr.id)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .phase(),
+                crate::work::task::PrPhase::Merged
+            );
+            continue;
+        }
+        let prepared = prepared.unwrap();
         assert_eq!(prepared.plan.base_ref, local_tip);
+        if remote_state == "closed" {
+            let recorded = parent
+                .store
+                .active_task_pr(&parent.task.id)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_ne!(recorded.id, pr.id);
+            assert_eq!(recorded.sequence, pr.sequence + 1);
+            assert!(recorded.publication.is_none());
+            assert_eq!(prepared.pr(&child.id).parent_pr_id, Some(recorded.id));
+            assert_eq!(
+                parent
+                    .store
+                    .get_task_pr(&pr.id)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .phase(),
+                crate::work::task::PrPhase::Abandoned
+            );
+            assert_eq!(
+                crate::git::rev_parse(repo.bare_path(), &parent.task.branch).unwrap(),
+                local_tip
+            );
+            assert!(bin.path().join("armed").exists());
+            continue;
+        }
         assert_eq!(prepared.pr(&child.id).parent_pr_id, Some(pr.id.clone()));
         assert_eq!(
             crate::git::rev_parse(repo.bare_path(), &parent.task.branch).unwrap(),
@@ -2643,9 +2734,10 @@ esac
         assert_eq!(repo.head_sha(), local_tip);
         assert_eq!(bin.path().join("armed").exists(), !changed_head);
         let saved = parent.store.get_task_pr(&pr.id).await.unwrap().unwrap();
+        pr.github_observation = saved.github_observation.clone();
+        pr.updated_at = saved.updated_at;
         if changed_head {
             pr.publication.as_mut().unwrap().merge = None;
-            pr.updated_at = saved.updated_at;
         }
         assert_eq!(saved, pr);
     }

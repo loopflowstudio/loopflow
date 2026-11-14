@@ -201,11 +201,19 @@ fn push_stack_effects(
         return;
     }
     match super::stack_parent_branch(repo, parent) {
-        Ok(state) => report.unavailable.extend(
-            state
-                .note(parent, "stacking pushes")
-                .map(|note| format!("Not run (based on already-fetched refs): {note}")),
-        ),
+        Ok(state) => {
+            if state == super::StackParentBranch::Behind && parent.has_open_pr() {
+                report.unavailable.push(format!(
+                    "Not run: stacking reads {}'s PR from GitHub before restoring its missing branch; a merged PR refuses, a closed PR uses a new unpublished record",
+                    parent.task.identifier
+                ));
+            }
+            report.unavailable.extend(
+                state
+                    .note(parent, "stacking pushes")
+                    .map(|note| format!("Not run (based on already-fetched refs): {note}")),
+            );
+        }
         Err(error) => report.impediments.push(error.to_string()),
     }
     if parent.pr.is_none() {

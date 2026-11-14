@@ -9,6 +9,9 @@ The stopped ship loop and personal configuration stay untouched.
 Stack on any placed Task branch. Push to origin without force when absent, or
 when behind an unpublished parent. A published parent’s missing remote branch uses the commit fence:
 changed heads revoke Auto before pushing; the same clean head retains intent.
+Before restoring a published branch, read GitHub fresh and select the parent
+again: merged refuses a new stack; closed allocates an unpublished record.
+Unreadable GitHub keeps the stored reading and the existing restore behavior.
 Record an unpublished Task PR when needed; open no parent GitHub PR. Share parent selection between new and
 existing placements. Origin remains the child's base; the stack message counts
 omitted local commits. Placement without a Task PR is intentional; stacking or
@@ -27,7 +30,8 @@ Separate existing/new stack selectors and published-parent preconditions were
 replaced by `select_stack_parent` / `record_stack_parent`. Keep that one path.
 Remove the abandoned-specific refusal, historical abandoned-parent retry,
 parent-only re-parenting update, unconditional published-parent push,
-published-remote-absence refusal, and past-tense push in preview. Preserve unpublished pushes, rejection/divergence,
+published-remote-absence refusal, restoration based only on a stored Open PR,
+and past-tense push in preview. Preserve unpublished pushes, rejection/divergence,
 history, cycle checks, retry identity, child edits and squash-parent sync.
 
 ## Recovery and earlier checks
@@ -76,47 +80,46 @@ stack preparation uses the published base, origin and local heads remain intact,
 the full parent PR record (including its merge request) is unchanged, and the
 stack note counts one omitted commit with the parent push command.
 
-### Next implement direction (concept review, 2026-11-13, third pass)
+### Missing-branch reconciliation (concept review, 2026-11-13, third pass)
 
-Counterexample, read from the code (not run): GitHub closes a PR when its head
-branch is deleted, and squash landing deletes the branch. So a parent the store
-still shows Open (GitHub number recorded) whose `origin/<branch>` is gone after
-`fetch --prune` has merged or closed on GitHub; the store has not read it yet
-(Auto landed between observations). `record_stack_parent` today trusts the
-store: it pushes the merged branch back to origin, and on a changed head calls
-`disable_auto_merge` on a PR that can no longer merge. That bypasses two rules
-above: a merged parent refuses, a closed PR falls back to the placed branch.
-The fixture `gh` never reports the PR closed, so the regression passes.
+Counterexample found by code review: GitHub can merge or close a published PR
+and delete its branch while the store still shows Open. Restoring from that
+stored reading recreated a merged branch and could disable Auto on a settled PR.
+The original review and direction remain at
+`8f131a0580fe66c188605b090e715f11146d6ca7:scratch/loo-837-demo.md`.
 
-1. In `record_stack_parent`, when the selected parent's PR is Open and origin
-   lacks its branch, read the PR fresh first (`reconcile_task_pr_observation`,
-   `PrReadFreshness::Fresh`; it takes and releases the parent mutation lock
-   itself) and select again. Merged then refuses; closed stacks as an
-   unpublished parent with a new record. Still Open, or GitHub unreadable:
-   restore through the fence as now, on the store's reading. No new refusal.
-   The fence stays, per “Implement publication for that case while respecting
-   the parent’s commit-fence behavior”.
-2. Regression: fixture `gh` reports the PR merged, remote branch absent, store
-   Open. Stacking refuses with the merged message; origin gains no branch and
-   `--disable-auto` is never called. Same for closed: branch pushed, a new
-   unpublished parent record, the old one abandoned.
-3. “Commit fence” is internal; no doc on main uses it. In `docs/agent-api.md`,
-   `docs/dev/delivery.md`, `docs/ops.md` and `docs/work.md`, say what happens:
-   “If Auto was requested for an earlier head, stacking turns Auto off before
-   pushing.” Add that a parent whose PR merged or closed on GitHub is read
-   first. The preview line may say the PR is read from GitHub at execution.
+`record_stack_parent` now reconciles the Open PR with `PrReadFreshness::Fresh`
+before a missing-branch restore, releases reconciliation's mutation lock, and
+selects again. A merged parent refuses new stacks without pushing or disabling
+Auto; an identical retry retains its historical merged identity. A closed PR
+is abandoned and replaced by an unpublished parent record. Open or unreadable
+GitHub restores through the existing fence. Existing remote branches stay untouched.
+Preview names the execution-time GitHub read. `docs/ops.md`,
+`docs/agent-api.md` and `docs/dev/delivery.md` describe Auto being turned off
+for an earlier head instead of using “commit fence”; the `docs/work.md`
+overview names only the push. Preview and execution share
+`StackParent::has_open_pr`.
+
+The existing missing-remote fixture now covers same-head and changed-head Open,
+Merged, Closed and unreadable responses, with local Git transport and fixture
+GitHub REST responses. The remote receive hook rejects an exposed changed head
+while Auto is armed; merged and closed cases retain the armed marker.
 
 Not for this Task: the child names the parent's PR row (`parent_pr_id`), though
 the taught concept is a Task with a branch. Keeping the row current caused the
 abandoned-parent, retry and re-parenting repairs. A parent Task plus fork could
 remove the need to allocate a parent PR row; that redesign remains separate.
 
-Earlier focused checks and preview results: `b89812f9fc:scratch/loo-837-demo.md`.
-The missing-remote regression covers unchanged and changed heads, checking origin,
-child base, parent PR identity/copy, retained same-head Auto and remote revocation
-before a changed-head push.
+Earlier focused checks and preview results:
+`8f131a0580fe66c188605b090e715f11146d6ca7:scratch/loo-837-demo.md`.
+Only published parents take the push lock/fence; unpublished pushes need no
+checkout or wait on the parent's `lf commit`.
 
-- `cargo test -p loopflow --lib ops::task::tests::task_preparation_stacks`: 5 passed (3.51 s); the new missing-remote case with its final environment lock passed separately (2.09 s). Existing macOS unwind-section linker warning remains gate-owned.
-- Compress: only a published parent takes the parent lock and fence, so an unpublished parent needs no checkout and its push never waits on the parent's `lf commit`; the post-clear PR re-read is gone (callers read id and branch). Same filter: 5 passed (4.61 s).
-- `cargo test -p loopflow --test integration documented_commands::`: 4 passed (6.94 s).
-- `cargo fmt --all -- --check` and `git diff --check`: passed; scratch is within both context limits.
+The initial expanded test failed with “missing fresh read for open”: its fake
+`gh` rejected `--version`, so reconciliation correctly treated GitHub as
+unavailable. The fixture now supports that probe. An earlier compiled fixture
+with duplicate environment locks was stopped; the duplicate lock was removed.
+
+- `cargo test -p loopflow --lib ops::task::tests::task_preparation_stacks`: 5 passed (4.90 s after compress), including five missing-published-branch cases. Existing macOS unwind-section linker warning remains gate-owned.
+- `cargo test -p loopflow --test integration documented_commands::`: 4 passed (7.05 s).
+- `cargo fmt --all -- --check` and `git diff --check`: passed; scratch remains within both context limits. Clippy and hosted suites stay with gate.

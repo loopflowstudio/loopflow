@@ -1246,6 +1246,13 @@ impl StackParent {
     fn is_published(&self) -> bool {
         self.pr.as_ref().is_some_and(|pr| pr.publication.is_some())
     }
+
+    /// GitHub has a PR for the branch that the store last saw open.
+    fn has_open_pr(&self) -> bool {
+        self.pr
+            .as_ref()
+            .is_some_and(|pr| pr.phase() == PrPhase::Open)
+    }
 }
 
 /// One rule for every stack: the parent is a Task with a placed branch.
@@ -1312,7 +1319,24 @@ async fn record_stack_parent(
     task: &Task,
     requested: &str,
 ) -> OpsResult<(TaskPr, Option<String>)> {
-    let parent = select_stack_parent(store, task, requested).await?;
+    let mut parent = select_stack_parent(store, task, requested).await?;
+    if parent.has_open_pr()
+        && crate::git::has_origin(main_repo)?
+        && !ref_exists(
+            main_repo,
+            &format!("refs/remotes/origin/{}", parent.branch()),
+        )?
+    {
+        // A deleted branch may mean GitHub landed or closed the PR since our last read.
+        // Reconciliation owns its mutation lock; release it before the push's lock.
+        reconcile_task_pr_observation(
+            store,
+            &mut parent.task,
+            crate::ops::pr::PrReadFreshness::Fresh,
+        )
+        .await?;
+        parent = select_stack_parent(store, task, requested).await?;
+    }
     // A retry keeps its historical parent identity for sync.
     // Its branch may already be deleted and must not be republished.
     if parent.pr.as_ref().is_some_and(TaskPr::is_settled) {

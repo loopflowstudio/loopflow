@@ -299,8 +299,11 @@ lf task run LOO-13 --stack-on LOO-12
 
 When the parent has no PR yet, stacking pushes its branch if origin lacks it or
 is behind. It never force-pushes or opens a PR for the parent. A published
-parent's missing remote branch is restored through the commit fence: a changed
-head revokes Auto before pushing; the same clean head keeps its merge request.
+parent's missing remote branch is restored after reading its PR from GitHub:
+a merged PR stops stacking; a closed PR uses a new unpublished parent record.
+If GitHub cannot be read, stacking uses the saved PR state. If Auto was requested
+for an earlier head, stacking turns Auto off before pushing. The same clean head
+keeps its merge request.
 If the published parent's remote branch exists and is behind, or
 origin has diverged, the child bases on `origin/<branch>` and the stack line
 counts the local commits it leaves out. Run `lf commit -p` in the parent's

@@ -58,47 +58,24 @@ including the admission fixture, are deferred: no hosted run has yet proved the
 timeout repair. Hosted proof needs a head with scratch/ clear (`lf pr submit`
 clears added scratch).
 
-Remaining: demo judgment; a scratch-clear head so hosted CI runs the full matrix. No demo or
-approval occurred in this headless recovery. The stopped ship loop stays stopped.
+## Abandoned parent PR (concept review, 2026-11-13) — done in `dbde53699f`
 
-Compress (after the recovery push): no edits. The diff already runs one stack
-path (`select_stack_parent` / `record_stack_parent`, shared by placement and
-`checkout --explain`); main's new `d981a4330f` merges clean
-(`git merge-tree --write-tree HEAD origin/main`), so nothing was rebuilt or rerun.
+The rule is "the parent is a Task with a placed branch". A PR closed on GitHub
+leaves the parent's branch and worktree, so `select_stack_parent` now treats an
+`Abandoned` active PR as no record: placed branch → stack and record the next
+unpublished PR (old row stays historical); no branch → the existing "has no
+placed branch; run `lf checkout`" error. `lf pr abandon` deletes the branch, so
+it lands in that error. Docs never mentioned abandoned; unchanged.
 
-## Concept review (2026-11-13, after recovery) — implemented direction
+Kept, with its counterexample: a `Merged` parent still refuses. A parent working
+toward a second PR after its merge still carries pre-squash commits, and sync's
+merged-parent path sends the child to main; telling them apart needs a "new work
+since the merge" reading nothing has asked for.
 
-The rule is "the parent is a Task with a placed branch". One refusal in
-`select_stack_parent` contradicts it: an active PR in phase `Abandoned` errors
-with "PR was abandoned; it has no live branch to stack on" without looking at
-the branch. `lf pr abandon` does delete the branch and worktree, so there the
-claim holds. A PR closed on GitHub leaves both: the parent Task is still placed,
-publication treats that record as spent and makes the next one
-(`request_task_pr_publication` filters settled, `next_task_pr`; `insert_task_pr`
-retires the settled row), and stacking refuses with a statement that is false.
+Checks on `dbde53699f` (pushed; merges clean with origin/main):
+- `cargo test -p loopflow --lib ops::task::tests::task_preparation_stacks`: 3 passed in 1.80 s, including `..._on_a_placed_parent_with_an_abandoned_pr` (new unsettled parent row, sequence +1, old row unchanged). The fixture uses its persisted timestamp because SQLite truncates subsecond precision.
+- `cargo fmt --all -- --check`, `git diff --check`: passed.
+- Clippy not rerun on this revision; gate owns it with the hosted suites.
 
-Change: an `Abandoned` active PR counts as no PR record. The existing
-no-placed-branch check then decides: placed branch → stack, pushing and
-recording the next unpublished PR exactly as for a parent that never published;
-no worktree or branch → the existing "has no placed branch; run `lf checkout`"
-error. The abandoned-specific error is deleted. `StackParent::branch()` already
-falls back to the Task's branch when `pr` is `None`. One test: parent with a
-closed PR and a live branch; the child stacks and the parent gets a new
-unsettled row with the old one historical. Docs list "already merged" among the
-stops and never mention abandoned, so they stay.
-
-Kept, with its counterexample: a `Merged` parent still refuses ("already merged;
-place this Task without --stack-on"). A parent that keeps working after its
-merge toward a second PR also has a placed branch, but its branch still carries
-the pre-squash commits and sync's merged-parent path sends the child to main;
-telling those apart needs a "has new work since the merge" reading that nothing
-has asked for. Not changed here.
-
-No open product choice.
-
-Implement check: `cargo test -p loopflow --lib ops::task::tests::task_preparation_stacks_on_a_placed_parent_with_an_abandoned_pr` passed (1 test); `cargo fmt --all -- --check` and `git diff --check` passed. The fixture uses its persisted timestamp because SQLite truncates subsecond precision. The existing macOS unwind-section linker warning remains; gate owns clippy and hosted suites for this revision.
-
-Compress (after the abandoned-PR change): the parent PR's phase is read in one
-`match` in `select_stack_parent` (Merged refuses, Abandoned counts as none), and
-the new test drops two assertions its sequence and old-row checks already imply.
-`cargo test -p loopflow --lib ops::task::tests::task_preparation_stacks`: 3 passed in 1.80 s; `cargo fmt --all` clean. Clippy not rerun on this revision; gate owns it.
+No open product choice. Remaining: gate (clippy, scratch-clear head so hosted CI
+runs the full matrix including the admission fixture), then demo.

@@ -1077,7 +1077,8 @@ exit 2
                     "{args}"
                 );
             }
-            if first && provider == "claude" {
+            // A provider's start hook names its thread; these stand-ins run none.
+            if first {
                 let store =
                     loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db"))
                         .unwrap();

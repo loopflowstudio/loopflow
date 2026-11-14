@@ -3359,13 +3359,14 @@ fn watch_for(home: &Path, terminal: &str, line: String) -> std::thread::JoinHand
                 Err(error) => panic!("viewer read failed: {error}"),
             }
             // Frames: a tag, a big-endian length, the payload. 0x02 and 0x03
-            // carry terminal bytes.
+            // carry terminal bytes; 0x06 carries lf's own lines, such as a
+            // departure notice.
             while buffer.len() >= 5 {
                 let length = u32::from_be_bytes(buffer[1..5].try_into().unwrap()) as usize;
                 if buffer.len() < 5 + length {
                     break;
                 }
-                if matches!(buffer[0], 0x02 | 0x03) {
+                if matches!(buffer[0], 0x02 | 0x03 | 0x06) {
                     shown.extend_from_slice(&buffer[5..5 + length]);
                 }
                 buffer.drain(..5 + length);

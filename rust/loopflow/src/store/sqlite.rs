@@ -18,6 +18,78 @@ use crate::store::{
 };
 use crate::work::wave::{Wave, WaveLocator};
 
+// Historical aliases can coexist with canonical observations. Prefer the newer
+// reading; at equal second-resolution timestamps retain the stricter reading.
+fn reconcile_legacy_account_windows(limits: Vec<AccountLimitRow>) -> Vec<AccountLimitRow> {
+    let mut winners = std::collections::HashMap::new();
+    let key = |row: &AccountLimitRow| {
+        let model = row.model.as_deref()?;
+        let canonical = format!("seven_day_{model}");
+        (row.provider == "claude"
+            && crate::config::CLAUDE_MODEL_FAMILIES.contains(&model)
+            && (row.window == canonical || row.window == "seven_day_overage_included"))
+            .then(|| (row.account_id.clone(), model.to_owned()))
+    };
+    for (index, row) in limits.iter().enumerate() {
+        if let Some(key) = key(row) {
+            let rank = (
+                row.observed_at,
+                row.limited_until,
+                row.used_percent,
+                row.window != "seven_day_overage_included",
+            );
+            let winner = winners.entry(key).or_insert((rank, index));
+            if rank > winner.0 {
+                *winner = (rank, index);
+            }
+        }
+    }
+    limits
+        .iter()
+        .enumerate()
+        .filter(|(index, row)| key(row).is_none_or(|key| winners[&key].1 == *index))
+        .map(|(_, row)| row.clone())
+        .collect()
+}
+
+fn write_account_windows(
+    transaction: &Connection,
+    provider: &str,
+    account_id: &ProviderAccountId,
+    windows: &[crate::store::AccountLimitWindow],
+    source: &str,
+) -> StoreResult<()> {
+    let now = now_unix();
+    for window in windows {
+        transaction.execute(
+            "INSERT INTO provider_account_limits
+                 (provider, account_id, window, used_percent, resets_at, plan, observed_at, source, model, limited_until)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+             ON CONFLICT(provider, account_id, window) DO UPDATE SET
+                 used_percent = excluded.used_percent,
+                 resets_at = excluded.resets_at,
+                 plan = excluded.plan,
+                 observed_at = excluded.observed_at,
+                 source = excluded.source,
+                 model = excluded.model,
+                 limited_until = excluded.limited_until",
+            params![
+                provider,
+                account_id.as_str(),
+                window.window,
+                window.used_percent,
+                window.resets_at,
+                window.plan,
+                now,
+                source,
+                window.model,
+                window.limited_until,
+            ],
+        )?;
+    }
+    Ok(())
+}
+
 mod admission;
 mod children;
 pub(crate) mod ci_incidents;
@@ -1082,7 +1154,7 @@ impl SqliteStore {
             .map_err(|error| StoreError::InvalidData(error.to_string()))?;
         conn.execute("INSERT INTO provider_accounts(provider,account_id,home,credential_state,utilization_percent,cooldown_until,cooldown_reason,last_selected_at,created_at,updated_at,observed_email,observed_subject,observed_plan,observed_credential_digest)
             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)
-            ON CONFLICT(provider,account_id) DO UPDATE SET home=excluded.home,credential_state=excluded.credential_state,utilization_percent=excluded.utilization_percent,cooldown_until=excluded.cooldown_until,cooldown_reason=excluded.cooldown_reason,last_selected_at=excluded.last_selected_at,updated_at=excluded.updated_at,observed_email=excluded.observed_email,observed_subject=excluded.observed_subject,observed_plan=excluded.observed_plan,observed_credential_digest=excluded.observed_credential_digest",
+            ON CONFLICT(provider,account_id) DO UPDATE SET capacity_revision=provider_accounts.capacity_revision+1,home=excluded.home,credential_state=excluded.credential_state,utilization_percent=excluded.utilization_percent,cooldown_until=excluded.cooldown_until,cooldown_reason=excluded.cooldown_reason,last_selected_at=excluded.last_selected_at,updated_at=excluded.updated_at,observed_email=excluded.observed_email,observed_subject=excluded.observed_subject,observed_plan=excluded.observed_plan,observed_credential_digest=excluded.observed_credential_digest",
             params![account.provider,account.account_id.as_str(),account.home.as_ref().map(|path| path.to_string_lossy().to_string()),account.credential_state.as_str(),account.utilization_percent,account.cooldown_until,account.cooldown_reason,account.last_selected_at,account.created_at,account.updated_at,account.observed_email,account.observed_subject,account.observed_plan,account.observed_credential_digest])?;
         Ok(())
     }
@@ -1180,7 +1252,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let changed = conn.execute(
             "UPDATE provider_accounts SET cooldown_until = NULL, cooldown_reason = NULL,
-             updated_at = ?3 WHERE provider = ?1 AND account_id = ?2",
+             capacity_revision = capacity_revision + 1, updated_at = ?3 WHERE provider = ?1 AND account_id = ?2",
             params![provider, account_id.as_str(), now_unix()],
         )?;
         if changed == 0 {
@@ -1225,7 +1297,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let changed = conn.execute(
             "UPDATE provider_accounts
-             SET credential_state = 'missing',
+             SET capacity_revision = capacity_revision + 1, credential_state = 'missing',
                  cooldown_until = NULL,
                  cooldown_reason = ?3,
                  updated_at = ?4
@@ -1253,25 +1325,163 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let changed = conn.execute(
-            "UPDATE provider_accounts
-             SET utilization_percent = ?3,
-                 cooldown_until = ?4,
-                 cooldown_reason = ?5,
-                 updated_at = ?6
-             WHERE provider = ?1 AND account_id = ?2",
+            "UPDATE provider_accounts SET utilization_percent=?3, cooldown_until=?4,
+             cooldown_reason=?5, capacity_revision=capacity_revision+1, updated_at=?6
+             WHERE provider=?1 AND account_id=?2",
             params![
                 provider,
                 account_id.as_str(),
                 utilization_percent,
                 cooldown_until,
                 cooldown_reason,
-                now_unix(),
+                now_unix()
             ],
         )?;
         if changed == 0 {
             return Err(StoreError::NotFound);
         }
         Ok(())
+    }
+
+    pub(crate) fn provider_account_capacity_revision(
+        &self,
+        provider: &str,
+        account_id: &ProviderAccountId,
+    ) -> StoreResult<i64> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT capacity_revision FROM provider_accounts WHERE provider=?1 AND account_id=?2",
+            params![provider, account_id.as_str()],
+            |row| row.get(0),
+        )?)
+    }
+
+    pub(crate) fn record_provider_account_capacity(
+        &self,
+        provider: &str,
+        account_id: &ProviderAccountId,
+        capacity: &crate::store::AccountCapacity,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        // A warning or a scoped rejection cannot erase an account-wide rejection.
+        let changed = transaction.execute(
+            "UPDATE provider_accounts SET utilization_percent=?3,
+             cooldown_until=CASE WHEN ?4 IS NOT NULL THEN ?4 ELSE cooldown_until END,
+             cooldown_reason=CASE WHEN ?4 IS NOT NULL THEN ?5 ELSE cooldown_reason END,
+             capacity_revision=capacity_revision+1, updated_at=?6
+             WHERE provider=?1 AND account_id=?2",
+            params![
+                provider,
+                account_id.as_str(),
+                capacity.utilization_percent,
+                capacity.cooldown_until,
+                capacity.cooldown_reason,
+                now_unix()
+            ],
+        )?;
+        if changed == 0 {
+            return Err(StoreError::NotFound);
+        }
+        write_account_windows(
+            &transaction,
+            provider,
+            account_id,
+            &capacity.windows,
+            "stream",
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub(crate) fn reconcile_provider_account_capacity(
+        &self,
+        account: &ProviderAccount,
+        revision: i64,
+        windows: &[crate::store::AccountLimitWindow],
+    ) -> StoreResult<bool> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current: (i64, Option<String>, Option<i64>) = transaction.query_row(
+            "SELECT capacity_revision, cooldown_reason, cooldown_until FROM provider_accounts
+             WHERE provider=?1 AND account_id=?2",
+            params![account.provider, account.account_id.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        if current.0 != revision {
+            return Ok(false);
+        }
+        let cause = current
+            .1
+            .as_deref()
+            .and_then(|reason| reason.rsplit(": ").next());
+        let mut windows = windows.to_vec();
+        for window in &mut windows {
+            if window.used_percent >= 100 && window.limited_until.is_none() {
+                let prior: Option<i64> = transaction.query_row(
+                    "SELECT MAX(limited_until) FROM provider_account_limits WHERE provider=?1
+                     AND account_id=?2 AND (window=?3 OR
+                        (window='seven_day_overage_included' AND model=?4 AND ?3='seven_day_'||model))",
+                    params![account.provider, account.account_id.as_str(), window.window, window.model],
+                    |row| row.get(0),
+                )?;
+                window.limited_until = prior.or_else(|| {
+                    (cause == Some(window.window.as_str()))
+                        .then_some(current.2)
+                        .flatten()
+                });
+            }
+        }
+        let recovered = windows.iter().any(|window| {
+            let matching = cause == Some(window.window.as_str());
+            (matching
+                && matches!(
+                    window.window.as_str(),
+                    "five_hour" | "seven_day" | "weekly" | "session"
+                )
+                && window.model.is_none()
+                && window.used_percent < 100)
+                || (matching
+                    && window.model.as_deref().is_some_and(|model| {
+                        crate::config::CLAUDE_MODEL_FAMILIES.contains(&model)
+                            && window.window == format!("seven_day_{model}")
+                    }))
+        });
+        for window in &windows {
+            if account.provider == "claude"
+                && window.model.as_deref().is_some_and(|model| {
+                    crate::config::CLAUDE_MODEL_FAMILIES.contains(&model)
+                        && window.window == format!("seven_day_{model}")
+                })
+            {
+                transaction.execute(
+                    "DELETE FROM provider_account_limits WHERE provider=?1 AND account_id=?2
+                     AND window='seven_day_overage_included' AND model=?3",
+                    params![account.provider, account.account_id.as_str(), window.model],
+                )?;
+            }
+        }
+        write_account_windows(
+            &transaction,
+            &account.provider,
+            &account.account_id,
+            &windows,
+            "poll",
+        )?;
+        transaction.execute(
+            "UPDATE provider_accounts SET capacity_revision=capacity_revision+1,
+             cooldown_until=CASE WHEN ?3 THEN NULL ELSE cooldown_until END,
+             cooldown_reason=CASE WHEN ?3 THEN NULL ELSE cooldown_reason END, updated_at=?4
+             WHERE provider=?1 AND account_id=?2",
+            params![
+                account.provider,
+                account.account_id.as_str(),
+                recovered,
+                now_unix()
+            ],
+        )?;
+        transaction.commit()?;
+        Ok(true)
     }
 
     /// Record observed subscription window state for one account, replacing
@@ -1285,34 +1495,11 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction()?;
-        let now = now_unix();
-        for window in windows {
-            transaction.execute(
-                "INSERT INTO provider_account_limits
-                     (provider, account_id, window, used_percent, resets_at, plan, observed_at, source, model, limited_until)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
-                 ON CONFLICT(provider, account_id, window) DO UPDATE SET
-                     used_percent = excluded.used_percent,
-                     resets_at = excluded.resets_at,
-                     plan = excluded.plan,
-                     observed_at = excluded.observed_at,
-                     source = excluded.source,
-                     model = excluded.model,
-                     limited_until = excluded.limited_until",
-                params![
-                    provider,
-                    account_id.as_str(),
-                    window.window,
-                    window.used_percent,
-                    window.resets_at,
-                    window.plan,
-                    now,
-                    source,
-                    window.model,
-                    window.limited_until,
-                ],
-            )?;
-        }
+        transaction.execute(
+            "UPDATE provider_accounts SET capacity_revision=capacity_revision+1 WHERE provider=?1 AND account_id=?2",
+            params![provider, account_id.as_str()],
+        )?;
+        write_account_windows(&transaction, provider, account_id, windows, source)?;
         transaction.commit()?;
         Ok(())
     }
@@ -1333,7 +1520,7 @@ impl SqliteStore {
         for row in rows {
             limits.push(row??);
         }
-        Ok(limits)
+        Ok(reconcile_legacy_account_windows(limits))
     }
 
     // -- Session moves --------------------------------------------------------
@@ -1777,7 +1964,7 @@ impl SqliteStore {
             for row in rows {
                 limits.push(row??);
             }
-            limits
+            reconcile_legacy_account_windows(limits)
         };
         let mut account_statement = transaction.prepare(
             &format!("SELECT {PROVIDER_ACCOUNT_COLUMNS} FROM provider_accounts WHERE provider = ?1 AND account_id = ?2"),
@@ -2785,6 +2972,369 @@ mod account_observation_tests {
             last_selected_at: Some(7),
             created_at: 1,
             updated_at: 1,
+        }
+    }
+
+    fn window(name: &str, used: u8, model: Option<&str>) -> AccountLimitWindow {
+        AccountLimitWindow {
+            window: name.into(),
+            used_percent: used,
+            model: model.map(str::to_owned),
+            resets_at: Some(1_900_000_000),
+            plan: None,
+            limited_until: (used == 100).then_some(1_900_000_005),
+        }
+    }
+
+    #[test]
+    fn claude_usage_reconciliation_keeps_only_matching_aliases_and_scopes() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&directory.path().join("registry.db")).unwrap();
+        for (id, percent) in [("first", 11), ("second", 100)] {
+            let mut account = account();
+            account.account_id = ProviderAccountId::parse(id).unwrap();
+            account.cooldown_until = None;
+            account.cooldown_reason = None;
+            store.upsert_provider_account(&account).unwrap();
+            let old = [
+                window("seven_day_overage_included", 100, Some("fable")),
+                window("usage credits", 100, Some("opus")),
+                window("unknown", 100, None),
+            ];
+            store
+                .upsert_provider_account_limits("claude", &account.account_id, &old, "stream")
+                .unwrap();
+            let revision = store
+                .provider_account_capacity_revision("claude", &account.account_id)
+                .unwrap();
+            let polled = [
+                window("seven_day", 66, None),
+                window("seven_day_fable", percent, Some("fable")),
+            ];
+            assert!(store
+                .reconcile_provider_account_capacity(&account, revision, &polled)
+                .unwrap());
+            let limits = store.provider_account_limits(Some("claude")).unwrap();
+            let own: Vec<_> = limits
+                .iter()
+                .filter(|row| row.account_id == account.account_id)
+                .cloned()
+                .collect();
+            assert_eq!(own.len(), 4);
+            assert!(!own
+                .iter()
+                .any(|row| row.window == "seven_day_overage_included"));
+            assert!(own.iter().any(|row| row.window == "usage credits"));
+            // Remove unrelated holds only from this local assertion's input.
+            let included: Vec<_> = own
+                .into_iter()
+                .filter(|row| row.window.starts_with("seven_day"))
+                .collect();
+            for model in ["opus", "sonnet", "haiku"] {
+                assert_eq!(
+                    crate::provider_account::account_held_until(
+                        &account,
+                        &included,
+                        Some(model),
+                        1_800_000_000
+                    ),
+                    None
+                );
+            }
+            assert_eq!(
+                crate::provider_account::account_held_until(
+                    &account,
+                    &included,
+                    Some("fable"),
+                    1_800_000_000
+                ),
+                (percent == 100).then_some(1_900_000_005)
+            );
+            assert_eq!(
+                crate::provider_account::account_held_until(
+                    &account,
+                    &included,
+                    Some("fable"),
+                    1_900_000_005
+                ),
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn claude_usage_reconciliation_revision_rejects_delayed_polls_and_rolls_back() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("registry.db");
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let account = account();
+        store.upsert_provider_account(&account).unwrap();
+        let revision = store
+            .provider_account_capacity_revision("claude", &account.account_id)
+            .unwrap();
+        // Two independent writers can observe and write in the same second.
+        let writer = SqliteStore::open_ephemeral(&path).unwrap();
+        writer
+            .record_provider_account_capacity(
+                "claude",
+                &account.account_id,
+                &crate::store::AccountCapacity {
+                    utilization_percent: Some(100),
+                    cooldown_until: Some(1_900_000_005),
+                    cooldown_reason: Some("rejected: seven_day".into()),
+                    windows: vec![window("seven_day", 100, None)],
+                },
+            )
+            .unwrap();
+        assert!(!store
+            .reconcile_provider_account_capacity(
+                &account,
+                revision,
+                &[window("seven_day", 10, None)]
+            )
+            .unwrap());
+        assert_eq!(
+            store.provider_account_limits(None).unwrap()[0].used_percent,
+            100
+        );
+        let revision = store
+            .provider_account_capacity_revision("claude", &account.account_id)
+            .unwrap();
+        assert!(store
+            .reconcile_provider_account_capacity(
+                &account,
+                revision,
+                &[window("seven_day", 20, None)]
+            )
+            .unwrap());
+        assert!(!writer
+            .reconcile_provider_account_capacity(
+                &account,
+                revision,
+                &[window("seven_day", 90, None)]
+            )
+            .unwrap());
+        assert_eq!(
+            store.provider_account_limits(None).unwrap()[0].used_percent,
+            20
+        );
+        assert_eq!(
+            store
+                .get_provider_account("claude", &account.account_id)
+                .unwrap()
+                .unwrap()
+                .cooldown_until,
+            None
+        );
+
+        let revision = store
+            .provider_account_capacity_revision("claude", &account.account_id)
+            .unwrap();
+        store.conn.lock().unwrap().execute_batch("CREATE TRIGGER fail_window BEFORE INSERT ON provider_account_limits WHEN NEW.window='fail' BEGIN SELECT RAISE(ABORT, 'fixture failure'); END;").unwrap();
+        assert!(store
+            .reconcile_provider_account_capacity(
+                &account,
+                revision,
+                &[window("seven_day", 5, None), window("fail", 5, None)]
+            )
+            .is_err());
+        assert_eq!(
+            store
+                .provider_account_capacity_revision("claude", &account.account_id)
+                .unwrap(),
+            revision
+        );
+        assert_eq!(
+            store.provider_account_limits(None).unwrap()[0].used_percent,
+            20
+        );
+    }
+
+    #[test]
+    fn claude_usage_reconciliation_requires_the_cause_and_preserves_global_rejection() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&directory.path().join("registry.db")).unwrap();
+        for (cause, polled, cleared) in [
+            (
+                "rejected: seven_day",
+                vec![window("seven_day_fable", 11, Some("fable"))],
+                false,
+            ),
+            (
+                "rejected: seven_day",
+                vec![window("seven_day", 66, None)],
+                true,
+            ),
+            (
+                "rejected: five_hour",
+                vec![window("seven_day", 66, None)],
+                false,
+            ),
+            (
+                "rejected: five_hour",
+                vec![window("five_hour", 10, None)],
+                true,
+            ),
+            (
+                "rejected: seven_day",
+                vec![window("seven_day", 100, None)],
+                false,
+            ),
+            (
+                "rejected: seven_day_fable",
+                vec![window("seven_day_fable", 100, Some("fable"))],
+                true,
+            ),
+            (
+                "rejected: seven_day_overage_included",
+                vec![window("seven_day", 66, None)],
+                false,
+            ),
+            ("usage credits", vec![window("seven_day", 66, None)], false),
+            ("rejected", vec![window("seven_day", 66, None)], false),
+            ("rejected: seven_day", vec![], false),
+        ] {
+            let mut account = account();
+            account.cooldown_reason = Some(cause.into());
+            store.upsert_provider_account(&account).unwrap();
+            let revision = store
+                .provider_account_capacity_revision("claude", &account.account_id)
+                .unwrap();
+            assert!(store
+                .reconcile_provider_account_capacity(&account, revision, &polled)
+                .unwrap());
+            let current = store
+                .get_provider_account("claude", &account.account_id)
+                .unwrap()
+                .unwrap();
+            assert_eq!(current.cooldown_until.is_none(), cleared, "{cause}");
+        }
+        store
+            .record_provider_account_health(
+                "claude",
+                &account().account_id,
+                Some(100),
+                Some(1_900_000_000),
+                Some("rejected: seven_day"),
+            )
+            .unwrap();
+        store
+            .record_provider_account_capacity(
+                "claude",
+                &account().account_id,
+                &crate::store::AccountCapacity {
+                    utilization_percent: Some(50),
+                    cooldown_until: None,
+                    cooldown_reason: None,
+                    windows: vec![window("five_hour", 50, None)],
+                },
+            )
+            .unwrap();
+        let current = store
+            .get_provider_account("claude", &account().account_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(current.cooldown_until, Some(1_900_000_000));
+        assert_eq!(
+            current.cooldown_reason.as_deref(),
+            Some("rejected: seven_day")
+        );
+    }
+
+    #[test]
+    fn claude_usage_reconciliation_missing_reset_keeps_rejection_deadline() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&directory.path().join("registry.db")).unwrap();
+        let mut account = account();
+        account.cooldown_until = None;
+        store.upsert_provider_account(&account).unwrap();
+        store
+            .upsert_provider_account_limits(
+                "claude",
+                &account.account_id,
+                &[window("seven_day_overage_included", 100, Some("fable"))],
+                "stream",
+            )
+            .unwrap();
+        let mut spent = window("seven_day_fable", 100, Some("fable"));
+        spent.resets_at = None;
+        spent.limited_until = None;
+        let revision = store
+            .provider_account_capacity_revision("claude", &account.account_id)
+            .unwrap();
+        assert!(store
+            .reconcile_provider_account_capacity(&account, revision, &[spent])
+            .unwrap());
+        let current = store.provider_account_limits(None).unwrap();
+        assert_eq!(current.len(), 1);
+        assert_eq!(current[0].resets_at, None);
+        assert_eq!(current[0].limited_until, Some(1_900_000_005));
+        let revision = store
+            .provider_account_capacity_revision("claude", &account.account_id)
+            .unwrap();
+        store
+            .clear_provider_account_cooldown("claude", &account.account_id)
+            .unwrap();
+        assert!(!store
+            .reconcile_provider_account_capacity(&account, revision, &[])
+            .unwrap());
+        let revision = store
+            .provider_account_capacity_revision("claude", &account.account_id)
+            .unwrap();
+        store
+            .record_provider_account_credential_invalidated(
+                "claude",
+                &account.account_id,
+                "fixture",
+            )
+            .unwrap();
+        assert!(!store
+            .reconcile_provider_account_capacity(&account, revision, &[])
+            .unwrap());
+    }
+
+    #[test]
+    fn claude_usage_reconciliation_legacy_precedence_and_indexed_lookups() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&directory.path().join("registry.db")).unwrap();
+        let account = account();
+        store.upsert_provider_account(&account).unwrap();
+        store
+            .upsert_provider_account_limits(
+                "claude",
+                &account.account_id,
+                &[
+                    window("seven_day_overage_included", 100, Some("fable")),
+                    window("seven_day_fable", 11, Some("fable")),
+                ],
+                "stream",
+            )
+            .unwrap();
+        // Equal timestamps keep the rejection; a strictly newer canonical row wins.
+        assert_eq!(
+            store.provider_account_limits(None).unwrap()[0].used_percent,
+            100
+        );
+        let conn = store.conn.lock().unwrap();
+        conn.execute("UPDATE provider_account_limits SET observed_at=observed_at+1 WHERE window='seven_day_fable'", []).unwrap();
+        drop(conn);
+        assert_eq!(
+            store.provider_account_limits(None).unwrap()[0].used_percent,
+            11
+        );
+        let conn = store.conn.lock().unwrap();
+        conn.execute_batch("WITH RECURSIVE accounts(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM accounts WHERE n<10000)
+            INSERT INTO provider_accounts(provider,account_id,credential_state,created_at,updated_at)
+            SELECT 'claude', 'fixture-'||n, 'connected', 1, 1 FROM accounts;").unwrap();
+        for sql in [
+            "SELECT capacity_revision FROM provider_accounts WHERE provider='claude' AND account_id='primary'",
+            "DELETE FROM provider_account_limits WHERE provider='claude' AND account_id='primary' AND window='seven_day_overage_included' AND model='fable'",
+            "SELECT MAX(limited_until) FROM provider_account_limits WHERE provider='claude' AND account_id='primary' AND (window='seven_day_fable' OR (window='seven_day_overage_included' AND model='fable' AND 'seven_day_fable'='seven_day_'||model))",
+        ] {
+            let plan: Vec<String> = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap()
+                .query_map([], |row| row.get(3)).unwrap().collect::<Result<_, _>>().unwrap();
+            assert!(plan.iter().any(|line| line.contains("SEARCH") && line.contains("INDEX")), "{plan:?}");
+            assert!(!plan.iter().any(|line| line.contains("SCAN")), "{plan:?}");
         }
     }
 

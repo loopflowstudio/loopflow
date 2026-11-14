@@ -142,6 +142,7 @@ moves into the shared home when it resumes.
 lf account                       # one row per login; stale rows refresh
 lf account work@                 # that login: auth, plan, each window's age and source, its browsers
 lf account claude                # every Claude login and Claude's local credentials, with every saved browser
+lf account claude --json         # refresh Claude usage and inspect saved limits
 lf account --cached              # offline: no provider contact, no writes
 lf account --json                # every login and local service as one document
 ```
@@ -200,11 +201,27 @@ credentials remain visible with older usage and the `lf account connect` recover
 command. Unreadable credentials are distinguished from missing files. Verification
 records provider rejection as missing; locally detected identity mismatches are
 reported without changing cached state. Unavailable usage leaves credential state
-unchanged. Neither changes account configuration. A cooldown comes only from a
-provider's rejection; a fresh read that finds no account-wide window spent
-clears it, so `lf account <login>` mends a wrong one. Provider routes skip
-missing, disabled, cooling and limited accounts and continue to the next
-candidate.
+unchanged. Neither changes account configuration. Provider routes skip missing,
+disabled and cooling accounts, and accounts limited for the requested model,
+then continue to the next candidate.
+
+After a Claude limit, run `lf account claude` to refresh usage. If Fable now
+has room, its fresh weekly reading replaces the older Fable rejection. If
+Fable is still at 100% but the account-wide windows have room, Fable waits
+while Sonnet, Opus and Haiku remain eligible, including when reopening a
+conversation on those models. Account details show which model is held and
+until when. In JSON, `cooldown_until: null` means no account-wide cooldown;
+individual windows can still hold a model back.
+
+A refresh clears an old rejection only when the corresponding usage window
+establishes recovery. Overall weekly room alone does not clear a Fable limit;
+Fable room does not clear an account-wide limit. Included quota does not clear
+paid-credit exhaustion. Failed, empty or incomplete readings retain limits
+they cannot resolve, as do rejections whose cause is unknown. Successful
+authentication alone establishes no capacity. A rejection or other capacity
+update received while a refresh is in flight takes precedence over that
+refresh; the report shows the saved result, and another refresh can check
+again. Discarded readings are absent from `verified_windows`.
 
 A credential replacement detected during verification makes that result
 unavailable and retains prior account evidence. A switch holds Claude's own
@@ -269,8 +286,12 @@ $ lf account next
                                    without that order: work@example.com, 60% left
 ```
 
-`next` is a dry run of the next launch: which login each provider takes, and
-why. It exits 0 when both can launch, 2 when one is blocked until a reset, and
+`next` explains account routing for each provider without choosing a model.
+It conservatively treats a limit on any model as a blocker, so it can report
+Claude blocked by Fable while a Sonnet launch on that login is eligible.
+`--agent` does not make `next` a model-specific check. Fresh launches and resumed
+conversations check capacity for the model they run.
+It exits 0 when both providers are ready, 2 when one is blocked until a reset, and
 3 when one needs a login. `--json` reports the same per provider, with
 `outcome` `ready`, `blocked`, `login_needed` or `ambient`. `--default` ignores
 repository and Wave orders. An order that names fewer logins than are in
@@ -374,14 +395,21 @@ going, and a launch with neither an explicit nor a saved model waits for every
 scope on the account.
 A limit Claude only states in words ("You've reached your Fable limit") is
 scoped the same way. Loopflow then reads that account's usage once, and when
-the read fails the account rests for 15 minutes. Any usage read that finds a
-window spent holds that window's launches back until it resets.
+the read fails the model is held for 15 minutes, plus a five-second grace
+period. A spent window with a known reset holds that window's launches back
+until five seconds after the reset. A missing reset time stays unknown.
 
-Running out of usage credits ("You're out of usage credits", Claude's
-`seven_day_overage_included`) holds back only the model the launch ran, until
-the reset, never the account. A bare `claude` launch runs Fable, so Fable rests
-and, with no other configured entry behind it, the step goes on with Opus on
-the same account, in the same conversation.
+Claude's `seven_day_overage_included` is an included weekly allocation for a
+model, separate from paid usage credits. Loopflow uses the reported model, or
+the launch's model when Claude omits it, to scope that limit. A fresh weekly
+reading for that model replaces the older rejection even if Claude uses a
+different window name. Unrelated or unknown limits remain in place.
+
+A stated credit failure ("You're out of usage credits") holds back the model
+the launch ran. Included-quota readings do not clear that credit failure.
+Bare `claude` uses the saved Claude model, or Fable by default. With no saved
+model or other configured entry behind it, a Fable limit lets the step go on
+with Opus on the same account, in the same conversation, if Opus has capacity.
 
 Open Claude Sessions need nothing either. When one hits a limit, the login
 moves to the eligible account that ranks first, and every open Claude follows

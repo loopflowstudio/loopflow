@@ -423,7 +423,11 @@ fn rate_limit_signal(value: &Value) -> Option<RateLimitSignal> {
     let reason = rate_type
         .map(|rate_type| format!("{status}: {rate_type}"))
         .unwrap_or_else(|| status.to_string());
-    let model = rate_type.and_then(claude_limit_model).map(str::to_owned);
+    let model = info
+        .get("model")
+        .and_then(Value::as_str)
+        .map(crate::provider_account::claude_model_family)
+        .or_else(|| rate_type.and_then(claude_limit_model).map(str::to_owned));
     // The stream event carries one window at a time, named as Claude names
     // it, so the stored observation lands on the key a poll would update.
     let windows = utilization_percent
@@ -445,9 +449,7 @@ fn rate_limit_signal(value: &Value) -> Option<RateLimitSignal> {
         reason,
         windows,
         model,
-        // `seven_day_overage_included`: the launched model needs usage
-        // credits, and they ran out.
-        credits: rate_type.is_some_and(|rate_type| rate_type.contains("overage")),
+        credits: rate_type == Some("overage"),
     })
 }
 
@@ -1177,18 +1179,84 @@ mod tests {
 
     /// The event that started the November 2 failures.
     #[test]
-    fn a_rejected_overage_is_a_credits_limit_naming_no_model() {
+    fn claude_usage_reconciliation_included_allocation_is_not_paid_credit() {
         let signal = rate_limit(
             r#"{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","rate_limit_type":"seven_day_overage_included","utilization":1.0,"resets_at":1900000000}}"#,
         );
         assert!(signal.limited);
-        assert!(signal.credits);
+        assert!(!signal.credits);
         assert_eq!(signal.model, None);
         assert_eq!(signal.windows[0].window, "seven_day_overage_included");
         assert!(!rate_limit(
             r#"{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","rate_limit_type":"seven_day","utilization":1.0}}"#,
         )
         .credits);
+    }
+
+    #[tokio::test]
+    async fn claude_usage_reconciliation_decoder_records_and_refreshes_the_reported_family() {
+        use crate::provider_account::{
+            account_held_until, new_account, save_polled_usage, ProviderAccountRoute,
+        };
+        use crate::provider_auth::Provider;
+        use crate::store::{AccountLimitWindow, ProviderAccountId, StorageConfig};
+        let root = tempfile::tempdir().unwrap();
+        let store = std::sync::Arc::new(
+            crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+                root.path().join("store.db"),
+            ))
+            .await
+            .unwrap(),
+        );
+        let account = new_account(
+            Provider::Claude,
+            ProviderAccountId::parse("first").unwrap(),
+            root.path().join("first"),
+            None,
+        );
+        store.upsert_provider_account(&account).await.unwrap();
+        let route = ProviderAccountRoute::shared(
+            Provider::Claude,
+            account.account_id.clone(),
+            store.clone(),
+            root.path().join("first"),
+            false,
+        );
+        let signal = rate_limit(
+            r#"{"type":"rate_limit_event","rate_limit_info":{
+            "status":"rejected","rate_limit_type":"seven_day_overage_included",
+            "model":"Claude Opus 4.5","utilization":1.0}}"#,
+        );
+        route.record_rate_limit(&signal).await.unwrap();
+        let limits = store.provider_account_limits(None).await.unwrap();
+        assert_eq!(limits[0].window, "seven_day_opus");
+        assert_eq!(limits[0].model.as_deref(), Some("opus"));
+        assert!(account_held_until(&account, &limits, Some("opus"), 1).is_some());
+        assert_eq!(
+            account_held_until(&account, &limits, Some("sonnet"), 1),
+            None
+        );
+        let revision = store
+            .provider_account_capacity_revision("claude", &account.account_id)
+            .await
+            .unwrap();
+        assert!(save_polled_usage(
+            &store,
+            &account,
+            revision,
+            &[AccountLimitWindow {
+                window: "seven_day_opus".into(),
+                used_percent: 11,
+                resets_at: None,
+                plan: None,
+                model: Some("opus".into()),
+                limited_until: None,
+            }]
+        )
+        .await
+        .unwrap());
+        let limits = store.provider_account_limits(None).await.unwrap();
+        assert_eq!(account_held_until(&account, &limits, Some("opus"), 1), None);
     }
 
     /// A limit on one model leaves the account's other models usable.

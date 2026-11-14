@@ -696,21 +696,23 @@ pub(crate) async fn redeem_reset(
     } else {
         diagnose!("Reset attempt {key}; retry this attempt with --idempotency-key {key}");
     }
+    let revision = store
+        .provider_account_capacity_revision(&account.provider, &account.account_id)
+        .await?;
     let redemption = crate::subscription::redeem_codex_reset(account, &accounts, &key, credit_id)
         .await
         .with_context(|| {
             format!("reset outcome unconfirmed; retry only with --idempotency-key {key}")
         })?;
-    for usage in std::iter::once(&redemption.before).chain(redemption.after.as_ref().ok()) {
-        crate::provider_account::save_polled_usage(&store, account, &usage.windows)
-            .await
-            .with_context(|| {
-                format!(
-                    "reset outcome {}; failed to save usage; attempt {key}",
-                    redemption.outcome
-                )
-            })?;
-    }
+    let usage = redemption.after.as_ref().unwrap_or(&redemption.before);
+    crate::provider_account::save_polled_usage(&store, account, revision, &usage.windows)
+        .await
+        .with_context(|| {
+            format!(
+                "reset outcome {}; failed to save usage; attempt {key}",
+                redemption.outcome
+            )
+        })?;
     let snapshot = |usage: &SubscriptionUsage| UsageSnapshot {
         windows: usage.windows.clone(),
         reset_credits: usage.reset_credits.clone(),
@@ -878,9 +880,13 @@ async fn read_first_usage(
         .get_provider_account(provider.as_str(), account_id)
         .await?
         .context("connected account disappeared")?;
+    let revision = store
+        .provider_account_capacity_revision(&account.provider, &account.account_id)
+        .await?;
     match crate::subscription::poll_account(&account).await {
         Ok(usage) => {
-            crate::provider_account::save_polled_usage(store, &account, &usage.windows).await?;
+            crate::provider_account::save_polled_usage(store, &account, revision, &usage.windows)
+                .await?;
         }
         Err(error) => narrate!("Usage not read yet ({error}); `lf account` reads it"),
     }

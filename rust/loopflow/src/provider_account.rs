@@ -342,11 +342,19 @@ pub(crate) struct RateLimitSignal {
 impl RateLimitSignal {
     /// A limit reached with nothing more said: no reset time, no windows.
     fn stated(limit: crate::agent::SpentLimit) -> Self {
+        let reason = if limit.model.is_none()
+            && !limit.credits
+            && limit.reason.to_ascii_lowercase().contains("weekly limit")
+        {
+            "rejected: seven_day".to_owned()
+        } else {
+            limit.reason
+        };
         Self {
             utilization_percent: None,
             resets_at: None,
             limited: true,
-            reason: limit.reason,
+            reason,
             windows: Vec::new(),
             model: limit.model,
             credits: limit.credits,
@@ -779,26 +787,28 @@ async fn record_rate_limit_signal(
             .max(now)
             + RESET_GRACE_SECS
     });
+    let included = signal
+        .windows
+        .iter()
+        .any(|window| window.window == "seven_day_overage_included")
+        || signal.reason.rsplit(": ").next() == Some("seven_day_overage_included");
     let scope = signal
         .model
-        .clone()
-        .or_else(|| signal.credits.then(|| launched_model_family(launched)));
-    // A limit on one model holds back only that model's window; the account
-    // itself cools only when every model is limited.
+        .as_deref()
+        .map(claude_model_family)
+        .filter(|model| !included || crate::config::CLAUDE_MODEL_FAMILIES.contains(&model.as_str()))
+        .or_else(|| (signal.credits || included).then(|| launched_model_family(launched)));
     let scoped = scope.is_some();
-    store
-        .record_provider_account_health(
-            provider.as_str(),
-            account_id,
-            signal.utilization_percent,
-            cooldown_until.filter(|_| !scoped),
-            signal.limited.then_some(signal.reason.as_str()),
-        )
-        .await?;
     let mut windows = signal.windows.clone();
     if scoped && signal.limited && windows.is_empty() {
         windows.push(crate::store::AccountLimitWindow {
-            window: signal.reason.clone(),
+            window: scope
+                .as_deref()
+                .filter(|model| {
+                    !signal.credits && crate::config::CLAUDE_MODEL_FAMILIES.contains(model)
+                })
+                .map(|model| format!("seven_day_{model}"))
+                .unwrap_or_else(|| signal.reason.clone()),
             used_percent: 100,
             resets_at: signal.resets_at,
             plan: None,
@@ -807,26 +817,50 @@ async fn record_rate_limit_signal(
         });
     }
     for window in &mut windows {
-        if signal.credits && window.model.is_none() {
+        window.model = window.model.as_deref().map(claude_model_family);
+        if included || (signal.credits && window.model.is_none()) {
             window.model = scope.clone();
         }
         if signal.limited && window.model == scope {
             window.limited_until = cooldown_until;
         }
     }
-    if !windows.is_empty() {
-        store
-            .upsert_provider_account_limits(provider.as_str(), account_id, &windows, "stream")
-            .await?;
+    for window in &mut windows {
+        if window.window == "seven_day_overage_included" {
+            if let Some(model) = window
+                .model
+                .as_deref()
+                .filter(|model| crate::config::CLAUDE_MODEL_FAMILIES.contains(model))
+            {
+                window.window = format!("seven_day_{model}");
+            }
+        }
     }
+    store
+        .record_provider_account_capacity(
+            provider.as_str(),
+            account_id,
+            crate::store::AccountCapacity {
+                utilization_percent: signal.utilization_percent,
+                cooldown_until: cooldown_until.filter(|_| !scoped),
+                cooldown_reason: signal.limited.then(|| signal.reason.clone()),
+                windows,
+            },
+        )
+        .await?;
+
     Ok(())
 }
 
 /// The model family a launch of `model` runs, as limit scopes spell it.
 fn launched_model_family(model: Option<&str>) -> String {
-    let Some(model) = model.map(str::to_ascii_lowercase) else {
-        return crate::config::CLAUDE_DEFAULT_MODEL_FAMILY.to_string();
-    };
+    model
+        .map(claude_model_family)
+        .unwrap_or_else(|| crate::config::CLAUDE_DEFAULT_MODEL_FAMILY.to_owned())
+}
+
+pub(crate) fn claude_model_family(model: &str) -> String {
+    let model = model.to_ascii_lowercase();
     crate::config::CLAUDE_MODEL_FAMILIES
         .into_iter()
         .find(|family| model.contains(family))
@@ -857,39 +891,25 @@ async fn record_stated_limit(
     else {
         return Ok(());
     };
+    let revision = store
+        .provider_account_capacity_revision(&account.provider, &account.account_id)
+        .await?;
     if let Ok(usage) = crate::subscription::poll_account(&account).await {
-        save_polled_usage(store, &account, &usage.windows).await?;
+        save_polled_usage(store, &account, revision, &usage.windows).await?;
     }
     Ok(())
 }
 
-/// Save a usage reading of `account`, clearing its cooldown when the reading
-/// has account-wide windows and none is spent. Only a rejection sets that cooldown,
-/// and a rejection can be about something the account still has room for; a
-/// spent model's window holds that model by itself. Returns whether it cleared.
+/// Commit a poll only while its starting capacity revision is still current.
 pub(crate) async fn save_polled_usage(
     store: &SharedStore,
     account: &ProviderAccount,
+    revision: i64,
     polled: &[crate::store::AccountLimitWindow],
 ) -> Result<bool, ProviderAccountError> {
-    store
-        .upsert_provider_account_limits(&account.provider, &account.account_id, polled, "poll")
-        .await?;
-    let cooling = account
-        .cooldown_until
-        .is_some_and(|until| until > now_unix());
-    let account_wide: Vec<_> = polled
-        .iter()
-        .filter(|window| window.model.is_none())
-        .collect();
-    let spent = account_wide.iter().any(|window| window.used_percent >= 100);
-    if !cooling || account_wide.is_empty() || spent {
-        return Ok(false);
-    }
-    store
-        .clear_provider_account_cooldown(&account.provider, &account.account_id)
-        .await?;
-    Ok(true)
+    Ok(store
+        .reconcile_provider_account_capacity(account, revision, polled)
+        .await?)
 }
 
 #[cfg(test)]
@@ -1652,6 +1672,18 @@ pub(crate) fn account_unavailable_reason(
                 Some(model) if account.cooldown_until.is_none_or(|cooling| cooling <= now) => {
                     format!(" for {model}")
                 }
+                None if account.cooldown_until.is_none_or(|cooling| cooling <= now) => {
+                    let scopes: std::collections::BTreeSet<_> = limits
+                        .iter()
+                        .filter(|limit| {
+                            limit.provider == account.provider
+                                && limit.account_id == account.account_id
+                                && limit.limited_until.is_some_and(|until| until > now)
+                        })
+                        .filter_map(|limit| limit.model.as_deref())
+                        .collect();
+                    format!(" for {}", scopes.into_iter().collect::<Vec<_>>().join(", "))
+                }
                 _ => String::new(),
             },
             format_reset_time(until)
@@ -2404,10 +2436,9 @@ mod tests {
         assert_eq!(account.cooldown_reason.as_deref(), Some("five_hour"));
     }
 
-    /// November 7: a bare `claude` step ran Fable, which needs usage credits,
-    /// and the rejection cooled the whole account for three days.
+    /// Included weekly allocations hold only the launched model.
     #[tokio::test]
-    async fn a_credits_rejection_holds_the_launched_model_and_never_the_account() {
+    async fn claude_usage_reconciliation_included_rejection_scopes_the_launched_model() {
         let temp = tempdir().unwrap();
         let store = Arc::new(
             crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
@@ -2439,7 +2470,7 @@ mod tests {
                 limited_until: None,
             }],
             model: None,
-            credits: true,
+            credits: false,
         };
         let launch = |model: Option<&str>| {
             ProviderAccountRoute::shared(
@@ -2506,7 +2537,7 @@ mod tests {
             None,
         );
         account.cooldown_until = Some(now_unix() + 3 * 24 * 3600);
-        account.cooldown_reason = Some("rejected: seven_day_overage_included".into());
+        account.cooldown_reason = Some("rejected: weekly".into());
         store.upsert_provider_account(&account).await.unwrap();
         let window =
             |name: &str, used_percent, model: Option<&str>| crate::store::AccountLimitWindow {
@@ -2519,14 +2550,32 @@ mod tests {
             };
 
         // A reading without account-wide windows says nothing.
-        assert!(!save_polled_usage(&store, &account, &[]).await.unwrap());
+        let revision = store
+            .provider_account_capacity_revision("claude", &account.account_id)
+            .await
+            .unwrap();
+        assert!(save_polled_usage(&store, &account, revision, &[])
+            .await
+            .unwrap());
         let spent = [window("weekly", 100, None)];
-        assert!(!save_polled_usage(&store, &account, &spent).await.unwrap());
+        let revision = store
+            .provider_account_capacity_revision("claude", &account.account_id)
+            .await
+            .unwrap();
+        assert!(save_polled_usage(&store, &account, revision, &spent)
+            .await
+            .unwrap());
         let room = [
             window("weekly", 93, None),
             window("weekly:fable", 100, Some("fable")),
         ];
-        assert!(save_polled_usage(&store, &account, &room).await.unwrap());
+        let revision = store
+            .provider_account_capacity_revision("claude", &account.account_id)
+            .await
+            .unwrap();
+        assert!(save_polled_usage(&store, &account, revision, &room)
+            .await
+            .unwrap());
         let stored = store
             .get_provider_account("claude", &account.account_id)
             .await

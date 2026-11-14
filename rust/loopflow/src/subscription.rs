@@ -67,8 +67,8 @@ pub async fn poll_account(
             )))
         }
     };
-    // A spent window holds its account back until it resets, whichever read
-    // saw it; a hold the stream set survives a later poll.
+    // A spent window holds the launches it affects through reset grace.
+    // An omitted reset remains unknown.
     for window in &mut usage.windows {
         if window.used_percent >= 100 {
             window.limited_until = window
@@ -224,14 +224,44 @@ fn claude_windows(body: &Value) -> Vec<AccountLimitWindow> {
     limits
         .iter()
         .filter_map(|limit| {
-            let percent = percentage(limit.get("percent")?)?;
+            let raw_percent = limit.get("percent")?;
+            if !raw_percent
+                .as_f64()
+                .is_some_and(|value| value.is_finite() && value >= 0.0)
+            {
+                return None;
+            }
+            let percent = percentage(raw_percent)?;
             let group = limit.get("group").and_then(Value::as_str)?;
-            let scope = limit
-                .pointer("/scope/model/display_name")
-                .and_then(Value::as_str);
+            if limit
+                .get("scope")
+                .is_some_and(|scope| !scope.is_null() && !scope.is_object())
+            {
+                return None;
+            }
+            let scope = match limit
+                .pointer("/scope/model")
+                .filter(|model| !model.is_null())
+            {
+                Some(model) => Some(
+                    model
+                        .get("display_name")?
+                        .as_str()
+                        .filter(|name| !name.trim().is_empty())?,
+                ),
+                None => None,
+            };
+            let resets_at = match limit.get("resets_at").filter(|value| !value.is_null()) {
+                Some(value) => Some(
+                    OffsetDateTime::parse(value.as_str()?, &Rfc3339)
+                        .ok()?
+                        .unix_timestamp(),
+                ),
+                None => None,
+            };
             // Named as Claude's stream names its `rate_limit_type`, so a poll
             // and a running Claude update the same window.
-            let model = scope.map(str::to_lowercase);
+            let model = scope.map(crate::provider_account::claude_model_family);
             let window = match (group, &model) {
                 ("session", _) => "five_hour".to_string(),
                 ("weekly", None) => "seven_day".to_string(),
@@ -241,11 +271,7 @@ fn claude_windows(body: &Value) -> Vec<AccountLimitWindow> {
             Some(AccountLimitWindow {
                 window,
                 used_percent: percent,
-                resets_at: limit
-                    .get("resets_at")
-                    .and_then(Value::as_str)
-                    .and_then(|value| OffsetDateTime::parse(value, &Rfc3339).ok())
-                    .map(|value| value.unix_timestamp()),
+                resets_at,
                 plan: None,
                 model,
                 limited_until: None,
@@ -916,6 +942,25 @@ pub(crate) mod observation_tests {
         assert_eq!(windows.len(), 1);
         assert_eq!(windows[0].used_percent, 23);
         assert_eq!(windows[0].resets_at, None);
+    }
+
+    #[test]
+    fn claude_usage_reconciliation_malformed_percentages_cannot_establish_recovery() {
+        let windows = claude_windows(&json!({"limits": [
+            {"group":"weekly", "percent":-1},
+            {"group":"weekly", "percent":101},
+            {"group":"weekly", "percent":null},
+            {"group":"weekly", "percent":"unknown"},
+            {"group":"weekly", "percent":11, "scope":{"model":{}}},
+            {"group":"weekly", "percent":11, "resets_at":"invalid"},
+            {"group":"weekly", "percent":11, "scope":{"model":{"display_name":"Claude Fable 5"}}},
+            {"group":"weekly", "percent":35, "scope":{"model":{"display_name":"Unknown Model"}}}
+        ]}));
+        assert_eq!(windows.len(), 3);
+        assert_eq!(windows[0].window, "seven_day");
+        assert_eq!(windows[0].used_percent, 100);
+        assert_eq!(windows[1].window, "seven_day_fable");
+        assert_eq!(windows[2].window, "seven_day_unknown model");
     }
 
     #[tokio::test]

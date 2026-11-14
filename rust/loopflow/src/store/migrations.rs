@@ -6345,6 +6345,37 @@ mod tests {
         );
     }
 
+    #[test]
+    fn claude_usage_reconciliation_upgrade_keeps_capacity_and_adds_revision() {
+        let conn = open();
+        apply_before_migration(&conn, "account_capacity_revision");
+        conn.execute_batch("INSERT INTO provider_accounts
+            (provider,account_id,credential_state,cooldown_until,cooldown_reason,created_at,updated_at)
+            VALUES ('claude','primary','connected',1900000005,'rejected: seven_day',1,1);
+            INSERT INTO provider_account_limits
+            (provider,account_id,window,used_percent,resets_at,observed_at,source,model,limited_until)
+            VALUES ('claude','primary','seven_day_overage_included',100,1900000000,1,'stream','fable',1900000005);").unwrap();
+        apply_pending_migrations(&conn);
+        let capacity: (i64, i64, String) = conn
+            .query_row(
+                "SELECT capacity_revision,cooldown_until,cooldown_reason FROM provider_accounts
+             WHERE provider='claude' AND account_id='primary'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(capacity, (0, 1900000005, "rejected: seven_day".into()));
+        let used: i64 = conn
+            .query_row(
+                "SELECT used_percent FROM provider_account_limits",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(used, 100);
+        validate_foreign_keys(&conn).unwrap();
+    }
+
     /// Fresh initialization over the full real registry — a brand-new database
     /// runs the entire canonical tail from empty to the latest known version.
     #[test]

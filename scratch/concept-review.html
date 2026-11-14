@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-900 · Claude capacity concept review</title>
+<style>
+  :root { color-scheme: light dark; font: 17px/1.5 system-ui, sans-serif; }
+  body { max-width: 760px; margin: 3rem auto; padding: 0 1.2rem; }
+  h1 { font-size: 1.8rem; line-height: 1.2; }
+  h2 { font-size: 1.15rem; margin-top: 2rem; }
+  header, small { color: light-dark(#555, #bbb); }
+  pre { padding: 1rem; background: light-dark(#f1f3f4, #24282c); overflow: auto; font-size: .85rem; }
+  code { overflow-wrap: anywhere; }
+  .decision { border-left: 3px solid light-dark(#a34617, #efaa71); padding-left: 1rem; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; vertical-align: top; padding: .65rem .4rem; border-bottom: 1px solid light-dark(#ccc, #555); }
+  @media (max-width: 500px) { body { margin-top: 1.5rem; } th, td { font-size: .85rem; } }
+</style>
+<header>
+  LOO-900 · concept-review · 2026-11-14<br>
+  Built from <code>scratch/claude-usage-reconciliation.md</code>,
+  <code>docs/subscriptions.md</code>, <code>harness/claude_decode.rs</code>,
+  <code>provider_account.rs</code>, <code>store/sqlite.rs</code>,
+  <code>lf/commands/account_status.rs</code> and <code>subscription.rs</code>
+  under <code>rust/loopflow/src/</code>.
+</header>
+<h1>Let the limit’s bucket determine its scope</h1>
+<p class="decision">Iterate to implement. The design already requires global exhaustion
+to stop every model. The current patch can narrow a global limit when an event
+also names a model. Correct that precedence; no product choice remains open.</p>
+
+<h2>Actions → concepts → APIs</h2>
+<table>
+  <thead><tr><th>Action</th><th>Concept</th><th>State change or read</th></tr></thead>
+  <tbody>
+    <tr><td><code>lf account claude</code></td><td>A fresh observation of the same quota bucket</td><td><code>reconcile_provider_account_capacity</code> atomically saves windows if the starting revision still matches.</td></tr>
+    <tr><td>Launch or reopen Sonnet</td><td>Capacity for this model</td><td><code>account_held_until</code> combines global holds with applicable scoped windows.</td></tr>
+    <tr><td><code>lf account next</code></td><td>Routing with no chosen model</td><td>Conservative read; a Fable hold can block this explanation while Sonnet remains eligible.</td></tr>
+  </tbody>
+</table>
+
+<h2>Biggest mismatch in the current patch</h2>
+<p>Synthetic counterexample, not a captured provider response:</p>
+<pre><code>{"rate_limit_type":"seven_day", "model":"fable",
+ "status":"rejected", "utilization":1.0}</code></pre>
+<p><strong>Existing patch:</strong> the reported model wins → Fable-only window →
+Sonnet remains eligible despite aggregate exhaustion.</p>
+<p><strong>Proposed correction:</strong> known global bucket wins → global hold →
+every model waits. For <code>seven_day_fable</code>, the named Fable family wins
+even if incidental metadata says Sonnet. For <code>seven_day_overage_included</code>,
+the reported or launched family supplies the scope, as the working design requires.</p>
+
+<h2>Normal use, failure, recovery</h2>
+<p><strong>Normal:</strong> refresh Fable to 11% → replace its old alias → Fable
+and Sonnet can launch. At 100%, only Fable waits through reset grace.</p>
+<p><strong>Failure:</strong> an aggregate weekly rejection blocks all models.
+A Fable-only reading cannot release it. Unknown causes and paid-credit holds
+survive unrelated included-quota readings.</p>
+<p><strong>Recovery:</strong> a matching aggregate reading with room releases the
+global hold. If a rejection arrives during refresh, its revision wins; status
+shows the saved result and omits the discarded reading from verified windows.</p>
+
+<h2>Next implementation</h2>
+<p>Keep the two existing capacity tables and internal revision. Correct scope
+precedence before persistence; add decoder-to-store routing regressions for
+global buckets carrying a model and named-family buckets carrying a conflicting
+model. Usage docs already describe the intended experience. No skill changes
+are needed. This review changes no production code and reruns no tests.</p>
+
+<h2>Review questions resolved by the working design</h2>
+<ol>
+  <li>Can model metadata narrow a known global bucket? No: global exhaustion stops every model.</li>
+  <li>Can metadata contradict a family named in the bucket? No: bucket identity and scope must agree.</li>
+  <li>Is a new product decision needed? No. Loop-or-next should iterate to implement the scope correction.</li>
+</ol>
+</html>

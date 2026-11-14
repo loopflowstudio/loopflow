@@ -186,7 +186,7 @@ pub fn hold(directory: &Path, issue: &str, reason: Option<&str>) -> Result<Hold>
     })
 }
 
-/// `task.steer`: direction for the Task's runs, as `lf steer <issue>
+/// `task.steer`: direction for the Task's runs, as `lf task steer <issue>
 /// <message>` does. The delivery is [`super::session::steer`]'s Task scope:
 /// the entry joins the Task's thread and the store saves it as the Task's
 /// steer, which every Session on the Task, now or later, reads at its next

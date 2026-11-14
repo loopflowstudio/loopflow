@@ -294,6 +294,7 @@ uuid_id!(LfProcessId);
 uuid_id!(TerminalId);
 uuid_id!(AgentProcessId);
 uuid_id!(SteerId);
+uuid_id!(SteerBatchId);
 
 // One claim, not a Process identity. Never reused after attachment transfer.
 uuid_id!(AttachmentToken);

@@ -3,18 +3,15 @@ use rusqlite::{params, OptionalExtension};
 use super::{save_in, SqliteStore};
 use crate::durable::Author;
 use crate::id::LfProcessId;
-use crate::steer::{NativeBoundary, Steer, SteerAdapter};
+use crate::steer::{NativeBoundary, SteerAdapter, SteerContext};
 use crate::store::sqlite::sessions::OwnerRetention::LiveTurn;
 use crate::store::StoreError;
 
-/// Claim the conversation's next unread steers and stamp them as printed.
-fn read(store: &SqliteStore, adapter: &SteerAdapter, thread: &str) -> Vec<Steer> {
-    let (steers, _) = store.claim_session_steers(adapter, thread).unwrap();
-    let ids: Vec<_> = steers.iter().map(|steer| steer.id.clone()).collect();
-    store
-        .deliver_session_steers(&adapter.session, &ids)
-        .unwrap();
-    steers
+fn rendered(text: &str) -> SteerContext {
+    SteerContext {
+        text: text.into(),
+        excerpts: Vec::new(),
+    }
 }
 
 const ACTIVATE: NativeBoundary<'static> = NativeBoundary::Activate { source: "startup" };
@@ -347,90 +344,154 @@ fn a_conversation_on_an_app_server_records_its_turns_from_hooks() {
 #[test]
 fn saving_a_steer_wakes_tool_hooks() {
     let (home, store, _) = fixture();
-    let marker = crate::steer::session_marker(home.path(), "session");
-    assert!(!marker.exists());
+    let latest = crate::steer::latest_marker(home.path());
+    assert!(!latest.exists());
     store
         .save_session_steer("session", "Named author", "Change direction")
         .unwrap();
-    assert!(marker.exists(), "a saved steer must reach gated tool hooks");
-    assert!(
-        !crate::steer::latest_marker(home.path()).exists(),
-        "one Session's steer starts lf in no other conversation"
-    );
+    assert!(latest.exists(), "a saved steer must reach gated tool hooks");
 }
 
 #[test]
-fn a_read_steer_is_not_replayed() {
+fn emitted_direction_is_not_replayed_and_retry_is_explicit() {
     let (_home, store, adapter) = fixture();
     let steer = store
         .save_session_steer("session", "Named author", "Change direction")
         .unwrap();
-    assert_eq!(
-        read(&store, &adapter, "native"),
-        std::slice::from_ref(&steer)
-    );
+    store
+        .emit_session_steers(&adapter, "native", "tool:one", |_, items, remaining| {
+            assert_eq!(items, std::slice::from_ref(&steer));
+            assert_eq!(remaining, 0);
+            Ok(rendered("payload"))
+        })
+        .unwrap();
+    // Handed to a hook, the batch is delivered once that hook says it printed it.
     let page = store.session_steers("session", 0, 32).unwrap();
-    assert!(page.items[0].delivered_at.is_some());
+    assert_eq!(page.items[0].evidence, "uncertain");
     assert_eq!(page.pending, 0);
-    assert!(read(&store, &adapter, "native").is_empty());
+    assert!(page.items[0].payload_hash.is_some());
+    let batch = page.items[0].batch_id.clone().unwrap();
+    assert!(store.confirm_session_steers(&adapter, &[], 2).unwrap());
+    assert!(!store.confirm_session_steers(&adapter, &[batch], 2).unwrap());
+    let page = store.session_steers("session", 0, 32).unwrap();
+    assert_eq!(page.items[0].evidence, "emitted");
+    store
+        .emit_session_steers(&adapter, "native", "compact", |_, _, _| {
+            panic!("compaction replayed")
+        })
+        .unwrap();
+    store.retry_session_steer("session", &steer.id).unwrap();
+    assert_eq!(store.session_steers("session", 0, 32).unwrap().pending, 1);
+    store
+        .emit_session_steers(&adapter, "native", "tool:two", |_, _, _| {
+            Ok(rendered("retry"))
+        })
+        .unwrap();
+    assert_eq!(
+        store.session_steers("session", 0, 32).unwrap().items[0].attempt,
+        1
+    );
 }
 
-/// A hook that claims and never prints: the claim hides the steer from a hook
-/// beside it, then lapses, and the steer is claimed again.
 #[test]
-fn an_unprinted_claim_hides_the_steer_then_lapses() {
+fn a_failed_render_releases_and_an_answered_batch_stays_uncertain() {
     let (_home, store, adapter) = fixture();
-    let steer = store
+    store
         .save_session_steer("session", "Author", "Direction")
         .unwrap();
-    let (claimed, remaining) = store.claim_session_steers(&adapter, "native").unwrap();
-    assert_eq!(
-        (claimed.as_slice(), remaining),
-        ([steer.clone()].as_slice(), 0)
-    );
     assert!(store
-        .claim_session_steers(&adapter, "native")
-        .unwrap()
-        .0
-        .is_empty());
-    let page = store.session_steers("session", 0, 32).unwrap();
-    assert_eq!((page.pending, page.items[0].delivered_at), (0, None));
-    store
-        .conn
-        .lock()
-        .unwrap()
-        .execute("UPDATE steer_delivered SET claimed_at=claimed_at-60", [])
-        .unwrap();
+        .emit_session_steers(&adapter, "native", "first", |_, _, _| Err(
+            StoreError::InvalidData("source disk full".into())
+        ),)
+        .is_err());
     assert_eq!(store.session_steers("session", 0, 32).unwrap().pending, 1);
+    assert!(store
+        .emit_session_steers(&adapter, "native", "first", |_, _, _| Ok(rendered(
+            "payload"
+        )),)
+        .unwrap()
+        .is_some());
     assert_eq!(
-        read(&store, &adapter, "native"),
-        std::slice::from_ref(&steer)
+        store.session_steers("session", 0, 32).unwrap().items[0].evidence,
+        "uncertain"
     );
+    store
+        .emit_session_steers(&adapter, "native", "next", |_, _, _| {
+            panic!("uncertain replay")
+        })
+        .unwrap();
 }
 
 #[test]
-fn claims_take_bounded_pages_oldest_first() {
+fn concurrent_boundaries_reserve_independent_bounded_pages() {
     let (_home, store, adapter) = fixture();
     for n in 0..20 {
         store
             .save_session_steer("session", "Author", &format!("Direction {n}"))
             .unwrap();
     }
-    let (first, remaining) = store.claim_session_steers(&adapter, "native").unwrap();
-    assert_eq!((first.len(), remaining), (8, 12));
-    let (second, remaining) = store.claim_session_steers(&adapter, "native").unwrap();
-    assert_eq!((second.len(), remaining), (8, 4));
-    assert!(second[0].sequence > first[7].sequence);
-    let page = store.session_steers("session", 0, 3).unwrap();
-    assert_eq!(page.items.len(), 3);
-    let next = store
-        .session_steers("session", page.next_after.unwrap(), 3)
+    let other = store.clone();
+    let another = adapter.clone();
+    store
+        .emit_session_steers(&adapter, "native", "one", |_, first, remaining| {
+            assert_eq!(first.len(), 8);
+            assert_eq!(remaining, 12);
+            other
+                .emit_session_steers(&another, "native", "two", |_, second, pending| {
+                    assert_eq!(second.len(), 8);
+                    assert_eq!(pending, 4);
+                    assert!(second
+                        .iter()
+                        .all(|row| !first.iter().any(|item| item.id == row.id)));
+                    Ok(rendered("second"))
+                })
+                .unwrap();
+            // A status read cannot cancel the first callback's live reservation.
+            assert_eq!(other.session_steers("session", 0, 32).unwrap().pending, 4);
+            Ok(rendered("first"))
+        })
         .unwrap();
-    assert!(next.items[0].steer.sequence > page.items[2].steer.sequence);
+    store
+        .emit_session_steers(&adapter, "native", "one", |_, _, _| {
+            panic!("duplicate boundary selected the pending page")
+        })
+        .unwrap();
+    let first = store.session_steers("session", 0, 3).unwrap();
+    assert_eq!(first.items.len(), 3);
+    let next = store
+        .session_steers("session", first.next_after.unwrap(), 3)
+        .unwrap();
+    assert!(next.items[0].steer.sequence > first.items[2].steer.sequence);
 }
 
 #[test]
-fn source_revisions_supersede_unread_ones_and_keep_complete_sources() {
+fn only_abandoned_prewrite_reservations_return_to_pending() {
+    let (_home, store, adapter) = fixture();
+    let direction = store
+        .save_session_steer("session", "Author", "Direction")
+        .unwrap();
+    let crashed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        store.emit_session_steers(&adapter, "native", "crashed", |_, _, _| {
+            panic!("simulated emitter exit before write")
+        })
+    }));
+    assert!(crashed.is_err());
+    let status = store.session_steers("session", 0, 32).unwrap();
+    assert_eq!(status.pending, 1);
+    assert_eq!(status.items[0].steer.id, direction.id);
+    store
+        .emit_session_steers(&adapter, "native", "crashed", |_, _, _| {
+            Ok(rendered("recovered"))
+        })
+        .unwrap();
+    assert_eq!(
+        store.session_steers("session", 0, 32).unwrap().items[0].evidence,
+        "uncertain"
+    );
+}
+
+#[test]
+fn source_revisions_supersede_only_pending_and_keep_complete_sources() {
     let (_home, store, adapter) = fixture();
     let publish = |revision: &str, body: &str| {
         save_in(
@@ -449,19 +510,14 @@ fn source_revisions_supersede_unread_ones_and_keep_complete_sources() {
     let page = store.session_steers("session", 0, 32).unwrap();
     assert_eq!(page.items.len(), 1);
     assert_eq!(page.items[0].steer, edited);
-    assert_eq!(
-        read(&store, &adapter, "native"),
-        std::slice::from_ref(&edited)
-    );
-    // A correction to a steer already read is a new steer to read.
+    store
+        .emit_session_steers(&adapter, "native", "one", |_, _, _| Ok(rendered("payload")))
+        .unwrap();
     let latest = publish("latest", &"界".repeat(20_000));
     let page = store.session_steers("session", 0, 32).unwrap();
     assert_eq!(page.items.len(), 2);
-    assert!(page.items[0].delivered_at.is_some());
-    assert_eq!(
-        (page.items[1].steer.id.clone(), page.pending),
-        (latest.id.clone(), 1)
-    );
+    assert_eq!(page.items[0].evidence, "uncertain");
+    assert!(store.retry_session_steer("session", &edited.id).is_err());
     assert_eq!(
         store
             .session_steer_source("session", &latest.id)
@@ -472,7 +528,7 @@ fn source_revisions_supersede_unread_ones_and_keep_complete_sources() {
 }
 
 #[test]
-fn scopes_graph_downward_and_each_session_reads_for_itself() {
+fn scopes_graph_downward_and_idle_peers_keep_independent_pending_receipts() {
     let (_home, store, adapter) = fixture();
     for name in ["peer", "sibling", "parent", "taskless"] {
         store.test_session(name, &crate::session_record::new_artifact_key());
@@ -547,7 +603,12 @@ fn scopes_graph_downward_and_each_session_reads_for_itself() {
     ] {
         assert_eq!(store.session_steers(session, 0, 32).unwrap().pending, count);
     }
-    assert_eq!(read(&store, &adapter, "native").len(), 4);
+    store
+        .emit_session_steers(&adapter, "native", "tool", |_, rows, _| {
+            assert_eq!(rows.len(), 4);
+            Ok(rendered("payload"))
+        })
+        .unwrap();
     assert_eq!(store.session_steers("peer", 0, 32).unwrap().pending, 3);
     store
         .conn
@@ -634,7 +695,16 @@ fn a_new_task_session_skips_steers_an_earlier_session_read() {
         )
         .unwrap();
     save("read", "Already read");
-    assert_eq!(read(&store, &adapter, "native").len(), 1);
+    store
+        .emit_session_steers(&adapter, "native", "tool", |batch, _, _| {
+            Ok(rendered(batch))
+        })
+        .unwrap();
+    let batch = store.session_steers("session", 0, 32).unwrap().items[0]
+        .batch_id
+        .clone()
+        .unwrap();
+    store.confirm_session_steers(&adapter, &[batch], 2).unwrap();
     // Pending for no Session when the next one starts.
     save("unread", "Never read");
     store.test_session("next", &crate::session_record::new_artifact_key());
@@ -721,6 +791,48 @@ fn migration_preserves_released_event_copies_and_planning_receipts() {
     }
 }
 
+#[test]
+fn correction_during_render_cancels_the_superseded_batch_before_write() {
+    let (_home, store, adapter) = fixture();
+    save_in(
+        &store.conn.lock().unwrap(),
+        ("session", "session"),
+        "source",
+        "1",
+        &Author::Named("Author".into()),
+        "Original",
+    )
+    .unwrap();
+    let retained = store
+        .save_session_steer("session", "Author", "Independent direction")
+        .unwrap();
+    store
+        .emit_session_steers(&adapter, "native", "one", |_, _, _| {
+            save_in(
+                &store.conn.lock().unwrap(),
+                ("session", "session"),
+                "source",
+                "2",
+                &Author::Named("Author".into()),
+                "Correction",
+            )
+            .unwrap();
+            Ok(rendered("obsolete rendered text"))
+        })
+        .unwrap();
+    let page = store.session_steers("session", 0, 32).unwrap();
+    assert_eq!(page.pending, 2);
+    assert_eq!(page.items[0].steer, retained);
+    assert_eq!(page.items[1].steer.text, "Correction");
+    store
+        .emit_session_steers(&adapter, "native", "two", |_, rows, _| {
+            assert_eq!(rows[0], retained);
+            assert_eq!(rows[1].text, "Correction");
+            Ok(rendered("corrected text"))
+        })
+        .unwrap();
+}
+
 fn selections(store: &SqliteStore) -> Vec<(Option<String>, String, String)> {
     store
         .conn
@@ -759,10 +871,18 @@ fn a_cleared_conversation_becomes_the_selection_and_receives_steers() {
     assert!(
         matches!(stale, Err(StoreError::InvalidAuthority(message)) if message.contains("native") && message.contains("cleared"))
     );
-    assert_eq!(read(&store, &adapter, "cleared").len(), 1);
-    assert!(store.session_steers("session", 0, 32).unwrap().items[0]
-        .delivered_at
-        .is_some());
+    let emitted = store
+        .with_provider_context(&adapter, "cleared", NativeBoundary::Turn, || {
+            store.emit_session_steers(&adapter, "cleared", "UserPromptSubmit:one", |_, _, _| {
+                Ok(rendered("payload"))
+            })
+        })
+        .unwrap();
+    assert!(emitted.is_some());
+    assert_eq!(
+        store.session_steers("session", 0, 32).unwrap().items[0].evidence,
+        "uncertain"
+    );
 }
 
 #[test]

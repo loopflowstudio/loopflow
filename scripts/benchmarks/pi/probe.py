@@ -318,11 +318,11 @@ def _steer_scenario(fixture: Fixture) -> dict:
     try:
         assert model.arrived.wait(20), "model request never arrived"
         session, token = fixture.identity()
-        fixture.run(["steer", session, "LIVE_STEER 雪"])
+        fixture.run(["session", "steer", session, "LIVE_STEER 雪"])
         deadline = time.monotonic() + 15
         while time.monotonic() < deadline:
             receipts = json.loads(fixture.run(["session", "steers", session, "--json"]).stdout)
-            if receipts["items"] and receipts["items"][0]["delivered_at"] is not None:
+            if receipts["items"] and receipts["items"][0]["evidence"].startswith("emitted"):
                 break
             time.sleep(0.1)
         else:
@@ -422,11 +422,11 @@ def _handoff_scenario(fixture: Fixture) -> dict:
         first.wait(timeout=5)
         # Exercise the public viewer path while the original model call is pending.
         replacement = attach(["session", "attach", session])
-        fixture.run(["steer", session, "HANDOFF_STEER 雪"])
+        fixture.run(["session", "steer", session, "HANDOFF_STEER 雪"])
         deadline = time.monotonic() + 15
         while time.monotonic() < deadline:
             receipts = json.loads(fixture.run(["session", "steers", session, "--json"]).stdout)
-            if receipts["items"] and receipts["items"][0]["delivered_at"] is not None:
+            if receipts["items"] and receipts["items"][0]["evidence"].startswith("emitted"):
                 break
             time.sleep(0.1)
         else:

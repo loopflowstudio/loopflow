@@ -105,13 +105,14 @@ Provider delivery converges independently; there is no cross-system atomic switc
 ## Durable communication
 
 ```bash
-lf steer INF-123 "keep the public name"
-lf --wave infrastructure steer "preserve native history"
-lf --repo . steer "retain source attribution"
-lf steer SESSION "inspect the last failure"
+lf task steer INF-123 "keep the public name"
+lf --wave infrastructure session steer "preserve native history"
+lf session steer "retain source attribution"
+lf session steer SESSION "inspect the last failure"
 lf session steers SESSION --json --limit 32
 lf session steers SESSION --after 42 --json
 lf session steers SESSION --source STEER_ID
+lf session steers SESSION --retry STEER_ID
 ```
 
 Steers retain immutable source revisions and authorship. Task steers and

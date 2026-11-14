@@ -1009,7 +1009,6 @@ impl SqliteStore {
         crate::store::canonical_ids::session_fence_file(Path::new(&database), &locator)
     }
 
-    #[cfg(test)]
     pub(crate) fn try_lock_session_attachment(&self, session: &str) -> StoreResult<Option<File>> {
         let file = self.session_fence_file(session)?;
         match file.try_lock_exclusive() {

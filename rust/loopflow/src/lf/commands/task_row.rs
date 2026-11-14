@@ -90,7 +90,7 @@ impl TaskGraphRow {
     }
 }
 
-/// The Task's comment thread, as `lf steer` and `lf task report` keep it, without restating
+/// The Task's comment thread, as `lf task steer` and `lf task report` keep it, without restating
 /// the Task's identifier.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskThread {

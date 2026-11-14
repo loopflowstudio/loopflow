@@ -13,13 +13,15 @@ use rusqlite::OptionalExtension;
 use super::sqlite::SqliteStore;
 
 /// Tables that grow with every Task, Session, turn, steer or Process.
-const GROWING: [&str; 16] = [
+const GROWING: [&str; 17] = [
     "agent_sessions",
     "planning_peer_changes",
     "planning_peer_routes",
     "processes",
     "session_events",
-    "steer_delivered",
+    "session_steers",
+    "steer_batches",
+    "steer_deliveries",
     "steers",
     "task_checkouts",
     "task_events",
@@ -27,7 +29,6 @@ const GROWING: [&str; 16] = [
     "task_ownership",
     "task_primary_sessions",
     "task_retirements",
-    "task_update_readings",
     "task_ship_events",
     "tasks",
 ];
@@ -35,8 +36,7 @@ const GROWING: [&str; 16] = [
 /// `sqlite_stat1` as `ANALYZE` measured it on a Machine with 17,536
 /// Sessions, 170,688 Processes, 283,304 Session events, 37,512 planning
 /// changes and 3,362 steers (November 13). Indexes newer than that store's
-/// schema were built and analyzed on a copy of it; `steer_delivered` is counted
-/// from the rows its migration copies there.
+/// schema were built and analyzed on a copy of it.
 /// `task_checkouts` retains the November 12 measurement of 838 checkouts;
 /// `tasks_abandoned` counts that store's 259 abandoned Tasks, and
 /// `task_checkouts_parent_pr` its 11 parent PRs;
@@ -45,11 +45,11 @@ const GROWING: [&str; 16] = [
 /// stopped Tasks backfill to, 216 of them naming a Process.
 /// `task_ownership` counts November 13's 895 entries over 880 Tasks.
 const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
-         'agent_sessions','processes','session_events','tasks','steer_delivered',
-         'steer_adapters','projects','waves',
+         'agent_sessions','processes','session_events','tasks','steer_batches',
+         'steer_deliveries','session_steers','steer_adapters','projects','waves',
          'planning_peer_changes','planning_peer_routes','repository_plans','steers',
          'task_retirements','task_checkouts','task_primary_sessions','task_ship_events',
-         'task_ownership','task_update_readings');
+         'task_ownership');
      INSERT INTO sqlite_stat1(tbl,idx,stat) VALUES
          ('agent_sessions','agent_sessions_agent_process','17171 1'),
          ('agent_sessions','agent_sessions_held_terminal','85 2'),
@@ -108,10 +108,17 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          ('session_events','session_provider_transitions','3805 1 1'),
          ('session_events','session_turn_events','84228 45 45 3 1 1'),
          ('session_events','session_turn_window','85815 2 1 1 1 1'),
+         ('session_steers','session_steers_steer','43400 34'),
+         ('session_steers','sqlite_autoindex_session_steers_1','43400 6 1'),
          ('steer_adapters','sqlite_autoindex_steer_adapters_1','13914 1'),
          ('steer_adapters','sqlite_autoindex_steer_adapters_2','13914 1'),
-         ('steer_delivered','sqlite_autoindex_steer_delivered_1','42770 6 1'),
-         ('steer_delivered','steer_delivered_steer','42770 23'),
+         ('steer_batches','sqlite_autoindex_steer_batches_1','11143 1'),
+         ('steer_batches','steer_batches_agent_process','11163 2'),
+         ('steer_batches','steer_batches_boundary','11078 2 1'),
+         ('steer_batches','steer_batches_session','11143 5 5 1'),
+         ('steer_deliveries','sqlite_autoindex_steer_deliveries_1','42654 6 1 1'),
+         ('steer_deliveries','steer_deliveries_batch','42654 4'),
+         ('steer_deliveries','steer_deliveries_steer','42654 34'),
          ('steers','sqlite_autoindex_steers_1','3349 1'),
          ('steers','sqlite_autoindex_steers_2','3349 1 1'),
          ('steers','steers_project','1 1'),
@@ -121,7 +128,6 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          ('steers','steers_wave','0 0 0'),
          ('task_retirements','sqlite_autoindex_task_retirements_1','258 1'),
          ('task_retirements','task_retirements_unfinished','179 1'),
-         ('task_update_readings','sqlite_autoindex_task_update_readings_1','1219 1'),
          ('task_checkouts','sqlite_autoindex_task_checkouts_1','838 1'),
          ('task_checkouts','task_checkouts_worktree','838 1'),
          ('task_checkouts','task_checkouts_root','838 1'),
@@ -611,64 +617,13 @@ mod tests {
     }
 
     #[test]
-    fn a_hook_reading_its_steers_and_task_updates_plans_by_index() {
-        let (_home, store, task, _viewer) = fixture();
-        store.test_session("hooked", &crate::session_record::new_artifact_key());
-        let process = store.test_lf_process();
-        let claim = store
-            .claim_session_attachment("hooked", None, &process, false)
-            .unwrap();
-        store
-            .record_agent_process_identity("hooked", &claim, std::process::id(), 1)
-            .unwrap();
-        let adapter = store.reserve_steer_adapter("hooked", &claim).unwrap();
-        store
-            .with_provider_context(
-                &adapter,
-                "thread",
-                crate::steer::NativeBoundary::Activate { source: "startup" },
-                || Ok(()),
-            )
-            .unwrap();
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "UPDATE agent_sessions SET cwd='/repo.task/src',interactive=1 WHERE id='hooked'",
-                [],
-            )
-            .unwrap();
-        store
-            .save_session_steer("hooked", "person", "Look here")
-            .unwrap();
-        let traced = statements(&store, || {
-            // The first reading writes the Task's baseline; the next update
-            // compares against it.
-            crate::harness::task_updates::write(&store, "hooked").unwrap();
-            let reading = store.task_update_reading(&task).unwrap();
-            store
-                .save_task_update(
-                    &task,
-                    reading.as_deref(),
-                    reading.as_deref().unwrap(),
-                    &[("update:-:fixture".into(), "Task update".into())],
-                )
-                .unwrap();
-            store.baseline_task_updates("hooked").unwrap();
-            let (claimed, _) = store.claim_session_steers(&adapter, "thread").unwrap();
-            assert_eq!(claimed.len(), 1);
-        });
-        let scans = growing_scans(&store, &traced);
-        assert!(scans.is_empty(), "{}", scans.join("\n"));
-    }
-
-    #[test]
-    fn a_steer_read_does_not_wait_for_another_write() {
+    fn an_unchanged_steer_read_does_not_wait_for_another_write() {
         let (home, store, _task, _viewer) = fixture();
         let steer = store
             .save_session_steer("viewed", "person", "Look here")
             .unwrap();
+        // The first read files the steer's receipt.
+        store.session_steers("viewed", 0, 10).unwrap();
         store
             .conn
             .lock()
@@ -679,10 +634,21 @@ mod tests {
         writer.execute_batch("BEGIN IMMEDIATE").unwrap();
         let page = store.session_steers("viewed", 0, 10).unwrap();
         assert_eq!(page.items.len(), 1);
-        assert_eq!(page.pending, 1);
         assert_eq!(
             store.session_steer_source("viewed", &steer.id).unwrap().id,
             steer.id
+        );
+        // A new steer needs a receipt, which needs the write lock.
+        writer.execute_batch("ROLLBACK").unwrap();
+        store
+            .save_session_steer("viewed", "person", "And here")
+            .unwrap();
+        writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+        assert!(store.session_steers("viewed", 0, 10).is_err());
+        writer.execute_batch("ROLLBACK").unwrap();
+        assert_eq!(
+            store.session_steers("viewed", 0, 10).unwrap().items.len(),
+            2
         );
     }
 

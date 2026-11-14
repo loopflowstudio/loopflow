@@ -433,7 +433,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
                 + [graph].compactMap { $0 } + argument("--from", from) + ["--json"]
         case .taskShip(_, let issue): return ["--task", issue, "ship", "--json"]
         case .taskHold(_, let issue): return ["task", "hold", issue, "--json"]
-        case .taskSteer(_, let issue, let message): return ["steer", issue, message, "--json"]
+        case .taskSteer(_, let issue, let message): return ["task", "steer", issue, message, "--json"]
         case .taskReport(_, let issue, let message): return ["task", "report", issue, message, "--json"]
         case .taskInterrupt(_, let issue): return ["task", "interrupt", issue, "--json"]
         case .taskMove(_, let issue, let wave, let machine):
@@ -442,7 +442,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .taskSave(_, let issue, let path, let revision, _):
             return ["task", "save", issue, path, "--revision", revision, "--json"]
         case .sessionSteer(_, let session, let wave, let message):
-            return argument("--wave", wave) + ["steer"] + [session].compactMap { $0 } + [message, "--json"]
+            return argument("--wave", wave) + ["session", "steer"] + [session].compactMap { $0 } + [message, "--json"]
         case .sessionRename(_, let id, let name): return ["session", "rename", "--json", "--", id, name]
         case .sessionStatus(_, let id, let terminal, let agentProcess, let stream, let sequence, _):
             return ["session", "observe-status", "--json", id, "--terminal", terminal, "--stream", stream,

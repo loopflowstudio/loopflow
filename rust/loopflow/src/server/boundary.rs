@@ -811,6 +811,58 @@ mod tests {
         assert_eq!(gaps, 1);
     }
 
+    /// A Stop whose snapshot still names a background watch or a scheduled
+    /// wakeup keeps the turn holding its owner, and so does a Stop that names
+    /// neither list; only an empty snapshot settles it.
+    #[test]
+    fn a_turn_end_settles_only_once_no_watch_or_wakeup_remains() {
+        use crate::store::sqlite::sessions::OwnerRetention::LiveTurn;
+        let (_home, store, adapter, delivery) = fixture();
+        let owner = store
+            .session_attachment("session")
+            .unwrap()
+            .unwrap()
+            .lf_process_id
+            .unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET interactive=1,transport_lf_process_id=?1",
+                [&owner],
+            )
+            .unwrap();
+        let hook = |moment, callback: serde_json::Value| {
+            answer(&store, &boundary(moment, &adapter, &delivery, callback)).unwrap();
+            store.owner_retention(&owner).unwrap()
+        };
+        let stop = |tasks: serde_json::Value, crons: serde_json::Value| {
+            let mut callback = serde_json::json!({"session_id":"native","hook_event_name":"Stop"});
+            if !tasks.is_null() {
+                callback["background_tasks"] = tasks;
+                callback["session_crons"] = crons;
+            }
+            hook(BoundaryMoment::Stop, callback)
+        };
+        let prompt =
+            serde_json::json!({"session_id":"native","hook_event_name":"UserPromptSubmit"});
+        assert_eq!(hook(BoundaryMoment::Tool, prompt.clone()), Some(LiveTurn));
+        assert_eq!(stop(serde_json::Value::Null, serde_json::Value::Null), None);
+        // A second prompt starts a turn with nothing new to deliver.
+        assert_eq!(hook(BoundaryMoment::Tool, prompt), Some(LiveTurn));
+        let watch = serde_json::json!([{"id":"watch","type":"shell","status":"running"}]);
+        assert_eq!(stop(watch, serde_json::json!([])), Some(LiveTurn));
+        assert_eq!(
+            stop(serde_json::Value::Null, serde_json::Value::Null),
+            Some(LiveTurn),
+            "a Stop without the lists cannot settle a watch"
+        );
+        let cron = serde_json::json!([{"id":"poll","schedule":"* * * * *","recurring":true}]);
+        assert_eq!(stop(serde_json::json!([]), cron), Some(LiveTurn));
+        assert_eq!(stop(serde_json::json!([]), serde_json::json!([])), None);
+    }
+
     #[test]
     fn a_turn_end_records_transcript_usage_once_without_a_hook_name() {
         let (home, store, adapter, delivery) = fixture();

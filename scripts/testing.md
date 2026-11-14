@@ -79,6 +79,9 @@ Task storage changes also run `binary(session_lifecycle_tests)`: creation and
 promotion cover absent checkouts and primary Sessions. When moving nullable
 columns into separate tables, update fixture reads to handle absent rows and
 direct SQL writes and shared fixture lookups to use the new tables. Run
+`scripts/test_desktop.sh --filter 'TaskRowMetadataTests|WaveStandupTests|DTOFixtureTests'`
+when changing Task ownership DTOs; inline Swift fixtures must include required
+nullable keys alongside the shared JSON fixtures. Run
 `test(performance_tests::)` to check that seeded Graphs still belong to their
 Tasks. Include `test(ops::task::tests::)`:
 checkout adoption must still find a running Graph and prevent a second run.

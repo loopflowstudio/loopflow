@@ -195,7 +195,7 @@ struct WorkflowDiagram: View {
 
     /// Whether the Task is on `edge` with its Graph still running; `nil` when it is not on it.
     private func running(_ edge: Int) -> Bool? {
-        guard case .run(let step, _, let running) = position,
+        guard case .run(let step, _, _, let running) = position,
               edges.firstIndex(where: { $0.from == step }) == edge else { return nil }
         return running
     }

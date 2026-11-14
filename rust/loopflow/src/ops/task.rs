@@ -630,16 +630,33 @@ pub(crate) struct TaskRunSelection {
     /// Whether the Task takes `graph` up first: it has none, or named another.
     pub take_up: bool,
     /// Where the run begins; `None` when nothing remains before `end`.
-    pub start: Option<crate::task_graph::Place>,
+    pub start: Option<RunStart>,
+}
+
+/// Where a Task run sets out: the step, and the cursor the Graph starts from.
+/// A stopped run's cursor keeps its loop passes, verdicts and routes.
+#[derive(Debug, Clone)]
+pub(crate) struct RunStart {
+    pub place: crate::task_graph::Place,
+    pub cursor: crate::graph::runner::ExecutionCursor,
+}
+
+impl From<crate::task_graph::Place> for RunStart {
+    fn from(place: crate::task_graph::Place) -> Self {
+        Self {
+            cursor: place.cursor(),
+            place,
+        }
+    }
 }
 
 impl TaskRunSelection {
     /// Whether the run reaches `end`: it runs through interactive steps, or
     /// none lies ahead. Such a run hands the Task off, granting merge authority.
     pub fn reaches_end(&self, mode: TaskRunMode) -> bool {
-        self.start
-            .as_ref()
-            .is_none_or(|place| mode.runs_through() || self.graph.next_interactive(place).is_none())
+        self.start.as_ref().is_none_or(|start| {
+            mode.runs_through() || self.graph.next_interactive(&start.place).is_none()
+        })
     }
 }
 
@@ -729,24 +746,25 @@ pub(crate) fn select_task_run(
     }
     let step = row.as_ref().map_or(START, |row| row.step.as_str());
     let start = match (from, row.as_ref().and_then(|row| row.run.as_ref())) {
-        (Some(name), _) => Some(graph.find(name).ok_or_else(|| {
-            task_error(format!(
-                "graph {} has no step {name:?}. Steps: {}",
-                graph.name,
-                graph.describe_steps()
-            ))
-        })?),
-        // A run that stopped starts again from where it began, or from the
-        // step a usage limit held or stopped: the steps before it are done.
-        (None, Some((cursor, _))) => limit_recovery::ended_step_recovery(&store.sqlite, &task.id)
-            .map_err(task_error)?
-            .filter(|(_, recovery)| {
-                recovery.retry_at.is_some()
-                    || crate::ops::task_execution::limit_stop(recovery).is_some()
-            })
-            .and_then(|(step, _)| graph.find(&step))
-            .or_else(|| graph.place_of(cursor)),
-        (None, None) if step == START => graph.find(START),
+        (Some(name), _) => Some(
+            graph
+                .find(name)
+                .ok_or_else(|| {
+                    task_error(format!(
+                        "graph {} has no step {name:?}. Steps: {}",
+                        graph.name,
+                        graph.describe_steps()
+                    ))
+                })?
+                .into(),
+        ),
+        // A run that stopped starts again at the step it stopped at, with the
+        // passes and routes it had: the steps before it are done.
+        (None, Some((cursor, _))) => graph.place_of(cursor).map(|place| RunStart {
+            place,
+            cursor: cursor.clone(),
+        }),
+        (None, None) if step == START => graph.find(START).map(RunStart::from),
         (None, None) if step == END => {
             return Err(task_error(format!(
                 "Task {issue} is at the end of graph {}; `lf task run {issue} --from <step>` runs part of it again, `lf task run {issue} <graph>` takes up another. Steps: {}",
@@ -756,7 +774,7 @@ pub(crate) fn select_task_run(
         }
         // Waiting at a step that merges, the Task starts at it again.
         (None, None) => match graph.landing_step(step) {
-            Some(landing) => Some(landing),
+            Some(landing) => Some(landing.into()),
             None => {
                 let place = graph.interactive_step(step).ok_or_else(|| {
                     task_error(format!(
@@ -765,7 +783,7 @@ pub(crate) fn select_task_run(
                         graph.describe_steps()
                     ))
                 })?;
-                graph.after(&place)
+                graph.after(&place).map(RunStart::from)
             }
         },
     };
@@ -819,21 +837,21 @@ async fn start_task_run(
         return Ok(TaskRunStart::Ended);
     };
     // Starting at an interactive step without running past it puts the Task there.
-    if let Some(step) = graph.interactive_at(&start).filter(|_| !through) {
+    if let Some(step) = graph.interactive_at(&start.place).filter(|_| !through) {
         store
             .sqlite
             .set_task_graph_step(&task.id, step)
             .map_err(task_error)?;
         return Ok(TaskRunStart::Waiting(step.to_owned()));
     }
-    let label = if start == crate::task_graph::Place::default() {
+    let label = if start.place == crate::task_graph::Place::default() {
         format!("{} from start", graph.name)
     } else {
-        format!("{} from {}", graph.name, graph.step_name(&start))
+        format!("{} from {}", graph.name, graph.step_name(&start.place))
     };
     if !store
         .sqlite
-        .start_task_graph_run(&task.id, &row, &start.cursor(), &process, ships)
+        .start_task_graph_run(&task.id, &row, &start.cursor, &process, ships)
         .map_err(task_error)?
     {
         return Err(task_error(format!(

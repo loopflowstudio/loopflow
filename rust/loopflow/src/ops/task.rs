@@ -67,7 +67,8 @@ use crate::ops::task_actions::TaskActionModel;
 use crate::store::sqlite::{SqliteStore, TaskCheckout};
 use crate::store::{open_existing_store, SharedStore, Store};
 use crate::work::task::{
-    GithubPr, Observation, PrPhase, PrPublication, Task, TaskEventKind, TaskPr, TaskPrId,
+    GithubPr, Observation, PrMergeMode, PrPhase, PrPublication, Task, TaskEventKind, TaskPr,
+    TaskPrId,
 };
 use crate::work::wave::Wave;
 use time::format_description::well_known::Rfc3339;
@@ -1343,19 +1344,29 @@ async fn record_stack_parent(
         return Ok((parent.pr.expect("settled parent has a PR record"), None));
     }
     let state = stack_parent_branch(main_repo, &parent)?;
+    let mut revoked = None;
     if state == StackParentBranch::Behind {
-        // Only a published branch carries a merge request: the push goes through
-        // the commit fence, so a changed head revokes Auto before origin sees it.
+        // Only a published branch carries a merge request. Under the commit fence's
+        // lock, a branch head other than the requested one revokes the request before
+        // origin sees it. The push exposes the branch, so uncommitted edits keep it.
         // Callers read the parent's id and branch, never its merge request.
+        let branch = parent.branch();
         let _mutation = if parent.is_published() {
-            let checkout = parent.task.worktree()?;
-            let mutation = lock_task_pr_mutation(checkout)?;
-            delivery::clear_task_pr_merge(store, &parent.task, checkout, false, &|_| {}).await?;
+            let mutation = lock_task_pr_mutation(parent.task.worktree()?)?;
+            let head = rev_parse(main_repo, &format!("refs/heads/{branch}"))?;
+            let stored = store
+                .active_task_pr(&parent.task.id)
+                .await
+                .map_err(task_error)?;
+            revoked = stale_merge_request(stored.as_ref(), &head);
+            if revoked.is_some() {
+                let checkout = parent.task.worktree()?;
+                delivery::clear_task_pr_merge(store, &parent.task, checkout, true, &|_| {}).await?;
+            }
             Some(mutation)
         } else {
             None
         };
-        let branch = parent.branch();
         git_output(main_repo, &["push", "--set-upstream", "origin", branch]).map_err(|error| {
             task_error(format!(
                 "failed to push stack parent {}'s branch {branch} to origin: {error}",
@@ -1363,7 +1374,14 @@ async fn record_stack_parent(
             ))
         })?;
     }
-    let note = state.note(&parent, "pushed");
+    let note = state.note(&parent, "pushed").map(|pushed| match revoked {
+        // Stacking changed another Task's merge request; say so where the person stacking looks.
+        Some(request) => format!(
+            "{} and {pushed}",
+            request.note(&parent, "turned off", "withdrew")
+        ),
+        None => pushed,
+    });
     if let Some(pr) = parent.pr {
         return Ok((pr, note));
     }
@@ -1379,6 +1397,36 @@ async fn record_stack_parent(
         return Ok((active, note));
     }
     Ok((pr, note))
+}
+
+/// A parent's merge request recorded for a head other than its branch's.
+#[derive(Debug, Clone, Copy)]
+struct StaleMergeRequest {
+    number: u32,
+    mode: PrMergeMode,
+}
+
+fn stale_merge_request(pr: Option<&TaskPr>, head: &str) -> Option<StaleMergeRequest> {
+    let pr = pr?;
+    let merge = pr.publication.as_ref()?.merge.as_ref()?;
+    (merge.head_sha != head).then_some(StaleMergeRequest {
+        number: pr.github()?.number,
+        mode: merge.mode,
+    })
+}
+
+impl StaleMergeRequest {
+    /// `auto` and `user` are the verbs for each mode: done at execution, pending in a preview.
+    fn note(&self, parent: &StackParent, auto: &str, user: &str) -> String {
+        let request = match self.mode {
+            PrMergeMode::Auto => format!("{auto} Auto"),
+            PrMergeMode::User => format!("{user} the merge request"),
+        };
+        format!(
+            "{request} on {}'s PR #{}, whose branch is no longer at the requested head,",
+            parent.task.identifier, self.number
+        )
+    }
 }
 
 /// How the parent's local branch relates to origin's, from refs already fetched.

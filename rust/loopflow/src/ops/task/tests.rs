@@ -2594,6 +2594,9 @@ esac
             repo.create_file("unreviewed.txt", "local work");
             repo.stage_all();
             repo.commit("Unreviewed parent work");
+        } else {
+            // The push exposes the branch, not uncommitted edits.
+            repo.create_file("draft.txt", "uncommitted work");
         }
         let local_tip = repo.head_sha();
         // Keep Git transport local while exercising the GitHub observation path.

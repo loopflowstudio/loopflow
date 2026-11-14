@@ -56,6 +56,62 @@ It now reads:</p>
 (<code>stack_existing_task</code>), so sync keeps the old parent's files as child content. Covered by
 <code>sync_tests::stacking_on_a_different_parent_keeps_inherited_files_on_sync</code>.</p>
 
+<h2>Published parents: second walkthrough (2026-11-13)</h2>
+<p>Fresh private Machine at <code>/tmp/lf-qa-837p</code>, branch-built <code>lf</code>. Origin is
+<code>https://github.com/qa/repo.git</code>, rewritten by <code>insteadOf</code> to a local bare repository, so the
+GitHub code path runs. A stateful fake <code>gh</code> on <code>PATH</code> stands in for GitHub (REST PR read,
+<code>LoopflowPrMerge</code>, <code>pr create/edit/ready/merge</code>); every call is logged. Parents were published with
+<code>lf pr publish</code> and armed with <code>lf pr arm</code>; local commits used <code>lf commit</code>. The origin
+<code>pre-receive</code> hook refuses any head other than the armed one while the fake PR has Auto on, as GitHub's
+exact-head arm would make it stale. Remote branches were removed with <code>git push origin --delete</code>.</p>
+<table>
+<tr><th>#</th><th>What I did</th><th>What I saw</th><th></th></tr>
+<tr><td>A</td><td>Stack while the published branch is still on origin</td>
+<td>Child forked from <code>origin/qa/b1a029-parent-feature</code>; no push, no GitHub writes, Auto still on.</td><td class="ok">ok</td></tr>
+<tr><td>B</td><td>Branch deleted, same clean head, PR open, Auto on</td>
+<td><pre>Task c0f9b4 stacks on task_b1a0…: pushed b1a029's branch qa/b1a029-parent-feature to origin.</pre>
+One fresh <code>repos/qa/repo/pulls/42</code> read; origin restored at the reviewed head <code>855d54f</code>; Auto still on.</td><td class="ok">ok</td></tr>
+<tr><td>C</td><td>Unreviewed <code>lf commit</code> on the parent, branch deleted</td>
+<td><code>gh pr merge 42 --disable-auto</code> ran before the push (the hook would otherwise have refused); origin got <code>864c462</code>.
+The stack line only said <code>pushed …</code>: the parent's Auto went off silently. <b>Fixed</b> (D).</td><td class="note">fixed</td></tr>
+<tr><td>D</td><td>Re-armed, another unreviewed commit, branch deleted</td>
+<td><pre>Task bd1a44 stacks on b1a029: turned off Auto on b1a029's PR #42, whose branch is no longer at the requested head, and pushed b1a029's branch qa/b1a029-parent-feature to origin.</pre>
+Stored merge request cleared.</td><td class="ok">ok</td></tr>
+<tr><td>E</td><td>GitHub reports #42 merged, branch deleted; stack a new child, then retry an already-stacked one</td>
+<td><pre>Error: stack parent b1a029 already merged; place this Task without --stack-on</pre>
+No push, no <code>--disable-auto</code>, no child worktree; the store now reads <code>merged</code>.
+The retry printed <code>…This Task's checkout and PR are unchanged…</code> and pushed nothing.</td><td class="ok">ok</td></tr>
+<tr><td>F</td><td>GitHub reports #43 closed, branch deleted</td>
+<td><pre>Task 393884 stacks on 0a4046: pushed 0a4046's branch qa/0a4046-closed-parent to origin.</pre>
+Parent's PR row <code>pr_3705…</code> (open) replaced by <code>pr_834e…</code> (<code>working</code>, no publication).</td><td class="ok">ok</td></tr>
+<tr><td>G</td><td>REST read returns garbage; Auto on, changed head, branch deleted</td>
+<td>Stored reading kept (phase <code>open</code>); Auto turned off through the GraphQL path, then pushed; the line names it.</td><td class="ok">ok</td></tr>
+<tr><td>H</td><td>Re-stack child 393884 (on 0a4046, holding its <code>work.txt</code>) onto df1c86, then <code>lf sync</code></td>
+<td>Both parents wrote <code>work.txt</code>, so sync stopped with a normal conflict (the sync agent could not sign in).
+Resolved by hand; second <code>lf sync</code>: <code>Synced onto origin/qa/df1c86-unreadable-parent.</code> Child kept
+<code>child.txt</code> and the old parent's content, gained <code>extra.txt</code>. Earlier scenario 11 now passes through the CLI.</td><td class="ok">ok</td></tr>
+<tr><td>I</td><td>Published, armed, then an <b>uncommitted</b> edit in the parent checkout (head unchanged); branch deleted</td>
+<td>Auto turned off and the line claimed the head changed, although the push restored exactly the reviewed head <code>3864cfc</code>.
+The shared commit fence treats a dirty checkout as a changed head; stacking pushes the branch, not the working tree. <b>Fixed</b> (K).</td><td class="bad">bug, fixed</td></tr>
+<tr><td>J</td><td><code>lf --explain checkout C --stack-on df1c86</code> with Auto on an earlier head</td>
+<td><pre>Not run: stacking turns off Auto on df1c86's PR #44, whose branch is no longer at the requested head, before pushing</pre>
+Then execution printed the matching past-tense line.</td><td class="ok">ok</td></tr>
+<tr><td>K</td><td>Scenario I again on a fresh parent</td>
+<td><pre>Task c82626 stacks on 853fe1…: pushed 853fe1's branch qa/853fe1-dirty-parent-two to origin.</pre>
+No <code>--disable-auto</code>; fake GitHub and the store both keep Auto at <code>a5a5250</code>; <code>wip.txt</code> untouched. Preview shows no Auto line.</td><td class="ok">ok</td></tr>
+</table>
+
+<h3>Fixed in this pass</h3>
+<ul>
+<li><code>record_stack_parent</code> no longer calls the commit fence's clean-and-same-head check. Under the parent's
+mutation lock it compares the stored request's head with the parent branch's head (<code>stale_merge_request</code>) and
+clears unconditionally only when they differ.</li>
+<li>Execution and <code>--explain</code> both name the revoked request (<code>StaleMergeRequest::note</code>).</li>
+<li>Regression: the same-head case of <code>task_preparation_stacks_on_a_published_parent_without_a_remote_branch</code>
+now leaves an uncommitted file in the parent. With the old fence call it fails at the Auto assertion; with the fix
+the five stacking preparation tests pass (9.25 s). <code>sync_tests::stacking_</code>: 3 passed (73.67 s).</li>
+</ul>
+
 <h2>Still wrong, worst first</h2>
 <ol>
 <li><code>lf sync</code>'s checkpoint commit in a child added <code>.lf/prompts/</code> to <code>.gitignore</code> — expected housekeeping, but it lands as a child commit.</li>
@@ -63,9 +119,14 @@ It now reads:</p>
 
 <h2>Not reached</h2>
 <ul>
+<li>Real GitHub: the second walkthrough used a fake <code>gh</code> and local Git transport. Whether GitHub really keeps
+an Open PR whose branch was deleted (it normally closes it) and how <code>--match-head-commit</code> reacts are untested here.</li>
 <li>GitHub: no real parent/child PRs, PR base targeting, or squash-merge follow-through (local bare origin only). Hosted CI still owns the full matrix.</li>
 <li><code>lf task run --stack-on</code> with a live Graph: used <code>lf checkout</code> to avoid launching agents. Checkout started background Codex primary conversations, which failed without sign-in; none were left running.</li>
 <li>Desktop rendering of stacked Tasks.</li>
 </ul>
+<p>Second walkthrough cleanup: <code>lf checkout</code> again started background Codex primary conversations (14, none signed in)
+under a private launchd server <code>com.loopflow.server.cfe9537c58b4b722</code>. Booted out that label, stopped the holder
+and its Codex children by verified PID; no QA processes remain.</p>
 <p>Cleanup: the walkthrough registered a private launchd server (<code>com.loopflow.server.1664eed2190e703d</code>); booted out. No QA processes remained.</p>
 </body></html>

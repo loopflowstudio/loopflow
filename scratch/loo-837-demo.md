@@ -129,3 +129,14 @@ with duplicate environment locks was stopped; the duplicate lock was removed.
 - `cargo test -p loopflow --lib ops::task::tests::task_preparation_stacks`: 5 passed (4.90 s after compress), including five missing-published-branch cases. Existing macOS unwind-section linker warning remains gate-owned.
 - `cargo test -p loopflow --test integration documented_commands::`: 4 passed (7.05 s).
 - `cargo fmt --all -- --check` and `git diff --check`: passed; scratch remains within both context limits. Clippy and hosted suites stay with gate.
+
+### QA, published parents (2026-11-13)
+
+CLI walkthrough against a fake `gh` and local Git transport (`scratch/qa.html`,
+scenarios A–K). Found: a parent checkout with uncommitted edits and the reviewed
+head lost Auto on stacking, because the shared fence counts a dirty checkout as
+a changed head; stacking pushes the branch only. Now the stored request's head
+is compared with the branch head under the parent's mutation lock. Execution and
+`--explain` name a revoked request. Regression extended (fails on the old call).
+`task_preparation_stacks`: 5 passed; `sync_tests::stacking_`: 3 passed;
+clippy `--all-targets -D warnings` and fmt clean. Real GitHub remains unchecked.

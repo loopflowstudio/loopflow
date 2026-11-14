@@ -208,6 +208,15 @@ fn push_stack_effects(
                     parent.task.identifier
                 ));
             }
+            let head = crate::git::rev_parse(repo, &format!("refs/heads/{}", parent.branch()));
+            if let (super::StackParentBranch::Behind, Ok(head)) = (&state, head) {
+                if let Some(request) = super::stale_merge_request(parent.pr.as_ref(), &head) {
+                    report.unavailable.push(format!(
+                        "Not run: stacking {} before pushing",
+                        request.note(parent, "turns off", "withdraws")
+                    ));
+                }
+            }
             report.unavailable.extend(
                 state
                     .note(parent, "stacking pushes")

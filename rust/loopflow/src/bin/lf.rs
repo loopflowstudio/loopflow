@@ -1307,15 +1307,6 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
         TaskCommand::Update { .. } | TaskCommand::Move { .. } => {
             unreachable!("shared mutation dispatch precedes this command")
         }
-        TaskCommand::Steer {
-            issue,
-            message,
-            wave,
-            json,
-        } => print_thread(
-            &loopflow::engine::task::steer(repo, issue, wave.as_deref(), message)?,
-            *json,
-        ),
         TaskCommand::Report {
             issue,
             message,
@@ -1355,7 +1346,7 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
     }
 }
 
-/// `lf task steer` and `lf task report` print the thread with the new entry.
+/// `lf task report` prints the thread with the new entry.
 fn print_thread(
     result: &loopflow::work::task::comment::TaskComments,
     json: bool,
@@ -1793,14 +1784,15 @@ fn run() -> anyhow::Result<()> {
     );
     let desktop_read = desktop_intent_read(&cli);
     init_tracing(cli.verbose);
-    // A turn or tool boundary asks the Machine server and binds no Work, so
-    // the hook opens no store.
+    // A turn or tool boundary binds no Work. A held launch's asks the Machine
+    // server and opens no store; a bare launch's steer check opens it itself.
     if let Some(Commands::ContextBlock {
         delivery,
         moment:
             moment @ (ContextMoment::Start
             | ContextMoment::Compact
             | ContextMoment::Tool
+            | ContextMoment::Steer
             | ContextMoment::Stop),
         ..
     }) = &cli.command
@@ -2097,6 +2089,8 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
             None => break,
         }
     }
+    // `lf steer` names its flag apart from the root `--json`.
+    json |= matches!(&cli.command, Some(Commands::Steer { json: true, .. }));
     // Entry resolution has normalized known selectors to exact Task IDs.
     // Every Task preview uses that same selection, regardless of its action.
     let task = if let Some(Commands::Task { cmd }) = &cli.command {
@@ -2107,6 +2101,13 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
             );
         }
         cmd.selector().or(cli.task.as_deref())
+    } else if let Some(Commands::Steer {
+        target: Some(target),
+        ..
+    }) = &cli.command
+    {
+        // A preview reads no Session: it shows the Task steer this would save.
+        Some(target.as_str())
     } else {
         cli.task.as_deref()
     };
@@ -2238,21 +2239,23 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
             )),
         )),
         Some(Commands::Task {
-            cmd: TaskCommand::Steer { message, wave, .. },
-        }) => Some((
-            wave.as_deref().or(cli.wave.as_deref()),
-            loopflow::ops::task::TaskPlanningRequest::Comment {
-                message: Some(message),
-                steer: true,
-            },
-        )),
-        Some(Commands::Task {
             cmd: TaskCommand::Report { message, wave, .. },
         }) => Some((
             wave.as_deref().or(cli.wave.as_deref()),
             loopflow::ops::task::TaskPlanningRequest::Comment {
                 message: Some(message),
                 steer: false,
+            },
+        )),
+        Some(Commands::Steer {
+            target: Some(_),
+            message,
+            ..
+        }) => Some((
+            cli.wave.as_deref(),
+            loopflow::ops::task::TaskPlanningRequest::Comment {
+                message: Some(message),
+                steer: true,
             },
         )),
         Some(Commands::Task {
@@ -2810,6 +2813,15 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
         journal::admit_process(&std::env::current_dir()?, args);
         return loopflow::lf::commands::session::run(cmd, &cli);
     }
+    if let Some(Commands::Steer {
+        target,
+        message,
+        json,
+    }) = &cli.command
+    {
+        journal::admit_process(&std::env::current_dir()?, args);
+        return loopflow::lf::commands::session::steer(&cli, target.as_deref(), message, *json);
+    }
     // Your own settings scope by the `--wave` typed, never by the worktree's
     // Work, so they dispatch before Work binding.
     if let Some(Commands::Config {
@@ -3035,7 +3047,9 @@ fn execute_command(
             delivery, moment, ..
         }) => loopflow::lf::commands::context::emit_block(delivery.as_deref(), *moment),
         Some(Commands::Holder { .. }) => unreachable!("the holder dispatches before any store"),
-        Some(Commands::Session { .. }) => unreachable!("Session dispatch precedes Work binding"),
+        Some(Commands::Session { .. } | Commands::Steer { .. }) => {
+            unreachable!("Session dispatch precedes Work binding")
+        }
         Some(Commands::Ship { .. }) => unreachable!("ship dispatch precedes Work binding"),
         Some(Commands::Machine {
             cmd: loopflow::lf::MachineCommand::Doctor { json, planning },

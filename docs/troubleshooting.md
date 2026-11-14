@@ -43,7 +43,7 @@ liveness stays unknown; lf never guesses a process is dead.
 | You see | Run |
 |---|---|
 | A question waiting for you | `lf resume --task <ID>` |
-| The run is going the wrong way | `lf task steer <ID> "address the latest feedback"` |
+| The run is going the wrong way | `lf steer <ID> "address the latest feedback"` |
 | It must stop now | `lf task interrupt <ID>` |
 | It stopped and should go again | `lf task run <ID> --reason "provider credentials repaired"` |
 | It stopped, and an earlier step's work must be redone | `lf task run <ID> --from <step>` |
@@ -105,26 +105,27 @@ grep 'recording gap' ~/.lf/logs/lf.log | tail
 grep 'recording gap' ~/.lf/logs/pi-extension.log | tail   # Pi conversations
 ```
 
-Hooks at each prompt, tool and turn end ask the Machine server to record the
-turn and hand over waiting steers. When the server is stopped, restarting or
-slow, the hook gives up after two seconds and the conversation continues
-without it; `logs/lf.log` has one `recording gap` line for that conversation
-until the server answers again. OpenCode and Pi ask from inside the provider
-instead of a hook process, and write that line to their own log:
-`logs/pi-extension.log`, or `opencode.stderr.log` beside the Session's
-capture. A steer saved while the server was down is
-still waiting and arrives at the next boundary the server answers. One the
-server sent after the hook gave up shows `uncertain` in
-`lf session steers <session>` and is sent again at the next boundary; a steer
-can arrive twice this way, and is never dropped. The missed turns show in the Session's
-history as one `store-gap` entry, read as unknown rather than still running.
+Hooks at each prompt and turn end ask the Machine server to record the turn.
+When the server is stopped, restarting or slow, the hook gives up after two
+seconds and the conversation continues without it; `logs/lf.log` has one
+`recording gap` line for that conversation until the server answers again.
+OpenCode and Pi report from inside the provider instead of a hook process, and
+write that line to their own log: `logs/pi-extension.log`, or
+`opencode.stderr.log` beside the Session's capture. The missed turns show in
+the Session's history as one `store-gap` entry, read as unknown rather than
+still running.
+
+Steers do not wait on the server: each hook reads them from the store. One a
+hook claimed and never printed shows `pending` again in
+`lf session steers <session>` after fifteen seconds and is printed at the next
+boundary; a steer can arrive twice this way, and is never dropped.
 
 Nothing needs relaunching. If `lf server status` reports no server or a
 mismatched build, run `lf install`.
 
-A headless run started with plain `lf -b <skill>` or `lf graph`, by you or
-by an agent, takes no steers, even inside a Task's checkout: steer the Task's
-own conversation, or the agent that started the run.
+A run started with plain `lf <skill>` or `lf graph`, by you or by an agent,
+reads its steers from the store after a tool call or at a prompt, with no
+server: one sitting idle at its prompt hears nothing until you type.
 
 ## A Task run stops with "Loopflow server is not running"
 

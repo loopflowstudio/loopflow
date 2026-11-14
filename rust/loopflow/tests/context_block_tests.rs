@@ -25,6 +25,10 @@ fn hook(repo: &Path, home: &Path, moment: &str) -> String {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
+    // A boundary with nothing to deliver prints nothing.
+    if output.stdout.is_empty() {
+        return String::new();
+    }
     let output: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(
         output["hookSpecificOutput"]["hookEventName"],

@@ -9,14 +9,20 @@
         "author": {"kind":"named","id":"Fixture author"},
         "text": "Complete source"
       },
-      "attempt": 0,
-      "evidence": "emitted",
-      "batch_id": "22222222-2222-4222-8222-222222222222",
-      "payload_hash": "fixture-hash",
-      "excerpted": true
+      "delivered_at": 1794000000
+    },
+    {
+      "steer": {
+        "id": "33333333-3333-4333-8333-333333333333",
+        "sequence": 2,
+        "source": "steer:33333333-3333-4333-8333-333333333333",
+        "revision": "local",
+        "author": {"kind":"named","id":"Fixture author"},
+        "text": "Not read yet"
+      },
+      "delivered_at": null
     }
   ],
   "next_after": null,
-  "pending": 0,
-  "capability": "authenticated provider callback observed; output acceptance unconfirmed"
+  "pending": 1
 }

@@ -204,7 +204,7 @@ writes! {
     TaskHold { directory: PathBuf, issue: String } => task::Hold;
     { issue, .. } => task::hold(directory, issue, None)?,
 
-    /// `lf task steer <issue> <message> --json`: direction for the Task's
+    /// `lf steer <issue> <message> --json`: direction for the Task's
     /// runs, whoever writes it.
     #[serde(rename = "task.steer")]
     TaskSteer {
@@ -265,7 +265,7 @@ writes! {
         crate::ops::task::task_save(issue, path, revision, &content)?
     },
 
-    /// `lf [--wave <wave>] session steer [<id>] <message> --json`: a steer
+    /// `lf [--wave <wave>] steer [<id>] <message> --json`: a steer
     /// one Session, every Session of the Wave or, with neither, every Session
     /// of the repository reads at its next boundary.
     #[serde(rename = "session.steer")]

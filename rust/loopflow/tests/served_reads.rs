@@ -2194,10 +2194,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             directory,
             issue,
             message,
-        } => (
-            path(directory),
-            words(&["task", "steer", issue, message, "--json"]),
-        ),
+        } => (path(directory), words(&["steer", issue, message, "--json"])),
         Write::TaskReport {
             directory,
             issue,
@@ -2253,7 +2250,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             if let Some(wave) = wave {
                 spelled.extend(words(&["--wave", wave]));
             }
-            spelled.extend(words(&["session", "steer"]));
+            spelled.extend(words(&["steer"]));
             spelled.extend(session.clone());
             spelled.extend(words(&[message, "--json"]));
             (path(directory), spelled)

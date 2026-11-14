@@ -9,7 +9,7 @@ use loopflow_test_support::{MachineServer, TestRepo};
 /// `lf skill startup-proof` on a stand-in Claude that runs its SessionStart
 /// hook, then answers. With `task` the command names the Task, so the launch
 /// is managed; without, it is a bare `lf` in the checkout and the stand-in
-/// expects only the two context hooks and no steer capability. The stand-in
+/// expects no turn hooks and steers its own Session through its tool hook. The stand-in
 /// expects a steer in the hook's block when `expect-steer` exists under `home`.
 fn launch_startup_proof(
     repo: &TestRepo,
@@ -105,8 +105,8 @@ with open(lock, 'r+') as fence:
     hook = settings['hooks']['SessionStart'][0]['hooks'][0]['command']
     arguments = shlex.split(hook)
     if (home / 'expect-bare').exists():
-        assert 'LF_PROVIDER_CONTEXT' not in os.environ and 'LF_STEER_SEEN' not in os.environ
-        assert list(settings['hooks']) == ['SessionStart'], list(settings['hooks'])
+        assert 'LF_PROVIDER_CONTEXT' not in os.environ
+        assert 'Stop' not in settings['hooks'], list(settings['hooks'])
         commands = [h['command'].split()[-1] for group in settings['hooks']['SessionStart'] for h in group['hooks']]
         assert commands == ['start', 'compact'], commands
     else:
@@ -120,6 +120,22 @@ with open(lock, 'r+') as fence:
         assert 'STARTUP_DIRECTION' in context_text
         assert '[excerpt; full source above]' in context_text
     (home / 'startup-complete').touch()
+if (home / 'expect-bare').exists():
+    # A bare launch's tool hook reads its steers from the store, with no server.
+    adapter = json.loads(os.environ['LF_BARE_STEER'])
+    assert adapter['agent_process_id'] == caller['agent_process_id']
+    tool = settings['hooks']['PostToolUse'][0]['hooks'][0]['command']
+    def after_tool():
+        callback = {'session_id': 'startup-native', 'hook_event_name': 'PostToolUse'}
+        return subprocess.check_output(tool, shell=True, input=json.dumps(callback).encode()).decode()
+    assert after_tool() == '', 'no steer yet'
+    seen = pathlib.Path(os.environ['LF_STEER_SEEN'])
+    checked = seen.stat().st_mtime_ns
+    assert after_tool() == '' and seen.stat().st_mtime_ns == checked, 'lf ran with no new steer'
+    subprocess.check_call([arguments[2], 'steer', caller['session_id'], 'BARE_DIRECTION'], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+    steered = json.loads(after_tool())['hookSpecificOutput']
+    assert steered['hookEventName'] == 'PostToolUse' and 'BARE_DIRECTION' in steered['additionalContext'], steered
+    assert after_tool() == '', 'the steer arrived twice'
 context = json.loads(sys.stdin.readline())
 query = json.loads(sys.stdin.readline())
 assert context['shouldQuery'] is False
@@ -213,9 +229,8 @@ fn claude_startup_preserves_large_combined_seed_and_correlated_answer() {
         .unwrap();
     let receipts = store.session_steers(&session, 0, 32).unwrap();
     assert_eq!(receipts.items[0].steer.id, steer.id);
-    // No later hook ran to say the startup hook printed it.
-    assert_eq!(receipts.items[0].evidence, "uncertain");
-    assert_eq!(receipts.items[0].excerpted, Some(true));
+    // The startup hook claimed it, printed it and stamped it.
+    assert!(receipts.items[0].delivered_at.is_some());
     assert_eq!(
         store
             .session_steer_source(&session, &steer.id)
@@ -227,9 +242,10 @@ fn claude_startup_preserves_large_combined_seed_and_correlated_answer() {
 
 /// A bare `lf <skill>` in a Task's checkout needs no Machine server: it
 /// counts toward the Task, its two context hooks hand the provider its block
-/// from checkout files, and nothing asks a server, so no gap is logged.
+/// from checkout files, and its tool hook reads a steer saved for its Session
+/// from the store. Nothing asks a server, so no gap is logged.
 #[test]
-fn a_bare_skill_in_a_task_checkout_gets_context_hooks_and_asks_no_server() {
+fn a_bare_skill_in_a_task_checkout_takes_a_steer_and_asks_no_server() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let task =
@@ -248,6 +264,10 @@ fn a_bare_skill_in_a_task_checkout_gets_context_hooks_and_asks_no_server() {
         .unwrap();
     assert_eq!(counted, task.task.id.to_string());
     assert_eq!(source, "checkout");
+    let delivered: Option<i64> = db
+        .query_row("SELECT delivered_at FROM steer_delivered", [], |r| r.get(0))
+        .unwrap();
+    assert!(delivered.is_some());
     let log = fs::read_to_string(home.path().join("logs/lf.log")).unwrap_or_default();
     assert!(!log.contains("Loopflow server unavailable"), "{log}");
 }
@@ -585,7 +605,7 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
         .unwrap();
     assert_eq!(first.agent_process_id, third.agent_process_id);
     assert_ne!(first.token, third.token);
-    // Hooks open no store: the Machine server records and delivers for them.
+    // The Machine server records each boundary; the hook claims its own steers.
     let hook = |payload: serde_json::Value| {
         let mut hook = Command::new(env!("CARGO_BIN_EXE_lf"))
             .env_clear()
@@ -628,21 +648,15 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
         String::from_utf8_lossy(&received.stderr)
     );
     assert!(String::from_utf8_lossy(&received.stdout).contains("HANDOFF_DIRECTION"));
-    // Printed; the conversation's next hook tells the server so.
-    assert_eq!(
-        store.session_steers(session, 0, 32).unwrap().items[0].evidence,
-        "uncertain"
-    );
+    // Printed and stamped by the hook that claimed it; the next hook repeats nothing.
+    let read = &store.session_steers(session, 0, 32).unwrap().items[0];
+    assert_eq!(read.steer.id, direction.id);
+    assert!(read.delivered_at.is_some());
     let mut next_tool = payload.clone();
     next_tool["tool_use_id"] = serde_json::json!("handoff-tool-next");
-    assert!(hook(next_tool).status.success());
-    let confirmed = &store.session_steers(session, 0, 32).unwrap().items[0];
-    assert_eq!(confirmed.steer.id, direction.id);
-    assert_eq!(
-        (confirmed.evidence.as_str(), confirmed.attempt),
-        ("emitted", 0),
-        "a later hook named the batch the first one printed"
-    );
+    let next = hook(next_tool);
+    assert!(next.status.success());
+    assert!(!String::from_utf8_lossy(&next.stdout).contains("HANDOFF_DIRECTION"));
     let pending = store
         .save_session_steer(session, "Fixture author", "NEXT_DIRECTION")
         .unwrap();
@@ -662,8 +676,6 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
     // Exercise the shipped OpenCode plugin against the real Machine server.
     // Internal stream retries reuse one transformed value; a later callback has
     // another adapter invocation and must replace that ephemeral context copy.
-    // The plugin keeps the batches it printed in its own memory, so it names
-    // only its own: the hook's batch was confirmed by a hook above.
     let plugin = home.path().join("transform.mjs");
     let delivery_path = declaration["delivery"].as_str().unwrap();
     let delivery: serde_json::Value =
@@ -715,6 +727,7 @@ clearInterval(alive);
             "LF_PROVIDER_CONTEXT",
             declaration["capability"].as_str().unwrap(),
         )
+        .env("LF_STEER_SEEN", home.path().join("plugin-seen"))
         .output()
         .unwrap();
     assert!(
@@ -724,14 +737,13 @@ clearInterval(alive);
     );
     let page = store.session_steers(session, 0, 32).unwrap();
     assert_eq!(page.pending, 0);
-    assert_eq!(
-        page.items
-            .iter()
-            .find(|row| row.steer.id == pending.id)
-            .unwrap()
-            .evidence,
-        "emitted"
-    );
+    assert!(page
+        .items
+        .iter()
+        .find(|row| row.steer.id == pending.id)
+        .unwrap()
+        .delivered_at
+        .is_some());
     store
         .save_session_steer(session, "Fixture author", "FAILED_TOOL_DIRECTION")
         .unwrap();
@@ -772,30 +784,31 @@ clearInterval(alive);
         String::from_utf8_lossy(&after_clear.stderr)
     );
     assert!(String::from_utf8_lossy(&after_clear.stdout).contains("AFTER_CLEAR_DIRECTION"));
-    // With the server stopped the tool completes without its steer, and the
-    // conversation keeps one recording gap until the server answers again.
+    // With the server stopped the hook still reads its steer from the store,
+    // and the conversation keeps one recording gap until the server answers.
     drop(server.take());
     store
         .save_session_steer(session, "Fixture author", "WAITED_DIRECTION")
         .unwrap();
     let unanswered = serde_json::json!({"session_id":"cleared-native",
         "hook_event_name":"PostToolUse","tool_use_id":"unanswered-tool"});
-    for _ in 0..2 {
+    let read = [true, false].map(|_| {
         let missed = hook(unanswered.clone());
         assert!(
             missed.status.success(),
             "{}",
             String::from_utf8_lossy(&missed.stderr)
         );
-        assert!(!String::from_utf8_lossy(&missed.stdout).contains("WAITED_DIRECTION"));
-    }
+        String::from_utf8_lossy(&missed.stdout).contains("WAITED_DIRECTION")
+    });
+    assert_eq!(read, [true, false]);
     let log = fs::read_to_string(home.path().join("logs/lf.log")).unwrap();
     let down = "recording gap: session boundary: Loopflow server unavailable";
     assert_eq!(log.matches(down).count(), 1, "{log}");
     let _server = MachineServer::start(env!("CARGO_BIN_EXE_lf"), home.path());
     let answered = hook(serde_json::json!({"session_id":"cleared-native",
         "hook_event_name":"PostToolUse","tool_use_id":"answered-tool"}));
-    assert!(String::from_utf8_lossy(&answered.stdout).contains("WAITED_DIRECTION"));
+    assert!(answered.status.success());
     let gaps: i64 = db
         .query_row(
             "SELECT count(*) FROM session_events WHERE session_id=?1
@@ -872,15 +885,14 @@ fn public_commands_save_steers_without_launching_providers() {
         );
         String::from_utf8(output.stdout).unwrap()
     };
-    run(&["session", "steer", "REPOSITORY_DIRECTION"]);
+    run(&["--repo", ".", "steer", "REPOSITORY_DIRECTION"]);
     run(&[
         "--wave",
         task.task.wave_id.as_ref().unwrap().as_str(),
-        "session",
         "steer",
         "WAVE_DIRECTION",
     ]);
-    run(&["task", "steer", task.task.id.as_str(), "TASK_DIRECTION"]);
+    run(&["steer", task.task.id.as_str(), "TASK_DIRECTION"]);
     let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     conn.execute(
         "INSERT INTO agent_sessions(id,title,title_source,created_at,cwd,input_published,repo)
@@ -905,14 +917,13 @@ fn public_commands_save_steers_without_launching_providers() {
         [conn.last_insert_rowid()],
     )
     .unwrap();
-    run(&["session", "steer", "idle", "DIRECT_DIRECTION"]);
+    run(&["steer", "idle", "DIRECT_DIRECTION"]);
     let page: serde_json::Value = serde_json::from_str(&run(&[
         "session", "steers", "idle", "--json", "--limit", "2",
     ]))
     .unwrap();
     assert_eq!(page["pending"], 4, "{page}");
     assert_eq!(page["items"].as_array().unwrap().len(), 2);
-    assert!(page["capability"].as_str().unwrap().contains("idle"));
     let cursor = page["next_after"].as_i64().unwrap().to_string();
     let rest: serde_json::Value = serde_json::from_str(&run(&[
         "session", "steers", "idle", "--json", "--after", &cursor,

@@ -27,14 +27,15 @@ export default {
       console.error(`recording gap closed (context ${gap}); lf serves context from here`);
       gap = undefined;
     };
-    // A launch that reports no turns opens no connection: no steers, no turn end.
+    // A launch that reports no turns opens no connection and reports no turn end.
     const server = spec.turns ? machineServer(delivery, (line) => console.error(line)) : undefined;
-    // The block comes from checkout files; the boundary itself went to the server.
-    const { LF_PROVIDER_CONTEXT: _, ...renderEnv } = process.env;
+    const lf = { env: { ...process.env, LF_HOME: spec.delivery.home }, cwd: spec.delivery.repo };
+    // The block comes from checkout files, rendered without the launch's
+    // capability; the Session's news is read apart from it.
+    const { LF_PROVIDER_CONTEXT: _, LF_BARE_STEER: __, ...renderEnv } = lf.env;
     const render = (moment, callback) => JSON.parse(execFileSync(spec.executable,
       ["__context-block", "--delivery", delivery, "--moment", moment], {
-        env: { ...renderEnv, LF_HOME: spec.delivery.home }, cwd: spec.delivery.repo,
-        input: JSON.stringify(callback), encoding: "utf8", timeout: 30000,
+        env: renderEnv, cwd: lf.cwd, input: JSON.stringify(callback), encoding: "utf8", timeout: 30000,
       })).hookSpecificOutput.additionalContext;
     await session.hook("prompt", (input) => { owner ??= input.sessionID; });
     await session.hook("compaction", (input) => { if (input.sessionID === owner) refresh = "compact"; });
@@ -44,20 +45,19 @@ export default {
       if (spec.instructions) input.system.push({ type: "text", text: spec.instructions });
       const callback = { session_id: input.sessionID, hook_event_name: "OpenCodeMessagesTransform",
         adapter_invocation_id: randomUUID() };
-      const moment = refresh ?? "tool";
-      const answer = await server?.boundary(moment, callback);
+      await server?.boundary(refresh ?? "tool", callback);
       if (refresh) {
         try {
-          block = render(moment, callback);
+          block = render(refresh, callback);
           refresh = undefined;
           recovered();
         } catch (error) {
           recordingGap(error);
         }
       }
-      const text = `${news(answer)}${block ?? ""}`;
+      const news = ownNews(callback, (line) => console.error(line), ["--delivery", delivery], lf);
+      const text = `${news}${block ?? ""}`;
       if (text) input.system.push({ type: "text", text });
-      if (answer?.steers) server.printed(answer.steers.batch);
     });
     if (!server) return async () => {};
     const controller = new AbortController();

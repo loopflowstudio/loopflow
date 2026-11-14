@@ -375,19 +375,19 @@ tool call), not a summary. On the harness it already uses, `-a` changes nothing.
 ## Steer without interrupting
 
 ```bash
-lf session steer <session> "use the existing retry helper"   # saved; delivered at its next boundary
-lf session steer "freeze merges until 3pm"                   # every Session in this repository
-lf --wave billing session steer "invoices before refunds"    # every Session on the Wave
-lf session steers <session>                                  # was it delivered?
+lf steer <session> "use the existing retry helper"   # saved; delivered at its next boundary
+lf --repo . steer "freeze merges until 3pm"          # every Session in this repository
+lf --wave billing steer "invoices before refunds"    # every Session on the Wave
+lf session steers <session>                          # was it delivered?
 ```
 
 Each Session receives a steer at its next supported provider boundary. An idle
 managed conversation is woken with it now
 ([below](#keep-several-conversations-open)); an idle bare one waits until it
-next runs. For a Task, `lf task steer` does the same for every Session on it
+next runs. For a Task, `lf steer` does the same for every Session on it
 ([Work](work.md#steer-it-while-it-runs)).
-Delivery proves the agent saw the steer, not that it followed it;
-`lf session steers <session> --retry <steer>` retries an uncertain delivery.
+Delivery proves the agent saw the steer, not that it followed it; to say it
+again, steer again.
 
 ## Keep several conversations open
 
@@ -414,10 +414,8 @@ bare run hears none.
 Locally saved comments reach a conversation even when planning connection
 settings are unavailable; sync badges stay in the Task thread. An update that
 lands while the server is down reaches the idle conversation when the server
-comes back. Failed wake attempts are logged in `logs/lf.log`. Steers remain
-pending until sent; Task progress is marked delivered before sending, so a
-failed send can lose that progress update. Progress delivery confirmation is
-tracked in [LOO-841](https://linear.app/loopflow/issue/LOO-841).
+comes back. Failed wake attempts are logged in `logs/lf.log`. Steers and Task
+updates remain pending until sent.
 
 ## One more headless turn
 

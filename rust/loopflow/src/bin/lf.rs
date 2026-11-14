@@ -3072,7 +3072,13 @@ fn execute_command(
             target,
             cached,
             json,
-        }) => loopflow::lf::commands::account::run(cmd.as_ref(), target.as_deref(), *cached, *json),
+        }) => loopflow::lf::commands::account::run(
+            cmd.as_ref(),
+            target.as_deref(),
+            *cached,
+            *json,
+            cli.agent.as_deref(),
+        ),
         Some(Commands::Server { cmd }) => loopflow::lf::commands::server::run(cmd),
         Some(Commands::Machine { cmd }) => loopflow::lf::commands::machine::run(cmd, cli.batch),
         Some(Commands::Pr { cmd }) => in_repo_runtime(args, |_| {

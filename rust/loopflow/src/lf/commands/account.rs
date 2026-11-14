@@ -156,10 +156,11 @@ pub fn run(
     target: Option<&str>,
     cached: bool,
     json: bool,
+    agent: Option<&str>,
 ) -> Result<()> {
     let rt = tokio::runtime::Runtime::new().context("failed to create async runtime")?;
     match cmd {
-        Some(cmd) => rt.block_on(run_async(cmd)),
+        Some(cmd) => rt.block_on(run_async(cmd, agent)),
         None => {
             let target = target.map(Target::parse).transpose()?;
             rt.block_on(account_status::run(target, cached, json))
@@ -167,10 +168,10 @@ pub fn run(
     }
 }
 
-pub(crate) async fn run_async(cmd: &AccountCommand) -> Result<()> {
+pub(crate) async fn run_async(cmd: &AccountCommand, agent: Option<&str>) -> Result<()> {
     match cmd {
         AccountCommand::Next { repo, default, json } => {
-            super::profile::show_next(repo.as_deref(), *default, *json).await
+            super::profile::show_next(repo.as_deref(), *default, *json, agent).await
         }
         AccountCommand::Use { login } => use_login(login).await,
         AccountCommand::Pause { login } => set_rotation(login, RoutingState::ExplicitOnly).await,
@@ -1600,34 +1601,24 @@ fn parse_paid_through(value: &str) -> Result<time::Date> {
 async fn clear_account_cooldown(store: &SharedStore, account: &ProviderAccount) -> Result<String> {
     let provider: Provider = account.provider.parse()?;
     let now = OffsetDateTime::now_utc().unix_timestamp();
+    let limits = store
+        .provider_account_limits(Some(provider.as_str()))
+        .await?;
+    let holds = crate::provider_account::account_capacity_holds(account, &limits, None, now);
     store
         .clear_provider_account_cooldown(provider.as_str(), &account.account_id)
         .await
         .map_err(|error| account_store_error(provider, account_login(account), error))?;
-    let current = store
-        .get_provider_account(provider.as_str(), &account.account_id)
-        .await?
-        .ok_or(StoreError::NotFound)?;
-    let limits = store
-        .provider_account_limits(Some(provider.as_str()))
-        .await?;
-    let holds = crate::provider_account::account_capacity_holds(&current, &limits, None, now);
     let login = format!(
         "{} login '{}'",
         provider.display_name(),
         account_login(account)
     );
-    let mut message = if account.cooldown_until.is_some_and(|until| until > now) {
-        format!("Cleared {login} account-wide cooldown")
+    let message = if holds.is_empty() {
+        format!("{login} has no active cooldown or window hold")
     } else {
-        format!("{login} has no active account-wide cooldown")
+        format!("Cleared {login} holds {}", holds.join("; "))
     };
-    if !holds.is_empty() {
-        message.push_str(&format!(
-            "; observed windows still hold it {}",
-            holds.join("; ")
-        ));
-    }
     Ok(message)
 }
 
@@ -1812,7 +1803,24 @@ mod tests {
             )
             .await
             .unwrap();
+        let original_limits = store.provider_account_limits(Some("claude")).await.unwrap();
         for cooldown in [Some(4102444800), None] {
+            store
+                .upsert_provider_account_limits(
+                    "claude",
+                    &account.account_id,
+                    &[AccountLimitWindow {
+                        window: "seven_day_fable".into(),
+                        used_percent: 100,
+                        resets_at: Some(4102531200),
+                        plan: None,
+                        model: Some("fable".into()),
+                        limited_until: Some(4102531205),
+                    }],
+                    "stream",
+                )
+                .await
+                .unwrap();
             store
                 .record_provider_account_health(
                     "claude",
@@ -1850,27 +1858,27 @@ mod tests {
             let message = super::clear_account_cooldown(&store, &account)
                 .await
                 .unwrap();
-            let prefix = if cooldown.is_some() {
-                "Cleared Claude login 'fixture@example.com' account-wide cooldown"
-            } else {
-                "Claude login 'fixture@example.com' has no active account-wide cooldown"
-            };
-            assert_eq!(
-                message,
-                format!(
-                    "{prefix}; observed windows still hold it for fable until 2100-01-02T00:00:05Z"
-                )
-            );
+            assert!(message.starts_with("Cleared Claude login 'fixture@example.com' holds"));
+            assert!(message.contains("for fable until 2100-01-02T00:00:05Z"));
             let current = store
                 .get_provider_account("claude", &account.account_id)
                 .await
                 .unwrap()
                 .unwrap();
             assert_eq!(current.cooldown_until, None);
-            assert_eq!(
-                store.provider_account_limits(Some("claude")).await.unwrap(),
-                limits
-            );
+            let cleared = store.provider_account_limits(Some("claude")).await.unwrap();
+            assert!(cleared.iter().all(|row| row.limited_until.is_none()));
+            assert_eq!(cleared[0].used_percent, original_limits[0].used_percent);
+            assert!(crate::provider_account::account_route_eligible(
+                &current,
+                &cleared,
+                Some("fable"),
+                1_900_000_000
+            ));
+            assert!(super::clear_account_cooldown(&store, &current)
+                .await
+                .unwrap()
+                .contains("has no active cooldown or window hold"));
         }
     }
 

@@ -223,19 +223,23 @@ fn account_holds_and_rotation_use_the_same_machine_state_as_the_cli() {
     ))
     .unwrap();
     assert_eq!(report(), cli);
-    let next = server_read(Read::AccountNext {
-        directory: repo.path().to_owned(),
-        repo: None,
-        default: true,
-    });
-    let cli: Value = serde_json::from_str(&read(
-        repo.path(),
-        home.path(),
-        &["account", "next", "--default", "--json"],
-        None,
-    ))
-    .unwrap();
-    assert_eq!(next, cli);
+    for agent in [None, Some("claude:fable")] {
+        let next = server_read(Read::AccountNext {
+            agent: agent.map(str::to_owned),
+            directory: repo.path().to_owned(),
+            repo: None,
+            default: true,
+        });
+        let mut argv = vec!["account", "next", "--default", "--json"];
+        if let Some(agent) = agent {
+            argv.extend(["--agent", agent]);
+        }
+        let cli: Value =
+            serde_json::from_str(&read(repo.path(), home.path(), &argv, None)).unwrap();
+        assert_eq!(next, cli);
+        assert_eq!(next[0]["model"], serde_json::json!(agent.map(|_| "fable")));
+        assert!(next[1]["model"].is_null());
+    }
     assert!(server_write(Write::AccountUse {
         login: "auto".into()
     })

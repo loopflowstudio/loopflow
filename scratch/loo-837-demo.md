@@ -53,7 +53,9 @@ checkout explanation, sync, documented commands and planning performance.
 Then demo; no interactive judgment collected here. Store API callers also reach
 Task initialization, handoff, PR range and Graph fixtures. Realign
 (2026-11-13) found code, help and the four docs agreeing with the
-published-parent rule. This iteration adds missing-remote restoration before gate.
+published-parent rule. Missing-remote restoration is implemented and its
+regression passed (below); realign (2026-11-13, second pass) found code, docs
+and scratch agreeing on it.
 
 ## Published parent repair (concept review, 2026-11-13)
 

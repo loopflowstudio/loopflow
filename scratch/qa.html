@@ -1,0 +1,70 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>LOO-837 QA: stack on any placed Task</title>
+<style>
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem;color:#222}
+pre{background:#f5f5f2;padding:.6rem .8rem;overflow-x:auto;font-size:13px;border-radius:4px}
+table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #ddd;padding:.4rem;text-align:left;vertical-align:top}
+.ok{color:#17702e;font-weight:600}.bad{color:#a3231a;font-weight:600}.note{color:#8a5a00;font-weight:600}
+</style></head><body>
+<h1>LOO-837 QA: stack on any placed Task</h1>
+<p>Branch-built <code>lf</code> (<code>target/debug/lf</code>) against a disposable repo at <code>/tmp/lf-qa-837/repo</code>,
+a local bare <code>origin.git</code>, private <code>HOME</code>/<code>LF_HOME</code>, inherited <code>LF_*</code> cleared,
+stdin closed, <code>planning: {provider: git, personal: true}</code>. Every Task was created with
+<code>lf task create</code> and placed with <code>lf checkout</code>; no rows seeded. Headless run: no Desktop, no GitHub.</p>
+
+<h2>Scenarios</h2>
+<table>
+<tr><th>#</th><th>What I did</th><th>What I saw</th><th></th></tr>
+<tr><td>1</td><td>Stack child on a parent Task with no checkout</td>
+<td><pre>Error: stack parent 58af83 has no placed branch; run `lf checkout 58af83` first</pre>No child worktree created.</td><td class="ok">ok</td></tr>
+<tr><td>2</td><td><code>lf checkout 58af83</code>, commit <code>parent.txt</code> (branch never pushed), then <code>lf checkout 4b3cb9 --stack-on 58af83</code></td>
+<td><pre>Task 4b3cb9 stacks on 58af83: stacking pushes 58af83's branch qa/58af83-parent-feature to origin.</pre>
+Origin gained <code>refs/heads/qa/58af83-parent-feature</code> at the parent tip; child worktree forked there and has <code>parent.txt</code>.
+Store: parent got one <code>task_prs</code> row (sequence 1, no GitHub number); child's <code>parent_pr_id</code> points to it.</td><td class="ok">ok</td></tr>
+<tr><td>3</td><td>Commit in child, rerun the same <code>--stack-on</code></td>
+<td><pre>Task 4b3cb9 stacks on 58af83 (qa/58af83-parent-feature). This Task's checkout and PR are unchanged; run `lf sync` in … to integrate it.</pre>
+Child HEAD unchanged; parent still has exactly one PR row.</td><td class="ok">ok</td></tr>
+<tr><td>4</td><td>Parent commits again locally (origin behind); stack a second child</td>
+<td>Origin fast-forwarded to the new parent tip; child forked there.</td><td class="ok">ok</td></tr>
+<tr><td>5</td><td>Push a remote-only commit to the parent branch from another clone, add 2 local parent commits; stack a third child</td>
+<td><pre>Task 442d98 stacks on 58af83: origin/qa/58af83-parent-feature has diverged, so this Task bases on it and leaves out 2 local 58af83 commits not on origin.</pre>
+Origin untouched (no force); child has <code>remote.txt</code>, not the local-only files.</td><td class="ok">ok</td></tr>
+<tr><td>6</td><td><code>--stack-on NOPE-1</code>; <code>--stack-on</code> itself</td>
+<td><pre>Error: stack parent "NOPE-1" has no Task; create it with `lf task create`
+Error: a Task cannot stack on itself</pre></td><td class="ok">ok</td></tr>
+<tr><td>7</td><td>Origin <code>pre-receive</code> hook rejects the parent's branch; stack on it</td>
+<td><pre>Error: failed to push stack parent 58858f's branch qa/58858f-rejected-parent to origin: git push --set-upstream origin qa/58858f-rejected-parent failed: remote: policy: branch refs/heads/qa/58858f-rejected-parent is frozen
+ ! [remote rejected] qa/58858f-rejected-parent -> qa/58858f-rejected-parent (pre-receive hook declined)</pre>
+No child worktree. Removing the hook and retrying stacked cleanly.</td><td class="ok">ok</td></tr>
+<tr><td>8</td><td>A Task already placed on main with its own commit, then <code>--stack-on 58af83</code> (diverged) and <code>lf sync</code></td>
+<td>Stack line carried both the diverged note and "checkout and PR are unchanged". Sync merged <code>origin/qa/58af83-parent-feature</code>; child kept <code>late.txt</code> and gained <code>parent.txt</code>, <code>remote.txt</code>.</td><td class="ok">ok</td></tr>
+<tr><td>9</td><td><code>lf sync</code> in the diverged-base child (5)</td><td>Synced onto origin's parent branch.</td><td class="ok">ok</td></tr>
+<tr><td>10</td><td>Parent placed, then its worktree and branch deleted; stack on it</td>
+<td><pre>Error: stack parent b84160's branch qa/b84160-gone-parent is neither local nor on origin</pre></td><td class="ok">ok</td></tr>
+<tr><td>11</td><td>Re-stack child 4b3cb9 (stacked on 58af83, holding <code>parent.txt</code>) onto a different parent 58858f, then <code>lf sync</code></td>
+<td>Accepted; sync merge commit <b>deleted <code>parent.txt</code></b> from the child. The merge used the recorded fork (old parent's tip) as comparison base, so the new parent's lack of the file reads as a deletion.</td><td class="note">pre-existing</td></tr>
+</table>
+
+<h2>Fixed</h2>
+<p>The first-time stack line said <code>stacking pushes 58af83's branch … to origin.</code> after the push had already happened.
+It now reads:</p>
+<pre>Task e122dd stacks on 4841c0: pushed 4841c0's branch qa/4841c0-fresh-parent to origin.</pre>
+<p><code>rust/loopflow/src/ops/task.rs</code> note text and the matching assertion in <code>sync_tests.rs</code>.
+<code>cargo test -p loopflow --test integration -- sync_tests::stacking_</code>: 2 passed. <code>cargo fmt --check</code>, <code>git diff --check</code>: clean.</p>
+
+<h2>Still wrong, worst first</h2>
+<ol>
+<li><b>Re-parenting drops the old parent's files on sync</b> (scenario 11). Same flow on <code>origin/main</code>
+(<code>stack_existing_task</code> → <code>stack_task_placement</code> leaves <code>base_commit</code>); this branch makes it reachable
+with unpublished parents. Not fixed here: whether re-parenting should rebase the fork point or refuse is a product call.</li>
+<li><code>lf sync</code>'s checkpoint commit in a child added <code>.lf/prompts/</code> to <code>.gitignore</code> — expected housekeeping, but it lands as a child commit.</li>
+</ol>
+
+<h2>Not reached</h2>
+<ul>
+<li>GitHub: no real parent/child PRs, PR base targeting, or squash-merge follow-through (local bare origin only). Hosted CI still owns the full matrix.</li>
+<li><code>lf task run --stack-on</code> with a live Graph: used <code>lf checkout</code> to avoid launching agents. Checkout started background Codex primary conversations, which failed without sign-in; none were left running.</li>
+<li>Desktop rendering of stacked Tasks.</li>
+</ul>
+<p>Cleanup: the walkthrough registered a private launchd server (<code>com.loopflow.server.1664eed2190e703d</code>); booted out. No QA processes remained.</p>
+</body></html>

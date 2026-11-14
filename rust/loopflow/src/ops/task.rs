@@ -1348,7 +1348,7 @@ impl StackParentBranch {
         match self {
             Self::Current => None,
             Self::Behind => Some(format!(
-                "stacking pushes {identifier}'s branch {branch} to origin"
+                "pushed {identifier}'s branch {branch} to origin"
             )),
             Self::Diverged { left_out } => Some(format!(
                 "origin/{branch} has diverged, so this Task bases on it and leaves out {left_out} local {identifier} commit{} not on origin",

@@ -877,7 +877,7 @@ fn stacking_retry_replaces_an_abandoned_parent_and_syncs() {
             &["checkout", "INF-124", "--stack-on", "INF-123"],
         );
         let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(stderr.contains("stacking pushes"), "{stderr}");
+        assert!(stderr.contains("pushed INF-123's branch"), "{stderr}");
         assert!(
             stderr.contains("This Task's checkout and PR are unchanged"),
             "{stderr}"

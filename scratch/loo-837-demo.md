@@ -79,3 +79,12 @@ Gate: clippy and scratch-clear publication so hosted CI runs the full matrix,
 including the admission fixture. Affected checks include Task preparation,
 checkout explanation, sync, documented commands and planning performance.
 Then demo; no interactive judgment collected in this headless run.
+
+## QA (2026-11-13, headless, local bare origin)
+
+`scratch/qa.html`: 11 CLI scenarios with the branch `lf`. Unpushed, behind,
+diverged, rejected-push, missing-branch, retry and late-stack paths behave as
+documented. Fixed: the push note now reads "pushed <id>'s branch … to origin"
+(it printed after the push). Open, pre-existing on main: re-stacking a child
+onto a different parent keeps the old fork as `base_commit`, so `lf sync`
+deletes the old parent's files from the child.

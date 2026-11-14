@@ -230,8 +230,8 @@ impl WorkSource {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Holder {
     /// A bare launch: the terminal it runs in, or the caller waiting on a
-    /// headless run. It behaves as the harness alone would, with only the two
-    /// context hooks, no server and no steers.
+    /// headless run. It behaves as the harness alone would, with no server:
+    /// two context hooks, and a steer check that reads the store itself.
     #[default]
     Caller,
     /// Task, Wave or repository work: every hook and steers, beside a
@@ -250,7 +250,7 @@ impl Holder {
         }
     }
 
-    /// Whether the provider reports its turn and tool boundaries and takes steers.
+    /// Whether the provider reports its turn boundaries to the Machine server.
     pub(crate) fn reports_turns(self) -> bool {
         self != Self::Caller
     }

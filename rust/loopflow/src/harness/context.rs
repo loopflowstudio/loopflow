@@ -15,9 +15,7 @@ use crate::session::Holder;
 /// wakes through Claude's inbox.
 pub(crate) fn claude_args(context: &ContextDelivery, holder: Holder) -> Result<Vec<String>> {
     let mut hooks = context.hook_settings(holder)?;
-    if holder.reports_turns() {
-        hooks["PostToolUseFailure"] = hooks["PostToolUse"].clone();
-    }
+    hooks["PostToolUseFailure"] = hooks["PostToolUse"].clone();
     let mut settings = json!({"hooks": hooks});
     if holder == Holder::Server {
         // The Machine server wakes an idle conversation with steers and Task
@@ -101,7 +99,7 @@ pub(crate) fn add_opencode_context(
     holder: Holder,
 ) -> Result<()> {
     let spec = json!({"executable":crate::os_process::resolve_lf_binary()?, "delivery":context, "instructions":instructions, "turns":holder.reports_turns(),
-        "server":server_spec("lf opencode plugin")});
+        "steers":crate::steer::latest_marker(&context.home), "server":server_spec("lf opencode plugin")});
     let delivery = write_prompt_log(
         &context.repo,
         &serde_json::to_string(context)?,
@@ -158,6 +156,7 @@ pub(crate) fn pi_args(
         "const spec = {};\n{}\n{}",
         json!({"native":native, "turns":holder.reports_turns(), "executable":crate::os_process::resolve_lf_binary()?,
             "log":home.join("logs").join("pi-extension.log"), "server":server_spec("lf pi extension"),
+            "steers":crate::steer::latest_marker(&home),
             "bashGuard":pi_bash_guard()}),
         include_str!("context_pi.mjs"),
         include_str!("server_connection.js")
@@ -312,10 +311,16 @@ mod tests {
             assert_eq!(args[0], "--settings");
             serde_json::from_slice(&std::fs::read(&args[1]).unwrap()).unwrap()
         };
-        // A bare launch gets only the context hooks, wherever it runs.
+        // A bare launch reports no turns; its tool hook reads steers from the store.
         let bare = settings(Holder::Caller);
         assert!(bare["hooks"]["SessionStart"].is_array());
         assert!(bare["hooks"].get("Stop").is_none());
+        for event in ["PostToolUse", "PostToolUseFailure", "UserPromptSubmit"] {
+            let command = bare["hooks"][event][0]["hooks"][0]["command"]
+                .as_str()
+                .unwrap();
+            assert!(command.ends_with("--moment steer"), "{event}: {command}");
+        }
         assert!(bare.get("crossSessionInbound").is_none());
         let managed = settings(Holder::Server);
         assert!(managed["hooks"]["Stop"].is_array(), "Work keeps turn hooks");
@@ -378,14 +383,15 @@ mod tests {
         );
     }
 
-    /// A stand-in `lf` that logs its arguments and answers a context block.
+    /// A stand-in `lf` that logs its arguments and answers a context block,
+    /// or for a steer check marks the check and answers a steer.
     fn recording_lf(directory: &std::path::Path) -> std::path::PathBuf {
         use std::os::unix::fs::PermissionsExt;
         let lf = directory.join("lf");
         std::fs::write(
             &lf,
             format!(
-                "#!/bin/sh\necho \"$*\" >> '{}'\ncat > /dev/null\necho '{{\"hookSpecificOutput\":{{\"additionalContext\":\"BLOCK\"}}}}'\n",
+                "#!/bin/sh\necho \"$*\" >> '{}'\ncat > /dev/null\ntext=BLOCK\ncase \"$*\" in *steer) touch \"$LF_STEER_SEEN\"; text='STEER ';; esac\necho \"{{\\\"hookSpecificOutput\\\":{{\\\"additionalContext\\\":\\\"$text\\\"}}}}\"\n",
                 directory.join("calls").display()
             ),
         )
@@ -395,13 +401,11 @@ mod tests {
     }
 
     /// A stand-in Machine server on the plugin's socket: it welcomes every
-    /// `hello` (a frozen one never does), answers the first `answer_steers`
-    /// boundary with one batch, and keeps each hello and request in
-    /// `server.json`.
+    /// `hello` (a frozen one never does), answers each boundary, and keeps
+    /// each hello and request in `server.json`.
     const STAND_IN_SERVER: &str = r#"import { createServer } from 'node:net';
 import { writeFileSync } from 'node:fs';
 const seen = { hellos: [], requests: [] };
-let answered = false;
 const keep = () => writeFileSync(SEEN, JSON.stringify(seen));
 const server = createServer((socket) => {
   let buffer = '';
@@ -421,11 +425,8 @@ const server = createServer((socket) => {
       const operation = message.operation;
       seen.requests.push(operation);
       keep();
-      const steers = !answered && (ANSWER_STEERS)(operation)
-        ? { batch: 'batch-1', text: 'STEER ' } : null;
-      answered ||= steers !== null;
       socket.write(JSON.stringify({ type: 'response', id: message.id, trace_id: 't',
-        result: { steers, waiting: false } }) + '\n');
+        result: { steers: null, update: null, waiting: false } }) + '\n');
     }
   });
 });
@@ -439,33 +440,30 @@ await new Promise((resolve) => server.listen(SOCKET, resolve));
         server: serde_json::Value,
     }
 
-    /// Run `source` under Node beside a stand-in server. `answer_steers` is a
-    /// JavaScript predicate over a request's operation.
-    fn run_probe(
-        directory: &std::path::Path,
-        turns: bool,
-        frozen: bool,
-        answer_steers: &str,
-        source: &str,
-    ) -> Probe {
+    /// Run `source` under Node beside a stand-in server.
+    fn run_probe(directory: &std::path::Path, turns: bool, frozen: bool, source: &str) -> Probe {
         let socket = crate::server::socket_path().unwrap();
         let seen = directory.join("server.json");
         let server = STAND_IN_SERVER
             .replace("SEEN", &serde_json::to_string(&seen).unwrap())
             .replace("SOCKET", &serde_json::to_string(&socket).unwrap())
-            .replace("ANSWER_STEERS", answer_steers)
             .replace("FROZEN", &frozen.to_string());
         let probe = directory.join("probe.mjs");
         std::fs::write(&probe, format!("{server}\n{source}\nprocess.exit(0);\n")).unwrap();
         let mut node = std::process::Command::new("node");
         node.arg(&probe)
             .env("LF_CONTEXT_DELIVERY", directory.join("delivery.json"))
-            .env_remove(crate::steer::PROVIDER_CONTEXT_ENV);
+            .env_remove(crate::steer::PROVIDER_CONTEXT_ENV)
+            .env_remove(crate::steer::BARE_STEER_ENV)
+            .env_remove(crate::steer::STEER_SESSION_ENV)
+            .env_remove(crate::steer::STEER_TASK_ENV)
+            .env(crate::steer::STEER_SEEN_ENV, directory.join("seen"));
+        let capability =
+            r#"{"session":"session","agent_process_id":"process","capability":"capability"}"#;
         if turns {
-            node.env(
-                crate::steer::PROVIDER_CONTEXT_ENV,
-                r#"{"session":"session","agent_process_id":"process","capability":"capability"}"#,
-            );
+            node.env(crate::steer::PROVIDER_CONTEXT_ENV, capability);
+        } else {
+            node.env(crate::steer::BARE_STEER_ENV, capability);
         }
         let output = node.output().unwrap();
         let _ = std::fs::remove_file(&socket);
@@ -518,7 +516,6 @@ await new Promise((resolve) => server.listen(SOCKET, resolve));
             repo.path(),
             turns,
             false,
-            "(operation) => operation.moment === 'tool'",
             &format!(
                 r#"import assert from 'node:assert/strict';
 import plugin from {plugin};
@@ -540,28 +537,27 @@ for (const compact of [false, false, true]) {{
   await hooks.context(request);
   texts.push(request.system.map((part) => part.text));
 }}
-const steered = {steered};
-assert.deepEqual(texts[0], ['Fixed instructions', 'BLOCK']);
-assert.deepEqual(texts[1], ['Fixed instructions', steered ? 'STEER BLOCK' : 'BLOCK']);
+// The first request finds the launch has never checked for steers; the
+// second finds nothing newer.
+assert.deepEqual(texts.slice(0, 2).map((text) => text[1]), ['STEER BLOCK', 'BLOCK']);
 end();
 await new Promise((resolve) => setTimeout(resolve, 200));
 await close();
 "#,
                 plugin = serde_json::to_string(&format!("{plugin}/index.js")).unwrap(),
-                steered = turns,
             ),
         )
     }
 
     #[test]
-    fn a_managed_opencode_turn_asks_the_server_and_renders_only_at_start_and_compaction() {
+    fn a_managed_opencode_turn_reports_to_the_server_and_starts_lf_only_for_context_and_steers() {
         let managed = opencode_turn(Holder::Server);
-        let renders: Vec<_> = managed
+        let calls: Vec<_> = managed
             .calls
             .lines()
             .map(|call| call.rsplit(' ').next().unwrap())
             .collect();
-        assert_eq!(renders, ["start", "compact"], "{}", managed.calls);
+        assert_eq!(calls, ["start", "steer", "compact"], "{}", managed.calls);
         assert_eq!(moments(&managed), ["start", "tool", "compact", "stop"]);
         // One connection per boundary, each opened with a hook's hello.
         let hellos = managed.server["hellos"].as_array().unwrap();
@@ -569,18 +565,22 @@ await close();
         assert!(hellos
             .iter()
             .all(|hello| hello["client"]["kind"] == "plugin"));
-        // The batch the second request carried is named by the next one.
-        let requests = &managed.server["requests"];
-        assert_eq!(requests[1]["printed"], serde_json::json!([]));
-        assert_eq!(requests[2]["printed"], serde_json::json!(["batch-1"]));
-        assert_eq!(requests[1]["adapter"]["session"], "session");
+        assert_eq!(
+            managed.server["requests"][1]["adapter"]["session"],
+            "session"
+        );
     }
 
     #[test]
-    fn a_bare_opencode_run_serves_context_and_opens_no_connection() {
+    fn a_bare_opencode_run_reads_its_own_steers_and_opens_no_connection() {
         let bare = opencode_turn(Holder::Caller);
-        assert_eq!(bare.calls.lines().count(), 2, "{}", bare.calls);
-        assert!(bare.calls.contains("--moment start") && bare.calls.contains("--moment compact"));
+        // One steer check, at the first request; later ones find nothing newer.
+        let calls: Vec<_> = bare
+            .calls
+            .lines()
+            .map(|call| call.rsplit(' ').next().unwrap())
+            .collect();
+        assert_eq!(calls, ["start", "steer", "compact"], "{}", bare.calls);
         assert!(moments(&bare).is_empty(), "{}", bare.server);
         assert!(bare.server["hellos"].as_array().unwrap().is_empty());
     }
@@ -621,8 +621,6 @@ export const createLocalBashOperations = () => ({
             home.path(),
             turns,
             frozen,
-            "(operation) => operation.moment !== 'start' && operation.callback.type === 'tool_execution_start'
-  || operation.callback.hook_event_name === 'PiSteer'",
             &format!(
                 r#"import assert from 'node:assert/strict';
 import {{ readFileSync }} from 'node:fs';
@@ -656,25 +654,24 @@ for (const tool of ['one', 'two']) {{
 }}
 await fire('agent_settled', {{ type: 'agent_settled' }});
 await fire('session_shutdown', {{}});
-assert.deepEqual(steers, {steers});
+// One steer check finds the launch has never checked; later ones find nothing newer.
+assert.deepEqual(steers, [["STEER ", "steer"]]);
 "#,
                 extension = serde_json::to_string(&args[1]).unwrap(),
-                steers = if turns && !frozen { r#"[["STEER ", "steer"]]"# } else { "[]" },
-                ran = serde_json::to_string(&home.path().join("ran").display().to_string()).unwrap(),
+                ran =
+                    serde_json::to_string(&home.path().join("ran").display().to_string()).unwrap(),
             ),
         )
     }
 
     #[test]
-    fn a_managed_native_pi_turn_reports_events_and_takes_steers_without_starting_lf() {
+    fn a_managed_native_pi_turn_reports_events_and_starts_lf_only_for_context_and_steers() {
         let native = pi_turn(true, Holder::Server, false);
-        // One render at start; no lf per event, tool, steer check or bash command.
-        let calls: Vec<_> = native.calls.lines().collect();
+        // One render at start and one steer check; no lf per event, tool or
+        // bash command.
         assert_eq!(
-            calls,
-            ["__context-block --moment start"],
-            "{}",
-            native.calls
+            native.calls,
+            "__context-block --moment start\n__context-block --moment steer\n"
         );
         assert_eq!(
             moments(&native),
@@ -698,27 +695,24 @@ assert.deepEqual(steers, {steers});
                 "agent_settled"
             ]
         );
-        // The steer the first tool start answered is confirmed by the next event.
-        assert_eq!(requests[4]["printed"], serde_json::json!(["batch-1"]));
         assert_eq!(requests[2]["callback"]["sessionFile"], "/pi/session.jsonl");
     }
 
     #[test]
-    fn a_driven_pi_turn_asks_for_steers_and_a_bare_one_opens_no_connection() {
+    fn a_driven_pi_turn_reports_only_its_ends_and_a_bare_one_opens_no_connection() {
+        let checks = "__context-block --moment start\n__context-block --moment steer\n";
+        // Pi's RPC driver records the events; the extension reports the
+        // render and the turn end.
         let driven = pi_turn(false, Holder::Server, false);
-        assert_eq!(driven.calls, "__context-block --moment start\n");
-        // Pi's RPC driver records the events; the extension asks only for steers.
-        assert_eq!(
-            moments(&driven),
-            ["start", "tool", "tool", "tool", "tool", "tool", "tool", "stop"]
-        );
+        assert_eq!(driven.calls, checks);
+        assert_eq!(moments(&driven), ["start", "stop"]);
         let bare = pi_turn(false, Holder::Caller, false);
-        assert_eq!(bare.calls, "__context-block --moment start\n");
+        assert_eq!(bare.calls, checks);
         assert!(moments(&bare).is_empty(), "{}", bare.server);
     }
 
     #[test]
-    fn a_native_pi_turn_against_a_frozen_server_waits_only_where_a_steer_can_land() {
+    fn a_native_pi_turn_against_a_frozen_server_waits_only_at_its_kept_events() {
         let frozen = pi_turn(true, Holder::Server, true);
         // Nine boundaries reach a live server. With no answer, only session
         // start, the start render, each tool start, the turn end and `stop`

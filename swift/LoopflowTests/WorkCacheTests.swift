@@ -492,7 +492,7 @@ struct WorkCacheTests {
         let second = WorkWorkspaceKey(repository: repository, kind: .wave, id: "wave-2")
         #expect(registry.retained(first)?.multiplexer.sessionPane?.sessionId == "primary-wave:wave-1")
         #expect(registry.retained(second)?.multiplexer.sessionPane?.sessionId == "primary-wave:wave-2")
-        // Concurrent preparations can reach the source in either order.
+        // Preparations run concurrently; each scope must open exactly once, in any order.
         #expect(await source.preparedPrimaries.sorted() == ["repository", "wave:wave-1", "wave:wave-2"])
         // Repeated fresh frames cannot displace either pane and reopen it.
         for _ in 0..<3 { await model.refresh() }

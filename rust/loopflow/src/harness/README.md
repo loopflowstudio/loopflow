@@ -51,18 +51,19 @@ keeps passing when lf's own state is unavailable: a store that is locked, refuse
 by its reader floor, missing a column or gone; a hook that fails; a lock that
 cannot be read.
 
-Every lf invocation at a turn or tool boundary is best-effort. A bare headless
-run ([which launches are managed](../server/README.md#turn-and-tool-boundaries))
-has no such boundaries: it runs `__context-block` only at session start and
-after a compaction, to print its context block, and asks no server. Otherwise
-`__context-block` from Claude hooks opens no store: it
-sends one `session.boundary` request to the Machine server at `machine.sock`
-with a two-second deadline, and the server records the turn, acknowledges the
-native input, answers pending steers (delivered once the hook's next request
-says it printed them) and Task updates and, after a turn ends, records Codex
-turns, refreshes planning and starts a pending Session move ([Turn and tool boundaries](../server/README.md#turn-and-tool-boundaries)).
-When the server does not answer, the hook prints the context block without
-steers, exits 0 and records the gap once per native conversation in
+Every lf invocation at a turn or tool boundary is best-effort. Every launch's
+hook reads the Session's unread steers, Task updates among them, from the store, in
+its own process, and at a tool boundary only when a steer may be waiting
+([Every launch reads its own steers](../server/README.md#every-launch-reads-its-own-steers)).
+A bare launch no owner holds
+([which launches are managed](../server/README.md#turn-and-tool-boundaries))
+does nothing else: it reports no boundary and asks no server. A held launch's
+hook first sends one `session.boundary` request to the Machine server at
+`machine.sock` with a two-second deadline, and the server records the turn,
+acknowledges the native input and, after a turn ends, records Codex turns,
+refreshes planning and starts a pending Session move ([Turn and tool boundaries](../server/README.md#turn-and-tool-boundaries)).
+When the server does not answer, the hook still reads its steers, exits 0 and
+records the gap once per native conversation in
 `logs/lf.log`. The turn or tool completes without it. A recording gap is one
 concept, `store::RecordingGap`: one log line per changed failure and one when
 lf's state answers again, whether the gap lives in the server's
@@ -77,7 +78,7 @@ because a kill between a token reply and the profile write would lose a rotated
 grant. The Pi extension and OpenCode plugin live inside the provider's
 process, so they send the same request on a `machine.sock` connection of their
 own, one per boundary, instead of starting `lf` at each boundary
-([OpenCode and Pi ask from inside the provider](../server/README.md#opencode-and-pi-ask-from-inside-the-provider)).
+([OpenCode and Pi report from inside the provider](../server/README.md#opencode-and-pi-report-from-inside-the-provider)).
 A server they cannot reach, or an lf they cannot run, goes to their own log
 (`logs/pi-extension.log`, `opencode.stderr.log` beside the capture), never to
 the conversation. The server
@@ -100,20 +101,25 @@ a comment. Each managed conversation hears what changed on its Tasks: a Graph
 run or step that settled, its Graph position, a comment from anyone else. A
 comment with direction is a steer (source `comment:<id>`) and arrives only as
 one.
-History from before its first boundary is a baseline, not a report to repeat.
 
-`task_updates::read` compares the Tasks against the last update the Session
-received, recorded in its history. It caches the revision at which a Session
-had no news, avoiding history rebuilds until that revision changes. It runs
-at two places in the Machine server, never in a process of its own: each
-`session.boundary` answer carries the update to the hook, which prints it with
-the steers, and the server wakes an idle managed conversation when the store's
-`task_updates` revision moves
+A Task update is a steer lf writes (source `update:…`), owned by the Task. No
+writer sits at each fact: `task_updates::write` compares the Task with its
+last reading (`task_update_readings`) and saves what moved, one steer for its
+position and runs and one per comment. Whoever looks first writes it for
+everyone: a conversation's hook before it claims its steers, or the Machine
+server before it wakes an idle conversation
 ([Waking an idle conversation](../server/README.md#waking-an-idle-conversation)).
-Both record the update as `dispatched` before it leaves, so it reaches the
-conversation once whichever goes first. A run between steps keeps its last
-report until its next step or its end. An exit no one records stays unreported
-until something else on the Task moves.
+A second reader of the same change finds the reading already moved and writes
+nothing. So an exit no one recorded is still reported the next time anything
+looks.
+
+Only interactive conversations read updates, never the Session whose comment
+it is, and only they look: a worker Run rebuilds no Task history. The Task's
+first reading is a baseline, and a conversation that just started marks the
+updates written before it as read. The steer is rendered as an observation,
+not direction. A run between steps keeps its last report until its next step
+or its end. The server caches the revision at which a Task had nothing new; a
+hook's process is too short-lived to.
 
 The revision's triggers follow Task membership, Graph and step facts, comments
 and delivery receipts. Transcript, usage, availability and ordinary tool-process

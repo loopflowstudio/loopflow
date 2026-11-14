@@ -674,20 +674,24 @@ fn members(
             })
         })?
         .collect::<StoreResult<Vec<_>>>()?;
+    Ok((sessions, member_graphs(tx, task)?))
+}
+
+/// A Task's Graphs with their inventory entries.
+fn member_graphs(tx: &rusqlite::Connection, task: &TaskId) -> StoreResult<Vec<MemberGraph>> {
     let graphs = graphs_of_task(tx, task)?;
     let wave = if graphs.is_empty() {
         None
     } else {
         super::durable::task_wave_in(tx, task)?
     };
-    let graphs = graphs
+    graphs
         .into_iter()
         .map(|graph| {
             let entry = super::graph_inventory::entry_of(&graph, Some(task.clone()), wave.clone())?;
             Ok((graph, entry))
         })
-        .collect::<StoreResult<Vec<_>>>()?;
-    Ok((sessions, graphs))
+        .collect()
 }
 
 impl SqliteStore {
@@ -768,6 +772,25 @@ impl SqliteStore {
             },
             details,
         ))
+    }
+
+    /// The Task's Graph position and what `lf graph show --processes` says of
+    /// each of its Graphs, without listing its Sessions: a hook reads this.
+    pub(crate) fn task_progress(
+        &self,
+        task: &TaskId,
+    ) -> StoreResult<(Option<TaskGraph>, Vec<crate::durable::GraphProcessDetail>)> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.savepoint()?;
+        let graphs = member_graphs(&tx, task)?;
+        let graph = task_graph_row(&tx, task)?;
+        tx.commit()?;
+        drop(conn);
+        let details = graphs
+            .iter()
+            .map(|(graph, entry)| graph.detail(entry.clone()))
+            .collect();
+        Ok((graph.map(|row| self.read_task_graph(row)), details))
     }
 
     /// Read all three owners in one SQLite snapshot, including closed history.

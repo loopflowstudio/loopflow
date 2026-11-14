@@ -1,7 +1,7 @@
 //! Old command spellings, kept for one release after the LOO-593 namespace
 //! alignment moved each command to its API name. This module is deleted
-//! whole in the release after 0.15, together with its one call in
-//! `navigation::normalize_args`; nothing else names an old spelling.
+//! whole in the release after 0.15, together with its calls in `navigation`;
+//! nothing else names an old spelling.
 //!
 //! alias until the release after 0.15: LOO-593 alignment
 
@@ -102,8 +102,10 @@ pub const MOVED: &[Moved] = &[
     moved(&["monitor"], &["prune"], &["process", "prune"]),
     moved(&["ps"], &[], &["process", "list"]),
     moved(&["graph", "show"], &["--processes"], &["process", "show"]),
-    moved(&["comment"], &[], &["task", "steer"]),
-    moved(&["task", "comment"], &["--steer"], &["task", "steer"]),
+    moved(&["comment"], &[], &["steer"]),
+    moved(&["task", "comment"], &["--steer"], &["steer"]),
+    moved(&["task", "steer"], &[], &["steer"]),
+    moved(&["session", "steer"], &[], &["steer"]),
     moved(&["task", "comment"], &[], &["task", "report"]),
 ];
 

@@ -38,13 +38,15 @@ Sessions:
 - The agent's own status reports in its output show whether the Session is
   working or available for a reply, including a permission or a question.
   The server's emulator reads them; no per-pane status process is needed.
-- A hook at a turn or tool boundary sends the server the provider's callback.
-  The server records the turn from it and answers with any steers waiting.
+- A hook at a turn boundary sends the server the provider's callback, and
+  the server records the turn from it. The hook then reads the Session's
+  steers from the store itself.
 
 Hooks reach the server at its fixed socket path with a short deadline. A hook
 that cannot reach it logs a gap and lets the turn continue. A managed launch
 starts the server before its agent and fails when none comes up. A bare run,
-headless or in a terminal, has only its two context hooks.
+headless or in a terminal, has its two context hooks and the steer check every
+launch has.
 
 Bare runs at a terminal or headless, and raw conversations, have neither
 signal. They read as available from
@@ -118,7 +120,7 @@ work (LOO-732) reads per-turn `usage` and `completed` rows from the store.
 The transcript is the only writer of `usage` rows (`transcript/facts.rs`):
 one row per turn id, holding that turn's tokens and model, not a running
 total. Turn-end hooks send `session.boundary` to the Machine server and open
-no store themselves. Before answering a Stop, `server/boundary.rs::answer`
+the store only to claim their own steers. Before answering a Stop, `server/boundary.rs::answer`
 reads the transcript's tail and records each complete ended turn (Claude's
 and Codex's Stop hook, Pi's `agent_settled`, OpenCode's
 `session.execution.succeeded`). Bare runs have no turn-end hook.
@@ -205,9 +207,9 @@ What a held terminal's views would become:
   transcript, or the hook becomes a wake-up that tells the server to read the
   transcript. `session.boundary` carries the whole callback, so it serves
   either.
-- Whether the server becomes the only process that opens the store. Hooks and
-  views already do not open it; Graph processes and one-shot commands still
-  do.
+- Whether the server becomes the only process that opens the store. Views
+  already do not open it; Graph processes, one-shot commands and every hook
+  claiming its own steers still do.
 - Whether Claude or Codex re-send terminal modes (bracketed paste, focus,
   Kitty keyboard) on resize, which decides what a crashed server's rebuilt
   emulator gets wrong.

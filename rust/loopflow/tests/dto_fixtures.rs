@@ -926,15 +926,18 @@ fn work_authors_preserve_names_and_historical_attribution() {
 }
 
 #[test]
-fn session_steer_status_preserves_excerpt_evidence() {
+fn session_steers_say_when_each_was_read() {
     let fixture = include_str!("../../../tests/fixtures/dto/session_steers.json");
     let page: loopflow::steer::SessionSteerPage = serde_json::from_str(fixture).unwrap();
-    assert_eq!(page.items[0].excerpted, Some(true));
-    assert_eq!(page.items[0].evidence, "emitted");
+    assert_eq!(page.items[0].delivered_at, Some(1794000000));
+    assert_eq!((page.items[1].delivered_at, page.pending), (None, 1));
     assert_eq!(
         serde_json::to_value(page).unwrap(),
         serde_json::from_str::<serde_json::Value>(fixture).unwrap()
     );
+    // A page missing a nullable key is not a complete page.
+    let partial = fixture.replace(r#""delivered_at": null"#, r#""unrelated": null"#);
+    assert!(serde_json::from_str::<loopflow::steer::SessionSteerPage>(&partial).is_err());
 }
 
 #[test]

@@ -24,6 +24,22 @@ fn git(repo: &std::path::Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
+/// Run `lf` in `dir` and return its output, failing the test unless it succeeds.
+fn lf(dir: &std::path::Path, args: &[&str]) -> std::process::Output {
+    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .args(args)
+        .current_dir(dir)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "lf {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    output
+}
+
 /// Publish `parent`'s PR at `head`, stack `child` on it, then record the
 /// parent's `merge` commit when given.
 fn stack_on_published_parent(
@@ -810,6 +826,90 @@ fn stacked_child_merges_main_after_parent_squash() {
 }
 
 #[test]
+fn stacking_retry_replaces_an_abandoned_parent_and_syncs() {
+    for live_parent in [false, true] {
+        let home = tempfile::TempDir::new().unwrap();
+        let repo = TestRepo::new();
+        let _env = EnvGuard::with_lf_home(&[], home.path());
+        let parent_path = repo.create_named_worktree("parent");
+        std::fs::write(parent_path.join("parent.txt"), "parent work\n").unwrap();
+        git(&parent_path, &["add", "parent.txt"]);
+        git(&parent_path, &["commit", "-m", "parent work"]);
+        let parent_tip = git(&parent_path, &["rev-parse", "HEAD"]);
+        let parent =
+            support::register_task_with_pr(home.path(), &parent_path, "parent", &repo.head_sha());
+        let child_path = repo.create_named_worktree("child");
+        let child = support::register_sibling_task(&parent, "INF-124", "child", &child_path);
+        stack_on_published_parent(&parent, &child, &parent_tip, None);
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let mut closed = runtime
+            .block_on(parent.store.get_task_pr(&parent.pr.id))
+            .unwrap()
+            .unwrap();
+        closed.abandoned_at = Some(closed.created_at);
+        runtime
+            .block_on(parent.store.update_task_pr(&closed))
+            .unwrap();
+        assert!(task_stack(&child_path)
+            .unwrap_err()
+            .to_string()
+            .contains("closed without merging"));
+        let closed = runtime
+            .block_on(parent.store.get_task_pr(&closed.id))
+            .unwrap()
+            .unwrap();
+        let live = if live_parent {
+            let mut next = closed.clone();
+            next.id = loopflow::work::task::TaskPrId::new();
+            next.sequence += 1;
+            next.publication = None;
+            next.abandoned_at = None;
+            runtime
+                .block_on(parent.store.insert_task_pr(&next))
+                .unwrap();
+            Some(next.id)
+        } else {
+            None
+        };
+
+        let output = lf(
+            &child_path,
+            &["checkout", "INF-124", "--stack-on", "INF-123"],
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("stacking pushes"), "{stderr}");
+        assert!(
+            stderr.contains("This Task's checkout and PR are unchanged"),
+            "{stderr}"
+        );
+        let selected = runtime
+            .block_on(parent.store.active_task_pr(&parent.task.id))
+            .unwrap()
+            .unwrap();
+        assert_ne!(selected.id, closed.id);
+        assert_eq!(selected.sequence, closed.sequence + 1);
+        if let Some(live) = live {
+            assert_eq!(selected.id, live);
+        }
+        assert_eq!(
+            runtime
+                .block_on(parent.store.get_task_pr(&closed.id))
+                .unwrap(),
+            Some(closed)
+        );
+        let stacked = task_stack(&child_path)
+            .unwrap()
+            .expect("retry restores a live stack");
+        assert_eq!(stacked.child.parent_pr_id, Some(selected.id));
+        lf(&child_path, &["sync"]);
+        assert_eq!(
+            std::fs::read_to_string(child_path.join("parent.txt")).unwrap(),
+            "parent work\n"
+        );
+    }
+}
+
+#[test]
 fn stacking_on_an_unpushed_parent_pushes_its_branch_and_sync_follows_it() {
     let home = tempfile::TempDir::new().unwrap();
     let repo = TestRepo::new();
@@ -824,16 +924,9 @@ fn stacking_on_an_unpushed_parent_pushes_its_branch_and_sync_follows_it() {
     let child_path = repo.create_named_worktree("child");
     let child = support::register_sibling_task(&parent, "INF-124", "child", &child_path);
 
-    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["checkout", "INF-124", "--stack-on", "INF-123"])
-        .current_dir(&child_path)
-        .stdin(std::process::Stdio::null())
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
+    lf(
+        &child_path,
+        &["checkout", "INF-124", "--stack-on", "INF-123"],
     );
 
     assert_eq!(
@@ -853,30 +946,10 @@ fn stacking_on_an_unpushed_parent_pushes_its_branch_and_sync_follows_it() {
     assert_eq!(child.parent_pr_id, Some(parent_pr.id));
     let stacked = task_stack(&child_path).unwrap().expect("child is stacked");
     assert_eq!(stacked.parent_branch.as_deref(), Some("parent"));
-    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["sync", "--plan"])
-        .current_dir(&child_path)
-        .stdin(std::process::Stdio::null())
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    let output = lf(&child_path, &["sync", "--plan"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("base: origin/parent\n"), "{stdout}");
-    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .arg("sync")
-        .current_dir(&child_path)
-        .stdin(std::process::Stdio::null())
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    lf(&child_path, &["sync"]);
     assert_eq!(
         std::fs::read_to_string(child_path.join("parent.txt")).unwrap(),
         "parent work\n"

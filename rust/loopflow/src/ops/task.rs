@@ -1207,7 +1207,7 @@ async fn stack_existing_task(
         .await
         .map_err(|error| task_error(error.to_string()))?;
     eprintln!(
-        "Task {} stacks on {requested} ({}){}. Checkout and GitHub are unchanged; run `lf sync` in {} to integrate it.",
+        "Task {} stacks on {requested} ({}){}. This Task's checkout and PR are unchanged; run `lf sync` in {} to integrate it.",
         task.identifier,
         parent.branch,
         note.map(|note| format!("; {note}")).unwrap_or_default(),
@@ -1250,10 +1250,10 @@ async fn select_stack_parent(
     if parent_task.id == task.id {
         return Err(task_error("a Task cannot stack on itself"));
     }
-    // Retrying the same parent retains its historical PR identity.
+    // Retrying retains its historical PR identity unless that PR closed without merging.
     if let Some(id) = &task.parent_pr_id {
         if let Some(pr) = store.get_task_pr(id).await.map_err(task_error)? {
-            if pr.task_id == parent_task.id {
+            if pr.task_id == parent_task.id && pr.phase() != PrPhase::Abandoned {
                 return Ok(StackParent {
                     task: parent_task,
                     pr: Some(pr),

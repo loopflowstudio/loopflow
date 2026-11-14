@@ -77,5 +77,29 @@ Checks on `dbde53699f` (pushed; merges clean with origin/main):
 - `cargo fmt --all -- --check`, `git diff --check`: passed.
 - Clippy not rerun on this revision; gate owns it with the hosted suites.
 
-No open product choice. Remaining: gate (clippy, scratch-clear head so hosted CI
-runs the full matrix including the admission fixture), then demo.
+## Retry repair (2026-11-13)
+
+`select_stack_parent` no longer retains an abandoned historical parent on retry:
+it uses the existing placed-branch path to choose the live row or record an
+unpublished one. Merged-parent retries still retain their identity without pushing.
+`stack_existing_task` now says "This Task's checkout and PR are unchanged" after
+any parent-branch publication note.
+
+The CLI regression covers both a newer live parent record and a newly allocated
+one, retaining the closed row and syncing the parent's file into the child.
+
+- `cargo test -p loopflow --test integration sync_tests::stacking_retry_replaces_an_abandoned_parent_and_syncs`: passed both new-record and live-record cases in 8.63 s; the initial fixture assertion was corrected to snapshot history after sync lookup refreshed its observation cache.
+
+- `cargo test -p loopflow --lib ops::task::tests::stacking_retry_keeps_a_merged_parent_without_republishing_its_branch`: passed in 0.32 s; merged identity retained with local branch present or absent, no remote publication. Both test builds emitted the existing macOS unwind-section linker warning.
+- `cargo fmt --all -- --check` and `git diff --check`: passed on the retry repair; clippy remains gate-owned.
+
+Compress: the two stacking CLI tests share one `lf(dir, args)` helper in
+`sync_tests.rs`; production code unchanged.
+- `cargo test -p loopflow --test integration -- sync_tests::stacking_`: 2 passed in 10.09 s.
+
+## Remaining
+
+Gate: clippy and scratch-clear publication so hosted CI runs the full matrix,
+including the admission fixture. Affected checks include Task preparation,
+checkout explanation, sync, documented commands and planning performance.
+Then demo; no interactive judgment collected in this headless run.

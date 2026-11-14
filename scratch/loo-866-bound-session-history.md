@@ -233,6 +233,7 @@ Open, not blocking Done when (record answers here):
 
 ## Checks
 
+- QA run 2 (`35021f9fde`, load 150–195, `scratch/qa.html`): real Task conversation (turn, steer, `/exit`) read back through `lf session history`, `lf session usage --task` (id, `lf-…` identifier, short prefix), `lf task context` and socket `session.usage`/`task.context`, 0.01–0.4 s. Main and branch statements agree on 208 window/Task/limit combinations on that store. Fresh `VACUUM INTO` Machine copy: Task drills (ranks 1, 2, 10, 50) `same` rows, main 1.2–2.7 s → branch 0.04–0.30 s; whole store `same` 20,788 rows, finished included 2.0–3.0 → 2.5–3.3 s, finished excluded 3.0–3.5 → 3.9–4.4 s.
 - Task arms + `?5>0` gate (load avg 400–680): `cargo test -p loopflow --lib -- store::query_plans:: store::sqlite::session` 38/39, the one failure the drill's selector-resolution `tasks` scan (`scratch/questions.md`); after scoping the check to the history statement, `session_history_reads_plan_by_window` passes. `task_history_reads_every_row_naming_the_task` passes. `bench.sh`: `same` on all eight rows. Clippy, CI suites: gate.
 - `eligible` `?3` filter matches `task_id=?3` (input and `started` origin), no `tasks` subquery: `cargo test -p loopflow --lib -- store::query_plans:: store::sqlite::session` 39/39. Bench not rerun.
 - After sync `65be402161`: `cargo test -p loopflow --lib -- store::query_plans:: store::sqlite::session server::boundary::` 51 pass; fmt and clippy clean.

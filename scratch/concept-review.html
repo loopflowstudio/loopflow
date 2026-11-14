@@ -18,10 +18,11 @@ li { margin: 10px 0; } blockquote { margin: 12px 0; padding-left: 16px; border-l
 Sources: scratch/loo-715-plan.md, scratch/loo-715-direction.md,
 scratch/desktop-exit-2026-11-02.md, BrowserPageView.swift,
 SessionsView.swift, MultiplexerStore.swift, BrowserPageLifecycleTests.swift,
-swift/README.md, browser-lifetime/README.md.</header>
-<h1>Keep browser use ordinary. Decide which crash evidence production keeps.</h1>
+swift/README.md, browser-lifetime/README.md, reporter/README.md,
+desktop_exits/envelope_experiment.rs.</header>
+<h1>Decide which crash evidence production keeps.</h1>
 <p>Jack Heart said “lets do it.” The required outcome is Desktop surviving first-paint closes while preserving history, pane moves and Undo. Production reporter policy remains open.</p>
-<p class="callout"><strong>Biggest mismatch:</strong> the README promises crash survival; the implemented change only observes lifetime. All 48 final window trials survived, including immediate release. No teardown candidate has demonstrated a repair.</p>
+<p class="callout"><strong>Biggest mismatch:</strong> lifetime observation is built; a lifetime repair is not. All 48 comparison trials survived, including immediate release. Later probes found occluded windows without animation callbacks. A failing baseline on an unoccluded display is still missing.</p>
 <h2>Actions → concepts → APIs</h2>
 <table>
 <thead><tr><th>Action</th><th>Concept that stays</th><th>Existing state change</th></tr></thead>
@@ -33,12 +34,15 @@ swift/README.md, browser-lifetime/README.md.</header>
 <tr><td>Inspect an unexplained exit</td><td>Evidence, with uncertainty</td><td><code>lf doctor</code> reads launch journal and system log</td></tr>
 </tbody></table>
 <h2>Before → proposed outcome</h2>
-<p><strong>Existing:</strong> pool removal can precede native destruction; diagnostics now distinguish both. Native reporting can bypass exit hooks. <strong>Proposed, unbuilt:</strong> a demonstrated safe disposal path in the same pool, plus attributable crash evidence. No second cache, persistent lifecycle record or new user action.</p>
+<p><strong>Existing:</strong> pool removal can precede native destruction; diagnostics distinguish both. Native reporting can bypass exit hooks. <strong>Proposed, unbuilt:</strong> demonstrated safe disposal in the same pool, plus attributable crash evidence. Undo owns recoverability; the pool owns native pages; containers own presentation. No second cache, persisted lifecycle or new user action.</p>
 <blockquote>Proposed usage copy: “Close a page, then Undo: its history returns. Moving or hiding a pane keeps its contents. Surviving a close during first paint remains an acceptance target under investigation.”</blockquote>
 <p><strong>Failure and recovery:</strong> relaunch restores access, not a repair or a promise of live page history after process death. Missing journal/report evidence stays unknown. Failed navigation, WebContent death and owner loss must still permit reclamation; a timeout or paint callback alone proves no safety.</p>
-<h2>Open decision for later review</h2>
-<ol><li>Which production reporter policy should follow the isolated comparison?<br>
-<strong>1a.</strong> Keep Ghostty's reporter; correlate local fatal envelopes in <code>lf doctor</code>.<br>
-<strong>1b.</strong> Disable it after proving signal-journal and macOS crash reports in a disposable diagnostic build.</li></ol>
-<p>Both experiments remain unfinished; no recommendation is established. Dumps and envelopes stay private. No install, merge, upload or OS upgrade. <strong>Review outcome: Blocked</strong> on this product choice; reproduction remains an independent engineering gap.</p>
+<h2>Measured alternatives; production remains unchanged</h2>
+<p><strong>Disable reporter:</strong> the isolated patched Ghostty build produced one signal-journal entry and a matching macOS report after a disposable native fault. Recommended after review and packaging checks.</p>
+<p><strong>Keep reporter:</strong> synthetic envelope correlation passes its focused checks without reading memory streams. Production integration still needs executable/process-birth launch fields and handling for rotating evidence; native dump memory remains on disk.</p>
+<p>Neither alternative repairs WebKit. No experiments need repeating here. Details and private receipt locations are in the plan; dumps and envelopes stay private. No install, merge, upload or OS upgrade.</p>
+<h2>Decision needed · loop-or-next: Blocked</h2>
+<ol><li>Which production reporter policy should be implemented after review?<br>
+<strong>1a.</strong> Keep Ghostty's reporter and add exact launch-to-envelope correlation in <code>lf doctor</code>.<br>
+<strong>1b.</strong> Disable it and use the demonstrated signal-journal/macOS-report route (recommendation).</li></ol>
 </html>

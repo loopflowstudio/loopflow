@@ -12,7 +12,19 @@ import sys
 from pathlib import Path
 
 OFFSETS = (0, 10, 25, 50, 100, 200)
-SCENARIOS = ("single", "two-close", "shell-replace", "pane-replace", "reparent", "workspace")
+SCENARIOS = (
+    "single",
+    "two-close",
+    "shell-replace",
+    "pane-replace",
+    "reparent",
+    "workspace",
+    "swiftui-close",
+    "swiftui-reparent",
+    "window-transfer",
+    "occluded",
+)
+ANCHORS = ("load-request", "navigation-commit", "navigation-finish", "animation-frame")
 VARIANTS = ("immediate", "detach-stop", "deferred", "blank")
 
 
@@ -36,12 +48,22 @@ def _result(returncode: int, events: list[dict], timed_out: bool = False) -> dic
         outcome = "timeout"
     elif returncode < 0:
         outcome = "crash"
+    elif any(event["event"] == "display-unavailable" for event in events):
+        outcome = "unavailable"
     elif returncode != 0:
         outcome = "failed"
     elif (
         len(complete) != 1
         or not environment
         or not environment.get("display_session")
+        or not any(event["event"] == "display-ready" for event in events)
+        or not any(
+            event["event"] == "presentation"
+            and event.get("visible") is True
+            and event.get("width", 0) > 0
+            and event.get("height", 0) > 0
+            for event in events
+        )
         or complete[0].get("retained") != 0
         or complete[0].get("retiring") != 0
         or not complete[0].get("created")
@@ -102,6 +124,7 @@ def main() -> int:
     parser.add_argument("--variant", choices=VARIANTS, default="immediate")
     parser.add_argument("--scenario", choices=SCENARIOS, action="append")
     parser.add_argument("--offset-ms", type=int, choices=OFFSETS, action="append")
+    parser.add_argument("--anchor", choices=ANCHORS, default="navigation-finish")
     parser.add_argument("--attempts", type=int, default=3)
     parser.add_argument(
         "--hold-ms",
@@ -143,6 +166,7 @@ def main() -> int:
             {
                 "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
                 "executable_sha256": hashlib.sha256(executable.read_bytes()).hexdigest(),
+                "anchor": args.anchor,
                 "hold_ms": args.hold_ms,
                 "settle_ms": args.settle_ms,
                 "swift": subprocess.check_output(
@@ -159,7 +183,10 @@ def main() -> int:
     (output / "os-build.txt").write_text(subprocess.check_output(["sw_vers"], text=True))
     if args.check:
         print(check.stdout.strip())
-        print(f"Environment saved to {output}; no window opened.")
+        print(
+            f"Environment saved to {output}; no window opened. "
+            "Session availability does not prove visible rendering."
+        )
         return check.returncode
     if check.returncode:
         print(f"Display session unavailable; no trials run. Environment: {output}", file=sys.stderr)
@@ -170,7 +197,7 @@ def main() -> int:
         for offset in args.offset_ms or OFFSETS:
             for attempt in range(args.attempts):
                 for variant in variants:
-                    name = f"{scenario}-{offset}-{attempt}-{variant}"
+                    name = f"{args.anchor}-{scenario}-{offset}-{attempt}-{variant}"
                     result = _run(
                         [
                             str(executable),
@@ -179,12 +206,17 @@ def main() -> int:
                             str(offset),
                             str(args.hold_ms),
                             str(args.settle_ms),
+                            args.anchor,
                         ],
                         output / name,
                         timeout=30 + 2 * args.settle_ms // 1000,
                     )
                     result.update(
-                        scenario=scenario, offset_ms=offset, attempt=attempt, variant=variant
+                        scenario=scenario,
+                        anchor=args.anchor,
+                        offset_ms=offset,
+                        attempt=attempt,
+                        variant=variant,
                     )
                     results.append(result)
                     (output / "results.json").write_text(json.dumps(results, indent=2) + "\n")
@@ -193,6 +225,9 @@ def main() -> int:
                         f"retained={result['retained']}",
                         flush=True,
                     )
+                    if result["outcome"] == "unavailable":
+                        print(f"Visible display unavailable; sweep stopped. Evidence: {output}")
+                        return 2
     for variant in variants:
         selected = [result for result in results if result["variant"] == variant]
         failures = sum(result["outcome"] != "pass" for result in selected)

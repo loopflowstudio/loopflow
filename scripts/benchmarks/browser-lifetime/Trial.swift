@@ -2,6 +2,7 @@ import AppKit
 import Darwin
 import MachO
 import WebKit
+import SwiftUI
 
 private func emit(_ event: String, _ fields: [String: Any] = [:]) {
     var fields = fields
@@ -49,23 +50,30 @@ private final class TrialPage: WKWebView {
 
 /// Each process owns one disposable window, no Desktop or Loopflow store.
 @MainActor
-private final class Trial: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScriptMessageHandler {
+private final class Trial: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigationDelegate, WKScriptMessageHandler {
     let variant: String
     let scenario: String
+    let anchor: String
     let offset: Int
     let hold: Int
     let settle: Int
     let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 800, height: 600),
                           styleMask: [.titled], backing: .buffered, defer: false)
+    var otherWindow: NSWindow?
+    var hosting: NSHostingView<HostedPages>?
+    let presentation = Presentation()
     var pages: [String: TrialPage] = [:]
     var undo: TrialPage?
     var retired: [String: TrialPage] = [:]
     var references: [String: WeakPage] = [:]
+    var reparenting = false
+    var loading = false
     var scheduled = false
     var started = false
     var navigationFinished: Double?
 
-    init(variant: String, scenario: String, offset: Int, hold: Int, settle: Int) {
+    init(variant: String, scenario: String, offset: Int, hold: Int, settle: Int, anchor: String) {
+        self.anchor = anchor
         self.variant = variant
         self.scenario = scenario
         self.offset = offset
@@ -75,20 +83,47 @@ private final class Trial: NSObject, NSApplicationDelegate, WKNavigationDelegate
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         window.title = "Browser lifetime diagnostic — disposable"
+        window.delegate = self
         window.isReleasedWhenClosed = false
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         let page = makePage("first")
-        mount(page)
+        if scenario.hasPrefix("swiftui") {
+            presentation.page = page
+            let host = NSHostingView(rootView: HostedPages(presentation: presentation, attached: { [weak self] page in
+                self?.attached(page)
+            }))
+            hosting = host
+            window.contentView = host
+        } else {
+            mount(page)
+        }
+        emit("windows", ["screens": NSScreen.screens.count, "scenario": scenario])
+        window.contentView?.layoutSubtreeIfNeeded()
+        beginNavigation()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            guard let self, !self.loading else { return }
+            emit("display-unavailable", ["reason": "window-never-unoccluded"])
+            exit(2)
+        }
+    }
+
+    func windowDidChangeOcclusionState(_ notification: Notification) { beginNavigation() }
+
+    func beginNavigation() {
+        guard !loading, window.occlusionState.contains(.visible), let page = pages["first"] else { return }
+        loading = true
+        emit("display-ready", ["width": window.frame.width, "height": window.frame.height])
         if scenario == "two-close" || scenario == "workspace" {
             let second = makePage("second")
             second.loadHTMLString(Self.html, baseURL: nil)
         }
         // Identical local content for all variants; no network or machine data.
+        schedule("load-request")
         page.loadHTMLString(Self.html, baseURL: URL(string: "https://browser-lifetime.invalid/"))
         DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
             guard let self, !self.started else { return }
-            emit("incomplete", ["reason": "navigation-never-finished"])
+            emit("incomplete", ["reason": "anchor-never-observed", "anchor": self.anchor])
             exit(2)
         }
     }
@@ -97,6 +132,8 @@ private final class Trial: NSObject, NSApplicationDelegate, WKNavigationDelegate
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
         configuration.userContentController.add(self, name: "paint")
+        configuration.userContentController.addUserScript(WKUserScript(source: "window.lifetimePage = '\(id)';",
+            injectionTime: .atDocumentStart, forMainFrameOnly: true))
         let page = TrialPage(id, configuration: configuration)
         page.navigationDelegate = self
         pages[id] = page
@@ -117,14 +154,27 @@ private final class Trial: NSObject, NSApplicationDelegate, WKNavigationDelegate
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         guard let page = webView as? TrialPage else { return }
         let id = page.lifetime.id
-        emit("navigation-finish", ["page": id, "blank": retired[id] != nil])
+        emit("navigation-finish", ["page": id, "blank": retired[id] != nil,
+                                   "width": page.bounds.width, "height": page.bounds.height,
+                                   "window_visible": page.window?.isVisible == true,
+                                   "unoccluded": page.window?.occlusionState.contains(.visible) == true])
         if variant == "blank", retired[id] != nil {
             finishRetirement(id, reason: "blank-finish")
             return
         }
-        guard id == "first", !scheduled else { return }
-        scheduled = true
+        guard id == "first" else { return }
         navigationFinished = ProcessInfo.processInfo.systemUptime * 1000
+        schedule("navigation-finish")
+    }
+
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        if (webView as? TrialPage)?.lifetime.id == "first" { schedule("navigation-commit") }
+    }
+
+    func schedule(_ observed: String) {
+        guard anchor == observed, !scheduled else { return }
+        scheduled = true
+        emit("anchor", ["kind": observed])
         // didFinish is a navigation anchor, never a first-paint acknowledgement.
         DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(offset)) { [weak self] in self?.exercise() }
     }
@@ -151,6 +201,7 @@ private final class Trial: NSObject, NSApplicationDelegate, WKNavigationDelegate
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let body = message.body as? [String: Any] else { return }
         emit("paint-observation", body)
+        if body["kind"] as? String == "animation-frame", body["page"] as? String == "first" { schedule("animation-frame") }
     }
 
     func close(_ id: String) {
@@ -163,7 +214,42 @@ private final class Trial: NSObject, NSApplicationDelegate, WKNavigationDelegate
     func exercise() {
         started = true
         emit("exercise", ["scenario": scenario, "offset_ms": offset])
+        if let page = references["first"]?.page {
+            emit("presentation", ["width": page.bounds.width, "height": page.bounds.height,
+                                  "visible": page.window?.occlusionState.contains(.visible) == true])
+        }
         switch scenario {
+        case "swiftui-close", "swiftui-reparent":
+            // The SwiftUI value and old AppKit container retain the page after
+            // pool removal, just as BrowserPageSurface does in Desktop.
+            if scenario == "swiftui-reparent" {
+                reparenting = true
+                presentation.side.toggle()
+                // SwiftUI may coalesce same-turn changes. Wait for the actual
+                // new container attachment before dropping presentation.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
+                    guard self?.reparenting == true else { return }
+                    emit("incomplete", ["reason": "swiftui-never-reparented"])
+                    exit(2)
+                }
+                return
+            }
+            if let first = pages.removeValue(forKey: "first") { dispose(first, detach: false) }
+            presentation.page = nil
+        case "window-transfer", "occluded":
+            if scenario == "window-transfer", let first = pages["first"] {
+                let target = NSScreen.screens.last?.visibleFrame.origin ?? NSPoint(x: 950, y: 100)
+                let other = NSWindow(contentRect: NSRect(origin: target, size: NSSize(width: 640, height: 480)),
+                                     styleMask: [.titled], backing: .buffered, defer: false)
+                other.isReleasedWhenClosed = false
+                otherWindow = other
+                other.makeKeyAndOrderFront(nil)
+                first.removeFromSuperview()
+                first.frame = other.contentView!.bounds
+                other.contentView!.addSubview(first)
+            }
+            window.orderOut(nil)
+            if let first = pages.removeValue(forKey: "first") { dispose(first) }
         case "two-close":
             close("first")
             if let second = pages["second"] { mount(second) }
@@ -188,15 +274,32 @@ private final class Trial: NSObject, NSApplicationDelegate, WKNavigationDelegate
         default:
             if let first = pages.removeValue(forKey: "first") { dispose(first) }
         }
+        checkpoint()
+    }
+
+    func attached(_ page: TrialPage) {
+        guard reparenting else { return }
+        reparenting = false
+        emit("reparent", ["same_page": page === references["first"]?.page])
+        // Do not mutate observable presentation during updateNSView.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            if let first = self.pages.removeValue(forKey: "first") { self.dispose(first, detach: false) }
+            self.presentation.page = nil
+            self.checkpoint()
+        }
+    }
+
+    func checkpoint() {
         emit("ownership", ["open": pages.count, "undo": undo == nil ? 0 : 1, "retiring": retired.count])
         DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(settle)) { [weak self] in self?.cleanup() }
     }
 
-    func dispose(_ page: TrialPage) {
+    func dispose(_ page: TrialPage, detach: Bool = true) {
         let id = page.lifetime.id
         emit("retire", ["page": id, "variant": variant,
                         "since_navigation_ms": navigationFinished.map { ProcessInfo.processInfo.systemUptime * 1000 - $0 } ?? -1])
-        page.removeFromSuperview()
+        if detach { page.removeFromSuperview() }
         if variant != "immediate" { page.stopLoading() }
         if variant == "deferred" || variant == "blank" {
             retired[id] = page
@@ -220,7 +323,12 @@ private final class Trial: NSObject, NSApplicationDelegate, WKNavigationDelegate
         undo?.stopLoading()
         pages.removeAll()
         undo = nil
+        presentation.page = nil
+        hosting = nil
         window.contentView = nil
+        otherWindow?.contentView = nil
+        otherWindow?.close()
+        otherWindow = nil
         DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(settle)) { [weak self] in
             guard let self else { return }
             let retained = self.references.values.filter { $0.page != nil }.count
@@ -232,19 +340,58 @@ private final class Trial: NSObject, NSApplicationDelegate, WKNavigationDelegate
     static let html = """
     <!doctype html><meta charset="utf-8"><style>
     body { background:#15243c; color:white; font:32px system-ui; }
-    div { width:400px; height:240px; transform:translateZ(0); background:linear-gradient(45deg,#f68,#48f); }
+    @keyframes move { to { transform:translate3d(100px,50px,0) rotate(30deg); } }
+    div { animation:move 0.2s infinite alternate; width:400px; height:240px; transform:translateZ(0); background:linear-gradient(45deg,#f68,#48f); }
     </style><h1>Local first-paint lifetime trial</h1><div></div><canvas width="600" height="200"></canvas>
     <script>
-    const send = value => window.webkit.messageHandlers.paint.postMessage(value);
+    const send = value => window.webkit.messageHandlers.paint.postMessage({...value, page:window.lifetimePage});
     const supported = PerformanceObserver.supportedEntryTypes?.includes('paint') ?? false;
     send({kind:'paint-support', supported});
     if (supported) new PerformanceObserver(list => list.getEntries().forEach(entry =>
       send({kind:entry.name, page_ms:entry.startTime}))).observe({type:'paint', buffered:true});
     requestAnimationFrame(() => requestAnimationFrame(() => send({kind:'animation-frame', page_ms:performance.now()})));
     const ctx = document.querySelector('canvas').getContext('2d');
-    ctx.fillStyle='#fea'; ctx.fillRect(0,0,600,200);
+    function draw(t) { ctx.fillStyle=`hsl(${t%360},80%,60%)`; ctx.fillRect(0,0,600,200); requestAnimationFrame(draw); }
+    requestAnimationFrame(draw);
     </script>
     """
+}
+
+@MainActor
+@Observable
+private final class Presentation {
+    var page: TrialPage?
+    var side = false
+}
+
+private struct HostedPages: View {
+    let presentation: Presentation
+    let attached: @MainActor (TrialPage) -> Void
+    var body: some View {
+        HStack {
+            if !presentation.side, let page = presentation.page { HostedSurface(page: page, attached: attached).frame(maxWidth: .infinity, maxHeight: .infinity) }
+            Color.clear.frame(width: 10)
+            if presentation.side, let page = presentation.page { HostedSurface(page: page, attached: attached).frame(maxWidth: .infinity, maxHeight: .infinity) }
+        }
+    }
+}
+
+private struct HostedSurface: NSViewRepresentable {
+    let page: TrialPage
+    let attached: @MainActor (TrialPage) -> Void
+    func makeNSView(context: Context) -> NSView { NSView() }
+    func updateNSView(_ container: NSView, context: Context) {
+        guard page.superview !== container else { return }
+        page.removeFromSuperview()
+        page.frame = container.bounds
+        page.autoresizingMask = [.width, .height]
+        container.addSubview(page)
+        emit("swiftui-attach", ["page": page.lifetime.id])
+        attached(page)
+    }
+    static func dismantleNSView(_ container: NSView, coordinator: ()) {
+        emit("swiftui-dismantle", ["children": container.subviews.count])
+    }
 }
 
 @MainActor
@@ -259,13 +406,13 @@ let display = session?[kCGSessionOnConsoleKey as String] as? Bool == true && CGM
 emit("environment", ["os": ProcessInfo.processInfo.operatingSystemVersionString,
                      "webkit": webKitImage(), "display_session": display, "pid": getpid()])
 if arguments.contains("--check") { exit(display ? 0 : 2) }
-guard display, arguments.count == 6 else {
-    emit("incomplete", ["reason": "requires-display-session-and-five-arguments"])
+guard display, arguments.count == 7 else {
+    emit("incomplete", ["reason": "requires-display-session-and-six-arguments"])
     exit(2)
 }
 let app = NSApplication.shared
 app.setActivationPolicy(.regular)
 private let trial = Trial(variant: arguments[1], scenario: arguments[2], offset: Int(arguments[3])!,
-                  hold: Int(arguments[4])!, settle: Int(arguments[5])!)
+                  hold: Int(arguments[4])!, settle: Int(arguments[5])!, anchor: arguments[6])
 app.delegate = trial
 app.run()

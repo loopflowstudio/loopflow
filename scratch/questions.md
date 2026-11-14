@@ -8,9 +8,19 @@
   animation frames never count as proof of a committed layer tree.
 - Jack Heart's production reporter decision remains open, but it does not block
   the isolated `-Dsentry=false` and envelope-correlation experiments (operator
-  steer, November 14). Ask only once both are measured. No reporter policy,
+  steer, November 14). Both experiments are now measured; the recommendation is in the plan.
+  Headless review leaves the choice open. No reporter policy,
   installation, merge, OS upgrade or upload is included.
 - November 14 measured counterexample to selecting a workaround: the final 48
   visible-window trials passed even with immediate release. Choosing a delay or
   blank navigation from that evidence would be unjustified. The missing evidence
   is a reproduced failing baseline / observed Desktop release trigger.
+
+- November 14: newer trials exposed a missing display condition: console-session
+  presence and a visible window flag did not imply unoccluded rendering.
+  An 800×600 page was occluded and never supplied animation callbacks. The final
+  probe reports unavailable; no additional survival count justifies a workaround.
+- Reversible experiment placement: the synthetic envelope candidate lives under
+  `#[cfg(test)]` in `desktop_exits` until reporter review. Production integration
+  would require executable and kernel process-birth fields currently absent from
+  launch records. No production scan or fallback identity is inferred.

@@ -477,13 +477,16 @@ A later edit to the YAML applies to Tasks that take it up afterwards; taking one
 up again replaces the row and starts over at `start`.
 
 While `lf task run` carries the Task, the row also holds `run_start`, the cursor
-that run began from, and `lf_process_id`, that Task run. Whether it still runs is
-read from the Process, never stored. The run's child Graph process writes where it
-left the Task: before the interactive step it stopped at, or `end`. A run that
-stops leaves the Task on it; the next `lf task run` starts it again from
-`run_start`. Without one, `lf task run` continues after the step the Task waits
-at; `--from STEP` (a step id, skill or composed graph name) starts anywhere, and
-starting from an interactive step only puts the Task there. `-b task run` runs
+the run's next attempt sets out from, and `lf_process_id`, that Task run. Whether
+it still runs is read from the Process, never stored. `lf task run` writes
+`run_start`; the child Graph process overwrites it after every step with the
+cursor of the next one (loop counts, iterate direction, pending verdict and route
+included), so a failed attempt and the next `lf task run` start at the step that
+failed and the steps before it never rerun. The child Graph process writes where
+it left the Task: before the interactive step it stopped at, or `end`. With no
+run, `lf task run` continues after the step the Task waits at; `--from STEP` (a
+step id, skill or composed graph name) starts anywhere, and starting from an
+interactive step only puts the Task there. `-b task run` runs
 straight through headless, and `lf ship` repeats it until `end`. Other Graphs in
 the checkout never move the Task. Graph processes and Task events keep the
 history; there is no move log.

@@ -13,6 +13,10 @@ Name the Rust modules and integration binaries the diff can reach before
 building anything: the changed module's own tests, its direct callers, and any
 boundary check its owner README names (see below).
 
+Task Graph selection, cursors or step names also reach
+`test(ops::task::explain::tests::)`: previews share the execution selector and
+display names. Run these rows before the Task launch fixtures.
+
 Markdown changes under `docs/`, builtins or skills, and README or AGENTS edits,
 also run `cargo test -p loopflow --test integration documented_commands::`.
 It checks command examples and maintained copy, including design documents;

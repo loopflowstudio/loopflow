@@ -172,6 +172,8 @@ Removed:
 - The completed concept review's obsolete implementation walkthrough.
 - Single-deadline cooldown explanations that hide a longer model hold behind
   an account-wide label; shared per-scope explanations survive.
+- Separate active-hold filtering in routing and its explanations;
+  `provider_account::account_hold_deadlines` supplies both.
 
 Retained deliberately:
 
@@ -180,9 +182,10 @@ Retained deliberately:
 - General health/window writes for other callers; both advance the revision.
 
 The store shares one canonical model-weekly predicate for recovery, alias
-removal and legacy comparison. Legacy selection consumes winning rows without
-cloning them; stream normalization runs in one pass. Recovery tests remain on
-the surviving store path.
+removal and legacy comparison. Recovery tests remain on the surviving store
+path. Cached account reports need no poll revision; verified reports read it
+before polling. Cooldown clearing uses one reading time for both its old
+account cooldown and remaining window holds.
 
 ## Checks and remaining delivery
 
@@ -221,18 +224,23 @@ and Fable holds separate deadlines. `--clear-cooldown` names remaining window
 holds; an already-null cooldown says no active account-wide cooldown. Eligibility
 and stored windows keep their existing semantics.
 
-Concept review, 2026-11-14: no further design change or open product choice.
-The overlapping-hold correction above is present in the working tree and fits
-the existing model: one login has independently scoped capacity holds, and
-clearing its account cooldown leaves observed windows intact. The review page
-at `scratch/concept-review.html` shows the failure and recovery interaction.
-Next: gate the implemented correction; no additional implement direction.
+QA, concept review and realign, 2026-11-14: overlapping holds now have separate
+deadlines, and clearing cooldown names remaining windows. The focused
+`claude_usage_reconciliation_explains_overlapping_and_cleared_holds` test passed
+(1), as did `cargo fmt --check` and `git diff --check`; the linker repeated the
+compact-unwind size warning above. `scratch/qa.html` records the original run;
+`scratch/concept-review.html` shows its implemented correction. Remaining: gate
+and CI's broader checks; no open product choice.
 
-- `cargo test -p loopflow --lib claude_usage_reconciliation_explains_overlapping_and_cleared_holds` — passed (1); linker repeated the compact-unwind size warning above. `cargo fmt --check` and `git diff --check` passed; gate/CI own clippy, documented commands and broader suites after this explanation fix.
+Compression after realign, 2026-11-14 (inherited `LF_*` unset, stdin closed):
 
-Realign after QA, 2026-11-14: the QA direction (longer Fable hold reported
-behind an account-wide cooldown; `--clear-cooldown` naming remaining scoped
-holds) is implemented. `lf account next` reaches
-`provider_account::account_unavailable_reason` via `profile::show_next`
-(`profile.rs:161`); `clear_account_cooldown` appends
-`account_capacity_holds`. Same focused test passed again (1). Remaining: gate.
+- `cargo test -p loopflow --lib claude_usage_reconciliation_` — passed (13);
+  linker repeated the compact-unwind size warning. Gate/CI own broader suites.
+- `cargo clippy --all-targets -- -D warnings` — passed.
+
+QA after compression, 2026-11-14 (branch `lf` on the released incident store,
+`/tmp/lf-qa-900`): `next` and fresh launches give separate account-wide and
+Fable deadlines; Sonnet/Opus/Haiku route, Fable is refused. `--clear-cooldown`
+read "Cleared … account-wide cooldown; still held account-wide until …" when an
+unscoped `five_hour` window remained; it now reads "observed windows still hold
+it …". Focused tests passed (13). Store rows unchanged by clearing.

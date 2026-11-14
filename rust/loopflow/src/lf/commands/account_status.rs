@@ -375,9 +375,6 @@ async fn managed_rows(
             .as_ref()
             .map(|identity| identity.email.clone());
         let mut live_usage = None;
-        let revision = store
-            .provider_account_capacity_revision(&account.provider, &account.account_id)
-            .await?;
         let identity_error = (presence == crate::provider_auth::CredentialPresence::Present
             && (provider == Provider::Codex || (!verify && cached_identity.is_some())))
         .then(|| {
@@ -392,6 +389,9 @@ async fn managed_rows(
             recover = true;
             Verification::Rejected
         } else if verify && presence == crate::provider_auth::CredentialPresence::Present {
+            let revision = store
+                .provider_account_capacity_revision(&account.provider, &account.account_id)
+                .await?;
             let observation = if _login_lock.as_ref().is_some_and(|lock| lock.is_err()) {
                 Err(crate::subscription::SubscriptionError::Unavailable(
                     "managed credential cannot be locked; another credential operation may be in progress; retry verification".into(),

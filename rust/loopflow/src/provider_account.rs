@@ -61,19 +61,36 @@ pub(crate) fn account_held_until(
     model: Option<&str>,
     now: i64,
 ) -> Option<i64> {
+    account_hold_deadlines(account, limits, model, now)
+        .map(|(_, until)| until)
+        .max()
+}
+
+// Routing and its explanations read the same active scopes and deadlines.
+fn account_hold_deadlines<'a>(
+    account: &'a ProviderAccount,
+    limits: &'a [AccountLimitRow],
+    model: Option<&'a str>,
+    now: i64,
+) -> impl Iterator<Item = (Option<&'a str>, i64)> + 'a {
     let scoped = limits
         .iter()
-        .filter(|limit| {
-            limit.provider == account.provider && limit.account_id == account.account_id
+        .filter(move |limit| {
+            limit.provider == account.provider
+                && limit.account_id == account.account_id
+                && limit_affects(limit.model.as_deref(), model)
         })
-        .filter(|limit| limit_affects(limit.model.as_deref(), model))
-        .filter_map(|limit| limit.limited_until);
+        .filter_map(|limit| {
+            limit
+                .limited_until
+                .map(|until| (limit.model.as_deref(), until))
+        });
     account
         .cooldown_until
         .into_iter()
+        .map(|until| (None, until))
         .chain(scoped)
-        .filter(|until| *until > now)
-        .max()
+        .filter(move |(_, until)| *until > now)
 }
 
 pub(crate) fn account_route_eligible(
@@ -1667,20 +1684,11 @@ pub(crate) fn account_capacity_holds(
     now: i64,
 ) -> Vec<String> {
     let mut holds = std::collections::BTreeMap::<Option<&str>, i64>::new();
-    if let Some(until) = account.cooldown_until.filter(|until| *until > now) {
-        holds.insert(None, until);
-    }
-    for limit in limits.iter().filter(|limit| {
-        limit.provider == account.provider
-            && limit.account_id == account.account_id
-            && limit_affects(limit.model.as_deref(), model)
-    }) {
-        if let Some(until) = limit.limited_until.filter(|until| *until > now) {
-            holds
-                .entry(limit.model.as_deref())
-                .and_modify(|current| *current = (*current).max(until))
-                .or_insert(until);
-        }
+    for (scope, until) in account_hold_deadlines(account, limits, model, now) {
+        holds
+            .entry(scope)
+            .and_modify(|current| *current = (*current).max(until))
+            .or_insert(until);
     }
     holds
         .into_iter()

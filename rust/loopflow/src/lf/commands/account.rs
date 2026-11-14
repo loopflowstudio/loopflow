@@ -1599,6 +1599,7 @@ fn parse_paid_through(value: &str) -> Result<time::Date> {
 
 async fn clear_account_cooldown(store: &SharedStore, account: &ProviderAccount) -> Result<String> {
     let provider: Provider = account.provider.parse()?;
+    let now = OffsetDateTime::now_utc().unix_timestamp();
     store
         .clear_provider_account_cooldown(provider.as_str(), &account.account_id)
         .await
@@ -1610,30 +1611,22 @@ async fn clear_account_cooldown(store: &SharedStore, account: &ProviderAccount) 
     let limits = store
         .provider_account_limits(Some(provider.as_str()))
         .await?;
-    let holds = crate::provider_account::account_capacity_holds(
-        &current,
-        &limits,
-        None,
-        OffsetDateTime::now_utc().unix_timestamp(),
+    let holds = crate::provider_account::account_capacity_holds(&current, &limits, None, now);
+    let login = format!(
+        "{} login '{}'",
+        provider.display_name(),
+        account_login(account)
     );
-    let mut message = if account
-        .cooldown_until
-        .is_some_and(|until| until > OffsetDateTime::now_utc().unix_timestamp())
-    {
-        format!(
-            "Cleared {} login '{}' account-wide cooldown",
-            provider.display_name(),
-            account_login(account)
-        )
+    let mut message = if account.cooldown_until.is_some_and(|until| until > now) {
+        format!("Cleared {login} account-wide cooldown")
     } else {
-        format!(
-            "{} login '{}' has no active account-wide cooldown",
-            provider.display_name(),
-            account_login(account)
-        )
+        format!("{login} has no active account-wide cooldown")
     };
     if !holds.is_empty() {
-        message.push_str(&format!("; still held {}", holds.join("; ")));
+        message.push_str(&format!(
+            "; observed windows still hold it {}",
+            holds.join("; ")
+        ));
     }
     Ok(message)
 }
@@ -1864,7 +1857,9 @@ mod tests {
             };
             assert_eq!(
                 message,
-                format!("{prefix}; still held for fable until 2100-01-02T00:00:05Z")
+                format!(
+                    "{prefix}; observed windows still hold it for fable until 2100-01-02T00:00:05Z"
+                )
             );
             let current = store
                 .get_provider_account("claude", &account.account_id)

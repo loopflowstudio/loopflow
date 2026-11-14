@@ -131,8 +131,9 @@ most attributed rows and the 10th. Load avg 600–680, best of 5:
 
 Warm, at load ~415: 3.8–4.5 s → 0.08–0.10 s and 3.0–4.1 s → 0.02–0.06 s.
 `same` rows on every row. Plan reads `tasks` by MULTI-INDEX OR and
-`session_events_task`; no history scan. (Measured before compress dropped
-the arms' `tasks` join; the outer `?3` filter still reads `tasks` that way.)
+`session_events_task`; no history scan. (Measured before the arms and the
+`eligible` `?3` filter dropped their `tasks` join; the statement now reads
+no `tasks` row.)
 
 Unscoped whole store (`bind_attribution`, `context_cost` from
 `FIRST_WEEK_START`) is still slower than main. Same run, 3 tries each,
@@ -199,19 +200,7 @@ finished-arm half of `windowed`. That is a store-model change beyond this Task.
 Open: whether to file it. The two runs disagree on 1d finished-included:
 gate ~5× (1.89→0.37 s), QA ~3.5× (10.2→2.9 s), both at load avg 150+.
 
-## Next implement direction (concept review, Nov 13)
-
-One Task, one id. `pending_inputs` binds `?3` to the id `resolve_task_id`
-returns, and the Task arms already match `task_id=?3`. The `eligible` filter
-still re-resolves it: `task_id IN (SELECT id FROM tasks WHERE id=?3 OR
-issue_identifier=?3 OR external_issue_id=?3)`, twice (input and `started`
-origin). That is the `tasks` MULTI-INDEX OR read left in the drill plan. Make
-both `task_id=?3`, matching the arms; the statement then reads no `tasks` row
-for a drill. Only change: an unresolved selector that equals a `task_id` with
-no `tasks` row now returns those rows instead of none, same as the arms
-already find them. `task_history_reads_every_row_naming_the_task` and
-`session_history_reads_plan_by_window` cover it. Selector resolution itself
-(`resolve_task_id_in`, `scratch/questions.md`) stays out of this Task.
+## Open questions
 
 Open, not blocking Done when (record answers here):
 
@@ -245,6 +234,7 @@ Open, not blocking Done when (record answers here):
 ## Checks
 
 - Task arms + `?5>0` gate (load avg 400–680): `cargo test -p loopflow --lib -- store::query_plans:: store::sqlite::session` 38/39, the one failure the drill's selector-resolution `tasks` scan (`scratch/questions.md`); after scoping the check to the history statement, `session_history_reads_plan_by_window` passes. `task_history_reads_every_row_naming_the_task` passes. `bench.sh`: `same` on all eight rows. Clippy, CI suites: gate.
+- `eligible` `?3` filter matches `task_id=?3` (input and `started` origin), no `tasks` subquery: `cargo test -p loopflow --lib -- store::query_plans:: store::sqlite::session` 39/39. Bench not rerun.
 - After sync `65be402161`: `cargo test -p loopflow --lib -- store::query_plans:: store::sqlite::session server::boundary::` 51 pass; fmt and clippy clean.
 - QA Nov 13 (load avg 200–250, `scratch/qa.html`): `same` all six windows on a `VACUUM INTO` copy; 1d 10.2→2.9 s and 4.5→0.6 s; 7d 6.0→5.0 s, 7.5→5.7 s; 30d 3.9→7.1 s; whole 2.5→8.7 s. Real Task conversation, steer and exit read back through branch `lf session history`; main and branch statements agree on that store. 1d finished-included still below 4×.
 - Gate Nov 13 (load avg 150–290; `scripts/test.py` stopped at resource preflight on a `du` deadline with 46.9 GiB free, plan run by hand): architecture, inventory, `cargo fmt --check`, clippy, website (73), swift boundaries pass. Nextest `query_plans`, `sqlite::session*`, `server::boundary`, session_history/activity/context_cost/bind_attribution, `documented_commands`, `session_cli_tests`, `two_people`, `transport_tests`: 212/218. Six provider-startup tests missed their 30 s launch deadline; four pass on rerun, `resume_refuses_a_graph_step_and_leaves_it_running` and `session_cli_tests::terminal_titles_follow_session_rename_and_reconnect_without_provider_accounts` failed again at load 236 ("launched missing", "codex/failure failed to start"). No launch or resume path calls `pending_inputs`; CI owns them. Swift: `ThemeTests.ghosttyThemesResolveAfterYoursAndBuiltinsAndStayReadOnly` failed (theme files; no Swift in this diff); CI owns it.

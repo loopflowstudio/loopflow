@@ -1224,10 +1224,10 @@ impl SqliteStore {
                         AND inputs.captured IS NOT NULL AND origin.captured_event=inputs.captured AND origin.kind='started'
                         AND origin.task_id IN (SELECT t.id FROM projects p CROSS JOIN tasks t ON t.project_id=p.id
                             WHERE p.id=?10 OR p.project_slug=?2 OR p.external_project_id=?11)))
-                AND (?3 IS NULL OR task_id IN (SELECT id FROM tasks WHERE id=?3 OR issue_identifier=?3 OR external_issue_id=?3)
+                AND (?3 IS NULL OR task_id=?3
                     OR EXISTS (SELECT 1 FROM session_events origin WHERE origin.session_id=inputs.session_id
                         AND inputs.captured IS NOT NULL AND origin.captured_event=inputs.captured AND origin.kind='started'
-                        AND origin.task_id IN (SELECT id FROM tasks WHERE id=?3 OR issue_identifier=?3 OR external_issue_id=?3)))
+                        AND origin.task_id=?3))
                 AND (?4 IS NULL OR caller_input_id=?4 OR caller_input_id IN (SELECT receipt_key FROM session_events WHERE kind='captured' AND session_id=?12))
                 AND (started>=?5 OR (?6 AND ended>=?5)))
                 SELECT eligible.session_id,eligible.input_id,eligible.caller_input_id,started,eligible.task_id,eligible.wave_id,

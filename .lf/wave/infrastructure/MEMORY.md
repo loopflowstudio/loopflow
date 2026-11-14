@@ -20,7 +20,7 @@ Preserved refs/bundle establish committed-history recovery only; no pre-deletion
 inventory establishes whether uncommitted/ignored data existed. Recovery must
 preserve MTG-193's active checkout and Task. LOO-543 remains separate.
 
-## Limit recovery (LOO-747/811, reconciled 2026-11-09)
+## Limit recovery (LOO-747/811, reconciled 2026-11-14)
 
 LOO-747 (#1828) owns Graph recovery without replay; LOO-811 owns interactive
 continuation and Desktop recovery. LOO-813/#1863 is complete opening/reconnect
@@ -39,19 +39,19 @@ rejected without handoff. `turn/start` can return an existing turn ID; completio
 must match the admitted hook and exact retry input. Claude joins inbox UUID,
 admitted prompt ID and Stop. Cache expiry and outside history reads reserve no input.
 
-Guarded sends now use existing Session owners and the account broker. A one-use
+Since 2026-11-14 the Machine server owns recovery checks and native side
+connections; holders keep PTYs; no per-Session observer. A one-use
 socket holds native submission through preparation. Cancellation stops subsequent
 installation/retry, but cannot undo a native installation already sent: retain
 uncertainty and track confirmed account changes. Refresh/save-back must finish
 outside the cancelled hook so received grants survive. Late waits retain dispatch
 and completion; only recovery depends on its gate, ordinary input stays best-effort.
 
-Synthetic native checks now cover two Task primary Sessions per provider through
+Pre-holder (Nov 9) synthetic checks covered two Task primary Sessions per provider through
 Desktop's served protocol: bulk continuation, drafts/later input, held-lock
 cancellation and an approval retained while the other Task recovers, executed
-once when answered. Release's entry-point lesson still applies: these are
-neither rendered Desktop nor installed/real-token acceptance. Model/routes,
-merged-tree gate and the ordinary-typing incident remain open. Scoped Keychain
+once when answered: neither rendered Desktop nor installed/real-token acceptance. Model/routes,
+gate and the ordinary-typing incident remain open. Scoped Keychain
 checks cover USER plus one lexical legacy item, not native write rejection or
 installed/unsuffixed repair. Sources and candidate hashes:
 `16efb4f8ee531901e8ac707dc5c78067aae72fa2:scratch/interactive-limit-recovery.md`

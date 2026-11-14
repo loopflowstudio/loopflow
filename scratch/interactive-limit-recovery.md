@@ -115,19 +115,12 @@ Dispatch remains in Session history, so server restart never resends uncertain
 input. Missing launch metadata waits rather than using the server's account
 restrictions. Credential preparation must finish save-back even after cancellation.
 
-Delete — do not maintain:
-
-- `harness/claude_updates.rs` and `harness/observer_measurement.rs`, and their
-  exclusive fixtures: main removed these watchers.
-- `CodexObserver`, `Recorder`, `spawn_observer`, `run_observer`, and the old
-  Task-update polling loop in `codex_connection.rs`. Preserve guarded recovery,
-  native input correlation and late-install cancellation on server connections.
-- `task_updates::watch`, `ContextMoment::TaskUpdates` and Pi watcher dispatch.
-  Main's shared server wake and steer path stays authoritative.
-- `record_native_limit`'s unconditional shared-login switch: guarded native
-  admission replaces it; headless stream fallback and manual switches remain.
-- Environment-dependent interactive route selection: pass the Session's saved
-  account selection to the surviving broker path; never change server env.
+Deleted with commit 7a67cd6eb6: `harness/claude_updates.rs`,
+`harness/observer_measurement.rs` and their fixtures; `CodexObserver` and the
+Task-update polling loop; `task_updates::watch` and Pi watcher dispatch;
+`record_native_limit`'s unconditional shared-login switch; environment-dependent
+interactive route selection. The `printed`/`SessionBoundaryAnswer` TODOs in
+`server/wire.rs` are main's LOO-838 compatibility, not leftovers here.
 
 ### Remaining verification
 
@@ -138,6 +131,11 @@ continued-input cases. Include a Machine-server restart while Codex is using
 supplied-token login: retention of dispatch does not establish transfer of
 its native token-refresh callback connection. Do not infer that from the
 metadata-only reopen test.
+
+PR #1862's body still describes the November 9 candidate ("Existing Session
+owners guard submission", 870 selected Rust tests); its checks and wording
+predate the holder adaptation. The publishing step rewrites it from the gate's
+receipts.
 
 Demo/review retains rendered Desktop, physical keyboard input after reopen,
 and installed/real-login behavior. No production switch or installation has

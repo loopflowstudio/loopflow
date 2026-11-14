@@ -42,7 +42,7 @@ Local CLI QA (`scratch/qa.html`) covered 11 scenarios. Re-parenting initially
 kept the old fork, and sync deleted the old parent's files; the repaired path
 passed the three stacking CLI regressions in 19.47 s. The history/idempotence
 library test passed in 0.47 s; documented commands passed four tests in 6.97 s.
-Those earlier results do not cover this iteration's published-parent repair.
+The published-parent repair has its own checks at the end of this file.
 
 ## Remaining
 
@@ -50,7 +50,9 @@ Gate owns clippy,
 scratch-clear publication, and hosted suites including admission, Task preparation,
 checkout explanation, sync, documented commands and planning performance.
 Then demo; no interactive judgment collected here. Store API callers also reach
-Task initialization, handoff, PR range and Graph fixtures.
+Task initialization, handoff, PR range and Graph fixtures. Realign
+(2026-11-13) found code, help and the four docs agreeing with the
+published-parent rule; nothing else remains before gate.
 
 ## Published parent repair (concept review, 2026-11-13)
 

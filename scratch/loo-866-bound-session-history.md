@@ -33,8 +33,12 @@ identical row for row:
 | 7d, finished excluded, limit 50 (Wave detail) | 320–390 ms | 210–350 ms |
 | 30d, finished included | 550–780 ms | 815–1460 ms (regression) |
 | whole store (`since=0`) | 590–900 ms | 740–1120 ms (regression) |
+| Task drill (`since=0`, `?3` set) | 11–15 s | 0.01–0.37 s (Task drills below) |
 
-Machine load average was 20+ during measurement; spreads are run-to-run. At
+Machine load average was 20+ during measurement; spreads are run-to-run. The
+unscoped whole-store row is still a regression after the `?5>0` gate (Task
+drills below; QA 2.5→8.7 s); Desktop's Task history and `task.context` no
+longer take that path. At
 7d the remaining time is per-input evaluation (`ended`, `latest`, scope
 subqueries) over ~6.4k in-window inputs, not the walk.
 
@@ -222,6 +226,7 @@ gate ~5× (1.89→0.37 s), QA ~3.5× (10.2→2.9 s), both at load avg 150+.
 - Gate Nov 13 (load avg 150–290; `scripts/test.py` stopped at resource preflight on a `du` deadline with 46.9 GiB free, plan run by hand): architecture, inventory, `cargo fmt --check`, clippy, website (73), swift boundaries pass. Nextest `query_plans`, `sqlite::session*`, `server::boundary`, session_history/activity/context_cost/bind_attribution, `documented_commands`, `session_cli_tests`, `two_people`, `transport_tests`: 212/218. Six provider-startup tests missed their 30 s launch deadline; four pass on rerun, `resume_refuses_a_graph_step_and_leaves_it_running` and `session_cli_tests::terminal_titles_follow_session_rename_and_reconnect_without_provider_accounts` failed again at load 236 ("launched missing", "codex/failure failed to start"). No launch or resume path calls `pending_inputs`; CI owns them. Swift: `ThemeTests.ghosttyThemesResolveAfterYoursAndBuiltinsAndStayReadOnly` failed (theme files; no Swift in this diff); CI owns it.
 - Compress after Task arms: arms match `task_id=?3` (the resolved id) instead of joining `tasks`. `cargo test -p loopflow --lib -- store::query_plans:: store::sqlite::session` 39/39 (load ~230); drill on the store copy, 689 rows, `same` as main; plan searches `session_events_task` directly. fmt clean.
 - Compress after sync: no code cut; `session_turn_events` still serves the grouped turn lookup (EXPLAIN on the store copy), `session_capture_caller` still serves selector resolution.
+- Hosted CI on `c6f51d6036` (Task arms, pushed): 2 pass, 15 skipped while `scratch/` holds files.
 - Hosted CI on `cf1c165096`: green, with the Rust, Python and macOS suites
   deferred while `scratch/` holds files; they run once submit clears it.
 - `check_migrations.py` — `history_window_indexes.sql` unmerged, additive.

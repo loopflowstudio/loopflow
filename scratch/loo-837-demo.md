@@ -106,6 +106,11 @@ Merged, Closed and unreadable responses, with local Git transport and fixture
 GitHub REST responses. The remote receive hook rejects an exposed changed head
 while Auto is armed; merged and closed cases retain the armed marker.
 
+Fourth pass (2026-11-13): the review changed nothing in the design. Recalled,
+not checked in this run: GitHub closes a PR when its head branch is deleted, so
+after a fresh read an Open PR with a missing branch is left only by an
+unreadable GitHub or a race; the fenced restore serves those.
+
 Not for this Task: the child names the parent's PR row (`parent_pr_id`), though
 the taught concept is a Task with a branch. Keeping the row current caused the
 abandoned-parent, retry and re-parenting repairs. A parent Task plus fork could

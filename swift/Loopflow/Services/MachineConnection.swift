@@ -30,6 +30,11 @@ public actor MachineConnection {
     }
     /// Nil while disconnected. Saved observation values then remain last-known.
     public nonisolated var observationSource: String? { state.observationSource }
+    struct ObservationConnection: Equatable, Sendable {
+        let source: String
+        let generation: UUID
+    }
+    nonisolated var observationConnection: ObservationConnection? { state.observationConnection }
 
     public nonisolated var isWaiting: Bool { state.isWaiting }
     public nonisolated func changes() -> AsyncStream<Void> { state.changes() }
@@ -105,6 +110,12 @@ private final class ConnectionState: @unchecked Sendable {
     private var generation: UUID?
     private var source: String?
     var observationSource: String? { lock.withLock { source } }
+    var observationConnection: MachineConnection.ObservationConnection? {
+        lock.withLock {
+            guard let source, let generation else { return nil }
+            return MachineConnection.ObservationConnection(source: source, generation: generation)
+        }
+    }
     func isCurrent(_ link: ServerLink) -> Bool { lock.withLock { generation == link.generation } }
     func beginOpening() -> UUID {
         lock.withLock {

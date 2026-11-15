@@ -223,6 +223,275 @@ final class ClientWorkQueryTests: XCTestCase {
         return database
     }
 
+    private func fieldStamp(_ query: String = "fields", planning: Int64 = 7, sessions: Int64 = 7,
+                            complete: Bool = true, epoch: String = "epoch") -> ReadingStamp {
+        try! JSONDecoder().decode(ReadingStamp.self, from: JSONSerialization.data(withJSONObject: [
+            "machine": "machine", "epoch": epoch, "schema": ServerProtocol.revision, "query": query,
+            "complete": complete, "observations": NSNull(), "revisions": ["planning": planning,
+                "sessions": sessions, "graphs": 7, "processes": 7, "usage": 7]]))
+    }
+
+    private func fieldPlan(_ stamp: ReadingStamp, wave: String? = "a", lifecycle: [WorkSelectionState] = [.working],
+                           activity: [WorkSelectionState] = [.busy], clock: UInt64? = 19,
+                           source: String = "observer", activityKnown: Bool = true) throws -> WorkViewPlan {
+        let plan = try workingPlan(["a"])
+        func support(_ derivation: String, _ revisions: [String: Int64],
+                     _ observations: WorkMembershipPlan.FieldSupport.Observations) -> WorkMembershipPlan.FieldSupport {
+            .init(machine: stamp.machine, epoch: stamp.epoch, schema: stamp.schema,
+                derivation: derivation, revisions: revisions, observations: observations)
+        }
+        let observations: WorkMembershipPlan.FieldSupport.Observations = clock.map {
+            .captured(.init(source: source, validatedAt: $0, dependencies: [.init(fact: "process", token: $0)]))
+        } ?? .unavailable
+        let old = try XCTUnwrap(plan.membership.facts.first)
+        var membership = plan.membership
+        membership.facts = [.init(work: old.work, name: old.name,
+            parent: .init(wave: wave, support: support("work.parent/1", ["planning": stamp.revisions.planning], .sqlite)),
+            lifecycle: .init(states: lifecycle, known: true, support: support("work.lifecycle/1",
+                ["planning": stamp.revisions.planning, "graphs": 7, "processes": 7], .sqlite)),
+            activity: .init(states: activity, known: activityKnown, support: support("work.activity/1",
+                ["planning": stamp.revisions.planning, "sessions": stamp.revisions.sessions, "graphs": 7, "processes": 7], observations)))]
+        var wire = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(plan)) as? [String: Any])
+        wire["membership"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(membership))
+        return try JSONDecoder().decode(WorkViewPlan.self, from: JSONSerialization.data(withJSONObject: wire))
+    }
+
+    func testFieldIngestionPrecedesIncompleteAndIncomparableQueryReplacement() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let database = try complete(directory)
+        let connection = MachineConnection.ObservationConnection(source: "observer", generation: UUID())
+        let held = fieldStamp(sessions: 9)
+        let plan = try fieldPlan(held)
+        let work = try XCTUnwrap(plan.membership.facts.first?.work)
+        _ = try database.cache(ClientWorkQuery(stamp: held, plans: [plan]), key: "held", observation: connection)
+        for complete in [false, true] {
+            let other = fieldStamp(planning: 9, sessions: 8, complete: complete)
+            _ = try database.cache(ClientWorkQuery(stamp: other,
+                plans: [fieldPlan(other, wave: "c", lifecycle: [.done], clock: nil)]), key: "held", observation: connection)
+            let fields = try XCTUnwrap(database.fieldReading(machine: "machine", work: work, observation: connection))
+            XCTAssertEqual(fields.facts.parent?.value, "c")
+            XCTAssertEqual(fields.facts.lifecycle?.value.states, [.done])
+            XCTAssertEqual(fields.facts.activity?.value.states, [.busy], "Invalid capture keeps the last-known activity")
+            XCTAssertTrue(fields.parentCurrent)
+            XCTAssertTrue(fields.lifecycleCurrent)
+            XCTAssertFalse(fields.activityCurrent)
+            XCTAssertTrue(fields.facts.parent?.covers(CommitFence(machine: "machine", epoch: "epoch",
+                schema: UInt32(ServerProtocol.revision), revisions: ["planning": 8])) == true)
+            XCTAssertEqual(try database.cached(machine: "machine", key: "held")?.stamp, held,
+                "Independently newer fields do not manufacture a coherent query snapshot")
+        }
+        XCTAssertEqual(try database.pending().map(\.id), ["saved"], "Field incorporation never settles unknown delivery")
+        let restarted = try ClientWorkDatabase(directory: directory)
+        let restored = try XCTUnwrap(restarted.fieldReading(machine: "machine", work: work))
+        XCTAssertEqual(restored.facts.parent?.value, "c")
+        XCTAssertTrue(restored.parentCurrent)
+        XCTAssertFalse(restored.activityCurrent)
+        let repaired = fieldStamp("other", planning: 9, sessions: 10)
+        _ = try restarted.cache(ClientWorkQuery(stamp: repaired,
+            plans: [fieldPlan(repaired, wave: "c", lifecycle: [.done], activity: [], clock: 21)]), key: "other", observation: connection)
+        let fresh = try XCTUnwrap(restarted.fieldReading(machine: "machine", work: work, observation: connection))
+        XCTAssertTrue(fresh.activityCurrent)
+        XCTAssertEqual(fresh.facts.activity?.value.states, [])
+        XCTAssertEqual(fresh.facts.parent?.value, "c")
+    }
+
+    func testFieldObservationReconnectRequiresReadingEvenWithTheSameSource() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let database = try ClientWorkDatabase(directory: directory)
+        let first = MachineConnection.ObservationConnection(source: "observer", generation: UUID())
+        let stamp = fieldStamp()
+        let plan = try fieldPlan(stamp)
+        let reading = ClientWorkQuery(stamp: stamp, plans: [plan])
+        let work = try XCTUnwrap(plan.membership.facts.first?.work)
+        _ = try database.cache(reading, key: "held", observation: first)
+        XCTAssertTrue(try XCTUnwrap(database.fieldReading(machine: "machine", work: work, observation: first)).activityCurrent)
+        XCTAssertFalse(try XCTUnwrap(database.fieldReading(machine: "machine", work: work)).activityCurrent)
+        let reconnected = MachineConnection.ObservationConnection(source: "observer", generation: UUID())
+        XCTAssertFalse(try XCTUnwrap(database.fieldReading(machine: "machine", work: work, observation: reconnected)).activityCurrent)
+        _ = try database.cache(reading, key: "held", observation: reconnected)
+        XCTAssertTrue(try XCTUnwrap(database.fieldReading(machine: "machine", work: work, observation: reconnected)).activityCurrent)
+        let restarted = try ClientWorkDatabase(directory: directory)
+        XCTAssertFalse(try XCTUnwrap(restarted.fieldReading(machine: "machine", work: work, observation: reconnected)).activityCurrent)
+        XCTAssertTrue(try XCTUnwrap(restarted.fieldReading(machine: "machine", work: work)).parentCurrent)
+        let replacement = MachineConnection.ObservationConnection(source: "replacement", generation: UUID())
+        _ = try restarted.cache(ClientWorkQuery(stamp: stamp,
+            plans: [fieldPlan(stamp, activity: [], clock: 1, source: "replacement")]), key: "held", observation: replacement)
+        XCTAssertTrue(try XCTUnwrap(restarted.fieldReading(machine: "machine", work: work, observation: replacement)).activityCurrent)
+        _ = try restarted.cache(reading, key: "held", observation: replacement)
+        let stale = try XCTUnwrap(restarted.fieldReading(machine: "machine", work: work, observation: replacement))
+        XCTAssertEqual(stale.facts.activity?.value.states, [], "A delayed old source cannot elect itself")
+        XCTAssertTrue(stale.activityCurrent, "A departed-source frame cannot invalidate the current capture")
+    }
+
+    func testFieldStoreCannotBorrowCurrentConnectionForAnUnattributedReading() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let carrier = CompletionCarrier()
+        let connection = MachineConnection {
+            try await ServerLink.open(ServerEndpoint(client: .init(kind: "test", platform: "test", name: "test", version: "test"),
+                control: { carrier }, ticketed: { carrier }))
+        }
+        let link = try await connection.link()
+        addTeardownBlock { await link.close() }
+        let disk = ClientWorkStore(directory: directory, connection: connection, machine: { "machine" }, read: { _ in "null" },
+            observe: { _ in ServerWatch(updates: AsyncThrowingStream { $0.finish() }, checkpoint: { _ in }, cancel: {}) },
+            send: { _ in XCTFail("Field ingestion never sends") })
+        addTeardownBlock { await disk.close() }
+        let stamp = fieldStamp()
+        let plan = try fieldPlan(stamp, source: "fixture-observer")
+        _ = try await disk.receivePlans([plan], stamp: stamp, for: .viewSelect(expression: "state:working"))
+        let work = try XCTUnwrap(plan.membership.facts.first?.work)
+        let fields = try await disk.fieldReading(machine: "machine", work: work)
+        XCTAssertTrue(try XCTUnwrap(fields).parentCurrent)
+        XCTAssertNil(fields?.facts.activity, "A matching source alone cannot attribute a buffered reading to this connection")
+        XCTAssertFalse(try XCTUnwrap(fields).activityCurrent)
+    }
+
+    func testFieldOrderingRejectsStaleCrossedAndEqualConflictingEvidence() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let database = try ClientWorkDatabase(directory: directory)
+        let connection = MachineConnection.ObservationConnection(source: "observer", generation: UUID())
+        let stamp = fieldStamp(planning: 8)
+        let plan = try fieldPlan(stamp, wave: "c", activity: [], clock: 20)
+        let work = try XCTUnwrap(plan.membership.facts.first?.work)
+        _ = try database.cache(ClientWorkQuery(stamp: stamp, plans: [plan]), key: "first", observation: connection)
+        let older = fieldStamp(planning: 7)
+        _ = try database.cache(ClientWorkQuery(stamp: older, plans: [fieldPlan(older)]), key: "older", observation: connection)
+        var facts = try XCTUnwrap(database.fieldReading(machine: "machine", work: work, observation: connection))
+        XCTAssertEqual(facts.facts.parent?.value, "c")
+        XCTAssertTrue(facts.activityCurrent)
+        // Newer SQL with older observations covers neither computation.
+        let crossed = fieldStamp(planning: 9)
+        _ = try database.cache(ClientWorkQuery(stamp: crossed, plans: [fieldPlan(crossed, wave: "d", clock: 19)]), key: "crossed", observation: connection)
+        facts = try XCTUnwrap(database.fieldReading(machine: "machine", work: work, observation: connection))
+        XCTAssertEqual(facts.facts.parent?.value, "d")
+        XCTAssertEqual(facts.facts.activity?.value.states, [])
+        XCTAssertTrue(facts.parentCurrent)
+        XCTAssertFalse(facts.activityCurrent)
+        _ = try database.cache(ClientWorkQuery(stamp: crossed, plans: [fieldPlan(crossed, wave: "wrong", clock: 21)]), key: "conflict", observation: connection)
+        facts = try XCTUnwrap(database.fieldReading(machine: "machine", work: work, observation: connection))
+        XCTAssertEqual(facts.facts.parent?.value, "d")
+        XCTAssertFalse(facts.parentCurrent)
+        XCTAssertTrue(facts.activityCurrent)
+        // Equal support with the retained value is still not reconciliation.
+        _ = try database.cache(ClientWorkQuery(stamp: crossed, plans: [fieldPlan(crossed, wave: "d", clock: 21)]), key: "repeat", observation: connection)
+        XCTAssertFalse(try XCTUnwrap(database.fieldReading(machine: "machine", work: work)).parentCurrent)
+        let newer = fieldStamp(planning: 10)
+        _ = try database.cache(ClientWorkQuery(stamp: newer, plans: [fieldPlan(newer, wave: "e", clock: 22)]), key: "newer", observation: connection)
+        facts = try XCTUnwrap(database.fieldReading(machine: "machine", work: work, observation: connection))
+        XCTAssertEqual(facts.facts.parent?.value, "e")
+        XCTAssertTrue(facts.parentCurrent)
+        _ = try database.cache(ClientWorkQuery(stamp: newer,
+            plans: [fieldPlan(newer, wave: "e", activity: [], clock: 24, activityKnown: false)]), key: "unknown", observation: connection)
+        _ = try database.cache(ClientWorkQuery(stamp: newer,
+            plans: [fieldPlan(newer, wave: "e", clock: 23)]), key: "old known", observation: connection)
+        facts = try XCTUnwrap(database.fieldReading(machine: "machine", work: work, observation: connection))
+        XCTAssertFalse(facts.activityCurrent)
+        XCTAssertEqual(facts.facts.activity?.value.known, false, "An older known answer cannot overwrite a captured unknown transition")
+    }
+
+    func testFieldSupportMustMatchItsResourceAndCapturedDependencies() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let database = try ClientWorkDatabase(directory: directory)
+        let connection = MachineConnection.ObservationConnection(source: "observer", generation: UUID())
+        let stamp = fieldStamp()
+        let plan = try fieldPlan(stamp)
+        let work = try XCTUnwrap(plan.membership.facts.first?.work)
+        _ = try database.cache(ClientWorkQuery(stamp: stamp, plans: [plan]), key: "first", observation: connection)
+        let candidate = try fieldPlan(stamp, wave: "wrong", activity: [], clock: 20)
+        for (field, value) in [("machine", "other" as Any), ("epoch", "other"), ("schema", 0),
+                               ("revisions", ["planning": 8]), ("derivation", "")] {
+            var wire = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(candidate)) as? [String: Any])
+            var membership = try XCTUnwrap(wire["membership"] as? [String: Any])
+            var facts = try XCTUnwrap(membership["facts"] as? [[String: Any]])
+            var parent = try XCTUnwrap(facts[0]["parent"] as? [String: Any])
+            var support = try XCTUnwrap(parent["support"] as? [String: Any])
+            support[field] = value
+            parent["support"] = support
+            facts[0]["parent"] = parent
+            membership["facts"] = facts
+            wire["membership"] = membership
+            let invalid = try JSONDecoder().decode(WorkViewPlan.self, from: JSONSerialization.data(withJSONObject: wire))
+            _ = try database.cache(ClientWorkQuery(stamp: stamp, plans: [invalid]), key: field, observation: connection)
+            let fields = try XCTUnwrap(database.fieldReading(machine: "machine", work: work, observation: connection))
+            XCTAssertEqual(fields.facts.parent?.value, "a", field)
+            XCTAssertTrue(fields.parentCurrent, field)
+            XCTAssertTrue(fields.activityCurrent, "Invalid parent support does not discard independent activity")
+        }
+        let newer = fieldStamp(planning: 8)
+        var wire = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(fieldPlan(newer, wave: "b"))) as? [String: Any])
+        var membership = try XCTUnwrap(wire["membership"] as? [String: Any])
+        var facts = try XCTUnwrap(membership["facts"] as? [[String: Any]])
+        var activity = try XCTUnwrap(facts[0]["activity"] as? [String: Any])
+        var support = try XCTUnwrap(activity["support"] as? [String: Any])
+        support["observations"] = ["kind": "captured", "evidence": ["source": "observer", "validated_at": 20,
+            "dependencies": [["fact": "process", "token": 19], ["fact": "process", "token": 21]]]]
+        activity["support"] = support
+        facts[0]["activity"] = activity
+        membership["facts"] = facts
+        wire["membership"] = membership
+        _ = try database.cache(ClientWorkQuery(stamp: newer,
+            plans: [JSONDecoder().decode(WorkViewPlan.self, from: JSONSerialization.data(withJSONObject: wire))]), key: "invalid capture", observation: connection)
+        let fields = try XCTUnwrap(database.fieldReading(machine: "machine", work: work, observation: connection))
+        XCTAssertEqual(fields.facts.parent?.value, "b")
+        XCTAssertTrue(fields.parentCurrent)
+        XCTAssertFalse(fields.activityCurrent)
+    }
+
+    func testFieldAndQueryWritesRollbackTogetherAndFieldLookupIsKeyedAtTenThousandRows() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let database = try ClientWorkDatabase(directory: directory)
+        let connection = MachineConnection.ObservationConnection(source: "observer", generation: UUID())
+        let stamp = fieldStamp()
+        let plan = try fieldPlan(stamp)
+        let work = try XCTUnwrap(plan.membership.facts.first?.work)
+        _ = try database.cache(ClientWorkQuery(stamp: stamp, plans: [plan]), key: "first", observation: connection)
+        var sqlite: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(directory.appendingPathComponent("work.sqlite").path, &sqlite), SQLITE_OK)
+        defer { sqlite3_close(sqlite) }
+        XCTAssertEqual(sqlite3_exec(sqlite, "CREATE TRIGGER reject_query BEFORE INSERT ON work_queries BEGIN SELECT RAISE(ABORT,'disk failure'); END", nil, nil, nil), SQLITE_OK)
+        let newer = fieldStamp(planning: 8)
+        XCTAssertThrowsError(try database.cache(ClientWorkQuery(stamp: newer,
+            plans: [fieldPlan(newer, wave: "b", clock: 20)]), key: "failed", observation: connection))
+        let fields = try XCTUnwrap(database.fieldReading(machine: "machine", work: work, observation: connection))
+        XCTAssertEqual(fields.facts.parent?.value, "a")
+        XCTAssertTrue(fields.parentCurrent)
+        XCTAssertFalse(fields.activityCurrent, "A rolled back transaction cannot leave a revalidation proof")
+        XCTAssertNil(try database.cached(machine: "machine", key: "failed"))
+        XCTAssertEqual(sqlite3_exec(sqlite, "WITH RECURSIVE ids(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM ids WHERE n<10000) INSERT INTO work_fields(id,state) SELECT 'fixture-'||n,'{}' FROM ids", nil, nil, nil), SQLITE_OK)
+        var statement: OpaquePointer?
+        XCTAssertEqual(sqlite3_prepare_v2(sqlite, "EXPLAIN QUERY PLAN SELECT state FROM work_fields WHERE id=?", -1, &statement, nil), SQLITE_OK)
+        defer { sqlite3_finalize(statement) }
+        XCTAssertEqual(sqlite3_step(statement), SQLITE_ROW)
+        let detail = String(cString: sqlite3_column_text(statement, 3))
+        XCTAssertTrue(detail.contains("SEARCH work_fields USING INDEX"), detail)
+    }
+
+    func testFieldProtocolUpgradeRequiresFreshSupportWithoutReinterpretingStoredFacts() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let database = try ClientWorkDatabase(directory: directory)
+        let stamp = fieldStamp()
+        let plan = try fieldPlan(stamp)
+        let work = try XCTUnwrap(plan.membership.facts.first?.work)
+        _ = try database.cache(ClientWorkQuery(stamp: stamp, plans: [plan]), key: "first")
+        var sqlite: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(directory.appendingPathComponent("work.sqlite").path, &sqlite), SQLITE_OK)
+        defer { sqlite3_close(sqlite) }
+        XCTAssertEqual(sqlite3_exec(sqlite, "UPDATE work_fields SET state=CAST(json_set(CAST(state AS TEXT),'$.parent.support.schema',0) AS BLOB)", nil, nil, nil), SQLITE_OK)
+        let restarted = try ClientWorkDatabase(directory: directory)
+        XCTAssertFalse(try XCTUnwrap(restarted.fieldReading(machine: "machine", work: work)).parentCurrent)
+        _ = try restarted.cache(ClientWorkQuery(stamp: stamp, plans: [fieldPlan(stamp, wave: "b")]), key: "fresh")
+        let fields = try XCTUnwrap(restarted.fieldReading(machine: "machine", work: work))
+        XCTAssertTrue(fields.parentCurrent)
+        XCTAssertEqual(fields.facts.parent?.value, "b")
+    }
+
     func testHeldListKeepsItsRemovalAfterCommandRetirementAndRestartRegardlessOfCountOrder() async throws {
         for countFirst in [false, true] {
             let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

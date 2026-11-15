@@ -72,6 +72,9 @@ final class ClientWorkDatabase {
     }
     static let retainedEffectLimit = 64
     private var retainedQueries: [String: Set<String>] = [:]
+    // Coverage is connection-local. Reopening SQLite or reconnecting, even to
+    // the same source, requires another captured reading for external fields.
+    private var fieldConnections: [String: UUID] = [:]
     private let connection: OpaquePointer
 
     init(directory: URL, prepareDirectory: (URL) throws -> Void = { _ in }) throws {
@@ -107,6 +110,7 @@ final class ClientWorkDatabase {
         try execute("CREATE INDEX IF NOT EXISTS session_names_machine ON session_names(json_extract(CAST(state AS TEXT),'$.fence.machine'))")
         try execute("CREATE TABLE IF NOT EXISTS work_epochs (id TEXT PRIMARY KEY, state BLOB NOT NULL)")
         try execute("CREATE TABLE IF NOT EXISTS work_requirements (id TEXT PRIMARY KEY, state BLOB NOT NULL)")
+        try execute("CREATE TABLE IF NOT EXISTS work_fields (id TEXT PRIMARY KEY, state BLOB NOT NULL)")
         // Confirmed caches are replaceable. The outbox and its reload floors
         // survive a membership vocabulary change; never reinterpret an old plan.
         try execute("DELETE FROM work_queries WHERE EXISTS (SELECT 1 FROM json_each(CAST(work_queries.state AS TEXT),'$.plans') WHERE json_type(value,'$.membership.domains') IS NULL)")
@@ -430,15 +434,22 @@ final class ClientWorkDatabase {
         return try JSONDecoder().decode([QueryRequirement].self, from: data)
     }
 
-    func cache(_ reading: ClientWorkQuery, key: String) throws -> ClientWorkQuery? {
+    func cache(_ reading: ClientWorkQuery, key: String,
+               observation: MachineConnection.ObservationConnection? = nil) throws -> ClientWorkQuery? {
         let stamp = reading.stamp
-        guard stamp.complete, stamp.schema == ServerProtocol.revision, stamp.query != nil else {
-            throw RegistryQueryError("A confirmed Work base requires a complete stamped query")
+        guard stamp.schema == ServerProtocol.revision, stamp.query != nil else {
+            throw RegistryQueryError("Work fields require a supported stamped query")
         }
         return try transaction {
             guard try observeMachineEpoch(stamp.epoch, machine: stamp.machine) else {
                 return try cached(machine: stamp.machine, key: key)
             }
+            for fact in reading.plans.flatMap({ $0.membership.facts }) {
+                try receiveFields(fact, stamp: stamp, observation: observation)
+            }
+            // Field ingestion is useful even when this body cannot replace the
+            // exact-query base. Incompleteness cannot certify filtered absence.
+            guard stamp.complete else { return try cached(machine: stamp.machine, key: key) }
             let id = queryID(machine: stamp.machine, query: key)
             let previous = try queryState(id)
             if let previous, previous.stamp.epoch == stamp.epoch {
@@ -453,6 +464,93 @@ final class ClientWorkDatabase {
                 data: JSONEncoder().encode(reading))
             return try cached(machine: stamp.machine, key: key)
         }
+    }
+
+    private func fieldID(machine: String, work: WorkWorkspaceKey) throws -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        return queryID(machine: machine, query: String(decoding: try encoder.encode(work), as: UTF8.self))
+    }
+
+    private func fields(_ id: String) throws -> WorkFieldFacts? {
+        try rows("SELECT state FROM work_fields WHERE id=?", id: id).first.map {
+            try JSONDecoder().decode(WorkFieldFacts.self, from: $0)
+        }
+    }
+
+    private func receiveFields(_ fact: WorkMembershipPlan.Facts, stamp: ReadingStamp,
+                               observation: MachineConnection.ObservationConnection?) throws {
+        let id = try fieldID(machine: stamp.machine, work: fact.work)
+        let previous = try fields(id)
+        var facts = previous ?? WorkFieldFacts(machine: stamp.machine, work: fact.work)
+        facts.parent = join(fact.parent.wave, support: fact.parent.support, previous: facts.parent,
+            stamp: stamp, observation: observation, key: id + "/parent")
+        facts.lifecycle = join(WorkFieldStates(fact.lifecycle), support: fact.lifecycle.support, previous: facts.lifecycle,
+            stamp: stamp, observation: observation, key: id + "/lifecycle")
+        facts.activity = join(WorkFieldStates(fact.activity), support: fact.activity.support, previous: facts.activity,
+            stamp: stamp, observation: observation, key: id + "/activity")
+        guard facts != previous, facts.parent != nil || facts.lifecycle != nil || facts.activity != nil else { return }
+        try execute("INSERT OR REPLACE INTO work_fields(id,state) VALUES(?,?)", id: id, data: JSONEncoder().encode(facts))
+    }
+
+    private func join<Value>(_ value: Value, support: WorkMembershipPlan.FieldSupport?,
+                             previous: WorkFieldFact<Value>?, stamp: ReadingStamp,
+                             observation: MachineConnection.ObservationConnection?, key: String) -> WorkFieldFact<Value>? {
+        if let support {
+            guard support.belongs(to: stamp) else { return previous }
+            if case .captured(let evidence) = support.observations,
+               evidence.source != observation?.source { return previous }
+        }
+        guard let support, support.belongs(to: stamp), support.isAvailable(on: observation) else {
+            fieldConnections[key] = nil
+            guard var previous else { return nil }
+            previous.needsReconciliation = true
+            return previous
+        }
+        if var previous, previous.support.epoch == support.epoch, previous.support.schema == support.schema {
+            guard support.covers(previous.support) else {
+                // An ordered older reply cannot revoke newer coverage. Crossed
+                // or otherwise incomparable supports require reconciliation.
+                if !previous.support.covers(support) {
+                    previous.reconcile(support)
+                }
+                return previous
+            }
+            if support == previous.support && value != previous.value {
+                previous.reconcile(support)
+                return previous
+            }
+            if !previous.conflictingSupports.isEmpty,
+               support == previous.support || !previous.conflictingSupports.allSatisfy({ support.covers($0) }) {
+                // A repeated value cannot resolve a conflict at equal support,
+                // nor can a reading cover just one of two crossed supports.
+                previous.reconcile(support)
+                return previous
+            }
+        }
+        if case .captured = support.observations { fieldConnections[key] = observation?.generation }
+        else { fieldConnections[key] = nil }
+        return WorkFieldFact(value: value, support: support, needsReconciliation: false)
+    }
+
+    func fieldReading(machine: String, work: WorkWorkspaceKey,
+                      observation: MachineConnection.ObservationConnection? = nil) throws -> WorkFieldReading? {
+        let id = try fieldID(machine: machine, work: work)
+        guard let facts = try fields(id), let epoch = try activeEpoch(machine: machine) else { return nil }
+        func current<Value>(_ fact: WorkFieldFact<Value>?, _ field: String) -> Bool {
+            guard let fact, !fact.needsReconciliation, fact.support.epoch == epoch,
+                  fact.support.schema == ServerProtocol.revision else { return false }
+            switch fact.support.observations {
+            case .sqlite: return true
+            case .unavailable: return false
+            case .captured:
+                return fact.support.isAvailable(on: observation)
+                    && observation.map { fieldConnections[id + "/" + field] == $0.generation } == true
+            }
+        }
+        return WorkFieldReading(facts: facts, parentCurrent: current(facts.parent, "parent"),
+            lifecycleCurrent: facts.lifecycle?.value.known == true && current(facts.lifecycle, "lifecycle"),
+            activityCurrent: facts.activity?.value.known == true && current(facts.activity, "activity"))
     }
 
     func cached(machine: String, key: String) throws -> ClientWorkQuery? {
@@ -558,6 +656,7 @@ final class ClientWorkDatabase {
             return result
         } catch {
             try? execute("ROLLBACK")
+            fieldConnections.removeAll()
             throw error
         }
     }

@@ -2,9 +2,10 @@
 
 Built on origin/main `9cafc410ee`: conversation/Machine link `a2a0a0fb33`,
 unreachable Machine and Desktop rename `35e2835de1`, fixture teardown `5231746858`,
-observation source `86f99e3315`, typed field support `f9a8da8ae9`. Next: persisted
-normalization and incorporation, derived-answer coverage, then dynamic membership
-with disconnected Move. No shipping or merge decision; no Wave selected.
+observation source `86f99e3315`, typed field support `f9a8da8ae9`. SQL-only
+normalization is now persisted; receiving-link attribution precedes external
+normalization, field-effect incorporation and derived-answer coverage, then dynamic
+membership with disconnected Move. No shipping or merge decision; no Wave selected.
 
 ## Direction
 
@@ -235,6 +236,13 @@ only; SQLite commits precede rewrites.
 
 Still remove, with their consumers:
 
+- `ServerClient.subscribe`'s `RawJSON`→`Data` erasure and attribution-less
+  `LineSubscription.lines` payload. Replace with receiving-link attribution
+  through every raw/line/WorkFrame consumer and detached decoder. Keep exact
+  bytes, queued baselines, resume/checkpoints, scope cancellation and guarded
+  resource reads; CLI inventory without a negotiated link supplies no external
+  revalidation. Keep attribution outside wire stamps.
+
 - Desktop `TaskRunDraft.phase`, other mutation refresh barriers
   (`performTaskAction`) and bind replacement bookkeeping (`replaceSession`,
   `supersedeSessions`).
@@ -320,16 +328,10 @@ journey/platform, endpoints reported separately. Nothing here is measured yet.
 
 ### Synchronous intent and effect contracts
 
-The detailed handoff, effect-stage and reordered-reading requirements remain in
+The State, ordering and reconciliation contracts above retain the live requirements.
+Earlier handoff and reordered-reading detail:
 `cfebc7f89a6c8c5301518a067f9cc3a2e977ee5a:scratch/instant-task-session.md`
-(Implementation direction). Keep these acceptance requirements through subsequent
-cuts: Complete publishes before Machine discovery or disk; save/receipt recovery
-never navigates; settlement, supersession and per-query incorporation remain
-independent. A held list retains its removal after a covering count and command
-retirement, including restart, composed occurrences and unrelated domain writes.
-Required domain correlation stays inspectable when unavailable. A newer Work
-reading cannot replace an earlier command's original outcome. Attachment owns
-input readiness and Retry opening for the same Session.
+(Implementation direction).
 
 ### Query destinations and leases
 
@@ -449,28 +451,11 @@ remain. Keep shipped README claims limited to built behavior until this cut pass
 
 ### External-observation counterexample · 2026-11-15
 
-Implementation stopped the dependent field/manifest/Move cut here. The proposed
-contract gives each field supporting domain revisions, but that cannot order all
-membership predicates. `work_in` in `store/sqlite/selections.rs` derives
-`SelectionWork.states` and `activity_known` from `session_summaries_in`.
-`sessions.rs` gates available/report values on `journal::agent_process_evidence`,
-which observes OS process identity outside SQLite. A live provider can exit
-without any SQLite commit. The same Machine/epoch/query/schema/revision vector
-can therefore produce Busy, then not Busy. This is a legitimate change, not the
-equal-provenance conflict described above. Task ordering also consumes this
-activity (`TaskOrder::key`), so separating only the displayed activity badge is
-insufficient.
-
-The correction keeps SQLite-only parent/lifecycle facts separate from observed
-activity; its specified form is the Review direction below. Never promote
-observation evidence into native input readiness.
-
-`process_exit_changes_selection_without_advancing_sqlite_provenance`
-(`store/sqlite/selections.rs`) exercises that store boundary with a child process
-and no timing sleep.
-
-Fixture teardown checks: `5231746858:scratch/instant-task-session.md`; its
-shutdown/close/removal order remains required.
+`process_exit_changes_selection_without_advancing_sqlite_provenance` establishes
+that activity and order can change without SQLite revisions. The Review direction
+below resolves this with captured observations. Original investigation and teardown
+checks: `0883b66cf08b145df0cd462a9c8dca06b0f3e15a:scratch/instant-task-session.md`
+(External-observation counterexample).
 
 ### Review direction: one observation source, independent facts · 2026-11-15
 
@@ -581,19 +566,11 @@ that case launches no children. Gate owns it; no retry was taken as a fix.
 ### Concept review: fields carry their own support · 2026-11-15
 
 Review against `f9a8da8ae9`. Producer-declared parent, lifecycle and activity
-support and strict cross-platform fixtures are built. The next cut consumes
-those independent values; it does not infer support from an invocation-wide bag
-or treat null evidence as a validated empty set.
-
-The producer declares each field's complete SQLite and observation inputs,
-including the field's derivation identity so changed rules cannot share an old
-value's proof. Keep the existing invocation capture/answer reuse; record consumed
-support for typed outputs within that owner. SQL-only parent/lifecycle values
-can normalize independently when an unrelated observed input fails validation.
-A derived activity field with missing/invalid support remains last-known or
-unavailable; a validated empty external set is a different result. Both clients
-persist and consume this distinction in the existing SQLite owner. No second
-capture cache or client reconstruction of lifecycle rules.
+support and strict cross-platform fixtures are built. Consume each field's full
+SQLite/observation support and derivation identity, never split the invocation bag.
+Missing/invalid support differs from validated empty observations. SQL-only fields
+normalize independently; invalid activity stays last-known/unavailable. Keep the
+existing capture owner and producer lifecycle rules on both clients.
 
 Add the failure/recovery counterexample: a reading contains a newer committed
 parent and activity whose dependency changes during capture. Incorporate the
@@ -638,12 +615,77 @@ Session read's consumed set; narrowing it keeps the contract. The transient unio
 `SelectionState::is_activity` split as a literal Swift set; both go with the
 state-only reducer. Wire values alone do not complete normalization acceptance.
 
-Checks, `LF_*` cleared:
-- `cargo nextest run -p loopflow --lib -E 'test(fields_validate_only) | test(a_capture_reuses) | test(membership_fields_declare)'`: 3 pass after shared-answer optimization; typed fixture and plan roundtrip also passed unchanged.
-- `cargo nextest run -p loopflow --lib -E 'test(server::schema::tests::) - test(bare_time_serializes_as_its_described_tuple)'`: 7 pass; prior LEAK remains gate work.
-- `scripts/test_desktop.sh --filter 'WorkSelectionTests|testObservationAndFieldUpgrade|testUnknownActivityElsewhere'`: 9 pass; `scripts/test_ios.py` with the typed-field fixture and those two shared query checks: 3 pass.
-- `cargo test -p loopflow --test integration documented_commands::`: 4 pass; `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and multiplatform boundaries pass.
-- `EXPLAIN QUERY PLAN`, 10,000-Task copied fixture: local-Machine index and revision primary key; singleton epoch scan, no Task scan. Native latency remains unmeasured.
+Prior typed-field checks and 10k query plans:
+`0883b66cf08b145df0cd462a9c8dca06b0f3e15a:scratch/instant-task-session.md`
+(Concept review: fields carry their own support). Native latency is unmeasured;
+the nextest LEAK above remains gate work.
+
+### Persisted normalization and receiving-link gap · 2026-11-15
+
+Built in the client SQLite owner: independent parent/lifecycle/activity field
+joins before exact-query replacement, retained last-known values, incomparable
+support reconciliation, field fence comparison, and connection-local external
+coverage. A newer SQL-only parent survives rejected/incomplete query bodies and
+invalid activity. Facts and exact query writes commit or roll back together;
+unsupported fields cannot acquire provenance from an older cache. No predecessor
+membership reducer was extended or removed in this prerequisite.
+
+**Dependent cut stopped at a transport counterexample.**
+`ServerSubscription.disconnected` deliberately keeps queued readings across
+reconnect. `RemoteTaskObservation` and Desktop's Dashboard decode them after
+asynchronous suspension; `ServerClient.subscribe` strips `RawJSON` to `Data`.
+A reading queued on generation A can reach SQLite after generation B welcomes
+the same observation source. Sampling `MachineConnection.observationConnection`
+at ingestion would falsely revalidate A as B. Source equality does not fix it.
+Production ingestion therefore currently normalizes only SQL-only fields; it
+never borrows the ambient connection to normalize captured activity. Existing
+query rendering remains unchanged, and external normalized values are unbuilt
+in live consumers. Direct owner tests supply an explicit receiving connection.
+
+Revised prerequisite: carry receiving-link attribution beside raw bytes through
+the existing subscription/line/WorkFrame transports and detached decoding, then
+compare that attribution to the Machine owner's current generation inside the
+client owner. Keep it outside encoded stamps and persisted Machine revisions.
+Unattributed CLI/cache bodies cannot revalidate external values. Test buffered A
+→ disconnect → same-source B welcome → consume A → consume B on both hosts;
+only B can establish current external coverage. Keep SQL-only incorporation and
+original request recovery independent. Then finish derived-answer dependencies,
+field-targeted effects and dynamic membership/Move with the predecessor deletion
+cut. No product judgment is missing; this changes the engineering order.
+
+**Concept-review refinement: attribution belongs to the reading, not the
+subscription.** Carry one local envelope containing unchanged bytes and the
+receiving link's Machine, generation and negotiated observation source. Construct
+it at `ServerSubscription.receive`, before yielding to a buffered stream. Preserve
+it through `ServerClient.subscribe`, `LineSubscription`, `WorkFrame`, Dashboard
+and phone detached decoding, and into `ClientWorkStore.receivePlans`. A watch
+spans multiple links; neither its identity nor its current link can supply the
+envelope after delivery. CLI/cache inputs have no negotiated attribution. This is
+local transport metadata, not a wire DTO change or another persistent ledger.
+
+At ingestion, compare the envelope to the existing Machine connection's active
+link; passing the received generation to the database without this comparison
+would merely bless an old link. Keep the received generation with any external
+revalidation proof, so a disconnect during/after ingestion immediately makes that
+proof last-known. Never stamp it with a freshly sampled generation. Commit and
+rollback must also govern that proof; a failed query write cannot leave activity
+revalidated in memory. Parent/lifecycle joins remain independently eligible under
+their own Machine/epoch/schema and field support checks. Do not discard a queued
+baseline solely to suppress external revalidation: preserve resume/checkpoint and
+event ordering, exact-query inputs and scope cancellation.
+
+Normal path: B's attributed capture establishes external coverage. Failure:
+queue A, disconnect, welcome B with the same source, then finish decoding A;
+A cannot establish B's coverage or revoke a newer B capture. Recovery: consume
+B's complete capture and repair only dependent answers, without another Move,
+send or navigation. Exercise both delivery orders, a disconnect held across
+decoding/ingestion, and two windows sharing the Machine owner on both hosts.
+Keep the existing independent-field, restart and source-replacement cases.
+
+Checks: focused `ClientWorkQueryTests/testField*` via `scripts/test_desktop.sh --filter`
+and `scripts/test_ios.py -only-testing`: 7 cases per host (including protocol upgrade);
+`check_swift_multiplatform_boundaries.py` passes. 10k-row `EXPLAIN`: primary-key
+lookup. Gate owns wider suites and the prior LEAK; native latency is unmeasured.
 
 ### Open product choices
 
@@ -679,7 +721,7 @@ including without a network event. Retirement cancels its receipt observer and
 transfers lagging effects or scoped reload floors. The complete prior contracts and
 query checks remain at `6e944e73b5a:scratch/instant-task-session.md`.
 
-Remaining: normalized typed values and reconnect coverage in the client SQLite owner; field incorporation and answer coverage,
+Remaining: receiving-link attribution and live external normalization; field-effect incorporation and derived-answer coverage,
 then disconnected Move; effect-policy duplication; cross-client closed-query convergence; exhaustive
 effect/dependency declarations and cross-query provenance; other mutation recovery
 and resource lanes; retained mobile `SessionLink`; projected inspection;

@@ -2,49 +2,51 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LOO-906 · Fields carry support; queries prove answers</title>
+<title>LOO-906 · Reconnect must not refresh an old reading</title>
 <style>
-:root{color-scheme:light dark;--bg:#faf8f4;--fg:#292924;--muted:#67665e;--line:#cdc9bd;--proposal:#e4efe6}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.45 system-ui,sans-serif}main{max-width:800px;margin:auto;padding:26px 22px}header,small{font-size:12px;color:var(--muted)}h1{font-size:28px;line-height:1.15;margin:20px 0 12px}h2{font-size:18px;margin:24px 0 8px}p{margin:10px 0}table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;vertical-align:top;border-bottom:1px solid var(--line);padding:8px 6px}pre{background:var(--proposal);padding:12px;font-size:13px;white-space:pre-wrap}code{font-size:12px;overflow-wrap:anywhere}li{margin:12px 0}@media(prefers-color-scheme:dark){:root{--bg:#20221f;--fg:#ecece4;--muted:#b5b5a8;--line:#4c5046;--proposal:#2c382f}}@media(max-width:540px){main{padding:20px 12px}table{font-size:12px}th,td{padding:6px 3px}h1{font-size:24px}}
+:root{color-scheme:light dark;--bg:#faf8f4;--fg:#292924;--muted:#67665e;--line:#cdc9bd;--example:#e4efe6}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.45 system-ui,sans-serif}main{max-width:800px;margin:auto;padding:26px 22px}header,small{font-size:12px;color:var(--muted)}h1{font-size:28px;line-height:1.15;margin:20px 0 12px}h2{font-size:18px;margin:24px 0 8px}p{margin:10px 0}table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;vertical-align:top;border-bottom:1px solid var(--line);padding:8px 6px}pre{background:var(--example);padding:12px;font-size:13px;white-space:pre-wrap}code{font-size:12px;overflow-wrap:anywhere}li{margin:12px 0}@media(prefers-color-scheme:dark){:root{--bg:#20221f;--fg:#ecece4;--muted:#b5b5a8;--line:#4c5046;--example:#2c382f}}@media(max-width:540px){main{padding:20px 12px}table{font-size:12px}th,td{padding:6px 3px}h1{font-size:24px}}
 </style>
 <main>
 <header>LOO-906 · concept-review · 2026-11-15 · headless Graph step<br>
 Sources: scratch/{instant-task-session,questions,desktop-reactivity-feedback}.md;
-Reviewed HEAD f9a8da8ae9; ReadingStamp.swift, WorkMembership.swift, ClientWorkQuery.swift, ClientWorkDatabase.swift;
-Rust observe.rs, server/{service,wire,subscriptions}.rs,
-store/sqlite/selections.rs; both client READMEs.
+HEAD 0883b66cf0 plus the interrupted workspace changes in WorkFieldFacts.swift,
+ClientWork{Database,Store}.swift, MachineConnection.swift and ClientWorkQueryTests.swift;
+ServerLink.swift, WorkObservation.swift, ServerClient.swift, DashboardView.swift,
+RemoteTaskObservation.swift and both client READMEs.<br>
 Source review; no new runtime measurements.</header>
-<h1>Next implement: absorb fields before replacing answers.</h1>
-<p><strong>Review direction · proposed:</strong> persist independently supported fields and their incorporation before deciding whether an exact query can replace its prior base. Then derive answer coverage, dynamic membership and disconnected Move. The three product questions below remain independent.</p>
-<p><strong>Built:</strong> source negotiation and coherent observation capture at <code>86f99e3315</code>; typed parent, lifecycle and activity support with strict Rust/Desktop/iOS fixtures at <code>f9a8da8ae9</code>. Normalized persistence and disconnected Move remain unbuilt.</p>
-<p><strong>Biggest mismatch:</strong> the producer now separates field support, but the client still accepts or rejects a whole complete query before incorporation. An incomplete query or one with older activity can carry a newer confirmed parent. That parent must replace old Move intent independently.</p>
-<pre>Move A → B commits; a later reading supplies parent C.
-Its activity is unavailable, or its query lacks content.
+<h1>Next implement: keep the receiving link with every reading.</h1>
+<p><strong>Design changed — iterate to implement.</strong> Carry receiving-link attribution through buffering and decoding before enabling live external normalization. Then finish field incorporation and derived-answer coverage, followed by dynamic membership and disconnected Move. No new product answer is needed for this cut.</p>
+<p><strong>Built in the workspace:</strong> independent SQL-only field persistence before exact-query replacement; invalid activity cannot discard a supported parent. Explicit-connection owner tests cover external facts. <strong>Still proposed:</strong> external normalization in live consumers, field-effect incorporation and the membership/Move replacement.</p>
+<p><strong>Biggest mismatch:</strong> one subscription survives several connections, but its queued bytes lose the identity of the link that received them. Reading the current connection after decoding would make old activity look freshly confirmed.</p>
+<pre>Move A → B commits. A reading waits in the stream.
+Disconnect → reconnect to the same observation source → decode it.
 
-Before · built: typed field evidence; query-local incorporation
+Before · built: live ingestion accepts SQL-only fields;
+               captured activity cannot be revalidated.
 After · proposed:
-  parent C incorporates Move once; B intent never returns
-  real cached Task appears in the unfiltered destination
-  Busy/order/count answers that need activity stay incomplete
-  a later valid activity capture repairs them without navigation</pre>
+  old link's reading keeps its original attribution
+  supported parent survives; activity stays last-known
+  new link's capture repairs Busy/order/count coverage
+  Move stays absorbed; selection and request ID stay unchanged</pre>
 <h2>Actions → concepts → APIs</h2>
 <table>
-<thead><tr><th>Action</th><th>Before · built</th><th>After · proposed</th></tr></thead>
+<thead><tr><th>Action</th><th>Concept</th><th>Before → proposed API change</th></tr></thead>
 <tbody>
-<tr><td>Move offline</td><td>Desktop waits in <code>performTaskAction</code>; destination candidates omit arrivals</td><td>Shared intent changes parent facts; dynamic programs update supported lists/counts from real cached content before disk</td></tr>
-<tr><td>Receive later state</td><td><code>ClientWorkDatabase.cache</code> gates the whole base; <code>WorkQueryEffect.covered</code> checks its stamp</td><td>Join supported fields in the existing transaction first; absorb covered effects; replace the query base only when its own coverage allows</td></tr>
-<tr><td>Open destination</td><td>Fixed candidates and query-local content</td><td>Definition + candidate coverage + consumed facts/content determine completeness; no invented DTO or exact count</td></tr>
-<tr><td>Restart / reconnect</td><td>Saved IDs, original-Machine recovery and <code>welcome.observations</code> source negotiation exist</td><td>Persisted activity stays last-known until revalidated; parent incorporation survives independently. Recover <code>task.membership_changed</code> by original ID</td></tr>
+<tr><td>Reconnect</td><td>Reading versus receiving link</td><td><code>ServerSubscription.receive</code> yields raw bytes → yields unchanged bytes with local Machine/generation/source attribution</td></tr>
+<tr><td>Resume a cached view</td><td>Last-known versus current activity</td><td><code>ServerClient.subscribe</code> erases to Data → <code>LineSubscription</code>, <code>WorkFrame</code> and phone decoding retain the envelope</td></tr>
+<tr><td>Receive confirmed state</td><td>Independent fields versus complete answers</td><td><code>ClientWorkStore.receivePlans</code> has no attribution → validates the received link against the current Machine owner; SQLite joins fields before replacing a query</td></tr>
+<tr><td>Move offline</td><td>Saved intent and original-Machine recovery</td><td>Fixed candidates and state-only projection → dynamic membership consumes normalized fields; committed parent effects remain incorporated across restart</td></tr>
 </tbody></table>
-<p><strong>Proposed usage:</strong> Move to a Wave or No Wave. Cached lists update immediately; the conversation and drafts stay open. Offline changes wait for their original Machine. Refusal restores only the refused change and leaves later edits and navigation alone.</p>
-<p>The existing cache, capture and client SQLite transaction remain the owners. Rust declares each typed field’s SQLite domains, consumed observations and derivation identity. Clients validate the resource’s Machine/epoch/schema and the connection’s negotiated source, then compare each field independently. A reading never elects its own source; null evidence never means a validated empty set. A field with invalid observed support remains last-known; independently supported stored fields can still incorporate. No second observer ledger or input-readiness owner.</p>
-<p>Field incorporation and answer completeness stay separate. Fresh parent data cannot prove fresh activity or content. Client-derived answers never become Machine <code>ReadingStamp</code>s. Complete → Reopen, A → B → C, process exit without a write, cache eviction, source replacement and offline restart must pass on both clients before Move migrates.</p>
+<p><strong>Proposed usage:</strong> Move a Task to a Wave or No Wave. Cached lists and counts change immediately; its conversation and drafts stay open. Offline changes wait for their original Machine and survive restart. Refusal restores only the refused change. Missing destination content remains visibly incomplete.</p>
+<p>The existing connection, observation cache and client SQLite transaction keep ownership. Attribution is local transport metadata, never a manufactured wire stamp or durable Machine revision. Preserve queued baselines, checkpoints, event order and cancellation. A stale or unattributed link cannot revalidate activity; independently supported parent/lifecycle fields retain their own checks. Disconnect makes external coverage last-known even if ingestion has already begun. Rollback cannot leave a revalidation proof behind.</p>
+<p><strong>Show next on both hosts:</strong> hold A through decoding, welcome same-source B, consume A then B and reverse their delivery order. Only B establishes current external coverage. Repeat with two windows, offline restart and source replacement; no replay, revived Move or later navigation. Replace the old query-local incorporation and state-only reducer with the dynamic membership cut. Existing README claims remain limited to built behavior; no builtin skill rule changes.</p>
 <h2>Questions for the next conversation</h2>
-<p>No answer is inferred here; numbering is unchanged. These choices do not block the supplied engineering direction. Review outcome for loop-or-next: <strong>design changed — iterate to implement</strong>. The working design now specifies field ingestion before query replacement and the crossed-freshness recovery case.</p>
+<p>No answers are inferred. These independent product choices retain their numbering and do not block the engineering cut above.</p>
 <ol>
 <li><strong>Abandon while disconnected.</strong> It closes PRs and removes branches; the recorded “1a” named Complete, rename and move.<br>1a — Save Abandon and deliver on reconnect (built provisionally).<br>1b — Require a reachable Machine and keep the Task until then.</li>
 <li><strong>Take back a change before it was sent.</strong> A mistaken offline removal currently has no cancellation action.<br>2a — Keep that behavior; Reopen afterwards.<br>2b — Offer Cancel only before first send, removing the request and its projection.</li>
 <li><strong>Conversation names on the phone.</strong><br>3a — Keep Task titles and Desktop-only Session rename (built).<br>3b — Show Session names and offer rename on the phone too.</li>
 </ol>
-<small>Earlier quoted answers remain in the design. Native latency is unmeasured and does not gate this pass. No code, Task creation, publication or merge in this review.</small>
+<small>Earlier exact replies remain in the working design. Native latency is unmeasured; the recorded nextest LEAK remains for gate. This review changes design files only.</small>
 </main>
 </html>

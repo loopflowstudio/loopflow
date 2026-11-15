@@ -1,22 +1,21 @@
 # Working assumptions
 
-- Headless engineering clarification, 2026-11-15: normalize supported fields
-  before deciding whether to replace an exact-query base. A rejected/incomplete
-  query can still supply an independently newer parent; it cannot certify missing
-  activity or settle delivery. This follows the existing field/answer separation,
-  not a new product preference (`instant-task-session.md`, Concept review).
+- Headless engineering finding, 2026-11-15: buffered subscription readings can
+  outlive their receiving connection, including a reconnect to the same source.
+  Never borrow the ambient connection generation at SQLite ingestion. SQL-only
+  normalization is built; live external normalization and the dependent
+  incorporation/projection cut await receiving-link attribution through existing
+  transports. Headless review refinement: attribution travels with each reading,
+  before buffering; the current Machine owner validates it at ingestion. A
+  subscription identity cannot stand in for a link across reconnect. Revised
+  prerequisite and counterexample are in the design's
+  Persisted normalization and receiving-link gap section. No product answer inferred.
 
-- Headless engineering clarification, 2026-11-15: typed fields carry producer-declared
-  support; clients cannot split the invocation's opaque dependency bag. Invalid
-  observed activity must not stop incorporation of a separately supported parent
-  or lifecycle value. Typed producer support is built; persisted incorporation must
-  keep field support and answer completeness separate (`instant-task-session.md`,
-  Concept review). No product answer inferred.
-
-- Headless engineering choice, 2026-11-15: source/capture uses the existing
-  observation cache. Per-field persistence and last-known reconnect coverage still
-  precede Move (`instant-task-session.md`, Review direction). No product
-  preference inferred.
+- Field/answer separation and source/capture decisions remain in the design's
+  Concept review and Review direction sections. Independent SQL-only support
+  normalizes before query replacement; invalid activity cannot settle delivery
+  or discard a supported parent. Observation capture stays in the existing cache.
+  No product preference inferred.
 
 - Jack Heart replied “1a” to the 2026-11-15 conversation review's disconnected-edit
   question: save and project Complete/rename/move locally, show “Waiting for

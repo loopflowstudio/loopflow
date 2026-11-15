@@ -2,41 +2,44 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LOO-906 · Moving Work without replaying old intent</title>
+<title>LOO-906 · Facts survive reconnect; live status is revalidated</title>
 <style>
 :root{color-scheme:light dark;--bg:#faf8f4;--fg:#292924;--muted:#67665e;--line:#cdc9bd;--proposal:#e4efe6}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.45 system-ui,sans-serif}main{max-width:800px;margin:auto;padding:26px 22px}header,small{font-size:12px;color:var(--muted)}h1{font-size:28px;line-height:1.15;margin:20px 0 12px}h2{font-size:18px;margin:24px 0 8px}p{margin:10px 0}table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;vertical-align:top;border-bottom:1px solid var(--line);padding:8px 6px}pre{background:var(--proposal);padding:12px;font-size:13px;white-space:pre-wrap}code{font-size:12px;overflow-wrap:anywhere}li{margin:12px 0}@media(prefers-color-scheme:dark){:root{--bg:#20221f;--fg:#ecece4;--muted:#b5b5a8;--line:#4c5046;--proposal:#2c382f}}@media(max-width:540px){main{padding:20px 12px}table{font-size:12px}th,td{padding:6px 3px}h1{font-size:24px}}
 </style>
 <main>
 <header>LOO-906 · concept-review · 2026-11-15 · headless Graph step<br>
 Sources: scratch/{instant-task-session,questions,desktop-reactivity-feedback}.md;
-HEAD 5d0187746f; WorkMembership.swift, ClientWorkQuery.swift,
-ClientWorkDatabase.swift, OperationDeclaration.swift, WorkModel.swift;
-Rust selection/{membership,query}.rs and ops/task.rs; both client READMEs.
+HEAD 5231746858; ReadingStamp.swift, WorkMembership.swift, ClientWorkQuery.swift;
+Rust observe.rs, server/{service,wire,subscriptions}.rs,
+store/sqlite/selections.rs; both client READMEs.
 Source review; no new runtime measurements.</header>
-<h1>Three product choices remain open. Move first needs a clearer incorporation model.</h1>
-<p><strong>Built:</strong> the phone now says “Waiting for connection” once and ends offline refresh. Desktop Session rename publishes before save and survives restart. Those repairs are committed at <code>35e2835de1</code>.</p>
-<p><strong>Biggest mismatch:</strong> a query’s old snapshot and the newer facts it can consume are different things. Using the old query stamp to decide whether to apply intent can hide a reopened Task or move it back to an earlier Wave.</p>
-<pre>Held query:      Task in A
-Local move:     A → B, committed
-Another query:  newer parent C
+<h1>Next implement: separate stored facts from observed activity.</h1>
+<p><strong>Review direction · proposed:</strong> establish one observation source on connection, capture its dependencies with each derived field, and retain last-known values through restart. Then build field incorporation, answer coverage and disconnected Move. The three product questions below remain independent.</p>
+<p><strong>Built:</strong> the phone’s waiting/refresh behavior and offline Desktop Session rename are committed at <code>35e2835de1</code>. SQLite fixture teardown and the process-exit counterexample are committed at <code>5231746858</code>. Move remains unbuilt.</p>
+<p><strong>Biggest mismatch:</strong> SQLite revisions cannot order all Task facts. A provider can exit without a database write, changing Busy membership, ordering and counts. Reusing a query stamp or an evicted observer’s counter can mistake this for unchanged data.</p>
+<pre>Stored parent:  Move A → B incorporated
+Provider:       running → exited
+SQLite:         unchanged
 
-Current model:  cannot project Move; adding it to the old
-                overlay rule risks putting the Task back in B
-Proposed:       keep parent C; never replay the absorbed A → B
-                missing content still means an incomplete answer</pre>
+Before · built: no external provenance for cross-query joins
+After · proposed:
+  parent stays B; newer activity removes Busy everywhere
+  observer restart keeps last-known content, awaits live facts
+  old frames cannot restore Busy or replay the Move</pre>
 <h2>Actions → concepts → APIs</h2>
 <table>
 <thead><tr><th>Action</th><th>Before · built</th><th>After · proposed</th></tr></thead>
 <tbody>
 <tr><td>Move offline</td><td>Desktop waits in <code>performTaskAction</code>; destination candidates omit arrivals</td><td>Shared intent changes parent facts; dynamic programs update lists/counts from real cached content before disk</td></tr>
-<tr><td>Receive later state</td><td><code>WorkQueryEffect.covered</code> checks the exact-query stamp</td><td>Same-field provenance absorbs the committed effect; a later Reopen or Move wins</td></tr>
+<tr><td>Receive later state</td><td><code>WorkQueryEffect.covered</code> checks the exact-query stamp</td><td>Same-field provenance absorbs the committed effect; a later Reopen or Move wins. Activity also needs captured observation dependencies</td></tr>
 <tr><td>Open destination</td><td>Fixed candidates and query-local content</td><td>Definition + candidate coverage + consumed facts/content determine completeness; no invented DTO or exact count</td></tr>
-<tr><td>Restart / reconnect</td><td>Saved IDs and original-Machine recovery already exist</td><td>Persist facts and coverage in that SQLite owner; retire or invalidate old bases, recover <code>task.membership_changed</code> by original ID</td></tr>
+<tr><td>Restart / reconnect</td><td>Saved IDs and original-Machine recovery already exist</td><td><code>welcome</code> establishes the active observer; persisted activity stays last-known until revalidated. Recover <code>task.membership_changed</code> by original ID</td></tr>
 </tbody></table>
 <p><strong>Proposed usage:</strong> Move to a Wave or No Wave. Cached lists update immediately; the conversation and drafts stay open. Offline changes wait for their original Machine. Refusal restores only the refused change and leaves later edits and navigation alone.</p>
-<p>Field incorporation and answer completeness are separate. Fresh parent data cannot prove fresh activity or content. Client-derived answers never become Machine <code>ReadingStamp</code>s. Complete → Reopen, A → B → C, partial content, and closed-query restart must pass on both clients before Move migrates.</p>
+<p>One cache incarnation and a non-reusing cache clock replace resettable entry counters. Captures retain the exact dependencies consumed; eviction, process replacement and changed dependencies cannot borrow another fact’s freshness. A delayed frame cannot establish a new source. No second observer ledger or input-readiness owner.</p>
+<p>Field incorporation and answer completeness stay separate. Fresh parent data cannot prove fresh activity or content. Client-derived answers never become Machine <code>ReadingStamp</code>s. Complete → Reopen, A → B → C, process exit without a write, cache eviction, source replacement and offline restart must pass on both clients before Move migrates.</p>
 <h2>Questions for the next conversation</h2>
-<p>No answer is inferred here. These retain the previous page’s numbering. Under the headless concept-review rule, open product choices return <strong>Blocked</strong> to loop-or-next; the proposed engineering direction is recorded in the working design.</p>
+<p>No answer is inferred here; numbering is unchanged. These choices do not block the supplied engineering direction. Review outcome for loop-or-next: <strong>design changed — iterate to implement</strong>. Source replacement, persistence and eviction are specified in the working design.</p>
 <ol>
 <li><strong>Abandon while disconnected.</strong> It closes PRs and removes branches; the recorded “1a” named Complete, rename and move.<br>1a — Save Abandon and deliver on reconnect (built provisionally).<br>1b — Require a reachable Machine and keep the Task until then.</li>
 <li><strong>Take back a change before it was sent.</strong> A mistaken offline removal currently has no cancellation action.<br>2a — Keep that behavior; Reopen afterwards.<br>2b — Offer Cancel only before first send, removing the request and its projection.</li>

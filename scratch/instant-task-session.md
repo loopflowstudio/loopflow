@@ -563,9 +563,10 @@ current activity, content, order or candidate coverage. A client-derived answer
 retains those independent dependencies without changing the exact-query stamp.
 A new observer incarnation cannot be ordered by arrival time or compared by its
 reset counter. Establish its current source through a fresh Machine reading;
-prior cached activity remains last-known/incomplete until then. Review must
-settle source replacement, persistence and eviction before this becomes a wire
-contract. Never promote observation evidence into native input readiness.
+prior cached activity remains last-known/incomplete until then. Source replacement,
+persistence and eviction are settled as the next engineering direction below;
+the wire/client cut remains unbuilt. Never promote observation evidence into
+native input readiness.
 
 Add to acceptance: a live Task has a Busy answer; its provider exits and is
 reaped, with every SQLite revision unchanged; another query supplies the new
@@ -593,6 +594,113 @@ Checks, 2026-11-15, inherited `LF_*` cleared:
 - `cargo test -p loopflow --lib process_exit_changes_selection_without_advancing_sqlite_provenance`: passed after fixing the new fixture's Task/Wave association; debug linker reported oversized `__eh_frame`.
 - `cargo test -p loopflow --test integration documented_commands::`: 4 passed.
 - `check_swift_multiplatform_boundaries.py`, `git diff --check`, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`: passed; gate owns broader suites and Desktop Xcode fallback.
+
+### Review direction: one observation source, independent facts · 2026-11-15
+
+Headless concept review against `5231746858`. This resolves the engineering gap
+above, not the three independent product questions. Proposed, unbuilt. The
+experience stays the same: a Task whose provider exits stops looking Busy in every
+cached view; missing activity does not undo an already incorporated Move. A
+Machine restart keeps conversations and saved changes, while live status awaits
+that Machine's new observations.
+
+**Source ownership and replacement.** Give the existing `observe::Cache` one
+opaque incarnation and one monotonic observation clock for its lifetime. The
+server already holds that cache through `service::run`; expose its incarnation in
+the negotiated welcome and carry it with captured observation evidence. Keep
+`welcome.instance` (server lifetime), database epoch and observation incarnation
+distinct: none orders the others. No new authority service or persistent observer
+ledger. A replacement cache requires a new welcome before publishing its facts.
+Bare reads without this owner may supply display inventory, never comparable
+external provenance.
+
+The shared Machine connection establishes the active observation source from its
+current welcome, before delivering readings. Connection generations reject old
+welcomes, reads and callbacks after reconnect; a delayed frame cannot elect its
+own source. Windows share this decision through the existing Machine owner.
+Disconnect preserves last-known content and pending intent, but dependent live
+answers become stale. On reconnect, even to the same incarnation, current-source
+readings revalidate their consumed inputs; welcome alone proves no field or
+membership. With a new incarnation, keep the previous values as last-known and
+invalidate their external coverage until replaced. Never compare incarnation IDs
+lexically, compare counters across them, or switch back on a delayed reading.
+
+**Capture and eviction.** Allocate from the cache-wide clock whenever a fact is
+first installed or its answer changes, including failure/unknown transitions.
+Entry eviction never resets that clock. Recreating a fact therefore produces a
+newer token within the same incarnation without retaining unbounded tombstones.
+Tokens compare only the same declared fact; an unrelated clock advance certifies
+nothing about another input. Process evidence includes OS process identity, not
+only PID. Export opaque dependency identities, not raw private paths, command
+arguments or transcript contents.
+
+Capture each consumed answer and token together, and reuse that captured answer
+for repeated reads within the invocation and inherited workers. Before exporting
+a derived field, validate its consumed dependency set against the observation
+owner and record the owner's clock atomically with that validation, synchronized
+with answer changes and entry replacement. Changed/evicted
+dependencies make the field unavailable for normalization and schedule the normal
+refresh; do not stamp a mixed computation as coherent or spin until it succeeds.
+The validation clock can order changed dependency sets within one incarnation;
+it never covers omitted dependencies. A later observation after validation makes
+the captured answer older, not invalid history. Preserve the pinned SQLite
+snapshot's revisions independently. Two captures with crossed SQLite/observation
+freshness remain incomparable; neither arrival order nor component maxima can
+create a replacement value.
+
+**Field evidence and answer coverage.** Declare inputs per field/predicate:
+parent and lifecycle consume their actual SQLite domains; activity consumes its
+SQLite inputs plus process/turn/deadline observations as applicable; ordering
+consumes the fields it actually sorts. A normalized derived value carries that
+complete support, including captured dependency identities/tokens and validation
+clock. A later comparable capture can replace it when the supporting set changes
+(for example, a Session acquires another process); an individual process fact
+alone cannot rewrite Task activity. Dynamic membership programs consume these
+typed fields, never infer Task lifecycle a second time in Swift. Candidate
+manifests declare observation coverage too if their eligibility depends on it;
+an identity/parent-only universe must not prefilter Busy Tasks.
+
+Persist normalized values, source identities, incorporation and derived-answer
+dependencies in the existing client SQLite transaction owner. Persisted external
+values are last-known after restart until the active source revalidates them;
+do not persist the server's clock as a durable Machine revision. Parent/lifecycle
+incorporation survives independently, so stale/missing activity cannot revive an
+absorbed Complete or Move. Eviction retains sufficient facts/coverage or the
+existing scoped reload floor. Missing content need not retain a full delivered
+command. Old query caches without external evidence cannot be upgraded by
+assigning the current incarnation.
+
+**Implement order and deletion.** First extend the observation owner and required
+wire DTO/fixtures on Rust, Desktop and iOS; then add field incorporation and
+derived-answer coverage; then dynamic membership and disconnected Move together
+with their callers. Preserve the original exact-query stamp/body as an input.
+Replace the query-local incorporation shortcuts and state-only reducer listed
+above; do not add a second observer, outbox or readiness owner. No production
+README or builtin skill claim changes until acceptance. The proposed Move usage
+text above remains the documentation target; observation tokens stay out of the
+product's interaction vocabulary.
+
+Acceptance adds these deterministic cases to the retained Move counterexamples:
+
+- Same SQLite revisions, process exits: held Busy membership, order and counts
+  consume the newer derived activity; reordered old evidence cannot restore Busy.
+- Evict/recreate the observed entry in the same cache: its token never repeats.
+  Replace the cache/server: new welcome invalidates old external coverage; delayed
+  old frames and welcomes cannot restore it, including across two windows.
+- Change a dependency during capture or read it twice across a held change: no
+  mixed field is normalized; refresh later supplies one complete dependency set.
+- Replace a Task's process (including PID reuse): a newer complete capture may
+  change the dependency set; a newer fact for only the old process cannot.
+- Restart offline after parent incorporation, then reconnect with a new observer
+  and unchanged database epoch: Move stays absorbed; activity/order/counts remain
+  last-known or incomplete until covered. Saved request IDs and original-Machine
+  recovery survive without resend or later navigation.
+
+No new runtime measurements in this review. Next implement owns these checks;
+native latency remains unmeasured and does not block this cut. Outcome for
+loop-or-next: **design changed — iterate to implement** this observation contract,
+then field/answer separation and Move. The unanswered product choices below do
+not block that direction.
 
 ### Open product choices
 

@@ -6,7 +6,12 @@
   order those inputs; exporting `observe` counters without an incarnation also
   reuses revisions after eviction. Proposed correction and acceptance are in
   `instant-task-session.md` (External-observation counterexample). Source
-  replacement and persistence need design review before protocol/client cutover.
+  replacement, persistence and eviction are now specified by the headless concept
+  review in that design (Review direction: one observation source, independent
+  facts). Proposed: connection-established cache incarnation, non-reusing cache
+  clock, captured dependency evidence and persisted last-known values. Implement
+  this observation contract before field/answer separation and disconnected Move;
+  no new product preference is inferred.
   The SQLite teardown repair is implemented; Move remains unbuilt. The three
   product questions remain open and independent of this engineering gap.
 

@@ -380,3 +380,82 @@ public struct ProjectedWorkInventory: Equatable, Sendable {
     public let membership: WorkMembershipPlan
     public let resolution: WorkSelectionResolution
 }
+
+/// Real detail/history content joined to the query owner's current fields.
+/// Unstamped pages never contribute parent or lifecycle facts.
+public struct ProjectedTaskHistory: Sendable {
+    public struct Row: Identifiable, Sendable {
+        public var id: String { task.id }
+        public let task: RoadmapTask
+        public let lifecycle: WorkMembershipPlan.StateFact?
+        public let locationKnown: Bool
+
+        public var status: String {
+            guard locationKnown, let lifecycle, lifecycle.known else { return "Updating…" }
+            if lifecycle.states.contains(.done), task.task.completedAt == nil { return "Done · date unavailable" }
+            return TaskSection(states: lifecycle.states).rawValue.capitalized
+        }
+    }
+    public let rows: [Row]
+    /// Includes retained rows outside the filter, for an already-selected inspector.
+    public let retained: [Row]
+    public let count: Int?
+    public let incomplete: Bool
+
+    public init(plans: [ProjectedWorkPlan], repository: String, wave: String,
+                content: [RoadmapTask], showCompleted: Bool, days: Int, now: Date,
+                contentComplete: Bool, historyComplete: Bool) {
+        let plans = plans.filter { $0.repository == repository }
+        let fields = Dictionary(plans.flatMap { $0.membership.facts }.map { ($0.work, $0) },
+            uniquingKeysWith: { first, _ in first })
+        let scoped = plans.map { $0.inventory(wave: wave) }
+        var incomplete = plans.isEmpty || !contentComplete || (showCompleted && !historyComplete)
+            || scoped.contains { !$0.resolution.unavailable.isEmpty }
+        var rows: [Row] = []
+        var retained: [Row] = []
+        var seen = Set<String>()
+        for task in content where task.task.repositoryId == repository && seen.insert(task.id).inserted {
+            let key = WorkWorkspaceKey(repository: repository, kind: .task, id: task.id)
+            let fact = fields[key]
+            var reasons: [String] = []
+            let belongs = fact.map {
+                WorkMembershipPlan.Predicate.descendants(wave: wave).includes($0, facts: fields, unavailable: &reasons)
+            }
+            let locationKnown = belongs != nil && reasons.isEmpty
+            let row = Row(task: task, lifecycle: fact?.lifecycle, locationKnown: locationKnown)
+            retained.append(row)
+            if locationKnown && belongs == false { continue }
+            guard locationKnown, let lifecycle = fact?.lifecycle, lifecycle.known else {
+                incomplete = true
+                rows.append(row)
+                continue
+            }
+            // Lifecycle alone cannot certify the end of unresolved execution.
+            if task.condition.unresolvedExecution { rows.append(row); continue }
+            let section = TaskSection(states: lifecycle.states)
+            if section != .done && section != .abandoned { rows.append(row); continue }
+            guard section == .done, showCompleted else { continue }
+            if days == 0 { rows.append(row); continue }
+            // Pages carry dates as display content, without field provenance.
+            // They can filter retained content, but cannot certify a dated total.
+            incomplete = true
+            guard let timestamp = task.task.completedAt,
+                  let date = Self.completionDate(timestamp), task.lifecycle == .done else {
+                incomplete = true
+                continue
+            }
+            if date <= now && date >= now.addingTimeInterval(-Double(days) * 86_400) { rows.append(row) }
+        }
+        let loaded = Set(retained.map { $0.task.id })
+        if scoped.flatMap({ $0.resolution.members }).contains(where: { !loaded.contains($0.work.id) }) { incomplete = true }
+        self.rows = rows
+        self.retained = retained
+        self.incomplete = incomplete
+        count = incomplete ? nil : rows.count
+    }
+
+    public static func completionDate(_ timestamp: String) -> Date? {
+        if let date = try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse(timestamp) { return date }
+        return try? Date.ISO8601FormatStyle().parse(timestamp)
+    }
+}

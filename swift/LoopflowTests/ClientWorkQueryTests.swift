@@ -696,6 +696,73 @@ final class ClientWorkQueryTests: XCTestCase {
         }
     }
 
+    private func historyTask(date: String? = "2026-07-14T18:30:00Z", unresolved: Bool = false) throws -> RoadmapTask {
+        let url = Bundle(for: Self.self).url(forResource: "closed_task_page", withExtension: "json")
+            ?? URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+                .deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto/closed_task_page.json")
+        let page = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        var row = try XCTUnwrap((page["tasks"] as? [[String: Any]])?.first)
+        var task = try XCTUnwrap(row["task"] as? [String: Any])
+        task["id"] = "a"
+        task["repo_id"] = try plan().repository
+        task["wave_id"] = "a"
+        task["project_id"] = "historical-project"
+        task["completed_at"] = date.map { $0 as Any } ?? NSNull()
+        row["task"] = task
+        var condition = try XCTUnwrap(row["condition"] as? [String: Any])
+        condition["unresolved_execution"] = unresolved
+        row["condition"] = condition
+        return try JSONDecoder().decode(RoadmapTask.self, from: JSONSerialization.data(withJSONObject: row))
+    }
+
+    private func history(_ plans: [ProjectedWorkPlan], wave: String = "a", content: [RoadmapTask],
+                         showCompleted: Bool = false, days: Int = 7, complete: Bool = true) -> ProjectedTaskHistory {
+        ProjectedTaskHistory(plans: plans, repository: plans.first?.repository ?? content.first?.task.repositoryId ?? "missing", wave: wave, content: content,
+            showCompleted: showCompleted, days: days, now: Date(timeIntervalSince1970: 1_784_070_000),
+            contentComplete: true, historyComplete: complete)
+    }
+
+    func testDetailHistoryOfflineMovesAndRefusalNeverBorrowPageMembership() throws {
+        var query = ClientWorkQuery(stamp: fieldStamp(), plans: [try scoped(fieldPlan(fieldStamp(), wave: "a"), wave: nil)])
+        query.prepareProjection()
+        let page = try historyTask()
+        func plans(_ effects: [WorkQueryEffect]) -> [ProjectedWorkPlan] { query.applying(effects).projection }
+        let first = WorkQueryEffect(operationID: "move", sequence: 1, directory: "/repo", kind: "task.move", issue: "a", wave: "b", resolution: nil)
+        let next = WorkQueryEffect(operationID: "later", sequence: 2, directory: "/repo", kind: "task.move", issue: "a", wave: nil, resolution: nil)
+        XCTAssertTrue(history(plans([first]), content: [page, page]).rows.isEmpty)
+        let destination = history(plans([first]), wave: "b", content: [page])
+        XCTAssertEqual(destination.rows.map(\.id), ["a"])
+        XCTAssertEqual(destination.rows.first?.status, "Working")
+        XCTAssertEqual(destination.rows.first?.task.task.projectId, "historical-project")
+        XCTAssertTrue(history(plans([first, next]), wave: "b", content: [page]).rows.isEmpty)
+        let refusal = try fieldReceipt(kind: "task.move", stage: "task.membership_changed", resolution: .definitelyRefused)
+        let refused = WorkQueryEffect(operationID: "move", sequence: 1, directory: "/repo", kind: "task.move", issue: "a", wave: "b", resolution: refusal.commits.first)
+        XCTAssertEqual(history(plans([refused]), content: [page]).rows.map(\.id), ["a"])
+        XCTAssertTrue(history(plans([refused, next]), content: [page]).rows.isEmpty)
+    }
+
+    func testDetailHistoryUnknownDateMissingFieldsAndFailedPageKeepContentWithoutExactCount() throws {
+        let done = ProjectedWorkPlan(try scoped(fieldPlan(fieldStamp(), wave: "a", lifecycle: [.done]), wave: nil))
+        let undated = try historyTask(date: nil)
+        let dated = history([done], content: [undated], showCompleted: true)
+        XCTAssertTrue(dated.rows.isEmpty)
+        XCTAssertNil(dated.count)
+        XCTAssertEqual(dated.retained.map(\.id), ["a"])
+        XCTAssertEqual(history([done], content: [undated], showCompleted: true, days: 0).count, 1)
+        XCTAssertNil(history([done], content: [undated], showCompleted: true, days: 0, complete: false).count)
+        let missing = history([], content: [undated])
+        XCTAssertEqual(missing.rows.first?.status, "Updating…")
+        XCTAssertNil(missing.count)
+        let recovery = history([done], content: [try historyTask(unresolved: true)])
+        XCTAssertEqual(recovery.rows.map(\.id), ["a"])
+        let absentContent = history([done], content: [])
+        XCTAssertNil(absentContent.count)
+        let unknownParent = ProjectedWorkPlan(try scoped(fieldPlan(fieldStamp(), wave: "unknown-parent"), wave: nil))
+        let unplaced = history([unknownParent], content: [undated])
+        XCTAssertEqual(unplaced.rows.first?.status, "Updating…")
+        XCTAssertNil(unplaced.count)
+    }
+
     func testProjectedInventoryScopesDescendantsAndKeepsLifecycleIndependentOfActivity() throws {
         let stamp = fieldStamp()
         var base = try scoped(fieldPlan(stamp, wave: "b", activityKnown: false), wave: "a")
@@ -795,6 +862,11 @@ final class ClientWorkQueryTests: XCTestCase {
             let inventory = try XCTUnwrap(restarted.cached(machine: "machine", key: "inventory")?.projection.first?.inventory())
             XCTAssertEqual(inventory.membership.facts.first?.lifecycle.states, [.working])
             XCTAssertEqual(inventory.resolution.members.map(\.work.id), ["a"])
+            let projected = try XCTUnwrap(restarted.cached(machine: "machine", key: "inventory")?.projection.first)
+            let detail = history([projected], content: [try historyTask()])
+            XCTAssertEqual(detail.rows.map(\.id), ["a"])
+            XCTAssertEqual(detail.rows.first?.status, "Working")
+            XCTAssertEqual(detail.count, 1)
             XCTAssertTrue(try restarted.pending().isEmpty)
         }
     }

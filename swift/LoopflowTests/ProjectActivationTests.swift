@@ -74,6 +74,7 @@ struct ProjectActivationTests {
         await response.started()
         // Finish the suspended transport before assertions can throw.
         var portfolio: WaveDetailPane { WaveDetailPane(
+                model: model,
             wave: WaveViewModel(api: Wave(id: wave.id, name: wave.name, repo: wave.repo, status: .ready),
                 plan: WavePlan(objective: "Retained objective")),
             repoPath: wave.repo, streamed: nil,

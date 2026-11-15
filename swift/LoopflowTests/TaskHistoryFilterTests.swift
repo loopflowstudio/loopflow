@@ -36,6 +36,7 @@ struct TaskHistoryFilterTests {
         }
         if let index = rows.firstIndex(where: { ($0["task"] as? [String: Any])?["id"] as? String == "unresolved" }) {
             rows[index]["lifecycle"] = "moving"
+            rows[index]["selection_states"] = ["open", "working"]
             rows[index]["runtime"] = ["work_id": "unresolved", "status": "moving", "reason": "Running", "updated_at": "2026-10-02T12:00:00Z", "provider": "codex", "owner": ["person": "Jack Heart", "person_id": NSNull(), "machine": ["id": NSNull(), "label": NSNull()]] as [String: Any]] as [String: Any]
             var condition = try #require(rows[index]["condition"] as? [String: Any])
             condition["unresolved_execution"] = true
@@ -68,17 +69,60 @@ struct TaskHistoryFilterTests {
         filter.includes(row, now: now)
     }
 
-    @Test func closedPagesJoinOpenTasksOnceAndReachTheirRange() throws {
+    @Test func closedPagesDeduplicateAndReachTheirRange() throws {
         let page = try JSONDecoder().decode(ClosedTaskPage.self, from: Data(contentsOf: fixtures.appendingPathComponent("closed_task_page.json")))
         var history = ClosedTaskHistory()
         history.append(page)
-        // A Task that closed between readings stays a single row.
-        #expect(history.merged(after: page.tasks).count == 1)
-        #expect(history.merged(after: []).map(\.id) == page.tasks.map(\.id))
+        history.append(page)
+        #expect(history.tasks.map(\.id) == page.tasks.map(\.id))
         let closedAt = try #require(TaskHistoryFilter.completionDate("2026-07-14T18:30:00Z"))
         #expect(history.reaches(closedAt.addingTimeInterval(1)))
         #expect(!history.reaches(closedAt.addingTimeInterval(-1)))
         #expect(history.next == page.next)
+    }
+
+    @Test func selectedHistoryContentKeepsItsWorkspaceWhileFieldsAreUnavailable() throws {
+        let page = try JSONDecoder().decode(ClosedTaskPage.self, from: Data(contentsOf: fixtures.appendingPathComponent("closed_task_page.json")))
+        let task = try #require(page.tasks.first)
+        let list = ProjectedTaskHistory(plans: [], repository: task.task.repositoryId,
+            wave: task.task.waveId ?? "missing", content: page.tasks,
+            showCompleted: false, days: 7, now: now, contentComplete: false, historyComplete: false)
+        var selected: RoadmapTask?
+        let row = RoadmapTaskView(row: try #require(list.rows.first),
+            selectedTask: Binding(get: { selected }, set: { selected = $0 }))
+        try row.inspect().find(viewWithAccessibilityIdentifier: "wave-task").callOnTapGesture()
+        #expect(selected?.id == task.id)
+        // The next detail frame and page no longer contain the selected Task.
+        let replacement = ProjectedTaskHistory(plans: [], repository: task.task.repositoryId,
+            wave: task.task.waveId ?? "missing", content: [selected].compactMap { $0 },
+            showCompleted: false, days: 7, now: now, contentComplete: false, historyComplete: false)
+        var opened: String?
+        let inspector = WaveWorkInspector(row: replacement.retained.first, onOpenTask: { opened = $0 })
+        _ = try inspector.inspect().find(text: "\(task.task.identifier) · \(task.task.name)")
+        _ = try inspector.inspect().find(text: "Updating… · \(task.condition.reason)")
+        try inspector.inspect().find(button: "Open Task workspace").tap()
+        #expect(opened == task.id)
+        #expect(list.count == nil)
+    }
+
+    @Test func heldPageCannotChangeNewRangeCursorAndFailureKeepsLoadedContent() throws {
+        let page = try JSONDecoder().decode(ClosedTaskPage.self, from: Data(contentsOf: fixtures.appendingPathComponent("closed_task_page.json")))
+        var history = ClosedTaskHistory()
+        let oldRange = history.begin()
+        let newRange = history.begin()
+        history.receive(page, generation: oldRange)
+        history.finish(oldRange, error: "Old range failed")
+        #expect(history.isLoading && history.error == nil)
+        #expect(history.tasks.map(\.id) == page.tasks.map(\.id))
+        #expect(!history.loaded && history.next == nil)
+        history.receive(page, generation: newRange)
+        history.finish(newRange)
+        let cursor = history.next
+        let next = history.begin()
+        history.finish(next, error: "Next page failed")
+        #expect(history.tasks.map(\.id) == page.tasks.map(\.id))
+        #expect(history.next == cursor && history.error == "Next page failed")
+        #expect(!history.isLoading)
     }
 
     @Test func rollingBoundariesAndValidation() throws {
@@ -254,6 +298,7 @@ struct TaskHistoryFilterTests {
         let wave = try #require(roadmap.waves.first)
         let model = WorkModel(query: query)
         model.applyFixture(roadmap: .available(roadmap), waves: .available([wave.wave.toWave()]), workActivity: .loading, repos: [])
+        model.applyProjectedSelectionPlans([ProjectedWorkPlan(fixtureInventoryPlan(roadmap))], reason: "")
         model.select(.wave(id: wave.wave.id))
         let board = WaveStandupBoard(model: model, view: .wave(wave.wave.id))
         #expect(try board.inspect().find(viewWithAccessibilityIdentifier: "wave-status").text().string()

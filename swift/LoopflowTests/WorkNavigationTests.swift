@@ -34,10 +34,10 @@ struct WorkNavigationTests {
         model.select(.task(id: task.id))
         model.navigation.selectedSessionId = record.id
         model.navigation.renaming = SessionRenameDraft(sessionId: record.id, text: "Keep this draft")
-        let content = WorkViewPlan.Content(paneRevision: nil, face: nil, work: .init(repository: "repo", kind: .task, id: task.id),
+        let content = WorkViewPlan.Content(paneRevision: nil, face: nil, work: .init(repository: task.task.repositoryId, kind: .task, id: task.id),
             title: task.task.name, states: [.working], identifier: task.task.identifier, primarySession: record.id,
             location: nil, argv: nil, unavailable: [])
-        let template = fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"), members: [content])
+        let template = fixtureViewPlan(owner: .init(repository: task.task.repositoryId, kind: .repository, id: "repo"), members: [content])
         let fields = [WorkMembershipPlan.Facts(work: content.work, name: task.task.identifier,
             parent: .init(wave: wave, support: nil), lifecycle: .init(states: [.working], known: true, support: nil),
             activity: .init(states: [], known: false, support: nil))]
@@ -49,11 +49,18 @@ struct WorkNavigationTests {
                 facts: facts, unavailable: incomplete ? ["Destination awaits confirmation"] : [])
             model.applyProjectedSelectionPlans([ProjectedWorkPlan(template, membership: membership)], reason: "")
         }
+        func detail() -> ProjectedTaskHistory {
+            model.detailTasks(wave: wave, repository: task.task.repo, content: [task, task],
+                showCompleted: false, days: 7, now: .now, contentComplete: true, historyComplete: false)
+        }
         publish(parent: wave)
+        #expect(detail().rows.map(\.id) == [task.id])
         #expect(model.startedTaskCount(.wave(wave)) == 1)
         #expect(model.standupTasks(.wave(wave))?.items.map(\.id) == [task.id])
         #expect(model.standup([task], doneDays: 0).working.map(\.id) == [task.id])
         publish(parent: nil)
+        #expect(detail().rows.isEmpty)
+        #expect(detail().retained.map(\.id) == [task.id])
         #expect(model.startedTaskCount(.wave(wave)) == 0)
         #expect(model.standupTasks(.wave(wave))?.items.isEmpty == true)
         #expect(model.projection.standaloneTasks.map(\.task.id) == [task.id])
@@ -66,6 +73,8 @@ struct WorkNavigationTests {
         #expect(missingContent.breadcrumb(selection: model.selection, sessionId: record.id)?.waveWork == nil)
         #expect(missingContent.breadcrumb(selection: model.selection, sessionId: record.id)?.taskWork == .task(id: task.id))
         publish(parent: "unresolved", incomplete: true)
+        #expect(detail().rows.first?.status == "Updating…")
+        #expect(detail().count == nil)
         #expect(model.startedTaskCount(.repository) == nil)
         #expect(model.projection.standaloneTasks.isEmpty)
         #expect(model.projection.unplacedTasks.map(\.task.id) == [task.id])

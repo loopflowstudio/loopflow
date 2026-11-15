@@ -30,8 +30,7 @@ struct TaskHistoryFilter: Equatable {
     }
 
     static func completionDate(_ timestamp: String) -> Date? {
-        if let date = try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse(timestamp) { return date }
-        return try? Date.ISO8601FormatStyle().parse(timestamp)
+        ProjectedTaskHistory.completionDate(timestamp)
     }
 }
 
@@ -40,12 +39,16 @@ struct TaskHistoryFilter: Equatable {
 struct ClosedTaskHistory {
     private(set) var tasks: [RoadmapTask] = []
     private(set) var next: String?
-    var isLoading = false
-    var error: String?
+    private(set) var isLoading = false
+    private(set) var error: String?
+    private(set) var loaded = false
+    private(set) var generation = UUID()
 
     mutating func append(_ page: ClosedTaskPage) {
-        tasks += page.tasks
+        let ids = Set(tasks.map(\.id))
+        tasks += page.tasks.filter { !ids.contains($0.id) }
         next = page.next
+        loaded = true
     }
 
     /// Whether the pages reach back to `date`.
@@ -55,10 +58,28 @@ struct ClosedTaskHistory {
         return closed < date
     }
 
-    /// The open inventory, then closed Tasks it does not already hold.
-    func merged(after open: [RoadmapTask]) -> [RoadmapTask] {
-        let ids = Set(open.map(\.id))
-        return open + tasks.filter { !ids.contains($0.id) }
+    /// A range change retains loaded pages; only the active request can settle loading.
+    mutating func begin() -> UUID {
+        generation = UUID()
+        isLoading = true
+        error = nil
+        return generation
+    }
+
+    mutating func receive(_ page: ClosedTaskPage, generation: UUID) {
+        // Even a canceled range's page is useful content, but never its cursor.
+        if generation != self.generation {
+            let ids = Set(tasks.map(\.id))
+            tasks += page.tasks.filter { !ids.contains($0.id) }
+            return
+        }
+        append(page)
+    }
+
+    mutating func finish(_ generation: UUID, error: String? = nil) {
+        guard generation == self.generation else { return }
+        isLoading = false
+        if let error { self.error = error }
     }
 }
 

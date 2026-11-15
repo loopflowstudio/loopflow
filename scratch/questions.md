@@ -152,5 +152,13 @@
   projected current parent/lifecycle while retaining separately paged history,
   its cursors/content and unresolved-execution recovery. Historical Project
   association stays historical. This follows the existing shared-owner design;
-  it is proposed implementation, not a new product answer. Three numbered product
-  questions remain open; native latency remains unmeasured.
+  the shared-field join now implements it. Unstamped page dates remain display
+  content: dated exact totals need supported date fields; All ages uses lifecycle.
+  Three numbered product questions remain open; native latency remains unmeasured.
+
+- Headless concept review, 2026-11-15: completion time must correlate with the
+  projected completion, using the existing supported field owner. A present
+  page/planning date is not enough to certify a dated Done answer. Proposed next
+  direction joins lifecycle/time through producer, persistence and board/detail;
+  All ages stays lifecycle-only. This is an engineering consequence of the
+  current contract, not an answer to the three open product questions.

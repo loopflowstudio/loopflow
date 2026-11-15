@@ -126,6 +126,11 @@ A refusal restores only that change, leaving later edits and navigation alone.
 Incomplete cached destinations wait for their missing data before showing an
 exact count. Done leaves its dated total incomplete while completion dates are
 still arriving; showing all ages can include those completed Tasks immediately.
+Wave detail uses the same current location as the board and trail. Completed-history
+pages stay loaded when Tasks move or reopen, including across range changes and
+failed next-page requests. Missing data keeps counts incomplete and loaded content
+reachable. History pages carry display dates without stamped date coverage, so the
+detail's dated-history count stays incomplete; **All ages** uses known lifecycle.
 
 Open an active Task whose planning state is **Todo**: wherever its lifecycle
 appears in the page, sidebar, board or breadcrumb picker, it shows **Active**.

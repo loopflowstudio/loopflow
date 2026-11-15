@@ -369,6 +369,7 @@ struct WavesView: View {
     private var waveDetail: some View {
         if let wave = selectedWave {
             WaveDetailPane(
+                model: model,
                 wave: wave,
                 repoPath: waveRepoPath(for: wave),
                 streamed: model.waveDetail(id: wave.id),

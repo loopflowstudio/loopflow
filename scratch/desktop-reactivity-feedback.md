@@ -40,3 +40,11 @@ Jack Heart, comment `35145bd7-dbd3-40db-9081-d75844fb0f40`:
 
 Benchmarking now belongs to implementation as well as demo. ADEMark coverage and
 workflow-specific journeys are mapped in the existing performance harness docs.
+
+Jack Heart, 2026-11-15, conversation discussion:
+> “I wonder if we should change the skills that we give in Implement and, to maybe some lesser degree, Kick Off and Design (or maybe not even lesser), to encourage slices that are big enough to get full vertical views on a system and allow you to see it working end to end, even if it's not in every case, rather than trying to design a perfect version of a layer and then going to the next layer only to figure out that actually your previous implementation was not correct.”
+> “second there's the question of how we are going to review this thing. Can we decompose it into smaller shippable chunks?”
+> “And third there's the question of what the product questions that arose were and what we should discuss in order to answer them or guide the overall design”
+
+These are discussion questions, not a decision to split, ship, change product
+behavior or restart the active Graph.

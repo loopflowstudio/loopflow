@@ -6,8 +6,8 @@ observation source `86f99e3315`, typed field support `f9a8da8ae9`. SQL-only and 
 normalization, field-stage incorporation and derived membership answers now
 share the client owner. Dynamic membership, disconnected Move and the projected
 surface cut (boards, portfolio Roadmap/Now, trails, No Wave grouping, counts) use
-that same owner. Next: the Wave detail Task table (current location through
-detail and history, below). No shipping or merge decision; no Wave selected.
+that same owner. Wave detail/history now joins those fields too; the remaining
+responsibility inventory below keeps the full rewrite open. No shipping or merge decision; no Wave selected.
 
 ## Direction
 
@@ -244,6 +244,12 @@ intersections, hidden/suppressed occurrences and unknown/partial reads remain on
 the typed program and its shared evaluator. Desktop Move no longer uses
 `performTaskAction` or its post-write refresh barrier.
 
+Removed in the detail/history cut: `ClosedTaskHistory.merged`, detail's DTO
+lifecycle filter, unconditional history resets, and inspector lookup limited to
+`workMap.tasks`. Required page content/cursors, original Project IDs, ordering,
+recovery and selected inspector now stay on the shared-field join; history pages
+supply no field facts.
+
 Still remove, with their consumers:
 
 - Desktop `TaskRunDraft.phase`, other mutation refresh barriers
@@ -429,6 +435,46 @@ in `questions.md`. These do not prevent the engineering cut above, but remain
 open product choices for this concept-review's Blocked outcome; (3) decides
 whether phone rename exists. No answer is inferred in a headless run.
 
+### Concept review: completion time belongs to the fact · 2026-11-15
+
+The detail/history join implements the preceding review direction. The next
+engineering mismatch is a dated Done answer: detail refuses to certify it from
+unstamped page dates, while the board's `WaveStandup` only checks for a missing
+`completedAt`. A present old date can therefore look complete. Source review only;
+the focused run results below are from the preceding implementation, not rerun here.
+
+Next implement direction, implied by the existing field-support contract: a
+completion date must identify the same completion as the projected lifecycle.
+Carry lifecycle and its nullable completion time as one supported terminal fact
+(or equally strong correlated support) through producer capture, wire fixtures,
+normalization, SQLite persistence and shared projection. Distinguish known absent
+from unavailable. Reopen clears terminal time; a later Complete cannot inherit
+the earlier completion's date. Local intent changes lifecycle immediately but
+does not invent a Machine completion time. Planning/page DTOs remain content,
+never an independent authority for dated membership or exact totals.
+
+Both board and detail consume that shared dated answer, keeping their existing
+range controls, order, loaded pages/cursors, historical Project association and
+unresolved-execution recovery. All ages continues to use lifecycle alone. Until
+the terminal fact is available and compatible, dated membership/count coverage
+stays incomplete; a page's displayed timestamp cannot fill the gap. Keep this
+one vertical change through both transports and their real consumers, without
+another date cache or a separate receipt ledger. Proposed usage after acceptance:
+> Done ranges use the current completion time. While that time is unavailable,
+> the range stays incomplete; All ages can show the completed Task immediately.
+
+Counterexample for the next cut: Complete at D1 → Reopen → Complete at D2,
+then an old D1 page arrives with D1 outside the selected range and D2 inside.
+Board and detail must use D2, including after restart and on the second client.
+Hold D2's reading: local Done is immediate, its dated answer is incomplete.
+Refuse only the newer Complete: retain the latest confirmed Reopen and later
+navigation. Cover known-null/unavailable time, equal conflicting support,
+partial history, changed ranges and a failed next page; keep loaded content and
+original request recovery. No new product choice or builtin skill change.
+
+Outcome for loop-or-next remains **Blocked** on questions 1–3 above. This
+engineering direction does not answer them or authorize restarting execution.
+
 ### Persisted field incorporation · 2026-11-15
 
 The existing declaration targets Complete/Abandon/Reopen at lifecycle and Move at
@@ -546,8 +592,8 @@ offline restart (`testDynamicTwoClientsConverge…`); omitted destination,
 retirement, restart (`testDynamicMoveIntoOmittedDestination…`); later navigation
 offline (`testDynamicMovePublishesBothWindows…`); Complete→newer Reopen across
 queries, retirement, restart (`testDerivedAnswerUsesIncorporatedReopen…`);
-reconnect (`testDerivedCoveragePublishesDisconnect…`). The surface cut adds
-the projected acceptance map under Projected surface validation.
+reconnect (`testDerivedCoveragePublishesDisconnect…`). The surface acceptance map remains at
+`09ab7e7ab2:scratch/instant-task-session.md` (Projected surface validation).
 Prior runs: `5c958398a6de:scratch/instant-task-session.md`.
 
 Prior dynamic/Move checks, including Desktop, iOS and Rust commands/results:
@@ -556,87 +602,71 @@ Logs: `/tmp/loo-906-dynamic-{build,final-tests,cli-workspace,ios,rust,domain,wir
 Native usability/latency, broader suites and lint remain with implementation/demo
 and gate as previously assigned.
 
-### Projected surface validation · 2026-11-15
+### Responsibility inventory · 2026-11-15
 
-Shared fixtures now supply parent/lifecycle/activity independently of roadmap
-membership. A dated Done count stays incomplete when projected completion precedes
-its completion date; all-ages Done can count the known lifecycle immediately.
-Acceptance map (`ClientWorkQueryTests/testProjectedInventory…`): descendants and
-lifecycle vs activity (`ScopesDescendants…`), unresolved destination and refusal
-(`MoveIntoUnresolvedDestination…`), changed definition (`ChangedSavedDefinition…`),
-two-client Complete→Reopen with restart (`TwoClientsCompleteThenReopen…`),
-superseded retry (`FailedMoveCannotRetryBehindLaterMove`); surfaces in
-`WorkNavigationTests` "Projected fields move boards and trails…".
-The real CLI fixture uses Manual portfolio selection before adding its repository;
-adding a manual path alone left its default Folder reading empty.
+This table tracks the accepted rewrite, not a claim of exhaustive discovery.
+New findings join their responsibility; repairs are marked separately.
 
-- `swift build --build-tests --package-path swift --jobs 4`: passes.
-- Desktop surface filter (`testProjectedInventory`, boards, trails, Now/Roadmap,
-  scope/checkpoints and `standaloneMovesKeepWorkspace`): 25 pass; the real CLI
-  case shares one owner across repository and portfolio windows and awaits both
-  readers and its private server. Final breadcrumb/jump recheck: 2 pass. Logs:
-  `/tmp/loo-906-surfaces-{tests,cli,trail}.log`.
-- Desktop callers (`TaskConceptTests`, `waveRowCountsStartedTasks`, `inspectorShowsPlanning`): 9 pass; `/tmp/loo-906-surfaces-callers.log`.
-- `uv run python scripts/test_ios.py` with seven explicit surface/Move selections:
-  7 pass; `/tmp/loo-906-surfaces-ios.log`.
-- `scripts/test_desktop.sh --skip-build --filter 'WaveStandupTests|WorkNavigationTests/projectedInventoryMovesBoardsAndTrail'`: 10 pass, including the additional unknown-date count case; `/tmp/loo-906-surfaces-dates.log`.
-- `cargo test -p loopflow --test integration documented_commands::`: 4 pass; `/tmp/loo-906-surfaces-docs.log`.
+| Responsibility / consumers | Built / deleted path | Remaining / exit check |
+| --- | --- | --- |
+| Admission, creation, both hosts | Shared outbox and original-ID recovery; old creation owner removed | Reordered validation epochs and native first-input acceptance |
+| Field capture and ingestion, both transports | Independent supported fields, receiving-link attribution | Historical restoration epoch reset; all-writer declaration audit |
+| Dynamic queries and Move, both hosts | Shared field/effect evaluator; fixed membership removed | Real 10k payload/cache/fan-out profiling |
+| Boards, portfolio, trails, No Wave | Query-owned parent/lifecycle; old planning membership removed | Native acceptance; surface commands at `09ab7e7ab2:scratch/instant-task-session.md` |
+| Wave detail/history/inspector | Shared projected join; DTO membership merge removed | Dated exact totals need supported completion dates; unproven dates stay incomplete |
+| Complete/Abandon, both hosts | Synchronous shared projection/navigation and outbox | Three product questions above; other command families below |
+| Other edits and command recovery | Session rename migrated | Claim/unassign/Reopen, Wave/Dashboard edits, bind/new/move, settings, file/layout and delivery/Graph actions: migrate real consumers and remove refresh barriers/duplicate policy |
+| Native ownership, navigation | Desktop pool retained; shared synchronous selection | Retained mobile SessionLink, cached revisit/disclosure input and paint measurements |
+| Query cache and inspection | SQLite normalized facts/derived answers | Remove remaining WorkCache/TaskFeed authority; projected inspection beyond this detail cut |
+| Acceptance and latency | Deterministic shared/Desktop/phone checks per cut | Quiet-host native baseline; exhaustive policy/remaining consumer checks; gate owns broader suites, lint and recorded LEAK |
+
+Repair in this pass: the retained history/board test supplied only planning data
+after the earlier membership migration. It now supplies a query manifest and
+consistent unresolved lifecycle states. No production authority was restored.
+LOO-650 coordination (`f64be018-352a-4514-917f-181eb67f1bcc`) recommended a finite
+migration table and coherent vertical exits; concrete lessons were returned in
+Task report `50918d31-2e7a-4531-8a74-2d1921749a6a`.
+
+### Detail and history cut · 2026-11-15
+
+`WavePlanView` joins planning, repository and loaded-page content by canonical
+repository/Task identity to the existing query owner's parent and lifecycle.
+Move changes the open detail with its board/trail; old detail/pages cannot restore
+membership. Complete follows the history filter, while unresolved execution stays
+reachable. Reopen wins over old completed content in both clients after restart.
+Historical Project IDs remain untouched. Missing fields/ancestry keep loaded rows
+reachable as Updating; missing content or pages withhold exact counts.
+
+Range changes retain pages and cursors. A canceled range's late reply can add
+content but cannot change the current cursor, loading state or error. A failed
+next page retains content/cursor and offers Retry. Selection, Session, drafts and
+navigation never come from these replies. The inspector joins the same retained
+content, including history-only Tasks and Tasks that left the list.
+
+Unstamped pages carry display dates, not normalized field support. Dated filtering
+retains its existing range semantics but cannot certify a total; unknown dates
+keep that membership incomplete. All ages uses known lifecycle without guessing
+a date. Newly exposed contract: exact dated totals need supported completion-date
+projection. No page fabricates a stamp or restores its old lifecycle.
+
+Acceptance: shared `ClientWorkQueryTests/testDetailHistory…` covers offline
+A→B→No Wave, refusal/newer Move, stale pages, historical Project association,
+unknown dates, missing fields/content/ancestry and unresolved execution.
+`testProjectedInventoryTwoClientsCompleteThenReopen…` now joins stale history
+content after restart. `WorkNavigationTests/projectedInventoryMovesBoardsAndTrail`
+checks the real model's detail/board agreement and retained Session/draft/selection.
+`TaskHistoryFilterTests/heldPageCannotChangeNewRangeCursorAndFailureKeepsLoadedContent`
+checks range replacement and failed paging. Production row/inspector actions retain
+selected content through removal from detail/pages and still open its workspace.
+No new product answer or shipping decision.
+
+- `swift build --build-tests --package-path swift --jobs 4`: passes; `/tmp/loo-906-detail-final-build.log`.
+- `scripts/test_desktop.sh --skip-build --filter 'ClientWorkQueryTests/testDetailHistory|ClientWorkQueryTests/testProjectedInventoryTwoClientsCompleteThenReopen|TaskHistoryFilterTests|WorkNavigationTests/projectedInventoryMovesBoardsAndTrail|ProjectActivationTests'`: 3 XCTest and 14 Swift Testing cases pass; `/tmp/loo-906-detail-tests.log`.
+
+- `scripts/test_desktop.sh --skip-build --filter 'TaskHistoryFilterTests/selectedHistoryContentKeepsItsWorkspaceWhileFieldsAreUnavailable|TaskHistoryFilterTests/heldPageCannotChangeNewRangeCursorAndFailureKeepsLoadedContent|TaskHistoryFilterTests/closedPagesDeduplicateAndReachTheirRange'`: 3 pass after inspector retention; `/tmp/loo-906-detail-inspector.log`.
+- `uv run python scripts/test_ios.py` with the three explicit shared detail/history and two-client/restart selections above: 3 pass; `/tmp/loo-906-detail-ios.log`.
+- `cargo test -p loopflow --test integration documented_commands::`: 4 pass; `/tmp/loo-906-detail-docs.log`.
 - `uv run python scripts/check_swift_multiplatform_boundaries.py`: passes.
-
-Remaining: native paint/input baseline, 10k inventory/count fan-out profiling,
-planning Project detail/history tables (`WaveDetailPane.projectAndTasks`), and the
-other interaction families above. Those tables merge separately paginated history;
-changing their membership must retain that content on the same field owner.
-The current board/trail cut does not claim full cross-platform acceptance.
-
-### Next implement direction: current location through detail and history
-
-Headless concept review of `aee0e10dc603` plus the uncommitted surface cut,
-2026-11-15. Boards, portfolio Roadmap/Now, trails, No Wave grouping and phone
-partial-result presentation now consume projected fields. The former review's
-surface proposal is built; the three unanswered product questions remain open.
-
-The remaining mismatch is the current Wave's detail Task table:
-`WavePlanView.projectAndTasks` merges `workMap.tasks` with `ClosedTaskHistory`,
-then `TaskHistoryFilter.includes` reads the resulting DTO's lifecycle. Move or
-Complete can change the board while this table still lists the old membership.
-Do not replace this merge with only the current manifest: loaded historical Tasks
-and their pagination would disappear. Historical Project association is distinct
-from a Task's current Wave; moving a Task must not rewrite historical records.
-
-Proposed experience: Move changes every current-location list, including an open
-Wave detail, in the same local interaction. Complete follows the existing history
-visibility/range setting; a missing completion date leaves dated membership/counts
-incomplete. Reopen restores current membership even when an older history page
-arrives later. Keep the existing recovery visibility for unresolved execution;
-known completion does not certify that native work or recovery has ended.
-
-Use the existing query/SQLite owner for parent, lifecycle and coverage. Join real
-detail and paged-history content by canonical identity with its actual provenance;
-an unstamped history page cannot overwrite newer fields or establish completeness.
-Keep its content reachable while the necessary field reading is unavailable.
-Preserve loaded pages, range, cursor, authored order, selected inspector, Session,
-panes, draft and later navigation. Count only what the captured scope/range covers;
-partial pages never prove a complete historical total. Replace the old membership
-and lifecycle decisions with this join, without another view-local overlay.
-
-Show next: an open board and detail agree for offline A→B→No Wave, refusal and a
-newer Move; retained old history pages cannot restore a removed row. Across two
-clients, Complete→Reopen survives stale detail/page arrivals and restart. Include
-unknown completion date, missing content/ancestry, a changed range during a held
-page, and a failed next page: loaded content remains reachable, counts stay honest,
-and no reply changes later navigation. Retain historical Project association and
-unresolved-execution recovery tests. Profile 10k inventory/count fan-out separately;
-native paint/input latency remains unmeasured. No builtin instruction changes.
-
-Proposed usage addition after acceptance:
-> A Task's current Wave lists agree with its board and trail. Completed-history
-> pages stay loaded as you move or reopen Tasks. Missing data keeps the affected
-> count incomplete; it does not close the conversation or discard loaded history.
-
-Outcome for loop-or-next: Blocked on the three product questions under Open
-product choices. The detail/history direction above follows the existing design
-and can be implemented independently; no execution is started by this review.
 
 ### Admission identity and recovery contract
 

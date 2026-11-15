@@ -1370,6 +1370,19 @@ final class WorkModel {
     private var projectedInventories: [ProjectedWorkPlan] {
         selectionPlans.value?.filter { $0.dashboardID == nil && $0.selection.expression == .repository } ?? []
     }
+    func detailTasks(wave: String, repository: String, content: [RoadmapTask],
+                     showCompleted: Bool, days: Int, now: Date, contentComplete: Bool,
+                     historyComplete: Bool) -> ProjectedTaskHistory {
+        let canonical = projectedInventories.first { $0.repositoryPath == repository }?.repository
+            ?? content.first { $0.task.repo == repository }?.task.repositoryId ?? repository
+        let plans = projectedInventories.filter { $0.repository == canonical }
+        let members = Set(plans.flatMap { $0.inventory(wave: wave).resolution.members.map(\.work.id) })
+        let additional = visibleTasks.filter { $0.task.repositoryId == canonical && members.contains($0.id) }
+        return ProjectedTaskHistory(plans: plans, repository: canonical, wave: wave,
+            content: content + additional, showCompleted: showCompleted, days: days, now: now,
+            contentComplete: contentComplete, historyComplete: historyComplete)
+    }
+
     var projectedFacts: [WorkMembershipPlan.Facts] { projectedInventories.flatMap { $0.membership.facts } }
 
     var projection: WorkProjection {

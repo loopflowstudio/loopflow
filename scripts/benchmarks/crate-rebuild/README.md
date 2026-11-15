@@ -38,6 +38,12 @@ overhead is excluded. These receipts do not establish total Machine CPU savings
 or a safe concurrent build budget. The commands do not configure shared daemon
 root refresh or Machine admission budgets.
 
+The private daemon accepts frames up to 1 GiB: client-side cache uploads of
+storage/application libraries exceed sccache's default 8 MiB IPC frame limit.
+With that default, an upload can close the connection and lose the compilation's
+statistics even though Cargo finishes successfully. Owner-only hit/miss checks
+prevent dependency counters from concealing that failure.
+
 The probe retains copies of the rlibs and their source-path strings. A cache hit
 can retain the first checkout's absolute debug-source paths even when runtime
 identity is correct. A successful cache counter check does not make those

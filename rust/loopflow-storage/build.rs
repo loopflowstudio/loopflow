@@ -1,6 +1,5 @@
 //! Generate the ordered migration catalogue, canonical schema and fixture image.
 use sha2::{Digest, Sha256};
-use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::{env, fs};
 #[path = "src/migration_build.rs"]
@@ -92,22 +91,8 @@ fn emit_migration_catalog(
     let connection = migration_build::apply_catalog(&catalog)
         .unwrap_or_else(|error| panic!("apply migration catalog: {error}"));
 
-    let mut code = String::from("static MIGRATIONS: &[Migration] = &[\n");
-    for entry in &catalog {
-        let path = entry
-            .path
-            .canonicalize()
-            .unwrap_or_else(|error| panic!("canonicalize {}: {error}", entry.path.display()));
-        writeln!(
-            code,
-            "    Migration {{ version: {:?}, sql: include_str!({:?}), merged: {} }},",
-            entry.version,
-            path.to_string_lossy(),
-            entry.merged
-        )
-        .expect("write migration catalog");
-    }
-    code.push_str("];\n");
+    let code = migration_build::render_catalog(&catalog)
+        .unwrap_or_else(|error| panic!("render migration catalog: {error}"));
     fs::write(out_dir.join("migrations.rs"), code).expect("write migration catalog");
 
     let schema =

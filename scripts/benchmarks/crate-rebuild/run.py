@@ -153,6 +153,7 @@ def main() -> None:
     env.update(
         CARGO_INCREMENTAL="0",
         SCCACHE_CLIENT_SIDE="1",
+        SCCACHE_MAX_FRAME_LENGTH=str(1024 * 1024 * 1024),
         RUSTC_WRAPPER=str(cache),
         SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=(
             "CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH,LOOPFLOW_BUILD_SOURCE_ROOT"
@@ -168,6 +169,23 @@ def main() -> None:
 
     def stats() -> dict:
         return json.loads(run([str(cache), "--show-stats", "--stats-format", "json"]))["stats"]
+
+    (output / "configuration.json").write_text(
+        json.dumps(
+            {
+                "cache_binary": str(cache),
+                "cache_sha256": hashlib.sha256(cache.read_bytes()).hexdigest(),
+                "cache_version": run([str(cache), "--version"]).strip(),
+                "rustc": run(["rustc", "--version"]).strip(),
+                "machine": list(os.uname()),
+                "cpus": os.cpu_count(),
+                "client_side": env["SCCACHE_CLIENT_SIDE"],
+                "max_frame_length": env["SCCACHE_MAX_FRAME_LENGTH"],
+            },
+            indent=2,
+        )
+        + "\n"
+    )
 
     with tempfile.TemporaryDirectory(prefix="lf650-build-", dir="/tmp") as temporary:
         root = Path(temporary).resolve()
@@ -230,6 +248,7 @@ def main() -> None:
                             text.replace(old, '"no Task exists for {issue:?} (rebuild probe)"')
                         )
                     before = stats()
+                    load_before = os.getloadavg()
                     start = time.monotonic()
                     stem = f"{label}_{case}"
                     with (
@@ -272,6 +291,8 @@ def main() -> None:
                         "exit_code": result.returncode,
                         "wall_seconds": round(time.monotonic() - start, 3),
                         "jobs": args.jobs,
+                        "load_before": load_before,
+                        "load_after": os.getloadavg(),
                         "edited_source": (
                             str(edited_source.relative_to(tree)) if edited_source else None
                         ),
@@ -280,6 +301,15 @@ def main() -> None:
                                 item["target"]["name"]
                                 for item in artifacts
                                 if item.get("reason") == "compiler-artifact" and not item["fresh"]
+                            }
+                        ),
+                        "nonfresh_libraries": sorted(
+                            {
+                                item["target"]["name"]
+                                for item in artifacts
+                                if item.get("reason") == "compiler-artifact"
+                                and not item["fresh"]
+                                and "lib" in item["target"]["kind"]
                             }
                         ),
                         "stats_before": before,
@@ -311,6 +341,12 @@ def main() -> None:
                     )
                     if result.returncode:
                         raise RuntimeError(f"build failed: see {output / (stem + '.log')}")
+                    if case in ("shipping_b", "task_record_b"):
+                        expected = ["loopflow"]
+                        if case == "task_record_b" and (tree / "rust/loopflow-storage").is_dir():
+                            expected.append("loopflow_storage")
+                        if receipt["nonfresh_libraries"] != expected:
+                            raise RuntimeError(f"unexpected rebuild closure: {receipt}")
                     run([str(tree / "target/debug/lf"), "--version"], tree)
                 if label == "candidate" and (trees[0] / "rust/loopflow-storage").is_dir():
                     _verify_catalog_refresh(trees[0], output, run)

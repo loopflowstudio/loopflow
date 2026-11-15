@@ -1,6 +1,7 @@
 //! The catalog `build.rs` generates: discovery and merge order. Runtime builds
 //! compile it only for tests.
 
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -74,6 +75,23 @@ pub fn order_catalog(
             }
         }))
         .collect())
+}
+
+/// Embed migration bytes without retaining a checkout path in generated Rust.
+pub fn render_catalog(catalog: &[CatalogEntry]) -> Result<String, String> {
+    let mut source = String::from("static MIGRATIONS: &[Migration] = &[\n");
+    for entry in catalog {
+        let sql = std::fs::read_to_string(&entry.path)
+            .map_err(|error| format!("read {}: {error}", entry.path.display()))?;
+        writeln!(
+            source,
+            "    Migration {{ version: {:?}, sql: {:?}, merged: {} }},",
+            entry.version, sql, entry.merged
+        )
+        .expect("writing to a String cannot fail");
+    }
+    source.push_str("];\n");
+    Ok(source)
 }
 
 /// Slugs in the order `origin/main`'s first-parent history added them under
@@ -361,5 +379,21 @@ mod tests {
             *super::super::migration_schema::product_schema(&apply_catalog(&packaged).unwrap())
                 .unwrap()
         );
+    }
+    #[test]
+    fn generated_catalog_is_source_root_independent_and_tracks_sql_bytes() {
+        let first = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        let sql = "CREATE TABLE words(value TEXT DEFAULT 'a\\b');\n-- \"quoted\" 雪\n";
+        for root in [first.path(), second.path()] {
+            write(root, "0.10.001_initial", sql);
+        }
+        let a = super::render_catalog(&order_catalog(first.path(), &[]).unwrap()).unwrap();
+        let b = super::render_catalog(&order_catalog(second.path(), &[]).unwrap()).unwrap();
+        assert_eq!(a, b);
+        assert!(a.contains(&format!("sql: {sql:?}")));
+        write(second.path(), "0.10.001_initial", "SELECT 1;");
+        let changed = super::render_catalog(&order_catalog(second.path(), &[]).unwrap()).unwrap();
+        assert_ne!(a, changed);
     }
 }

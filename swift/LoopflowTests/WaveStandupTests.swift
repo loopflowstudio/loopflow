@@ -52,7 +52,17 @@ struct WaveStandupTests {
 
     private func standup(_ tasks: [RoadmapTask], closed: [RoadmapTask]? = nil, doneDays: Int = 7,
                          github: [String: GitHubPerson] = [:]) -> WaveStandup {
-        WaveStandup(tasks: tasks, closed: closed ?? tasks, doneDays: doneDays, now: now, github: github)
+        WaveStandup(tasks: tasks, closed: closed ?? tasks, doneDays: doneDays, now: now, github: github,
+            states: Dictionary((tasks + (closed ?? [])).map { task in
+                let section: [WorkSelectionState] = switch task.section {
+                case .backlog: [.backlog]
+                case .working: [.working]
+                case .autonomous: [.autonomous]
+                case .done: [.done]
+                case .abandoned: []
+                }
+                return (task.id, section + Array(task.selectionStates))
+            }, uniquingKeysWith: { first, _ in first }))
     }
 
     @Test func columnsAreRustSections() throws {
@@ -123,11 +133,24 @@ struct WaveStandupTests {
         #expect(standup.text(heading: [], section: .done).hasSuffix("Done 0]\n  last 7 days\n  None"))
     }
 
+    @Test func doneWindowKeepsUnknownCompletionDatesIncomplete() throws {
+        let completed = try task("just-completed", section: "working", owner: "Person")
+        let board = WaveStandup(tasks: [completed], closed: [completed], doneDays: 7, now: now, github: [:],
+            states: [completed.id: [.done]])
+        #expect(board.working.isEmpty)
+        #expect(board.count(.done) == nil)
+        #expect(board.text(heading: [], section: .done).contains("Completion dates await confirmation"))
+        let allAges = WaveStandup(tasks: [completed], closed: [completed], doneDays: 0, now: now, github: [:],
+            states: [completed.id: [.done]])
+        #expect(allAges.count(.done) == 1)
+    }
+
     @Test func boardRendersHeaderColumnsAndMetrics() throws {
         let roadmap = try roadmap()
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Rendering is passive") },
                               repoPath: roadmap.wave.repo)
         model.applyFixture(roadmap: .available(try snapshot()), waves: .available([]), workActivity: .loading, repos: [])
+        model.applySelectionPlans([fixtureInventoryPlan(try self.snapshot())], reason: "")
         let board = WaveStandupBoard(model: model, view: .wave(roadmap.wave.id))
         #expect(try board.inspect().find(viewWithAccessibilityIdentifier: "wave-title").text().string() == roadmap.wave.displayName)
         #expect(try board.inspect().find(viewWithAccessibilityIdentifier: "wave-metric-headline").text().string()
@@ -151,6 +174,7 @@ struct WaveStandupTests {
         let repo = try roadmap().wave.repo
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Rendering is passive") }, repoPath: repo)
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        model.applySelectionPlans([fixtureInventoryPlan(try self.snapshot())], reason: "")
         let board = WaveStandupBoard(model: model, view: .repository)
         #expect(try board.inspect().find(viewWithAccessibilityIdentifier: "wave-title").text().string() == model.repositoryName)
         // Unstarted backlog from every Wave, and none, is on the repository's board.
@@ -198,6 +222,7 @@ struct WaveStandupTests {
         #expect(!conversation.multiplexer.collapsedPaneIds.contains(pane.id))
         try DesktopAction.perform(DesktopActionRequest(repository: "repo", window: "window", pane: nil, action: "show",
                                                        args: ["part": "board"]), model: model, workspaces: registry)
+        model.applySelectionPlans([fixtureInventoryPlan(try self.snapshot())], reason: "")
         let board = WaveStandupBoard(model: model, view: view)
         try board.inspect().find(viewWithAccessibilityIdentifier: "show-pane-tiles").button().tap()
         #expect(model.desktopViewParts(repository: "repo").map(\.hidden) == [false, false, false])

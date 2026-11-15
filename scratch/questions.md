@@ -3,9 +3,10 @@
 - Dynamic membership uses the existing query's ordered repository manifest and
   prepared indexes; explicit-only programs stay small. Normalized fields, real
   content, incorporation, derived coverage and requests share one SQLite owner.
-  Query-specific acknowledgments replace stamp-only retirement shortcuts. These
-  are engineering choices, not new product answers. Native latency, remaining
-  planning-backed surfaces and the full acceptance cut remain open.
+  Query-specific acknowledgments replace stamp-only retirement shortcuts. The
+  projected manifest also supplies board lifecycle, Task parent labels and
+  No Wave grouping; planning supplies real content. These are engineering choices,
+  not new product answers. Native latency and full interaction acceptance remain open.
 
 - Receiving-link attribution is local transport metadata on each reading, captured
   before buffering and checked against the shared Machine owner at ingestion.
@@ -146,3 +147,10 @@
 - Rename targets retained Session metadata, including a completed conversation;
   it does not require a live input attachment. The domain transaction still owns
   naming permission, validation, the actual stored name and definite refusal.
+
+- Headless detail/history direction, 2026-11-15: current Wave detail lists use
+  projected current parent/lifecycle while retaining separately paged history,
+  its cursors/content and unresolved-execution recovery. Historical Project
+  association stays historical. This follows the existing shared-owner design;
+  it is proposed implementation, not a new product answer. Three numbered product
+  questions remain open; native latency remains unmeasured.

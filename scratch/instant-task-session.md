@@ -474,74 +474,28 @@ Gate owns nextest run `7bb50caf-46f5-485f-a8ff-d882ea6e5a98`:
 `server::schema::tests::bare_time_serializes_as_its_described_tuple` reported LEAK;
 that case launches no children. No retry was taken as a fix.
 
-### Concept review: moving changes membership, not just fields · 2026-11-15
+### Projected surface cut · 2026-11-15
 
-Reviewed `a5148f5745`. Field incorporation now feeds derived answers, and link
-changes publish dependent coverage loss without command traffic. Those are built
-prerequisites; the next cut is dynamic membership and disconnected Move. A
-normalized parent alone cannot put a Task into a destination whose compiled
-program omitted its identity. No new product concept or answer is needed for
-that correction; the recorded disconnected-edit “1a” already includes Move.
+The 2026-11-15 concept reviews and their counterexamples remain at
+`aee0e10dc603:scratch/instant-task-session.md` (moving changes membership;
+one Task location across surfaces). Dynamic queries already move rows, but
+boards, No Wave grouping, trails and counts still join old planning membership.
 
-The Dynamic membership, Move and Retirement contracts above hold. One more
-case: a held Wave B answer plus a Complete receipt at a later planning revision
-cannot prove whether a different Task moved into B; an effect's fence never
-certifies unrelated changes at an older query's reload floor.
+Removed in this cut: `WorkProjection`'s `wave.tasks.items` grouping and
+`task.waveId` standalone filter; `standupTasks`' roadmap membership; the Task
+breadcrumb's Session-Wave precedence; board counts from `RoadmapTask.section`.
+Keep planning content, authored order, Session attribution, panes, drafts and
+later navigation. The existing query owner exports projected fields and coverage;
+boards use the shared ancestry evaluator and lifecycle states. No view-local Move
+map or rewritten confirmed DTO. Missing content/ancestry has no exact count.
 
-Show next on Desktop and iOS: offline Move A→B updates both cached lists before
-save; a confirmed newer C wins over held A/B answers in either arrival order.
-Include a destination that omitted the Task, No Wave, descendants, changed query
-definitions, missing content/activity, refusal and commit-then-sync-failure.
-Repeat after retirement and offline restart. Disconnect/reconnect without a new
-body changes only live-dependent coverage; it neither revives an absorbed Move
-nor sends a command or changes later selection. Retain Complete→newer Reopen
-coverage on the replacement program. The detailed required counterexamples and
-proposed README text above remain the acceptance contract; no builtin changes.
-
-### Concept review: one Task location across surfaces · 2026-11-15
-
-Reviewed HEAD `5c958398a6de` plus the uncommitted dynamic/Move cut. Dynamic
-predicates, omitted destinations, persisted incorporation and query-specific
-retirement are built on the typed query path. The prior fixed-candidate review
-page no longer describes this workspace. Recorded focused checks below are not
-new native acceptance or latency measurements.
-
-The remaining mismatch is two visible locations for one Task: projected query
-rows move to B immediately, while `WorkProjection` groups roadmap Tasks by the
-old Wave and `standupTasks` reads the old Wave's board membership. Breadcrumbs
-also prefer a Session's recorded Wave. A Task move must change its displayed
-location everywhere without moving or recreating its Session. Session attribution
-and the Task's current parent are separate facts; the former cannot override the
-latter in a Task trail.
-
-Next implement direction, already implied by the shared-owner design: expose the
-projected parent/lifecycle alongside real content from the existing query owner;
-make boards, hierarchy labels, No Wave grouping and their counts consume that
-same answer and its coverage. Keep planning details as content, not a second
-membership decision. Preserve authored order and occurrence identity. Distinguish
-a complete empty destination from missing content/ancestry, and show no exact
-count for incomplete coverage. Remove the superseded roadmap membership joins
-with their callers; add no view-local move map or fabricated confirmed DTO.
-
-Acceptance: offline A→B changes the source/destination rows, boards, breadcrumb,
-No Wave grouping and counts together on both hosts wherever those surfaces exist.
-Keep the selected Task, Session, panes and draft. Refusal restores only that
-intent; an older save failure/retry cannot overwrite a later move. A newer C
-reading survives delayed A/B readings, retirement and offline restart. Include
-descendants and changed saved definitions, incomplete destinations and unknown
-activity; reconnect cannot change later navigation or replay uncertain delivery.
-Retain Complete→Reopen coverage. Native reaction/input latency still needs its
-own baseline; reducer samples cannot substitute for it.
-
-Proposed usage after this surface cut: “Move changes the Task's location across
-cached lists, boards and its trail immediately. Its conversation stays open.
-Incomplete destinations remain marked until their missing data arrives.” The
-existing offline/recovery contract above still applies. No builtin changes.
-
-Loop-or-next outcome: **Blocked — the three open product choices below remain
-unanswered.** The engineering direction changed to the remaining surface cut;
-those choices do not prevent that implementation work. This review starts no
-execution and changes no production code.
+Acceptance: offline Move, refusal, superseded save/retry, descendants, changed
+definitions, incomplete destinations, two-client Complete→Reopen, unresolved
+destination membership, retirement/restart and retained native ownership. The
+portfolio subscribes to the same per-repository manifests, with condition content
+kept separate from projected terminal membership. Its checkpoint must cover
+that subscription too. Unplaced parents never acquire a No Wave label.
+The three product choices below remain open and do not block this cut.
 
 ### Open product choices
 
@@ -617,11 +571,12 @@ including without a network event. Retirement cancels its receipt observer and
 transfers lagging effects or scoped reload floors. The complete prior contracts and
 query checks remain at `6e944e73b5a:scratch/instant-task-session.md`.
 
-Remaining: ordinary planning-backed boards, breadcrumb/No Wave grouping and
-counts must consume the shared projection rather than stale roadmap membership;
-Move save-failure/retry supersession, changed-definition/descendant presentation
-and native acceptance still need coverage. The typed query path has dynamic
-membership and disconnected Move; full interaction cutover is not claimed.
+The projected surface cut now joins boards, portfolio Roadmap/Now, Task trails,
+No Wave grouping and counts to the query owner's parent/lifecycle fields. Initial
+observation binds the receiving link's Machine before projecting; portfolio scope
+subscribes to all repository manifests. Failed unsaved Moves cannot retry behind
+a later Move. Focused checks are recorded below; native acceptance remains open.
+Full interaction cutover is not claimed.
 Other remaining work: effect-policy duplication; exhaustive
 effect/dependency declarations and cross-query provenance; other mutation recovery
 and resource lanes; retained mobile `SessionLink`; projected inspection;
@@ -668,22 +623,91 @@ offline restart (`testDynamicTwoClientsConverge…`); omitted destination,
 retirement, restart (`testDynamicMoveIntoOmittedDestination…`); later navigation
 offline (`testDynamicMovePublishesBothWindows…`); Complete→newer Reopen across
 queries, retirement, restart (`testDerivedAnswerUsesIncorporatedReopen…`);
-reconnect (`testDerivedCoveragePublishesDisconnect…`). Not covered: Complete→Reopen
-across two clients; Move into an unresolved-membership destination (full reducer). Prior runs: `5c958398a6de:scratch/instant-task-session.md`.
+reconnect (`testDerivedCoveragePublishesDisconnect…`). The surface cut adds
+two-client Complete→Reopen and unresolved-destination coverage below.
+Prior runs: `5c958398a6de:scratch/instant-task-session.md`.
 
-- `swift build --build-tests --package-path swift --jobs 4`: passes; gate owns the wider app matrix.
-- `scripts/test_desktop.sh --skip-build --filter 'ClientWorkQueryTests/testDynamic|ClientWorkQueryTests/testField|ClientWorkQueryTests/testDerived|ClientWorkQueryTests/testDesktopMove|ClientWorkQueryTests/testLaterSettlement|ClientWorkQueryTests/testCompletionIncorporation|ClientWorkQueryTests/testDefiniteRefusal|ClientWorkQueryTests/testProductionIntent|ClientWorkQueryTests/testHeldList'`: 31 pass, 1 opt-in measurement skipped; that measurement ran separately with 21 recorded samples. Content/field EXPLAIN checks use indexes at 10k rows.
-- `scripts/test_desktop.sh --skip-build --filter WorkCLISubscriptionTests/standaloneMovesKeepWorkspace`: 1 passes through real admission/receipt streams; retains selection, Session, panes and file draft, then awaits private server shutdown.
-- `uv run python scripts/test_ios.py` with 10 explicit shared/phone selections: 10 pass (two clients, migration, omitted destination, held disk, missing/conflicting content, restored/indexed agreement, phone Move, Busy and newer Reopen). Gate owns remaining iOS cases.
-- `cargo test -p loopflow --lib work::selection_tests::`: 21 pass.
-- `cargo test -p loopflow --lib store::sqlite::task_content::tests::membership_moves_preserve_work_and_capture_owners`: 1 passes, including actual Wave/Project stage result.
-- `cargo test -p loopflow --lib server::schema::tests:: -- --skip bare_time_serializes_as_its_described_tuple`: 7 pass; generated schema fixture matches. Gate owns the skipped case and recorded nextest LEAK.
-- `cargo test -p loopflow --test integration documented_commands::`: 4 pass. Rust links emitted the existing unwind-size warning.
-- `uv run python scripts/check_swift_multiplatform_boundaries.py`: passes.
-
-Current logs: `/tmp/loo-906-dynamic-{build,final-tests,cli-workspace,ios,rust,domain,wire,docs}.log`.
+Prior dynamic/Move checks, including Desktop, iOS and Rust commands/results:
+`aee0e10dc603:scratch/instant-task-session.md` (Dynamic membership and disconnected Move).
+Logs: `/tmp/loo-906-dynamic-{build,final-tests,cli-workspace,ios,rust,domain,wire,docs}.log`.
 Native usability/latency, broader suites and lint remain with implementation/demo
 and gate as previously assigned.
+
+### Projected surface validation · 2026-11-15
+
+Shared fixtures now supply parent/lifecycle/activity independently of roadmap
+membership. A dated Done count stays incomplete when projected completion precedes
+its completion date; all-ages Done can count the known lifecycle immediately.
+The real CLI fixture uses Manual portfolio selection before adding its repository;
+adding a manual path alone left its default Folder reading empty.
+
+- `swift build --build-tests --package-path swift --jobs 4`: passes.
+- Desktop surface filter (`testProjectedInventory`, boards, trails, Now/Roadmap,
+  scope/checkpoints and `standaloneMovesKeepWorkspace`): 25 pass; the real CLI
+  case shares one owner across repository and portfolio windows and awaits both
+  readers and its private server. Final breadcrumb/jump recheck: 2 pass. Logs:
+  `/tmp/loo-906-surfaces-{tests,cli,trail}.log`.
+- Desktop callers (`TaskConceptTests`, `waveRowCountsStartedTasks`, `inspectorShowsPlanning`): 9 pass; `/tmp/loo-906-surfaces-callers.log`.
+- `uv run python scripts/test_ios.py` with seven explicit surface/Move selections:
+  7 pass; `/tmp/loo-906-surfaces-ios.log`.
+- `scripts/test_desktop.sh --skip-build --filter 'WaveStandupTests|WorkNavigationTests/projectedInventoryMovesBoardsAndTrail'`: 10 pass, including the additional unknown-date count case; `/tmp/loo-906-surfaces-dates.log`.
+- `cargo test -p loopflow --test integration documented_commands::`: 4 pass; `/tmp/loo-906-surfaces-docs.log`.
+- `uv run python scripts/check_swift_multiplatform_boundaries.py`: passes.
+
+Remaining: native paint/input baseline, 10k inventory/count fan-out profiling,
+planning Project detail/history tables (`WaveDetailPane.projectAndTasks`), and the
+other interaction families above. Those tables merge separately paginated history;
+changing their membership must retain that content on the same field owner.
+The current board/trail cut does not claim full cross-platform acceptance.
+
+### Next implement direction: current location through detail and history
+
+Headless concept review of `aee0e10dc603` plus the uncommitted surface cut,
+2026-11-15. Boards, portfolio Roadmap/Now, trails, No Wave grouping and phone
+partial-result presentation now consume projected fields. The former review's
+surface proposal is built; the three unanswered product questions remain open.
+
+The remaining mismatch is the current Wave's detail Task table:
+`WavePlanView.projectAndTasks` merges `workMap.tasks` with `ClosedTaskHistory`,
+then `TaskHistoryFilter.includes` reads the resulting DTO's lifecycle. Move or
+Complete can change the board while this table still lists the old membership.
+Do not replace this merge with only the current manifest: loaded historical Tasks
+and their pagination would disappear. Historical Project association is distinct
+from a Task's current Wave; moving a Task must not rewrite historical records.
+
+Proposed experience: Move changes every current-location list, including an open
+Wave detail, in the same local interaction. Complete follows the existing history
+visibility/range setting; a missing completion date leaves dated membership/counts
+incomplete. Reopen restores current membership even when an older history page
+arrives later. Keep the existing recovery visibility for unresolved execution;
+known completion does not certify that native work or recovery has ended.
+
+Use the existing query/SQLite owner for parent, lifecycle and coverage. Join real
+detail and paged-history content by canonical identity with its actual provenance;
+an unstamped history page cannot overwrite newer fields or establish completeness.
+Keep its content reachable while the necessary field reading is unavailable.
+Preserve loaded pages, range, cursor, authored order, selected inspector, Session,
+panes, draft and later navigation. Count only what the captured scope/range covers;
+partial pages never prove a complete historical total. Replace the old membership
+and lifecycle decisions with this join, without another view-local overlay.
+
+Show next: an open board and detail agree for offline A→B→No Wave, refusal and a
+newer Move; retained old history pages cannot restore a removed row. Across two
+clients, Complete→Reopen survives stale detail/page arrivals and restart. Include
+unknown completion date, missing content/ancestry, a changed range during a held
+page, and a failed next page: loaded content remains reachable, counts stay honest,
+and no reply changes later navigation. Retain historical Project association and
+unresolved-execution recovery tests. Profile 10k inventory/count fan-out separately;
+native paint/input latency remains unmeasured. No builtin instruction changes.
+
+Proposed usage addition after acceptance:
+> A Task's current Wave lists agree with its board and trail. Completed-history
+> pages stay loaded as you move or reopen Tasks. Missing data keeps the affected
+> count incomplete; it does not close the conversation or discard loaded history.
+
+Outcome for loop-or-next: Blocked on the three product questions under Open
+product choices. The detail/history direction above follows the existing design
+and can be implemented independently; no execution is started by this review.
 
 ### Admission identity and recovery contract
 

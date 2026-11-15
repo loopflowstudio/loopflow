@@ -154,7 +154,7 @@ struct WorkCLISubscriptionTests {
         try await eventually { model.task(id: id) != nil }
         // An unstarted Task waits in the board's Backlog, where it offers Start; the strip lists Working Tasks.
         try await eventually {
-            WaveStandup(tasks: model.visibleTasks, closed: [], doneDays: 0, now: .now, github: [:])
+            model.standup(model.visibleTasks, doneDays: 0)
                 .backlog.contains { $0.id == id }
         }
         #expect(!selectedPlanMembers(model).contains { $0.work.id == id })
@@ -253,6 +253,8 @@ struct WorkCLISubscriptionTests {
         let fixture = try WorkCLIFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         try await fixture.prepare()
+        _ = try await fixture.run(["desktop", "portfolio", "manual"])
+        _ = try await fixture.run(["desktop", "portfolio", "add", fixture.repo.path])
         let created = try await fixture.json(["task", "create", "--no-wave", "--title", "Before filing", "--json"])["task"] as! [String: Any]
         let id = try #require(created["id"] as? String)
         _ = try await fixture.run(["checkout", id, "--json"])
@@ -277,8 +279,11 @@ struct WorkCLISubscriptionTests {
         let model = WorkModel(query: query, repoPath: fixture.repo.path)
         model.useInteractionForTesting(interaction)
         let keeping = Task { await model.keepWorkCurrent() }
+        let portfolio = WorkModel(query: query)
+        portfolio.useInteractionForTesting(interaction)
+        let portfolioKeeping = Task { await portfolio.keepWorkCurrent() }
         do {
-            try await eventually { model.visibleWork.standaloneTasks.count == 1 }
+            try await eventually { model.visibleWork.standaloneTasks.count == 1 && portfolio.visibleWork.standaloneTasks.count == 1 }
             let registry = SessionsWorkspaceRegistry(localMachineId: machineId)
             model.confirmMachine(machineId)
             let repository = try await query.repositoryIdentity(cwd: fixture.repo.path)
@@ -297,15 +302,17 @@ struct WorkCLISubscriptionTests {
             let before = try #require(model.task(id: id)?.task)
             model.moveTask(before, toWave: waveID)
             try await eventually { model.task(id: id)?.task.task.waveId != nil }
-            #expect(model.visibleWork.standaloneTasks.isEmpty)
+            try await eventually { model.visibleWork.standaloneTasks.isEmpty && portfolio.visibleWork.standaloneTasks.isEmpty }
             model.moveTask(try #require(model.task(id: id)?.task), toWave: nil)
-            try await eventually { model.visibleWork.standaloneTasks.count == 1 }
+            try await eventually { model.visibleWork.standaloneTasks.count == 1 && portfolio.visibleWork.standaloneTasks.count == 1 }
             #expect(model.selection == .task(id: id))
             #expect(registry.selectedWork == key)
             #expect(registry.retained(key) === workspace)
             #expect(workspace.multiplexer.layout == layout)
             #expect(draft.editor.string == "Unsent direction")
         } catch {
+            portfolioKeeping.cancel()
+            await portfolioKeeping.value
             keeping.cancel()
             await keeping.value
             await interaction.shutdown().value
@@ -313,6 +320,8 @@ struct WorkCLISubscriptionTests {
             await server.stop()
             throw error
         }
+        portfolioKeeping.cancel()
+        await portfolioKeeping.value
         keeping.cancel()
         await keeping.value
         await interaction.shutdown().value

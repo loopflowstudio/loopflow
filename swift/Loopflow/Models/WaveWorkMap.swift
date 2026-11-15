@@ -197,6 +197,17 @@ public enum TaskSection: String, Decodable, Sendable, Hashable {
     case backlog, working, autonomous, done, abandoned
 }
 
+extension TaskSection {
+    /// Lifecycle states are shared by boards, query rows and local effects.
+    public init(states: [WorkSelectionState]) {
+        if states.contains(.done) { self = .done }
+        else if states.contains(.autonomous) { self = .autonomous }
+        else if states.contains(.working) { self = .working }
+        else if states.contains(.backlog) { self = .backlog }
+        else { self = .abandoned }
+    }
+}
+
 public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     public var id: String { task.id }
 

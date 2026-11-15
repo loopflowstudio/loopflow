@@ -29,14 +29,14 @@ extension WorkModel {
             rows.append(.init(id: .wave(wave.wave.id), title: wave.wave.name, detail: "Wave · \(wave.wave.repo)", key: wave.wave.name))
         }
         for task in roadmap.value?.tasks.items ?? [] {
-            let home = roadmap.value?.waves.first { $0.wave.id == task.task.waveId }?.wave.name ?? "No Wave"
+            let home = taskLocationLabel(id: task.id)
             rows.append(.init(id: .task(task.id), title: task.task.name,
                               detail: "Task · \(home) · \(task.task.identifier) · \(task.task.repo)", key: task.task.identifier))
         }
         if let linked = navigation.selectedTaskEvidence,
            !rows.contains(where: { $0.id == .task(linked.task.id) }) {
             rows.append(.init(id: .task(linked.task.id), title: linked.task.task.name,
-                              detail: "Task · \(linked.wave?.wave.name ?? "No Wave") · \(linked.task.task.identifier)",
+                              detail: "Task · \(taskLocationLabel(id: linked.task.id)) · \(linked.task.task.identifier)",
                               key: linked.task.task.identifier))
         }
         // Current-plan absence says nothing about retained historical Tasks.
@@ -118,13 +118,13 @@ extension WorkModel {
             let waves = visibleRoadmaps.map { WorkPaletteRow(id: .wave($0.wave.id), title: $0.wave.displayName, detail: "Wave", key: $0.wave.name) }
             guard !query.isEmpty else { return waves }
             let tasks = visibleTasks.map { task in
-                let home = visibleRoadmaps.first { $0.wave.id == task.task.waveId }?.wave.displayName ?? "No Wave"
+                let home = taskLocationLabel(id: task.id)
                 return WorkPaletteRow(id: .task(task.id), title: task.task.name,
                     detail: "Task · \(home) · \(task.task.identifier)", key: task.task.identifier)
             }
             rows = waves + tasks
         case .wave(let id):
-            rows = (wave(id: id)?.tasks.items ?? []).map { task in
+            rows = (standupTasks(.wave(id))?.items ?? []).map { task in
                 WorkPaletteRow(id: .task(task.id), title: task.task.name,
                     detail: task.task.identifier + (task.awaitsStart ? " · Not started" : " · \(task.lifecycle.label.capitalized)"), key: task.task.identifier)
             }

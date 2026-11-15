@@ -260,7 +260,7 @@ public struct WorkMembershipPlan: Codable, Equatable, Sendable {
 /// Presentation data, independent of its immutable confirmed wire body.
 @dynamicMemberLookup
 public struct ProjectedWorkPlan: Equatable, Sendable {
-    private let membership: WorkMembershipPlan
+    public let membership: WorkMembershipPlan
     private let knownAbsent: [WorkWorkspaceKey: Set<WorkSelectionState>]
     public let contents: [WorkViewPlan.Content]
     public let confirmed: WorkViewPlan
@@ -268,7 +268,9 @@ public struct ProjectedWorkPlan: Equatable, Sendable {
     public let arrangement: WorkArrangement
     public let projection: WorkArrangementProjection
     public let states: [WorkWorkspaceKey: [WorkSelectionState]]
+    public let facts: [WorkWorkspaceKey: WorkMembershipPlan.Facts]
     let coverage: WorkAnswerCoverage?
+    let inventoryDependencies: [WorkAnswerDependency]
     public subscript<T>(dynamicMember keyPath: KeyPath<WorkViewPlan, T>) -> T { confirmed[keyPath: keyPath] }
     /// Unknown membership cannot produce an exact total. Occurrences of the
     /// same Task count once, regardless of arrangement or hidden tiles.
@@ -277,12 +279,32 @@ public struct ProjectedWorkPlan: Equatable, Sendable {
         return Set(resolution.members.filter { $0.work.kind == .task }.map(\.work)).count
     }
 
+    /// Planning content joins these fields without becoming another membership authority.
+    public func inventory(wave: String? = nil) -> ProjectedWorkInventory {
+        let tasks = WorkMembershipPlan.Node.select(source: ["inventory"], predicate: .kind(.task))
+        let root = wave.map { WorkMembershipPlan.Node.intersect([tasks,
+            .select(source: ["scope"], predicate: .descendants(wave: $0))]) } ?? tasks
+        let scoped = WorkMembershipPlan(domains: membership.domains, effects: membership.effects,
+            root: root, facts: membership.facts, unavailable: membership.unavailable)
+        var resolution = scoped.resolve(knownAbsent: knownAbsent)
+        var reasons = inventoryDependencies.filter { !$0.current }.map {
+            "Work \($0.work.id) \($0.field.rawValue) awaits confirmation"
+        }
+        if coverage?.candidatesCurrent == false { reasons.append("Work candidates await confirmation") }
+        reasons += membership.facts.filter { $0.work.kind == .task && !$0.lifecycle.known }.map {
+            "Work \($0.work.id) lifecycle awaits confirmation"
+        }
+        resolution = .init(attention: resolution.attention, members: resolution.members,
+            unavailable: resolution.unavailable + reasons)
+        return ProjectedWorkInventory(membership: scoped, resolution: resolution)
+    }
+
     public func reordering(_ task: String, to target: String) -> Self {
         var members = resolution.members
         guard let from = members.firstIndex(where: { $0.work.kind == .task && $0.work.id == task }),
               let to = members.firstIndex(where: { $0.work.kind == .task && $0.work.id == target }) else { return self }
         members.insert(members.remove(at: from), at: to)
-        return Self(confirmed, membership: membership, knownAbsent: knownAbsent, memberOrder: members, coverage: coverage, contents: contents)
+        return Self(confirmed, membership: membership, knownAbsent: knownAbsent, memberOrder: members, coverage: coverage, contents: contents, inventoryDependencies: inventoryDependencies)
     }
 
     public init(_ confirmed: WorkViewPlan, membership: WorkMembershipPlan? = nil, knownAbsent: [WorkWorkspaceKey: Set<WorkSelectionState>] = [:], memberOrder: [WorkMemberRef]? = nil) {
@@ -290,11 +312,13 @@ public struct ProjectedWorkPlan: Equatable, Sendable {
     }
 
     init(_ confirmed: WorkViewPlan, membership: WorkMembershipPlan? = nil, knownAbsent: [WorkWorkspaceKey: Set<WorkSelectionState>] = [:], memberOrder: [WorkMemberRef]? = nil, coverage: WorkAnswerCoverage?, contents: [WorkViewPlan.Content]? = nil,
-         resolution: WorkSelectionResolution? = nil, states: [WorkWorkspaceKey: [WorkSelectionState]]? = nil) {
+         resolution: WorkSelectionResolution? = nil, states: [WorkWorkspaceKey: [WorkSelectionState]]? = nil, inventoryDependencies: [WorkAnswerDependency] = []) {
         self.confirmed = confirmed
+        self.inventoryDependencies = inventoryDependencies
         self.contents = contents ?? confirmed.contents
         let membership = membership ?? confirmed.membership
         self.membership = membership
+        facts = Dictionary(membership.facts.map { ($0.work, $0) }, uniquingKeysWith: { first, _ in first })
         self.knownAbsent = knownAbsent
         self.coverage = coverage
         var resolution = resolution ?? membership.resolve(knownAbsent: knownAbsent)
@@ -349,4 +373,10 @@ public struct ProjectedWorkPlan: Equatable, Sendable {
         }
         projection = WorkArrangementProjection(visible: visible, suppressed: suppressed)
     }
+}
+
+/// Projected Task fields in captured order; hosts join their real presentation content.
+public struct ProjectedWorkInventory: Equatable, Sendable {
+    public let membership: WorkMembershipPlan
+    public let resolution: WorkSelectionResolution
 }

@@ -2,54 +2,55 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LOO-906 · One Task location across surfaces</title>
+<title>LOO-906 · Current location and loaded history</title>
 <style>
 :root{color-scheme:light dark;--bg:#faf8f4;--fg:#292924;--muted:#67665e;--line:#cdc9bd;--example:#e4efe6}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.45 system-ui,sans-serif}main{max-width:800px;margin:auto;padding:26px 22px}header,small{font-size:12px;color:var(--muted)}h1{font-size:28px;line-height:1.15;margin:20px 0 12px}h2{font-size:18px;margin:24px 0 8px}p{margin:10px 0}table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;vertical-align:top;border-bottom:1px solid var(--line);padding:8px 6px}pre{background:var(--example);padding:12px;font-size:13px;white-space:pre-wrap}code{font-size:12px;overflow-wrap:anywhere}li{margin:12px 0}@media(prefers-color-scheme:dark){:root{--bg:#20221f;--fg:#ecece4;--muted:#b5b5a8;--line:#4c5046;--example:#2c382f}}@media(max-width:540px){main{padding:20px 12px}table{font-size:12px}th,td{padding:6px 3px}h1{font-size:24px}}
 </style>
 <main>
 <header>LOO-906 · concept-review · 2026-11-15 · headless Graph step<br>
 Sources: scratch/{instant-task-session,questions,desktop-reactivity-feedback}.md;
-HEAD 5c958398a6de plus the uncommitted dynamic/Move cut;
-ClientWork{Database,Store,Query}.swift, WorkMembership.swift, OperationDeclaration.swift,
-WorkInteraction.swift, rust/loopflow/src/work/selection/membership.rs,
-WorkModel.swift, WorkProjection.swift, ClientWorkQueryTests.swift,
-MobileWorkInteractionTests.swift and swift/{README,LoopflowiOS/README}.md.<br>
-Source review; no new runtime measurements or production code changes.</header>
+HEAD aee0e10dc603 plus the uncommitted projected surface cut;
+WorkMembership.swift, ClientWorkQuery.swift, WorkInteraction.swift, WorkModel.swift,
+WorkProjection.swift, NowProjection.swift, WaveStandupBoard.swift, WaveDetailPane.swift,
+TaskHistoryFilter.swift, RemoteTaskObservation.swift; ClientWorkQueryTests.swift,
+WorkNavigationTests.swift, MobileWorkInteractionTests.swift and swift/{README,LoopflowiOS/README}.md.<br>
+Source review; prior check results are recorded in the working design. No new runtime measurements.</header>
 <h1>Decide offline Abandon, cancellation and phone names.</h1>
-<p><strong>Outcome for loop-or-next: Blocked — open product choices.</strong> Questions 1–3 remain unanswered. They do not prevent the remaining surface migration; this step starts no execution.</p>
-<p><strong>Built on the typed query path:</strong> dynamic membership brings a moved Task into an omitted destination using real cached content. Both hosts publish Move before disk and save before send. Newer parent C survives held A/B readings and restart; retirement acknowledges each query's own invalidation. Missing content leaves coverage incomplete without reviving an absorbed move.</p>
-<p><strong>Biggest remaining mismatch:</strong> one Task can have two displayed locations. Query rows move immediately, but planning-backed boards and hierarchy still read the old roadmap. A Session's recorded Wave can also override the Task's current parent in its breadcrumb.</p>
-<pre>Cached Wave A: Task T      Cached Wave B: empty
+<p><strong>Outcome for loop-or-next: Blocked — open product choices.</strong> Questions 1–3 remain unanswered. They do not prevent the detail/history migration described below.</p>
+<p><strong>Built:</strong> boards, portfolio Roadmap/Now, Task trails, No Wave grouping and counts now join real content to the shared projected parent and lifecycle. The phone retains known rows with an incomplete-data notice. Session attribution stays separate from Task location. Unknown completion dates withhold dated Done totals.</p>
+<p><strong>Biggest remaining mismatch:</strong> the current Wave detail Task table still merges planning membership with separately paged history and filters old lifecycle values. A Task can leave the board immediately yet remain in that table. Replacing the table with only current inventory would lose loaded history.</p>
+<pre>Wave A · Task T · conversation open · history loaded
 Move T to B while disconnected
 
-Built · typed query:       A: empty    B: Task T
-Still planning-backed:    board/trail may say A
+Built board/trail:    A: empty    B: T    trail: B → T
+Existing detail:      A may still list T
 
-Proposed · every affected surface:
-  A: empty                B: Task T    trail: B → T
-  conversation and drafts stay open
+Proposed current lists:
+  A: empty            B: T
+  loaded history, inspector, Session, panes and draft retained
   one saved request waits for the original Machine
 
-Then another client confirms parent C.
-Held A/B replies cannot move T back from C.</pre>
+Complete → another client Reopens → old history page arrives
+Proposed: T stays reopened; that page cannot restore old lifecycle.
+Historical Project association stays historical.</pre>
 <h2>Actions → concepts → APIs</h2>
 <table>
-<thead><tr><th>Action</th><th>Concept</th><th>Built → proposed</th></tr></thead>
+<thead><tr><th>Action</th><th>Concept</th><th>Existing → proposed</th></tr></thead>
 <tbody>
-<tr><td>Move to B or No Wave</td><td>One Task parent</td><td><code>WorkInteraction.moveTask</code> → projected parent → saved original request (built)</td></tr>
-<tr><td>See lists, boards, trail and counts agree</td><td>One projected answer</td><td><code>ClientWorkQuery</code> / <code>ProjectedWorkPlan</code> → proposed consumers in <code>WorkProjection</code>, <code>standupTasks</code> and hierarchy labels</td></tr>
-<tr><td>Keep the conversation open</td><td>Task location and Session ownership</td><td>Proposed: Task trail uses projected parent; Session identity, native attachment and drafts stay with their existing owners</td></tr>
-<tr><td>Restart offline, then reconnect</td><td>Coverage and original request</td><td><code>ClientWorkDatabase</code> retains incorporation, requests and scoped requirements (built) → all surfaces must honor incomplete coverage (remaining)</td></tr>
+<tr><td>Move to B or No Wave</td><td>One current Task parent</td><td><code>WorkInteraction.moveTask</code> → <code>ProjectedWorkPlan.inventory</code> → boards/trails (built); extend the same answer to current Wave detail</td></tr>
+<tr><td>Complete or Reopen with history loaded</td><td>Projected lifecycle plus retained history</td><td><code>ClosedTaskHistory.merged</code> + <code>TaskHistoryFilter.includes</code> → proposed join of real paged content to shared fields and range coverage</td></tr>
+<tr><td>Keep reading and editing</td><td>Location and native ownership stay independent</td><td>Retain Session, native attachment, inspector, panes, drafts and later navigation through membership changes</td></tr>
+<tr><td>Recover a failed or uncertain change</td><td>Original request and independent coverage</td><td><code>ClientWorkDatabase</code> keeps command/receipt identity (built); detail/pages must honor field provenance and incomplete coverage too</td></tr>
 </tbody></table>
-<p><strong>Proposed usage after the surface cut:</strong> Move changes the Task's location across cached lists, boards and its trail immediately. Its conversation stays open. Incomplete destinations remain marked until their missing data arrives. Offline changes keep their original Machine and request across restart.</p>
-<p><strong>Next implement:</strong> expose projected parent/lifecycle alongside real content from the existing query owner. Replace roadmap membership joins in boards, hierarchy labels, No Wave grouping and counts with that answer and its coverage. A Task trail follows its current parent without moving its Session. Preserve authored order and occurrence identity; incomplete destinations have no exact count.</p>
-<p><strong>Show next on both hosts:</strong> A → B updates every affected surface before disk, preserving Session, panes and draft. Refusal removes only its intent; an older save failure/retry cannot overwrite a later move. Newer C survives delayed A/B replies, retirement and offline restart. Include No Wave, descendants, changed definitions and missing content/activity; retain Complete → Reopen. Recovery never changes later navigation. Reducer samples are recorded, but native latency remains unmeasured. No builtin changes.</p>
+<p><strong>Next implement:</strong> use the existing field/query owner for detail membership and lifecycle; retain history content, cursors, range and order. Unstamped pages cannot replace newer fields or prove completeness. Preserve existing unresolved-execution recovery visibility. A missing date leaves a dated count incomplete; a partial page never proves a historical total. Remove old membership decisions as their consumers move.</p>
+<p><strong>Proposed usage after acceptance:</strong> A Task's current Wave lists agree with its board and trail. Completed-history pages stay loaded as you move or reopen Tasks. Missing data keeps the affected count incomplete; it does not close the conversation or discard loaded history.</p>
+<p><strong>Show next:</strong> offline Move with board and detail open; refusal followed by a newer Move; two-client Complete → Reopen with stale detail/pages and restart; missing date/content/ancestry; range change during a held page; failed next page. Preserve historical association and unresolved-work recovery. Profile 10k inventory/count fan-out; native paint/input latency remains unmeasured. No builtin instruction changes.</p>
 <h2>Questions for the next conversation</h2>
 <ol>
 <li><strong>Abandon while disconnected.</strong> It closes PRs and removes branches; the recorded “1a” named Complete, rename and move.<br>1a — Save Abandon and deliver on reconnect (built provisionally).<br>1b — Require a reachable Machine and keep the Task until then.</li>
 <li><strong>Take back a change before it was sent.</strong> A mistaken offline removal currently has no cancellation action.<br>2a — Keep that behavior; Reopen afterwards.<br>2b — Offer Cancel only before first send, removing the request and its projection.</li>
 <li><strong>Conversation names on the phone.</strong><br>3a — Keep Task titles and Desktop-only Session rename (built).<br>3b — Show Session names and offer rename on the phone too.</li>
 </ol>
-<small>Exact earlier replies remain in the working design. Prior implementation checks are recorded there; they were not rerun for this prose-only review. Native latency is unmeasured; the recorded nextest LEAK remains for gate.</small>
+<small>Exact earlier replies remain in the working design. Source review only; no implementation, publish or merge in this step. Gate owns the recorded nextest LEAK. No native latency result is claimed.</small>
 </main>
 </html>

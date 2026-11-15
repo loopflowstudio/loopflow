@@ -8,6 +8,7 @@ struct RepositoryTasks: Equatable {
     /// Its path on the Machine, which is how Waves name their repository.
     let path: String
     let tasks: [WorkViewPlan.Content]
+    var unavailable: [String] = []
 
     var name: String { URL(fileURLWithPath: path).lastPathComponent }
 }
@@ -15,15 +16,10 @@ struct RepositoryTasks: Equatable {
 typealias MobileTaskReading = Result<[RepositoryTasks], RegistryQueryError>
 
 /// The Tasks a Work reading shows, in the Machine's order.
-func mobileTasks(_ plan: ProjectedWorkPlan) throws -> [WorkViewPlan.Content] {
-    guard plan.resolution.unavailable.isEmpty else {
-        throw RegistryQueryError(plan.resolution.unavailable.joined(separator: "; "))
-    }
+func mobileTasks(_ plan: ProjectedWorkPlan) -> [WorkViewPlan.Content] {
     let contents = Dictionary(plan.contents.map { ($0.work, $0) }, uniquingKeysWith: { first, _ in first })
-    return try plan.projection.visible.filter { $0.work.kind == .task }.map { member in
-        guard var task = contents[member.work] else {
-            throw RegistryQueryError("The Machine returned an incomplete Task reading")
-        }
+    return plan.projection.visible.filter { $0.work.kind == .task }.compactMap { member in
+        guard var task = contents[member.work] else { return nil }
         task.states = plan.states[member.work] ?? task.states
         return task
     }
@@ -146,18 +142,9 @@ final class RemoteTaskObservation {
     }
 
     nonisolated static func decodePlans(_ plans: [ProjectedWorkPlan]) -> MobileTaskReading {
-        // One repository that cannot answer leaves the others listed; the reading
-        // fails only when none could.
-        var failure: RegistryQueryError?
-        let repositories = plans.map { plan in
-            do { return RepositoryTasks(repository: plan.repository, path: plan.repositoryPath, tasks: try mobileTasks(plan)) } catch {
-                failure = failure ?? (error as? RegistryQueryError) ?? RegistryQueryError(error.localizedDescription)
-                return RepositoryTasks(repository: plan.repository, path: plan.repositoryPath, tasks: [])
-            }
-        }
-        if let failure, repositories.allSatisfy(\.tasks.isEmpty), plans.allSatisfy({ !$0.resolution.unavailable.isEmpty }) {
-            return .failure(failure)
-        }
-        return .success(repositories)
+        .success(plans.map { plan in
+            RepositoryTasks(repository: plan.repository, path: plan.repositoryPath,
+                tasks: mobileTasks(plan), unavailable: plan.resolution.unavailable)
+        })
     }
 }

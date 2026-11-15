@@ -315,7 +315,7 @@ final class WorkModel {
         applyProjectedSelectionPlans(plans?.map { ProjectedWorkPlan($0) }, reason: reason)
     }
 
-    private func applyProjectedSelectionPlans(_ plans: [ProjectedWorkPlan]?, reason: String) {
+    func applyProjectedSelectionPlans(_ plans: [ProjectedWorkPlan]?, reason: String) {
         guard let plans else {
             selectionPlans = .unavailable(lastGood: selectionPlans.value, reason: reason)
             return
@@ -1235,7 +1235,8 @@ final class WorkModel {
 
     /// A Wave view's Tasks bucketed for its board, with owners' GitHub users and Sessions.
     func standup(_ tasks: [RoadmapTask], doneDays: Int) -> WaveStandup {
-        WaveStandup(tasks: tasks, closed: tasks, doneDays: doneDays, now: .now, github: githubPeople)
+        WaveStandup(tasks: tasks, closed: tasks, doneDays: doneDays, now: .now, github: githubPeople,
+            states: Dictionary(projectedFacts.map { ($0.work.id, $0.states) }, uniquingKeysWith: { first, _ in first }))
     }
 
     func boardSection(_ view: WorkNavigation.Board) -> WaveBoardSection {
@@ -1257,10 +1258,19 @@ final class WorkModel {
 
     /// The Tasks a Wave view's board buckets: the Wave's, or every Task in the repository.
     func standupTasks(_ view: WorkNavigation.Board) -> WorkEvidence<RoadmapTask>? {
-        if case .wave(let id) = view { return wave(id: id)?.tasks }
-        guard view == .repository, let tasks = roadmap.value?.tasks else { return nil }
-        guard case .available(_, let truncated) = tasks else { return tasks }
-        return .available(items: visibleTasks, truncated: truncated)
+        let plans = projectedInventories
+        guard !plans.isEmpty else { return .unavailable(reason: "Waiting for a covering Work reading") }
+        let scoped = plans.map { plan in
+            if case .wave(let id) = view { plan.inventory(wave: id) } else { plan.inventory() }
+        }
+        let members = scoped.flatMap { $0.resolution.members }
+        let ids = Set(members.map(\.work.id))
+        let content = Dictionary(visibleTasks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let tasks = members.compactMap { content[$0.work.id] }
+        let missing = ids.subtracting(tasks.map(\.id))
+        let reasons = scoped.flatMap { $0.resolution.unavailable } + missing.map { "Task \($0) planning content awaits confirmation" }
+        guard reasons.isEmpty else { return .unavailable(reason: reasons.joined(separator: "; ")) }
+        return .available(items: tasks, truncated: false)
     }
 
     var repositoryName: String { repoPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Repository" }
@@ -1357,8 +1367,14 @@ final class WorkModel {
         return state
     }
 
+    private var projectedInventories: [ProjectedWorkPlan] {
+        selectionPlans.value?.filter { $0.dashboardID == nil && $0.selection.expression == .repository } ?? []
+    }
+    var projectedFacts: [WorkMembershipPlan.Facts] { projectedInventories.flatMap { $0.membership.facts } }
+
     var projection: WorkProjection {
-        WorkProjection(roadmaps: visibleRoadmaps, inventory: visibleTasks, sessions: sessions.value ?? [])
+        WorkProjection(roadmaps: visibleRoadmaps, inventory: visibleTasks, sessions: sessions.value ?? [],
+            facts: projectedFacts)
     }
     /// Built from the whole projection, so it is computed once per change to
     /// what it reads, not on each of the several reads per window render.
@@ -1387,7 +1403,7 @@ final class WorkModel {
         }
         guard let retained = navigation.selectedTaskEvidence, selection == .task(id: retained.task.id) else { return nil }
         // Exact lookup evidence supports inspection without joining the current plan.
-        return WorkProjection(roadmaps: [retained.wave].compactMap { $0 }, inventory: [retained.task], sessions: sessions.value ?? [])
+        return WorkProjection(roadmaps: [retained.wave].compactMap { $0 }, inventory: [retained.task], sessions: sessions.value ?? [], facts: projectedFacts)
             .breadcrumb(selection: selection, sessionId: navigation.selectedSessionId)
     }
 
@@ -1401,7 +1417,8 @@ final class WorkModel {
     }
 
     var visibleWork: WorkProjection {
-        WorkProjection(roadmaps: visibleRoadmaps, inventory: visibleTasks, sessions: visibleSessions)
+        WorkProjection(roadmaps: visibleRoadmaps, inventory: visibleTasks, sessions: visibleSessions,
+            facts: projectedFacts)
     }
 
     private(set) var roadmap: WorkReading<RoadmapSnapshot> = .loading {
@@ -1887,6 +1904,7 @@ final class WorkModel {
     }
 
     private func apply(_ frame: WorkFrame) async {
+        if workMachine == nil, let machine = frame.receivingLink?.machine { confirmMachine(machine) }
         let part = frame.content.part
         if case .checkpoint = frame.content {
             // A confirmed command may have changed Workflow definitions.
@@ -2400,8 +2418,10 @@ final class WorkModel {
     }
 
     /// A Wave or repository row's count: its board's Working and Autonomous columns.
-    func startedTaskCount(_ board: WorkNavigation.Board) -> Int {
-        (standupTasks(board)?.items ?? []).count { $0.section == .working || $0.section == .autonomous }
+    func startedTaskCount(_ board: WorkNavigation.Board) -> Int? {
+        guard case .available(let tasks, _) = standupTasks(board) else { return nil }
+        let states = Dictionary(projectedFacts.map { ($0.work.id, $0.states) }, uniquingKeysWith: { first, _ in first })
+        return tasks.count { TaskSection(states: states[$0.id] ?? []) == .working || TaskSection(states: states[$0.id] ?? []) == .autonomous }
     }
 
     /// Below the Working Tasks: the started list's Autonomous Tasks (shipping, no
@@ -3116,6 +3136,18 @@ final class WorkModel {
         return records
     }
 
+    func projectedTaskFacts(id: String) -> WorkMembershipPlan.Facts? {
+        let canonical = taskIndex.positions[id].map { taskIndex.tasks[$0].id } ?? id
+        return projectedInventories.lazy.compactMap { plan in
+            plan.facts[.init(repository: plan.repository, kind: .task, id: canonical)]
+        }.first
+    }
+
+    func taskLocationLabel(id: String) -> String {
+        guard let fact = projectedTaskFacts(id: id) else { return "Location unavailable" }
+        return fact.parent.wave.map { wave(id: $0)?.wave.displayName ?? "Wave unavailable" } ?? "No Wave"
+    }
+
     func waveId(for work: WorkReference) -> String? {
         switch work.kind {
         case .wave:
@@ -3123,7 +3155,7 @@ final class WorkModel {
         case .project:
             waveForChapter(projectId: work.id)?.wave.id
         case .task:
-            task(id: work.id)?.task.task.waveId
+            projectedTaskFacts(id: work.id)?.parent.wave
         }
     }
 

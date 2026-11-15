@@ -5,6 +5,18 @@ import ViewInspector
 @testable import LoopflowiOS
 
 extension ClientWorkQueryTests {
+    func testPhoneIncompleteDestinationKeepsKnownRowsAndMarksItsCountUnavailable() throws {
+        let original = try workingPlan(["a", "b"])
+        let membership = WorkMembershipPlan(domains: original.membership.domains, effects: original.membership.effects,
+            root: original.membership.root, facts: original.membership.facts,
+            unavailable: ["Destination membership awaits confirmation"])
+        let projected = ProjectedWorkPlan(original, membership: membership)
+        let repositories = try RemoteTaskObservation.decodePlans([projected]).get()
+        XCTAssertEqual(repositories.first?.tasks.map(\.work.id), ["a", "b"])
+        XCTAssertFalse(try XCTUnwrap(repositories.first).unavailable.isEmpty)
+        XCTAssertNil(projected.taskCount)
+    }
+
     func testPhoneCompleteButtonPublishesBothFeedsAndReplacesOnlyTheOriginRouteBeforeDisk() async throws {
         try await leaveBothFeeds(abandon: false)
     }

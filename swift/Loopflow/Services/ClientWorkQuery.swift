@@ -62,7 +62,20 @@ public struct ClientWorkQuery: Codable, Sendable {
         let answer = answer ?? deriveAnswer()
         return zip(plans, answer.plans).map { plan, derived in
             ProjectedWorkPlan(plan, membership: derived.membership,
-                knownAbsent: derived.knownAbsent, coverage: derived.coverage, contents: availableContents(for: plan))
+                knownAbsent: derived.knownAbsent, coverage: derived.coverage, contents: availableContents(for: plan),
+                inventoryDependencies: inventoryDependencies(derived))
+        }
+    }
+
+    private func inventoryDependencies(_ answer: WorkQueryAnswer.Plan) -> [WorkAnswerDependency] {
+        let projected = Dictionary(grouping: answer.coverage.dependencies.filter(\.projected), by: \.work)
+        return answer.membership.facts.flatMap { fact in
+            let local = Set((projected[fact.work] ?? []).map(\.field))
+            return [WorkField.parent, .lifecycle].compactMap { field -> WorkAnswerDependency? in
+                guard fact.work.kind == .task || field == .parent else { return nil }
+                return dependency(fact.work, field: field, fact: fact, projected: local,
+                    absent: answer.knownAbsent[fact.work] ?? [])
+            }
         }
     }
 
@@ -205,7 +218,8 @@ public struct ClientWorkQuery: Codable, Sendable {
             let resolution = WorkSelectionResolution(attention: attention.sorted { ($0.repository, $0.kind.rawValue, $0.id) < ($1.repository, $1.kind.rawValue, $1.id) },
                 members: members, unavailable: [])
             renderings[index] = ProjectedWorkPlan(plan, membership: membership, knownAbsent: absent, coverage: coverage,
-                contents: rendered[index].contents, resolution: resolution, states: states)
+                contents: rendered[index].contents, resolution: resolution, states: states,
+                inventoryDependencies: inventoryDependencies(derived))
         }
         return (WorkQueryAnswer(plans: answers), renderings)
     }

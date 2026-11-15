@@ -240,6 +240,12 @@ public final class WorkInteraction {
     /// Parent intent changes every cached membership without changing navigation.
     @discardableResult
     public func moveTask(_ work: WorkWorkspaceKey, issue: String, directory: String, wave: String?) -> String {
+        let replaced = Set(intents.filter { intent in
+            intent.resource == .task(work) && intent.effect?.kind == "task.move"
+                && operations.contains { $0.id == intent.id && !$0.saved && $0.error != nil }
+        }.map(\.id))
+        intents.removeAll { replaced.contains($0.id) }
+        operations.removeAll { replaced.contains($0.id) }
         let id = UUID().uuidString.lowercased()
         let command = ServedWrite.taskMove(directory: directory, issue: issue, wave: wave, machine: nil)
         let payload = try! JSONEncoder().encode(command)
@@ -350,6 +356,13 @@ public final class WorkInteraction {
                         operations.removeAll { $0.id == intent.id }
                         intents.removeAll { $0.id == intent.id }
                     }
+                }
+                // A held older save can fail after a later Move was published.
+                // Its original ID must never become retryable behind that edit.
+                if intent.effect?.kind == "task.move", let index = intents.firstIndex(where: { $0.id == intent.id }),
+                   intents.dropFirst(index + 1).contains(where: { $0.effect?.kind == "task.move" && $0.resource == intent.resource }) {
+                    intents.removeAll { $0.id == intent.id }
+                    operations.removeAll { $0.id == intent.id }
                 }
                 publish()
             }

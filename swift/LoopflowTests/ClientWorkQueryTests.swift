@@ -696,6 +696,135 @@ final class ClientWorkQueryTests: XCTestCase {
         }
     }
 
+    func testProjectedInventoryScopesDescendantsAndKeepsLifecycleIndependentOfActivity() throws {
+        let stamp = fieldStamp()
+        var base = try scoped(fieldPlan(stamp, wave: "b", activityKnown: false), wave: "a")
+        var wire = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(base)) as? [String: Any])
+        var membership = try XCTUnwrap(wire["membership"] as? [String: Any])
+        var facts = base.membership.facts
+        let child = try XCTUnwrap(facts.firstIndex { $0.work.kind == .wave && $0.work.id == "b" })
+        facts[child].parent = .init(wave: "a", support: nil)
+        membership["facts"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(facts))
+        wire["membership"] = membership
+        base = try JSONDecoder().decode(WorkViewPlan.self, from: JSONSerialization.data(withJSONObject: wire))
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let database = try ClientWorkDatabase(directory: directory)
+        _ = try database.cache(ClientWorkQuery(stamp: stamp, plans: [base]), key: "inventory")
+        let query = try XCTUnwrap(database.cached(machine: "machine", key: "inventory"))
+        let before = try XCTUnwrap(query.projection.first)
+        XCTAssertEqual(before.inventory(wave: "a").resolution.members.map(\.work.id), ["a"])
+        XCTAssertTrue(before.inventory(wave: "a").resolution.unavailable.isEmpty)
+        let moved = try XCTUnwrap(query.applying([.init(operationID: "move", sequence: 1, directory: "/repo",
+            kind: "task.move", issue: "a", wave: "c", resolution: nil)]).projection.first)
+        XCTAssertTrue(moved.inventory(wave: "a").resolution.members.isEmpty)
+        XCTAssertEqual(moved.inventory(wave: "c").resolution.members.map(\.work.id), ["a"])
+        XCTAssertEqual(moved.membership.facts.first?.parent.wave, "c")
+        XCTAssertEqual(moved.membership.facts.first?.lifecycle.states, [.working])
+    }
+
+    func testProjectedInventoryMoveIntoUnresolvedDestinationKeepsIntentAndRefusalRestoresOnlyThatMove() throws {
+        var base = try scoped(fieldPlan(fieldStamp(), wave: "a"), wave: "b")
+        var wire = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(base)) as? [String: Any])
+        var membership = try XCTUnwrap(wire["membership"] as? [String: Any])
+        membership["unavailable"] = ["Saved definition awaits confirmation"]
+        wire["membership"] = membership
+        base = try JSONDecoder().decode(WorkViewPlan.self, from: JSONSerialization.data(withJSONObject: wire))
+        var query = ClientWorkQuery(stamp: fieldStamp(), plans: [base])
+        query.prepareProjection()
+        let first = WorkQueryEffect(operationID: "first", sequence: 1, directory: "/repo", kind: "task.move", issue: "a", wave: "b", resolution: nil)
+        let next = WorkQueryEffect(operationID: "next", sequence: 2, directory: "/repo", kind: "task.move", issue: "a", wave: "c", resolution: nil)
+        let moved = try XCTUnwrap(query.applying([first, next]).projection.first)
+        XCTAssertNil(moved.taskCount)
+        XCTAssertEqual(moved.membership.facts.first?.parent.wave, "c")
+        let refused = try fieldReceipt(kind: "task.move", stage: "task.membership_changed", resolution: .definitelyRefused)
+        let rejected = WorkQueryEffect(operationID: "first", sequence: 1, directory: "/repo", kind: "task.move", issue: "a", wave: "b", resolution: refused.commits.first)
+        XCTAssertEqual(query.applying([rejected, next]).projection.first?.membership.facts.first?.parent.wave, "c")
+        XCTAssertEqual(query.applying([rejected]).projection.first?.membership.facts.first?.parent.wave, "a")
+    }
+
+    func testProjectedInventoryChangedSavedDefinitionReevaluatesThePendingMove() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let database = try ClientWorkDatabase(directory: directory)
+        func definition(_ revision: Int64, wave: String) throws -> WorkViewPlan {
+            let base = try scoped(fieldPlan(fieldStamp(planning: revision), wave: "a"), wave: wave)
+            var wire = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(base)) as? [String: Any])
+            wire["saved_revision"] = revision
+            wire["dashboard_id"] = "saved-query"
+            return try JSONDecoder().decode(WorkViewPlan.self, from: JSONSerialization.data(withJSONObject: wire))
+        }
+        _ = try database.cache(ClientWorkQuery(stamp: fieldStamp(), plans: [definition(7, wave: "b")]), key: "saved-query")
+        try database.save(SubmittedOperation(requestID: "move", destination: "machine",
+            payload: JSONEncoder().encode(ServedWrite.taskMove(directory: "/repo", issue: "a", wave: "b", machine: nil)),
+            version: ServerProtocol.revision, submittedAt: Date()))
+        XCTAssertEqual(try database.cached(machine: "machine", key: "saved-query")?.projection.first?.taskCount, 1)
+        _ = try database.cache(ClientWorkQuery(stamp: fieldStamp(planning: 8), plans: [definition(8, wave: "c")]), key: "saved-query")
+        let changed = try XCTUnwrap(database.cached(machine: "machine", key: "saved-query")?.projection.first)
+        XCTAssertEqual(changed.taskCount, 0)
+        XCTAssertEqual(changed.savedRevision, 8)
+        XCTAssertEqual(changed.membership.facts.first?.parent.wave, "b")
+        XCTAssertEqual(try database.pending().map(\.id), ["move"])
+    }
+
+    func testProjectedInventoryTwoClientsCompleteThenReopenSurvivesStaleReadingsAndRestart() throws {
+        let directories = (0..<2).map { _ in FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString) }
+        addTeardownBlock { for directory in directories { try? FileManager.default.removeItem(at: directory) } }
+        let old = fieldStamp()
+        let original = try scoped(fieldPlan(old, wave: "a"), wave: nil)
+        let clients = try directories.map { try ClientWorkDatabase(directory: $0) }
+        for client in clients {
+            _ = try client.cache(ClientWorkQuery(stamp: old, plans: [original]), key: "inventory")
+            try client.retainQueries(machine: "machine", keys: ["inventory"])
+        }
+        try clients[0].save(SubmittedOperation(requestID: "saved", destination: "machine",
+            payload: JSONEncoder().encode(ServedWrite.taskComplete(directory: "/repo", issue: "a")),
+            version: ServerProtocol.revision, submittedAt: Date()))
+        XCTAssertTrue(try clients[0].observeEpoch("epoch", id: "saved"))
+        XCTAssertEqual(try clients[0].cached(machine: "machine", key: "inventory")?.projection.first?.membership.facts.first?.lifecycle.states, [.done])
+        let newer = fieldStamp("reopen", planning: 9, complete: false)
+        for client in clients {
+            _ = try client.cache(ClientWorkQuery(stamp: newer,
+                plans: [fieldPlan(newer, wave: "a", lifecycle: [.working], clock: nil)]), key: "reopen")
+        }
+        try clients[0].receive(fieldReceipt(), epoch: "epoch", id: "saved")
+        try clients[0].retireIfConverged("saved")
+        for directory in directories {
+            let restarted = try ClientWorkDatabase(directory: directory)
+            _ = try restarted.cache(ClientWorkQuery(stamp: old, plans: [original]), key: "inventory")
+            let inventory = try XCTUnwrap(restarted.cached(machine: "machine", key: "inventory")?.projection.first?.inventory())
+            XCTAssertEqual(inventory.membership.facts.first?.lifecycle.states, [.working])
+            XCTAssertEqual(inventory.resolution.members.map(\.work.id), ["a"])
+            XCTAssertTrue(try restarted.pending().isEmpty)
+        }
+    }
+
+    func testProjectedInventoryFailedMoveCannotRetryBehindLaterMove() async throws {
+        for laterBeforeFailure in [false, true] {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+            let fault = IntentDiskFault()
+            let disk = ClientWorkStore(directory: directory, prepareDirectory: { _ in try fault.check() }, machine: { "machine" },
+                read: { _ in "null" }, observe: { _ in ServerWatch(updates: AsyncThrowingStream { _ in }, checkpoint: { _ in }, cancel: {}) },
+                send: { _ in XCTFail("Offline changes must not send") })
+            addTeardownBlock { await disk.close() }
+            let owner = WorkInteraction(machine: "machine", store: disk)
+            defer { stop(owner) }
+            let work = WorkWorkspaceKey(repository: "repo", kind: .task, id: "a")
+            let failed = owner.moveTask(work, issue: "a", directory: "/repo", wave: "b")
+            if !laterBeforeFailure { await owner.persistPending(); fault.recover() }
+            let next = owner.moveTask(work, issue: "a", directory: "/repo", wave: "c")
+            await owner.persistPending()
+            fault.recover()
+            owner.retry(next)
+            owner.retry(failed)
+            await owner.persistPending()
+            let pending = try await disk.pending()
+            XCTAssertEqual(pending.map(\.id), [next])
+        }
+    }
+
+
     func testDynamicManifestMeasurements() throws {
         guard let output = ProcessInfo.processInfo.environment["LF_MEMBERSHIP_PERF_OUTPUT"] else {
             throw XCTSkip("Set LF_MEMBERSHIP_PERF_OUTPUT for diagnostic manifest measurements")

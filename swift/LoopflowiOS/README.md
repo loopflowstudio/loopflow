@@ -91,7 +91,8 @@ provider readiness still comes from the Session connection.
 lists and counts change immediately; its conversation and drafts stay open.
 While disconnected, the change waits for its original Machine and survives
 restart. A refusal restores only that change, leaving later edits and navigation
-alone. Incomplete cached destinations wait for their missing data.
+alone. Incomplete cached destinations retain known rows and show their missing
+data notice; their counts remain unavailable until that data arrives.
 
 The device touched last has the terminal. When another device takes it, the
 phone stops drawing and offers **Continue here**.

@@ -81,7 +81,7 @@ public enum WorkPart: String, CaseIterable, Sendable {
         switch self {
         case .planning: return .allPlans
         case .activity: return .processList
-        case .selections: return scope.repo.map { .desktopViewList(directory: $0) }
+        case .selections: return scope.repo.map { .desktopViewList(directory: $0) } ?? .viewSelect(expression: nil)
         case .taskList:
             return scope.repo.map { .desktopViewGet(directory: $0, expression: TaskList.started.expression(wave: scope.taskListWave)) }
         case .peerPlanning: return scope.repo.map { .repoPlan(directory: $0) }

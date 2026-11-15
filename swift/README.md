@@ -119,12 +119,13 @@ With sidebar focus, **⌘F** searches its visible Tasks and Waves; **Search all 
 widens the same navigator. **Shift-F10** opens the focused Task's actions without
 changing the open workspace.
 
-Move a Task to a Wave or **No Wave** from its action menu. Cached lists and
-counts change immediately; its conversation and drafts stay open. While
+Move a Task to a Wave or **No Wave** from its action menu. Cached lists, boards,
+its trail and counts change immediately; its conversation and drafts stay open. While
 disconnected, the change waits for its original Machine and survives restart.
 A refusal restores only that change, leaving later edits and navigation alone.
 Incomplete cached destinations wait for their missing data before showing an
-exact count.
+exact count. Done leaves its dated total incomplete while completion dates are
+still arriving; showing all ages can include those completed Tasks immediately.
 
 Open an active Task whose planning state is **Todo**: wherever its lifecycle
 appears in the page, sidebar, board or breadcrumb picker, it shows **Active**.
@@ -1225,9 +1226,12 @@ publications replace transient effects by ID and revision, including when a fast
 receipt has already retired the operation. Disk, receipt and cache changes repaint
 mounted queries without another server frame. Save failure retains the original
 command for retry. Shared query tests run on both targets, including held disk,
-reply permutations, restart and replacement epochs. Planning-backed boards,
-hierarchy labels and their counts still await the remaining projection migration;
-exhaustive mutation policies and native acceptance are unfinished.
+reply permutations, restart and replacement epochs. Boards, Task trails and No Wave
+grouping join real planning content to the same projected parent and lifecycle.
+Session attribution remains separate from the Task's current location. Missing
+content or ancestry withholds exact counts; unknown conversation activity does not
+change lifecycle-only board membership. Exhaustive mutation policies and native
+acceptance are unfinished.
 SQLite fixtures await `WorkInteraction.shutdown().value` and any direct query
 reader's close before calling `ClientWorkStore.close()` and removing temporary
 directories. Cancellation alone can leave a reader holding SQLite after its

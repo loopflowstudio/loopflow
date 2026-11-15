@@ -11,7 +11,7 @@ public extension TaskConditionState {
     }
 }
 
-/// NOW shows non-clear Task conditions from the one `lf wave show` read. Rust
+/// NOW shows non-clear Task conditions from the planning content. Rust
 /// owns the condition; Swift only omits clear rows and groups the rest.
 public func nowGroup(for task: RoadmapTask) -> TaskConditionState? {
     switch task.condition.state {
@@ -35,17 +35,23 @@ public struct NowRow: Identifiable, Sendable, Hashable {
     public let wave: WaveSnapshot?
     public let task: RoadmapTask
     public let group: TaskConditionState
+    public let parentWave: String?
+    public let section: TaskSection
 
     public var id: String { task.id }
 
     public init(
         wave: WaveSnapshot?,
         task: RoadmapTask,
-        group: TaskConditionState
+        group: TaskConditionState,
+        parentWave: String?,
+        section: TaskSection
     ) {
         self.wave = wave
         self.task = task
         self.group = group
+        self.parentWave = parentWave
+        self.section = section
     }
 }
 
@@ -61,16 +67,19 @@ public struct NowSection: Identifiable, Sendable, Hashable {
     }
 }
 
-/// Flatten the roadmap into the NOW shape: every Task across every visible Wave,
+/// Join planning content to projected parent/lifecycle fields for the NOW shape:
 /// bucketed by condition, oldest-first within each bucket, with empty buckets
 /// dropped. Age uses the Work record's `updated_at` (RFC3339, so lexical order
 /// is chronological); NOW rows always have runtime evidence.
-public func nowSections(from tasks: [RoadmapTask], waves: [WaveRoadmap]) -> [NowSection] {
+public func nowSections(from tasks: [RoadmapTask], facts: [WorkMembershipPlan.Facts], waves: [WaveRoadmap]) -> [NowSection] {
+    let fields = Dictionary(facts.filter { $0.work.kind == .task }.map { ($0.work.id, $0) }, uniquingKeysWith: { first, _ in first })
     var rowsByGroup: [TaskConditionState: [NowRow]] = [:]
     for task in tasks {
-        guard let group = nowGroup(for: task) else { continue }
-        let wave = waves.first { $0.wave.id == task.task.waveId }?.wave
-        rowsByGroup[group, default: []].append(NowRow(wave: wave, task: task, group: group))
+        guard let fact = fields[task.id], fact.lifecycle.known,
+              ![TaskSection.done, .abandoned].contains(TaskSection(states: fact.lifecycle.states)),
+              let group = nowGroup(for: task) else { continue }
+        let wave = waves.first { $0.wave.id == fact.parent.wave }?.wave
+        rowsByGroup[group, default: []].append(NowRow(wave: wave, task: task, group: group, parentWave: fact.parent.wave, section: TaskSection(states: fact.lifecycle.states)))
     }
     return [TaskConditionState.blocked, .waiting, .unknown].compactMap { group in
         guard let rows = rowsByGroup[group], !rows.isEmpty else { return nil }

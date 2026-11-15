@@ -51,7 +51,8 @@ final class TaskFeed {
                     guard let self, current == self.generation else { return }
                     switch update {
                     case .success:
-                        self.error = nil
+                        let reasons = self.repositories.flatMap(\.unavailable)
+                        self.error = reasons.isEmpty ? nil : reasons.joined(separator: "; ")
                         Perf.launch("tasks_current")
                         if let waiting = self.waiting { Perf.end(waiting, self.filter.rawValue) }
                         self.waiting = nil
@@ -77,7 +78,11 @@ final class TaskFeed {
             guard let self, current == self.generation else { return }
             guard let plans else { self.repositories = []; self.loaded = false; return }
             switch RemoteTaskObservation.decodePlans(plans) {
-            case .success(let repositories): self.repositories = repositories; self.loaded = true
+            case .success(let repositories):
+                self.repositories = repositories
+                self.loaded = true
+                let reasons = repositories.flatMap(\.unavailable)
+                self.error = reasons.isEmpty ? nil : reasons.joined(separator: "; ")
             case .failure(let error): self.error = error.message
             }
         }
@@ -228,7 +233,8 @@ struct TaskListView: View {
                         ForEach(section.open, id: \.work) { link($0) }
                         if !section.quiet.isEmpty {
                             // Started Tasks nobody has opened a conversation for stay one tap away.
-                            DisclosureGroup("\(section.quiet.count) without a conversation") {
+                            DisclosureGroup(feed.repositories.first { $0.repository == section.repository }?.unavailable.isEmpty == true
+                                ? "\(section.quiet.count) without a conversation" : "Without a conversation · incomplete") {
                                 ForEach(section.quiet, id: \.work) { link($0) }
                             }
                             .font(Typography.caption(14))

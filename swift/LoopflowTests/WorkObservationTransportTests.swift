@@ -106,6 +106,9 @@ struct WorkObservationTransportTests {
         try await subscriptions.answer(.processList, 5)
         let answered = try await frames.next()
         #expect(answered?.content.part == "activity")
+        // Portfolio membership is another independent query, not covered by activity.
+        try await subscriptions.answer(.viewSelect(expression: nil), 5)
+        #expect(try await frames.next()?.content.part == "selections")
         let checkpoint = try await frames.next()
         #expect(checkpoint?.content.part == "checkpoint")
         #expect(checkpoint?.answers == 5)

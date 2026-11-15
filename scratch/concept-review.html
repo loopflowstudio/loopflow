@@ -2,106 +2,74 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-650 · concept review</title>
+<title>LOO-650 · capture history</title>
 <style>
-:root { color-scheme: light dark; font: 16px/1.45 system-ui, sans-serif; }
-body { max-width: 760px; margin: 2rem auto; padding: 0 1rem 2rem; }
-header { font-size: .78rem; color: light-dark(#555d66, #b8c0ca); }
-h1 { font-size: 1.6rem; line-height: 1.2; }
-h2 { font-size: 1.05rem; margin: 1.3rem 0 .4rem; }
-p { margin: .6rem 0; }
-code { font: .85em ui-monospace, monospace; overflow-wrap: anywhere; }
-aside { border-left: 3px solid light-dark(#944218, #edb58b); padding-left: 1rem; }
-table { border-collapse: collapse; width: 100%; font-size: .86rem; }
-th, td { text-align: left; vertical-align: top; padding: .5rem .3rem; border-bottom: 1px solid light-dark(#ccc, #4b5159); overflow-wrap: anywhere; }
-li { margin: .4rem 0; }
-.new { border-left: 3px solid light-dark(#1f6f4a, #7fd1a6); padding-left: .5rem; }
-@media (max-width: 520px) { body { margin-top: 1rem; } table { font-size: .76rem; } }
+:root{color-scheme:light dark;font:16px/1.5 system-ui,sans-serif}
+body{max-width:760px;margin:2rem auto;padding:0 1rem 2rem}
+header{font-size:.78rem;color:light-dark(#555,#bbb)}
+h1{font-size:1.6rem;line-height:1.2}h2{font-size:1.05rem;margin:1.3rem 0 .4rem}
+p{margin:.6rem 0}code{font:.85em ui-monospace,monospace;overflow-wrap:anywhere}
+aside{border-left:3px solid light-dark(#96471c,#edb58b);padding-left:1rem}
+table{border-collapse:collapse;width:100%;font-size:.86rem}
+th,td{text-align:left;vertical-align:top;padding:.5rem .3rem;border-bottom:1px solid light-dark(#ccc,#555);overflow-wrap:anywhere}
+li{margin:.4rem 0}.proposed{border-left:3px solid light-dark(#23734c,#8cd6ad);padding-left:.7rem}
+@media(max-width:520px){body{margin-top:1rem}table{font-size:.76rem}}
 </style>
-<header>LOO-650 · concept-review · November 15, 2026 · HEAD 5258b07b4b<br>
+<header>LOO-650 · concept-review · November 15, 2026 · reviewed HEAD 64b1bc335e<br>
 Built from <code>scratch/{loo-650,questions}.md</code>,
-<code>rust/loopflow/src/config/migrate.rs</code>,
-<code>store/{migrations,canonical_ids,sqlite}.rs</code>,
-<code>store/MIGRATIONS.md</code> and the stale-cutover probe.</header>
+<code>session_record.rs</code>, <code>store/{session,sessions}.rs</code>,
+<code>store/sqlite/{sessions,session_events}.rs</code>, and
+<code>lf/commands/{session_history,activity}.rs</code>.</header>
 <main>
-<h1>Iterate to implement: the upgrade keeps its one exclusive transaction; the application passes two closures at open.</h1>
-<aside><strong>Biggest mismatch.</strong> Read / act / compare suits ordinary
-commands: many agents share the write lock, and a stale answer reacquires. An
-upgrade writes preference files, and files cannot be reacquired. Moving that
-work above <code>BEGIN EXCLUSIVE</code> gave up “no SQL writer between the
-export and the commit”, then needed a new restore / archive / re-export
-recovery with its own crash ordering to get it back.</aside>
-<p>No open product choice. No command, schema, wire shape, migration bytes or
-journal bytes change. A green bar marks what is proposed; the rest is what the
-code does now.</p>
-
-<h2>One upgrade, three designs</h2>
+<h1>Iterate to implement: SQL reads saved evidence; the application interprets the full capture.</h1>
+<aside><strong>Biggest mismatch.</strong> SQL currently calls a history projector
+that validates a prepared launch request. Moving that request into storage would
+bring settings and launch construction with it. Erasing the request to arbitrary
+JSON would accept malformed manifests that currently count as evidence gaps.</aside>
+<p>No open product choice. The proposed cut keeps commands, stored bytes and
+history output unchanged. Green rules below mark unbuilt behavior.</p>
+<h2>Actions → concepts → APIs</h2>
 <table>
-<thead><tr><th></th><th>Today</th><th>Withdrawn plan</th><th>Proposed</th></tr></thead>
-<tbody>
-<tr><td>Where outside work runs</td><td>inside the exclusive transaction</td><td>before it; compared inside</td><td class="new">inside it, unchanged</td></tr>
-<tr><td>Storage → application</td><td>storage calls <code>config::migrate</code> and <code>journal</code> by name</td><td>none; values pass down</td><td class="new">none; storage defines an observers value, the open path fills it</td></tr>
-<tr><td>Old <code>lf</code> writes a setting mid-upgrade</td><td>cannot happen</td><td>stale; files already written for the old export</td><td class="new">cannot happen</td></tr>
-<tr><td>New recovery code</td><td>—</td><td>restore, archive, re-export, four crash points</td><td class="new">none</td></tr>
-<tr><td>Released exporter (695 lines)</td><td>—</td><td>SQL split out into storage row types</td><td class="new">untouched</td></tr>
-</tbody>
+<tr><th>Action</th><th>Existing</th><th>Proposed</th></tr>
+<tr><td>Inspect one input</td><td><code>SqliteStore::input_history</code> selects, reads and projects</td><td>Application <code>store::sessions::input_history</code> uses SQL selection and evidence</td></tr>
+<tr><td>Read recent history</td><td>SQL budgets inputs before projecting</td><td>Same SQL budget; application projects each selected input in order</td></tr>
+<tr><td>Read activity</td><td>Sort by latest event; stop before decoding older inputs</td><td>Same stop, before reading their evidence</td></tr>
+<tr><td>Resume later</td><td>Session and provider history retain their identity</td><td>Same; history projection grants no execution authority</td></tr>
 </table>
-
-<h2>The two closures</h2>
-<ul>
-<li class="new"><strong>Export before a contract.</strong> Called with the
-transaction's connection and the guard list, at the same point in the migration
-order. The application passes <code>config::migrate::preflight</code> as it is.
-The exporter already owns a raw connection in <code>lf config migrate</code>.</li>
-<li class="new"><strong>Process evidence.</strong> Storage keeps the
-canonical-ID scan and the Session fence try-locks, and asks for
-<code>ProcessIdentityEvidence</code> per affected row. <code>journal</code>
-keeps producing it. Anything but Dead defers with today's message.</li>
-<li class="new">Both are required arguments. Storage's own tests pass closures;
-the application's wrapper and open path pass the real ones.</li>
-<li>Storage holds the guards through commit or rollback. The pure SQL checks
-stay where they are.</li>
-</ul>
-
+<h2>Proposed ownership</h2>
+<p class="proposed"><code>PendingHistory / PendingInput</code> →
+<code>SqliteStore::read_history_input</code> →
+<code>HistoryInput { capture, artifact key, scoped events, names }</code> →
+application <code>project_input_history</code> → <code>SessionHistory</code>.</p>
+<p>Storage keeps selector resolution, names, truncation and scoped event reads.
+The application keeps the complete <code>SessionCaptureManifest</code>,
+<code>AgentProcessRequest</code> and their existing deserialization.
+One selected-input reader replaces SQL <code>decode_history</code>;
+one application projector serves full, recent, single-input and activity reads.</p>
 <h2>Normal → failure → recovery</h2>
-<p>A store from before 0.16.0 opens under a new <code>lf</code>. Storage takes
-the migration lock and the exclusive transaction, reaches
-<code>settings_authority</code>, and calls the exporter: it reads the old
-tables, writes <code>settings-cutover.json</code>, then the preference files.
-The SQL runs and commits. Power fails after the file writes: SQLite rolls back,
-the journal and files remain. The next open exports the same source, matches the
-journal, finds each file at its before or after bytes, finishes and commits.</p>
-<p>What still refuses, as today: after that interruption an old <code>lf</code>
-changes a setting before the retry. The probe showed exit 1,
-<code>migration inputs changed; preserved recovery evidence is at …/settings-cutover.json</code>,
-with <code>config.yaml</code> still holding the first value. A recovery for it
-was drafted and is outside this Task.</p>
-
-<h2>What must hold</h2>
-<ul>
-<li>The journal <code>source</code> string stays byte-identical, or a cutover
-interrupted under released 0.16.0 turns into “migration inputs changed”.</li>
-<li>An in-memory store refuses a non-empty export. Preview skips the cutover.</li>
-<li>Unknown never becomes Dead. A busy Session fence defers without waiting.</li>
-<li>Earlier migrations in the same transaction have reshaped the schema before
-the exporter reads it.</li>
-</ul>
-
-<h2>Order</h2>
+<p>An input recorded under Task A remains attributed to A after the Session binds
+to B. A malformed <code>exec</code> request makes its manifest invalid, retaining
+today's gap count and current-input fallback rules. A later valid observation is
+read through the existing projector; inspection writes no repair and launches
+no provider. Missing manifests and orphaned native turns retain uncertainty.</p>
+<h2>The counterexample that shapes the API</h2>
+<p>An old input has invalid metadata. Activity already has enough newer entries
+to stop. Today it never reads that input. Eagerly loading every selected input's
+events would add work and could fail an otherwise readable page. Keep
+<code>settled</code> before the per-input evidence reader.</p>
+<p>Recent history still retains every unfinished input. Exact drills remain
+complete. Selection releases its savepoint before events are read, as today;
+this cut adds no page-wide snapshot or longer SQL lock.</p>
+<h2>Next implementation</h2>
 <ol>
-<li class="new">Observers on the migration entry; remove the two by-name calls from <code>store/migrations.rs</code> and <code>canonical_ids.rs</code>.</li>
-<li><code>store/</code> classification and the <code>mod.rs</code> split.</li>
-<li>Storage crate extraction, with its SQL tests sorted by entry point.</li>
-<li>Measure: fresh worktree and <code>ops/task/</code> edit, reported separately.</li>
+<li>Replace the SQL projection path with saved input evidence; route application callers through the one projector.</li>
+<li>Keep attribution, malformed-request gaps, orphaned turns, recent truncation and activity early-stop checks; move application tests above storage.</li>
+<li>Extract synchronous storage and catalogue/schema generation. Measure fresh-root reuse, application edits and Task-record edits separately.</li>
 </ol>
-
-<h2>Questions</h2>
+<h2>Review questions</h2>
 <ol>
-<li>The settings exporter: (a) keeps the transaction's raw connection, as
-proposed, or (b) storage returns old-schema rows as values, so the application
-never holds a connection, and the released exporter is rewritten.</li>
-<li>The changed-source refusal after an interrupted cutover: (a) leave it,
-(b) file the drafted recovery as its own Task.</li>
+<li>Does this require a new product choice? No: complete validation and bounded history reads already belong to the design.</li>
+<li>What should loop-or-next do? Iterate to implement this cut. Root upkeep, whole-application measurement, demo and review remain open.</li>
 </ol>
 </main>
 </html>

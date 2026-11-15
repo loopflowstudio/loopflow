@@ -1541,6 +1541,82 @@ mod tests {
     }
 
     #[test]
+    fn sessions_upgrade_to_the_provider_that_recorded_their_thread() {
+        let conn = open();
+        apply_before_migration(&conn, "resume_on_latest_input_provider");
+        conn.execute_batch(
+            "INSERT INTO provider_accounts(provider,account_id,credential_state,created_at,updated_at)
+             VALUES('codex','account','connected',10,10),('opencode','account','connected',10,10)",
+        )
+        .unwrap();
+        for (session, provider, thread) in [
+            ("switched", "claude", "codex-thread"),
+            ("same", "codex", "own-thread"),
+            ("ambiguous", "claude", "shared-thread"),
+            ("unrecorded", "claude", "unknown-thread"),
+            ("unaccounted", "claude", "manifest-thread"),
+        ] {
+            conn.execute(
+                "INSERT INTO agent_sessions(id,title,title_source,created_at,cwd,input_published,
+                    interactive,provider,model,provider_thread)
+                 VALUES(?1,?1,'generated',10,'/repo',1,1,?2,'opus',?3)",
+                rusqlite::params![session, provider, thread],
+            )
+            .unwrap();
+        }
+        for (provider, thread) in [
+            ("codex", "codex-thread"),
+            ("codex", "own-thread"),
+            ("codex", "shared-thread"),
+            ("opencode", "shared-thread"),
+        ] {
+            conn.execute(
+                "INSERT INTO provider_session_accounts(provider,provider_session_id,account_id,created_at)
+                 VALUES(?1,?2,'account',10)",
+                rusqlite::params![provider, thread],
+            )
+            .unwrap();
+        }
+
+        // Without an account record, the current input's manifest names its harness.
+        conn.execute_batch(
+            r#"INSERT INTO session_events(seq,session_id,kind,receipt_key,observed_at,payload)
+             VALUES(100,'unaccounted','captured','input',10,'{}'),
+                (101,'unaccounted','observed','input:manifest.json',10,
+                 '{"evidence":{"harness":"codex","model":"gpt-5"}}');
+             UPDATE agent_sessions SET current_capture=100 WHERE id='unaccounted';"#,
+        )
+        .unwrap();
+
+        upgrade_from_migration(&conn, "resume_on_latest_input_provider");
+
+        let sessions = conn
+            .prepare("SELECT id,provider,model FROM agent_sessions ORDER BY id")
+            .unwrap()
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        let opus = Some("opus".to_string());
+        assert_eq!(
+            sessions,
+            [
+                ("ambiguous".into(), "claude".into(), opus.clone()),
+                ("same".into(), "codex".into(), opus.clone()),
+                ("switched".into(), "codex".into(), None),
+                ("unaccounted".into(), "codex".into(), Some("gpt-5".into())),
+                ("unrecorded".into(), "claude".into(), opus),
+            ]
+        );
+    }
+
+    #[test]
     fn task_update_revision_upgrade_preserves_existing_counters() {
         let conn = open();
         apply_before_migration(&conn, "task_update_revision");
@@ -6343,6 +6419,37 @@ mod tests {
             tokens, 1,
             "seeded provider token did not survive the upgrade"
         );
+    }
+
+    #[test]
+    fn claude_usage_reconciliation_upgrade_keeps_capacity_and_adds_revision() {
+        let conn = open();
+        apply_before_migration(&conn, "account_capacity_revision");
+        conn.execute_batch("INSERT INTO provider_accounts
+            (provider,account_id,credential_state,cooldown_until,cooldown_reason,created_at,updated_at)
+            VALUES ('claude','primary','connected',1900000005,'rejected: seven_day',1,1);
+            INSERT INTO provider_account_limits
+            (provider,account_id,window,used_percent,resets_at,observed_at,source,model,limited_until)
+            VALUES ('claude','primary','seven_day_overage_included',100,1900000000,1,'stream','fable',1900000005);").unwrap();
+        apply_pending_migrations(&conn);
+        let capacity: (i64, i64, String) = conn
+            .query_row(
+                "SELECT capacity_revision,cooldown_until,cooldown_reason FROM provider_accounts
+             WHERE provider='claude' AND account_id='primary'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(capacity, (0, 1900000005, "rejected: seven_day".into()));
+        let used: i64 = conn
+            .query_row(
+                "SELECT used_percent FROM provider_account_limits",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(used, 100);
+        validate_foreign_keys(&conn).unwrap();
     }
 
     /// Fresh initialization over the full real registry — a brand-new database

@@ -53,12 +53,98 @@ pub struct AccountRow {
     /// rental's access token, which the laptop renews before then.
     pub expires_at: Option<i64>,
     pub windows: Vec<AccountLimitRow>,
+    pub launches: Vec<AccountLaunch>,
     pub verified_windows: Vec<String>,
     pub reset_credits: Option<crate::subscription::RateLimitResetCredits>,
     /// Signed in to the provider's shared home.
     pub active: bool,
     /// Held there by `lf account use`.
     pub held: bool,
+}
+
+#[derive(Debug, Clone, schemars::JsonSchema, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AccountLaunch {
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub model: Option<String>,
+    pub eligible: bool,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub out_until: Option<i64>,
+    pub blockers: Vec<String>,
+}
+
+fn account_launches(
+    account: &crate::store::ProviderAccount,
+    limits: &[AccountLimitRow],
+    accounts: &[crate::store::ProviderAccount],
+    now: i64,
+) -> Vec<AccountLaunch> {
+    let models = (account.provider == "claude")
+        .then_some(crate::config::CLAUDE_MODEL_FAMILIES)
+        .into_iter()
+        .flatten()
+        .map(Some)
+        .chain(std::iter::once(None));
+    let identity_blocker =
+        crate::provider_account::identity::check_account_identity(account, accounts).err();
+    models
+        .map(|model| {
+            let mut blockers =
+                crate::provider_account::account_launch_blockers(account, limits, model, now);
+            if let Some(reason) = &identity_blocker {
+                blockers.push(reason.clone());
+            }
+            AccountLaunch {
+                model: model.map(str::to_owned),
+                eligible: blockers.is_empty(),
+                out_until: crate::provider_account::account_held_until(account, limits, model, now),
+                blockers,
+            }
+        })
+        .collect()
+}
+
+fn launch_summary(row: &AccountRow, unavailable_only: bool) -> String {
+    // Claude's model-less entry repeats every model's hold; it stands alone on Codex.
+    let named = row.launches.iter().any(|launch| launch.model.is_some());
+    let entries = || {
+        row.launches
+            .iter()
+            .filter(move |launch| launch.model.is_some() == named)
+    };
+    let mut parts = Vec::new();
+    if !unavailable_only {
+        let ready: Vec<_> = entries()
+            .filter(|launch| launch.eligible)
+            .map(|launch| launch.model.as_deref().unwrap_or("ready"))
+            .collect();
+        if !ready.is_empty() {
+            parts.push(ready.join(", "));
+        }
+    }
+    // Credential, routing and identity blockers hold every model of the login.
+    let login_wide: Vec<_> = entries()
+        .next()
+        .into_iter()
+        .flat_map(|launch| &launch.blockers)
+        .filter(|blocker| !blocker.starts_with("cooling "))
+        .cloned()
+        .collect();
+    if !login_wide.is_empty() {
+        parts.push("none".into());
+        parts.extend(login_wide);
+    }
+    for launch in entries() {
+        if let Some(until) = launch.out_until {
+            let name = launch
+                .model
+                .as_deref()
+                .map(|model| format!("{model} "))
+                .unwrap_or_default();
+            parts.push(format!("{name}out until {}", local_time(until)));
+        }
+    }
+    parts.join(" · ")
 }
 
 #[derive(Debug, Clone, schemars::JsonSchema, Serialize, Deserialize)]
@@ -284,6 +370,7 @@ async fn local_rows(
             routing: None,
             cooldown_until: None,
             expires_at: snapshot.and_then(|s| s.expires_at),
+            launches: vec![],
             windows: vec![],
             verified_windows: vec![],
             reset_credits: None,
@@ -375,7 +462,6 @@ async fn managed_rows(
             .as_ref()
             .map(|identity| identity.email.clone());
         let mut live_usage = None;
-        let mut cooldown_until = account.cooldown_until;
         let identity_error = (presence == crate::provider_auth::CredentialPresence::Present
             && (provider == Provider::Codex || (!verify && cached_identity.is_some())))
         .then(|| {
@@ -390,6 +476,9 @@ async fn managed_rows(
             recover = true;
             Verification::Rejected
         } else if verify && presence == crate::provider_auth::CredentialPresence::Present {
+            let revision = store
+                .provider_account_capacity_revision(&account.provider, &account.account_id)
+                .await?;
             let observation = if _login_lock.as_ref().is_some_and(|lock| lock.is_err()) {
                 Err(crate::subscription::SubscriptionError::Unavailable(
                     "managed credential cannot be locked; another credential operation may be in progress; retry verification".into(),
@@ -421,10 +510,12 @@ async fn managed_rows(
                             usage.identity.credential_digest.as_deref(),
                         )
                         .await?;
-                    if crate::provider_account::save_polled_usage(store, account, &usage.windows)
-                        .await?
-                    {
-                        cooldown_until = None;
+                    let committed = store
+                        .reconcile_provider_account_capacity(account, revision, &usage.windows)
+                        .await?;
+                    if !committed {
+                        diagnostic =
+                            Some("usage refresh superseded by a newer capacity observation".into());
                     }
                     store
                         .update_provider_account_credential_state(
@@ -433,7 +524,7 @@ async fn managed_rows(
                             CredentialState::Connected,
                         )
                         .await?;
-                    live_usage = Some(usage);
+                    live_usage = committed.then_some(usage);
                     recover = false;
                     cached = CredentialState::Connected.as_str();
                     Verification::Accepted
@@ -470,6 +561,11 @@ async fn managed_rows(
         } else {
             Verification::NotChecked
         };
+        let current = store
+            .get_provider_account(&account.provider, &account.account_id)
+            .await?
+            .ok_or(crate::store::StoreError::NotFound)?;
+        let cooldown_until = current.cooldown_until;
         let windows: Vec<_> = store
             .provider_account_limits(Some(&account.provider))
             .await?
@@ -529,6 +625,7 @@ async fn managed_rows(
             ),
             cooldown_until,
             expires_at: access_expires_at,
+            launches: account_launches(&current, &windows, &accounts, now),
             windows,
             reset_credits: live_usage
                 .as_ref()
@@ -754,6 +851,7 @@ fn row_lines(row: &AccountRow, now: i64) -> Vec<String> {
             (None, None) => "unknown".into(),
         };
         lines.push(format!("  plan: {plan}"));
+        lines.push(format!("  launches: {}", launch_summary(row, false)));
     }
     let mut policy = Vec::new();
     if let Some(routing) = row.routing.as_ref().filter(|r| r.as_str() != "automatic") {
@@ -920,15 +1018,9 @@ fn render_table(report: &AccountReport, notes: &[RouteNote], now: i64) -> String
             .to_string(),
         );
         let indent = " ".repeat(10 + login_width);
-        if let Some(until) = row.cooldown_until.filter(|until| *until > now) {
-            lines.push(format!("{indent}out until {}", local_time(until)));
-        }
-        for window in &row.windows {
-            if let (Some(model), Some(until)) = (&window.model, window.limited_until) {
-                if until > now {
-                    lines.push(format!("{indent}{model} out until {}", local_time(until)));
-                }
-            }
+        let unavailable = launch_summary(row, true);
+        if !unavailable.is_empty() {
+            lines.push(format!("{indent}{unavailable}"));
         }
         if let Some(recovery) = &row.recovery {
             fixes.push((
@@ -1058,6 +1150,316 @@ mod tests {
 
     #[tokio::test]
     #[allow(clippy::await_holding_lock)]
+    async fn claude_usage_reconciliation_account_handlers_refresh_both_logins() {
+        use crate::provider_account::{
+            account_held_until, new_account, resolve_provider_account_exact,
+        };
+        use crate::provider_auth::Provider;
+        use crate::store::{AccountLimitWindow, ProviderAccountId, StorageConfig};
+        let _env = crate::journal::test_env_lock();
+        let root = tempfile::tempdir().unwrap();
+        let _homes = crate::test_ambient::EnvGuard::clear(&[
+            "LF_HOME",
+            "CLAUDE_CONFIG_DIR",
+            "LF_ACCOUNT_SELECTION",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "ANTHROPIC_API_KEY",
+        ]);
+        let native = root.path().join("native");
+        std::env::set_var("LF_HOME", root.path().join("machine"));
+        std::env::set_var("CLAUDE_CONFIG_DIR", &native);
+        let store = std::sync::Arc::new(
+            crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+                root.path().join("machine/loopflow.db"),
+            ))
+            .await
+            .unwrap(),
+        );
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        let reset = now + 86_400;
+        let mut accounts = Vec::new();
+        let mut responses = Vec::new();
+        for (id, login, weekly, fable) in [
+            ("first", "jack@loopflow.studio", 66, 11),
+            ("second", "jackstah@gmail.com", 65, 100),
+        ] {
+            let home = root.path().join(id);
+            std::fs::create_dir_all(&home).unwrap();
+            let credential = serde_json::json!({"claudeAiOauth":{
+                "accessToken": format!("fixture-{id}"), "expiresAt":4102444800000i64
+            }})
+            .to_string();
+            std::fs::write(home.join(".credentials.json"), &credential).unwrap();
+            let mut account = new_account(
+                Provider::Claude,
+                ProviderAccountId::parse(id).unwrap(),
+                home,
+                Some(crate::profile::EmailAddress::parse(login).unwrap()),
+            );
+            account.observed_email = Some(login.into());
+            account.observed_subject = Some(id.into());
+            account.observed_credential_digest = Some(
+                crate::provider_account::identity::credential_digest(&credential),
+            );
+            store.upsert_provider_account(&account).await.unwrap();
+            // Historical stream alias, before normalized writes.
+            store
+                .upsert_provider_account_limits(
+                    "claude",
+                    &account.account_id,
+                    &[AccountLimitWindow {
+                        window: "rejected: seven_day_overage_included".into(),
+                        used_percent: 100,
+                        resets_at: Some(reset),
+                        plan: None,
+                        model: Some("fable".into()),
+                        limited_until: Some(reset + 5),
+                    }],
+                    "stream",
+                )
+                .await
+                .unwrap();
+            responses.push((
+                200,
+                serde_json::json!({"limits":[
+                    {"group":"weekly", "percent":weekly, "resets_at":super::timestamp(reset)},
+                    {"group":"weekly", "percent":fable, "resets_at":super::timestamp(reset),
+                        "scope":{"model":{"display_name":"Fable"}}}
+                ]})
+                .to_string(),
+            ));
+            responses.push((
+                200,
+                serde_json::json!({"account":{"email":login, "uuid":id}}).to_string(),
+            ));
+            accounts.push(account);
+        }
+        let cached = super::report(Some(super::super::Target::Provider(Provider::Claude)), true)
+            .await
+            .unwrap();
+        assert!(cached
+            .accounts
+            .iter()
+            .filter(|row| row.scope == super::Scope::Managed)
+            .all(|row| row
+                .launches
+                .iter()
+                .any(|launch| launch.model.as_deref() == Some("fable") && !launch.eligible)));
+        let blocked = crate::lf::commands::profile::next(None, Some("claude:fable"))
+            .await
+            .unwrap();
+        assert_eq!(
+            blocked[0].outcome,
+            crate::lf::commands::profile::NextOutcome::Blocked
+        );
+        assert!(blocked[0].reason.contains("for fable until"));
+        for account in &accounts {
+            assert!(blocked[0]
+                .reason
+                .contains(crate::provider_account::account_login(account)));
+        }
+        let (_endpoints, server) =
+            crate::subscription::observation_tests::serve(responses.clone(), |_| {}).await;
+        let report = super::report(
+            Some(super::super::Target::Provider(Provider::Claude)),
+            false,
+        )
+        .await
+        .unwrap();
+        server.await.unwrap();
+        let managed: Vec<_> = report
+            .accounts
+            .iter()
+            .filter(|row| row.account_id.is_some())
+            .collect();
+        assert_eq!(managed.len(), 2);
+        assert!(
+            managed
+                .iter()
+                .all(|row| row.verification == super::Verification::Accepted
+                    && row.cooldown_until.is_none()
+                    && row.verified_windows.contains(&"seven_day_fable".to_owned())
+                    && row
+                        .windows
+                        .iter()
+                        .all(|window| window.window != "seven_day_overage_included")),
+            "{managed:?}"
+        );
+        for (row, held) in managed.iter().zip([false, true]) {
+            let fable = row
+                .launches
+                .iter()
+                .find(|launch| launch.model.as_deref() == Some("fable"))
+                .unwrap();
+            assert_eq!(fable.eligible, !held);
+            assert_eq!(fable.out_until, held.then_some(reset + 5));
+            let sonnet = row
+                .launches
+                .iter()
+                .find(|launch| launch.model.as_deref() == Some("sonnet"))
+                .unwrap();
+            assert!(sonnet.eligible);
+        }
+        let json = serde_json::to_value(&report).unwrap();
+        assert!(json.to_string().contains("seven_day_fable"));
+        let next = crate::lf::commands::profile::next(None, Some("claude:fable"))
+            .await
+            .unwrap();
+        assert_eq!(next[0].model.as_deref(), Some("fable"));
+        assert_eq!(next[0].account_id.as_ref(), Some(&accounts[0].account_id));
+        assert_eq!(next[1].model, None);
+        let unknown = crate::lf::commands::profile::next(None, Some("claude:future-sonnet"))
+            .await
+            .unwrap();
+        assert_eq!(
+            unknown[0].outcome,
+            crate::lf::commands::profile::NextOutcome::Ready
+        );
+        assert_eq!(unknown[0].model.as_deref(), Some("future-sonnet"));
+        let text = super::render(&report, 100, now);
+        assert!(text.contains("fable out until"), "{text}");
+        let limits = store.provider_account_limits(Some("claude")).await.unwrap();
+        assert_eq!(
+            account_held_until(&accounts[0], &limits, Some("fable"), now),
+            None
+        );
+        assert_eq!(
+            account_held_until(&accounts[1], &limits, Some("fable"), now),
+            Some(reset + 5)
+        );
+        for account in &accounts {
+            assert_eq!(
+                account_held_until(account, &limits, Some("sonnet"), now),
+                None
+            );
+        }
+        // Exercise the real account output handlers with the committed cached result.
+        super::run(
+            Some(super::super::Target::Provider(Provider::Claude)),
+            true,
+            true,
+        )
+        .await
+        .unwrap();
+        super::run(
+            Some(super::super::Target::Provider(Provider::Claude)),
+            true,
+            false,
+        )
+        .await
+        .unwrap();
+        let next = crate::lf::commands::profile::next(None, None)
+            .await
+            .unwrap();
+        assert_eq!(next[0].account_id.as_ref(), Some(&accounts[0].account_id));
+        for model in ["fable", "sonnet"] {
+            let route = resolve_provider_account_exact(
+                Provider::Claude,
+                None,
+                None,
+                None,
+                Some(model),
+                Some(root.path()),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            if model == "fable" {
+                assert_eq!(route.account_id(), &accounts[0].account_id);
+            }
+        }
+        // The same requested family reaches routing when reopening a recorded conversation.
+        let conversation: crate::id::AgentSessionId = "fixture-conversation".into();
+        std::fs::create_dir_all(native.join("projects/fixture")).unwrap();
+        std::fs::write(
+            native.join("projects/fixture/fixture-conversation.jsonl"),
+            "{}\n",
+        )
+        .unwrap();
+        store
+            .pin_provider_session_route(Provider::Claude, &conversation, &accounts[1].account_id)
+            .await
+            .unwrap();
+        let resumed = resolve_provider_account_exact(
+            Provider::Claude,
+            Some(&conversation),
+            Some(&accounts[1].account_id),
+            None,
+            Some("sonnet"),
+            Some(root.path()),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(accounts
+            .iter()
+            .any(|account| &account.account_id == resumed.account_id()));
+        assert_eq!(
+            store.provider_account_limits(Some("claude")).await.unwrap(),
+            limits
+        );
+        drop(_endpoints);
+        let writer = store.clone();
+        let first = accounts[0].account_id.clone();
+        let (_endpoints, server) =
+            crate::subscription::observation_tests::serve(responses, move |index| {
+                if index == 0 {
+                    writer
+                        .sqlite
+                        .record_provider_account_capacity(
+                            "claude",
+                            &first,
+                            &crate::store::AccountCapacity {
+                                utilization_percent: Some(100),
+                                cooldown_until: Some(reset + 5),
+                                cooldown_reason: Some("rejected: seven_day".into()),
+                                windows: vec![AccountLimitWindow {
+                                    window: "seven_day".into(),
+                                    used_percent: 100,
+                                    resets_at: Some(reset),
+                                    model: None,
+                                    plan: None,
+                                    limited_until: Some(reset + 5),
+                                }],
+                            },
+                        )
+                        .unwrap();
+                }
+            })
+            .await;
+        let raced = super::report(
+            Some(super::super::Target::Provider(Provider::Claude)),
+            false,
+        )
+        .await
+        .unwrap();
+        server.await.unwrap();
+        let first = raced
+            .accounts
+            .iter()
+            .find(|row| row.account_id.as_ref() == Some(&accounts[0].account_id))
+            .unwrap();
+        assert_eq!(first.verification, super::Verification::Accepted);
+        assert_eq!(first.cooldown_until, Some(reset + 5));
+        assert!(first.verified_windows.is_empty());
+        assert!(first.diagnostic.as_deref().unwrap().contains("superseded"));
+        assert_eq!(
+            first
+                .windows
+                .iter()
+                .find(|window| window.window == "seven_day")
+                .unwrap()
+                .used_percent,
+            100
+        );
+        let next = crate::lf::commands::profile::next(None, None)
+            .await
+            .unwrap();
+        assert!(next[0].reason.contains("fable"), "{:?}", next[0]);
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn claude_cached_identity_requires_current_verified_credentials() {
         let _env = crate::journal::test_env_lock();
         let root = tempfile::tempdir().unwrap();
@@ -1098,6 +1500,10 @@ mod tests {
             .unwrap();
         assert_eq!(rows[0].verification, super::Verification::Unavailable);
         assert!(rows[0]
+            .launches
+            .iter()
+            .all(|launch| !launch.eligible && !launch.blockers.is_empty()));
+        assert!(rows[0]
             .diagnostic
             .as_deref()
             .unwrap()
@@ -1136,6 +1542,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(rows[0].verification, super::Verification::NotChecked);
+        assert!(rows[0]
+            .launches
+            .iter()
+            .all(|launch| launch.eligible && launch.blockers.is_empty()));
         assert_eq!(rows[0].login.as_deref(), Some("first@example.com"));
         assert_eq!(
             store
@@ -1154,6 +1564,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(rows[0].verification, super::Verification::Unavailable);
+        assert!(rows[0]
+            .launches
+            .iter()
+            .all(|launch| !launch.eligible && !launch.blockers.is_empty()));
         assert_eq!(
             store
                 .get_provider_account("claude", &account.account_id)
@@ -1274,6 +1688,23 @@ mod tests {
             assert!(!text.contains("cached missing · needs login"));
             println!("--- {width} columns ---\n{text}");
         }
+        for field in ["model", "eligible", "out_until", "blockers"] {
+            let mut incomplete = serde_json::to_value(&report).unwrap();
+            incomplete["accounts"][0]["launches"][0]
+                .as_object_mut()
+                .unwrap()
+                .remove(field);
+            assert!(
+                serde_json::from_value::<AccountReport>(incomplete).is_err(),
+                "{field}"
+            );
+        }
+        let mut incomplete = serde_json::to_value(&report).unwrap();
+        incomplete["accounts"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("launches");
+        assert!(serde_json::from_value::<AccountReport>(incomplete).is_err());
         let mut incomplete = serde_json::to_value(&report).unwrap();
         incomplete["accounts"][0]
             .as_object_mut()
@@ -1365,6 +1796,48 @@ mod tests {
     }
 
     #[test]
+    fn claude_capacity_summaries_show_shared_blockers_once() {
+        let fixture = include_str!("../../../../../tests/fixtures/dto/auth_status.json");
+        let mut report: AccountReport = serde_json::from_str(fixture).unwrap();
+        let row = &mut report.accounts[0];
+        assert_eq!(
+            super::launch_summary(row, false),
+            "fable, opus, sonnet, haiku"
+        );
+        assert_eq!(super::launch_summary(row, true), "");
+        let healthy: AccountReport = serde_json::from_str(fixture).unwrap();
+        let single = AccountReport {
+            accounts: vec![healthy.accounts.into_iter().next().unwrap()],
+            browser: None,
+        };
+        assert_eq!(render_table(&single, &[], 1_800_000_000).lines().count(), 1);
+        for reason in ["credential is missing", "routing is explicit_only"] {
+            for launch in &mut row.launches {
+                launch.eligible = false;
+                launch.blockers = vec![reason.into()];
+            }
+            let expected = format!("none · {reason}");
+            assert_eq!(super::launch_summary(row, false), expected);
+            assert_eq!(super::launch_summary(row, true), expected);
+        }
+        row.launches[0].out_until = Some(1_800_086_400);
+        row.launches[0].blockers.push("cooling for fable".into());
+        let summary = super::launch_summary(row, false);
+        assert!(summary.starts_with("none · routing is explicit_only · fable out until"));
+        assert_eq!(summary.matches("routing is explicit_only").count(), 1);
+
+        row.launches.retain(|launch| launch.model.is_none());
+        row.launches[0].eligible = true;
+        row.launches[0].blockers.clear();
+        assert_eq!(super::launch_summary(row, false), "ready");
+        assert_eq!(super::launch_summary(row, true), "");
+        row.launches[0].eligible = false;
+        row.launches[0].out_until = Some(1_800_086_400);
+        row.launches[0].blockers.push("cooling account-wide".into());
+        assert!(super::launch_summary(row, false).starts_with("out until "));
+    }
+
+    #[test]
     fn the_overview_is_one_row_per_login_with_fixes_under_it() {
         let fixture = include_str!("../../../../../tests/fixtures/dto/auth_status.json");
         let mut report: AccountReport = serde_json::from_str(fixture).unwrap();
@@ -1391,6 +1864,14 @@ mod tests {
             ..report.accounts[0].windows[2].clone()
         };
         report.accounts[0].windows.push(fable);
+        let launch = report.accounts[0]
+            .launches
+            .iter_mut()
+            .find(|launch| launch.model.as_deref() == Some("fable"))
+            .unwrap();
+        launch.eligible = false;
+        launch.out_until = Some(now + 86_400);
+        launch.blockers = vec!["cooling for fable".into()];
         let notes = [RouteNote {
             provider: crate::provider_auth::Provider::Codex,
             scope: crate::profile::RouteScope::Default,
@@ -1420,6 +1901,8 @@ mod tests {
         ] {
             assert!(text.contains(expected), "missing {expected}: {text}");
         }
+        assert!(!text.contains("opus, sonnet, haiku"), "{text}");
+        assert!(!text.contains("launch out until"), "{text}");
         assert!(!text.contains(" 0% left"));
         assert!(!text.contains("local credentials"));
     }

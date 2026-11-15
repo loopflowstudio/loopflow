@@ -102,12 +102,8 @@ pub enum StoreError {
     Stale(String),
     #[error("invalid data: {0}")]
     InvalidData(String),
-    #[error("unordered or conflicting {entity} facts for {id}; refresh planning")]
-    ProviderObservationConflict { entity: &'static str, id: String },
     #[error("competing planning {effect} receipts")]
     PlanningReceiptConflict { effect: &'static str },
-    #[error("Project {project_id} membership changed without relationship ordering evidence")]
-    ProjectMembershipConflict { project_id: String },
     #[error("invalid control authority: {0}")]
     InvalidAuthority(String),
 }
@@ -679,6 +675,48 @@ impl Store {
         .await
     }
 
+    pub(crate) async fn provider_account_capacity_revision(
+        &self,
+        provider: &str,
+        account_id: &ProviderAccountId,
+    ) -> StoreResult<i64> {
+        let provider = provider.to_owned();
+        let account_id = account_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.provider_account_capacity_revision(&provider, &account_id)
+        })
+        .await
+    }
+
+    pub(crate) async fn record_provider_account_capacity(
+        &self,
+        provider: &str,
+        account_id: &ProviderAccountId,
+        capacity: AccountCapacity,
+    ) -> StoreResult<()> {
+        let provider = provider.to_owned();
+        let account_id = account_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.record_provider_account_capacity(&provider, &account_id, &capacity)
+        })
+        .await
+    }
+
+    /// Commit a poll only while its starting capacity revision is still current.
+    pub(crate) async fn reconcile_provider_account_capacity(
+        &self,
+        account: &ProviderAccount,
+        revision: i64,
+        windows: &[AccountLimitWindow],
+    ) -> StoreResult<bool> {
+        let account = account.clone();
+        let windows = windows.to_vec();
+        run_sqlite(&self.sqlite, move |store| {
+            store.reconcile_provider_account_capacity(&account, revision, &windows)
+        })
+        .await
+    }
+
     pub async fn upsert_provider_account_limits(
         &self,
         provider: &str,
@@ -1049,6 +1087,14 @@ impl RoutingState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderAccountSelection {
     pub account: ProviderAccount,
+}
+
+#[derive(Debug)]
+pub(crate) struct AccountCapacity {
+    pub utilization_percent: Option<u8>,
+    pub cooldown_until: Option<i64>,
+    pub cooldown_reason: Option<String>,
+    pub windows: Vec<AccountLimitWindow>,
 }
 
 /// One observed subscription rate-limit window: how much of the plan's

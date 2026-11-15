@@ -799,7 +799,7 @@ harness is installed. With multiple harnesses, save your choice with
 choose and save a personal default. Installation order and remaining usage do not
 choose a harness.
 Inspection still works without a choice; a new launch explains how to select one.
-Existing Sessions retain their recorded provider when resumed.
+Existing Sessions resume on the provider their latest input ran on.
 A personal `skill.implement.agent: codex` beats a repository occurrence's
 `agent: claude`; changing that personal key to `default_agent` lets the repository
 choice win, even if it is general. `-a` explicitly selects the invocation's agent.
@@ -999,8 +999,10 @@ Stopped-session resume reloads Loopflow settings at the saved checkout. The
 provider's conversation identity and account stay attached; a current model
 selection for that provider applies. The [saved Claude default](#claude-model)
 does not replace a recorded Session model. A configured different provider does
-not change the saved history's provider. A `default_agent` can refresh the model for
-that provider; switching providers requires an explicit agent choice. CLI overrides
+not change the provider of the latest input. A `default_agent` can refresh the model for
+that provider; switching providers requires an explicit agent choice, after which
+the Session stays on the new provider
+([Switch agents](sessions.md#switch-agents-mid-conversation)). CLI overrides
 take precedence. Connecting
 to an already running provider keeps its existing launch settings. Historical
 replay uses captured inputs. Native history from an account's own home, from

@@ -260,15 +260,17 @@ pub(crate) fn resolve_session_config(
     let current =
         crate::config::load_wave_config(Some(&session.cwd), wave.as_ref().map(|wave| wave.slug()))?
             .unwrap_or_default();
-    let request = if let Some(key) = session.artifact_key.as_deref() {
+    let saved = if let Some(key) = session.artifact_key.as_deref() {
         match crate::session_record::resolve_manifest(&crate::store::lf_home_dir(), key) {
-            Ok((_, saved)) => saved.process,
+            Ok((_, saved)) => Some(saved),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
             Err(error) => return Err(error.into()),
         }
     } else {
         None
     };
+    let input_harness = saved.as_ref().map(|saved| saved.harness.clone());
+    let request = saved.and_then(|saved| saved.process);
     let skill = request
         .as_ref()
         .and_then(|request| request.skill_invocation.as_ref())
@@ -320,6 +322,11 @@ pub(crate) fn resolve_session_config(
             ),
             crate::config::Resume::Import { agent } => (agent, true),
         };
+    // The latest input's thread and account belong to the provider it ran on.
+    let resumes_native = !importing
+        && input_harness
+            .as_deref()
+            .is_none_or(|harness| harness == provider);
     let mut config = AgentConfig {
         agent: Some(agent),
         cwd: Some(session.cwd.clone()),
@@ -342,7 +349,7 @@ pub(crate) fn resolve_session_config(
         if !importing && provider == "codex" {
             config.task_prompt = request.codex_initial_input();
         }
-        if !importing {
+        if resumes_native {
             config.provider_account_id = request.account_id;
         }
         config.system_prompt = request.system_prompt;
@@ -370,7 +377,7 @@ pub(crate) fn resolve_session_config(
             config.agent()?,
         )?);
     }
-    if !importing {
+    if resumes_native {
         if let Some(native) = session
             .artifact_key
             .as_deref()

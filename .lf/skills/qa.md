@@ -151,6 +151,22 @@ the same draft returns as an observer. Leave it passive with the test text remov
 Mirroring establishes physical-device networking and forwarded keyboard input,
 not camera scanning, touch-keyboard typing, dictation or cellular recovery.
 
+## Linear sync
+
+The shipped binary has no Linear stand-in endpoint, so Linear sync is checked
+on the Machine's own store and Linear. First compare `schema_migrations` in
+`~/.lf/loopflow.db` with `rust/loopflow/src/store/migrations/`: only with
+identical sets can the branch `lf` open the real store without making the
+installed one refuse it. Find held Tasks with a read-only query
+(`task_changes.error`, `tasks.completion_error`, `pm_writeback` in
+`lf task show <issue> --json`). Run the installed `lf task sync <issue>` once to
+see the failure, then the branch binary, from `~/src/loopflow` with `LF_*`
+unset and stdin closed. Each sync sends that Task's queued state and field
+edits to Linear: pick recent ones, and leave the rest to the installed pass.
+`~/.lf/logs/linear-requests.jsonl` shows each request by `lf_process_id`, and
+counting `target` over a day shows reads that never reach a mutation. Linear
+can answer a read just after a write with its previous `updatedAt`.
+
 ## Fix and repeat
 
 Repair what breaks within the change's scope, then go through the experience
@@ -326,6 +342,23 @@ stdin is the terminal. Pi retitles itself `pi`: read its argv from
 `processes.command`. A Session the installed `lf` made can be reopened by
 the branch only when the branch's migrations are a superset; otherwise it
 refuses with "a newer lf migrated this store".
+
+## Switching a Session's provider
+
+`lf -b : '<prompt>'` records a Run, which `lf resume` refuses. For a real
+conversation turn without a PTY, prepare a Session
+(`lf -a claude session resume --prepare --json` in the repository) and send
+turns with `lf -b [-a <harness>] session resume <id> --message '<text>'`; real
+Claude and Codex answer on the account's logins with only `LF_HOME` private.
+Each turn appends a capture: read `agent_sessions.provider`/`provider_thread`
+and `json_extract(payload,'$.provider')` of `kind='captured'` rows. For the
+interactive path, a PTY driver must answer `ESC[6n` and `ESC[5n`; kill the
+provider (not its holder) to make the next resume a dead-provider resume. A
+plain `lf -i session resume` with the private server stopped fails with
+"Loopflow server is not running"; start the branch's `lf server run` first.
+A store's provider rows without connected accounts have no
+`provider_session_accounts`; the current input's `<key>:manifest.json`
+observation (`$.evidence.harness`) is what ran.
 
 ## Codex launch settings
 
@@ -706,3 +739,23 @@ swift/.build/debug/LoopflowSwiftPackageTests.xctest/Contents/MacOS/LoopflowSwift
 `Library/PrivateFrameworks`, and `DYLD_LIBRARY_PATH` to its `usr/lib`. The
 helper is in the Xcode toolchain's `usr/libexec/swift/pm/`. Timestamp each
 run to show the overlap.
+
+## Account capacity and routing
+
+A private home gets Claude logins without OAuth or `lf account`: per login, a
+`provider_accounts` row (`credential_state='connected'`, `observed_email`,
+`observed_subject`, `observed_credential_digest` = sha256 of the exact
+`.credentials.json` bytes under `$LF_HOME/accounts/claude/<id>/`) plus
+`accounts.claude.<id>: {login_email, routing_state: automatic}` in
+`$LF_HOME/config.yaml`. Raw SQL works on a store the installed `lf` created,
+so its recorder can write the "before" rows and the branch then upgrades them.
+A stand-in `claude` that prints a `rate_limit_event` line between `init` and an
+`is_error` `result` records a limit through a real `lf -b -a claude:<model>`.
+`--only-account` and `--account` bypass capacity, so use them to record a
+limit and plain routing to check it; `lf account --cached` marks the login a
+launch switched to `● active`. `-b` runs are not resumable Sessions: launch
+`-i` in a PTY (the stand-in prints and exits) and `lf -i session resume`.
+The Claude usage endpoint override (`LF_TEST_CLAUDE_USAGE_URL`) exists only
+under `cfg(test)`, so a branch binary's poll reaches Anthropic; the poll path
+is checked by `cargo test -p loopflow --lib claude_usage_reconciliation_`.
+Name the PTY driver anything but `pty.py`: it shadows the stdlib module.

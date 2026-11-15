@@ -6,7 +6,8 @@
     "account_id": "engineering",
     "login": "engineering@example.com",
     "reason": "the only login ready for this launch",
-    "without_order": null
+    "without_order": null,
+    "model": null
   },
   {
     "provider": "codex",
@@ -15,7 +16,8 @@
     "account_id": "manabot",
     "login": "manabot-eng@example.com",
     "reason": "this repository's order names only it",
-    "without_order": "jack@example.com, 60% left"
+    "without_order": "jack@example.com, 60% left",
+    "model": null
   },
   {
     "provider": "claude",
@@ -24,6 +26,7 @@
     "account_id": null,
     "login": null,
     "reason": "'jack@example.com' credential is missing",
-    "without_order": null
+    "without_order": null,
+    "model": null
   }
 ]

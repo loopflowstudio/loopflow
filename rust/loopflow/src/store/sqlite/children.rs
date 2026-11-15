@@ -1421,9 +1421,10 @@ pub(super) fn require_task_planning_identity(conn: &Connection, task: &Task) -> 
         acquisition.state,
         PlanningState::Invalid | PlanningState::Removed
     ) {
-        return Err(StoreError::InvalidAuthority(
-            "Task planning has invalid ownership, invalidation or removal evidence; refresh its planning".into(),
-        ));
+        return Err(StoreError::InvalidAuthority(format!(
+            "Task planning has invalid ownership, invalidation or removal evidence; run `lf task sync {}`",
+            task.identifier
+        )));
     }
     Ok(())
 }

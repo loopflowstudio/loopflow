@@ -1,7 +1,7 @@
 # LOO-906: immediate interactions across Desktop and mobile
 
-Implementation continues 2026-11-15 from checkpoint `8b42a874db` on origin/main
-`42b31bc791`. Supersedes the Desktop-only delivery
+Implementation continues 2026-11-15 from checkpoint `c513f4d7e7` on origin/main
+`19872301e3`. Supersedes the Desktop-only delivery
 boundary. No shipping or merge decision is recorded. Placement remains this Task;
 no Wave is selected.
 
@@ -727,7 +727,11 @@ Previous 50-Desktop/15-Rust/one-iOS read-contract checks are recoverable at
 `950b83a138e2c3894f58ad260cad4bfd9d3fe839:scratch/instant-task-session.md`.
 They do not cover the new receipt cut.
 
-## Upstream since the last pass (origin/main `42b31bc791`)
+## Upstream absorbed (origin/main `19872301e3`)
+
+- #1944 (LOO-912) closes an unfinished terminal paste when an input view detaches,
+  is replaced or loses control. Retained-occurrence navigation must not detach
+  the input view on an ordinary revisit, or a quick switch discards the paste.
 
 - #1943 (LOO-905) added a third Desktop freshness owner: `WorkModel.taskPresentation`
   / `TaskPresentation` prefers current names over retained ones per source and keeps
@@ -737,7 +741,6 @@ They do not cover the new receipt cut.
 - #1942 (LOO-910) forwards terminal visibility to Ghostty, so hidden retained
   surfaces pause rendering. A healthy revisit must unhide the retained surface,
   not reattach it; click-to-cached-content timing includes that resume.
-- #1945 bounds the Desktop New session recovery test per attempt (3 s). Test-only.
 
 ## Benchmark implementation and observations (2026-11-14)
 

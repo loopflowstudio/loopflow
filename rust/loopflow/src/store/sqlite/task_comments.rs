@@ -5,8 +5,8 @@ use crate::work::edit::WorkValue as Edit;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
 use crate::store::{StoreError, StoreResult};
-use crate::work::task::comment::TaskComments;
-use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
+use loopflow_model::comment::TaskComments;
+use loopflow_model::comment::{TaskComment, TaskCommentAuthor};
 use loopflow_model::durable::TaskId;
 
 use super::SqliteStore;
@@ -296,7 +296,7 @@ pub(super) fn comment_steer_in(
         TaskCommentAuthor::Session { requester, .. } => requester,
         TaskCommentAuthor::Integration => return Ok(()),
     };
-    if !crate::work::task::comment::is_direction_comment(&comment.body, Some("local")) {
+    if !loopflow_model::comment::is_direction_comment(&comment.body, Some("local")) {
         return Ok(());
     }
     let text = match &comment.author {
@@ -323,8 +323,8 @@ pub(super) fn comment_steer_in(
 #[cfg(test)]
 mod tests {
     use crate::store::sqlite::SqliteStore;
-    use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
     use crate::work::wave::Wave;
+    use loopflow_model::comment::{TaskComment, TaskCommentAuthor};
     use loopflow_model::durable::TaskId;
     use loopflow_model::id::WaveId;
 

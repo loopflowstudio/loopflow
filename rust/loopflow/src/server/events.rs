@@ -206,7 +206,7 @@ mod tests {
 
     #[test]
     fn a_comment_steer_carries_the_exact_thread_entry() {
-        use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
+        use loopflow_model::comment::{TaskComment, TaskCommentAuthor};
         let (_dir, store, task) = fixture();
         let body = json!({"task":{"id":task}});
         let mut observer = Observer::default();

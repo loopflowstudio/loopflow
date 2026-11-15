@@ -567,10 +567,10 @@ mod tests {
     use crate::planning_git::PlanningDestination;
     use crate::store::sqlite::SqliteStore;
     use crate::work::edit::{WorkEdit, WorkValue, WorkValue as Edit};
-    use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
     use crate::work::task::NewTask;
     use crate::work::task::TaskUpdate;
     use crate::work::wave::Wave;
+    use loopflow_model::comment::{TaskComment, TaskCommentAuthor};
     use loopflow_model::durable::{ProjectId, TaskId};
     use loopflow_model::id::WaveId;
 
@@ -725,10 +725,10 @@ mod tests {
             .unwrap();
         a.append_task_comment(
             &task.id,
-            &crate::work::task::comment::TaskComment {
+            &loopflow_model::comment::TaskComment {
                 id: "standalone-comment".into(),
                 body: "Retain direction".into(),
-                author: crate::work::task::comment::TaskCommentAuthor::Integration,
+                author: loopflow_model::comment::TaskCommentAuthor::Integration,
                 created_at: Some("2026-10-17T00:00:00Z".into()),
             },
         )

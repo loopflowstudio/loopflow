@@ -1,7 +1,9 @@
 //! Saved selection and layout intent share one transaction and one Work snapshot.
 mod panes;
+use super::sessions::SessionProjection;
 use super::SqliteStore;
 use crate::durable::{TaskSection, TaskState};
+use crate::store::session_projection::Reading;
 
 use crate::store::{StoreError, StoreResult};
 use crate::work::selection::{
@@ -65,7 +67,11 @@ fn arrangement_in(
     .transpose()
 }
 
-fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<SelectionWork>> {
+fn work_in(
+    conn: &Connection,
+    repository: &RepositoryId,
+    projection: &SessionProjection,
+) -> StoreResult<Vec<SelectionWork>> {
     let repo: String = conn.query_row(
         "SELECT repo FROM repository_plans WHERE id=?1",
         [repository.as_str()],
@@ -96,7 +102,7 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
         });
     }
     let tasks = super::children::repository_tasks_in(conn, repository)?;
-    let reading = task_selection_in(conn, repository, &repo)?;
+    let reading = task_selection_in(conn, repository, &repo, projection)?;
     // State, publication and ownership for every Task in a fixed number of
     // statements: a query per Task costs thousands on a large repository.
     let ids: Vec<_> = tasks.iter().map(|task| task.id.clone()).collect();
@@ -214,6 +220,7 @@ fn task_selection_in(
     conn: &Connection,
     repository: &RepositoryId,
     repo: &str,
+    projection: &SessionProjection,
 ) -> StoreResult<TaskSelectionReading> {
     let sessions = super::sessions::session_summaries_in(
         conn,
@@ -223,8 +230,7 @@ fn task_selection_in(
             after: Some(String::new()),
             ..Default::default()
         },
-        time::OffsetDateTime::now_utc().unix_timestamp(),
-        "[]",
+        projection,
     )?;
     let mut activity = HashMap::<_, TaskActivity>::new();
     for session in sessions
@@ -304,11 +310,12 @@ fn resolve_in(
     repository: &RepositoryId,
     selection: &Selection,
     catalog: &[Dashboard],
+    projection: &SessionProjection,
 ) -> StoreResult<SelectionResolution> {
     selection
         .resolve(
             repository.as_str(),
-            &work_in(conn, repository)?,
+            &work_in(conn, repository, projection)?,
             &definitions(catalog),
         )
         .map_err(StoreError::from)
@@ -470,9 +477,10 @@ fn plan_selection_in(
     conn: &Connection,
     repository: &RepositoryId,
     selection: Selection,
+    projection: &SessionProjection,
 ) -> StoreResult<crate::work::selection::ViewPlan> {
     let catalog = catalog_in(conn, repository)?;
-    let work = work_in(conn, repository)?;
+    let work = work_in(conn, repository, projection)?;
     let saved = selection
         .referenced_query()
         .and_then(|id| catalog.iter().find(|saved| &saved.id == id));
@@ -505,9 +513,15 @@ impl SqliteStore {
         repository: &RepositoryId,
         selection: Selection,
     ) -> StoreResult<crate::work::selection::ViewPlan> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let snapshot = conn.savepoint()?;
-        plan_selection_in(&snapshot, repository, selection)
+        loop {
+            let projection =
+                Reading::acquire(self, time::OffsetDateTime::now_utc().unix_timestamp(), None)?;
+            let mut conn = self.conn.lock().expect("store mutex poisoned");
+            let Some(snapshot) = projection.pin(&mut conn)? else {
+                continue;
+            };
+            return plan_selection_in(&snapshot, repository, selection, &projection.values);
+        }
     }
 
     /// One consistent reading of the same selection across `repos` (canonical
@@ -522,30 +536,39 @@ impl SqliteStore {
             Some(source) => Selection::parse(source, None).map_err(StoreError::from)?,
             None => repository_default(),
         };
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let snapshot = conn.savepoint()?;
-        let waves = selection.waves();
-        let mut plans = Vec::new();
-        for repo in repos {
-            if let Some(repository) = super::repositories::repository_id_in(&snapshot, repo)? {
-                if !waves.is_empty()
-                    && !work_in(&snapshot, &repository)?.iter().any(|item| {
-                        item.key.kind == WorkWorkspaceKind::Wave
-                            && waves.iter().any(|wave| {
-                                item.key.id == *wave || item.name.eq_ignore_ascii_case(wave)
+        loop {
+            let projection =
+                Reading::acquire(self, time::OffsetDateTime::now_utc().unix_timestamp(), None)?;
+            let mut conn = self.conn.lock().expect("store mutex poisoned");
+            let Some(snapshot) = projection.pin(&mut conn)? else {
+                continue;
+            };
+            let waves = selection.waves();
+            let mut plans = Vec::new();
+            for repo in repos {
+                if let Some(repository) = super::repositories::repository_id_in(&snapshot, repo)? {
+                    if !waves.is_empty()
+                        && !work_in(&snapshot, &repository, &projection.values)?
+                            .iter()
+                            .any(|item| {
+                                item.key.kind == WorkWorkspaceKind::Wave
+                                    && waves.iter().any(|wave| {
+                                        item.key.id == *wave || item.name.eq_ignore_ascii_case(wave)
+                                    })
                             })
-                    })
-                {
-                    continue;
+                    {
+                        continue;
+                    }
+                    plans.push(plan_selection_in(
+                        &snapshot,
+                        &repository,
+                        selection.clone(),
+                        &projection.values,
+                    )?);
                 }
-                plans.push(plan_selection_in(
-                    &snapshot,
-                    &repository,
-                    selection.clone(),
-                )?);
             }
+            return Ok(plans);
         }
-        Ok(plans)
     }
 
     /// The observer and one-shot plans expose the same repository/default and saved views.
@@ -553,51 +576,58 @@ impl SqliteStore {
         &self,
         repository: &RepositoryId,
     ) -> StoreResult<Vec<crate::work::selection::ViewPlan>> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let snapshot = conn.savepoint()?;
-        let catalog = catalog_in(&snapshot, repository)?;
-        let queries = definitions(&catalog);
-        let work = work_in(&snapshot, repository)?;
-        let mut plans = vec![plan_in(
-            &snapshot,
-            repository,
-            repository_default(),
-            None,
-            &queries,
-            &work,
-        )?];
-        for wave in work
-            .iter()
-            .filter(|item| item.key.kind == WorkWorkspaceKind::Wave)
-        {
-            plans.push(plan_in(
+        loop {
+            let projection =
+                Reading::acquire(self, time::OffsetDateTime::now_utc().unix_timestamp(), None)?;
+            let mut conn = self.conn.lock().expect("store mutex poisoned");
+            let Some(snapshot) = projection.pin(&mut conn)? else {
+                continue;
+            };
+            let catalog = catalog_in(&snapshot, repository)?;
+            let queries = definitions(&catalog);
+            let work = work_in(&snapshot, repository, &projection.values)?;
+            let mut plans = vec![plan_in(
                 &snapshot,
                 repository,
-                Selection {
-                    id: crate::work::selection::SelectionId(format!(
-                        "{WAVE_DEFAULT_PREFIX}{}",
-                        wave.key.id
-                    )),
-                    expression: crate::work::selection::SelectionExpression::Wave {
-                        wave: loopflow_model::id::WaveId::parse(&wave.key.id).map_err(invalid)?,
-                    },
-                },
+                repository_default(),
                 None,
                 &queries,
                 &work,
-            )?);
+            )?];
+            for wave in work
+                .iter()
+                .filter(|item| item.key.kind == WorkWorkspaceKind::Wave)
+            {
+                plans.push(plan_in(
+                    &snapshot,
+                    repository,
+                    Selection {
+                        id: crate::work::selection::SelectionId(format!(
+                            "{WAVE_DEFAULT_PREFIX}{}",
+                            wave.key.id
+                        )),
+                        expression: crate::work::selection::SelectionExpression::Wave {
+                            wave: loopflow_model::id::WaveId::parse(&wave.key.id)
+                                .map_err(invalid)?,
+                        },
+                    },
+                    None,
+                    &queries,
+                    &work,
+                )?);
+            }
+            for saved in &catalog {
+                plans.push(plan_in(
+                    &snapshot,
+                    repository,
+                    saved.selection.clone(),
+                    Some(saved),
+                    &queries,
+                    &work,
+                )?);
+            }
+            return Ok(plans);
         }
-        for saved in &catalog {
-            plans.push(plan_in(
-                &snapshot,
-                repository,
-                saved.selection.clone(),
-                Some(saved),
-                &queries,
-                &work,
-            )?);
-        }
-        Ok(plans)
     }
 
     pub fn edit_dashboard(
@@ -651,14 +681,21 @@ impl SqliteStore {
         repository: &RepositoryId,
         selection: &Selection,
     ) -> StoreResult<SelectionResolution> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let snapshot = conn.savepoint()?;
-        resolve_in(
-            &snapshot,
-            repository,
-            selection,
-            &catalog_in(&snapshot, repository)?,
-        )
+        loop {
+            let projection =
+                Reading::acquire(self, time::OffsetDateTime::now_utc().unix_timestamp(), None)?;
+            let mut conn = self.conn.lock().expect("store mutex poisoned");
+            let Some(snapshot) = projection.pin(&mut conn)? else {
+                continue;
+            };
+            return resolve_in(
+                &snapshot,
+                repository,
+                selection,
+                &catalog_in(&snapshot, repository)?,
+                &projection.values,
+            );
+        }
     }
 
     /// Shared conversation activity and ordering, without loading unrelated Tasks.
@@ -666,14 +703,20 @@ impl SqliteStore {
         &self,
         repository: &RepositoryId,
     ) -> StoreResult<TaskSelectionReading> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let snapshot = conn.savepoint()?;
-        let repo: String = snapshot.query_row(
-            "SELECT repo FROM repository_plans WHERE id=?1",
-            [repository.as_str()],
-            |row| row.get(0),
-        )?;
-        task_selection_in(&snapshot, repository, &repo)
+        loop {
+            let projection =
+                Reading::acquire(self, time::OffsetDateTime::now_utc().unix_timestamp(), None)?;
+            let mut conn = self.conn.lock().expect("store mutex poisoned");
+            let Some(snapshot) = projection.pin(&mut conn)? else {
+                continue;
+            };
+            let repo: String = snapshot.query_row(
+                "SELECT repo FROM repository_plans WHERE id=?1",
+                [repository.as_str()],
+                |row| row.get(0),
+            )?;
+            return task_selection_in(&snapshot, repository, &repo, &projection.values);
+        }
     }
 
     pub fn dashboards(&self, repository: &RepositoryId) -> StoreResult<Vec<Dashboard>> {
@@ -686,20 +729,32 @@ impl SqliteStore {
         repository: &RepositoryId,
         id: &DashboardId,
     ) -> StoreResult<Option<DashboardReading>> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let snapshot = conn.savepoint()?;
-        let catalog = catalog_in(&snapshot, repository)?;
-        let Some(saved) = catalog.iter().find(|saved| &saved.id == id) else {
-            return Ok(None);
-        };
-        let resolution = resolve_in(&snapshot, repository, &saved.selection, &catalog)?;
-        let mut arrangement = saved.arrangement.clone();
-        arrangement.reconcile(&resolution);
-        Ok(Some(DashboardReading {
-            saved: saved.clone(),
-            resolution,
-            arrangement,
-        }))
+        loop {
+            let projection =
+                Reading::acquire(self, time::OffsetDateTime::now_utc().unix_timestamp(), None)?;
+            let mut conn = self.conn.lock().expect("store mutex poisoned");
+            let Some(snapshot) = projection.pin(&mut conn)? else {
+                continue;
+            };
+            let catalog = catalog_in(&snapshot, repository)?;
+            let Some(saved) = catalog.iter().find(|saved| &saved.id == id) else {
+                return Ok(None);
+            };
+            let resolution = resolve_in(
+                &snapshot,
+                repository,
+                &saved.selection,
+                &catalog,
+                &projection.values,
+            )?;
+            let mut arrangement = saved.arrangement.clone();
+            arrangement.reconcile(&resolution);
+            return Ok(Some(DashboardReading {
+                saved: saved.clone(),
+                resolution,
+                arrangement,
+            }));
+        }
     }
 
     /// Compare-and-swap both authored values. A stale or invalid edit writes nothing.
@@ -716,71 +771,77 @@ impl SqliteStore {
             return Err(invalid("Dashboard ID must be nonempty"));
         }
         let stale = || StoreError::Stale("Dashboard changed; read it again before editing".into());
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        // The Work read takes seconds in a large repository, so it reads a
-        // snapshot; the write transaction only checks the revision and writes.
-        let snapshot = conn.savepoint()?;
-        let catalog = catalog_in(&snapshot, repository)?;
-        let prior = catalog.iter().find(|saved| &saved.id == id).cloned();
-        if prior.as_ref().map(|saved| saved.revision) != expected_revision {
-            return Err(stale());
-        }
-        let work = work_in(&snapshot, repository)?;
-        let mut definitions = definitions(&catalog);
-        definitions.insert(id.clone(), selection.clone());
-        // Any cycle introduced by this edit must pass through this selection.
-        // Unrelated Dashboards may have ambiguous references and still be repairable.
-        let resolution = selection
-            .resolve(repository.as_str(), &work, &definitions)
-            .map_err(StoreError::from)?;
-        let expression_key = selection.expression_key();
-        let mut expected = arrangement_in(&snapshot, repository, id, &expression_key)?
-            .map(|(_, arrangement)| arrangement)
-            .or_else(|| prior.as_ref().map(|saved| saved.arrangement.clone()))
-            .unwrap_or_else(|| Arrangement::automatic(&[]));
-        expected.reconcile(&resolution);
-        let arrangement = Arrangement {
-            order: edit.order.clone(),
-            hidden: edit.hidden.clone(),
-            mode: if edit.order == expected.order {
-                expected.mode
-            } else {
-                ArrangementMode::Touched
-            },
-        };
-        arrangement
-            .validate(&expected.order)
-            .map_err(StoreError::from)?;
-        let saved = Dashboard {
-            repository: repository.to_string(),
-            id: id.clone(),
-            revision: expected_revision.unwrap_or(0) + 1,
-            name: prior.as_ref().and_then(|saved| saved.name.clone()),
-            pinned: prior.as_ref().is_some_and(|saved| saved.pinned),
-            slots: prior.as_ref().and_then(|saved| saved.slots.clone()),
-            selection: selection.clone(),
-            arrangement,
-        };
-        drop(snapshot);
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        // Every Dashboard write advances the revision, so an unchanged one
-        // means the catalog and arrangement read above are still current.
-        let current: Option<i64> = tx
-            .query_row(
-                "SELECT revision FROM dashboards WHERE repository_id=?1 AND id=?2",
-                params![repository.as_str(), id.0],
-                |row| row.get(0),
-            )
-            .optional()?;
-        if current != expected_revision {
-            return Err(stale());
-        }
-        tx.execute("INSERT INTO dashboards(repository_id,id,revision,expression_key,name,pinned) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(repository_id,id) DO UPDATE SET revision=excluded.revision,expression_key=excluded.expression_key",
+        loop {
+            let projection =
+                Reading::acquire(self, time::OffsetDateTime::now_utc().unix_timestamp(), None)?;
+            let mut conn = self.conn.lock().expect("store mutex poisoned");
+            // The Work read takes seconds in a large repository, so it reads a
+            // snapshot; the write transaction only checks the revision and writes.
+            let Some(snapshot) = projection.pin(&mut conn)? else {
+                continue;
+            };
+            let catalog = catalog_in(&snapshot, repository)?;
+            let prior = catalog.iter().find(|saved| &saved.id == id).cloned();
+            if prior.as_ref().map(|saved| saved.revision) != expected_revision {
+                return Err(stale());
+            }
+            let work = work_in(&snapshot, repository, &projection.values)?;
+            let mut definitions = definitions(&catalog);
+            definitions.insert(id.clone(), selection.clone());
+            // Any cycle introduced by this edit must pass through this selection.
+            // Unrelated Dashboards may have ambiguous references and still be repairable.
+            let resolution = selection
+                .resolve(repository.as_str(), &work, &definitions)
+                .map_err(StoreError::from)?;
+            let expression_key = selection.expression_key();
+            let mut expected = arrangement_in(&snapshot, repository, id, &expression_key)?
+                .map(|(_, arrangement)| arrangement)
+                .or_else(|| prior.as_ref().map(|saved| saved.arrangement.clone()))
+                .unwrap_or_else(|| Arrangement::automatic(&[]));
+            expected.reconcile(&resolution);
+            let arrangement = Arrangement {
+                order: edit.order.clone(),
+                hidden: edit.hidden.clone(),
+                mode: if edit.order == expected.order {
+                    expected.mode
+                } else {
+                    ArrangementMode::Touched
+                },
+            };
+            arrangement
+                .validate(&expected.order)
+                .map_err(StoreError::from)?;
+            let saved = Dashboard {
+                repository: repository.to_string(),
+                id: id.clone(),
+                revision: expected_revision.unwrap_or(0) + 1,
+                name: prior.as_ref().and_then(|saved| saved.name.clone()),
+                pinned: prior.as_ref().is_some_and(|saved| saved.pinned),
+                slots: prior.as_ref().and_then(|saved| saved.slots.clone()),
+                selection: selection.clone(),
+                arrangement,
+            };
+            drop(snapshot);
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            // Every Dashboard write advances the revision, so an unchanged one
+            // means the catalog and arrangement read above are still current.
+            let current: Option<i64> = tx
+                .query_row(
+                    "SELECT revision FROM dashboards WHERE repository_id=?1 AND id=?2",
+                    params![repository.as_str(), id.0],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if current != expected_revision {
+                return Err(stale());
+            }
+            tx.execute("INSERT INTO dashboards(repository_id,id,revision,expression_key,name,pinned) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(repository_id,id) DO UPDATE SET revision=excluded.revision,expression_key=excluded.expression_key",
             params![repository.as_str(),id.0,saved.revision,expression_key,saved.name,saved.pinned])?;
-        tx.execute("INSERT INTO dashboard_arrangements(repository_id,dashboard_id,expression_key,selection_json,arrangement_json) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(repository_id,dashboard_id,expression_key) DO UPDATE SET selection_json=excluded.selection_json,arrangement_json=excluded.arrangement_json",
+            tx.execute("INSERT INTO dashboard_arrangements(repository_id,dashboard_id,expression_key,selection_json,arrangement_json) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(repository_id,dashboard_id,expression_key) DO UPDATE SET selection_json=excluded.selection_json,arrangement_json=excluded.arrangement_json",
             params![repository.as_str(),id.0,expression_key,serde_json::to_string(selection)?,serde_json::to_string(&saved.arrangement)?])?;
-        tx.commit()?;
-        Ok(saved)
+            tx.commit()?;
+            return Ok(saved);
+        }
     }
 
     pub fn set_dashboard_metadata(
@@ -848,15 +909,19 @@ impl SqliteStore {
         task: &str,
         to: &str,
     ) -> StoreResult<Vec<String>> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
         // The Work read takes seconds in a large repository, so it reads a
         // snapshot. The write lands only on the order it read; a concurrent
         // reorder sends this one back to read again.
         for _ in 0..3 {
+            let projection =
+                Reading::acquire(self, time::OffsetDateTime::now_utc().unix_timestamp(), None)?;
+            let mut conn = self.conn.lock().expect("store mutex poisoned");
             let (read, order) = {
-                let snapshot = conn.savepoint()?;
+                let Some(snapshot) = projection.pin(&mut conn)? else {
+                    continue;
+                };
                 let read = task_order_in(&snapshot, repository)?;
-                let work = work_in(&snapshot, repository)?;
+                let work = work_in(&snapshot, repository, &projection.values)?;
                 let resolution = repository_default()
                     .resolve(repository.as_str(), &work, &BTreeMap::new())
                     .map_err(StoreError::from)?;

@@ -211,7 +211,7 @@ writes! {
         directory: PathBuf,
         issue: String,
         message: String,
-    } => crate::work::task::comment::TaskComments;
+    } => loopflow_model::comment::TaskComments;
     { issue, message, .. } => task::steer(directory, issue, None, message)?,
 
     /// `lf task report <issue> <message> --json`: progress for the Task's
@@ -221,7 +221,7 @@ writes! {
         directory: PathBuf,
         issue: String,
         message: String,
-    } => crate::work::task::comment::TaskComments;
+    } => loopflow_model::comment::TaskComments;
     { issue, message, .. } => task::report(directory, issue, None, message)?,
 
     /// `lf task interrupt <issue> --json`.

@@ -387,10 +387,10 @@ mod tests {
             store
                 .append_task_comment(
                     &self.task,
-                    &crate::work::task::comment::TaskComment {
+                    &loopflow_model::comment::TaskComment {
                         id: id.into(),
                         body: body.into(),
-                        author: crate::work::task::comment::TaskCommentAuthor::Person {
+                        author: loopflow_model::comment::TaskCommentAuthor::Person {
                             name: Some("jack".into()),
                         },
                         created_at: Some("2026-11-11T09:00:00Z".into()),

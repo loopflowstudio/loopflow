@@ -11,7 +11,7 @@ use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
 use crate::durable::{OwningMachineSource, TaskExecutionSource};
 use crate::store::{StoreError, StoreResult};
-use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
+use loopflow_model::comment::{TaskComment, TaskCommentAuthor};
 use loopflow_model::durable::{
     MachineId, MachineRef, MachineSetting, OwnershipEntryId, OwnershipKind, ProjectId,
     RepositoryId, TaskId, TaskOwner, TaskOwnership, TaskOwnershipEntry,
@@ -1094,8 +1094,8 @@ mod tests {
     use crate::planning_git::PlanningDestination;
     use crate::store::sqlite::task_moves::MoveStage;
     use crate::store::sqlite::SqliteStore;
-    use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
     use crate::work::task::NewTask;
+    use loopflow_model::comment::{TaskComment, TaskCommentAuthor};
     use loopflow_model::durable::{
         MachineId, MachineRef, OwnershipEntryId, OwnershipKind, RepositoryId, TaskId, TaskOwner,
         TaskOwnershipEntry,

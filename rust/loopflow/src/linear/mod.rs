@@ -18,7 +18,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
+use loopflow_model::comment::{TaskComment, TaskCommentAuthor};
 
 pub(crate) mod project_document;
 
@@ -385,9 +385,9 @@ pub(crate) struct LinearComment {
 impl From<&LinearComment> for TaskComment {
     fn from(comment: &LinearComment) -> Self {
         let author =
-            if comment.author_id.is_some() || crate::work::task::comment::is_steer(&comment.body) {
+            if comment.author_id.is_some() || loopflow_model::comment::is_steer(&comment.body) {
                 TaskCommentAuthor::Person {
-                    name: crate::work::task::comment::comment_requester(
+                    name: loopflow_model::comment::comment_requester(
                         &comment.body,
                         comment.author_name.as_deref(),
                     ),
@@ -2273,11 +2273,11 @@ impl From<CommentNode> for LinearComment {
             author_name: node.user.as_ref().and_then(|user| {
                 user.display_name
                     .as_deref()
-                    .and_then(crate::config::normalize_user_name)
+                    .and_then(loopflow_model::person::normalize_name)
                     .or_else(|| {
                         user.name
                             .as_deref()
-                            .and_then(crate::config::normalize_user_name)
+                            .and_then(loopflow_model::person::normalize_name)
                     })
             }),
             author_id: node.user.map(|user| user.id),

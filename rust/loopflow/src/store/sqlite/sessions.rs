@@ -13,6 +13,93 @@ use loopflow_model::durable::TaskId;
 use super::SqliteStore;
 use loopflow_model::id::{LfProcessId, TerminalId};
 
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct SessionProcessIdentity {
+    pub id: String,
+    pub completed_at: Option<i64>,
+    pub pid: Option<u32>,
+    pub os_started_at: Option<i64>,
+    pub started_at: i64,
+}
+
+/// Explicit observed inputs for one pinned Session reading. SQL performs no OS acquisition.
+#[derive(Debug)]
+pub(crate) struct SessionProjection {
+    pub now: i64,
+    pub live_agents: String,
+    pub evidence: std::collections::HashMap<String, crate::journal::ProcessIdentityEvidence>,
+}
+
+impl SessionProjection {
+    fn evidence(
+        &self,
+        id: Option<&loopflow_model::id::AgentProcessId>,
+    ) -> crate::journal::ProcessIdentityEvidence {
+        id.and_then(|id| self.evidence.get(id.as_str()))
+            .copied()
+            .unwrap_or(crate::journal::ProcessIdentityEvidence::Unknown)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct SessionProjectionInputs {
+    pub identities: Vec<SessionProcessIdentity>,
+    pub deadlines: Vec<i64>,
+}
+
+pub(crate) fn session_projection_inputs_in(
+    conn: &Connection,
+    now: i64,
+    session: Option<&str>,
+) -> StoreResult<SessionProjectionInputs> {
+    let predicate = if session.is_some() {
+        "id=?1"
+    } else {
+        "completed_at IS NULL AND ?1 IS NULL"
+    };
+    let mut query = conn.prepare(&format!(
+        "SELECT id,completed_at,pid,os_started_at,started_at FROM processes
+         WHERE id IN (SELECT agent_process_id FROM agent_sessions WHERE {predicate}) ORDER BY id"
+    ))?;
+    let identities = query
+        .query_map([session], |row| {
+            Ok(SessionProcessIdentity {
+                id: row.get(0)?,
+                completed_at: row.get(1)?,
+                pid: row.get(2)?,
+                os_started_at: row.get(3)?,
+                started_at: row.get(4)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut query = conn.prepare(
+        "SELECT DISTINCT observed_at + ?1 FROM session_activity
+        WHERE observed_at + ?1 > ?2 ORDER BY 1",
+    )?;
+    let deadlines = query
+        .query_map(
+            params![crate::session::AVAILABILITY_QUIET_SECONDS, now],
+            |row| row.get(0),
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(SessionProjectionInputs {
+        identities,
+        deadlines,
+    })
+}
+
+impl SqliteStore {
+    pub(crate) fn session_projection_inputs(
+        &self,
+        now: i64,
+        session: Option<&str>,
+    ) -> StoreResult<SessionProjectionInputs> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let snapshot = conn.savepoint()?;
+        session_projection_inputs_in(&snapshot, now, session)
+    }
+}
+
 /// Why a held terminal cannot retire without losing work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TerminalRetention {
@@ -263,11 +350,10 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         {available},
         COALESCE(({task_state}) IN ('done','abandoned'),0),
         s.id IN (SELECT session_id FROM task_primary_sessions),
-        (SELECT act.program_status FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id),a.agent_process_id,p.completed_at,p.pid,p.os_started_at,(SELECT terminal_id FROM processes WHERE id=p.attached_lf_process_id AND completed_at IS NULL),
+        (SELECT act.program_status FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id),a.agent_process_id,(SELECT terminal_id FROM processes WHERE id=p.attached_lf_process_id AND completed_at IS NULL),
         (SELECT act.preview FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id
          AND json_extract(act.preview,'$.provider_thread')=a.provider_thread
          AND act.attachment_token=p.attachment_token AND p.attached_lf_process_id IS NOT NULL AND a.completed_at IS NULL),
-        p.started_at,
         COALESCE((SELECT t.viewed IS NOT 1 FROM held_terminals t WHERE t.id=a.held_terminal_id AND t.ended_at IS NULL),0),
         (SELECT pin.account_id FROM provider_session_accounts pin WHERE pin.provider=s.provider AND pin.provider_session_id=a.provider_thread),
         EXISTS(
@@ -298,6 +384,7 @@ fn read_summary(
     conn: &Connection,
     labels: &mut std::collections::HashMap<TaskId, Option<String>>,
     row: &rusqlite::Row<'_>,
+    projection: &SessionProjection,
 ) -> rusqlite::Result<StoreResult<crate::session::SessionSummary>> {
     Ok((|| {
         let task_id = row
@@ -332,15 +419,9 @@ fn read_summary(
             None => None,
         };
         let agent_process_id: Option<loopflow_model::id::AgentProcessId> = row.get(31)?;
-        let agent_process_evidence = crate::journal::agent_process_evidence(
-            row.get(32)?,
-            row.get(33)?,
-            row.get(34)?,
-            row.get(37)?,
-            crate::journal::process_identity_evidence,
-        );
+        let agent_process_evidence = projection.evidence(agent_process_id.as_ref());
         let live = agent_process_evidence == crate::journal::ProcessIdentityEvidence::Live;
-        let unviewed: bool = row.get(38)?;
+        let unviewed: bool = row.get(34)?;
         let task_identifier = task_id
             .as_ref()
             .map(|id| super::children::cached_short_task_id(conn, labels, id))
@@ -348,18 +429,18 @@ fn read_summary(
             .flatten();
         Ok(crate::session::SessionSummary {
             transition: super::provider_transitions::latest_in(conn, &row.get::<_, String>(0)?)?,
-            has_provider_history: row.get(40)?,
+            has_provider_history: row.get(36)?,
             preview: row
-                .get::<_, Option<String>>(36)?
+                .get::<_, Option<String>>(33)?
                 .map(|json| serde_json::from_str(&json))
                 .transpose()?
                 .filter(|_| live),
             // A terminal no viewer occupies is gone, whatever its launch recorded.
             terminal_id: row
-                .get::<_, Option<String>>(35)?
+                .get::<_, Option<String>>(32)?
                 .filter(|_| live && !unviewed),
             unviewed,
-            held: live && row.get(41)?,
+            held: live && row.get(37)?,
             task_ids: serde_json::from_str(&row.get::<_, String>(25)?)?,
             primary_scope: row.get(26)?,
             agent_process_evidence,
@@ -391,7 +472,7 @@ fn read_summary(
             skill: row.get(11)?,
             provider: row.get(12)?,
             account: row
-                .get::<_, Option<String>>(39)?
+                .get::<_, Option<String>>(35)?
                 .map(|id| crate::store::ProviderAccountId::parse(&id))
                 .transpose()
                 .map_err(invalid)?,
@@ -473,34 +554,18 @@ pub(super) fn claim_session_input_in(
     Ok((next, attachment))
 }
 
-fn observe_availability(conn: &Connection, mut now: i64) -> StoreResult<i64> {
-    while crate::observe::active() {
-        // Availability changes once at the next quiet deadline, not on every tick.
-        let next: Option<i64> = conn.query_row(
-            "SELECT MIN(observed_at + ?1) FROM session_activity WHERE observed_at + ?1 > ?2",
-            rusqlite::params![crate::session::AVAILABILITY_QUIET_SECONDS, now],
-            |row| row.get(0),
-        )?;
-        match next {
-            Some(next) if crate::observe::deadline(next) => now = next,
-            _ => break,
-        }
-    }
-    Ok(now)
-}
-
 pub(super) fn session_summaries_in(
     conn: &Connection,
     filter: &crate::session::SessionFilter,
-    now: i64,
-    live_agents: &str,
+    projection: &SessionProjection,
 ) -> StoreResult<Vec<crate::session::SessionSummary>> {
-    let now = observe_availability(conn, now)?;
+    let now = projection.now;
+    let live_agents = &projection.live_agents;
     let mut labels = std::collections::HashMap::new();
     let (page, values) = inventory_query(filter, SUMMARY_SELECT, now, live_agents)?;
     let mut query = conn.prepare(&summary_query(&page, filter.after.is_some(), now))?;
     let rows = query.query_map(rusqlite::params_from_iter(values), |row| {
-        read_summary(conn, &mut labels, row)
+        read_summary(conn, &mut labels, row, projection)
     })?;
     rows.map(|row| row?).collect()
 }
@@ -845,48 +910,20 @@ impl SqliteStore {
             .ok_or_else(|| invalid(format!("Session {session} disappeared while being chosen")))
     }
 
-    // Available filters run before pagination; absence/unknown cannot occupy a page.
-    fn live_agent_ids(&self, needed: bool) -> StoreResult<String> {
-        let mut live = Vec::new();
-        if needed {
-            let identities = {
-                let conn = self.conn.lock().expect("store mutex poisoned");
-                let mut query = conn.prepare("SELECT id,pid,os_started_at FROM processes WHERE kind='agent' AND completed_at IS NULL")?;
-                let rows = query.query_map([], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, Option<u32>>(1)?,
-                        row.get::<_, Option<i64>>(2)?,
-                    ))
-                })?;
-                rows.collect::<rusqlite::Result<Vec<_>>>()?
-            };
-            for (id, pid, start) in identities {
-                if crate::journal::agent_process_evidence(
-                    None,
-                    pid,
-                    start,
-                    None,
-                    crate::journal::process_identity_evidence,
-                ) == crate::journal::ProcessIdentityEvidence::Live
-                {
-                    live.push(id);
-                }
-            }
-        }
-        Ok(serde_json::to_string(&live)?)
-    }
-
     /// Each row's Available is judged at `now`.
     pub(crate) fn session_summaries(
         &self,
         filter: &crate::session::SessionFilter,
         now: i64,
     ) -> StoreResult<Vec<crate::session::SessionSummary>> {
-        let live_agents = self.live_agent_ids(filter.available)?;
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let conn = conn.savepoint()?;
-        session_summaries_in(&conn, filter, now, &live_agents)
+        loop {
+            let projection = crate::store::session_projection::Reading::acquire(self, now, None)?;
+            let mut conn = self.conn.lock().expect("store mutex poisoned");
+            let Some(conn) = projection.pin(&mut conn)? else {
+                continue;
+            };
+            return session_summaries_in(&conn, filter, &projection.values);
+        }
     }
 
     /// Whether `session`'s current AgentProcess has reported what it is doing:
@@ -909,17 +946,24 @@ impl SqliteStore {
     ) -> StoreResult<Option<crate::session::SessionSummary>> {
         let canonical = loopflow_model::id::canonical_session(id);
         let id = canonical.as_str();
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let conn = conn.savepoint()?;
-        let now = observe_availability(&conn, now)?;
-        let mut labels = std::collections::HashMap::new();
-        conn.query_row(
-            &summary_query(&format!("{SUMMARY_SELECT} WHERE s.id=?1"), false, now),
-            [id],
-            |row| read_summary(&conn, &mut labels, row),
-        )
-        .optional()?
-        .transpose()
+        loop {
+            let projection =
+                crate::store::session_projection::Reading::acquire(self, now, Some(id))?;
+            let mut conn = self.conn.lock().expect("store mutex poisoned");
+            let Some(conn) = projection.pin(&mut conn)? else {
+                continue;
+            };
+            let now = projection.values.now;
+            let mut labels = std::collections::HashMap::new();
+            return conn
+                .query_row(
+                    &summary_query(&format!("{SUMMARY_SELECT} WHERE s.id=?1"), false, now),
+                    [id],
+                    |row| read_summary(&conn, &mut labels, row, &projection.values),
+                )
+                .optional()?
+                .transpose();
+        }
     }
 
     /// Resolve a conversation or captured-input selector from its SQLite owner.
@@ -1629,13 +1673,30 @@ impl SqliteStore {
 
     /// Every open Session.
     pub fn sessions(&self, filter: &crate::session::SessionFilter) -> StoreResult<Vec<LfSession>> {
-        let live_agents = self.live_agent_ids(filter.available)?;
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let now = time::OffsetDateTime::now_utc().unix_timestamp();
-        let (sql, values) = inventory_query(filter, SESSION_SELECT, now, &live_agents)?;
-        let mut query = conn.prepare(&sql)?;
-        let rows = query.query_map(rusqlite::params_from_iter(values), read_session)?;
-        rows.map(|row| row?).collect()
+        loop {
+            let now = time::OffsetDateTime::now_utc().unix_timestamp();
+            let projection = filter
+                .available
+                .then(|| crate::store::session_projection::Reading::acquire(self, now, None))
+                .transpose()?;
+            let mut conn = self.conn.lock().expect("store mutex poisoned");
+            let conn = conn.savepoint()?;
+            if let Some(projection) = &projection {
+                if !projection.is_current(&conn)? {
+                    continue;
+                }
+            }
+            let now = projection
+                .as_ref()
+                .map_or(now, |reading| reading.values.now);
+            let live_agents = projection
+                .as_ref()
+                .map_or("[]", |reading| reading.values.live_agents.as_str());
+            let (sql, values) = inventory_query(filter, SESSION_SELECT, now, live_agents)?;
+            let mut query = conn.prepare(&sql)?;
+            let rows = query.query_map(rusqlite::params_from_iter(values), read_session)?;
+            return rows.map(|row| row?).collect();
+        }
     }
 
     pub fn session_inputs(&self, id: &str) -> StoreResult<Vec<String>> {

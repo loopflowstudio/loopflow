@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 use super::children::{insert_task_event_in, task_events_after_in};
 use super::SqliteStore;
 use crate::store::{StoreError, StoreResult};
-use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
 use crate::work::task::{TaskEventKind, TaskId};
+use loopflow_model::comment::{TaskComment, TaskCommentAuthor};
 
 // Private decoding of immutable old events, never part of the Work model or DTOs.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

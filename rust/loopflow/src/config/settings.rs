@@ -1093,7 +1093,7 @@ fn environment() -> Result<Value, LoadError> {
     }
     match std::env::var(super::USER_NAME_ENV) {
         Ok(name) => {
-            if let Some(name) = super::normalize_user_name(&name) {
+            if let Some(name) = loopflow_model::person::normalize_name(&name) {
                 insert(&mut values, &["user", "name"], name.into());
             }
         }

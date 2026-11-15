@@ -49,7 +49,7 @@ pub struct Disposition {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CommentContent {
     pub body: String,
-    pub author: crate::work::task::comment::TaskCommentAuthor,
+    pub author: loopflow_model::comment::TaskCommentAuthor,
     pub created_at: Option<String>,
 }
 

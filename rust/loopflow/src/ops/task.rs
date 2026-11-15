@@ -49,7 +49,7 @@ pub use directory::{task_files, TaskDirectory, TaskFileEntry, TaskFileKind};
 pub use file_save::{task_save, TaskFileRecovery, TaskFileSave};
 
 use crate::config::ConfigSource;
-use crate::work::task::comment::TaskComments;
+use loopflow_model::comment::TaskComments;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -2098,7 +2098,7 @@ pub struct TaskStatus {
     pub overview: Option<crate::task_work::TaskOverview>,
     /// `lf graph show --processes` for each of `overview`'s Graphs, in order.
     pub graph_processes: Vec<crate::durable::GraphProcessDetail>,
-    pub comments: Option<crate::work::task::comment::TaskComments>,
+    pub comments: Option<loopflow_model::comment::TaskComments>,
 }
 
 pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
@@ -2689,7 +2689,7 @@ pub fn task_comment(
     wave: Option<&str>,
     message: Option<&str>,
     steer: bool,
-) -> OpsResult<crate::work::task::comment::TaskComments> {
+) -> OpsResult<loopflow_model::comment::TaskComments> {
     block_on_task(task_comment_async(repo, wave, issue, message, steer))
 }
 
@@ -2717,7 +2717,7 @@ pub(crate) fn append_task_comment(
                 "{}\n\n<!-- loopflow-progress:{provenance}:{id} -->",
                 message.trim()
             ),
-            crate::work::task::comment::TaskCommentAuthor::Integration,
+            loopflow_model::comment::TaskCommentAuthor::Integration,
         )
     } else {
         let name = crate::config::participant_name().map_err(task_error)?;
@@ -2740,16 +2740,16 @@ pub(crate) fn append_task_comment(
             .map(|session| {
                 format!(
                     "\n\n{}{session} -->",
-                    crate::work::task::comment::SESSION_MARKER
+                    loopflow_model::comment::SESSION_MARKER
                 )
             })
             .unwrap_or_default();
         let author = match session {
-            Some(session_id) => crate::work::task::comment::TaskCommentAuthor::Session {
+            Some(session_id) => loopflow_model::comment::TaskCommentAuthor::Session {
                 session_id,
                 requester: name,
             },
-            None => crate::work::task::comment::TaskCommentAuthor::Person { name },
+            None => loopflow_model::comment::TaskCommentAuthor::Person { name },
         };
         (
             format!(
@@ -2763,7 +2763,7 @@ pub(crate) fn append_task_comment(
         .sqlite
         .append_task_comment(
             &task.id,
-            &crate::work::task::comment::TaskComment {
+            &loopflow_model::comment::TaskComment {
                 id: id.clone(),
                 body,
                 author,

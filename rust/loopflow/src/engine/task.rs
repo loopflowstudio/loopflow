@@ -17,7 +17,7 @@ use super::{launch, Error, ErrorCode, Result};
 use crate::lf::commands::subscribe::{Subscription, Transport};
 use crate::ops::task::{TaskControlResult, TaskSnapshot, TaskWaitUntil};
 use crate::ops::task_ownership::OwnershipChange;
-use crate::work::task::comment::TaskComments;
+use loopflow_model::comment::TaskComments;
 use loopflow_model::durable::TaskOwnership;
 use loopflow_model::id::LfProcessId;
 

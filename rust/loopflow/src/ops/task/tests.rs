@@ -1898,7 +1898,7 @@ async fn steering_publication_resolves_empty_participant_from_config_or_git() {
             "{body}"
         );
         assert_eq!(
-            crate::work::task::comment::comment_requester(body, Some("Publisher")),
+            loopflow_model::comment::comment_requester(body, Some("Publisher")),
             Some(expected.to_string())
         );
     }

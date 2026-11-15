@@ -569,7 +569,7 @@ impl Import<'_> {
                 &self.machine_names,
             )?;
             if inserted.contains(&(table, target)) {
-                let comment = crate::work::task::comment::TaskComment {
+                let comment = loopflow_model::comment::TaskComment {
                     id: target.to_string(),
                     author: serde_json::from_str(&author)?,
                     body,

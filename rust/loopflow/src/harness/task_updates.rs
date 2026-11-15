@@ -13,7 +13,7 @@ use crate::durable::GraphStepProcess;
 use crate::store::sqlite::SqliteStore;
 use crate::store::{StoreError, StoreResult};
 use crate::task_graph::TaskGraphPosition;
-use crate::work::task::comment::TaskCommentAuthor;
+use loopflow_model::comment::TaskCommentAuthor;
 use loopflow_model::durable::TaskId;
 use loopflow_model::id::LfProcessId;
 
@@ -227,7 +227,7 @@ fn position_text(position: Option<&TaskGraphPosition>) -> String {
 mod tests {
     use super::write;
     use crate::store::sqlite::SqliteStore;
-    use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
+    use loopflow_model::comment::{TaskComment, TaskCommentAuthor};
     use loopflow_model::durable::TaskId;
     use loopflow_model::id::LfProcessId;
 

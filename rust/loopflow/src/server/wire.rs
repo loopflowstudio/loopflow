@@ -275,7 +275,7 @@ pub enum SubscriptionEvent {
         task_id: crate::work::task::TaskId,
         steer: crate::steer::Steer,
         /// The thread entry when this direction came from a retained comment.
-        comment: Option<crate::work::task::comment::TaskComment>,
+        comment: Option<loopflow_model::comment::TaskComment>,
     },
     #[serde(rename = "graph.step_finished")]
     GraphStepFinished {

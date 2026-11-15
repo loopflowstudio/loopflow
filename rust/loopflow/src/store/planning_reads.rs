@@ -7,7 +7,7 @@ impl Store {
     pub fn task_comments(
         &self,
         task: &TaskId,
-    ) -> StoreResult<crate::work::task::comment::TaskComments> {
+    ) -> StoreResult<loopflow_model::comment::TaskComments> {
         let saved = self.sqlite.task_comment_thread(task)?;
         let mut thread = saved.thread;
         if !crate::ops::planning_client::connected(&saved.repo) {

@@ -3946,10 +3946,10 @@ fn task_sync_explicit_retry_still_adopts_a_newer_linear_state() {
 #[test]
 fn historical_comment_delivery_retains_local_identity_after_linear_readback() {
     with_planning_task(|runtime, fixture, _repo, task, state| {
-        let comment = crate::work::task::comment::TaskComment {
+        let comment = loopflow_model::comment::TaskComment {
             id: uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_URL, b"retained-filing").to_string(),
             body: "Retained follow-up evidence".into(),
-            author: crate::work::task::comment::TaskCommentAuthor::Person {
+            author: loopflow_model::comment::TaskCommentAuthor::Person {
                 name: Some("Jack Heart".into()),
             },
             created_at: Some("2026-10-08T01:00:00Z".into()),

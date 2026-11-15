@@ -1592,7 +1592,7 @@ pub fn work_section() -> String {
 
 /// Name context is display data, not authorship for historical or external requests.
 pub fn render_user_context(name: Option<&str>) -> String {
-    let Some(name) = name.and_then(crate::config::normalize_user_name) else {
+    let Some(name) = name.and_then(loopflow_model::person::normalize_name) else {
         return String::new();
     };
     let name = serde_json::to_string(&name)

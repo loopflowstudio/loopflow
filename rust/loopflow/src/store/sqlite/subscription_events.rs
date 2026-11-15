@@ -3,8 +3,8 @@ use rusqlite::{params, OptionalExtension};
 use super::SqliteStore;
 use crate::steer::Steer;
 use crate::store::{StoreError, StoreResult};
-use crate::work::task::comment::TaskComment;
 use crate::work::task::{TaskEvent, TaskId};
+use loopflow_model::comment::TaskComment;
 use loopflow_model::id::SteerId;
 
 impl SqliteStore {

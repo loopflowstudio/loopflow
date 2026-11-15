@@ -15,8 +15,8 @@ use crate::durable::{GraphProcessDetail, TaskState};
 use crate::session::GraphProcessSummaryState;
 use crate::store::rows::unix_to_datetime;
 use crate::store::SharedStore;
-use crate::work::task::comment::{TaskComment, TaskComments};
 use crate::work::task::PrPhase;
+use loopflow_model::comment::{TaskComment, TaskComments};
 
 /// One Task. Wire type; no defaults.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

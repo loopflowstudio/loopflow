@@ -33,6 +33,7 @@ pub(crate) mod query_plans;
 mod recording_gap;
 mod repositories;
 pub mod rows;
+pub(crate) mod session_projection;
 mod sessions;
 pub mod sqlite;
 mod token_crypto;

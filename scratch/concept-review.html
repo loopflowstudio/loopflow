@@ -14,7 +14,7 @@ ops/task_ownership.rs and engine/operation.rs; Swift WorkFieldFacts.swift, Clien
 OperationDeclaration.swift, WorkModel.swift, TaskWorkView.swift and both app READMEs.<br>
 Source review only; no new runtime measurements.</header>
 <h1>Decide offline Abandon, cancellation and phone names.</h1>
-<p><strong>Outcome for loop-or-next: Blocked — questions 1–3 remain open.</strong> The next engineering direction is recorded below. It follows the shared-owner design and does not answer those product questions or start implementation.</p>
+<p><strong>Status:</strong> questions 1–3 remain open; they do not gate the engineering direction below, which is the next implement cut.</p>
 <p><strong>Biggest mismatch:</strong> a derived Done/Backlog state loses the facts that Claim, unassign and Reopen must change. Adding guessed destination states would leave owner controls and other lists disagreeing.</p>
 <pre>Two completed Tasks have the same current membership: Done.
 A: owned, has checkout, Workflow held at an interactive step

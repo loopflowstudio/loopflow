@@ -1,6 +1,6 @@
 # LOO-906: immediate interactions across Desktop and mobile
 
-Built on origin/main `9cafc410ee`: conversation/Machine link `a2a0a0fb33`,
+Built on origin/main `9cafc410ee` (#1942–#1944, #1947; coverage map `639411f1b2`): conversation/Machine link `a2a0a0fb33`,
 unreachable Machine and Desktop rename `35e2835de1`, fixture teardown `5231746858`,
 observation source `86f99e3315`, typed field support `f9a8da8ae9`. SQL-only and attributed external
 normalization, field-stage incorporation and derived membership answers now
@@ -45,10 +45,9 @@ Jack Heart:
 > “this is meant for deskto”
 > “it takes like >10 seconds and there are a lot of intermediate states”
 
-Other quotes: `desktop-reactivity-feedback.md`.
-
-The LOO-904 screenshot (not available here) was described as Reading workflow,
-Restoring workspace, Not started/Start, and Conversation change unconfirmed.
+Other quotes: `desktop-reactivity-feedback.md`. The LOO-904 screenshot (not
+here) showed Reading workflow, Restoring workspace, Not started/Start and
+Conversation change unconfirmed.
 
 ## What the current code establishes
 
@@ -329,8 +328,8 @@ Graph registration and provider attach. Log IDs and durations, never authored
 text. Compare in-process, Desktop local and mobile remote transports. EXPLAIN
 changed SQL on the 10,000-Task fixture.
 
-Proposed target: local reaction P95 under 100 ms, at least 20 native samples per
-journey/platform, endpoints reported separately. Nothing here is measured yet.
+Proposed target: local reaction P95 under 100 ms, ≥20 native samples per
+journey/platform, endpoints separate. Unmeasured.
 
 ## Implementation direction (2026-11-15)
 
@@ -404,10 +403,9 @@ Full source/capture and ingestion design, contrary cases and historical checks:
   A → reconnect B cannot borrow B's link. Parent incorporation survives offline
   restart and new observer, without replay or later navigation.
 
-Source/normalization checks: `86f99e3315`, `0883b66cf0`, `2c6146e43f`.
-Gate owns nextest run `7bb50caf-46f5-485f-a8ff-d882ea6e5a98`:
-`server::schema::tests::bare_time_serializes_as_its_described_tuple` reported LEAK;
-that case launches no children. No retry was taken as a fix.
+Checks: `86f99e3315`, `0883b66cf0`, `2c6146e43f`. Gate owns nextest run
+`7bb50caf-46f5-485f-a8ff-d882ea6e5a98`: `server::schema::tests::bare_time_serializes_as_its_described_tuple`
+reported LEAK; it launches no children. No retry counted as a fix.
 
 ### Projected surface cut · 2026-11-15
 
@@ -421,9 +419,9 @@ acquire a No Wave label.
 
 ### Task action cut requires a model revision · 2026-11-15
 
-Status: design counterexample found before consumer migration; Claim, unassign
-and local Reopen remain unbuilt. The earlier cut's Reopen checks cover newer
-Machine readings, not a local Reopen gesture. Product choices below are separate.
+Status: source review found a model counterexample before consumer migration;
+Claim, unassign and local Reopen remain unbuilt and are the next implement cut.
+The earlier cut's Reopen checks cover newer Machine readings, not a local gesture.
 
 The current `MembershipFacts.lifecycle` is a derived result, not sufficient input
 for these transitions:
@@ -494,19 +492,14 @@ Proposed usage for both app READMEs, after that vertical exit:
 > the original request; it never submits a replacement. Later navigation, drafts
 > and the open conversation stay where they are.
 
-Counterexample retained for implementation: Claim can be a domain no-op when the
-Machine already owns the Task, even if the client's cached owner is stale. It
-still needs an actual ownership result and fence; neither a successful transport
-return nor a planning refresh may retire the projected owner. Likewise Reopen of
-an already-open Task must follow the domain's no-op semantics, not unconditionally
-withdraw an unrelated Auto-Ship approval. Unassign refusal after a newer local
-Claim must remove only the refused layer, not restore an old owner snapshot.
+Counterexamples: Claim of an already-owned Task (stale cached owner) still needs
+an actual ownership result and fence; transport return or planning refresh never
+retires the projected owner. Unassign refusal after a newer local Claim removes
+only the refused layer, never restoring an old owner snapshot.
 
 No builtin skill instruction changes are needed: these are app gestures and
 existing Task commands. Keep shipped usage unchanged until the new paths exist.
-The engineering direction follows the shared-owner design; it supplies no answer
-to the product choices below. Loop-or-next outcome remains Blocked on those open
-choices; this review does not launch implementation.
+This direction answers none of the product choices below, and they don't gate it.
 
 ### Open product choices
 
@@ -532,16 +525,6 @@ All ages uses lifecycle alone; missing/invalid time leaves dated totals incomple
 Pages retain content, original Project association, cursors and range behavior;
 unresolved execution remains reachable. Prior review/counterexamples:
 `b70defa4a63a:scratch/instant-task-session.md` (completion time belongs to the fact).
-Three product questions remain open, independently of this engineering cut.
-
-Earlier completion-time review, 2026-11-15: no further model change from reviewing this
-cut. Complete at D1 → Reopen → Complete at D2 now has one correlated answer;
-an old page cannot supply D1 to a newer lifecycle. Held confirmation withholds a
-dated answer without withholding All ages. Refusal restores the latest base,
-not a saved page; restart retains the supported pair and original request.
-The existing Desktop/iOS/Rust logs listed below were inspected, not rerun.
-The completion-time cut is built. None of the three open
-product choices is answered by this cut.
 
 Acceptance: shared `testDatedHistory…` cases cover D1→Reopen→D2, stale
 arrivals/pages, two clients/restart, held local completion, refusal and changed
@@ -650,8 +633,7 @@ and gate as previously assigned.
 | Acceptance and latency | Deterministic shared/Desktop/phone checks per cut | Quiet-host native baseline; exhaustive policy/remaining consumer checks; gate owns broader suites, lint and recorded LEAK |
 
 LOO-650 coordination (`f64be018-352a-4514-917f-181eb67f1bcc`) recommended a finite
-migration table and coherent vertical exits; concrete lessons were returned in
-Task report `50918d31-2e7a-4531-8a74-2d1921749a6a`.
+migration table and vertical exits; lessons: Task report `50918d31-2e7a-4531-8a74-2d1921749a6a`.
 
 ### Detail and history cut · 2026-11-15
 
@@ -687,12 +669,6 @@ Still open: reordered validation replies must update only the active epoch with 
 newer receipt revision, never enabling input or retiring overlays, and full
 cross-platform presentation acceptance.
 
-## Upstream acceptance retained
-
-Origin/main `9cafc410ee` supplies #1942–#1944 and #1947 (`selection_states`); the
-shared projection and retained-occurrence migration keep their coverage. Map:
-`639411f1b2:scratch/instant-task-session.md`.
-
 ## Benchmark implementation and observations (2026-11-14)
 
 Exact feedback and host preferences are in `desktop-reactivity-feedback.md`; the
@@ -712,7 +688,7 @@ only). 10k receipt lookup/admission P95 0.033 ms, all 20 receipt statements keye
 backend-stage baseline exists. Raw files and earlier detail: `8b42a874db`,
 `bb936ac371` (`scratch/instant-task-session.md`).
 
-Implementation owns the baseline; demo owns native usability.
+Implementation owns the baseline; demo, native usability.
 
 ## Conversation review retained
 
@@ -721,4 +697,4 @@ The 2026-11-15 review and its numbered disconnected-edit option:
 Jack Heart's “1a” selects saved disconnected Complete/rename/Move on the original
 Machine, keeping IDs across restart and uncertain delivery.
 
-Check: `git diff --check` passes; source/design edits only, so no build or runtime test ran.
+Check: `git diff --check` passes; plan edits only, no build or test ran.

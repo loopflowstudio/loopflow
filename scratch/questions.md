@@ -162,11 +162,6 @@
   cache bodies leaves exact pending commands and reload floors intact. No product
   answer or separate date cache is introduced.
 
-- Task actions, 2026-11-15 source review: aggregate lifecycle facts lose ownership
-  and execution inputs needed for local Claim/unassign/Reopen. Newer Reopen
-  reading coverage is not local-gesture coverage. The working design now contains
-  the counterexamples and the next input-based replacement/vertical exit; consumer
-  migration stopped before adding guessed state effects. This is an engineering
-  design revision, independent of the three unanswered product choices.
-  Preserve domain no-op semantics for already-open Reopen; a pending completion
-  identity must distinguish withdrawal from that no-op. No product answer inferred.
+- Task actions: local Claim/unassign/Reopen derive from normalized ownership,
+  publication and execution inputs, not the aggregate lifecycle fact (working
+  design, Task action cut). Engineering choice; no product answer inferred.

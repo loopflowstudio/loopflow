@@ -961,6 +961,7 @@ private actor Source {
             var runtime = item["runtime"] as! [String: Any]
             runtime["status"] = "idle"
             item["runtime"] = runtime
+            item["lifecycle"] = "idle"
             return item
         }
         wire["tasks"] = inventory
@@ -977,6 +978,7 @@ private actor Source {
                 var runtime = item["runtime"] as! [String: Any]
                 runtime["status"] = "done"
                 item["runtime"] = runtime
+                item["lifecycle"] = "done"
                 return item
             }
             return inventory

@@ -1203,16 +1203,14 @@ mod tests {
                 .iter()
                 .all(|event| event.lf_process_id.as_deref() == Some(a.as_str())));
             assert_eq!(
-                store
-                    .input_history(original.input_key().unwrap())
+                crate::store::sessions::input_history(&store, original.input_key().unwrap())
                     .unwrap()
                     .usage
                     .total_input_tokens,
                 Some(12)
             );
             assert_eq!(
-                store
-                    .input_history(next.input_key().unwrap())
+                crate::store::sessions::input_history(&store, next.input_key().unwrap())
                     .unwrap()
                     .usage
                     .total_input_tokens,

@@ -15,7 +15,8 @@ pub(crate) fn collect_recent_history(
     filter: WorkFilter,
 ) -> Result<(Vec<SessionHistory>, bool)> {
     let since = chrono::Utc::now().timestamp() - WINDOW_DAYS * 24 * 3600;
-    Ok(store.recent_conversation_history(
+    Ok(crate::store::sessions::recent_conversation_history(
+        store,
         filter.wave,
         filter.project,
         filter.task,
@@ -38,7 +39,8 @@ pub(crate) fn collect_history(
         &database,
         crate::store::token_key::encryption_key,
     )?;
-    Ok(store.conversation_history(
+    Ok(crate::store::sessions::conversation_history(
+        &store,
         filter.wave,
         filter.project,
         filter.task,
@@ -73,8 +75,7 @@ pub(crate) fn render(selector: &str, view: SessionView, json: bool) -> Result<St
         &database,
         crate::store::token_key::encryption_key,
     )?;
-    let snapshot = store
-        .input_history(selector)
+    let snapshot = crate::store::sessions::input_history(&store, selector)
         .map_err(|error| anyhow!("Session capture unavailable: {error}"))?;
     if view == SessionView::Transcript {
         let conversation = super::history_transcript::session(&store, &snapshot.session_id)?;

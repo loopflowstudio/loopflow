@@ -163,7 +163,8 @@ fn read_steps(filter: WorkFilter) -> Result<Vec<Step>> {
         &database,
         crate::store::token_key::encryption_key,
     )?;
-    let sessions = store.conversation_history(
+    let sessions = crate::store::sessions::conversation_history(
+        &store,
         filter.wave,
         filter.project,
         filter.task,

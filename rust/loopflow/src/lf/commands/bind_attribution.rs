@@ -105,11 +105,11 @@ fn read() -> Result<(Vec<Step>, Vec<SessionBind>)> {
         &database,
         crate::store::token_key::encryption_key,
     )?;
-    let steps = store
-        .conversation_history(None, None, None, None, 0, false)?
-        .iter()
-        .map(step)
-        .collect();
+    let steps =
+        crate::store::sessions::conversation_history(&store, None, None, None, None, 0, false)?
+            .iter()
+            .map(step)
+            .collect();
     Ok((steps, store.bound_sessions()?))
 }
 

@@ -401,7 +401,7 @@ pub(crate) fn render(
         }
         if let Some(input) = input {
             anyhow::ensure!(session.is_some(), "--input requires a Session identity");
-            let captured = store.sqlite.input_history(input)?;
+            let captured = crate::store::sessions::input_history(&store.sqlite, input)?;
             anyhow::ensure!(
                 captured.session_id == id,
                 "Input does not belong to Session {id}"

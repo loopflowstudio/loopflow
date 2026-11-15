@@ -1,10 +1,11 @@
 use crate::session::{LfSession, PrimaryScope, TitleSource};
 use crate::store::session_projection;
+use crate::store::sqlite::sessions::{PendingHistory, PendingInput};
 use crate::store::sqlite::{SessionCaller, SqliteStore};
 use loopflow_model::durable::TaskId;
 use loopflow_model::id::LfProcessId;
 
-use super::{run_sqlite, Store, StoreResult};
+use super::{run_sqlite, Store, StoreError, StoreResult};
 
 impl Store {
     pub(crate) async fn session_summaries(
@@ -254,6 +255,107 @@ pub fn bind_session(
     store.bind_session_prepared(id, capture, task, &saved.cwd, &caller)
 }
 
+/// Project retained input history, with its own attribution and chronology.
+/// A continuation never moves earlier usage to the conversation's new binding.
+pub(crate) fn conversation_history(
+    store: &SqliteStore,
+    wave: Option<&str>,
+    project: Option<&str>,
+    task: Option<&str>,
+    caller: Option<&str>,
+    since: i64,
+    include_finished: bool,
+) -> StoreResult<Vec<crate::store::session_record::SessionHistory>> {
+    conversation_inputs(
+        store,
+        wave,
+        project,
+        task,
+        caller,
+        (since, include_finished, None),
+        None,
+    )
+    .map(|(rows, _)| rows)
+}
+
+/// Select the recent presentation budget before history decoding. Every
+/// unterminated input is retained; explicit drills use conversation_history.
+pub(crate) fn recent_conversation_history(
+    store: &SqliteStore,
+    wave: Option<&str>,
+    project: Option<&str>,
+    task: Option<&str>,
+    since: i64,
+    limit: usize,
+) -> StoreResult<(Vec<crate::store::session_record::SessionHistory>, bool)> {
+    let (rows, truncated) = conversation_inputs(
+        store,
+        wave,
+        project,
+        task,
+        None,
+        (since, false, Some(limit)),
+        None,
+    )?;
+    Ok((rows, truncated))
+}
+
+pub(crate) fn input_history(
+    store: &SqliteStore,
+    selector: &str,
+) -> StoreResult<crate::store::session_record::SessionHistory> {
+    let selected = store.resolve_history_input(selector)?;
+    let input = store
+        .session(&selected)?
+        .and_then(|session| session.artifact_key)
+        .unwrap_or(selected);
+    conversation_inputs(
+        store,
+        None,
+        None,
+        None,
+        None,
+        (0, false, None),
+        Some(&input),
+    )?
+    .0
+    .pop()
+    .ok_or(StoreError::NotFound)
+}
+
+fn conversation_inputs(
+    store: &SqliteStore,
+    wave: Option<&str>,
+    project: Option<&str>,
+    task: Option<&str>,
+    caller: Option<&str>,
+    window: (i64, bool, Option<usize>),
+    input: Option<&str>,
+) -> StoreResult<(Vec<crate::store::session_record::SessionHistory>, bool)> {
+    let pending = store.pending_inputs(wave, project, task, caller, window, input)?;
+    let histories = pending
+        .inputs
+        .iter()
+        .map(|input| project_history_input(store, &pending, input))
+        .collect::<StoreResult<Vec<_>>>()?;
+    Ok((histories, pending.truncated))
+}
+
+pub(crate) fn project_history_input(
+    store: &SqliteStore,
+    pending: &PendingHistory,
+    input: &PendingInput,
+) -> StoreResult<crate::store::session_record::SessionHistory> {
+    let saved = store.read_history_input(pending, input)?;
+    crate::session_record::project_input_history(
+        &saved.session,
+        saved.artifact_key.as_deref(),
+        &saved.events,
+        saved.names,
+    )
+    .map_err(|error| super::StoreError::InvalidData(error.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use crate::session::{LfSession, PrimaryScope, TitleSource};
@@ -285,6 +387,61 @@ mod tests {
             completed_at: None,
             created_at: 1,
         }
+    }
+
+    #[test]
+    fn malformed_prepared_request_keeps_history_gaps_and_current_fallbacks() {
+        let home = tempfile::tempdir().unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let input = crate::session_record::new_artifact_key();
+        let mut session = candidate(home.path());
+        session.artifact_key = Some(input.clone());
+        session.provider = Some("claude".into());
+        session.model = Some("current-model".into());
+        session.skill = Some("current-skill".into());
+        let session = super::create_session(&store, session, None).unwrap();
+        let mut manifest = serde_json::json!({
+            "schema_version":1, "artifact_key":input,
+            "created_at":"1970-01-01T00:00:01Z", "harness":"codex",
+            "model":"saved-model", "surface":"headless", "cwd":"/saved",
+            "skill":"saved-skill", "subjects":[], "host":"fixture",
+            "exec":{"system_prompt":42}
+        });
+        assert!(
+            serde_json::from_value::<crate::session_record::SessionCaptureManifest>(
+                manifest.clone()
+            )
+            .is_err()
+        );
+        let retain = |manifest| {
+            store.retain_session_observation(&session, &crate::session::SessionObservation {
+            artifact_key: input.clone(), source:"manifest.json".into(), observed_at:1,
+            task_id:None, wave_id:None,
+            payload:serde_json::json!({"input_id":input,"source":"manifest.json","evidence":manifest}),
+        }).unwrap()
+        };
+        retain(manifest.clone());
+        let malformed = super::input_history(&store, &input).unwrap();
+        assert_eq!(malformed.evidence_gaps, 2);
+        assert_eq!(malformed.harness, "claude");
+        assert_eq!(malformed.model.as_deref(), Some("current-model"));
+        assert_eq!(malformed.skill.as_deref(), Some("current-skill"));
+        assert_eq!(
+            malformed.worktree,
+            Some(home.path().to_string_lossy().into_owned())
+        );
+        manifest["exec"] = serde_json::Value::Null;
+        // A later valid observation uses the same saved-input reader and projector.
+        store.retain_session_observation(&session, &crate::session::SessionObservation {
+            artifact_key: input.clone(), source:"manifest.json:recovered".into(), observed_at:2,
+            task_id:None, wave_id:None,
+            payload:serde_json::json!({"input_id":input,"source":"manifest.json","evidence":manifest}),
+        }).unwrap();
+        let recovered = super::input_history(&store, &input).unwrap();
+        assert_eq!(recovered.evidence_gaps, 1);
+        assert_eq!(recovered.harness, "codex");
+        assert_eq!(recovered.model.as_deref(), Some("saved-model"));
+        assert_eq!(recovered.worktree.as_deref(), Some("/saved"));
     }
 
     #[test]
@@ -344,3 +501,6 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+pub(crate) mod history_tests;

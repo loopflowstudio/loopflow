@@ -429,12 +429,13 @@ fn helper_capture_admits_a_headless_conversation_with_its_input_and_outcome() {
 
     assert_eq!(after.id, session.id);
     assert_eq!(
-        crate::session_record::row_store(&capture.artifact_dir())
-            .unwrap()
-            .input_history(capture.artifact_key().as_str())
-            .unwrap()
-            .recorded_outcome
-            .as_deref(),
+        crate::store::sessions::input_history(
+            &crate::session_record::row_store(&capture.artifact_dir()).unwrap(),
+            capture.artifact_key().as_str()
+        )
+        .unwrap()
+        .recorded_outcome
+        .as_deref(),
         Some("failed")
     );
     assert!(after.completed_at.is_none());

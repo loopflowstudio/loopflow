@@ -444,7 +444,9 @@ fn opencode_native_history_preserves_output_and_tools_and_leaves_usage_to_the_tr
         .unwrap()
         .iter()
         .all(|row| row.kind != crate::session::SessionEventKind::Usage));
-    let usage = store.input_history(input.as_str()).unwrap().usage;
+    let usage = crate::store::sessions::input_history(&store, input.as_str())
+        .unwrap()
+        .usage;
     assert_eq!(usage.input_tokens, None);
 }
 

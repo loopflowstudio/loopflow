@@ -678,6 +678,15 @@ pub(crate) struct PendingInput {
     pub(crate) latest: i64,
 }
 
+/// Saved evidence for one selected input, before application projection.
+#[derive(Debug)]
+pub(crate) struct HistoryInput {
+    pub session: crate::store::session::HistoryCapture,
+    pub artifact_key: Option<String>,
+    pub events: Vec<crate::store::session::SessionEvent>,
+    pub names: (Option<String>, Option<String>),
+}
+
 /// The caller reads and validates this Session inside the same transaction.
 pub(super) fn bind_session_in(
     conn: &Connection,
@@ -1052,77 +1061,7 @@ impl SqliteStore {
         Ok(ids)
     }
 
-    /// Project retained input history, with its own attribution and chronology.
-    /// A continuation never moves earlier usage to the conversation's new binding.
-    pub(crate) fn conversation_history(
-        &self,
-        wave: Option<&str>,
-        project: Option<&str>,
-        task: Option<&str>,
-        caller: Option<&str>,
-        since: i64,
-        include_finished: bool,
-    ) -> StoreResult<Vec<crate::store::session_record::SessionHistory>> {
-        self.conversation_inputs(
-            wave,
-            project,
-            task,
-            caller,
-            (since, include_finished, None),
-            None,
-        )
-        .map(|(rows, _)| rows)
-    }
-
-    /// Select the recent presentation budget before history decoding. Every
-    /// unterminated input is retained; explicit drills use conversation_history.
-    pub(crate) fn recent_conversation_history(
-        &self,
-        wave: Option<&str>,
-        project: Option<&str>,
-        task: Option<&str>,
-        since: i64,
-        limit: usize,
-    ) -> StoreResult<(Vec<crate::store::session_record::SessionHistory>, bool)> {
-        let (rows, truncated) =
-            self.conversation_inputs(wave, project, task, None, (since, false, Some(limit)), None)?;
-        Ok((rows, truncated))
-    }
-
-    pub(crate) fn input_history(
-        &self,
-        selector: &str,
-    ) -> StoreResult<crate::store::session_record::SessionHistory> {
-        let selected = self.resolve_history_input(selector)?;
-        let input = self
-            .session(&selected)?
-            .and_then(|session| session.artifact_key)
-            .unwrap_or(selected);
-        self.conversation_inputs(None, None, None, None, (0, false, None), Some(&input))?
-            .0
-            .pop()
-            .ok_or(StoreError::NotFound)
-    }
-
-    fn conversation_inputs(
-        &self,
-        wave: Option<&str>,
-        project: Option<&str>,
-        task: Option<&str>,
-        caller: Option<&str>,
-        window: (i64, bool, Option<usize>),
-        input: Option<&str>,
-    ) -> StoreResult<(Vec<crate::store::session_record::SessionHistory>, bool)> {
-        let pending = self.pending_inputs(wave, project, task, caller, window, input)?;
-        let histories = pending
-            .inputs
-            .iter()
-            .map(|input| self.decode_history(&pending, input))
-            .collect::<StoreResult<Vec<_>>>()?;
-        Ok((histories, pending.truncated))
-    }
-
-    /// The inputs [`Self::conversation_history`] reads, newest first, before
+    /// The inputs a conversation history read selects, newest first, before
     /// any history is decoded.
     pub(crate) fn pending_conversation_history(
         &self,
@@ -1142,7 +1081,7 @@ impl SqliteStore {
         )
     }
 
-    fn pending_inputs(
+    pub(crate) fn pending_inputs(
         &self,
         wave: Option<&str>,
         project: Option<&str>,
@@ -1360,12 +1299,12 @@ impl SqliteStore {
         })
     }
 
-    /// One pending input's history, decoded.
-    pub(crate) fn decode_history(
+    /// Read one selected input's saved metadata and scoped events.
+    pub(crate) fn read_history_input(
         &self,
         pending: &PendingHistory,
         input: &PendingInput,
-    ) -> StoreResult<crate::store::session_record::SessionHistory> {
+    ) -> StoreResult<HistoryInput> {
         let scope = (
             pending.scope.0.as_deref(),
             pending.scope.1.as_deref(),
@@ -1434,8 +1373,12 @@ impl SqliteStore {
                 self.orphaned_native_history(&session_id, scope, thread.as_ref(), turn.as_deref())?
             }
         };
-        crate::session_record::project_input_history(&session, input.as_deref(), &history, names)
-            .map_err(invalid)
+        Ok(HistoryInput {
+            session,
+            artifact_key: input,
+            events: history,
+            names,
+        })
     }
 
     pub fn session(&self, id: &str) -> StoreResult<Option<LfSession>> {
@@ -2612,184 +2555,6 @@ mod metadata_tests {
                 .unwrap()
                 .independent
         );
-    }
-
-    #[test]
-    fn history_windows_find_inputs_by_each_start_and_end() {
-        let home = tempfile::tempdir().unwrap();
-        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
-        {
-            let conn = store.conn.lock().unwrap();
-            // (session, capture recorded, manifest observed, terminal observed)
-            for (id, captured, manifest, terminal) in [
-                ("late-manifest", 10, 100, None),
-                ("early-manifest", 100, 10, None),
-                ("late-terminal", 10, 10, Some(100)),
-            ] {
-                let input = crate::session_record::new_artifact_key();
-                conn.execute(
-                    "INSERT INTO agent_sessions(id,title,title_source,created_at,interactive,
-                     input_published,cwd,repo) VALUES(?1,?1,'human',1,1,0,'/unavailable','/repo')",
-                    [id],
-                )
-                .unwrap();
-                conn.execute(
-                    "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
-                     VALUES(?1,'captured',?2,?3,json_object('artifact_key',?2))",
-                    params![id, input, captured],
-                )
-                .unwrap();
-                let captured_event = conn.last_insert_rowid();
-                let manifest_payload = json!({"input_id":input,"source":"manifest.json",
-                    "evidence":{"artifact_key":input,"schema_version":1}});
-                let terminal_payload = json!({"input_id":input,"source":"terminal.json",
-                    "evidence":{"outcome":"done","ended_at":"1970-01-01T00:01:40Z"}});
-                for (file, observed, payload) in [
-                    ("manifest.json", Some(manifest), manifest_payload),
-                    ("terminal.json", terminal, terminal_payload),
-                ] {
-                    let Some(observed) = observed else { continue };
-                    conn.execute(
-                        "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
-                         VALUES(?1,'observed',?2,?3,?4,?5)",
-                        params![id, format!("{input}:{file}"), observed, payload.to_string(), captured_event],
-                    )
-                    .unwrap();
-                }
-            }
-        }
-        let read = |include_finished| {
-            store
-                .conversation_history(None, None, None, None, 50, include_finished)
-                .unwrap()
-                .into_iter()
-                .map(|row| (row.session_id.to_string(), row.observed_at))
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(
-            read(false),
-            [("late-manifest".to_string(), 100)],
-            "an input starts when its manifest is observed, not when it was captured"
-        );
-        assert_eq!(
-            read(true),
-            [
-                ("late-manifest".to_string(), 100),
-                ("late-terminal".to_string(), 10)
-            ],
-            "an input started earlier ends in the window when its terminal is observed there"
-        );
-    }
-
-    #[test]
-    fn task_history_reads_every_row_naming_the_task() {
-        let home = tempfile::tempdir().unwrap();
-        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
-        let repository = crate::repository::location::ensure_repository(&store, "/repo").unwrap();
-        let [task, other] = [0, 1].map(|_| {
-            let id = loopflow_model::durable::TaskId::new();
-            store
-                .create_task(&crate::store::work::task::NewTask {
-                    repository_id: repository.clone(),
-                    id: id.clone(),
-                    project_id: None,
-                    title: "Drill".into(),
-                    description: String::new(),
-                    due_date: None,
-                })
-                .unwrap();
-            id
-        });
-        // Bound after its input was captured: binding assigns future work only.
-        let bound = store.test_session("bound", &crate::session_record::new_artifact_key());
-        crate::store::sessions::bind_session(&store, "bound", bound.captured, &task).unwrap();
-        {
-            let conn = store.conn.lock().unwrap();
-            // (session, Task on the capture, on its manifest, on its `started` origin)
-            for (id, capture, manifest, origin) in [
-                ("capture", Some(&task), None, None),
-                ("manifest", None, Some(&task), None),
-                ("origin", None, None, Some(&task)),
-                ("other", Some(&other), None, None),
-            ] {
-                let input = crate::session_record::new_artifact_key();
-                conn.execute(
-                    "INSERT INTO agent_sessions(id,title,title_source,created_at,interactive,
-                     input_published,cwd,repo) VALUES(?1,?1,'human',1,1,1,'/unavailable','/repo')",
-                    [id],
-                )
-                .unwrap();
-                conn.execute(
-                    "INSERT INTO session_events(session_id,kind,receipt_key,task_id,observed_at,payload)
-                     VALUES(?1,'captured',?2,?3,10,json_object('artifact_key',?2))",
-                    params![id, input, capture.map(|task| task.as_str())],
-                )
-                .unwrap();
-                let captured = conn.last_insert_rowid();
-                conn.execute(
-                    "UPDATE agent_sessions SET current_capture=?2 WHERE id=?1",
-                    params![id, captured],
-                )
-                .unwrap();
-                if let Some(task) = manifest {
-                    let payload = json!({"input_id":input,"source":"manifest.json",
-                        "evidence":{"artifact_key":input,"schema_version":1}});
-                    conn.execute(
-                        "INSERT INTO session_events(session_id,kind,receipt_key,task_id,observed_at,payload,captured_event)
-                         VALUES(?1,'observed',?2,?3,10,?4,?5)",
-                        params![id, format!("{input}:manifest.json"), task.as_str(), payload.to_string(), captured],
-                    )
-                    .unwrap();
-                }
-                if let Some(task) = origin {
-                    conn.execute(
-                        "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,
-                         task_id,observed_at,payload,captured_event) VALUES(?1,'thread','turn','started','',?2,10,'{}',?3)",
-                        params![id, task.as_str(), captured],
-                    )
-                    .unwrap();
-                }
-            }
-            conn.execute(
-                "INSERT INTO agent_sessions(id,title,title_source,created_at,interactive,
-                 input_published,cwd,repo) VALUES('native','native','human',1,1,0,'/unavailable','/repo')",
-                [],
-            )
-            .unwrap();
-            conn.execute(
-                "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,
-                 task_id,observed_at,payload) VALUES('native','thread','turn','started','',?1,10,'{}')",
-                [task.as_str()],
-            )
-            .unwrap();
-        }
-        let issue = store
-            .conn
-            .lock()
-            .unwrap()
-            .query_row(
-                "SELECT issue_identifier FROM tasks WHERE id=?1",
-                [task.as_str()],
-                |row| row.get::<_, String>(0),
-            )
-            .unwrap();
-        for selector in [task.as_str(), issue.as_str()] {
-            for since in [0, 5, 20] {
-                let mut sessions = store
-                    .conversation_history(None, None, Some(selector), None, since, true)
-                    .unwrap()
-                    .into_iter()
-                    .map(|row| row.session_id.to_string())
-                    .collect::<Vec<_>>();
-                sessions.sort();
-                let expected: &[&str] = if since > 10 {
-                    &[]
-                } else {
-                    &["capture", "manifest", "native", "origin"]
-                };
-                assert_eq!(sessions, expected, "{selector} since {since}");
-            }
-        }
     }
 
     #[test]

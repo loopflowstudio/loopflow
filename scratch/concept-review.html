@@ -2,7 +2,7 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-650 · capture history</title>
+<title>LOO-650 · storage relocation</title>
 <style>
 :root{color-scheme:light dark;font:16px/1.5 system-ui,sans-serif}
 body{max-width:760px;margin:2rem auto;padding:0 1rem 2rem}
@@ -15,61 +15,64 @@ th,td{text-align:left;vertical-align:top;padding:.5rem .3rem;border-bottom:1px s
 li{margin:.4rem 0}.proposed{border-left:3px solid light-dark(#23734c,#8cd6ad);padding-left:.7rem}
 @media(max-width:520px){body{margin-top:1rem}table{font-size:.76rem}}
 </style>
-<header>LOO-650 · concept-review · November 15, 2026 · reviewed HEAD 64b1bc335e<br>
-Built from <code>scratch/{loo-650,questions}.md</code>,
-<code>session_record.rs</code>, <code>store/{session,sessions}.rs</code>,
-<code>store/sqlite/{sessions,session_events}.rs</code>, and
-<code>lf/commands/{session_history,activity}.rs</code>.</header>
+<header>LOO-650 · concept-review · November 15, 2026<br>
+Built from <code>scratch/loo-650.md</code>, the withdrawn relocation diagnostics,
+<code>desktop/shells/store.rs</code>, <code>linear/observations.rs</code>,
+<code>harness/fact_writer.rs</code>, <code>store/{session,execution,pr_landing}.rs</code>,
+<code>store/work/task</code>, <code>engine/creation.rs</code>,
+<code>ops/{task_actions,task_location,pr_landing}.rs</code>, and migration build/check/package scripts.</header>
 <main>
-<h1>Iterate to implement: SQL reads saved evidence; the application interprets the full capture.</h1>
-<aside><strong>Biggest mismatch.</strong> SQL currently calls a history projector
-that validates a prepared launch request. Moving that request into storage would
-bring settings and launch construction with it. Erasing the request to arbitrary
-JSON would accept malformed manifests that currently count as evidence gaps.</aside>
-<p>No open product choice. The proposed cut keeps commands, stored bytes and
-history output unchanged. Green rules below mark unbuilt behavior.</p>
+<h1>Iterate to implement: move saved facts and SQL together; keep execution policy above.</h1>
+<aside><strong>Biggest mismatch.</strong> The directory inventory missed SQL
+outside <code>store/</code> and application methods on moved records.
+Moving files also hid migrations’ original additions. A compiling library alone
+would establish neither correct upgrades nor cheaper application builds.</aside>
+<p>No open product choice. Capture-history selection and full-manifest projection
+are built, with recorded passing checks. Storage extraction and the corrections
+below remain proposed. Commands, receipts and recovery keep their behavior.</p>
 <h2>Actions → concepts → APIs</h2>
 <table>
-<tr><th>Action</th><th>Existing</th><th>Proposed</th></tr>
-<tr><td>Inspect one input</td><td><code>SqliteStore::input_history</code> selects, reads and projects</td><td>Application <code>store::sessions::input_history</code> uses SQL selection and evidence</td></tr>
-<tr><td>Read recent history</td><td>SQL budgets inputs before projecting</td><td>Same SQL budget; application projects each selected input in order</td></tr>
-<tr><td>Read activity</td><td>Sort by latest event; stop before decoding older inputs</td><td>Same stop, before reading their evidence</td></tr>
-<tr><td>Resume later</td><td>Session and provider history retain their identity</td><td>Same; history projection grants no execution authority</td></tr>
+<tr><th>Action / concept</th><th>Existing</th><th>Proposed owner</th></tr>
+<tr><td>Open a shell / consumed launch receipt</td><td>SQL under Desktop</td><td>Storage owns receipt queries and atomic writes; application launches</td></tr>
+<tr><td>Acquire Linear changes / saved evidence</td><td>SQL under Linear</td><td>Storage owns observation transactions; application acquires</td></tr>
+<tr><td>Inspect context / saved tally</td><td>Writer implements tally methods</td><td>Pure arithmetic with TurnContext; application interprets events and counts tokens</td></tr>
+<tr><td>Continue work / scope and state</td><td>Application matches same-crate enums exhaustively</td><td>Owner supplies pure record operations; application keeps dispatch and recommendations</td></tr>
+<tr><td>Build another worktree / migration identity</td><td>Order follows additions at one path</td><td>One first-addition history across old and new paths; one current SQL directory</td></tr>
 </table>
-<h2>Proposed ownership</h2>
-<p class="proposed"><code>PendingHistory / PendingInput</code> →
-<code>SqliteStore::read_history_input</code> →
-<code>HistoryInput { capture, artifact key, scoped events, names }</code> →
-application <code>project_input_history</code> → <code>SessionHistory</code>.</p>
-<p>Storage keeps selector resolution, names, truncation and scoped event reads.
-The application keeps the complete <code>SessionCaptureManifest</code>,
-<code>AgentProcessRequest</code> and their existing deserialization.
-One selected-input reader replaces SQL <code>decode_history</code>;
-one application projector serves full, recent, single-input and activity reads.</p>
+<h2>Proposed source contract</h2>
+<p class="proposed">Application acquisition and policy → synchronous storage →
+saved records. Keep <code>request</code>/<code>compacted</code> arithmetic with
+<code>TurnContext</code>; make <code>hear(&amp;mut TurnContext, &amp;ConversationEvent)</code>
+an application function. No extension trait or storage callback into launch code.</p>
+<p>Keep non-exhaustive enums. Move string conversion, saved keys and location
+text with their records. An unsupported scope returns a dispatch error;
+unsupported recovery uses the uncertain-receipt path; unsupported landing holds
+delivery; an unsupported PR phase recommends NoAction. No panic, launch,
+completion or invented JSON fallback follows an unsupported value.</p>
 <h2>Normal → failure → recovery</h2>
-<p>An input recorded under Task A remains attributed to A after the Session binds
-to B. A malformed <code>exec</code> request makes its manifest invalid, retaining
-today's gap count and current-input fallback rules. A later valid observation is
-read through the existing projector; inspection writes no repair and launches
-no provider. Missing manifests and orphaned native turns retain uncertainty.</p>
-<h2>The counterexample that shapes the API</h2>
-<p>An old input has invalid metadata. Activity already has enough newer entries
-to stop. Today it never reads that input. Eagerly loading every selected input's
-events would add work and could fail an otherwise readable page. Keep
-<code>settled</code> before the per-input evidence reader.</p>
-<p>Recent history still retains every unfinished input. Exact drills remain
-complete. Selection releases its savepoint before events are read, as today;
-this cut adds no page-wide snapshot or longer SQL lock.</p>
+<p>A shell’s lost acknowledgment still leaves a consumed receipt. Retry discovers
+it rather than launching again. An uncertain creation retains its identity and
+inspection path. Capture history still validates the complete manifest; activity
+still stops before reading older evidence.</p>
+<p>A migration-directory move keeps each slug’s first merge position, timestamp
+and exact SQL. Refreshing only origin/main must update the generated catalogue.
+An interrupted upgrade retains the same transaction, exports and refusal policy.
+No new recovery lifecycle is proposed.</p>
+<h2>Counterexamples to keep</h2>
+<p>Alphabetical slug order already failed with missing <code>is_local</code>.
+Moving whole test modules exposed private SQL helpers and application setup in
+one module. Keep private invariant tests in storage; move application tests by
+function. Use prepared fixture values and dev-only inspection helpers.</p>
 <h2>Next implementation</h2>
 <ol>
-<li>Replace the SQL projection path with saved input evidence; route application callers through the one projector.</li>
-<li>Keep attribution, malformed-request gaps, orphaned turns, recent truncation and activity early-stop checks; move application tests above storage.</li>
-<li>Extract synchronous storage and catalogue/schema generation. Measure fresh-root reuse, application edits and Task-record edits separately.</li>
+<li>Extract storage with the corrected SQL, record, reducer and test ownership.</li>
+<li>Compare catalogue order/checksums/schema; check a directory move, origin/main-only refresh, unmerged migration and no-Git package.</li>
+<li>Measure fresh-root reuse, application-only edits and Task-record edits separately. Root upkeep, whole-application cost, demo and review remain open.</li>
 </ol>
 <h2>Review questions</h2>
 <ol>
-<li>Does this require a new product choice? No: complete validation and bounded history reads already belong to the design.</li>
-<li>What should loop-or-next do? Iterate to implement this cut. Root upkeep, whole-application measurement, demo and review remain open.</li>
+<li>Does a product choice remain? No; these corrections follow the existing ownership and behavior requirements.</li>
+<li>What should loop-or-next do? Iterate to implement the revised relocation design in <code>scratch/loo-650.md</code>.</li>
 </ol>
 </main>
 </html>

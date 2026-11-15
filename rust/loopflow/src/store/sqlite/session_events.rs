@@ -868,6 +868,7 @@ fn record_event_in(
 #[cfg(test)]
 mod tests {
     use crate::process::attachment;
+    use crate::store::sessions::history_tests::record_captured_start;
 
     use crate::session::SessionEventKind;
     use crate::store::sqlite::SqliteStore;
@@ -1021,29 +1022,6 @@ mod tests {
         assert_eq!(payload["last_miss"], span.last_miss);
         close(&store, &mut gap());
         assert_eq!(observations(), 1);
-    }
-
-    fn record_captured_start(store: &SqliteStore, session: &str, turn: &str) -> i64 {
-        let attachment = store
-            .session_attachment(session)
-            .unwrap()
-            .unwrap_or_else(|| {
-                let process = loopflow_model::id::LfProcessId::new();
-                store
-                    .conn
-                    .lock()
-                    .unwrap()
-                    .execute(
-                        "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
-                        [&process],
-                    )
-                    .unwrap();
-                attachment::claim_session_attachment(store, session, None, &process, false).unwrap()
-            });
-        let origin = store.session_turn_origin(session, &attachment).unwrap();
-        store
-            .record_session_turn_origin(&"thread".into(), turn, &origin)
-            .unwrap()
     }
 
     #[test]
@@ -1223,69 +1201,6 @@ mod tests {
     }
 
     #[test]
-    fn first_provider_attempt_follows_original_input_order_after_import() {
-        let home = tempfile::tempdir().unwrap();
-        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
-        store.test_session("conversation", "run_00000000000000000000000000000001");
-        let input =
-            crate::session_record::parse_artifact_key("run_00000000000000000000000000000001")
-                .unwrap();
-        let session = store.session("conversation").unwrap().unwrap();
-        assert_eq!(
-            store
-                .input_history(&input)
-                .unwrap()
-                .first_provider_attempt_at,
-            None
-        );
-        let pr = crate::store::work::task::TaskPrId::new();
-        let manifest = json!({"schema_version":1,"artifact_key":input,
-            "created_at":"1970-01-01T00:00:01Z","harness":"codex","surface":"headless",
-            "cwd":"/fixture","subjects":[],"host":"fixture",
-            "flow":{"kind":"step","task_pr_id":pr,"invocation_id":"retained",
-                "flow":"feature","step":"review"}});
-        store
-            .retain_session_observation(
-                &session,
-                &crate::session::SessionObservation {
-                    artifact_key: input.clone(),
-                    source: "manifest.json".into(),
-                    observed_at: 1,
-                    task_id: None,
-                    wave_id: None,
-                    payload: json!({"input_id":input,"source":"manifest.json","evidence":manifest}),
-                },
-            )
-            .unwrap();
-        for seq in [1, 0] {
-            let source = format!("events.jsonl:{seq}");
-            let time = time::OffsetDateTime::from_unix_timestamp(10 + seq * 10).unwrap();
-            let evidence = json!({"schema_version":1,"seq":seq,
-                "observed_at":time.format(&time::format_description::well_known::Rfc3339).unwrap(),
-                "type":"provider_attempt_started","attempt_key":format!("attempt-{seq}"),
-                "provider":"codex","model":null});
-            store
-                .retain_session_observation(
-                    &session,
-                    &crate::session::SessionObservation {
-                        artifact_key: input.clone(),
-                        source: source.clone(),
-                        observed_at: 100 + seq,
-                        task_id: None,
-                        wave_id: None,
-                        payload: json!({"input_id":input,"source":source,"evidence":evidence}),
-                    },
-                )
-                .unwrap();
-        }
-        let snapshot = store.input_history(&input).unwrap();
-        assert_eq!(snapshot.task_pr_id, Some(pr));
-        assert_eq!(snapshot.observed_at, 1);
-        assert_eq!(snapshot.first_provider_attempt_at, Some(10));
-        assert_eq!(snapshot.usage.gaps, 0);
-    }
-
-    #[test]
     fn silences_follow_input_order() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
@@ -1316,321 +1231,6 @@ mod tests {
             store.input_silences(&input).unwrap(),
             [(100, 900), (5_000, 6_000)]
         );
-    }
-
-    #[test]
-    fn history_limits_precede_payload_reads_and_keep_unfinished_work_and_exact_callers() {
-        let home = tempfile::tempdir().unwrap();
-        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
-        let mut template = store.test_session("seed", "run_000000000000000000000000000000ff");
-        template.captured = None;
-        template.caller_artifact_key = Some(template.input_key().unwrap().clone());
-        let attached = loopflow_model::id::LfProcessId::new();
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
-                [&attached],
-            )
-            .unwrap();
-        for at in 1..=60 {
-            let mut session = template.clone();
-            session.id = format!("conversation-{at}").into();
-            session.artifact_key = Some(format!("run_{at:032x}"));
-            session.created_at = at;
-            let session = crate::store::sessions::create_session(
-                &store,
-                session,
-                (at == 1).then_some(&attached),
-            )
-            .unwrap();
-            record_captured_start(&store, &session.id, &at.to_string());
-            if at != 1 {
-                store
-                    .record_session_event(
-                        &session.id,
-                        &"thread".into(),
-                        &at.to_string(),
-                        SessionEventKind::Completed,
-                        &json!({"status":"completed"}),
-                    )
-                    .unwrap();
-            }
-        }
-        let (recent, truncated) = store
-            .recent_conversation_history(None, None, None, 0, 5)
-            .unwrap();
-        assert!(truncated);
-        assert_eq!(recent.len(), 5);
-        assert_eq!(
-            recent.iter().map(|row| row.observed_at).collect::<Vec<_>>(),
-            [60, 59, 58, 1, 1]
-        );
-        let exact = store
-            .conversation_history(
-                None,
-                None,
-                None,
-                Some(template.input_key().unwrap().as_str()),
-                0,
-                false,
-            )
-            .unwrap();
-        assert_eq!(
-            exact.len(),
-            60,
-            "an exact caller drill has no presentation budget"
-        );
-        let boundary = store
-            .conversation_history(None, None, None, None, 59, false)
-            .unwrap();
-        assert_eq!(boundary.len(), 2);
-        assert_eq!(boundary[1].observed_at, 59);
-        assert_eq!(
-            store
-                .conversation_history(None, None, None, None, 59, true)
-                .unwrap()
-                .len(),
-            59,
-            "completed native turns in the window retain older captures"
-        );
-        // Corrupt body evidence outside the selected budget cannot break a list;
-        // exact detail still reports that real error instead of hiding it.
-        store.conn.lock().unwrap().execute(
-            "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
-             SELECT session_id,'observed',receipt_key||':events.jsonl:1',10,'{',seq FROM session_events
-             WHERE kind='captured' AND session_id='conversation-10'", []).unwrap();
-        assert_eq!(
-            store
-                .recent_conversation_history(None, None, None, 0, 5)
-                .unwrap()
-                .0,
-            recent
-        );
-        assert!(store
-            .input_history("run_0000000000000000000000000000000a")
-            .is_err());
-        // A turn left open by an attachment that has exited is over: it stops
-        // holding a place in the recent list.
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "UPDATE processes SET completed_at=100 WHERE id IN (SELECT lf_process_id FROM session_events WHERE session_id='conversation-1' AND kind='started')",
-                [],
-            )
-            .unwrap();
-        assert_eq!(
-            store
-                .recent_conversation_history(None, None, None, 0, 5)
-                .unwrap()
-                .0
-                .iter()
-                .map(|row| row.observed_at)
-                .collect::<Vec<_>>(),
-            [60, 59, 58, 57, 1]
-        );
-        assert!(store
-            .conversation_history(
-                None,
-                None,
-                None,
-                Some(template.input_key().unwrap().as_str()),
-                0,
-                false
-            )
-            .is_err());
-    }
-
-    #[test]
-    fn process_completion_ends_inputs_without_exit_events() {
-        for captured in [true, false] {
-            let home = tempfile::tempdir().unwrap();
-            let store =
-                crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
-            let mut session =
-                store.test_session("seed", &crate::session_record::new_artifact_key());
-            session.id = "conversation".into();
-            session.captured = None;
-            session.artifact_key = Some(crate::session_record::new_artifact_key());
-            let process = loopflow_model::id::LfProcessId::new();
-            let creator = loopflow_model::id::LfProcessId::new();
-            {
-                let conn = store.conn.lock().unwrap();
-                conn.execute(
-                    "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
-                    [&process],
-                )
-                .unwrap();
-            }
-            store.conn.lock().unwrap().execute(
-                "INSERT INTO processes(id,trace_id,started_at,completed_at) VALUES(?1,'fixture',1,25)", [&creator],
-            ).unwrap();
-            // Preparation may exit before another lf attaches and starts the turn.
-            crate::store::sessions::create_session(&store, session, Some(&creator)).unwrap();
-            {
-                let conn = store.conn.lock().unwrap();
-                conn.execute("UPDATE agent_sessions SET input_published=?1", [captured])
-                    .unwrap();
-                conn.execute(
-                    "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,observed_at,payload,captured_event,lf_process_id)
-                     SELECT id,'thread','turn','started','',10,'{}',CASE WHEN ?1 THEN current_capture END,?2 FROM agent_sessions WHERE id='conversation'",
-                    rusqlite::params![captured,process],
-                ).unwrap();
-            }
-            let completed_since = || {
-                store
-                    .conversation_history(None, None, None, None, 20, true)
-                    .unwrap()
-            };
-            assert!(completed_since().is_empty());
-            // A turn with unknown ownership must not fall back to its ended creator.
-            store.conn.lock().unwrap().execute(
-                "UPDATE session_events SET lf_process_id=NULL WHERE session_id='conversation' AND kind='started'",
-                [],
-            ).unwrap();
-            assert!(completed_since().is_empty());
-            store.conn.lock().unwrap().execute(
-                "UPDATE session_events SET lf_process_id=?1 WHERE session_id='conversation' AND kind='started'",
-                [&process],
-            ).unwrap();
-            // An unrelated attachment's exit cannot finish this input.
-            store
-                .conn
-                .lock()
-                .unwrap()
-                .execute(
-                    "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
-                 VALUES('conversation','observed','attachment:other:exit',30,'{}')",
-                    [],
-                )
-                .unwrap();
-            assert!(completed_since().is_empty());
-            store
-                .conn
-                .lock()
-                .unwrap()
-                .execute(
-                    "UPDATE processes SET completed_at=30 WHERE id=?1",
-                    [&process],
-                )
-                .unwrap();
-            let history = completed_since();
-            assert_eq!(history.len(), 1, "captured={captured}");
-            assert_eq!(history[0].captured.is_some(), captured);
-            assert!(
-                history[0].providers[0].outcome.is_none(),
-                "process death is not provider success"
-            );
-        }
-    }
-
-    #[test]
-    fn aggregate_history_discovers_unattributed_native_receipts_without_a_capture() {
-        let home = tempfile::tempdir().unwrap();
-        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
-        store.test_session("conversation", "run_00000000000000000000000000000001");
-        let counts = json!({"inputTokens":12,"outputTokens":3,
-            "cachedInputTokens":0,"reasoningOutputTokens":0});
-        for (turn, at) in [("old", 10), ("recent", 100)] {
-            store
-                .record_session_event(
-                    "conversation",
-                    &"thread".into(),
-                    turn,
-                    SessionEventKind::Usage,
-                    &json!({"total":counts,"last":counts}),
-                )
-                .unwrap();
-            store
-                .record_session_event(
-                    "conversation",
-                    &"thread".into(),
-                    turn,
-                    SessionEventKind::Completed,
-                    &json!({"status":"completed"}),
-                )
-                .unwrap();
-            // Simulated observation times exercise the public reader's window.
-            store
-                .conn
-                .lock()
-                .unwrap()
-                .execute(
-                    "UPDATE session_events SET observed_at=?1 WHERE provider_turn=?2",
-                    (at, turn),
-                )
-                .unwrap();
-        }
-        let rows = store
-            .conversation_history(None, None, None, None, 50, true)
-            .unwrap();
-        assert_eq!(
-            rows.len(),
-            1,
-            "an older unlinked turn cannot hide or join the recent one"
-        );
-        let history = &rows[0];
-        assert!(history.captured.is_none());
-        assert!(history.artifact_key.is_none());
-        assert!(history.task_id.is_none());
-        assert!(history.wave_id.is_none());
-        assert!(history.recorded_outcome.is_none());
-        assert_eq!(history.observed_at, 100);
-        assert_eq!(history.providers.len(), 1);
-        let provider = &history.providers[0];
-        assert!(
-            matches!(&provider.reference, crate::session_record::ProviderHistoryReference::NativeTurn {
-            turn, start_seq: None, completion_seq: Some(_), .. } if turn == "recent")
-        );
-        assert!(provider.lf_process_id.is_none());
-        assert!(provider.task_id.is_none());
-        assert!(provider.started_at.is_none());
-        assert_eq!(provider.outcome.as_deref(), Some("completed"));
-        assert_eq!(history.usage.input_tokens, Some(12));
-        assert_eq!(history.usage.streams, 1);
-        assert_eq!(
-            history.usage.final_streams, 0,
-            "a missing start keeps usage coverage partial"
-        );
-        assert!(store
-            .conversation_history(None, None, Some("missing-task"), None, 0, true)
-            .unwrap()
-            .is_empty());
-        let (recent, truncated) = store
-            .recent_conversation_history(None, None, None, 50, 1)
-            .unwrap();
-        assert_eq!(recent, vec![history.clone()]);
-        assert!(!truncated);
-        assert_eq!(
-            store
-                .conversation_history(None, None, None, None, 0, true)
-                .unwrap()
-                .len(),
-            3,
-            "both unlinked turns and the reserved capture retain independent evidence"
-        );
-        let wave = loopflow_model::id::WaveId::new();
-        crate::work::wave::bootstrap::upsert_wave(
-            &store,
-            &crate::work::wave::Wave::new(wave.clone(), "proof".into(), "/repo".into()),
-        )
-        .unwrap();
-        // Imported native history can establish Work without a capture. That
-        // turn cannot lend its attribution to another unlinked receipt.
-        store.conn.lock().unwrap().execute(
-            "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,wave_id,observed_at,payload)
-             VALUES('conversation','thread','owned','started','',?1,110,'{}')", [wave.as_str()],
-        ).unwrap();
-        let scoped = store
-            .conversation_history(Some(wave.as_str()), None, None, None, 0, true)
-            .unwrap();
-        assert_eq!(scoped.len(), 1);
-        assert_eq!(scoped[0].providers.len(), 1);
-        assert_eq!(scoped[0].wave_id.as_ref(), Some(&wave));
     }
 
     #[test]
@@ -1855,85 +1455,6 @@ mod tests {
             .is_some());
     }
 
-    /// `lf history` reads inputs by this bound and stops early, so an input
-    /// captured long ago whose completion is the newest fact still leads.
-    #[test]
-    fn no_decoded_time_follows_its_inputs_bound() {
-        let home = tempfile::tempdir().unwrap();
-        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
-        let old = crate::session_record::new_artifact_key();
-        let session = store.test_session("old", &old);
-        store.test_session("new", &crate::session_record::new_artifact_key());
-        store
-            .record_session_event(
-                "new",
-                &"thread".into(),
-                "turn",
-                SessionEventKind::Started,
-                &json!({}),
-            )
-            .unwrap();
-        // Captures are immutable and stamped now; later facts follow them.
-        let now = time::OffsetDateTime::now_utc().unix_timestamp();
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "UPDATE session_events SET observed_at=?1 WHERE session_id='new' AND kind='started'",
-                [now + 100],
-            )
-            .unwrap();
-        let ended_at = time::OffsetDateTime::from_unix_timestamp(now + 200).unwrap();
-        store
-            .retain_session_observation(
-                &session,
-                &crate::session::SessionObservation {
-                    artifact_key: old.clone(),
-                    source: "terminal.json".into(),
-                    observed_at: ended_at.unix_timestamp(),
-                    task_id: None,
-                    wave_id: None,
-                    payload: json!({"input_id": old, "source": "terminal.json",
-                    "evidence": crate::session_record::TerminalReceipt {
-                        schema_version: 1,
-                        outcome: "ok".into(),
-                        ended_at,
-                        result_ref: None,
-                    }}),
-                },
-            )
-            .unwrap();
-
-        let mut pending = store
-            .pending_conversation_history(None, None, None, 0, true)
-            .unwrap();
-        pending
-            .inputs
-            .sort_by_key(|input| std::cmp::Reverse(input.latest));
-        let histories: Vec<_> = pending
-            .inputs
-            .iter()
-            .map(|input| (input.latest, store.decode_history(&pending, input).unwrap()))
-            .collect();
-        assert_eq!(histories[0].1.artifact_key.as_deref(), Some(old.as_str()));
-        assert_eq!(histories[0].1.recorded_at, Some(now + 200));
-        for (latest, history) in histories {
-            let reported = [Some(history.observed_at), history.recorded_at]
-                .into_iter()
-                .chain(
-                    history
-                        .providers
-                        .iter()
-                        .flat_map(|provider| [provider.started_at, provider.completed_at]),
-                )
-                .flatten();
-            for at in reported {
-                assert!(at <= latest, "{at} follows its input's bound {latest}");
-            }
-        }
-    }
-
     #[test]
     fn completed_turn_does_not_complete_the_conversation() {
         let home = tempfile::tempdir().unwrap();
@@ -2126,7 +1647,7 @@ mod tests {
             )
             .unwrap()
             .is_empty());
-        let old = store.input_history(&first_input).unwrap();
+        let old = crate::store::sessions::input_history(&store, &first_input).unwrap();
         assert_eq!(old.usage.input_tokens, Some(18));
         assert_eq!(old.usage.output_tokens, Some(5));
         assert_eq!(old.usage.cost_usd, None);
@@ -2150,7 +1671,7 @@ mod tests {
                 payload:json!({"input_id":first_input,"source":source,"evidence":evidence})
             }).unwrap();
         }
-        let old = store.input_history(&first_input).unwrap();
+        let old = crate::store::sessions::input_history(&store, &first_input).unwrap();
         assert_eq!(old.usage.streams, 1);
         assert_eq!(old.usage.input_tokens, Some(18));
         assert_eq!(old.usage.output_tokens, Some(5));
@@ -2194,9 +1715,11 @@ mod tests {
                 &json!({"total":counts(100,50),"last":counts(10,5)}),
             )
             .unwrap();
-        let partial = store
-            .input_history(replacement.input_key().unwrap().as_str())
-            .unwrap();
+        let partial = crate::store::sessions::input_history(
+            &store,
+            replacement.input_key().unwrap().as_str(),
+        )
+        .unwrap();
         assert_eq!(partial.usage.total_input_tokens, Some(10));
         assert_eq!(partial.usage.output_tokens, Some(5));
         assert!(partial.usage.gaps > 0);
@@ -2241,50 +1764,6 @@ mod tests {
             plan.iter()
                 .any(|step| step.contains("session_events_captured_event")),
             "{plan:?}"
-        );
-    }
-
-    #[test]
-    fn native_usage_cannot_skip_a_turn_without_a_notification_for_its_baseline() {
-        let home = tempfile::tempdir().unwrap();
-        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
-        let input = crate::session_record::new_artifact_key();
-        store.test_session("conversation", &input);
-        let counts = |value| {
-            json!({"inputTokens":value,"outputTokens":0,
-            "cachedInputTokens":0,"reasoningOutputTokens":0,"cacheWriteInputTokens":0})
-        };
-        for (turn, total, last) in [("a", Some(20), 20), ("b", None, 30), ("c", Some(60), 10)] {
-            record_captured_start(&store, "conversation", turn);
-            if let Some(total) = total {
-                store
-                    .record_session_event(
-                        "conversation",
-                        &"thread".into(),
-                        turn,
-                        SessionEventKind::Usage,
-                        &json!({"total":counts(total),"last":counts(last)}),
-                    )
-                    .unwrap();
-            }
-            store
-                .record_session_event(
-                    "conversation",
-                    &"thread".into(),
-                    turn,
-                    SessionEventKind::Completed,
-                    &json!({"status":"completed"}),
-                )
-                .unwrap();
-        }
-        // B's usage is unknown: 20 for A and C's 10-token suffix.
-        let usage = store.input_history(&input).unwrap().usage;
-        assert_eq!(usage.total_input_tokens, Some(30));
-        assert_eq!(usage.streams, 2);
-        assert_eq!(usage.final_streams, 0);
-        assert!(
-            usage.gaps > 0,
-            "C has only its observed suffix, not a complete baseline"
         );
     }
 

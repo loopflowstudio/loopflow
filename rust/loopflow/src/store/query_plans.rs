@@ -589,13 +589,12 @@ mod tests {
             )
             .unwrap();
         let mut traced = statements(&store, || {
-            store
-                .recent_conversation_history(None, None, None, 100, 50)
+            crate::store::sessions::recent_conversation_history(&store, None, None, None, 100, 50)
                 .unwrap();
             store
                 .pending_conversation_history(None, None, None, 100, true)
                 .unwrap();
-            store.input_history(&input).unwrap();
+            crate::store::sessions::input_history(&store, &input).unwrap();
         });
         // A Task drill's window is the Task (Desktop Task history, `task.context`).
         // Its selector resolution scans `tasks` for short-id prefixes once per

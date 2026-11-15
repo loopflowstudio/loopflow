@@ -2932,9 +2932,16 @@ mod local_planning_tests {
             store.session("generated").unwrap().unwrap().title,
             "abcdef Fix login"
         );
-        let history = store
-            .conversation_history(None, None, Some("abcdef"), None, 0, true)
-            .unwrap();
+        let history = crate::store::sessions::conversation_history(
+            &store,
+            None,
+            None,
+            Some("abcdef"),
+            None,
+            0,
+            true,
+        )
+        .unwrap();
         assert_eq!(history.len(), 2);
         assert!(history
             .iter()
@@ -2978,9 +2985,16 @@ mod local_planning_tests {
             store.session("generated").unwrap().unwrap().title,
             "ENG-123 Review login"
         );
-        let history = store
-            .conversation_history(None, None, Some("eng-123"), None, 0, true)
-            .unwrap();
+        let history = crate::store::sessions::conversation_history(
+            &store,
+            None,
+            None,
+            Some("eng-123"),
+            None,
+            0,
+            true,
+        )
+        .unwrap();
         assert_eq!(history.len(), 2);
         assert!(history
             .iter()

@@ -1180,38 +1180,42 @@ mod tests {
             task.id.as_str(),
             task.linear_id.as_ref().unwrap().as_str(),
         ] {
-            let rows = store
-                .sqlite
-                .conversation_history(
-                    Some(wave.slug()),
-                    Some(project.id.as_str()),
-                    Some(selector),
-                    None,
-                    0,
-                    false,
-                )
-                .unwrap();
-            assert_eq!(rows.len(), 2);
-            for snapshot in &rows {
-                assert_eq!(snapshot.task_id.as_ref(), Some(&task.id));
-            }
-            assert!(store
-                .sqlite
-                .conversation_history(None, Some("other"), Some(selector), None, 0, false)
-                .unwrap()
-                .is_empty());
-        }
-        let children = store
-            .sqlite
-            .conversation_history(
+            let rows = crate::store::sessions::conversation_history(
+                &store.sqlite,
+                Some(wave.slug()),
+                Some(project.id.as_str()),
+                Some(selector),
                 None,
-                None,
-                None,
-                Some(worker.input_key().unwrap().as_str()),
                 0,
                 false,
             )
             .unwrap();
+            assert_eq!(rows.len(), 2);
+            for snapshot in &rows {
+                assert_eq!(snapshot.task_id.as_ref(), Some(&task.id));
+            }
+            assert!(crate::store::sessions::conversation_history(
+                &store.sqlite,
+                None,
+                Some("other"),
+                Some(selector),
+                None,
+                0,
+                false
+            )
+            .unwrap()
+            .is_empty());
+        }
+        let children = crate::store::sessions::conversation_history(
+            &store.sqlite,
+            None,
+            None,
+            None,
+            Some(worker.input_key().unwrap().as_str()),
+            0,
+            false,
+        )
+        .unwrap();
         assert_eq!(
             children[0].artifact_key.as_deref(),
             Some(helper.input_key().unwrap().as_str())
@@ -1225,17 +1229,16 @@ mod tests {
                 .await
                 .unwrap();
         }
-        let children = store
-            .sqlite
-            .conversation_history(
-                None,
-                None,
-                None,
-                Some(worker.input_key().unwrap().as_str()),
-                0,
-                false,
-            )
-            .unwrap();
+        let children = crate::store::sessions::conversation_history(
+            &store.sqlite,
+            None,
+            None,
+            None,
+            Some(worker.input_key().unwrap().as_str()),
+            0,
+            false,
+        )
+        .unwrap();
         assert_eq!(
             children.len(),
             56,

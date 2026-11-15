@@ -30,10 +30,11 @@ fn history_times_provider_work_from_its_first_recorded_attempt() {
         .unwrap();
     capture.finish("completed").unwrap();
 
-    let history = crate::session_record::row_store(&capture.artifact_dir())
-        .unwrap()
-        .input_history(capture.artifact_key().as_str())
-        .unwrap();
+    let history = crate::store::sessions::input_history(
+        &crate::session_record::row_store(&capture.artifact_dir()).unwrap(),
+        capture.artifact_key().as_str(),
+    )
+    .unwrap();
     let attempts = history
         .providers
         .iter()

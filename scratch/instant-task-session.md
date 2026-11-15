@@ -1,6 +1,6 @@
 # LOO-906: immediate interactions across Desktop and mobile
 
-Implementation continues 2026-11-15 from checkpoint `c8d86049e1` on
+Implementation continues 2026-11-15 from checkpoint `fff8aaa849` on
 origin/main `9cafc410ee`. Supersedes the Desktop-only delivery
 boundary. No shipping or merge decision is recorded. Placement remains this Task;
 no Wave is selected.
@@ -43,10 +43,8 @@ Jack Heart:
 > “can we talk about what are the fundamental causes of so many intermediate states and non-immediate reactivity?”
 > “is it about slow sql? insufficient reactive UI archtiecture?”
 
-The reported LOO-904 screenshot described Reading workflow, Restoring workspace,
-Not started/Start, and Conversation change unconfirmed. The screenshot was not
-available here. No native latency distribution or SQL attribution for these
-interactions has been measured.
+The LOO-904 screenshot (not available here) was described as Reading workflow,
+Restoring workspace, Not started/Start, and Conversation change unconfirmed.
 
 ## What the current code establishes
 
@@ -57,7 +55,7 @@ still disagree about when an interaction happened. Desktop `WorkModel`/
 delete list). Revision-6 subscriptions now provide exact-query snapshot stamps;
 server operation admission covers all typed writes, while live client outbox
 migration still specializes creation. Native Session/Graph owners retain readiness.
-Predecessor map: `bb936ac371`.
+Predecessor map: `bb936ac371`; earlier Desktop design: `7030e08a`.
 
 Completion already saves a domain request, checks execution/PR conditions, settles
 state, syncs planning and schedules retirement. Creation already prepares its
@@ -65,19 +63,12 @@ primary Session and Graph. Those waits are not a measured SQL/latency diagnosis.
 
 ## Established designs and dependency choices
 
-Research sources, the architecture and mutable-replica comparisons remain at
-`8b42a874db6d925382c2e113c172c840496c6ea0` and `bb936ac371` (`scratch/instant-task-session.md`).
-Apollo/TanStack supply operation-layer and rebase precedents; neither supplies
-LF domain recovery. Apollo iOS would require GraphQL migration. Observation stays
-as the native rendering model; SwiftData, Sharing and TCA do not establish causal
-synchronization. A mutable replica would also require reproducing server-derived
-Work membership and conflict policies. The selected engineering direction remains
-confirmed cache plus ordered operation overlays, with one normalized owner.
-
-The outbox now uses system SQLite3 directly on both native targets. This simpler
-reversible dependency choice replaces the unadopted GRDB proposal; confirmed
-cache/query transactions still belong in that same database. No new library is
-installed. Membership coverage must be proved before client projection migration.
+Research and replica comparisons: `8b42a874db`, `bb936ac371`. Apollo/TanStack
+give operation-layer precedents, not LF domain recovery; SwiftData, Sharing and
+TCA don't give causal sync; a mutable replica would duplicate server-derived
+membership. Direction: confirmed cache plus ordered operation overlays, one
+normalized owner, Observation for rendering. The outbox uses system SQLite3 on
+both targets (GRDB not adopted); the confirmed cache belongs in that database.
 
 The cache/overlay owner must project every affected query, including Dashboard
 membership and counts. If declarative membership cannot cover them, move the pure
@@ -361,9 +352,6 @@ creation whose attachment failed; replace the epoch between presentation and
 incorporation. Each retains exactly its outstanding obligations, with no duplicate
 count delta, replay, recovery prompt or navigation change. Cover both clients.
 
-Replace the interim `presented` deletion and creation-only presentation map in
-the shared projection migration, after domain recovery and effect/stage coverage.
-
 ### Opening another query must preserve pending intent
 
 Next implement direction: affected-query coverage is a dependency rule, not a
@@ -496,8 +484,6 @@ existing bounded input owners: no offline keystroke queue or automatic resend.
   second-submit recovery. Preserve success, duplicate prevention, failure,
   departure, ownership, layout and first-turn coverage on the shared path.
 
-Previous Desktop design: `7030e08a:scratch/instant-task-session.md`.
-
 ## Forbidden outcomes
 
 No per-screen exception sets, second mobile submission ledger, whole-snapshot
@@ -529,8 +515,7 @@ and their consumers must converge together.
 5. Measure actual latency and remove demonstrated backend waits independently of
    presentation; run the full acceptance matrix and native demo.
 
-Slice status and order are under Current implementation cut; slice 4 has not
-started, and slice 3 deletes the interim launch exception.
+Slice status is under Current implementation cut; slice 4 has not started.
 
 Headless acceptance uses deterministic held/reordered replies, not timing sleeps:
 shared reducer tests cover overlapping success/failure, stale reads, partial pages,
@@ -542,12 +527,9 @@ Two windows and two clients prove all projected surfaces agree. The
 command registry has exhaustive policy coverage. Receipt fixtures include Rust,
 Swift/macOS and iOS; upgrade tests preserve existing pending submissions.
 
-Planned focused commands once those tests exist: `scripts/test_desktop.sh --filter
-'ClientWorkStoreTests|WorkDestinationTests|NewTaskTests'`, `uv run python
-scripts/test_ios.py -only-testing:LoopflowiOSTests/ClientWorkInteractionTests`, and
-the new Rust operation-receipt/stamped-subscription module filters. Exact Rust
-filters follow the named modules created by implementation. Gate owns wider suites
-and documented commands; display diagnostics remain demo work.
+Focused commands: `ClientWorkStoreTests|OperationRecoveryPresentationTests` on
+Desktop, `LoopflowiOSTests/ClientWorkStoreTests` on iOS, plus Rust operation
+module filters. Gate owns wider suites; display diagnostics remain demo work.
 
 ## Latency and open review decisions
 
@@ -593,12 +575,7 @@ mutation-family fences and both-client cutover. No open product choice.
 - The existing lagging-reading test checks only a stamp. It is not projection,
   list/count or selection acceptance. These remain required before cutover.
 
-The shared owner now persists presentation acknowledgment and departed epochs,
-retains missing/evidence status as unavailable, and derives planning independently
-from the saved diagnostic. Desktop consumes those annotations and keeps its
-observer after presentation. Unclassified diagnostics deliberately remain Inspect:
-no effect registry currently establishes which domain can discharge them. This
-is a conservative interim state, not completed independent-effect recovery.
+Interim state and its known regression are under Current implementation cut.
 
 ### Next cut: make obligations executable
 
@@ -682,9 +659,6 @@ no longer mutate that resource; an unrelated planning wait must not hold every
 later edit, while a still-live external writer cannot be bypassed by lookup.
 Presentation acknowledgment and cache retirement retain their existing rules.
 
-Server coverage: `planning_recovery_tracks_the_exact_change_across_newer_edits_and_restart`
-(`store/sqlite/task_content.rs`) and completion output loss after external delivery.
-
 Preserve the launch counterexamples in the shared tests: pre-admission cached
 Task data, a fresh unrelated planning frame, unavailable or missing Task rows,
 current no-Graph results, Graph removal after reconciliation, reconnect, departure
@@ -752,10 +726,24 @@ evidence is separate from historical result/error and becomes unavailable on
 epoch replacement. Desktop's recovery message reads the shared recovery annotations and Retry waits
 for its prior observer. Acknowledgment clears only a converged result prompt;
 missing planning evidence and unrelated diagnostics retain Inspect. Tests cover macOS
-presentation and the shared owner on both targets. Live Work incorporation,
-per-query overlays and phone recovery presentation remain open.
+presentation (Task edit fixtures only) and the shared owner on both targets. Live
+Work incorporation, per-query overlays and phone recovery presentation remain open.
 
-Remaining, in order: integrate live Work query incorporation and current recovery
+2026-11-15 review of `c8d86049e1` found missing planning evidence treated as
+resolved and presentation deleting finished requests. `fff8aaa849` already
+changed both (`OperationRecovery.planning`, `ClientWorkDatabase.remove` deleted).
+Read from code, not run: the fix overcorrects. `task.filed`
+(`store/sqlite/operations.rs`) records no `planning_changes`, so every finished
+`task.create`/`session.new` derives `.unavailable`, `needsInspection` stays true,
+and Desktop keeps a "Planning confirmation unavailable" Inspect/Retry row after a
+successful launch. Nothing retires an operation, so every saved command stays in
+`operations` and `CreationRecovery.refresh` starts a reconcile/observer for each
+on every launch. Both await the command/effect declaration below; neither is
+fixed by a Swift-side kind check.
+
+Remaining, in order: the command/effect declaration that gives creation its
+planning correlation (or declared inapplicability, e.g. `session.new`) and finite
+retirement, with a successful-creation presentation test; integrate live Work query incorporation and current recovery
 actions with saved-result/planning observation (including reordered replies,
 restart and later selection); lost-output coverage for families beyond completion;
 remaining mutation-family recovery and fences (remote/detached,
@@ -842,45 +830,27 @@ must retain their coverage. The detailed predecessor map is at
 
 ## Benchmark implementation and observations (2026-11-14)
 
-Exact feedback and host preferences are in `desktop-reactivity-feedback.md`.
-The existing performance harness README now maps ADEMark A1–A12/B1–B4/C1–C6 and
-LF workflow journeys to endpoints, fixtures, platforms, coverage and remaining
-work. Sources read: https://ademark.dev/ and https://github.com/zqkra/ademark,
-source HEAD `119a5f7b99247cffbe7f96bb2c36c03496cf3018`, retrieved 2026-11-14.
-The site's C2–C6 reliability methods are written but not run; no borrowed result
-is a Loopflow measurement. Web-reader access failed; a direct HTTP fetch succeeded.
+Exact feedback and host preferences are in `desktop-reactivity-feedback.md`; the
+harness README maps ADEMark (https://github.com/zqkra/ademark at `119a5f7b99`,
+retrieved 2026-11-14) and LF journeys to endpoints. No borrowed result is a
+Loopflow measurement. `desktop_performance.py preflight` rejects contaminated
+hosts; thermal/swap and whole-trial load are not yet checked. `PerfClock.interaction`
+marks separate selection publication, completion return and phone mount from pixels.
+Rust CLI volume reports aggregate SQLite time; mutex/planning/provider attribution
+is incomplete. `measureWriteToVisible` still refers to removed `pm_items.body`.
 
-`desktop_performance.py preflight` retains host CPU/load and rejects contamination
-without stopping other work. Quiet-host native probes inspect display/capture/input
-access without prompting. These probes do not yet establish thermal/swap or
-whole-trial load. Shared `PerfClock.interaction` marks distinguish Desktop
-selection publication/completion return and phone tap/workspace mount from pixels.
-Rust CLI volume adds aggregate SQLite profile time without SQL text/values;
-mutex/planning/provider attribution remains incomplete. The existing headless
-projection measurement now includes 10,000 Tasks/Sessions, preserves each sample
-with an atomic checkpoint outside the interval and refuses to overwrite an old
-result. The rebuilt diagnostic ran; the quiet-host baseline remains missing. Native display/input benchmarks remain unmeasured.
+Observed: both hosts failed load preflight on 2026-11-14 and again 2026-11-15T10:40:27Z
+(CPU 371.0%, load 39.52); the mini runs macOS 15.5 against Desktop's macOS 26
+target. Debug 10k constructor warm P95 235.92 ms on a rejected host (diagnostic
+only). 10k receipt lookup/admission P95 0.033 ms, all 20 receipt statements keyed
+(nextest `7f2b652c-19e3-4026-8961-d4e3f4d84d37`). No gesture, native paint/input or
+backend-stage baseline exists. Raw files and earlier detail: `8b42a874db`,
+`bb936ac371` (`scratch/instant-task-session.md`).
 
-Benchmark observations and raw files: `8b42a874db`; earlier checks: `bb936ac371`
-(both `scratch/instant-task-session.md`). Both hosts failed load preflight on 2026-11-14; the mini also runs macOS 15.5
-against Desktop's macOS 26 target (`ssh mini-heart sw_vers -productVersion`
-reconfirmed 15.5 on 2026-11-15). The rebuilt debug 10k constructor warm P95
-was 235.92 ms on the rejected host; it is diagnostic, not a regression baseline
-or native/SQL attribution. No gesture, native paint/input or full backend-stage
-baseline exists. The 10k receipt diagnostic (nextest run
-`7f2b652c-19e3-4026-8961-d4e3f4d84d37`) had lookup/admission P95 0.033 ms;
-all 20 receipt SQL statements used keyed indexes without table scans.
-`measureWriteToVisible` still refers to removed `pm_items.body` and needs migration.
-The earlier admission LEAK has no established cause. Preflight rejected native measurement at
-2026-11-15T10:40:27Z (CPU 371.0%, one-minute load 39.52), raw
-`/tmp/loo906-state-planning-preflight-session_b2a6/preflight.json`.
+Implementation owns a valid benchmark baseline; demo owns native usability.
 
-Gate owns wider suites and packaging; implementation owns a valid benchmark
-baseline; demo owns native usability judgment.
-
-Earlier Rust checks and raw results: `9fdf6ef582:scratch/instant-task-session.md`.
-Current cut (2026-11-15; inherited `LF_*` cleared):
+Checks at `fff8aaa849` (2026-11-15, `LF_*` cleared; earlier Rust: `9fdf6ef582`):
 - `swift build --build-tests --package-path swift --jobs 4 -Xswiftc -gnone`: passed; existing unrelated warnings remain. Gate owns wider builds.
-- Desktop network boundary, private LF_HOME, `swift test --skip-build --disable-sandbox --package-path swift --no-parallel --filter 'ClientWorkStoreTests|OperationRecoveryPresentationTests'`: 23 passed. Replaced the fixture that allowed returning to a departed epoch with same-lifetime retry before replacement, followed by rejection after replacement. Gate owns broader acceptance.
+- Desktop network boundary, private LF_HOME, `swift test --skip-build --disable-sandbox --package-path swift --no-parallel --filter 'ClientWorkStoreTests|OperationRecoveryPresentationTests'`: 23 passed. Gate owns broader acceptance.
 - `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/ClientWorkStoreTests`: 2 passed; disposable Simulator removed. Gate owns wider iOS acceptance.
-- `check_swift_multiplatform_boundaries.py`, `git diff --check`: passed. Gate owns wider suites and documented commands.
+- `check_swift_multiplatform_boundaries.py`, `git diff --check`: passed.

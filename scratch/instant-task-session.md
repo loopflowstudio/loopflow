@@ -4,8 +4,10 @@ Built on origin/main `9cafc410ee`: conversation/Machine link `a2a0a0fb33`,
 unreachable Machine and Desktop rename `35e2835de1`, fixture teardown `5231746858`,
 observation source `86f99e3315`, typed field support `f9a8da8ae9`. SQL-only and attributed external
 normalization, field-stage incorporation and derived membership answers now
-share the client owner. Dynamic membership and disconnected Move now use that
-same owner; acceptance and remaining work are recorded below. No shipping or merge decision; no Wave selected.
+share the client owner. Dynamic membership, disconnected Move and the projected
+surface cut (boards, portfolio Roadmap/Now, trails, No Wave grouping, counts) use
+that same owner. Next: the Wave detail Task table (current location through
+detail and history, below). No shipping or merge decision; no Wave selected.
 
 ## Direction
 
@@ -336,95 +338,16 @@ The fixed-candidate counterexample and prior design are retained at
 `5c958398a6de:scratch/instant-task-session.md`. The dynamic predicate, field and
 retirement contracts below remain the acceptance contract.
 
-### Next implement direction: facts absorb effects; queries prove their answers
+### Facts absorb effects; queries prove their answers
 
-Headless concept review, 2026-11-15, against `5d0187746f`. Field incorporation
-and derived answer coverage are built. The dynamic/Move replacement is now
-implemented; the validation and outstanding surface migration are below.
-The correction above becomes two contracts rather than one larger query stamp:
-
-1. **Field incorporation.** Each confirmed value identifies its Machine, epoch,
-   schema, entity, field and supporting domain revisions. A committed effect stops
-   writing a field when a value for that same field covers its semantic stage's
-   fence. A later value wins even when it differs from the command's intended
-   value: Complete followed by Reopen must show Reopen. Missing or incomparable
-   provenance cannot absorb an effect. Unknown delivery retains intent until the
-   original receipt resolves it; an unrelated newer fact cannot settle delivery.
-2. **Answer coverage.** A locally evaluated query records its program/definition
-   revision, candidate coverage, and the field/content dependencies actually
-   consumed. This is a client-derived answer, never a Machine `ReadingStamp`.
-   Missing content may make the destination incomplete without reactivating an
-   absorbed parent-Wave effect. A newer parent value cannot establish fresh
-   lifecycle/activity, content, query definitions or candidate coverage.
-
-Keep the original exact-query stamp and body immutable. Cross-query normalization
-joins only values carrying comparable provenance, not whole DTOs by arrival time.
-Do not manufacture a coherent server snapshot by taking vector maxima from
-unrelated readings. Equal provenance with conflicting values is inconsistent;
-retain the known value and require reconciliation rather than picking the last
-arrival. Normalized facts, stage results, incorporation and saved command state
-join transactionally in the existing SQLite owner. The name-field owner is a
-precedent for ownership, not permission to use a sessions fence for Task fields.
-
-**Dynamic membership.** Rust compiles authored scope and filter predicates, with
-stable occurrence paths, instead of prefiltering their identities. Explicit Work
-leaves remain fixed. Both clients evaluate the same finite typed program over
-shared facts; canonical lifecycle/effect rules stay in one declaration, not a
-second Swift derivation of Task state. Preserve descendant-Wave semantics,
-interleaved/shared order, intersections, duplicate winners, hidden occurrences,
-unknown activity and partial reads. If the finite program cannot express these,
-use the portable core before changing consumers.
-
-Headless engineering choice: start with a compact repository candidate manifest
-(identity, parent relationships and membership predicates, not every Task's full
-content) to support dynamic arrivals. Its completeness is scoped to its captured
-revision. Individual fact replies cannot advance that universe or prove absence;
-replacement manifests or complete deltas need deletion evidence too. Cache real
-content separately by identity and provenance. For a known Task moved from A to B,
-both programs can consume its projected parent and cached content even when B's
-last result omitted it. A missing program, ancestor relationship or content stays
-explicitly incomplete; never show a fabricated Task or an exact empty/count.
-Index affected fields/scopes so a gesture does not scan/decode the repository on
-the main actor. Measure the 10k manifest and fan-out when implementing.
-
-**Move and recovery.** The gesture freezes original Machine, Task, destination
-Wave identity (or No Wave), sequence and request ID, then publishes parent intent
-to all affected queries/counts before disk. Keep native workspace, drafts and later
-navigation. Save before send; serialize conflicting Task edits through the earlier
-domain outcome. The domain still resolves the Wave's current Project and validates
-membership; do not freeze a guessed Project or retarget another Machine. Record
-the actual resulting parent/Project value, semantic disposition and fence with
-`task.membership_changed` in its owning transaction, including definite refusal.
-Commit followed by planning-sync failure retains the move. Recover an uncertain
-send by original ID. No receipt stage or send history means no blind retry.
-
-**Retirement and migration.** Query completeness and command delivery remain
-separate obligations. Absorbed field effects cannot return after close/restart.
-Retirement retains the necessary normalized facts and derived coverage, or marks
-an evicted/old base unavailable under scoped reload floors. Do not retain full
-commands forever merely because content is missing. Older query-local caches lack
-this proof: invalidate their derived membership, retain exact commands/receipts
-and recover their original IDs. Never relabel old cache data as new coverage.
-Delete `WorkQueryEffect.covered`'s stamp-only decision and
-`ClientWorkDatabase.effectsCover`'s arbitrary revision shortcut with their callers;
-replace the current state-only reducer and prefiltered dynamic nodes together.
-Preserve exact-query stamped refresh as an authoritative input.
-
-Required counterexamples before caller migration:
-- Held Working query → Complete commits → another query supplies Reopen's newer
-  state → old query reevaluates: Task is visible; Complete never re-hides it.
-- Move A→B commits → newer parent C arrives from another query: held A/B queries
-  cannot reapply A→B. A stale B reply cannot replace C; an incomparable one cannot
-  silently select a winner.
-- Fresh parent, missing content or unknown activity: old move stays incorporated,
-  but the dependent answer/count stays incomplete. A covering count cannot release
-  a held list's independent coverage.
-- Destination omitted the moved Task; two windows and both clients update source,
-  destination and counts from real cached content before disk. Repeat with No Wave,
-  descendant Waves, repeated authored occurrences and a changed saved definition.
-- Close both queries, retire, restart offline: reconstruct the same projection or
-  show unavailable under a persisted floor. Lost reply, refusal, newer local move,
-  commit-then-sync-failure and epoch change neither replay nor steal selection.
+Built: field incorporation, answer coverage, dynamic membership, Move/recovery and
+query-specific retirement. The full contracts and required counterexamples are
+at `aee0e10dc603:scratch/instant-task-session.md` (this heading's earlier title,
+"Next implement direction: facts absorb effects…"); their tests are mapped under
+Dynamic membership and disconnected Move below. Still binding: equal provenance
+with conflicting values is inconsistent, never last-arrival; a client-derived
+answer is never a Machine `ReadingStamp`; missing program, ancestry or content
+stays incomplete, never an exact empty/count.
 
 Proposed usage text for both READMEs after acceptance:
 > Move a Task to a Wave or No Wave. Cached lists and counts change immediately;
@@ -624,7 +547,7 @@ retirement, restart (`testDynamicMoveIntoOmittedDestination…`); later navigati
 offline (`testDynamicMovePublishesBothWindows…`); Complete→newer Reopen across
 queries, retirement, restart (`testDerivedAnswerUsesIncorporatedReopen…`);
 reconnect (`testDerivedCoveragePublishesDisconnect…`). The surface cut adds
-two-client Complete→Reopen and unresolved-destination coverage below.
+the projected acceptance map under Projected surface validation.
 Prior runs: `5c958398a6de:scratch/instant-task-session.md`.
 
 Prior dynamic/Move checks, including Desktop, iOS and Rust commands/results:
@@ -638,6 +561,12 @@ and gate as previously assigned.
 Shared fixtures now supply parent/lifecycle/activity independently of roadmap
 membership. A dated Done count stays incomplete when projected completion precedes
 its completion date; all-ages Done can count the known lifecycle immediately.
+Acceptance map (`ClientWorkQueryTests/testProjectedInventory…`): descendants and
+lifecycle vs activity (`ScopesDescendants…`), unresolved destination and refusal
+(`MoveIntoUnresolvedDestination…`), changed definition (`ChangedSavedDefinition…`),
+two-client Complete→Reopen with restart (`TwoClientsCompleteThenReopen…`),
+superseded retry (`FailedMoveCannotRetryBehindLaterMove`); surfaces in
+`WorkNavigationTests` "Projected fields move boards and trails…".
 The real CLI fixture uses Manual portfolio selection before adding its repository;
 adding a manual path alone left its default Folder reading empty.
 

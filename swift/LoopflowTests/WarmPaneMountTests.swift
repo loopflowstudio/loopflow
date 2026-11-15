@@ -64,13 +64,14 @@ struct WarmPaneMountTests {
         #expect(store.attachment(record.id) == .opening)
     }
 
-    @Test("Take back replaces a viewer another client ended")
-    func takeBackReplacesEndedViewer() async throws {
+    @Test("Take back replaces a displaced or ended viewer", arguments: ["ended", "connected"])
+    func takeBackReplacesDisplacedViewer(state: String) async throws {
         _ = NSApplication.shared
         let pool = GhosttySurfacePool(runtime: .shared)
-        let ended = #"{"generation":1,"state":"ended","input":false,"native_ready":false,"message":null}"#
+        let reading = #"{"generation":1,"state":"\#(state)","input":false,"native_ready":false,"message":null}"#
+        let expected: DesktopOpening.Status = state == "ended" ? .failed : .elsewhere
         let record = try warmSession(id: "displaced", argv: ["/bin/sh", "-c",
-            "(printf '%s\\n' '\(ended)'; sleep 30) | nc -U \"$LF_SERVER_STATUS\" & exec cat"])
+            "(printf '%s\\n' '\(reading)'; sleep 30) | nc -U \"$LF_SERVER_STATUS\" & exec cat"])
         let terminal = TerminalIdentity.session(record.id, machineId: fixtureMachineId)
         let store = SessionsStore(repoPath: NSTemporaryDirectory(), query: RegistryQuery { args, _ in
             guard !args.contains("--reveal-existing") else { throw RegistryQueryError("Take back must resume") }
@@ -86,10 +87,10 @@ struct WarmPaneMountTests {
         }
         store.recordPaneLive(record.id)
         let deadline = ContinuousClock.now + .seconds(10)
-        while store.attachment(record.id) != .failed, ContinuousClock.now < deadline {
+        while store.attachment(record.id) != expected, ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(20))
         }
-        try #require(store.attachment(record.id) == .failed)
+        try #require(store.attachment(record.id) == expected)
         #expect(store.sessions.first?.state == .live)
         await store.moveHere(record.id)
         #expect(old.surface == nil)

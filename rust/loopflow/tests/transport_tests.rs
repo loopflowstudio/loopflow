@@ -2857,7 +2857,7 @@ done
     first.wait_text("draft:unsent-");
     first.stop();
 
-    let open = |name: &str| {
+    let open = |name: &str, input: bool| {
         let status = ConnectionStatus::new(fixture.home.path().join(name));
         let mut command = service.command(&["session", "resume", "--reveal-existing", &session]);
         command
@@ -2870,7 +2870,7 @@ done
             let reading = status.reading();
             if reading.as_ref().is_some_and(|reading| {
                 reading["state"] == "connected"
-                    && reading["input"] == true
+                    && reading["input"] == input
                     && reading["native_ready"] == true
             }) {
                 break;
@@ -2881,7 +2881,7 @@ done
         }
         (view, status)
     };
-    let (mut reopened, status) = open("reopened.sock");
+    let (mut reopened, status) = open("reopened.sock", true);
     reopened
         .child
         .stdin
@@ -2897,10 +2897,42 @@ done
         "rows":24,"cols":80,"own":"request"}));
     assert_eq!(competing.until_reply()["kind"], "busy");
     drop(competing);
-    reopened.assert_viewing("the reopened Desktop viewer");
+    let mut takeover = service.command(&["session", "resume", &session]);
+    takeover.env("PATH", &path);
+    let mut takeover = Terminal::spawn(takeover);
+    wait_server_status(&status, "connected", false, 0);
+    reopened.assert_viewing("the read-only Desktop viewer");
+    takeover
+        .child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(b"other-viewer\n")
+        .unwrap();
+    reopened.wait_text("received:other-viewer");
     reopened.stop();
     drop(status);
-    let (mut refreshed, _status) = open("refreshed.sock");
+    // Refresh must display the same provider without displacing the newer viewer.
+    let (mut refreshed, status) = open("refreshed.sock", false);
+    takeover
+        .child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(b"still-elsewhere\n")
+        .unwrap();
+    refreshed.wait_text("received:still-elsewhere");
+    takeover.assert_viewing("the controller after Desktop Refresh");
+    // Desktop's explicit Move here action takes control on this same connection.
+    let generation = status.reading().unwrap()["generation"].as_u64().unwrap();
+    writeln!(
+        status.state.borrow_mut().socket.as_mut().unwrap(),
+        "{}",
+        json!({"kind":"move", "generation":generation})
+    )
+    .unwrap();
+    wait_server_status(&status, "connected", true, generation + 1);
+    assert!(takeover.wait_exit().success());
     refreshed
         .child
         .stdin
@@ -2911,7 +2943,7 @@ done
     refreshed.wait_text("received:after-refresh");
     assert_eq!(
         fixture.wait_file("answers"),
-        "unsent-draft\nafter-refresh\n"
+        "unsent-draft\nother-viewer\nstill-elsewhere\nafter-refresh\n"
     );
     assert_eq!(fixture.launches(1), vec![launched.clone()]);
     assert_eq!(session_of(&fixture.sql(), &launched), session);

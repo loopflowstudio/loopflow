@@ -86,6 +86,13 @@ checks `launchId` once beside the state transition. Focus recovery reuses
 `acceptsFirstResponder` for enabled/exited/detaching state. No deletion targets
 remain; retirement ordering and addressed-store routing still earn their place.
 
+Competing-viewer iteration deletes Desktop's exit-on-control-loss branch and its
+initial Busy failure, plus reveal's refusal of an active Session even when its
+held terminal answers. Terminal viewers still leave on control loss. Desktop keeps
+the live stream read-only, Refresh attaches passively on Busy, and Move here
+requests control on that connection. Toolbar Take back retires read-only panes
+before preparing resume, as it already does for ended panes. No protocol changes.
+
 Source defects found and fixed; routing and retirement regressions failed on the
 prior code:
 
@@ -133,6 +140,19 @@ differed from the LOO-906 workspace; the focus gap matches "navigation fixed it"
 
 ## Checks
 
+- `cargo test -p loopflow --test transport_tests desktop_crash_reopen -- --nocapture`
+  — competing-viewer iteration passed: control loss keeps Desktop's output live;
+  Refresh remains read-only while the terminal submits; Move here returns input
+  and ends that terminal viewer successfully; provider/Session/AgentProcess/held
+  terminal unchanged, four submissions once each. The expanded regression first
+  exposed reveal's pre-attachment refusal, "This conversation is controlled
+  elsewhere; use Take back to continue here". The debug linker warned about its
+  oversized `__eh_frame`; gate owns static checks.
+
+- `scripts/test_desktop.sh --filter WarmPaneMountTests` — competing-viewer iteration:
+  CLI/Swift built; four tests passed, including both read-only and ended Take back
+  cases and overlapping Refresh retirement. Build warnings were in unchanged
+  Swift code; mounted focus remains for demo.
 - `scripts/test_desktop.sh --filter 'SessionsStoreTests|WorkDestinationTests|WarmPaneMountTests|WorkspacePanesTests|GhosttyTerminalMountTests'` — compression pass: CLI and Swift built; 125 tests passed, four display diagnostics skipped; Refresh rejects stale failures and reports current ones. Mounted checks remain for demo.
 - `scripts/test_desktop.sh --skip-build --filter startThenCompetingHolder` — one passed after the failure-callback API cutover.
 - `scripts/test_desktop.sh --filter 'ServerConnectionTests|SessionsStoreTests|WorkspacePanesTests'`
@@ -142,12 +162,10 @@ differed from the LOO-906 workspace; the focus gap matches "navigation fixed it"
 - `scripts/test_desktop.sh --filter 'WarmPaneMountTests|recoveryAddressesRestoredTask|refreshSameConversation|taskWorkspaceReopenNamesTheTask|GhosttyTerminalMountTests'`
   — six passed on unmounted Ghostty surfaces; four mounted diagnostics skipped
   headless (“Optional display-session diagnostic”).
-- `cargo test -p loopflow --test transport_tests desktop_crash_reopen -- --nocapture`
-  — passed: draft kept, submissions once, same Session/AgentProcess/held
-  terminal/provider, competing non-replacing attach Busy.
 - `cargo fmt`, `git diff --check` — passed.
 - Gate: `cargo clippy --all-targets -- -D warnings`;
   `cargo test -p loopflow --test integration documented_commands::`;
+  `cargo test -p loopflow --lib transport::viewer_tests::`;
   `uv run python scripts/test.py --reuse-passing --rust-filter 'binary(transport_tests) & (test(desktop_crash_reopen) | test(a_held_pane_reads_reconnecting_until_the_next_server_answers))'`.
 - Demo: `LOOPFLOW_NATIVE_TESTS=1 swift test --package-path swift --no-parallel --filter GhosttyTerminalMountTests`
   (display session, unrun) and the mounted walkthrough above. Headless checks do
@@ -169,10 +187,34 @@ AppKit, a real provider. Observed for LOO-911: Desktop main thread hung 65 s on
 first Task open and 61 s on one Refresh, at load average 160–240; a sampled repeat
 did not hang.
 
-Open: with held terminals another viewer displaces Desktop's view (pane reads
-failed) rather than leaving it read-only/Busy; Take back and Refresh both recover.
+QA found that another viewer displaced Desktop into a failed pane; the competing-
+viewer iteration above repairs that lifecycle. Mounted confirmation remains for demo.
 
 ## Remaining
+
+### Concept review — competing viewers (November 14)
+
+Outcome: advance; no design change or open product choice. The requirement that
+another controller keeps input until Take back already settles QA's displacement
+question. The current iteration implements that interaction: control loss leaves
+Desktop connected read-only; Busy on reopen or Refresh attaches passively to the
+answering held terminal. Preparation grants no control. Move here requests it on
+the connection; toolbar Take back retires that viewer before replacing attachment.
+The existing connection reading derives `.elsewhere` from connected without input;
+there is no new Session state, persistence or protocol.
+
+Counterexamples retained: a live competing controller must still submit after
+Refresh; loss of control must not conceal later provider output; actual provider
+exit must still end the pane; an unavailable holder must not permit duplicate
+execution. The expanded transport regression covers displacement, passive Refresh,
+explicit takeover and once-only submissions with unchanged execution identity;
+the Swift regression covers Take back from both read-only and ended panes. Their
+recorded passing results above do not establish mounted acceptance. QA's failed
+pane observation remains historical, rather than a current product choice.
+
+Usage docs already describe this behavior; no skill instruction changes are
+needed. Next show the mounted competing-viewer walkthrough alongside crash/reopen
+and focus recovery. Review page: `scratch/concept-review.html`.
 
 - Gate checks above (add `cargo test -p loopflow --lib a_held_task_conversation_without_a_view_offers_attach` and `scripts/test_desktop.sh --filter WarmPaneMountTests`), then the mounted demo walkthrough.
 - Overlap: #1861 (LOO-774, open at `07a21c5956`: transport endings,

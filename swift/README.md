@@ -1061,7 +1061,10 @@ provider or move its cursor. Both mount layout and pre-mount sizing keep the sam
 viewport while status changes.
 Refresh waits for its previous viewer to retire before preparing a replacement.
 `WarmPaneMountTests` checks this headless with paused input and overlapping
-Refresh requests. `GhosttyTerminalMountTests` checks mounted focus separately.
+Refresh requests. Take back replaces read-only and ended attachments; the transport
+fixture `desktop_crash_reopen` checks control loss, read-only Refresh and explicit
+takeover against a surviving provider. `GhosttyTerminalMountTests` checks mounted
+focus separately.
 Check native status, paused input, local copy/Find/scroll, Retry after exhaustion,
 one-shot **Move here**, and cancellation on pane closure. Only an owner exit means
 ended. Installed-helper replacement must preserve the Session and Graph owners

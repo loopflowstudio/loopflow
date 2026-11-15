@@ -1787,7 +1787,7 @@ fn view(
                                     status.connected(controlled);
                                 }
                             }
-                            Reply::Busy if recovery.is_some() => {
+                            Reply::Busy if recovery.is_some() || status.is_some() => {
                                 // A fresh screen cannot atomically ask for optional
                                 // input. On Busy, attach passively to the same terminal.
                                 if let Err(error) = send(&mut socket, output.passive()) {
@@ -1870,6 +1870,11 @@ fn view(
                             held: false,
                             notice,
                         } => {
+                            if let Some(status) = &mut status {
+                                controlled = false;
+                                status.connected(false);
+                                continue;
+                            }
                             drop(terminal.take());
                             if let Some(notice) = notice {
                                 eprintln!("\n{notice}");

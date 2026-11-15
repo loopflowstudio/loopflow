@@ -1268,7 +1268,7 @@ pub(crate) async fn open_without_replacing(
                 != crate::journal::ProcessIdentityEvidence::Dead
         });
     let first_thread = attachable.is_none() && native.is_none();
-    let reason = if record.state == SessionState::Active || (occupied && attachable.is_none()) {
+    let reason = if (record.state == SessionState::Active || occupied) && attachable.is_none() {
         Some(CONTROLLED_ELSEWHERE.to_string())
     } else if !session.cwd.is_dir() {
         Some("The recorded checkout is unavailable; it has not been recreated".to_string())

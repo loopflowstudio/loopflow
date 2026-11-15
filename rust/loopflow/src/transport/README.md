@@ -304,9 +304,9 @@ return, including detaching or moving to another view. Terminal traffic does
 not wait for store reads; the final record is read after relaying ends.
 `lf resume SESSION --prepare --json` returns the one command Desktop runs,
 without opening a socket or starting a provider. Desktop decides from the
-record's `state` whether showing a pane reattaches: a `detached` Session
-reattaches, an `active` one waits for **Move here**, and an ended one waits for
-an explicit open.
+record's actions whether showing a pane reattaches: a held Session offers
+reveal, attaching read-only if another viewer holds input. **Move here** takes
+input explicitly; an ended Session waits for an explicit open.
 
 `lf session rename SESSION 'Resume repair'` updates the attached terminal
 title, including Rex and other terminals that support OSC titles. Reattaching
@@ -475,8 +475,12 @@ reply carries the `seq` of the last event queued when it was computed. Kinds:
 `resize {rows,cols}`, `theme {theme}`, `program_status {status}`,
 `owner {viewer,name,held}`, `control {held,notice}` (input control left this
 connection), `child_exited {code}`, `detached`, `hint {text}`,
-`return {detach}` and `live`. A view that receives `control` with
-`held: false` restores its terminal, prints the notice and leaves.
+`return {detach}` and `live`. A terminal view that receives `control` with
+`held: false` restores its terminal, prints the notice and leaves. Desktop keeps
+its view attached read-only and offers Move here, the only action that replaces
+another view's control. When a heartbeat's `controlled` reply says nobody holds
+input, a read-only Desktop view asks for it without replacing; Busy keeps it
+read-only.
 
 Input control and geometry release when a connection ends; a reconnecting view
 asks for them again. Another view's input or geometry claim survives, and
@@ -652,8 +656,8 @@ Desktop's automatic opening uses a non-replacing input claim: working Tasks use
 Start, which permits first-thread creation; other Work uses reveal, which
 requires existing history. Their prepared commands keep that distinction
 through launch. If another view wins before attachment, the server returns
-Busy and keeps that view's input. Only Take back uses ordinary resume to take
-control; Try again on a consumed first launch uses it on a Session no client
+Busy; Desktop attaches read-only and keeps that view's input. Only Take back uses
+ordinary resume to take control; Try again on a consumed first launch uses it on a Session no client
 holds. The live relay announces native input readiness to Desktop after the
 server acknowledges the native client; saved screen bytes never provide that
 announcement. A successful automatic attach records its Desktop terminal

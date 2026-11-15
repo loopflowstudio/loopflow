@@ -1487,6 +1487,23 @@ impl CatchingUp {
 enum Recovery {
     Reconnect,
     Takeover,
+    /// A read-only Desktop view asks for input nobody holds; Busy leaves it read-only.
+    Claim,
+}
+
+/// Input control requested on the live connection; the fresh snapshot repaints.
+fn control_request(replace: bool) -> Request {
+    let (rows, cols) = size();
+    Request::Attach {
+        control: true,
+        replace,
+        own: Some(if replace { Own::Take } else { Own::Request }),
+        rows,
+        cols,
+        name: tty_name(libc::STDIN_FILENO),
+        moved: None,
+        from: None,
+    }
 }
 
 /// A view of a held terminal always outlives its server connection.
@@ -1827,7 +1844,7 @@ fn view(
                                 }
                                 owned = owner.as_ref() == Some(&viewer);
                                 let recovered = recovery.take();
-                                if recovered == Some(Recovery::Takeover) {
+                                if matches!(recovered, Some(Recovery::Takeover | Recovery::Claim)) {
                                     // Reset the parser at the fresh snapshot, keeping
                                     // this connection's cumulative resume offset.
                                     output.scanner = Some(Scanner::new(&nonce));
@@ -1866,7 +1883,26 @@ fn view(
                                     status.connected(controlled);
                                 }
                             }
-                            Reply::Busy if recovery.is_some() => {
+                            // Another viewer took input first; this view stays attached read-only.
+                            Reply::Busy if recovery == Some(Recovery::Claim) => {
+                                recovery = None;
+                                acknowledgement_deadline = None;
+                            }
+                            // Input came free: the viewer holding it left. Moving
+                            // here is not needed to type again.
+                            Reply::Controlled { held: false, .. }
+                                if status.is_some()
+                                    && !controlled
+                                    && acknowledgement_deadline.is_none() =>
+                            {
+                                recovery = Some(Recovery::Claim);
+                                if let Err(error) = send(&mut socket, control_request(false)) {
+                                    interrupted = Some(error.to_string());
+                                    continue 'relay;
+                                }
+                                acknowledgement_deadline = Some(Instant::now() + attach_timeout);
+                            }
+                            Reply::Busy if recovery.is_some() || status.is_some() => {
                                 // A fresh screen cannot atomically ask for optional
                                 // input. On Busy, attach passively to the same terminal.
                                 if let Err(error) = send(&mut socket, output.passive()) {
@@ -1949,6 +1985,11 @@ fn view(
                             held: false,
                             notice,
                         } => {
+                            if let Some(status) = &mut status {
+                                controlled = false;
+                                status.connected(false);
+                                continue;
+                            }
                             drop(terminal.take());
                             if let Some(notice) = notice {
                                 eprintln!("\n{notice}");
@@ -2032,18 +2073,7 @@ fn view(
                 resume_input = true;
                 discard_reconnect_input(&mut paste)?;
                 fds[1].revents = 0;
-                let (rows, cols) = size();
-                let request = Request::Attach {
-                    control: true,
-                    replace: true,
-                    own: Some(Own::Take),
-                    rows,
-                    cols,
-                    name: tty_name(libc::STDIN_FILENO),
-                    moved: None,
-                    from: None,
-                };
-                if let Err(error) = send(&mut socket, request) {
+                if let Err(error) = send(&mut socket, control_request(true)) {
                     interrupted = Some(error.to_string());
                     continue;
                 }

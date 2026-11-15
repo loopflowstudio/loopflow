@@ -1150,7 +1150,7 @@ struct WorkDestinationTests {
             case "replaced":
                 if pane.kind == .session { workspace.multiplexer.replace(pane.id, with: .session(id: "replacement")) }
                 else { workspace.multiplexer.showBrowser(.graphLog) }
-            case "surface": store.recordPaneFailure(record.id, reason: "Native surface unavailable")
+            case "surface": store.recordPaneFailure(try #require(store.sessions.first), reason: "Native surface unavailable")
             default: store.recordPaneLive(record.id)
             }
         }
@@ -1172,7 +1172,7 @@ struct WorkDestinationTests {
         let workspace = try #require(registry.selectedWork.flatMap(registry.retained))
         let store = registry.sessionStore(repository: "repo", repoPath: try #require(model.repoPath), query: query)
         let pane = try #require(workspace.multiplexer.layout.allPanes.first { $0.sessionId == record.id })
-        store.recordPaneFailure(record.id, reason: "Temporary attachment failure")
+        store.recordPaneFailure(try #require(store.sessions.first), reason: "Temporary attachment failure")
         try await waitForOpening(model)
         #expect(model.taskOpening?.status == .failed)
         func attachment(in layout: DesktopLayoutInspection) -> DesktopOpening.Status? {

@@ -355,22 +355,30 @@ fn projected_actions(session: &crate::session::SessionSummary) -> Vec<SessionAct
 }
 
 /// A held terminal takes any number of views, so opening one takes no other
-/// terminal's input.
+/// terminal's input, and revealing it (Desktop's reopen and Refresh) attaches too.
 fn held_actions(session: &crate::session::SessionSummary) -> Vec<SessionAction> {
-    vec![SessionAction {
-        kind: SessionActionKind::Open,
-        label: if session.unviewed {
-            "Reconnect"
-        } else {
-            "Open here"
-        }
-        .to_string(),
-        help: format!(
-            "View the running conversation here: lf resume {}",
-            session.id
-        ),
-        unavailable_reason: None,
-    }]
+    vec![
+        SessionAction {
+            kind: SessionActionKind::Open,
+            label: if session.unviewed {
+                "Reconnect"
+            } else {
+                "Open here"
+            }
+            .to_string(),
+            help: format!(
+                "View the running conversation here: lf resume {}",
+                session.id
+            ),
+            unavailable_reason: None,
+        },
+        SessionAction {
+            kind: SessionActionKind::Reveal,
+            label: "Show conversation".to_string(),
+            help: "Continue existing history without taking another terminal's input".to_string(),
+            unavailable_reason: None,
+        },
+    ]
 }
 
 fn name_session_holder(actions: &mut [SessionAction], terminal: Option<&str>) {
@@ -1260,7 +1268,7 @@ pub(crate) async fn open_without_replacing(
                 != crate::journal::ProcessIdentityEvidence::Dead
         });
     let first_thread = attachable.is_none() && native.is_none();
-    let reason = if record.state == SessionState::Active || (occupied && attachable.is_none()) {
+    let reason = if (record.state == SessionState::Active || occupied) && attachable.is_none() {
         Some(CONTROLLED_ELSEWHERE.to_string())
     } else if !session.cwd.is_dir() {
         Some("The recorded checkout is unavailable; it has not been recreated".to_string())

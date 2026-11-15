@@ -310,9 +310,9 @@ pub(super) enum Event {
         name: Option<String>,
         held: bool,
     },
-    /// Input control changed hands. A recipient with `held: false` restores
-    /// its terminal, prints `notice` and leaves: another viewer took control,
-    /// or the terminal is ending.
+    /// Input control changed hands. A terminal viewer with `held: false`
+    /// restores its terminal, prints `notice` and leaves. Desktop keeps viewing
+    /// read-only until an explicit takeover or the terminal's end.
     Control {
         held: bool,
         notice: Option<String>,

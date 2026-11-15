@@ -398,10 +398,8 @@ acquire a No Wave label.
 
 ### Task action cut · 2026-11-15
 
-Status: domain results/recovery are built; the vertical client cut is unfinished.
-Local Claim/unassign/Reopen still use their old surfaces. Normalized inputs,
-shared derivation, persistence replacement and both-host actions remain required.
-The earlier Reopen checks cover newer Machine readings, not a local gesture.
+Status: domain results/recovery built (`ede0429321`); the vertical client cut is
+next. Desktop Claim/unassign/Reopen still go through `WorkModel.performTaskAction`.
 
 The current `MembershipFacts.lifecycle` is a derived result, not sufficient input
 for these transitions:
@@ -463,7 +461,7 @@ unassign → Claim and Complete → Reopen → Complete. Both hosts must publish
 held disk/network, retain later selection/drafts/Session, survive offline restart,
 recover the original ID after commit-before-reply, handle no-op success and definite
 refusal, and converge under reordered/two-client readings without stale owner
-controls. The three product choices are unchanged; native latency is unmeasured.
+controls.
 
 Proposed usage for both app READMEs, after that vertical exit:
 > **Claim** requests ownership on this Machine; **Unassign** releases ownership
@@ -495,14 +493,10 @@ not a complete supported execution reading. Incorporate only values and domains
 the result actually establishes; recover unknown inputs through stamped readings.
 Likewise ownership receipts retain historical labels but cannot certify current
 Machine labels. Add unknown-predicate → no-op and Complete → Reopen before send
-to the vertical acceptance cases. These follow the existing domain semantics;
-they introduce no product answer.
+to the vertical acceptance cases. Builtin skills and shipped app usage are
+unchanged until this exit.
 
-These are app gestures and existing Task commands; builtin skills are unchanged.
-Shipped app usage still describes the current paths.
-This direction answers none of the product choices below, and they don't gate it.
-
-Checks: `cargo nextest run -p loopflow --lib --test integration -E 'test(unassigning_another_persons_claim) | test(receipt_reads_and_duplicate_admission) | test(server::schema::tests::every_) | test(server::schema::tests::the_checked_in_schema) | test(dto_fixtures::ownership_planning_evidence) | test(documented_commands::)'` — 12 passed (6a596edb); the other six focused domain rows passed in 5fdbde33. That run's append-only fixture failure was repaired through ingestion, covered by the final run. `scripts/test_desktop.sh --filter ServerProtocolTests` — 28 passed. `cargo clippy --all-targets -- -D warnings`, `cargo package --locked --allow-dirty -p loopflow`, formatting and multiplatform boundaries — passed. Gate owns wider suites/iOS and the recorded LEAK.
+Checks: `cargo nextest run -p loopflow --lib --test integration -E 'test(unassigning_another_persons_claim) | test(receipt_reads_and_duplicate_admission) | test(server::schema::tests::every_) | test(server::schema::tests::the_checked_in_schema) | test(dto_fixtures::ownership_planning_evidence) | test(documented_commands::)'` — 12 passed; six more domain rows passed earlier. `scripts/test_desktop.sh --filter ServerProtocolTests` — 28 passed. Clippy, `cargo package`, formatting and multiplatform boundaries passed. Gate owns wider suites/iOS and the LEAK.
 
 ### Open product choices
 
@@ -614,9 +608,7 @@ offline (`testDynamicMovePublishesBothWindows…`); Complete→newer Reopen acro
 queries, retirement, restart (`testDerivedAnswerUsesIncorporatedReopen…`);
 reconnect (`testDerivedCoveragePublishesDisconnect…`). The surface acceptance map remains at
 `09ab7e7ab2:scratch/instant-task-session.md` (Projected surface validation).
-Prior runs: `5c958398a6de:scratch/instant-task-session.md`.
-
-Prior dynamic/Move checks: `aee0e10dc603:scratch/instant-task-session.md`.
+Prior runs: `5c958398a6de`, `aee0e10dc603` (this file).
 
 ### Responsibility inventory · 2026-11-15
 
@@ -633,8 +625,8 @@ Prior dynamic/Move checks: `aee0e10dc603:scratch/instant-task-session.md`.
 | Query cache and inspection | SQLite normalized facts/derived answers | Remove remaining WorkCache/TaskFeed authority; projected inspection beyond this detail cut |
 | Acceptance and latency | Deterministic shared/Desktop/phone checks per cut | Quiet-host native baseline; exhaustive policy/remaining consumer checks; gate owns broader suites, lint and recorded LEAK |
 
-LOO-650 coordination (`f64be018-352a-4514-917f-181eb67f1bcc`) recommended a finite
-migration table and vertical exits; lessons: Task report `50918d31-2e7a-4531-8a74-2d1921749a6a`.
+LOO-650 coordination (`f64be018-352a-4514-917f-181eb67f1bcc`): finite migration
+table, vertical exits; Task report `50918d31-2e7a-4531-8a74-2d1921749a6a`.
 
 ### Detail and history cut · 2026-11-15
 

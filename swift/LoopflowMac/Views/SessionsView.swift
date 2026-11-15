@@ -1337,13 +1337,20 @@ final class SessionsStore {
     func moveHere(_ id: String) async {
         // A retained viewer can be read-only or ended; Take back replaces its attachment.
         guard let index = _index(id) else { return }
-        if sessions[index].state != .pending, [.failed, .elsewhere].contains(attachment(id)) { await release(id)?.value }
-        await prepare(id, intent: .resume)
+        if sessions[index].state != .pending, [.failed, .elsewhere].contains(attachment(id)) {
+            await replaceViewer(id, intent: .resume)
+        } else {
+            await prepare(id, intent: .resume)
+        }
     }
 
     /// Replace this pane's viewer and read the same conversation again. A
     /// provider running in another terminal remains there until Take back.
     func refresh(_ id: String) async {
+        await replaceViewer(id, intent: .reveal)
+    }
+
+    private func replaceViewer(_ id: String, intent: SessionOpenIntent) async {
         guard let index = _index(id) else { return }
         let retirement = release(id)
         let generation = sessions[index].launchId
@@ -1352,7 +1359,7 @@ final class SessionsStore {
         guard let current = _index(id), sessions[current].launchId == generation else { return }
         sessions[current].state = .pending
         guard !Task.isCancelled else { return }
-        await select(id)
+        await select(id, intent: intent)
     }
 
     @discardableResult

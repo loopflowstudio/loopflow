@@ -443,7 +443,8 @@ fn a_view_continues_from_its_position_after_the_server_restarts() {
     // The server goes; the agent keeps printing into the holder's ring.
     first.close();
     drop(view);
-    std::thread::sleep(Duration::from_millis(500));
+    // Wait for output, not time: at least five full counter lines.
+    ring(&place, &terminal, left, left + 60);
 
     let second = Registry::open(BUILD).unwrap();
     let mut view = View::attach_from(&terminal, Some(left));

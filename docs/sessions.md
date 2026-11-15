@@ -267,7 +267,8 @@ input or restarts the Task's Graph. Preparing the view is only the first step;
 input stays paused until the conversation can accept it.
 
 If another view holds input, the pane stays read-only. Choose **Take back** to
-move input here deliberately; Refresh leaves that other view in control. A
+move input here deliberately; Refresh leaves that other view in control. When
+that view closes, the pane accepts typing again within about ten seconds. A
 connected terminal's **Move here** action also requests control explicitly.
 If the provider has ended, use the offered resume action to continue the same
 Session from history; an ended provider's unsent editor contents cannot be

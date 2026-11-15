@@ -3112,9 +3112,33 @@ done
         .write_all(b"after-refresh\n")
         .unwrap();
     refreshed.wait_text("received:after-refresh");
+    // When the viewer that took input leaves, nobody holds it: Desktop types again
+    // without Move here.
+    let mut visitor = service.command(&["session", "resume", &session]);
+    visitor.env("PATH", &path);
+    let mut visitor = Terminal::spawn(visitor);
+    wait_server_status(&status, "connected", false, 0);
+    visitor
+        .child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(b"visitor\n")
+        .unwrap();
+    refreshed.wait_text("received:visitor");
+    visitor.stop();
+    wait_server_status(&status, "connected", true, 0);
+    refreshed
+        .child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(b"after-visitor\n")
+        .unwrap();
+    refreshed.wait_text("received:after-visitor");
     assert_eq!(
         fixture.wait_file("answers"),
-        "unsent-draft\nother-viewer\nstill-elsewhere\nafter-refresh\n"
+        "unsent-draft\nother-viewer\nstill-elsewhere\nafter-refresh\nvisitor\nafter-visitor\n"
     );
     assert_eq!(fixture.launches(1), vec![launched.clone()]);
     assert_eq!(session_of(&fixture.sql(), &launched), session);

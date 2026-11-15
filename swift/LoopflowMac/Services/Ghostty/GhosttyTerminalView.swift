@@ -751,7 +751,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     func updateFocus(isFocused: Bool, isEnabled: Bool) {
         inputEnabled = isEnabled
         updateFeedbackPreferences()
-        let requested = isEnabled && isFocused && !childExited && !detaching
+        let requested = isFocused && acceptsFirstResponder
         let changed = focusRequested != requested
         focusRequested = requested
         if requested && changed {

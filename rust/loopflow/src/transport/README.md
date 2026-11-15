@@ -459,7 +459,10 @@ reply carries the `seq` of the last event queued when it was computed. Kinds:
 connection), `child_exited {code}`, `detached`, `hint {text}`,
 `return {detach}` and `live`. A terminal view that receives `control` with
 `held: false` restores its terminal, prints the notice and leaves. Desktop keeps
-its view attached read-only and offers Move here; only that action takes control.
+its view attached read-only and offers Move here, the only action that replaces
+another view's control. When a heartbeat's `controlled` reply says nobody holds
+input, a read-only Desktop view asks for it without replacing; Busy keeps it
+read-only.
 
 Input control and geometry release when a connection ends; a reconnecting view
 asks for them again. Another view's input or geometry claim survives, and

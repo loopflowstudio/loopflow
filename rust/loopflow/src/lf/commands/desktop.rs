@@ -3181,7 +3181,10 @@ fn reply_failure(error: DesktopReplyError) -> anyhow::Error {
         "argument" => DesktopError::Argument(message).into(),
         "target" => DesktopError::Target(message).into(),
         "version" => anyhow::anyhow!("{message} Update Desktop and lf to the same release."),
-        _ => anyhow::anyhow!("Desktop failed: {message}. Inspect again before retrying."),
+        _ => anyhow::anyhow!(
+            "Desktop failed: {}. Inspect again before retrying.",
+            message.trim_end_matches('.')
+        ),
     }
 }
 

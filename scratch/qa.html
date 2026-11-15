@@ -15,6 +15,57 @@ img{max-width:100%;border:1px solid #ccc}
 <code>lf desktop send / send-key / capture / do / state</code>. The shared Dev app was in use by
 another worktree's QA, so it was left alone.</p>
 
+<h2>Second pass: competing-viewer iteration (November 14, later)</h2>
+<p>Rebuilt the QA bundle from this branch with the competing-viewer iteration and the
+uncommitted Refresh/Take back merge (<code>SessionsStore.replaceViewer</code>). Same lf-world Machine,
+same Session <code>session_7e35…</code>, one stand-in provider (PID 23386) for the whole pass.
+Transcripts: <code>scratch/qa/run2/</code>.</p>
+<table>
+<tr><th>Scenario</th><th>Saw</th></tr>
+<tr><td>Refresh on a failed pane</td><td class="ok">usable in 2.3 s; <code>m-refresh</code> answered once; same provider</td></tr>
+<tr><td>Unsent draft, SIGKILL Desktop, relaunch</td><td class="ok">usable 0.3 s after the first state read; <code>qa-draft2</code> still on the line; completed with <code>+m-crash</code>, one reply</td></tr>
+<tr><td>Terminal <code>lf session resume</code> takes input</td><td class="ok">Desktop pane <code>elsewhere</code> (read-only), keeps showing the terminal's output (<code>term-1</code>)</td></tr>
+<tr><td>Typing into Desktop while read-only</td><td class="ok">refused: “Session input is paused or held by another viewer; no input was sent”; nothing reached the provider</td></tr>
+<tr><td>Refresh while read-only</td><td class="ok">new surface, still <code>elsewhere</code>; the terminal keeps input (<code>term-2</code> once)</td></tr>
+<tr><td>Take back</td><td class="ok">pane <code>usable</code>; terminal prints “This conversation moved to Desktop: lf resume session_7e35…”; <code>after-takeback</code> once, no intrusions</td></tr>
+<tr><td>Other viewer just closes (no Take back)</td><td><span class="bad">Before: <code>elsewhere</code> for 30 s and on, typing refused, though nobody held input.</span><br>
+<span class="ok">After fix: <code>usable</code> 7.5 s after the terminal closed, same surface; <code>after-leave</code> once</span></td></tr>
+</table>
+
+<h3>Fixed in this pass</h3>
+<ol>
+<li><b>Read-only pane outlived the viewer that held input.</b> The competing-viewer iteration keeps Desktop
+attached read-only on control loss, but nothing told it when the controller left. Every 10 s heartbeat reply
+already carries <code>held</code>; the relay ignored it. Now a read-only Desktop view that hears
+<code>held: false</code> asks for input without replacing (<code>Recovery::Claim</code> in
+<code>rust/loopflow/src/transport.rs</code>); Busy leaves it read-only, so a newer viewer still wins.
+Terminal viewers are unchanged. No wire change. Regression: <code>desktop_crash_reopen…</code> now opens and closes a
+visitor terminal and waits for Desktop input; it failed on the previous relay
+(<code>Expected connected/true, got … "input": false</code>) and passes now.</li>
+<li><b>Doubled period</b> in every Desktop failure (“no input was sent.. Inspect again”):
+<code>reply_failure</code> trims the message's own period.</li>
+<li><b>Load-dependent registry test.</b> <code>a_view_continues_from_its_position_after_the_server_restarts</code>
+failed alone on HEAD at load ~40–60 (three ticks in 500 ms, wanted five). It now waits for 60 bytes of output
+instead of sleeping; passed three runs in a row.</li>
+</ol>
+
+<h3>Tests run in this pass</h3>
+<ul>
+<li><code>cargo test -p loopflow --test transport_tests</code>: 46 passed, 5 ignored.</li>
+<li><code>cargo test -p loopflow --lib transport::</code>: 71 passed; the one failure was the registry test above, which also failed on HEAD's relay.
+After the fix, <code>transport::registry::tests::</code> passed 11/11 three times.</li>
+</ul>
+
+<h3>Environment notes</h3>
+<ul>
+<li>Desktop puts <code>~/.local/bin</code> ahead of the world's stand-in on pane <code>PATH</code>, so the first relaunch ran
+the real Claude 2.1.325 (unauthenticated, private config) for the world's three Sessions. I stopped those and started the Task's
+conversation on the stand-in from a CLI PTY. Recorded in <code>.lf/skills/qa.md</code>.</li>
+<li>After reinstalling the bundle, Desktop read “Loopflow server uses another executable” until the private server was restarted on the new
+<code>lf</code>. Then the pane recovered by itself onto the same provider, which is the expected install-skew behavior.</li>
+</ul>
+
+<h2>First pass</h2>
 <h2>Result</h2>
 <table>
 <tr><th>Scenario</th><th>Before QA fixes</th><th>After</th></tr>
@@ -79,9 +130,17 @@ region (display asleep or locked). Later states come from <code>lf desktop state
 <li><b>Main-thread hangs.</b> <code>main thread hung ms=65076</code> on the first Task open and <code>ms=61443</code> on one
 Refresh, at load average 160–240 with a debug build. A repeat Refresh, sampled for 25 s, didn't hang.
 This needs follow-up under LOO-911.</li>
-<li><b>Another viewer displaces Desktop.</b> With held terminals, Desktop's pane ends (<code>failed</code>) instead of
-staying read-only with Take back, which is what the plan's demo describes. Take back and Refresh both recover the pane.
-Whether displacement is the intended behavior is a product decision.</li>
+<li><s>Another viewer displaces Desktop.</s> Fixed by the competing-viewer iteration. The second pass above confirms it live.</li>
 <li>Gate still owns <code>cargo clippy --all-targets</code> and the broader suites. The two focused regressions above were the only tests run here.</li>
 </ol>
+
+<h2>Now (after both passes)</h2>
+<p><b>Works, seen live on the QA bundle:</b> crash/relaunch keeps the draft and the provider; Refresh repairs a failed
+pane and stays read-only behind another controller; Take back moves input and tells the terminal; input comes back when the other
+viewer closes; nothing typed while read-only reaches the provider; one provider PID throughout.</p>
+<p><b>Not reached:</b> screenshots and mounted AppKit focus/typing (no display images, no computer-use tool;
+<code>desktop send</code> inserts at the surface), a real authenticated provider, and the incident's crash itself (LOO-911).</p>
+<p><b>Still open, worst first:</b> (1) main-thread hangs from the first pass, under LOO-911; (2) input returns on the next heartbeat,
+so up to ~10 s after the other viewer closes the pane still reads <code>elsewhere</code>; (3) gate owns clippy and the Swift suites,
+and the Swift code here is unchanged since the 50-test pass recorded in the plan.</p>
 </body></html>

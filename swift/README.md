@@ -146,7 +146,7 @@ turn of any primary reads its scope and reports where it stands. A failed
 automatic Start shows its error with **Retry**. A launch that ended with no saved
 history stays closed until **Try again** repeats it; Retry and refresh never do.
 If another client holds input, the pane offers **Take back** and leaves that client
-in control until clicked. Close and eviction discard late opening results.
+in control until clicked or until it closes. Close and eviction discard late opening results.
 
 Finite CLI requests time out after 30 seconds. Canceling preparation ends only
 that request; running Sessions continue. If a change times out, refresh to learn
@@ -1084,8 +1084,9 @@ viewport while status changes.
 Refresh waits for its previous viewer to retire before preparing a replacement.
 `WarmPaneMountTests` checks this headless with paused input and overlapping
 Refresh requests. Take back replaces read-only and ended attachments; the transport
-fixture `desktop_crash_reopen` checks control loss, read-only Refresh and explicit
-takeover against a surviving provider. `GhosttyTerminalMountTests` checks mounted
+fixture `desktop_crash_reopen` checks control loss, read-only Refresh, explicit
+takeover and input returning when the other viewer closes, against a surviving
+provider. `GhosttyTerminalMountTests` checks mounted
 focus separately.
 Check native status, paused input, local copy/Find/scroll, Retry after exhaustion,
 one-shot **Move here**, and cancellation on pane closure. An orderly terminal close

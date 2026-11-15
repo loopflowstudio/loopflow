@@ -86,6 +86,12 @@ checks `launchId` once beside the state transition. Focus recovery reuses
 `acceptsFirstResponder` for enabled/exited/detaching state. No deletion targets
 remain; retirement ordering and addressed-store routing still earn their place.
 
+Refresh and Take back now share `SessionsStore.replaceViewer`: retirement,
+`launchId` and cancellation checks stay together before selecting with reveal or
+resume intent. This removes Take back's separate unguarded retirement wait.
+`updateFocus` also uses `acceptsFirstResponder` as the single enabled/exited/
+detaching predicate.
+
 Competing-viewer iteration deletes Desktop's exit-on-control-loss branch and its
 initial Busy failure, plus reveal's refusal of an active Session even when its
 held terminal answers. Terminal viewers still leave on control loss. Desktop keeps
@@ -132,6 +138,16 @@ Docs: `docs/sessions.md#when-desktop-loses-its-connection`,
   Regression `WarmPaneMountTests/takeBackReplacesEndedViewer` failed three
   expectations without it.
 
+- **Read-only after the controller left (found in second QA pass).** With the
+  competing-viewer iteration, a terminal that took input and then closed left
+  Desktop `elsewhere` indefinitely, refusing typing with nobody holding input.
+  The relay now reads the heartbeat's `Reply::Controlled { held }`: a read-only
+  Desktop view hearing `held: false` asks for input without replacing
+  (`Recovery::Claim`); Busy keeps it read-only. Terminal viewers unchanged; no
+  wire change. The `desktop_crash_reopen` regression adds a visitor terminal that
+  leaves; it failed on the prior relay and passes. Live: usable 7.5 s after the
+  terminal closed, one reply.
+
 This held-reveal defect reproduces the reported shape (reopened pane refuses
 input, Refresh repeats the same reveal). Whether it was the incident's cause is
 not established.
@@ -139,6 +155,13 @@ The routing bug matches "Refresh did not help" only when the last-warmed store
 differed from the LOO-906 workspace; the focus gap matches "navigation fixed it".
 
 ## Checks
+
+- Second QA pass (`scratch/qa.html`): `cargo test -p loopflow --test transport_tests` 46 passed, 5 ignored;
+  `cargo test -p loopflow --lib transport::registry::tests::` 11 passed three times after making
+  `a_view_continues_from_its_position_after_the_server_restarts` wait for output (it failed alone on HEAD under load).
+  Live QA bundle: crash/relaunch, Refresh, read-only Refresh, Take back and controller-leaves all passed.
+
+- `scripts/test_desktop.sh --filter 'WarmPaneMountTests|SessionsStoreTests|WorkspacePanesTests'` — resumed compression: CLI and Swift built; 50 tests in four suites passed. Existing linker/unchanged Swift warnings remain; gate and mounted demo below still apply.
 
 - `cargo test -p loopflow --test transport_tests desktop_crash_reopen -- --nocapture`
   — competing-viewer iteration passed: control loss keeps Desktop's output live;

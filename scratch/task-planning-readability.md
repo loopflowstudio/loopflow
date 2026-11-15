@@ -179,27 +179,31 @@ and retained workspace titles; `WorkNavigator.taskRow` no longer renders raw IDs
 or "Summary · Planning unavailable"; list loading/failure feeds `workStatus`;
 Retry uses the model refresh owner; README startup wording updated.
 
-### November 14 concept-review corrections
+### November 14 concept-review corrections (built in c403bc9a8b)
 
-Identity freshness now follows the source supplying the name. Current roadmap,
-Task-list and selection-plan names precede retained names in that order; another
-source's failure stays in its read status. Saved identity says Updating, and a
-failed source says Last known. No cache or read owner was added.
+The review's three defects are fixed in `WorkModel.taskPresentation` and
+`WorkNavigator.rowDetail`:
 
-Loaded empty descriptions omit the preview; title-only members still show pending
-details. Shipping context renders independently of identity context. README wording
-matches these distinctions. Regression cases cover each review counterexample,
-including replacement of one source while another source remains failed.
+- Name freshness follows the source that supplies the name. Current roadmap,
+  Task-list and selection-plan names come first, in that order, ahead of retained
+  names. A failure in another source stays in `workStatus` and does not mark
+  the name. Saved identity says Updating; a failed source says Last known.
+- A loaded Task with an empty description shows no preview. Only a title-only
+  member with no record shows "Loading planning…".
+- Shipping context renders whatever the identity context is, Updating included.
 
-Remaining: gate's broader filter and native demo/review in Acceptance above.
-The walkthrough `scratch/concept-review.html` reflects the corrected behavior.
+`swift/README.md` matches these distinctions. Counterexample tests:
+`independentNameFreshness`, `currentSelectionName`, `emptyDescription`
+(`WorkModelTests.swift`). No cache or read owner was added, and no product
+choice is open.
 
-Concept-review continuation, November 14: no further design change or open product
-choice. The interrupted implementation already contains the previous review's
-corrections and counterexamples. Fresh names and independent read errors coexist;
-loaded empty details stay empty; retained shipping context survives Updating.
-Advance to the next Graph step. Gate and native review remain separate obligations;
-this review adds no rendered or timing observation.
+Known edge, left as is: a record that came from the Task subscription or the
+selected-Task evidence takes its context from the roadmap's error. It reads
+"Last known" when only the roadmap failed. A fresh list or selection name still
+takes precedence. The rows stay readable and conservative.
+
+Remaining: the gate's broader filter, and native demo/review in Acceptance above.
+`scratch/concept-review.html` reflects the corrected behavior.
 
 ### Check results
 

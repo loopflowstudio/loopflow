@@ -21,14 +21,6 @@ struct TaskHistoryFilter: Equatable {
 
     mutating func clearValidation() { validationMessage = nil }
 
-    func includes(_ task: RoadmapTask, now: Date) -> Bool {
-        if !task.isCompleted || task.condition.unresolvedExecution { return true }
-        guard task.lifecycle == .done, showCompleted else { return false }
-        if days == 0 { return true }
-        guard let timestamp = task.task.completedAt, let date = Self.completionDate(timestamp) else { return false }
-        return date <= now && date >= now.addingTimeInterval(-Double(days) * 86_400)
-    }
-
     static func completionDate(_ timestamp: String) -> Date? {
         ProjectedTaskHistory.completionDate(timestamp)
     }

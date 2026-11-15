@@ -4436,6 +4436,44 @@
       ],
       "type": "string"
     },
+    "LifecycleFact": {
+      "description": "Lifecycle and its current completion time share one snapshot and support.",
+      "properties": {
+        "completed_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "known": {
+          "type": "boolean"
+        },
+        "states": {
+          "items": {
+            "$ref": "#/$defs/SelectionState"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "support": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FieldSupport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "states",
+        "known",
+        "completed_at",
+        "support"
+      ],
+      "type": "object"
+    },
     "Limits": {
       "additionalProperties": false,
       "properties": {
@@ -4918,7 +4956,7 @@
           "$ref": "#/$defs/StateFact"
         },
         "lifecycle": {
-          "$ref": "#/$defs/StateFact"
+          "$ref": "#/$defs/LifecycleFact"
         },
         "name": {
           "type": "string"

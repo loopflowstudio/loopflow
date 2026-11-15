@@ -59,7 +59,6 @@ struct TaskConceptTests {
                     #expect(label == "Active")
                     #expect(!task.awaitsStart)
                     #expect(!task.isCompleted)
-                    #expect(TaskHistoryFilter().includes(task, now: .now))
                     #expect(task.conversationIntent == .start)
                     #expect(task.isUnassigned == (phase.name == "unassigned_working"))
                     #expect(throws: (any Error).self) { try header.inspect().find(button: "Reopen") }

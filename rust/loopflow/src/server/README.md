@@ -455,7 +455,10 @@ beneath ordered per-query effects, including after command retirement and restar
   another epoch. `query` hashes the exact read arguments, JSON selection and
   resolution directory.
   Work membership facts carry separate `parent`, `lifecycle` and `activity`
-  values. Each value's `support` declares its derivation, Machine, epoch, schema
+  values. Lifecycle includes required nullable `completed_at`, captured with its
+  states under one support. Reopen clears it; a later completion gets its own
+  time. Page content cannot establish dated membership. Each value's `support`
+  declares its derivation, Machine, epoch, schema
   and consumed SQLite revisions. Observation support distinguishes SQL-only,
   captured (including an empty validated dependency set), and unavailable.
   Activity capture uses the existing invocation's answers, including inherited

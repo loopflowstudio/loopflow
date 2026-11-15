@@ -153,12 +153,11 @@
   its cursors/content and unresolved-execution recovery. Historical Project
   association stays historical. This follows the existing shared-owner design;
   the shared-field join now implements it. Unstamped page dates remain display
-  content: dated exact totals need supported date fields; All ages uses lifecycle.
+  content: dated totals use supported lifecycle/time; All ages uses lifecycle.
   Three numbered product questions remain open; native latency remains unmeasured.
 
-- Headless concept review, 2026-11-15: completion time must correlate with the
-  projected completion, using the existing supported field owner. A present
-  page/planning date is not enough to certify a dated Done answer. Proposed next
-  direction joins lifecycle/time through producer, persistence and board/detail;
-  All ages stays lifecycle-only. This is an engineering consequence of the
-  current contract, not an answer to the three open product questions.
+- Completion time, 2026-11-15: lifecycle and nullable completion time now share
+  one supported fact in the existing owner. Unknown, invalid or conflicting time
+  withholds dated membership/counts; All ages stays lifecycle-only. Replacing old
+  cache bodies leaves exact pending commands and reload floors intact. No product
+  answer or separate date cache is introduced.

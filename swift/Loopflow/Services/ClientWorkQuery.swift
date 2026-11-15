@@ -130,7 +130,7 @@ public struct ClientWorkQuery: Codable, Sendable {
             return
         }
         guard let change else { return }
-        fact.lifecycle = .init(states: Set(fact.lifecycle.states).subtracting(change.remove)
+        fact.lifecycle = .init(completedAt: nil, states: Set(fact.lifecycle.states).subtracting(change.remove)
             .union(change.insert.filter { !$0.isActivity }).sorted { $0.rawValue < $1.rawValue }, known: true, support: nil)
         fact.activity = .init(states: Set(fact.activity.states).subtracting(change.remove)
             .union(change.insert.filter(\.isActivity)).sorted { $0.rawValue < $1.rawValue }, known: fact.activity.known, support: nil)
@@ -144,6 +144,7 @@ public struct ClientWorkQuery: Codable, Sendable {
         let support = field == .parent ? fact?.parent.support : field == .lifecycle ? fact?.lifecycle.support : fact?.activity.support
         let current = field == .parent ? reading?.parentCurrent : field == .lifecycle ? reading?.lifecycleCurrent : reading?.activityCurrent
         let exact = support == nil && stamp.complete
+            && (field != .lifecycle || reading?.lifecycleCurrent != false)
             && (field == .parent || (field == .lifecycle && fact?.lifecycle.known == true))
         let local = projected.contains(field)
             || (field == .activity && absent.isSuperset(of: [.available, .busy, .blocked]))
@@ -238,8 +239,8 @@ public struct ClientWorkQuery: Codable, Sendable {
                 let normalized = reading.facts
                 membership.facts[index] = .init(work: original.work, name: original.name,
                     parent: sameEpoch(normalized.parent).map { .init(wave: $0.value, support: $0.support) } ?? original.parent,
-                    lifecycle: sameEpoch(normalized.lifecycle).map { .init(states: $0.value.states.sorted { $0.rawValue < $1.rawValue },
-                        known: $0.value.known, support: $0.support) } ?? original.lifecycle,
+                    lifecycle: sameEpoch(normalized.lifecycle).map { .init(completedAt: $0.value.completedAt, states: $0.value.states.sorted { $0.rawValue < $1.rawValue },
+                        known: $0.value.known, support: reading.lifecycleCurrent ? $0.support : nil) } ?? original.lifecycle,
                     activity: sameEpoch(normalized.activity).map { .init(states: $0.value.states.sorted { $0.rawValue < $1.rawValue },
                         known: $0.value.known, support: $0.support) } ?? original.activity)
             }

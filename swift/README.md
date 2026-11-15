@@ -124,13 +124,14 @@ its trail and counts change immediately; its conversation and drafts stay open. 
 disconnected, the change waits for its original Machine and survives restart.
 A refusal restores only that change, leaving later edits and navigation alone.
 Incomplete cached destinations wait for their missing data before showing an
-exact count. Done leaves its dated total incomplete while completion dates are
-still arriving; showing all ages can include those completed Tasks immediately.
+exact count.
 Wave detail uses the same current location as the board and trail. Completed-history
 pages stay loaded when Tasks move or reopen, including across range changes and
 failed next-page requests. Missing data keeps counts incomplete and loaded content
-reachable. History pages carry display dates without stamped date coverage, so the
-detail's dated-history count stays incomplete; **All ages** uses known lifecycle.
+reachable. Done ranges use the current completion time from the same supported fact as
+lifecycle, on both board and detail. Old history pages cannot restore a prior
+completion date. While that time is unavailable, the range stays incomplete;
+**All ages** can show the completed Task immediately.
 
 Open an active Task whose planning state is **Todo**: wherever its lifecycle
 appears in the page, sidebar, board or breadcrumb picker, it shows **Active**.

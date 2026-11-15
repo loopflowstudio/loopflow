@@ -53,7 +53,7 @@ struct WaveStandupTests {
     private func standup(_ tasks: [RoadmapTask], closed: [RoadmapTask]? = nil, doneDays: Int = 7,
                          github: [String: GitHubPerson] = [:]) -> WaveStandup {
         WaveStandup(tasks: tasks, closed: closed ?? tasks, doneDays: doneDays, now: now, github: github,
-            states: Dictionary((tasks + (closed ?? [])).map { task in
+            facts: Dictionary((tasks + (closed ?? [])).map { task in
                 let section: [WorkSelectionState] = switch task.section {
                 case .backlog: [.backlog]
                 case .working: [.working]
@@ -61,8 +61,21 @@ struct WaveStandupTests {
                 case .done: [.done]
                 case .abandoned: []
                 }
-                return (task.id, section + Array(task.selectionStates))
+                return (task.id, fact(task.id, lifecycle: .init(completedAt: task.task.completedAt,
+                    states: section, known: true, support: dateSupport), activity: Array(task.selectionStates)))
             }, uniquingKeysWith: { first, _ in first }))
+    }
+
+    private var dateSupport: WorkMembershipPlan.FieldSupport {
+        .init(machine: "machine", epoch: "epoch", schema: UInt32(ServerProtocol.revision),
+            derivation: "work.lifecycle/2", revisions: ["planning": 9], observations: .sqlite)
+    }
+
+    private func fact(_ id: String, lifecycle: WorkMembershipPlan.LifecycleFact,
+                      activity: [WorkSelectionState] = []) -> WorkMembershipPlan.Facts {
+        .init(work: .init(repository: "repo", kind: .task, id: id), name: id,
+            parent: .init(wave: nil, support: nil), lifecycle: lifecycle,
+            activity: .init(states: activity, known: true, support: nil))
     }
 
     @Test func columnsAreRustSections() throws {
@@ -136,13 +149,28 @@ struct WaveStandupTests {
     @Test func doneWindowKeepsUnknownCompletionDatesIncomplete() throws {
         let completed = try task("just-completed", section: "working", owner: "Person")
         let board = WaveStandup(tasks: [completed], closed: [completed], doneDays: 7, now: now, github: [:],
-            states: [completed.id: [.done]])
+            facts: [completed.id: fact(completed.id, lifecycle: .init(completedAt: nil, states: [.done], known: true, support: nil))])
         #expect(board.working.isEmpty)
         #expect(board.count(.done) == nil)
         #expect(board.text(heading: [], section: .done).contains("Completion dates await confirmation"))
         let allAges = WaveStandup(tasks: [completed], closed: [completed], doneDays: 0, now: now, github: [:],
-            states: [completed.id: [.done]])
+            facts: [completed.id: fact(completed.id, lifecycle: .init(completedAt: nil, states: [.done], known: true, support: nil))])
         #expect(allAges.count(.done) == 1)
+    }
+
+    @Test func datedBoardUsesProjectedCompletionInsteadOfOldPage() throws {
+        let old = try task("a", section: "done", completedAt: "2026-10-01T09:00:00Z")
+        let support = WorkMembershipPlan.FieldSupport(machine: "machine", epoch: "epoch", schema: UInt32(ServerProtocol.revision),
+            derivation: "work.lifecycle/2", revisions: ["planning": 9], observations: .sqlite)
+        let current = WorkMembershipPlan.LifecycleFact(completedAt: "2026-10-25T09:00:00Z", states: [.done], known: true, support: support)
+        let board = WaveStandup(tasks: [old], closed: [old], doneDays: 7, now: now, github: [:],
+            facts: ["a": fact("a", lifecycle: current)])
+        #expect(board.done.map(\.id) == ["a"])
+        #expect(board.count(.done) == 1)
+        let pending = WaveStandup(tasks: [old], closed: [old], doneDays: 7, now: now, github: [:],
+            facts: ["a": fact("a", lifecycle: .init(completedAt: nil, states: [.done], known: true, support: nil))])
+        #expect(pending.done.isEmpty)
+        #expect(pending.count(.done) == nil)
     }
 
     @Test func boardRendersHeaderColumnsAndMetrics() throws {

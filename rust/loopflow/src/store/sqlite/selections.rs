@@ -82,6 +82,7 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
         name: repo.clone(),
         states: BTreeSet::new(),
         activity_known: false,
+        completed_at: None,
         support: None,
     };
     let mut wave_work = Vec::with_capacity(waves.len());
@@ -92,6 +93,7 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
             name: wave.name().to_string(),
             states: BTreeSet::new(),
             activity_known: false,
+            completed_at: None,
             support: None,
         });
     }
@@ -125,6 +127,9 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
                 .activity
                 .get(&task.id)
                 .is_none_or(|activity| activity.known);
+        let completed_at = (state.lifecycle(task.state.as_deref()) == TaskState::Done)
+            .then_some(task.completed_at)
+            .flatten();
         let order = reading.order.key(task.id.as_str(), task.rank, &states);
         task_work.push((
             order,
@@ -134,6 +139,7 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
                 name: task.identifier,
                 states,
                 activity_known,
+                completed_at,
                 support: None,
             },
         ));
@@ -166,7 +172,7 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
     let support = MembershipSupport {
         parent: support("work.parent/1", &["planning"], FieldObservations::Sqlite),
         lifecycle: support(
-            "work.lifecycle/1",
+            "work.lifecycle/2",
             &["planning", "graphs", "processes"],
             FieldObservations::Sqlite,
         ),
@@ -1044,6 +1050,65 @@ mod tests {
                 .observations,
             FieldObservations::Unavailable
         ));
+    }
+
+    #[test]
+    fn lifecycle_time_tracks_complete_reopen_complete_in_one_supported_snapshot() {
+        let (_dir, store, repo) = fixture();
+        let id = crate::durable::TaskId::parse("task_33333333333333333333333333333333").unwrap();
+        let read = || {
+            store
+                .view_plan(&repo, Some("kind:task"))
+                .unwrap()
+                .membership
+                .facts
+                .into_iter()
+                .find(|fact| fact.work.id == id.as_str())
+                .unwrap()
+                .lifecycle
+        };
+        let decide = |target| {
+            super::super::task_state_delivery::queue_in(&store.conn.lock().unwrap(), &id, target)
+                .unwrap();
+        };
+        decide("completed");
+        // A fixed old date keeps this test independent of the clock's precision.
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET planning_completed_at='2026-06-01T12:00:00Z' WHERE id=?1",
+                [id.as_str()],
+            )
+            .unwrap();
+        let d1 = read();
+        assert!(d1
+            .states
+            .contains(&crate::work::selection::SelectionState::Done));
+        assert_eq!(d1.completed_at.as_deref(), Some("2026-06-01T12:00:00Z"));
+        decide("started");
+        let reopened = read();
+        assert!(!reopened
+            .states
+            .contains(&crate::work::selection::SelectionState::Done));
+        assert_eq!(reopened.completed_at, None);
+        decide("completed");
+        let d2 = read();
+        assert!(d2
+            .states
+            .contains(&crate::work::selection::SelectionState::Done));
+        assert!(d2.completed_at.is_some());
+        assert_ne!(d2.completed_at, d1.completed_at);
+        assert!(
+            d2.support.as_ref().unwrap().revisions["planning"]
+                > d1.support.as_ref().unwrap().revisions["planning"]
+        );
+        let wire = serde_json::to_value(&reopened).unwrap();
+        assert_eq!(wire["completed_at"], serde_json::Value::Null);
+        let mut missing = wire;
+        missing.as_object_mut().unwrap().remove("completed_at");
+        assert!(serde_json::from_value::<crate::work::selection::LifecycleFact>(missing).is_err());
     }
 
     #[test]

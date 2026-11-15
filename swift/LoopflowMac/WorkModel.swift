@@ -1236,7 +1236,7 @@ final class WorkModel {
     /// A Wave view's Tasks bucketed for its board, with owners' GitHub users and Sessions.
     func standup(_ tasks: [RoadmapTask], doneDays: Int) -> WaveStandup {
         WaveStandup(tasks: tasks, closed: tasks, doneDays: doneDays, now: .now, github: githubPeople,
-            states: Dictionary(projectedFacts.map { ($0.work.id, $0.states) }, uniquingKeysWith: { first, _ in first }))
+            facts: Dictionary(projectedFacts.map { ($0.work.id, $0) }, uniquingKeysWith: { first, _ in first }))
     }
 
     func boardSection(_ view: WorkNavigation.Board) -> WaveBoardSection {

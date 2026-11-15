@@ -197,7 +197,7 @@ final class ClientWorkQueryTests: XCTestCase {
         if explicit { nodes.append(["kind": "members", "members": [member("a", "retained")]]) }
         var membership = try XCTUnwrap(body["membership"] as? [String: Any])
         membership["root"] = ["kind": "compose", "items": nodes]
-        membership["facts"] = ids.map { ["work": key($0), "name": $0, "parent": ["wave": NSNull(), "support": NSNull()], "lifecycle": ["states": ["open", "working"], "known": true, "support": NSNull()], "activity": ["states": ["available"], "known": true, "support": NSNull()]] as [String: Any] }
+        membership["facts"] = ids.map { ["work": key($0), "name": $0, "parent": ["wave": NSNull(), "support": NSNull()], "lifecycle": ["completed_at": NSNull(), "states": ["open", "working"], "known": true, "support": NSNull()], "activity": ["states": ["available"], "known": true, "support": NSNull()]] as [String: Any] }
         body["membership"] = membership
         let original = try XCTUnwrap((body["contents"] as? [[String: Any]])?.first)
         body["contents"] = ids.map { id in
@@ -233,8 +233,8 @@ final class ClientWorkQueryTests: XCTestCase {
             }
             return .init(work: fact.work, name: fact.name,
                 parent: .init(wave: fact.parent.wave, support: support("work.parent/1", ["planning": stamp.revisions.planning])),
-                lifecycle: .init(states: completed.contains(fact.work.id) ? [.done] : fact.lifecycle.states, known: true,
-                    support: support("work.lifecycle/1", ["planning": stamp.revisions.planning,
+                lifecycle: .init(completedAt: nil, states: completed.contains(fact.work.id) ? [.done] : fact.lifecycle.states, known: true,
+                    support: support("work.lifecycle/2", ["planning": stamp.revisions.planning,
                         "graphs": stamp.revisions.graphs, "processes": stamp.revisions.processes])),
                 activity: fact.activity)
         }
@@ -253,7 +253,7 @@ final class ClientWorkQueryTests: XCTestCase {
 
     private func fieldPlan(_ stamp: ReadingStamp, wave: String? = "a", lifecycle: [WorkSelectionState] = [.working],
                            activity: [WorkSelectionState] = [.busy], clock: UInt64? = 19,
-                           source: String = "observer", activityKnown: Bool = true) throws -> WorkViewPlan {
+                           source: String = "observer", activityKnown: Bool = true, completedAt: String? = nil) throws -> WorkViewPlan {
         let plan = try workingPlan(["a"])
         func support(_ derivation: String, _ revisions: [String: Int64],
                      _ observations: WorkMembershipPlan.FieldSupport.Observations) -> WorkMembershipPlan.FieldSupport {
@@ -267,7 +267,7 @@ final class ClientWorkQueryTests: XCTestCase {
         var membership = plan.membership
         membership.facts = [.init(work: old.work, name: old.name,
             parent: .init(wave: wave, support: support("work.parent/1", ["planning": stamp.revisions.planning], .sqlite)),
-            lifecycle: .init(states: lifecycle, known: true, support: support("work.lifecycle/1",
+            lifecycle: .init(completedAt: completedAt, states: lifecycle, known: true, support: support("work.lifecycle/2",
                 ["planning": stamp.revisions.planning, "graphs": 7, "processes": 7], .sqlite)),
             activity: .init(states: activity, known: activityKnown, support: support("work.activity/1",
                 ["planning": stamp.revisions.planning, "sessions": stamp.revisions.sessions, "graphs": 7, "processes": 7], observations)))]
@@ -446,7 +446,7 @@ final class ClientWorkQueryTests: XCTestCase {
             for wave in ["a", "b", "c"] where !manifest.contains(where: { $0.work.kind == .wave && $0.work.id == wave }) {
                 manifest.append(.init(work: WorkWorkspaceKey(repository: template.work.repository, kind: .wave, id: wave), name: wave,
                     parent: .init(wave: nil, support: template.parent.support),
-                    lifecycle: .init(states: [], known: true, support: template.lifecycle.support),
+                    lifecycle: .init(completedAt: nil, states: [], known: true, support: template.lifecycle.support),
                     activity: .init(states: [], known: true, support: nil)))
             }
         }
@@ -720,6 +720,123 @@ final class ClientWorkQueryTests: XCTestCase {
         ProjectedTaskHistory(plans: plans, repository: plans.first?.repository ?? content.first?.task.repositoryId ?? "missing", wave: wave, content: content,
             showCompleted: showCompleted, days: days, now: Date(timeIntervalSince1970: 1_784_070_000),
             contentComplete: true, historyComplete: complete)
+    }
+
+    func testDatedHistoryCorrelatesCompletionAcrossTwoClientsRestartAndStalePages() throws {
+        let directories = (0..<2).map { _ in FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString) }
+        addTeardownBlock { for directory in directories { try? FileManager.default.removeItem(at: directory) } }
+        let oldPage = try historyTask(date: "2026-06-01T12:00:00Z")
+        let d2 = "2026-07-12T18:30:00Z"
+        for directory in directories {
+            let client = try ClientWorkDatabase(directory: directory)
+            let first = fieldStamp(planning: 7)
+            let reopened = fieldStamp(planning: 8)
+            let completed = fieldStamp(planning: 9)
+            func reading(_ stamp: ReadingStamp, _ states: [WorkSelectionState], _ date: String?) throws -> ClientWorkQuery {
+                ClientWorkQuery(stamp: stamp, plans: [try scoped(fieldPlan(stamp, lifecycle: states, clock: nil, completedAt: date), wave: nil)])
+            }
+            _ = try client.cache(reading(first, [.done], "2026-06-01T12:00:00Z"), key: "inventory")
+            _ = try client.cache(reading(reopened, [.working], nil), key: "reopen")
+            let confirmed = try XCTUnwrap(client.cached(machine: "machine", key: "inventory"))
+            XCTAssertNil(confirmed.projection.first?.membership.facts.first?.lifecycle.completedAt)
+            let pending = WorkQueryEffect(operationID: "d2", sequence: 1, directory: "/repo", kind: "task.complete", issue: "a", resolution: nil)
+            let projected = confirmed.applying([pending])
+            XCTAssertTrue(history(projected.projection, content: [oldPage], showCompleted: true).rows.isEmpty)
+            XCTAssertNil(history(projected.projection, content: [oldPage], showCompleted: true).count)
+            XCTAssertEqual(history(projected.projection, content: [oldPage], showCompleted: true, days: 0).count, 1)
+            let refusal = try fieldReceipt(stage: "task.completed", resolution: .definitelyRefused)
+            let refused = WorkQueryEffect(operationID: "d2", sequence: 1, directory: "/repo", kind: "task.complete", issue: "a", resolution: refusal.commits.first)
+            XCTAssertEqual(confirmed.applying([refused]).projection.first?.membership.facts.first?.lifecycle.states, [.working])
+            _ = try client.cache(reading(completed, [.done], d2), key: "d2")
+            _ = try client.cache(reading(first, [.done], "2026-06-01T12:00:00Z"), key: "stale")
+            let answer = try XCTUnwrap(client.cached(machine: "machine", key: "inventory"))
+            XCTAssertEqual(answer.projection.first?.membership.facts.first?.lifecycle.completedAt, d2)
+            XCTAssertEqual(history(answer.projection, content: [oldPage], showCompleted: true).count, 1)
+            XCTAssertNil(history(answer.projection, content: [oldPage], showCompleted: true, complete: false).count)
+        }
+        for directory in directories {
+            let restarted = try ClientWorkDatabase(directory: directory)
+            let answer = try XCTUnwrap(restarted.cached(machine: "machine", key: "inventory"))
+            XCTAssertEqual(answer.projection.first?.membership.facts.first?.lifecycle.completedAt, d2)
+            XCTAssertEqual(history(answer.projection, content: [oldPage], showCompleted: true).rows.map(\.id), ["a"])
+            XCTAssertEqual(history(answer.projection, content: [oldPage], showCompleted: true, days: 1).count, 0)
+        }
+    }
+
+    func testDatedHistoryConflictingOrUnavailableSupportCannotCertifyPageDate() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let client = try ClientWorkDatabase(directory: directory)
+        let stamp = fieldStamp()
+        let date = "2026-07-14T18:30:00Z"
+        func reading(_ date: String?) throws -> ClientWorkQuery {
+            ClientWorkQuery(stamp: stamp, plans: [try scoped(fieldPlan(stamp, lifecycle: [.done], clock: nil, completedAt: date), wave: nil)])
+        }
+        _ = try client.cache(reading(date), key: "inventory")
+        _ = try client.cache(reading(nil), key: "equal-conflict")
+        let answer = try XCTUnwrap(client.cached(machine: "machine", key: "inventory"))
+        XCTAssertNil(history(answer.projection, content: [try historyTask()], showCompleted: true).count)
+        XCTAssertEqual(answer.projection.first?.membership.facts.first?.lifecycle.completedAt, date)
+        XCTAssertNil(answer.projection.first?.membership.facts.first?.lifecycle.support)
+        let fields = try XCTUnwrap(client.fieldReading(machine: "machine", work: XCTUnwrap(answer.plans.first?.membership.facts.first?.work)))
+        XCTAssertTrue(fields.facts.lifecycle?.needsReconciliation == true)
+        XCTAssertFalse(fields.lifecycleCurrent)
+    }
+
+    func testLifecycleTimeKnownNullUnavailableAndMissingWireKey() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let client = try ClientWorkDatabase(directory: directory)
+        let stamp = fieldStamp()
+        let base = try scoped(fieldPlan(stamp, lifecycle: [.done], completedAt: nil), wave: nil)
+        _ = try client.cache(ClientWorkQuery(stamp: stamp, plans: [base]), key: "inventory")
+        let work = try XCTUnwrap(base.membership.facts.first?.work)
+        let knownNull = try XCTUnwrap(client.fieldReading(machine: "machine", work: work))
+        XCTAssertTrue(knownNull.lifecycleCurrent)
+        XCTAssertNil(knownNull.facts.lifecycle?.value.completedAt)
+        var membership = base.membership
+        let life = try XCTUnwrap(membership.facts.first?.lifecycle)
+        let oldSupport = try XCTUnwrap(life.support)
+        membership.facts[0].lifecycle = .init(completedAt: "2026-07-14T18:30:00Z", states: [.done], known: true,
+            support: .init(machine: oldSupport.machine, epoch: oldSupport.epoch, schema: oldSupport.schema,
+                derivation: oldSupport.derivation, revisions: oldSupport.revisions, observations: .unavailable))
+        var wire = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(base)) as? [String: Any])
+        wire["membership"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(membership))
+        let unavailable = try JSONDecoder().decode(WorkViewPlan.self, from: JSONSerialization.data(withJSONObject: wire))
+        _ = try client.cache(ClientWorkQuery(stamp: stamp, plans: [unavailable]), key: "unavailable")
+        XCTAssertFalse(try XCTUnwrap(client.fieldReading(machine: "machine", work: work)).lifecycleCurrent)
+        let answer = try XCTUnwrap(client.cached(machine: "machine", key: "inventory"))
+        XCTAssertNil(history(answer.projection, content: [try historyTask()], showCompleted: true).count)
+        var selected = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(life)) as? [String: Any])
+        XCTAssertTrue(selected["completed_at"] is NSNull)
+        selected.removeValue(forKey: "completed_at")
+        XCTAssertThrowsError(try JSONDecoder().decode(WorkMembershipPlan.LifecycleFact.self,
+            from: JSONSerialization.data(withJSONObject: selected)))
+    }
+
+    func testLifecycleOnlyCacheReplacementKeepsOriginalPendingCommand() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let original: SubmittedOperation
+        do {
+            let client = try complete(directory)
+            original = try XCTUnwrap(client.pending().first)
+            let stamp = fieldStamp()
+            _ = try client.cache(ClientWorkQuery(stamp: stamp, plans: [fieldPlan(stamp)]), key: "inventory")
+        }
+        var sqlite: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(directory.appendingPathComponent("work.sqlite").path, &sqlite), SQLITE_OK)
+        let handle = try XCTUnwrap(sqlite)
+        defer { sqlite3_close(handle) }
+        XCTAssertEqual(sqlite3_exec(handle, """
+            UPDATE work_queries SET state=json_remove(CAST(state AS TEXT),'$.plans[0].membership.facts[0].lifecycle.completed_at');
+            UPDATE work_fields SET state=json_remove(CAST(state AS TEXT),'$.lifecycle.value.completedAt');
+            """, nil, nil, nil), SQLITE_OK)
+        let restarted = try ClientWorkDatabase(directory: directory)
+        XCTAssertNil(try restarted.cached(machine: "machine", key: "inventory"))
+        let saved = try XCTUnwrap(restarted.pending().first)
+        XCTAssertTrue(try saved.hasSameCommand(as: original))
+        XCTAssertEqual(saved.id, original.id)
     }
 
     func testDetailHistoryOfflineMovesAndRefusalNeverBorrowPageMembership() throws {

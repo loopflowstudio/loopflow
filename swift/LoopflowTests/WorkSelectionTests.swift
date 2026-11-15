@@ -116,7 +116,7 @@ func fixtureViewPlan(owner: WorkWorkspaceKey, members: [WorkViewPlan.Content],
     return WorkViewPlan(name: nil, pinned: false, dashboardID: nil, repository: owner.repository, repositoryPath: "/src/fixture",
         selection: WorkSelection(id: owner.id, expression: owner.kind == .repository ? .repository : .wave(owner.id)), savedRevision: nil,
         resolution: WorkSelectionResolution(attention: [], members: refs, unavailable: []),
-        membership: WorkMembershipPlan(domains: [], effects: [:], root: .members(refs), facts: facts ?? members.map { .init(work: $0.work, name: $0.identifier ?? $0.work.id, parent: .init(wave: nil, support: nil), lifecycle: .init(states: $0.states.filter { ![.available, .busy, .blocked].contains($0) }, known: true, support: nil), activity: .init(states: $0.states.filter { [.available, .busy, .blocked].contains($0) }, known: true, support: nil)) }, unavailable: []),
+        membership: WorkMembershipPlan(domains: [], effects: [:], root: .members(refs), facts: facts ?? members.map { .init(work: $0.work, name: $0.identifier ?? $0.work.id, parent: .init(wave: nil, support: nil), lifecycle: .init(completedAt: nil, states: $0.states.filter { ![.available, .busy, .blocked].contains($0) }, known: true, support: nil), activity: .init(states: $0.states.filter { [.available, .busy, .blocked].contains($0) }, known: true, support: nil)) }, unavailable: []),
         arrangement: WorkArrangement(order: refs, hidden: [], mode: .auto),
         projection: WorkArrangementProjection(visible: refs, suppressed: []), slots: slots, contents: members)
 }
@@ -152,12 +152,12 @@ func fixtureInventoryPlan(_ snapshot: RoadmapSnapshot) -> WorkViewPlan {
     let facts = tasks.map { task in
         WorkMembershipPlan.Facts(work: .init(repository: "repo", kind: .task, id: task.id), name: task.task.identifier,
             parent: .init(wave: task.task.waveId, support: nil),
-            lifecycle: .init(states: Array(task.selectionStates).filter { ![.available, .busy, .blocked].contains($0) }, known: true, support: nil),
+            lifecycle: .init(completedAt: nil, states: Array(task.selectionStates).filter { ![.available, .busy, .blocked].contains($0) }, known: true, support: nil),
             activity: .init(states: Array(task.selectionStates).filter { [.available, .busy, .blocked].contains($0) }, known: true, support: nil))
     } + snapshot.waves.map { wave in
         WorkMembershipPlan.Facts(work: .init(repository: "repo", kind: .wave, id: wave.wave.id), name: wave.wave.name,
             parent: .init(wave: wave.wave.parentWaveId, support: nil),
-            lifecycle: .init(states: [], known: true, support: nil), activity: .init(states: [], known: true, support: nil))
+            lifecycle: .init(completedAt: nil, states: [], known: true, support: nil), activity: .init(states: [], known: true, support: nil))
     }
     let template = fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"), members: contents)
     return WorkViewPlan(name: nil, pinned: false, dashboardID: nil, repository: "repo", repositoryPath: "/src/fixture",

@@ -244,6 +244,11 @@ intersections, hidden/suppressed occurrences and unknown/partial reads remain on
 the typed program and its shared evaluator. Desktop Move no longer uses
 `performTaskAction` or its post-write refresh barrier.
 
+Removed in the dated-completion cut: `TaskHistoryFilter.includes`,
+`WaveStandup.date`, and board/detail reads of page dates for membership/counts.
+Their rolling-range, boundary and unresolved-execution behavior stays on the shared
+lifecycle fact and retained history join.
+
 Removed in the detail/history cut: `ClosedTaskHistory.merged`, detail's DTO
 lifecycle filter, unconditional history resets, and inspector lookup limited to
 `workMap.tasks`. Required page content/cursors, original Project IDs, ordering,
@@ -422,45 +427,48 @@ in `questions.md`. These do not prevent the engineering cut above, but remain
 open product choices for this concept-review's Blocked outcome; (3) decides
 whether phone rename exists. No answer is inferred in a headless run.
 
-### Concept review: completion time belongs to the fact · 2026-11-15
+### Correlated lifecycle and completion time · 2026-11-15
 
-The detail/history join implements the preceding review direction. The next
-engineering mismatch is a dated Done answer: detail refuses to certify it from
-unstamped page dates, while the board's `WaveStandup` only checks for a missing
-`completedAt`. A present old date can therefore look complete. Source review only;
-the focused run results below are from the preceding implementation, not rerun here.
+Lifecycle now carries required nullable `completed_at` under the same support,
+read in the producer's pinned snapshot (`work.lifecycle/2`). Reopen clears it;
+Complete supplies a new Machine time. Both wire transports and the shared SQLite
+field/derived-answer owner carry that value. Local intent clears time rather than
+inventing it. Old lifecycle-only caches are replaceable; commands, receipts and
+reload floors remain untouched. Unavailable/conflicting support retains confirmed
+facts for reconciliation but cannot certify a dated answer. The derived answer
+withdraws support rather than rewriting a last-known time into a known null.
 
-Next implement direction, implied by the existing field-support contract: a
-completion date must identify the same completion as the projected lifecycle.
-Carry lifecycle and its nullable completion time as one supported terminal fact
-(or equally strong correlated support) through producer capture, wire fixtures,
-normalization, SQLite persistence and shared projection. Distinguish known absent
-from unavailable. Reopen clears terminal time; a later Complete cannot inherit
-the earlier completion's date. Local intent changes lifecycle immediately but
-does not invent a Machine completion time. Planning/page DTOs remain content,
-never an independent authority for dated membership or exact totals.
+Board and detail use `LifecycleFact.completed(inLast:now:)`, never page dates.
+All ages uses lifecycle alone; missing/invalid time leaves dated totals incomplete.
+Pages retain content, original Project association, cursors and range behavior;
+unresolved execution remains reachable. Prior review/counterexamples:
+`b70defa4a63a:scratch/instant-task-session.md` (completion time belongs to the fact).
+Three product questions remain open, independently of this engineering cut.
 
-Both board and detail consume that shared dated answer, keeping their existing
-range controls, order, loaded pages/cursors, historical Project association and
-unresolved-execution recovery. All ages continues to use lifecycle alone. Until
-the terminal fact is available and compatible, dated membership/count coverage
-stays incomplete; a page's displayed timestamp cannot fill the gap. Keep this
-one vertical change through both transports and their real consumers, without
-another date cache or a separate receipt ledger. Proposed usage after acceptance:
-> Done ranges use the current completion time. While that time is unavailable,
-> the range stays incomplete; All ages can show the completed Task immediately.
+Concept-review outcome, 2026-11-15: no further model change from reviewing this
+cut. Complete at D1 → Reopen → Complete at D2 now has one correlated answer;
+an old page cannot supply D1 to a newer lifecycle. Held confirmation withholds a
+dated answer without withholding All ages. Refusal restores the latest base,
+not a saved page; restart retains the supported pair and original request.
+The existing Desktop/iOS/Rust logs listed below were inspected, not rerun.
+`scratch/concept-review.html` now shows this as built. Loop-or-next outcome:
+Blocked on the three open product choices above; none is answered by this cut.
 
-Counterexample for the next cut: Complete at D1 → Reopen → Complete at D2,
-then an old D1 page arrives with D1 outside the selected range and D2 inside.
-Board and detail must use D2, including after restart and on the second client.
-Hold D2's reading: local Done is immediate, its dated answer is incomplete.
-Refuse only the newer Complete: retain the latest confirmed Reopen and later
-navigation. Cover known-null/unavailable time, equal conflicting support,
-partial history, changed ranges and a failed next page; keep loaded content and
-original request recovery. No new product choice or builtin skill change.
+Acceptance: shared `testDatedHistory…` cases cover D1→Reopen→D2, stale
+arrivals/pages, two clients/restart, held local completion, refusal and changed
+ranges. `testLifecycleTime…` distinguishes known-null, unavailable and omitted
+wire keys; `testLifecycleOnlyCache…` retains the exact pending command through
+cache replacement. Existing detail/history tests retain partial/failed pages and
+unresolved execution. Board consumes one projected fact, including its time.
 
-Outcome for loop-or-next remains **Blocked** on questions 1–3 above. This
-engineering direction does not answer them or authorize restarting execution.
+Checks, 2026-11-15 (wider suites/lint and recorded LEAK remain gate; native latency
+remains unmeasured):
+- `scripts/test_desktop.sh --jobs 4 --filter 'ClientWorkQueryTests/testDatedHistory|ClientWorkQueryTests/testLifecycleTime|ClientWorkQueryTests/testLifecycleOnlyCache|ClientWorkQueryTests/testDetailHistory|WaveStandupTests'`: 6 shared query and 10 board cases pass; `/tmp/loo-906-terminal-reconciliation.log`. History/navigation checks also pass in `/tmp/loo-906-terminal-tests.log` and `/tmp/loo-906-terminal-board.log`.
+- `uv run python scripts/test_ios.py` selecting the four new shared cases: 4 pass; `/tmp/loo-906-terminal-ios-final.log`. Six phone decoder checks remain passing from `/tmp/loo-906-terminal-ios.log`.
+- `cargo test -p loopflow --lib lifecycle_time_tracks_complete_reopen_complete_in_one_supported_snapshot`: passes; `/tmp/loo-906-terminal-rust.log`.
+- `cargo test -p loopflow --lib server::schema::tests::`: 8 pass; `/tmp/loo-906-terminal-schema.log`. Two focused wire round-trips pass in `/tmp/loo-906-terminal-wire.log`; Desktop's 27 protocol cases pass in `/tmp/loo-906-terminal-cache-tests.log`.
+- `cargo test -p loopflow --test integration documented_commands::`: 4 pass; `/tmp/loo-906-terminal-docs.log`.
+- `cargo fmt --check` and `uv run python scripts/check_swift_multiplatform_boundaries.py`: pass.
 
 ### Persisted field incorporation · 2026-11-15
 
@@ -594,7 +602,7 @@ New findings join their responsibility; repairs are marked separately.
 | Field capture and ingestion, both transports | Independent supported fields, receiving-link attribution | Historical restoration epoch reset; all-writer declaration audit |
 | Dynamic queries and Move, both hosts | Shared field/effect evaluator; fixed membership removed | Real 10k payload/cache/fan-out profiling |
 | Boards, portfolio, trails, No Wave | Query-owned parent/lifecycle; old planning membership removed | Native acceptance; surface commands at `09ab7e7ab2:scratch/instant-task-session.md` |
-| Wave detail/history/inspector | Shared projected join; DTO membership merge removed | Dated exact totals need supported completion dates; unproven dates stay incomplete |
+| Wave detail/history/inspector | Shared projected join; DTO membership merge removed | Correlated lifecycle/time now supplies dated answers; unavailable dates stay incomplete |
 | Complete/Abandon, both hosts | Synchronous shared projection/navigation and outbox | Three product questions above; other command families below |
 | Other edits and command recovery | Session rename migrated | Claim/unassign/Reopen, Wave/Dashboard edits, bind/new/move, settings, file/layout and delivery/Graph actions: migrate real consumers and remove refresh barriers/duplicate policy |
 | Native ownership, navigation | Desktop pool retained; shared synchronous selection | Retained mobile SessionLink, cached revisit/disclosure input and paint measurements |
@@ -625,29 +633,11 @@ navigation never come from these replies. The inspector joins the same retained
 content, including history-only Tasks and Tasks that left the list.
 
 Unstamped pages carry display dates, not normalized field support. Dated filtering
-retains its existing range semantics but cannot certify a total; unknown dates
-keep that membership incomplete. All ages uses known lifecycle without guessing
-a date. Newly exposed contract: exact dated totals need supported completion-date
-projection. No page fabricates a stamp or restores its old lifecycle.
+now consumes the correlated lifecycle/time fact above; unavailable dates keep its
+answer incomplete. All ages uses lifecycle. Pages never restore old lifecycle.
 
-Acceptance: shared `ClientWorkQueryTests/testDetailHistory…` covers offline
-A→B→No Wave, refusal/newer Move, stale pages, historical Project association,
-unknown dates, missing fields/content/ancestry and unresolved execution.
-`testProjectedInventoryTwoClientsCompleteThenReopen…` now joins stale history
-content after restart. `WorkNavigationTests/projectedInventoryMovesBoardsAndTrail`
-checks the real model's detail/board agreement and retained Session/draft/selection.
-`TaskHistoryFilterTests/heldPageCannotChangeNewRangeCursorAndFailureKeepsLoadedContent`
-checks range replacement and failed paging. Production row/inspector actions retain
-selected content through removal from detail/pages and still open its workspace.
-No new product answer or shipping decision.
-
-- `swift build --build-tests --package-path swift --jobs 4`: passes; `/tmp/loo-906-detail-final-build.log`.
-- `scripts/test_desktop.sh --skip-build --filter 'ClientWorkQueryTests/testDetailHistory|ClientWorkQueryTests/testProjectedInventoryTwoClientsCompleteThenReopen|TaskHistoryFilterTests|WorkNavigationTests/projectedInventoryMovesBoardsAndTrail|ProjectActivationTests'`: 3 XCTest and 14 Swift Testing cases pass; `/tmp/loo-906-detail-tests.log`.
-
-- `scripts/test_desktop.sh --skip-build --filter 'TaskHistoryFilterTests/selectedHistoryContentKeepsItsWorkspaceWhileFieldsAreUnavailable|TaskHistoryFilterTests/heldPageCannotChangeNewRangeCursorAndFailureKeepsLoadedContent|TaskHistoryFilterTests/closedPagesDeduplicateAndReachTheirRange'`: 3 pass after inspector retention; `/tmp/loo-906-detail-inspector.log`.
-- `uv run python scripts/test_ios.py` with the three explicit shared detail/history and two-client/restart selections above: 3 pass; `/tmp/loo-906-detail-ios.log`.
-- `cargo test -p loopflow --test integration documented_commands::`: 4 pass; `/tmp/loo-906-detail-docs.log`.
-- `uv run python scripts/check_swift_multiplatform_boundaries.py`: passes.
+Prior detail/history acceptance and commands:
+`b70defa4a63a:scratch/instant-task-session.md` (Detail and history cut).
 
 ### Admission identity and recovery contract
 

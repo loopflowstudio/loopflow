@@ -65,6 +65,7 @@ fn defaults_include_child_waves_and_working_wave_tasks() {
         parent_wave,
         name: String::new(),
         activity_known: false,
+        completed_at: None,
         support: None,
     })
     .collect();
@@ -119,6 +120,7 @@ fn nested_sources_survive_insertions_and_report_unavailable_queries_and_cycles()
             SelectionState::Working,
         ]),
         activity_known: false,
+        completed_at: None,
         support: None,
     }];
     let query = DashboardId("saved".into());
@@ -305,6 +307,7 @@ fn query_work() -> Vec<SelectionWork> {
             name: "Product".into(),
             states: Default::default(),
             activity_known: false,
+            completed_at: None,
             support: None,
         },
         SelectionWork {
@@ -313,6 +316,7 @@ fn query_work() -> Vec<SelectionWork> {
             name: "FIX-1".into(),
             states: [SelectionState::Open, SelectionState::Available].into(),
             activity_known: true,
+            completed_at: None,
             support: None,
         },
         SelectionWork {
@@ -321,6 +325,7 @@ fn query_work() -> Vec<SelectionWork> {
             name: "FIX-2".into(),
             states: [SelectionState::Backlog].into(),
             activity_known: true,
+            completed_at: None,
             support: None,
         },
     ]
@@ -486,6 +491,7 @@ fn query_selection_plan_wire_roundtrips() {
             name: fact.name.clone(),
             states: fact.states(),
             activity_known: fact.activity.known,
+            completed_at: None,
             support: None,
         })
         .collect();
@@ -533,6 +539,7 @@ fn explicit_membership_program_keeps_only_its_candidates_at_ten_thousand_tasks()
             name: format!("LOO-{index}"),
             states: BTreeSet::from([SelectionState::Working]),
             activity_known: true,
+            completed_at: None,
             support: None,
         })
         .collect();
@@ -627,6 +634,7 @@ fn working_tasks_are_the_working_section_and_the_others_have_their_own_queries()
         name: id.into(),
         states: BTreeSet::from([SelectionState::Open, state, section]),
         activity_known: true,
+        completed_at: None,
         support: None,
     })
     .chain([SelectionWork {
@@ -635,6 +643,7 @@ fn working_tasks_are_the_working_section_and_the_others_have_their_own_queries()
         name: "wave".into(),
         states: BTreeSet::new(),
         activity_known: false,
+        completed_at: None,
         support: None,
     }])
     .collect();
@@ -724,6 +733,7 @@ fn dynamic_wave_membership_consumes_moves_without_recompiling_candidates() {
         parent_wave,
         states: BTreeSet::from([SelectionState::Working]),
         activity_known: true,
+        completed_at: None,
         support: None,
     })
     .collect();

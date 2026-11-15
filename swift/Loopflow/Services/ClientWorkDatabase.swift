@@ -118,6 +118,15 @@ final class ClientWorkDatabase {
                     OR json_type(fact.value,'$.lifecycle') IS NOT 'object'
                     OR json_type(fact.value,'$.activity') IS NOT 'object')
             """)
+        // A lifecycle-only cache cannot certify which completion its date belongs to.
+        // Replace cached answers/fields; retain commands, receipts and reload floors.
+        try execute("""
+            DELETE FROM work_queries WHERE EXISTS (
+                SELECT 1 FROM json_each(CAST(work_queries.state AS TEXT),'$.plans') AS plan,
+                    json_each(plan.value,'$.membership.facts') AS fact
+                WHERE json_type(fact.value,'$.lifecycle.completed_at') IS NULL)
+            """)
+        try execute("DELETE FROM work_fields WHERE json_type(CAST(state AS TEXT),'$.lifecycle.value.completedAt') IS NULL AND json_type(CAST(state AS TEXT),'$.lifecycle')='object'")
         // Fixed-candidate programs cannot support arrivals or acquire new proof.
         try execute("DELETE FROM work_queries WHERE EXISTS (SELECT 1 FROM json_tree(CAST(state AS TEXT),'$.plans') WHERE key='kind' AND value='state' AND json_type(CAST(state AS TEXT),substr(fullkey,1,length(fullkey)-5) || '.members') IS NOT NULL)")
         let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
@@ -505,7 +514,7 @@ final class ClientWorkDatabase {
         var facts = previous ?? WorkFieldFacts(machine: stamp.machine, work: fact.work)
         facts.parent = join(fact.parent.wave, support: fact.parent.support, previous: facts.parent,
             stamp: stamp, observation: observation, key: id + "/parent")
-        facts.lifecycle = join(WorkFieldStates(fact.lifecycle), support: fact.lifecycle.support, previous: facts.lifecycle,
+        facts.lifecycle = join(WorkFieldLifecycle(fact.lifecycle), support: fact.lifecycle.support, previous: facts.lifecycle,
             stamp: stamp, observation: observation, key: id + "/lifecycle")
         facts.activity = join(WorkFieldStates(fact.activity), support: fact.activity.support, previous: facts.activity,
             stamp: stamp, observation: observation, key: id + "/activity")

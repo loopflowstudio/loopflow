@@ -639,30 +639,21 @@ struct WorkModelStreamTests {
         #expect(model.sessions.value == nil)
     }
 
-    @Test("A Task completed elsewhere leaves the working set and stays under Completed")
+    @Test("Planning retains completed Task content and the selected workspace")
     func completedTaskLeavesWorkingSet() async throws {
         let fixture = try WorkTestFixture.load()
         let feed = WorkFeed()
         let model = WorkModel(query: fixture.streaming(feed))
         let keeping = Task { await model.keepWorkCurrent() }
         defer { keeping.cancel() }
-        let listed = { (filter: TaskHistoryFilter) -> Bool in
-            guard let row = model.task(id: "issue-now")?.task else { return false }
-            return filter.includes(row, now: Date())
-        }
-        var completed = TaskHistoryFilter()
-        completed.showCompleted = true
-
         try await feed.opened(1)
         await feed.send(try fixture.planningFrame(sequence: 1, answers: nil))
         try await eventually { model.roadmap.value != nil }
         model.select(.task(id: "issue-now"))
-        #expect(listed(TaskHistoryFilter()))
+        #expect(model.task(id: "issue-now")?.task.isCompleted == false)
 
         await feed.send(try fixture.planningFrame(sequence: 2, answers: nil, completing: "issue-now"))
         try await eventually { model.task(id: "issue-now")?.task.isCompleted == true }
-        #expect(!listed(TaskHistoryFilter()))
-        #expect(listed(completed))
         // Still in the reading, so the open Task is not deselected.
         #expect(model.selection == .task(id: "issue-now"))
         #expect(!model.roadmap.isLoading)

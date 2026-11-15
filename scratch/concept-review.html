@@ -9,25 +9,25 @@
 <main>
 <header>LOO-906 · concept-review · 2026-11-15 · headless Graph step<br>
 Sources: scratch/{instant-task-session,questions,desktop-reactivity-feedback}.md;
-HEAD 09ab7e7ab2 plus the uncommitted detail/history cut;
+HEAD b70defa4a63a plus the uncommitted correlated lifecycle/time cut;
 WorkMembership.swift, ClientWorkQuery.swift, WorkInteraction.swift, WorkModel.swift,
 WorkProjection.swift, NowProjection.swift, WaveStandupBoard.swift, WaveDetailPane.swift,
 TaskHistoryFilter.swift, WorkFieldFacts.swift, RemoteTaskObservation.swift; ClientWorkQueryTests.swift,
 WorkNavigationTests.swift, MobileWorkInteractionTests.swift and swift/{README,LoopflowiOS/README}.md.<br>
 Source review; prior check results are recorded in the working design. No new runtime measurements.</header>
 <h1>Decide offline Abandon, cancellation and phone names.</h1>
-<p><strong>Outcome for loop-or-next: Blocked — open product choices.</strong> Questions 1–3 remain unanswered. They do not prevent the completion-time engineering direction described below.</p>
+<p><strong>Outcome for loop-or-next: Blocked — open product choices.</strong> Questions 1–3 remain unanswered. The completion-time engineering cut is built; this review adds no further model change.</p>
 <p><strong>Built:</strong> Wave detail now joins the same projected parent and lifecycle as boards and trails. Loaded pages, cursors, selected inspector and historical Project association remain separate. Late pages cannot restore old lifecycle or change a newer range's loading state. Focused Desktop, iOS and Rust checks are recorded in the working design.</p>
-<p><strong>Biggest remaining mismatch:</strong> lifecycle is supported shared state; completion time is still page/planning content. Detail withholds exact dated totals from those dates, while the board checks only whether a date is missing. A present date may describe an earlier completion.</p>
+<p><strong>Mismatch resolved in this cut:</strong> a Task's current lifecycle and its completion time now travel as one supported fact. Board and detail no longer combine a newer Done state with an older page date. Known absent, unavailable and conflicting time cannot certify a dated answer.</p>
 <pre>Task T · Done range: last 7 days
 Complete at D1 (old) → Reopen → Complete at D2 (today)
 Old D1 history page arrives last
 
-Existing: lifecycle says Done; display date may still be D1
-          dated board may exclude T and show an exact count
-          detail withholds the count
+Before this cut: lifecycle says Done; page date may still be D1
+                dated board may exclude T and show an exact count
+                detail withholds the count
 
-Proposed shared terminal fact: Done at D2
+Built shared lifecycle fact: Done at D2
   board and detail include T using D2
   before D2 is known: Done is immediate; dated answer incomplete
   All ages: T is visible from lifecycle alone
@@ -35,17 +35,18 @@ Proposed shared terminal fact: Done at D2
 Loaded history, historical Project, Session and draft stay intact.</pre>
 <h2>Actions → concepts → APIs</h2>
 <table>
-<thead><tr><th>Action</th><th>Concept</th><th>Existing → proposed</th></tr></thead>
+<thead><tr><th>Action</th><th>Concept</th><th>Built API and ownership</th></tr></thead>
 <tbody>
 <tr><td>Move to B or No Wave</td><td>One current Task parent</td><td><code>WorkInteraction.moveTask</code> → shared fields → <code>ProjectedTaskHistory</code> and board/trail (built)</td></tr>
-<tr><td>Complete, Reopen, Complete again</td><td>One current terminal fact</td><td>Supported lifecycle + unqualified <code>completedAt</code> → proposed lifecycle/time correlation in producer capture, wire, SQLite and projection</td></tr>
-<tr><td>Choose a Done range</td><td>A dated answer needs supported time</td><td><code>WaveStandup</code> / <code>ProjectedTaskHistory</code> → proposed shared dated answer; All ages still needs lifecycle alone</td></tr>
+<tr><td>Complete, Reopen, Complete again</td><td>One current lifecycle fact</td><td><code>LifecycleFact</code> carries required nullable <code>completed_at</code> under <code>work.lifecycle/2</code> through both transports, SQLite and projection</td></tr>
+<tr><td>Choose a Done range</td><td>A dated answer needs supported time</td><td><code>WaveStandup</code> / <code>ProjectedTaskHistory</code> use <code>LifecycleFact.completed(inLast:now:)</code>; All ages needs lifecycle alone</td></tr>
 <tr><td>Keep reading and editing</td><td>Location and native ownership stay independent</td><td>Retain Session, native attachment, inspector, panes, drafts and later navigation through membership changes</td></tr>
-<tr><td>Recover a failed or uncertain change</td><td>Original request and independent coverage</td><td><code>ClientWorkDatabase</code> keeps command/receipt identity (built); proposed terminal time follows the same support and recovery rules</td></tr>
+<tr><td>Recover a failed or uncertain change</td><td>Original request and independent coverage</td><td><code>ClientWorkDatabase</code> retains command/receipt identity. Cache replacement discards lifecycle-only answers without changing saved commands or reload floors</td></tr>
 </tbody></table>
-<p><strong>Next implement direction:</strong> normalize lifecycle and nullable completion time as one supported terminal fact, or equally strong correlated support, in the existing owner. Distinguish known absent from unavailable; Reopen clears time and a new Complete cannot borrow the old time. Never guess a Machine completion timestamp from the gesture. Both transports and actual board/detail consumers must agree; no second date cache.</p>
-<p><strong>Proposed usage after acceptance:</strong> Done ranges use the current completion time. While that time is unavailable, the range stays incomplete; All ages can show the completed Task immediately. Loaded history and unresolved-work recovery stay reachable.</p>
-<p><strong>Show next:</strong> D1 → Reopen → D2 with an old page, held D2 reading, refusal, two clients and restart; known-null/unavailable dates, conflicting support, partial history, changed ranges and failed paging. Preserve request identity and later navigation. Native paint/input latency remains unmeasured. No builtin instruction changes or execution restart in this review.</p>
+<p><strong>Built recovery:</strong> Reopen clears time; a new Complete waits for its own Machine time. Local intent never invents a timestamp. Equal-support conflicts retain last-known values for reconciliation but withdraw dated support. A definite refusal removes only its effect and uses the latest confirmed base. Missing replies retain original-ID recovery; neither recovery nor a history page chooses navigation.</p>
+<p><strong>Usage, also in swift/README.md:</strong> Done ranges use the current completion time. While that time is unavailable, the range stays incomplete; All ages can show the completed Task immediately. Loaded history and unresolved-work recovery stay reachable.</p>
+<p><strong>Checked against source and existing run logs:</strong> D1 → Reopen → D2 with stale pages/readings, held D2, refusal, two persisted clients and restart; known-null/unavailable dates, equal-support conflict and lifecycle-only cache replacement. Recorded results: 6 shared Desktop cases, 10 board cases, 4 shared iOS cases and the focused Rust lifecycle case pass. These are deterministic checks, not native interaction measurements.</p>
+<p><strong>Show next:</strong> native launch, completion, cached revisit and Wave disclosure on a suitable quiet host. Native paint/input latency remains unmeasured; the wider rewrite inventory stays open. Questions below change product behavior, so this headless review leaves them unanswered. No builtin instruction changes or execution restart.</p>
 <h2>Questions for the next conversation</h2>
 <ol>
 <li><strong>Abandon while disconnected.</strong> It closes PRs and removes branches; the recorded “1a” named Complete, rename and move.<br>1a — Save Abandon and deliver on reconnect (built provisionally).<br>1b — Require a reachable Machine and keep the Task until then.</li>

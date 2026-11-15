@@ -53,11 +53,33 @@ struct WorkFieldStates: Codable, Equatable, Sendable {
     init(_ fact: WorkMembershipPlan.StateFact) { states = Set(fact.states); known = fact.known }
 }
 
+struct WorkFieldLifecycle: Codable, Equatable, Sendable {
+    let states: Set<WorkSelectionState>
+    let known: Bool
+    let completedAt: String?
+    init(_ fact: WorkMembershipPlan.LifecycleFact) {
+        states = Set(fact.states); known = fact.known; completedAt = fact.completedAt
+    }
+    private enum CodingKeys: String, CodingKey { case states, known, completedAt }
+    init(from decoder: any Decoder) throws {
+        let fields = try decoder.container(keyedBy: CodingKeys.self)
+        states = try fields.decode(Set<WorkSelectionState>.self, forKey: .states)
+        known = try fields.decode(Bool.self, forKey: .known)
+        completedAt = try fields.decode(String?.self, forKey: .completedAt)
+    }
+    func encode(to encoder: any Encoder) throws {
+        var fields = encoder.container(keyedBy: CodingKeys.self)
+        try fields.encode(states, forKey: .states)
+        try fields.encode(known, forKey: .known)
+        try fields.encode(completedAt, forKey: .completedAt)
+    }
+}
+
 struct WorkFieldFacts: Codable, Equatable, Sendable {
     let machine: String
     let work: WorkWorkspaceKey
     var parent: WorkFieldFact<String?>?
-    var lifecycle: WorkFieldFact<WorkFieldStates>?
+    var lifecycle: WorkFieldFact<WorkFieldLifecycle>?
     var activity: WorkFieldFact<WorkFieldStates>?
 
     mutating func incorporate(_ commit: OperationCommit, field: WorkField) {

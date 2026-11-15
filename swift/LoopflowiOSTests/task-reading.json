@@ -253,7 +253,8 @@
               "open"
             ],
             "known": true,
-            "support": null
+            "support": null,
+            "completed_at": null
           },
           "activity": {
             "states": [
@@ -279,7 +280,8 @@
               "open"
             ],
             "known": true,
-            "support": null
+            "support": null,
+            "completed_at": null
           },
           "activity": {
             "states": [
@@ -305,7 +307,8 @@
               "open"
             ],
             "known": true,
-            "support": null
+            "support": null,
+            "completed_at": null
           },
           "activity": {
             "states": [

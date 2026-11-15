@@ -44,12 +44,23 @@ pub struct StateFact {
     pub support: Option<FieldSupport>,
 }
 
+/// Lifecycle and its current completion time share one snapshot and support.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct LifecycleFact {
+    pub states: BTreeSet<SelectionState>,
+    pub known: bool,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub completed_at: Option<String>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub support: Option<FieldSupport>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct MembershipFacts {
     pub work: WorkWorkspaceKey,
     pub name: String,
     pub parent: ParentFact,
-    pub lifecycle: StateFact,
+    pub lifecycle: LifecycleFact,
     pub activity: StateFact,
 }
 
@@ -322,7 +333,8 @@ impl Selection {
                         wave: item.parent_wave.clone(),
                         support: item.support.as_ref().map(|support| support.parent.clone()),
                     },
-                    lifecycle: StateFact {
+                    lifecycle: LifecycleFact {
+                        completed_at: item.completed_at.clone(),
                         states: item
                             .states
                             .iter()

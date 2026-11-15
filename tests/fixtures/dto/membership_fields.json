@@ -30,7 +30,7 @@
         "machine": "machine_11111111111111111111111111111111",
         "epoch": "fixture-epoch",
         "schema": 6,
-        "derivation": "work.lifecycle/1",
+        "derivation": "work.lifecycle/2",
         "revisions": {
           "planning": 7,
           "graphs": 7,
@@ -39,7 +39,8 @@
         "observations": {
           "kind": "sqlite"
         }
-      }
+      },
+      "completed_at": null
     },
     "activity": {
       "states": [
@@ -94,7 +95,7 @@
         "machine": "machine_11111111111111111111111111111111",
         "epoch": "fixture-epoch",
         "schema": 6,
-        "derivation": "work.lifecycle/1",
+        "derivation": "work.lifecycle/2",
         "revisions": {
           "planning": 7,
           "graphs": 7,
@@ -103,7 +104,8 @@
         "observations": {
           "kind": "sqlite"
         }
-      }
+      },
+      "completed_at": null
     },
     "activity": {
       "states": [

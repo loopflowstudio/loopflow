@@ -45,13 +45,12 @@ struct WaveStandup: Equatable {
 
     /// `tasks` fill Backlog, Working and Autonomous; `closed` fills Done. Today both come from the
     /// shared projected inventory. `github` maps lowercase owner emails to their users.
-    init(tasks: [RoadmapTask], closed: [RoadmapTask], doneDays: Int, now: Date, github: [String: GitHubPerson], states: [String: [WorkSelectionState]]) {
+    init(tasks: [RoadmapTask], closed: [RoadmapTask], doneDays: Int, now: Date, github: [String: GitHubPerson], facts: [String: WorkMembershipPlan.Facts]) {
         func section(_ task: RoadmapTask) -> TaskSection? {
-            states[task.id].map { TaskSection(states: $0) }
+            facts[task.id].map { TaskSection(states: $0.lifecycle.states) }
         }
         self.doneDays = doneDays
-        let since = now.addingTimeInterval(-Double(doneDays) * 86_400)
-        missingCompletionDates = doneDays > 0 && closed.contains { section($0) == .done && $0.task.completedAt == nil }
+        missingCompletionDates = doneDays > 0 && closed.contains { section($0) == .done && facts[$0.id]?.lifecycle.completed(inLast: doneDays, now: now) == nil }
         var emails: [String: String] = [:]
         for owner in (tasks + closed).compactMap({ $0.runtime?.owner }) {
             if let name = owner.person, let email = owner.personKey { emails[name] = emails[name] ?? email.lowercased() }
@@ -65,16 +64,15 @@ struct WaveStandup: Equatable {
         done = closed.filter { task in
             guard section(task) == .done else { return false }
             if doneDays == 0 { return true }
-            guard let date = task.task.completedAt.flatMap(Self.date) else { return false }
-            return date <= now && date >= since
-        }.sorted { ($0.task.completedAt ?? "") > ($1.task.completedAt ?? "") }
+            return facts[task.id]?.lifecycle.completed(inLast: doneDays, now: now) == true
+        }.sorted { (facts[$0.id]?.lifecycle.completedAt ?? "") > (facts[$1.id]?.lifecycle.completedAt ?? "") }
             .map { Row(task: $0, person: person($0), note: nil, session: nil) }
         func started(_ target: TaskSection) -> [Row] {
             tasks.filter { section($0) == target }.map { task in
                 let note = task.pr?.phase == .merged ? "merged" : task.nextMove.reason
                 return Row(task: task, person: person(task), note: note.isEmpty ? nil : note,
-                           session: Set(states[task.id] ?? []).contains(.available) ? .available
-                            : Set(states[task.id] ?? []).contains(.busy) ? .busy : nil)
+                           session: Set(facts[task.id]?.states ?? []).contains(.available) ? .available
+                            : Set(facts[task.id]?.states ?? []).contains(.busy) ? .busy : nil)
             }
         }
         working = started(.working)
@@ -95,11 +93,6 @@ struct WaveStandup: Equatable {
 
     func count(_ section: WaveBoardSection) -> Int? {
         section == .done && missingCompletionDates ? nil : rows(section).count
-    }
-
-    private static func date(_ timestamp: String) -> Date? {
-        if let date = try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse(timestamp) { return date }
-        return try? Date.ISO8601FormatStyle().parse(timestamp)
     }
 
     /// A Wave's heading lines: name and status, objective, chapter Project and KRs.

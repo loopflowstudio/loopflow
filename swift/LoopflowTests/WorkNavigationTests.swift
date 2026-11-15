@@ -13,7 +13,7 @@ extension WorkProjection {
         let facts = inventory.map { task in
             WorkMembershipPlan.Facts(work: .init(repository: task.task.repo, kind: .task, id: task.id), name: task.task.identifier,
                 parent: .init(wave: task.task.waveId, support: nil),
-                lifecycle: .init(states: Array(task.selectionStates), known: true, support: nil),
+                lifecycle: .init(completedAt: nil, states: Array(task.selectionStates), known: true, support: nil),
                 activity: .init(states: [], known: true, support: nil))
         }
         self.init(roadmaps: roadmaps, inventory: inventory, sessions: sessions, facts: facts)
@@ -39,7 +39,7 @@ struct WorkNavigationTests {
             location: nil, argv: nil, unavailable: [])
         let template = fixtureViewPlan(owner: .init(repository: task.task.repositoryId, kind: .repository, id: "repo"), members: [content])
         let fields = [WorkMembershipPlan.Facts(work: content.work, name: task.task.identifier,
-            parent: .init(wave: wave, support: nil), lifecycle: .init(states: [.working], known: true, support: nil),
+            parent: .init(wave: wave, support: nil), lifecycle: .init(completedAt: nil, states: [.working], known: true, support: nil),
             activity: .init(states: [], known: false, support: nil))]
         func publish(parent: String?, states: [WorkSelectionState] = [.working], incomplete: Bool = false) {
             var facts = fields

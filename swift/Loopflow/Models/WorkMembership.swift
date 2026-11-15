@@ -72,11 +72,45 @@ public struct WorkMembershipPlan: Codable, Equatable, Sendable {
             try fields.encode(support, forKey: .support)
         }
     }
+    public struct LifecycleFact: Codable, Equatable, Sendable {
+        public let completedAt: String?
+        public var states: [WorkSelectionState]
+        public let known: Bool
+        public let support: FieldSupport?
+        private enum CodingKeys: String, CodingKey { case states, known, support, completedAt = "completed_at" }
+        public init(completedAt: String?, states: [WorkSelectionState], known: Bool, support: FieldSupport?) {
+            self.completedAt = completedAt; self.states = states; self.known = known; self.support = support
+        }
+        public init(from decoder: any Decoder) throws {
+            let fields = try decoder.container(keyedBy: CodingKeys.self)
+            completedAt = try fields.decode(String?.self, forKey: .completedAt)
+            states = try fields.decode([WorkSelectionState].self, forKey: .states)
+            known = try fields.decode(Bool.self, forKey: .known)
+            support = try fields.decode(FieldSupport?.self, forKey: .support)
+        }
+        public func encode(to encoder: any Encoder) throws {
+            var fields = encoder.container(keyedBy: CodingKeys.self)
+            try fields.encode(completedAt, forKey: .completedAt)
+            try fields.encode(states, forKey: .states)
+            try fields.encode(known, forKey: .known)
+            try fields.encode(support, forKey: .support)
+        }
+
+        /// Nil means this dated answer is incomplete. Local intent has no Machine time.
+        public func completed(inLast days: Int, now: Date) -> Bool? {
+            guard known else { return nil }
+            guard states.contains(.done) else { return false }
+            if days == 0 { return true }
+            guard let support, support.observations != .unavailable,
+                  let completedAt, let date = ProjectedTaskHistory.completionDate(completedAt) else { return nil }
+            return date <= now && date >= now.addingTimeInterval(-Double(days) * 86_400)
+        }
+    }
     public struct Facts: Codable, Equatable, Sendable {
         public let work: WorkWorkspaceKey
         public let name: String
         public var parent: ParentFact
-        public var lifecycle: StateFact
+        public var lifecycle: LifecycleFact
         public var activity: StateFact
         public var activityKnown: Bool { activity.known }
         public var states: [WorkSelectionState] {
@@ -387,12 +421,12 @@ public struct ProjectedTaskHistory: Sendable {
     public struct Row: Identifiable, Sendable {
         public var id: String { task.id }
         public let task: RoadmapTask
-        public let lifecycle: WorkMembershipPlan.StateFact?
+        public let lifecycle: WorkMembershipPlan.LifecycleFact?
         public let locationKnown: Bool
 
         public var status: String {
             guard locationKnown, let lifecycle, lifecycle.known else { return "Updating…" }
-            if lifecycle.states.contains(.done), task.task.completedAt == nil { return "Done · date unavailable" }
+            if lifecycle.states.contains(.done), lifecycle.support == nil || lifecycle.completedAt == nil { return "Done · date unavailable" }
             return TaskSection(states: lifecycle.states).rawValue.capitalized
         }
     }
@@ -436,15 +470,11 @@ public struct ProjectedTaskHistory: Sendable {
             if section != .done && section != .abandoned { rows.append(row); continue }
             guard section == .done, showCompleted else { continue }
             if days == 0 { rows.append(row); continue }
-            // Pages carry dates as display content, without field provenance.
-            // They can filter retained content, but cannot certify a dated total.
-            incomplete = true
-            guard let timestamp = task.task.completedAt,
-                  let date = Self.completionDate(timestamp), task.lifecycle == .done else {
+            guard let included = lifecycle.completed(inLast: days, now: now) else {
                 incomplete = true
                 continue
             }
-            if date <= now && date >= now.addingTimeInterval(-Double(days) * 86_400) { rows.append(row) }
+            if included { rows.append(row) }
         }
         let loaded = Set(retained.map { $0.task.id })
         if scoped.flatMap({ $0.resolution.members }).contains(where: { !loaded.contains($0.work.id) }) { incomplete = true }

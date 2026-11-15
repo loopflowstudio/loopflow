@@ -66,7 +66,13 @@ struct TaskHistoryFilterTests {
     }
 
     private func visible(_ row: RoadmapTask, _ filter: TaskHistoryFilter) -> Bool {
-        filter.includes(row, now: now)
+        if row.condition.unresolvedExecution { return true }
+        guard !row.isCompleted || row.lifecycle == .done && filter.showCompleted else { return false }
+        let fact = WorkMembershipPlan.LifecycleFact(completedAt: row.task.completedAt,
+            states: row.lifecycle == .done ? [.done] : [], known: true,
+            support: .init(machine: "machine", epoch: "epoch", schema: UInt32(ServerProtocol.revision),
+                derivation: "work.lifecycle/2", revisions: ["planning": 1], observations: .sqlite))
+        return !row.isCompleted || fact.completed(inLast: filter.days, now: now) == true
     }
 
     @Test func closedPagesDeduplicateAndReachTheirRange() throws {
@@ -169,20 +175,20 @@ struct TaskHistoryFilterTests {
         let retained = TaskProjection(id: WorkNodeKey(repo: "/repo", work: .task(id: row.id)), task: row, sessions: [try #require(sessions.first)],
             facts: .init(work: .init(repository: "/repo", kind: .task, id: row.id), name: row.task.identifier,
                 parent: .init(wave: row.task.waveId, support: nil),
-                lifecycle: .init(states: Array(row.selectionStates), known: true, support: nil),
+                lifecycle: .init(completedAt: nil, states: Array(row.selectionStates), known: true, support: nil),
                 activity: .init(states: [], known: true, support: nil)))
         #expect(!visible(row, TaskHistoryFilter()))
         #expect(retained.sessions.first?.id == sessions.first?.id)
     }
 
     @Test func rollingDurationCrossesDSTWithoutCalendarDayArithmetic() throws {
-        var filter = TaskHistoryFilter()
-        filter.showCompleted = true
-        let boundary = try task("completed", date: "2026-03-05T07:00:00-08:00")
-        let before = try task("completed", date: "2026-03-05T06:59:59.9999-08:00")
+        let support = WorkMembershipPlan.FieldSupport(machine: "machine", epoch: "epoch", schema: UInt32(ServerProtocol.revision),
+            derivation: "work.lifecycle/2", revisions: ["planning": 1], observations: .sqlite)
+        let boundary = WorkMembershipPlan.LifecycleFact(completedAt: "2026-03-05T07:00:00-08:00", states: [.done], known: true, support: support)
+        let before = WorkMembershipPlan.LifecycleFact(completedAt: "2026-03-05T06:59:59.9999-08:00", states: [.done], known: true, support: support)
         let springNow = ISO8601DateFormatter().date(from: "2026-03-12T08:00:00-07:00")!
-        #expect(filter.includes(boundary, now: springNow))
-        #expect(!filter.includes(before, now: springNow))
+        #expect(boundary.completed(inLast: 7, now: springNow) == true)
+        #expect(before.completed(inLast: 7, now: springNow) == false)
     }
 
     @Test func inlineEditingAppliesCancelsAndRemembersRange() throws {

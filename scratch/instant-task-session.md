@@ -52,17 +52,11 @@ Restoring workspace, Not started/Start, and Conversation change unconfirmed.
 
 ## What the current code establishes
 
-Start and Complete now use shared SwiftUI/Observation interaction and outbox
-owners on both clients. Other mutations still disagree about when an interaction
-happened. Desktop `TaskRunDraft`, plus mobile view-owned
-`SessionLink`, remain replacement targets (see the delete list). Revision-6 subscriptions now provide exact-query snapshot stamps;
-server operation admission covers all typed writes, while live client outbox
-migration still specializes creation. Native Session/Graph owners retain readiness.
-Predecessor map: `bb936ac371`; earlier Desktop design: `7030e08a`.
-
-Completion already saves a domain request, checks execution/PR conditions, settles
-state, syncs planning and schedules retirement. Creation already prepares its
-primary Session and Graph. Those waits are not a measured SQL/latency diagnosis.
+Shared interaction/outbox owners now serve both clients; the responsibility
+inventory below names remaining consumers. Native Session/Graph owners retain
+readiness. Completion and creation still have domain/planning/provider waits;
+those waits are not a measured SQL/latency diagnosis. Predecessor map:
+`bb936ac371`; earlier Desktop design: `7030e08a`.
 
 ## Established designs and dependency choices
 
@@ -258,6 +252,16 @@ supply no field facts.
 
 Still remove, with their consumers:
 
+- Aggregate lifecycle membership authority in `MembershipFacts.lifecycle`,
+  `WorkFieldLifecycle` and `ClientWorkQuery.apply`'s unconditional state-set
+  mutation, when the reviewed Task-input replacement moves every consumer.
+  Preserve correlated completion time, stage incorporation, dated history,
+  stale-reading/refusal behavior and exact pending commands on the surviving
+  evaluator; no flat Claim/Reopen effects that guess the destination section.
+- Claim/unassign/Reopen uses of `WorkModel.performTaskAction`, header/hover
+  async gesture wrappers and stale-planning guards, with shared synchronous
+  actions and pending-request recovery replacing them in the same cut.
+  `performTaskAction` itself remains until its delivery/Graph callers migrate.
 - Desktop `TaskRunDraft.phase`, other mutation refresh barriers
   (`performTaskAction`) and bind replacement bookkeeping (`replaceSession`,
   `supersedeSessions`).
@@ -299,8 +303,6 @@ and their consumers must converge together.
    retain native execution and input owners. Update product/API docs together.
 5. Measure actual latency and remove demonstrated backend waits independently of
    presentation; run the full acceptance matrix and native demo.
-
-Slice status is under Current implementation cut; Complete starts slice 4.
 
 Headless acceptance uses deterministic held/reordered replies, not timing sleeps:
 shared reducer tests cover overlapping success/failure, stale reads, partial pages,
@@ -368,8 +370,6 @@ Proposed usage text for both READMEs after acceptance:
 > change, leaving later edits and navigation alone. Incomplete cached destinations
 > remain visibly incomplete until their missing data arrives.
 
-No builtin skill changes; shipped READMEs claim only built behavior until acceptance.
-
 ### Observation and independent ingestion contracts · 2026-11-15
 
 Full source/capture and ingestion design, contrary cases and historical checks:
@@ -419,6 +419,95 @@ board counts from `RoadmapTask.section`. Boards use the shared ancestry evaluato
 and lifecycle; missing content/ancestry has no exact count; unplaced parents never
 acquire a No Wave label.
 
+### Task action cut requires a model revision · 2026-11-15
+
+Status: design counterexample found before consumer migration; Claim, unassign
+and local Reopen remain unbuilt. The earlier cut's Reopen checks cover newer
+Machine readings, not a local Reopen gesture. Product choices below are separate.
+
+The current `MembershipFacts.lifecycle` is a derived result, not sufficient input
+for these transitions:
+
+- `task_selection_states` in `store/sqlite/selections.rs` maps every completed
+  Task to Done and suppresses activity. Completed Tasks with a checkout versus
+  none, or with different ownership/Graph positions, can therefore have identical
+  membership facts but reopen into different lifecycle/sections. `reopen_task`
+  clears completion and withdraws Auto-Ship, retaining Graph/checkout history.
+  Inserting Working or Unstarted cannot represent both cases.
+- A published unstarted Task has Open/Unstarted/Backlog whether owned or unowned.
+  Its membership fact cannot determine the Claim/Unassign action. `RoadmapTask`
+  still reads `runtime.owner` from separate DTO content; projecting a section
+  alone would leave that control and the inspector stale after retirement.
+- `claim_task` and `unassign_task` write no operation stage. No-op success also
+  needs a committed result; refusal in `my_claim_in` currently returns before a
+  resolution is recorded. Generic command completion cannot supply those facts.
+  Reopen has a success stage and original-ID recovery, but its abandoned/deleted
+  refusals are not yet recorded as definite semantic refusals.
+
+Next implement direction: normalize the real inputs in the existing
+field/outbox owner, then derive lifecycle/section once. Keep planning disposition
+and its nullable completion time correlated; expose supported ownership (actual
+owner, including known unowned), publication and the structural execution inputs
+that terminal disposition currently masks. Execution inputs must account for
+checkout, Graph position/running work and Auto-Ship approval independently, since
+Reopen withdraws approval without moving the Graph. External conversation activity
+and native input readiness remain independently supported; reopening cannot
+certify either. Missing inputs make affected answers incomplete rather than
+inventing an exact destination. No second Task store or hypothetical future DTO.
+Include the supported pending-completion identity: Reopen withdraws a pending
+completion even before it becomes Done. Open disposition alone cannot distinguish
+that transition from an already-open no-op.
+
+This replaces the aggregate lifecycle authority rather than adding an ownership
+exception map beside it. Claim projects requested ownership without inventing a
+person/Machine owner DTO; confirmed owner labels come from the supported fact.
+Unassign projects known unowned. Reopen of completed or completing work projects
+open disposition with no completion time and withdrawn Auto-Ship approval; an
+already-open no-op preserves approval. The surviving evaluator derives
+its section from retained supported inputs. Each field absorbs only its own
+semantic stage, so an unrelated execution revision cannot retire an ownership edit.
+
+One vertical exit: domain transaction results/refusals and recovery; supported
+inputs through both transports and persisted cache replacement; shared derivation
+and resource lanes; Desktop header/hover/inspector plus phone Task actions; remove
+their old refresh barriers in that same cut. Keep exact pending requests, IDs,
+receipts and reload floors when replacing cached aggregate facts. Reuse the Task's
+single unreleased migration if domain persistence needs adjustment.
+
+Acceptance adds completed owned/unowned Tasks with and without checkout and at
+held/running Graph positions; published unstarted owned/unowned Tasks; Claim →
+unassign → Claim and Complete → Reopen → Complete. Both hosts must publish before
+held disk/network, retain later selection/drafts/Session, survive offline restart,
+recover the original ID after commit-before-reply, handle no-op success and definite
+refusal, and converge under reordered/two-client readings without stale owner
+controls. The three product choices are unchanged. No production migration or new
+runtime result is claimed by this source review.
+
+Proposed usage for both app READMEs, after that vertical exit:
+> **Claim** requests ownership on this Machine; **Unassign** releases ownership
+> while keeping checkout, PR and conversation history. The action and affected
+> lists update immediately. **Reopen** withdraws completion and Auto-Ship approval
+> without restarting or moving the Workflow. Its destination follows the retained
+> execution and ownership facts; missing facts show an incomplete answer.
+> Saved changes wait for their original Machine through disconnection and app
+> restart. A definite refusal removes only that change. An uncertain send checks
+> the original request; it never submits a replacement. Later navigation, drafts
+> and the open conversation stay where they are.
+
+Counterexample retained for implementation: Claim can be a domain no-op when the
+Machine already owns the Task, even if the client's cached owner is stale. It
+still needs an actual ownership result and fence; neither a successful transport
+return nor a planning refresh may retire the projected owner. Likewise Reopen of
+an already-open Task must follow the domain's no-op semantics, not unconditionally
+withdraw an unrelated Auto-Ship approval. Unassign refusal after a newer local
+Claim must remove only the refused layer, not restore an old owner snapshot.
+
+No builtin skill instruction changes are needed: these are app gestures and
+existing Task commands. Keep shipped usage unchanged until the new paths exist.
+The engineering direction follows the shared-owner design; it supplies no answer
+to the product choices below. Loop-or-next outcome remains Blocked on those open
+choices; this review does not launch implementation.
+
 ### Open product choices
 
 Unanswered, numbered in `scratch/concept-review.html`: (1) queue Abandon offline
@@ -445,13 +534,13 @@ unresolved execution remains reachable. Prior review/counterexamples:
 `b70defa4a63a:scratch/instant-task-session.md` (completion time belongs to the fact).
 Three product questions remain open, independently of this engineering cut.
 
-Concept-review outcome, 2026-11-15: no further model change from reviewing this
+Earlier completion-time review, 2026-11-15: no further model change from reviewing this
 cut. Complete at D1 → Reopen → Complete at D2 now has one correlated answer;
 an old page cannot supply D1 to a newer lifecycle. Held confirmation withholds a
 dated answer without withholding All ages. Refusal restores the latest base,
 not a saved page; restart retains the supported pair and original request.
 The existing Desktop/iOS/Rust logs listed below were inspected, not rerun.
-`scratch/concept-review.html` now shows this as built. None of the three open
+The completion-time cut is built. None of the three open
 product choices is answered by this cut.
 
 Acceptance: shared `testDatedHistory…` cases cover D1→Reopen→D2, stale
@@ -461,79 +550,33 @@ wire keys; `testLifecycleOnlyCache…` retains the exact pending command through
 cache replacement. Existing detail/history tests retain partial/failed pages and
 unresolved execution. Board consumes one projected fact, including its time.
 
-Checks, 2026-11-15 (wider suites/lint and recorded LEAK remain gate; native latency
-remains unmeasured):
-- `scripts/test_desktop.sh --jobs 4 --filter 'ClientWorkQueryTests/testDatedHistory|ClientWorkQueryTests/testLifecycleTime|ClientWorkQueryTests/testLifecycleOnlyCache|ClientWorkQueryTests/testDetailHistory|WaveStandupTests'`: 6 shared query and 10 board cases pass; `/tmp/loo-906-terminal-reconciliation.log`. History/navigation checks also pass in `/tmp/loo-906-terminal-tests.log` and `/tmp/loo-906-terminal-board.log`.
-- `uv run python scripts/test_ios.py` selecting the four new shared cases: 4 pass; `/tmp/loo-906-terminal-ios-final.log`. Six phone decoder checks remain passing from `/tmp/loo-906-terminal-ios.log`.
-- `cargo test -p loopflow --lib lifecycle_time_tracks_complete_reopen_complete_in_one_supported_snapshot`: passes; `/tmp/loo-906-terminal-rust.log`.
-- `cargo test -p loopflow --lib server::schema::tests::`: 8 pass; `/tmp/loo-906-terminal-schema.log`. Two focused wire round-trips pass in `/tmp/loo-906-terminal-wire.log`; Desktop's 27 protocol cases pass in `/tmp/loo-906-terminal-cache-tests.log`.
-- `cargo test -p loopflow --test integration documented_commands::`: 4 pass; `/tmp/loo-906-terminal-docs.log`.
-- `cargo fmt --check` and `uv run python scripts/check_swift_multiplatform_boundaries.py`: pass.
+Checks: focused Desktop, iOS, Rust lifecycle/schema/wire and documented-command
+checks passed; formatting and platform-boundary checks passed. Exact commands,
+results and log paths: `9987fcc9f1:scratch/instant-task-session.md` (Correlated
+lifecycle and completion time). Gate owns wider suites/lint and the recorded
+LEAK; native latency remains unmeasured.
 
-### Persisted field incorporation · 2026-11-15
+### Persisted incorporation and derived answers
 
-The existing declaration targets Complete/Abandon/Reopen at lifecycle and Move at
-parent. Bound accepted receipts and independently supported readings join stages
-into the exact resource's field in the SQLite owner, in either arrival order.
-Only known, nonconflicting support can establish incorporation; later conflicts,
-missing activity, query closure and command retirement retain it. Same-revision
-receipt content cannot advance incorporation beyond the saved receipt. Stage
-fences compact comparable commits without keeping request IDs or command bodies;
-retained query effects supply still-needed stages after retirement. Resource and
-bound-receipt lookups use indexes, with stage fan-out grouped by resource.
-
-Field incorporation now feeds the derived-answer path below. The dynamic cut removes stamp-only retirement and fixed candidates. Native
-presentation and the remaining inventory surfaces still need acceptance.
-
-
-### Derived membership answers · 2026-11-15
-
-The existing query entry now persists one replaceable answer: authored selection,
-saved definition revision, compiled root, original candidate/content snapshot,
-consumed membership-field support and derived membership. Its Machine stamp/body
-remain immutable. Shared field incorporation suppresses an absorbed Complete
-before evaluating held Working queries, so a newer Reopen wins in either
-receipt/reading order and after retirement/restart. Coverage does not settle
-receipt recovery. The union setter and old `makeProjection` are removed; this
-is the existing projection owner, not a second evaluator.
-
-Both hosts publish rows and coverage together through their existing query
-leases. Machine connection changes invalidate only dependent live membership,
-without command traffic. Welcome alone revalidates nothing; current-link captures
-do. Losing coverage retains the latest evaluated members, including a last-known
-empty Busy answer, rather than restoring rows from its older Machine body.
-Native attachment/location diagnostics do not mean missing content or invalidate
-an exact count. Prepared renderings stay off the main actor for cached reads.
-
-The dynamic cut below replaced fixed candidates and stamp-based retention.
-
+Field incorporation, query-specific coverage and bounded retirement are built in
+the existing SQLite owner. A supported newer Reopen reading absorbs an earlier
+Complete in either receipt/reading order, across query identities and restart.
+That is reconciliation of a Machine reading, not projection of a local Reopen.
+Missing activity, closure and retirement do not erase incorporation. Losing live
+coverage retains last-known membership without promoting its original Machine
+body. Detailed contracts and prior checks:
+`9987fcc9f1:scratch/instant-task-session.md` (Persisted field incorporation and
+Derived membership answers).
 
 ## Current implementation cut
 
-Start, Complete and Abandon publish through shared `WorkInteraction` on both hosts. Creation
-freezes ID/payload/scope/time before its synchronous selection callback, saves before
-send and derives `PendingOperation` from the saved command and receipt stages.
-Desktop keeps the operation selected through native readiness; iOS replaces its
-editor with an operation route. Neither receipt nor recovery navigates after
-leaving. Attachment Retry uses the recorded Session. Only a bound Session result can acknowledge presentation by resource. Native
-readiness gates the pending creation mount, not ordinary Session recovery.
-A mounted result acknowledges presentation without settling independent query/planning obligations. Unsaved
-failure retains words for same-ID retry or deliberate editing.
-
-Phone files import each original Machine/ID/command/source/outcome into SQLite,
-transactionally per Machine and idempotently across source cleanup crashes.
-Matching rows keep their send epoch and receipt; conflicts leave the source intact.
-Imported missing send evidence remains inspectable, never unsent. Editor revisions
-are associated with submitted commands in that transaction; surviving editor files
-cannot submit again after save or retirement. Imported and editor-linked retired
-commands leave compact source identities in the existing owner, outside indexed pending reads.
-No second receipt ledger exists. Other-Machine imports/lookups open no transport.
-
-Query leases retain their previous bounded semantics. Last-close suspends query
-publication while command recovery continues; reopening reconciles before display,
-including without a network event. Retirement cancels its receipt observer and
-transfers lagging effects or scoped reload floors. The complete prior contracts and
-query checks remain at `6e944e73b5a:scratch/instant-task-session.md`.
+Start, Complete, Abandon, Move and Session rename publish through shared
+`WorkInteraction`; selection remains local, while save-before-send and original-ID
+recovery belong to SQLite. Both clients import released creations by original
+Machine; uncertain historical sends require inspection. Query leases, scoped
+reload floors and compact retired source identities retain their prior contracts.
+Detailed implementation, migration requirements and prior results:
+`9987fcc9f1:scratch/instant-task-session.md` (Current implementation cut).
 
 Boards, portfolio Roadmap/Now, trails, No Wave grouping, counts and Wave
 detail/history join the query owner's parent/lifecycle fields; native acceptance
@@ -593,9 +636,6 @@ and gate as previously assigned.
 
 ### Responsibility inventory · 2026-11-15
 
-This table tracks the accepted rewrite, not a claim of exhaustive discovery.
-New findings join their responsibility; repairs are marked separately.
-
 | Responsibility / consumers | Built / deleted path | Remaining / exit check |
 | --- | --- | --- |
 | Admission, creation, both hosts | Shared outbox and original-ID recovery; old creation owner removed | Reordered validation epochs and native first-input acceptance |
@@ -609,9 +649,6 @@ New findings join their responsibility; repairs are marked separately.
 | Query cache and inspection | SQLite normalized facts/derived answers | Remove remaining WorkCache/TaskFeed authority; projected inspection beyond this detail cut |
 | Acceptance and latency | Deterministic shared/Desktop/phone checks per cut | Quiet-host native baseline; exhaustive policy/remaining consumer checks; gate owns broader suites, lint and recorded LEAK |
 
-Repair in this pass: the retained history/board test supplied only planning data
-after the earlier membership migration. It now supplies a query manifest and
-consistent unresolved lifecycle states. No production authority was restored.
 LOO-650 coordination (`f64be018-352a-4514-917f-181eb67f1bcc`) recommended a finite
 migration table and coherent vertical exits; concrete lessons were returned in
 Task report `50918d31-2e7a-4531-8a74-2d1921749a6a`.
@@ -683,3 +720,5 @@ The 2026-11-15 review and its numbered disconnected-edit option:
 `f2438fb1b49:scratch/instant-task-session.md` (Conversation concept review).
 Jack Heart's “1a” selects saved disconnected Complete/rename/Move on the original
 Machine, keeping IDs across restart and uncertain delivery.
+
+Check: `git diff --check` passes; source/design edits only, so no build or runtime test ran.

@@ -2,57 +2,51 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LOO-906 · Current completion and loaded history</title>
+<title>LOO-906 · Claim, unassign and Reopen</title>
 <style>
 :root{color-scheme:light dark;--bg:#faf8f4;--fg:#292924;--muted:#67665e;--line:#cdc9bd;--example:#e4efe6}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.45 system-ui,sans-serif}main{max-width:800px;margin:auto;padding:26px 22px}header,small{font-size:12px;color:var(--muted)}h1{font-size:28px;line-height:1.15;margin:20px 0 12px}h2{font-size:18px;margin:24px 0 8px}p{margin:10px 0}table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;vertical-align:top;border-bottom:1px solid var(--line);padding:8px 6px}pre{background:var(--example);padding:12px;font-size:13px;white-space:pre-wrap}code{font-size:12px;overflow-wrap:anywhere}li{margin:12px 0}@media(prefers-color-scheme:dark){:root{--bg:#20221f;--fg:#ecece4;--muted:#b5b5a8;--line:#4c5046;--example:#2c382f}}@media(max-width:540px){main{padding:20px 12px}table{font-size:12px}th,td{padding:6px 3px}h1{font-size:24px}}
 </style>
 <main>
 <header>LOO-906 · concept-review · 2026-11-15 · headless Graph step<br>
 Sources: scratch/{instant-task-session,questions,desktop-reactivity-feedback}.md;
-HEAD b70defa4a63a plus the uncommitted correlated lifecycle/time cut;
-WorkMembership.swift, ClientWorkQuery.swift, WorkInteraction.swift, WorkModel.swift,
-WorkProjection.swift, NowProjection.swift, WaveStandupBoard.swift, WaveDetailPane.swift,
-TaskHistoryFilter.swift, WorkFieldFacts.swift, RemoteTaskObservation.swift; ClientWorkQueryTests.swift,
-WorkNavigationTests.swift, MobileWorkInteractionTests.swift and swift/{README,LoopflowiOS/README}.md.<br>
-Source review; prior check results are recorded in the working design. No new runtime measurements.</header>
+HEAD 9987fcc9f1 and working design edits; Rust durable.rs, store/sqlite/{selections,children,task_ownership}.rs,
+ops/task_ownership.rs and engine/operation.rs; Swift WorkFieldFacts.swift, ClientWorkQuery.swift,
+OperationDeclaration.swift, WorkModel.swift, TaskWorkView.swift and both app READMEs.<br>
+Source review only; no new runtime measurements.</header>
 <h1>Decide offline Abandon, cancellation and phone names.</h1>
-<p><strong>Outcome for loop-or-next: Blocked — open product choices.</strong> Questions 1–3 remain unanswered. The completion-time engineering cut is built; this review adds no further model change.</p>
-<p><strong>Built:</strong> Wave detail now joins the same projected parent and lifecycle as boards and trails. Loaded pages, cursors, selected inspector and historical Project association remain separate. Late pages cannot restore old lifecycle or change a newer range's loading state. Focused Desktop, iOS and Rust checks are recorded in the working design.</p>
-<p><strong>Mismatch resolved in this cut:</strong> a Task's current lifecycle and its completion time now travel as one supported fact. Board and detail no longer combine a newer Done state with an older page date. Known absent, unavailable and conflicting time cannot certify a dated answer.</p>
-<pre>Task T · Done range: last 7 days
-Complete at D1 (old) → Reopen → Complete at D2 (today)
-Old D1 history page arrives last
+<p><strong>Outcome for loop-or-next: Blocked — questions 1–3 remain open.</strong> The next engineering direction is recorded below. It follows the shared-owner design and does not answer those product questions or start implementation.</p>
+<p><strong>Biggest mismatch:</strong> a derived Done/Backlog state loses the facts that Claim, unassign and Reopen must change. Adding guessed destination states would leave owner controls and other lists disagreeing.</p>
+<pre>Two completed Tasks have the same current membership: Done.
+A: owned, has checkout, Workflow held at an interactive step
+B: unowned, never checked out
 
-Before this cut: lifecycle says Done; page date may still be D1
-                dated board may exclude T and show an exact count
-                detail withholds the count
+Existing local Reopen: command → wait for refresh → show new state
+Proposed local Reopen: publish open intent → derive from retained inputs
+  A → Active / Working        B → Unstarted / Backlog
+  missing inputs → incomplete answer, never a guessed destination
 
-Built shared lifecycle fact: Done at D2
-  board and detail include T using D2
-  before D2 is known: Done is immediate; dated answer incomplete
-  All ages: T is visible from lifecycle alone
-
-Loaded history, historical Project, Session and draft stay intact.</pre>
+Workflow position, conversation and drafts stay intact.
+Reopen withdraws Auto-Ship for completed/completing work;
+an already-open no-op preserves the domain's approval semantics.</pre>
 <h2>Actions → concepts → APIs</h2>
 <table>
-<thead><tr><th>Action</th><th>Concept</th><th>Built API and ownership</th></tr></thead>
+<thead><tr><th>Action</th><th>Concept</th><th>Existing → proposed</th></tr></thead>
 <tbody>
-<tr><td>Move to B or No Wave</td><td>One current Task parent</td><td><code>WorkInteraction.moveTask</code> → shared fields → <code>ProjectedTaskHistory</code> and board/trail (built)</td></tr>
-<tr><td>Complete, Reopen, Complete again</td><td>One current lifecycle fact</td><td><code>LifecycleFact</code> carries required nullable <code>completed_at</code> under <code>work.lifecycle/2</code> through both transports, SQLite and projection</td></tr>
-<tr><td>Choose a Done range</td><td>A dated answer needs supported time</td><td><code>WaveStandup</code> / <code>ProjectedTaskHistory</code> use <code>LifecycleFact.completed(inLast:now:)</code>; All ages needs lifecycle alone</td></tr>
-<tr><td>Keep reading and editing</td><td>Location and native ownership stay independent</td><td>Retain Session, native attachment, inspector, panes, drafts and later navigation through membership changes</td></tr>
-<tr><td>Recover a failed or uncertain change</td><td>Original request and independent coverage</td><td><code>ClientWorkDatabase</code> retains command/receipt identity. Cache replacement discards lifecycle-only answers without changing saved commands or reload floors</td></tr>
+<tr><td>Claim / unassign</td><td>Supported ownership, including known unowned</td><td><code>WorkModel.assignTask → performTaskAction</code> → shared synchronous <code>WorkInteraction</code> intent on both hosts; owner control and all lists use the same fields</td></tr>
+<tr><td>Reopen</td><td>Disposition/time plus retained execution inputs</td><td><code>WorkModel.reopenTask</code> and refresh barrier → shared intent; derive lifecycle/section from checkout, Workflow, approval, ownership and publication</td></tr>
+<tr><td>Deliver / recover</td><td>Original request, semantic result and field incorporation</td><td>Claim/unassign lack domain stages → transaction records actual result, including no-op or definite refusal; original-ID lookup after uncertain send</td></tr>
+<tr><td>Read a board, detail or history</td><td>One derived answer</td><td>Aggregate lifecycle authority → supported inputs in the existing SQLite owner, replacing the old authority through both transports and every consumer</td></tr>
 </tbody></table>
-<p><strong>Built recovery:</strong> Reopen clears time; a new Complete waits for its own Machine time. Local intent never invents a timestamp. Equal-support conflicts retain last-known values for reconciliation but withdraw dated support. A definite refusal removes only its effect and uses the latest confirmed base. Missing replies retain original-ID recovery; neither recovery nor a history page chooses navigation.</p>
-<p><strong>Usage, also in swift/README.md:</strong> Done ranges use the current completion time. While that time is unavailable, the range stays incomplete; All ages can show the completed Task immediately. Loaded history and unresolved-work recovery stay reachable.</p>
-<p><strong>Checked against source and existing run logs:</strong> D1 → Reopen → D2 with stale pages/readings, held D2, refusal, two persisted clients and restart; known-null/unavailable dates, equal-support conflict and lifecycle-only cache replacement. Recorded results: 6 shared Desktop cases, 10 board cases, 4 shared iOS cases and the focused Rust lifecycle case pass. These are deterministic checks, not native interaction measurements.</p>
-<p><strong>Show next:</strong> native launch, completion, cached revisit and Wave disclosure on a suitable quiet host. Native paint/input latency remains unmeasured; the wider rewrite inventory stays open. Questions below change product behavior, so this headless review leaves them unanswered. No builtin instruction changes or execution restart.</p>
+<p><strong>Built:</strong> correlated lifecycle/completion time, dynamic membership and Complete/Move reconciliation. D1 → Machine Reopen → D2 checks cover newer readings; they do not cover a local Reopen gesture. Claim, unassign and local Reopen projection remain unbuilt.</p>
+<p><strong>Proposed usage:</strong> Claim requests ownership on this Machine. Unassign releases ownership while retaining checkout, PR and conversations. Reopen withdraws completion without restarting the Workflow. Actions and affected lists update immediately; missing destination facts remain incomplete. Saved changes wait for their original Machine through restart. Later navigation, drafts and the open conversation stay put.</p>
+<p><strong>Failure and recovery:</strong> save before send. A definite refusal removes only its layer from the latest base. Commit-before-reply checks the original ID; no replacement submission. Claim of an already-owned Task still needs an actual result and fence. An unrelated execution revision cannot retire ownership intent. Retain exact commands, receipts and reload floors when replacing aggregate caches.</p>
+<p><strong>Next vertical exit:</strong> domain results/refusals and recovery → supported inputs on both transports → persisted shared derivation → Desktop header/hover/inspector and phone actions. Delete the old action refresh barriers and aggregate lifecycle authority in that same cut. Check owned/unowned completed and unstarted Tasks, held/running Workflow positions, Claim → unassign → Claim, Complete → Reopen → Complete, offline restart, no-op, refusal and reordered two-client readings. No builtin skill changes; proposed README text is in the working design.</p>
 <h2>Questions for the next conversation</h2>
 <ol>
 <li><strong>Abandon while disconnected.</strong> It closes PRs and removes branches; the recorded “1a” named Complete, rename and move.<br>1a — Save Abandon and deliver on reconnect (built provisionally).<br>1b — Require a reachable Machine and keep the Task until then.</li>
-<li><strong>Take back a change before it was sent.</strong> A mistaken offline removal currently has no cancellation action.<br>2a — Keep that behavior; Reopen afterwards.<br>2b — Offer Cancel only before first send, removing the request and its projection.</li>
+<li><strong>Take back a change before it was sent.</strong> A mistaken offline removal currently has no cancellation action.<br>2a — Keep that behavior; Reopen afterwards where supported (Abandon cannot be reopened).<br>2b — Offer Cancel only before first send, removing the request and its projection.</li>
 <li><strong>Conversation names on the phone.</strong><br>3a — Keep Task titles and Desktop-only Session rename (built).<br>3b — Show Session names and offer rename on the phone too.</li>
 </ol>
-<small>Exact earlier replies remain in the working design. Source review only; no implementation, publish or merge in this step. Gate owns the recorded nextest LEAK. No native latency result is claimed.</small>
+<small>Exact replies and prior check results remain in the working design. Native latency remains unmeasured; gate owns the recorded nextest LEAK. No implementation, publish or merge in this step.</small>
 </main>
 </html>

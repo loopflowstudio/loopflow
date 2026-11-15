@@ -546,7 +546,7 @@ struct DesktopPerformanceTests {
                     && hasRendered(window, "task-work-perf-graph-0")
             })
             try await sample("task_overview", population, attempt, journal, window, action: {
-                files.page = .task
+                files.page = .brief
                 let pane = try #require(multiplexer.layout.pane(for: sessionPane))
                 try workspace.showBrowser(.files, from: pane)
             }, ready: { hasRendered(window, "browser-task-overview") })

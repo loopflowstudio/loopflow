@@ -56,6 +56,7 @@ struct ConsoleCommands: Commands {
             Button("Move Blocked Sessions…") { actions?.moveBlockedSessions() }.disabled(actions == nil)
             action("toggle-shell")
             action("toggle-browser")
+            action("details")
             action("page-back")
             action("page-forward")
             action("reload")
@@ -69,7 +70,8 @@ struct ConsoleCommands: Commands {
             let bindings: [DesktopKeyBinding?] = action.keys.isEmpty ? [nil] : action.keys
             ForEach(Array(bindings.enumerated()), id: \.offset) { _, binding in
                 let args = binding?.args ?? [:]
-                let title = args["index"].map { "Task \($0)" } ?? args["direction"]?.capitalized ?? action.title
+                let title = args["index"].map { "Task \($0)" } ?? args["direction"]?.capitalized
+                    ?? args["page"]?.capitalized ?? action.title
                 let button = Button(title) {
                     guard let actions else { return }
                     do { try action.perform(actions.context().with(args: args)) } catch { actions.failed(error) }

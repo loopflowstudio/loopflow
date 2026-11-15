@@ -272,10 +272,19 @@ struct TaskPatchLine: Equatable, Sendable {
 @MainActor
 @Observable
 final class TaskFilesStore {
+    /// Task details beside the conversation: what was asked, what changed, where.
     enum Page: String, CaseIterable {
-        case task = "Task"
-        case pullRequest = "PR"
+        case brief = "Brief"
+        case changes = "Changes"
         case files = "Files"
+
+        var symbol: String {
+            switch self {
+            case .brief: "doc.text"
+            case .changes: "plus.forwardslash.minus"
+            case .files: "folder"
+            }
+        }
     }
     var comparison = ChangeComparison.workingTree(base: "parent")
     let pullRequest = PullRequestStore()
@@ -562,6 +571,7 @@ final class TaskFilesStore {
             guard !Task.isCancelled, comparisonChanged else { return }
             await self.refreshChanges()
             if !Task.isCancelled, self.mode == .diff { await self.loadDiff() }
+            if !Task.isCancelled, self.page == .changes { await self.loadReview() }
         }
     }
 
@@ -692,6 +702,67 @@ final class TaskFilesStore {
             guard !Task.isCancelled, selection == path, generation == fileGeneration else { return }
             self.error = error.localizedDescription
         }
+    }
+
+    // MARK: Review
+
+    /// The whole comparison as one stream. A reload replaces it in place; the
+    /// reading anchor and current stop are ids, so new evidence never moves them.
+    private(set) var review: ReviewDiff?
+    private(set) var reviewError: String?
+    private(set) var reviewTruncated = false
+    private var reviewGeneration = 0
+    /// The row at the top of the stream when you last read it.
+    var reviewAnchor: String?
+    /// The change next/previous moves from.
+    var currentStop: String?
+    var reviewLayout = ReviewLayout.unified
+    /// One file at a time; next/previous still crosses into the next file.
+    var focusedPath: String?
+    var expandedMoves: Set<String> = []
+    var reviewSelection: ReviewSelection?
+    /// Where the Brief was scrolled, and the brief it was showing.
+    var briefOffset = CGPoint.zero
+    var briefShown: Int?
+
+    enum ReviewLayout: String, CaseIterable { case unified = "Unified", split = "Side by side" }
+
+    func loadReview() async {
+        if changes == nil { await refreshChanges() }
+        reviewGeneration += 1
+        let generation = reviewGeneration
+        guard let base = changes?.baseCommit else { return }
+        let target = comparison
+        do {
+            let next = try await query.taskDiff(issue: issue, path: nil, base: base, head: target.head)
+            let parsed = await Task.detached(priority: .userInitiated) { ReviewDiff.parse(next.patch) }.value
+            guard !Task.isCancelled, generation == reviewGeneration, comparison == target else { return }
+            review = parsed
+            reviewTruncated = next.truncated
+            reviewError = nil
+            if let focusedPath, parsed.file(focusedPath) == nil { self.focusedPath = nil }
+        } catch {
+            guard !Task.isCancelled, generation == reviewGeneration, comparison == target else { return }
+            // Keep the last readable stream; the error says it may be behind.
+            reviewError = error.localizedDescription
+        }
+    }
+
+    /// Move to the next or previous change, across files. A focused file
+    /// follows the stop into its file.
+    @discardableResult
+    func step(_ offset: Int) -> ReviewStop? {
+        guard let review, let stop = review.stop(after: currentStop, offset: offset) else { return nil }
+        currentStop = stop.id
+        if focusedPath != nil { focusedPath = stop.path }
+        noteInteraction()
+        return stop
+    }
+
+    /// Which comparison the stream shows, for a conversation reference.
+    var reviewRevision: String {
+        let head = changes.map { String($0.headCommit.prefix(10)) } ?? "unknown head"
+        return comparison.head == nil ? "working tree on \(head)" : "\(comparison.title) at \(head)"
     }
 
     func loadDiff() async {

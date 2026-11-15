@@ -249,7 +249,7 @@ struct TaskFilesTests {
         #expect(follow(mode: .edit, auto: true) == .openTab)
         #expect(follow(mode: .diff, idle: 600) == .openTab)
         #expect(follow(dirty: true, auto: true) == .openTab)
-        #expect(follow(selection: "scratch/explore.html", page: .task, idle: 600) == .select)
+        #expect(follow(selection: "scratch/explore.html", page: .brief, idle: 600) == .select)
     }
 
     @Test func readModeRendersHTMLAsAPageAndMarkdownAsBlocks() async throws {
@@ -490,20 +490,22 @@ struct TaskFilesTests {
         let task = try #require(roadmap.waves.first?.tasks.items.first)
         let store = TaskFilesStore(issue: task.task.identifier, cwd: "/fixture", query: RegistryQuery { _, _ in "{}" })
         store.selection = "draft.txt"
-        store.page = .task
-        let view = TaskFilesView(store: store, prURL: nil, checkoutBase: nil, task: task)
-        #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "browser-task-overview")
-            .find(text: task.task.name).string() == task.task.name)
-        store.page = .pullRequest
-        #expect(try view.inspect().find(text: "No pull request published yet.").string() == "No pull request published yet.")
+        store.page = .brief
+        let view = TaskFilesView(store: store, checkoutBase: nil, task: task)
+        // The Task is named in the header on every page.
+        #expect(try view.inspect().find(text: task.task.name).string() == task.task.name)
+        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "browser-task-overview")
+        store.page = .changes
+        #expect(try view.inspect().find(text: task.task.name).string() == task.task.name)
+        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "browser-changes")
         store.page = .files
         try view.inspect().find(viewWithAccessibilityIdentifier: "files-toggle-navigator").button().tap()
         #expect(store.navigator == .dropdown)
         #expect(store.selection == "draft.txt")
         store.navigator = .pinned
-        store.page = .task
-        try view.inspect().find(viewWithAccessibilityIdentifier: "files-toggle-navigator").button().tap()
-        #expect(store.page == .files)
+        store.page = .brief
+        // Brief and Changes keep the Files page's navigator and selection.
+        store.page = .files
         #expect(store.navigator == .pinned)
         try view.inspect().find(viewWithAccessibilityIdentifier: "files-toggle-navigator").button().tap()
         #expect(store.navigator == .closed)
@@ -823,7 +825,7 @@ struct TaskFilesTests {
 
         // Mount, hide and reopen the actual browser; its documents belong to the checkout.
         for _ in 0..<2 {
-            let browser = NSHostingView(rootView: TaskFilesView(store: store, prURL: nil, checkoutBase: nil))
+            let browser = NSHostingView(rootView: TaskFilesView(store: store, checkoutBase: nil))
             browser.frame = CGRect(x: 400, y: 0, width: 700, height: 500)
             root.addSubview(browser)
             browser.layoutSubtreeIfNeeded()

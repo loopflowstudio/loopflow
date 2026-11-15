@@ -616,7 +616,7 @@ struct SessionPaneView: View {
         }
         if let taskId = paneTaskId {
             ForEach(TaskFilesStore.Page.allCases, id: \.self) { page in
-                Button(page.rawValue, systemImage: page == .task ? "doc.text" : page == .pullRequest ? "arrow.triangle.pull" : "folder") {
+                Button(page.rawValue, systemImage: page.symbol) {
                     guard let browser = workspace.showBrowser(.files, from: pane) else { return }
                     do {
                         let files = try workspace.files(for: browser.content, task: model.task(id: taskId)?.task, query: sessions.query)
@@ -626,9 +626,6 @@ struct SessionPaneView: View {
             }
             Button("Task & workflow", systemImage: "list.bullet") {
                 workspace.showBrowser(.task, from: pane)
-            }
-            Button("Changes", systemImage: "plus.forwardslash.minus") {
-                workspace.showBrowser(.changes(comparison: .workingTree(base: "parent")), from: pane)
             }
             Button("lf process", systemImage: "list.bullet.rectangle") {
                 workspace.showBrowser(.graphLog, from: pane)
@@ -735,6 +732,22 @@ struct SessionPaneView: View {
         onFocus(pane.id, paneSessions.count == 1 ? paneSessions.first?.id : nil)
     }
 
+    /// Types into this workspace's conversation and focuses it; you send.
+    private func conversationInput() -> ((String) -> Void)? {
+        guard let session = store.layout.pane(of: .session), let terminal = session.terminal,
+              sessions.surfaces.surfaceIncarnation(for: terminal) != nil else { return nil }
+        return { text in
+            do {
+                guard let surface = sessions.surfaces.surfaceIncarnation(for: terminal) else {
+                    throw RegistryQueryError("The conversation has no terminal surface; nothing was typed.")
+                }
+                try sessions.surfaces.insertText(text, terminal: terminal, surface: surface)
+                store.setFocusedPane(session.id)
+                sessions.surfaces.focus(terminal)
+            } catch { shellError = error.localizedDescription }
+        }
+    }
+
     @ViewBuilder private var shellTabs: some View {
         if case .shell(let tabs, let selected) = pane.content {
             ScrollView(.horizontal) {
@@ -829,14 +842,13 @@ struct SessionPaneView: View {
                     let task = model.task(id: taskId)?.task
                     switch Result(catching: { try workspace.files(for: pane.content, task: task, query: sessions.query) }) {
                     case .success(let files):
-                        TaskFilesView(store: files, prURL: task?.pr?.publication?.github?.url,
-                            checkoutBase: task?.reference.workspace?.baseCommit, task: task, isFocused: isFocused)
+                        TaskFilesView(store: files, checkoutBase: task?.reference.workspace?.baseCommit, task: task,
+                            isFocused: isFocused, addToConversation: conversationInput())
                             .task(id: pane.content.selectedBrowserTab?.id) {
                                 if case .changes(let comparison) = pane.content.selectedBrowserTab {
                                     files.comparison = comparison
-                                    files.page = .files; files.mode = .diff; files.navigator = .pinned
+                                    files.page = .changes
                                     await files.refresh()
-                                    await files.loadDiff()
                                 } else if files.comparison != .workingTree(base: "parent") {
                                     files.comparison = .workingTree(base: "parent")
                                     await files.refresh()

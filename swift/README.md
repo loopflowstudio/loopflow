@@ -245,79 +245,38 @@ Task workspaces start with the Session on the left and Files on the right,
 at 61.8/38.2. Use **View → Toggle Shell** or **Toggle Files**, or their shortcuts.
 If every pane is hidden, **Show pane** restores the retained pane; **Open conversation**
 remains available when the Work has no conversation open.
-Shell holds retained shell tabs; Files holds documents, **Brief**, **Changes** and
-recorded **Pull request** tabs. Hidden tools keep their clients and drafts. Files starts with its chooser closed. Click the file-browser toggle or press
-Command-P in the file pane to search **scratch** and files changed from the
-branch's recorded parent commit. Selection closes the dropdown; pin it to keep
-the list alongside the document (Control-Command-B). Escape dismisses the dropdown.
-Sidebar selection switches the whole
-Task workspace; selections inside a Task can focus its companion.
+Shell holds retained shell tabs. Files names its Task in the header and has three
+pages, **Brief**, **Changes** and **Files** (Option-Command-1/2/3 or the header's
+segmented control). Hidden tools keep their clients and drafts.
+
+**Brief** shows the Task's state, next move and PR state above its text, the
+Tasks the brief names (click one to open it), and an outline when the brief has
+headings or an `Acceptance:` lead. Its scroll position survives page and Task
+switches in this window; a brief that changed since you last read it says so.
+
+**Changes** says where the work is delivered, then reads the whole comparison as
+one stream. Loopflow's record decides whether there is a PR: none, publishing,
+open, merged or abandoned. GitHub's reading adds checks, review and description
+with its age; a failed, stale (over two minutes) or behind-the-checkout reading
+stays readable but loses its colors, and merged never reads as a finished Task.
+The stream follows the comparison live without moving what you are reading.
+Press `]` and `[` (or the toolbar arrows) to step through changes across files;
+**Focus file** shows one file and still steps into the next. Edited lines
+emphasize the changed words. A block moved within a file collapses to one row,
+"Moved from L12", that expands to its old and new lines. Click a line number
+(Shift-click extends) to **Copy** the lines without patch markers or **Ask in
+conversation**, which types `path:L4-6 (after, working tree on <sha>)` into the
+conversation's unsent input. **Side by side** needs a pane at least 640 pt wide.
+
+**Files** holds open documents and their Read, Edit and Diff controls, with the
+Machine, checkout and directory of the selection under them. Files starts with
+its chooser closed. Click the file-browser toggle or press Command-P to search
+**scratch** and files changed from the branch's recorded parent commit.
+Selection closes the dropdown; pin it to keep the list alongside the document
+(Control-Command-B). Escape dismisses the dropdown. Sidebar selection switches
+the whole Task workspace; selections inside a Task can focus its companion.
 Resizing or closing the browser is remembered while the window stays open;
 layouts are not yet restored after quitting the app.
-
-Choose **PR** for a compact GitHub page: status, checks, pending reviewers,
-description and change totals. Expand **Files changed** and individual files to
-read published patches. Refresh updates GitHub data using the signed-in GitHub
-CLI on this Mac. Missing access and omitted large/binary patches are shown inline;
-local uncommitted edits stay in Files.
-
-Open **•••** or press Command-/ for the selected Task’s actions. Row context
-menus use the same actions for the clicked Task. Command-T adds a shell tab. The main Session's menu switches between **Claude**,
-**Codex**, and **OpenCode**, continuing the same Session with its history.
-**Refresh session** reconnects the pane to that conversation, including after a
-failed launch or stale connection. It keeps the provider's history and running
-process; a conversation open elsewhere still offers **Take back**. The control
-stays visible when the Session is the only pane. The same action is available
-through `lf desktop do refresh-session -p session`. **Take back** transfers input
-from another terminal; `lf desktop do take-back-session -p session` uses the same
-action.
-**Reset session** starts a fresh provider thread in the same Session, seeded with
-its saved conversation. Reset and provider switching first read that history,
-then replace the current provider process. If the
-provider has not saved a transcript yet, the current terminal stays open; finish
-its first turn and retry the switch. A failed status observer reconnects on the
-next status event without replacing the conversation.
-Repository, Wave, Task and exact Session
-preparation all use `lf resume --prepare`; reset uses `lf session new` for its scope.
-
-Shell panes with Ghostty shell integration group each completed command and its
-output into a full-width block. A command that exited non-zero has a red
-background. Click anywhere in a block to select the whole unit; drag to select
-text instead. There is one selection at a time, and Command-C or the context
-menu copies it: a block copies its command and all of its output. Right-click
-keeps the selection it lands on. A selected block clears when you type or press
-Escape. Command-Up and Command-Down jump between prompts. The live prompt remains ungrouped;
-Session/provider panes keep their native TUI behavior and do not expose shell
-command blocks.
-Automatic integration depends on the configured shell; macOS `/bin/bash` is
-excluded by the pinned Ghostty build. A zsh shell still on the macOS default
-prompt gets a small dim directory line above each bold command, with the gap
-between blocks shared evenly; any other prompt is left as it is.
-
-Terminals start from Desktop's own terminal settings. A launcher's `NO_COLOR`,
-`TERM`, pager and agent variables do not reach them, so provider CLIs keep their
-colors however Desktop was opened.
-
-If macOS cannot provide Ghostty's display link, terminals use timer rendering.
-The app logs the CoreVideo error code; the user's Ghostty configuration is unchanged.
-
-A Task workspace holds three designated panes — session, shell and browser —
-arranged freely by dragging, zoom and hide; Wave and repository workspaces hold
-only the session pane. The session pane shows one conversation and switches when
-another opens. ⌘T adds a shell tab. The browser's tabs are the Task's Files, its
-Graph processes and http(s) pages. ⌘W closes the selected tab, or hides the pane.
-⇧⌘T restores the last closed tab's identity and history. Close ends its shell
-and jobs; New Shell starts fresh execution.
-
-**View → Toggle Files** shows a Task's checkout in the browser pane beside the
-retained terminal. Expand folders to read one page of up to 500 entries;
-**Load more** continues the directory and **Show ignored** includes ignored paths.
-Tracked, unchanged and untracked files remain available without an active PR.
-**Changes** optionally compares the worktree with the Task PR's
-recorded base; **HEAD** compares with its current commit. The displayed SHA pins
-the file list and selected diff. A recorded PR links above the file navigator.
-Use ↑/↓ in the navigator to select files; hover a row for its full path.
-Closing the pane keeps its drafts in this window.
 
 **Read** is where documents open: Markdown renders formatted, HTML as a live
 page that runs its scripts but never reaches the network. Links open in the

@@ -70,6 +70,54 @@ An approval of an older commit is not an approval of the current head; `reviews`
 shows which commit each one covered. `checks` exits 8 while checks are pending,
 which is not a failure. `--logs` pulls failed GitHub Actions logs.
 
+### Review while CI runs
+
+```bash
+lf gate                  # publish the PR so CI starts, then review the change
+```
+
+```text
+Tests that matter most
+- retry_budget::stops_at_three      the limit this change moves
+- refresh::expired_token_retries    most-edited file; a 401 used to be swallowed
+- ship_api::acceptance              the design's acceptance check
+
+4c1e9a2  superseded. CI passed 14 checks; says nothing about the fix below.
+b70d3f5  CI pending: rust-test, tests-result. Passing: rust-lint, python-test.
+         Skipped: macos (paths not reached). Local: refresh:: passed.
+         Fixed in review: refresh dropped the retry count after a 401.
+Auto-merge not requested.
+```
+
+Gate publishes first. It reads enough of the diff and your notes to commit one
+coherent candidate, syncs, and runs `lf pr publish`, creating a ready PR if the
+branch has none. Then it checks that the real suites are queued, running or
+already completed for the head it pushed. Suites that report skipped did not
+start, and gate fixes the cause or says so.
+
+The review covers what a green check can't show: security and data handling
+where the change touches them, correctness, failure handling and recovery,
+ownership, interfaces and docs. Gate fixes what it finds in scope and publishes
+the fixes together, since each push restarts CI.
+
+It names the two to five tests that cover the riskiest or most-edited behavior,
+with a line of why each. CI runs them along with everything else. Gate runs
+one locally only for fast feedback on a fix, to reproduce a CI failure, or for
+a risk no suite covers.
+
+The report is by commit. Passing, failing, pending, skipped and unavailable
+stay separate, and a pass on an earlier head doesn't carry to a later one.
+Gate doesn't wait for a pending run or request auto-merge: `lf land
+--wait-and-fix` does both, and `lf ship` runs it next.
+
+Without a remote, publishing access, `gh` or any CI, gate says which is missing
+and runs its named tests here. It reports "no CI ran" when that is known;
+unreadable CI status stays unavailable. A local pass is reported as local.
+
+If your CI only tests PRs in some state (a label, no draft, a cleared notes
+directory), name that step in your agent guide. Gate does it before publishing.
+`lf skill customize gate` copies the Skill to change the rest.
+
 ### When CI fails
 
 ```bash
@@ -242,12 +290,26 @@ even without an ignore rule or when already staged: its staged and working
 contents survive sync without entering the checkpoint. Other ignored files stay
 ignored unless explicitly staged. Previously committed telemetry stays in history.
 
-Sync follows a stack parent through its squash merge. Stack one Task on
-another's open PR, even a draft:
+Sync follows a stack parent through its squash merge. Stack one Task on any
+other Task that has a branch, before that parent lands or even opens a PR:
 
 ```bash
 lf task run LOO-13 --stack-on LOO-12
 ```
+
+When the parent has no PR yet, stacking pushes its branch if origin lacks it or
+is behind. It never force-pushes or opens a PR for the parent. A published
+parent's missing remote branch is restored after reading its PR from GitHub:
+a merged PR stops stacking; a closed PR uses a new unpublished parent record.
+If GitHub cannot be read, stacking uses the saved PR state. If Auto was requested
+for an earlier head, stacking turns Auto off before pushing. The same clean head
+keeps its merge request.
+If the published parent's remote branch exists and is behind, or
+origin has diverged, the child bases on `origin/<branch>` and the stack line
+counts the local commits it leaves out. Run `lf commit -p` in the parent's
+checkout to include them. Stacking stops when the parent is not a Task, has no
+branch yet (`lf checkout LOO-12` places one), has already merged, or the push
+fails; a failed push shows git's message.
 
 Conflicts stay visible: resolve them, then `lf sync --continue`, or `lf sync --abort`.
 
@@ -366,7 +428,7 @@ For one launch, `--account codex=work@` prefers an account and keeps fallback;
 | `lf account [connect\|route\|use\|token\|set]` | Provider logins, capacity and routing |
 
 Every flag is in the [`lf` reference](lf-reference.md): [`lf pr`](lf-reference.md#lf-pr),
-[`lf repo`](lf-reference.md#lf-repository), [`lf wt`](lf-reference.md#lf-wt),
+[`lf repo`](lf-reference.md#lf-repo), [`lf wt`](lf-reference.md#lf-wt),
 [`lf machine`](lf-reference.md#lf-machine), [`lf account`](lf-reference.md#lf-account).
 
 Next: [Surfaces](surfaces.md): see this work in Desktop, cmux, Herdr or tmux.

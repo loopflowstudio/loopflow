@@ -8,6 +8,21 @@ use serde_json::{json, Value};
 
 use crate::work::selection::SplitAxis;
 
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub(super) struct HerdrLocation {
+    socket: String,
+    pane: String,
+}
+
+impl HerdrLocation {
+    pub(super) fn current() -> Option<Self> {
+        Some(Self {
+            socket: std::env::var("HERDR_SOCKET_PATH").ok()?,
+            pane: std::env::var("HERDR_PANE_ID").ok()?,
+        })
+    }
+}
+
 pub(super) struct Herdr {
     socket: String,
     /// The caller's pane, resolved to its current workspace at opening.
@@ -17,27 +32,28 @@ pub(super) struct Herdr {
 impl Herdr {
     /// The current server. Herdr panes carry its socket; there is no fallback.
     pub(super) fn local() -> Result<Self> {
-        let socket = std::env::var("HERDR_SOCKET_PATH")
-            .context("Herdr opening requires the current server's HERDR_SOCKET_PATH")?;
-        let viewed = match super::viewed_placement() {
-            Some((super::OpenHost::Herdr, workspace)) => Some(workspace),
-            _ => None,
+        let location = match super::viewed_placement() {
+            Some((super::OpenHost::Herdr, value)) => Some(
+                serde_json::from_str::<HerdrLocation>(&value)
+                    .context("Herdr viewer placement is unavailable")?,
+            ),
+            _ => HerdrLocation::current(),
         };
-        // A viewed conversation's placement outranks its startup pane.
-        Ok(Self {
-            socket,
-            pane: viewed
-                .is_none()
-                .then(|| std::env::var("HERDR_PANE_ID").ok())
-                .flatten(),
+        Ok(match location {
+            Some(location) => Self {
+                socket: location.socket,
+                pane: Some(location.pane),
+            },
+            None => Self {
+                socket: std::env::var("HERDR_SOCKET_PATH")
+                    .context("Herdr opening requires HERDR_SOCKET_PATH")?,
+                pane: None,
+            },
         })
     }
 
-    /// The workspace holding the caller's pane now, which follows pane moves.
+    /// Ask the recorded pane for its current workspace, including after moves.
     pub(super) fn here(&self) -> Result<Option<String>> {
-        if let Some((super::OpenHost::Herdr, workspace)) = super::viewed_placement() {
-            return Ok(Some(workspace));
-        }
         let Some(pane) = &self.pane else {
             return Ok(None);
         };
@@ -90,6 +106,20 @@ impl Herdr {
     pub(super) fn focus(&self, tab: &str) -> Result<()> {
         self.call("tab.focus", json!({"tab_id":tab}))?;
         Ok(())
+    }
+
+    pub(super) fn focus_view(placement: &str) -> Result<()> {
+        let location: HerdrLocation = serde_json::from_str(placement)
+            .context("The recorded Herdr view has no pane identity")?;
+        let host = Self {
+            socket: location.socket,
+            pane: Some(location.pane.clone()),
+        };
+        let current = host.call("pane.current", json!({"caller_pane_id":location.pane}))?;
+        let tab = current["pane"]["tab_id"]
+            .as_str()
+            .context("Herdr did not identify the conversation's tab")?;
+        host.focus(tab)
     }
 
     fn call(&self, method: &str, params: Value) -> Result<Value> {

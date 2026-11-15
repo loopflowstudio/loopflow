@@ -299,11 +299,19 @@ fn require_ondemand(sqlite: &SqliteStore, name: &str) -> anyhow::Result<OnDemand
     })
 }
 
+fn held_ids(
+    sqlite: &SqliteStore,
+    machine: &MachineId,
+) -> anyhow::Result<Vec<crate::durable::TaskId>> {
+    let held = sqlite.tasks_held_by(machine)?;
+    Ok(held.into_iter().map(|(task, _)| task).collect())
+}
+
 fn listing(sqlite: &SqliteStore, rental: Rental) -> anyhow::Result<RentalListing> {
     let (machine, tasks, copied) = match &rental.machine_id {
         Some(id) => (
             sqlite.machine_by_id(id)?.and_then(|machine| machine.label),
-            sqlite.tasks_held_by(id)?,
+            held_ids(sqlite, id)?,
             Some(sqlite.copy_counts(id)?).filter(|counts| counts.sessions + counts.processes > 0),
         ),
         None => (None, Vec::new(), None),
@@ -697,7 +705,7 @@ fn hand_off(
     if store.sqlite.task_ownership(&task.id)?.owner.is_none() {
         change(repo, issue, OwnershipChange::Claim)?;
     }
-    let ownership = change(repo, issue, OwnershipChange::Handoff(label.to_string()))?;
+    let ownership = change(repo, issue, OwnershipChange::Move(label.to_string()))?;
     eprintln!(
         "{}",
         crate::ops::task_ownership::render(&ownership)
@@ -789,7 +797,7 @@ fn checkout_script(
         })
         .collect();
     let script = format!(
-        "{} && {identity}mkdir -p ~/src && cd ~/src && {{ [ -d {dir} ] || {clone} {dir}; }} && cd {dir} && lf repo --bind {repository}",
+        "{} && {identity}mkdir -p ~/src && cd ~/src && {{ [ -d {dir} ] || {clone} {dir}; }} && cd {dir} && lf config repo --bind {repository}",
         super::machine::REMOTE_PATH,
         dir = q(directory),
     );
@@ -922,7 +930,7 @@ fn give_back(
             ..Holdings::default()
         }
     });
-    holdings.tasks = sqlite.tasks_held_by(&machine.id)?;
+    holdings.tasks = held_ids(sqlite, &machine.id)?;
     holdings.placed = sqlite.machine_ever_held(&machine.id)?;
     holdings.finished_at = sqlite.work_finished_at(&machine.id)?;
     match rental::give_back(rental, &holdings, explicit, force, now()) {
@@ -1351,7 +1359,7 @@ mod tests {
         // No store records either checkout: the Task alone names the repository.
         let repository = crate::durable::RepositoryId::new();
         let (_, script) = checkout_script(&worktree, &repository).unwrap();
-        assert!(script.ends_with(&format!("lf repo --bind {repository}")));
+        assert!(script.ends_with(&format!("lf config repo --bind {repository}")));
         assert!(script.contains("gh repo clone 'loopflowstudio/loopflow'"));
         assert!(script.contains("git config --global user.email 'jack@example.com'"));
     }

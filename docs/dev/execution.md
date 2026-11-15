@@ -2,7 +2,7 @@
 
 ```bash
 lf -b implement
-lf session list --interactive false --json
+lf session list --headless --json
 lf resume SESSION
 ```
 
@@ -43,10 +43,10 @@ assembly captures the selected instructions, exact provider strings, attribution
 explicit documents and launch options. Definitions are not reconstructed from
 current files when continuing historical work.
 
-A Graph process compiles its graph and all routing alternatives before the
-first step and holds them in memory. A direct conversation captures its selected
-Skill or inline prompt. Reconnect retains that conversation; a new Graph compiles
-current source. Current credentials and checkout contents remain live inputs to execution,
+A Graph process loads its graph and all routing alternatives before the first
+step and holds them in memory. Task runs use the Task's captured definition;
+a direct Graph launch compiles the selected source. A direct conversation captures
+its Skill or inline prompt. Reconnect retains that conversation. Current credentials and checkout contents remain live inputs to execution,
 not evidence that old captured intent changed.
 
 ## Record actual processes
@@ -89,6 +89,37 @@ replacement, retaining native/account history. Account failover selects a fresh
 thread; same-account retry retains it. Generic stop still preserves takeover.
 Generation-based caller/status wires and optional launches remain publication
 blockers.
+
+## Runtime and recording
+
+```text
+LfProcess: lf implement
+├── AgentProcess A: exits before completing the work
+└── AgentProcess B: retries → completes
+```
+
+Provider replacement keeps the skill's `LfProcess` identity. Its
+`process::LfProcessRuntime` shares the current attachment, retry identity and
+outcome across callers. It is an in-memory resource handle, with no additional
+execution ID or persisted lifecycle. Helper requests can scope resources under
+their command's provenance.
+
+`SessionRecorder` publishes captured input and writes attempt history and the
+terminal receipt. Recording grants no process control. The runtime retains the
+store that admitted its attachment; harness dispatch keeps an immutable snapshot
+so an old callback cannot stop a replacement. Account and thread observations
+update runtime state before best-effort recording, keeping retries on the known
+conversation even when history writes fail.
+
+Completion settles the attachment before writing its receipt. A headless caller
+still returns an error if that write fails; retrying the receipt can record the
+same outcome but cannot restart provider work or change the settled result.
+Native exit instead adopts a plain recorder through `CaptureHandoff`, with
+attachment cleanup owned separately by the process owner. Its recording failures
+are logged without changing the provider's exit result.
+
+The [harness guide](../../rust/loopflow/src/harness/README.md) maps these
+responsibilities to source files.
 
 ## Publish before spawn
 
@@ -176,6 +207,12 @@ coverage; this source path does not establish configured resume acceptance.
 
 ## Connect and transfer attachment
 
+A bare Codex launch is plain `codex [OPTIONS] -- <prompt>` (`codex resume -- <thread>
+<prompt>` to reopen) in the calling terminal, with lf's instructions, writable
+roots, two context hooks and its steer check as options: no app-server, `--remote` client or
+observer. Its start hook leaves the thread it started beside the launch's delivery
+file, and lf records it when Codex exits. What follows is a held Codex Session.
+
 The Codex terminal talks to its app-server directly, on the private Unix WebSocket
 the AgentProcess opened; lf carries none of its bytes. lf's instructions, hooks,
 shell policy and writable roots are `-c` overrides on that private `codex app-server`,
@@ -186,24 +223,25 @@ launcher starts or resumes the thread, names a new thread so it has a rollout to
 resume (Codex 0.166.0 has none until a first turn or a name), then execs into
 `codex --remote <endpoint> resume <thread>`. The app-server's
 lifeline writer crosses the exec, so the client holds the provider alive and no lf
-process has to. The execution owner settles the client's exit from a `NativeExit`
+process has to. The Machine server settles the client's exit from a `NativeExit`
 marked as a client, which leaves the AgentProcess's own exit to attachment close.
 
-`lf __codex-observe` watches from the side as one more subscriber, in its own
-session. app-server sends every subscriber every event, so it records turns, usage
-and attention, submits the launch's first turn, and delivers Task updates while the
-conversation is idle, each under the Session fence. A pending approval goes to every
-subscriber and the first answer wins; the observer never answers, and Codex replays
-a pending approval to a client that joins mid-turn. Store errors are recording gaps:
-the observer logs one per outage, retries the store, and history recovery fills the
-gap at the next launch. Stopping the observer stops recording, not the conversation.
-When the person starts or forks a conversation, the observer selects it as the
-Session's AgentSession and binds it to the Session's context, so lf's hooks answer
-there too.
+Nothing of lf's subscribes beside the client. lf sends the launch's first turn
+on the app-server before the client starts, recorded as lf's input; Codex
+replays a pending approval to a client that joins mid-turn. The app-server's
+hooks reach the Machine server like Claude's: at a turn end the server reads the
+thread's turns from the app-server into the Session's history, and an idle
+Session with a Task update gets a `turn/start` whose tool output is the update.
+A store or server that is unavailable is a recording gap; history recovery fills
+it at the next turn end or launch. The app-server carries the launch's context
+delivery file in its environment, so a conversation the person starts with
+`/new` or `/fork` reaches lf's hooks too, and its first boundary selects it as
+the Session's AgentSession.
 
-Attachment alone does not revoke the old client's writes, and with lf out of the path
-no dispatch can check them. The observer ends the exact client its attachment opened
-once a mover replaces that attachment. Native launch carries the frozen attachment
+Attachment alone does not revoke the old client's writes, and with lf out of the
+path no dispatch can check them. A client lf waits on checks its attachment every
+two seconds and stops once a mover replaces it; the server performs the same
+check for a held terminal's exec'd client. Native launch carries the frozen attachment
 in memory, separately from stable tool provenance. Admission validates that token;
 it never reconstructs authority from the current record. Both initial validation
 and the launch reject a replaced attachment, including A → B → A.
@@ -238,11 +276,14 @@ Attachment exit retains an exact history-event reference rather than deriving a
 receipt from counter arithmetic. Migration preserves old event keys and payloads,
 including captured input, native identity and historical outcomes.
 
-`lf resume` attaches to a live owner. A live turn, draft or pending request keeps
-its provider: a failed attachment reports the failure, discards no work and replays
-no input. Only a safely replaceable owner has its exact owned clients stopped and
-the same provider thread resumed, preserving sibling conversations.
-`--fork` leaves the holder running and starts a new Session from its log.
+`lf resume` of a live held Session becomes a view of its terminal: a failed
+attachment reports the failure, discards no work and replays no input. A
+Session an earlier build left under its own owner process is restarted: the
+owner is ended by verified pid and birth and the same provider thread resumes
+held, discarding unsent editor input; an owner that cannot be verified or does
+not exit starts nothing ([What runs on a Machine](index.md#what-runs-on-a-machine)).
+`--fork` leaves the running conversation alone and starts a new Session from
+its log.
 There is no separate Session AgentProcess-restart operation. Mere process silence,
 tmux visibility, causal ancestry or a stored active label grants no termination
 authority, and recovery never authorizes killing a shared AgentProcess for one thread.

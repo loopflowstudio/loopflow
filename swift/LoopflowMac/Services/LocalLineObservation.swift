@@ -11,9 +11,9 @@ final class LocalLineObservation<Frame: Sendable>: @unchecked Sendable {
     private let queue: DispatchQueue
     private let name: String
     private let process: Process
-    private let input = Pipe()
-    private let output = Pipe()
-    private let diagnostics = Pipe()
+    private let input = Pipe.uninherited()
+    private let output = Pipe.uninherited()
+    private let diagnostics = Pipe.uninherited()
     private let continuation: AsyncThrowingStream<Frame, any Error>.Continuation
     private let configurationChanged: @Sendable () throws -> Bool
     /// Runs on `queue`; a throw ends the observation.

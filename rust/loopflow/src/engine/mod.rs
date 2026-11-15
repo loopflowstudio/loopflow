@@ -12,6 +12,7 @@
 pub mod account;
 pub mod checkout;
 pub mod config;
+pub mod creation;
 pub mod graph;
 pub mod launch;
 pub mod pr;
@@ -144,5 +145,75 @@ impl Error {
             ErrorCode::OutcomeUnknown,
             format!("{error:#}; inspect the affected work before retrying"),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::{checkout, graph, pr, repo, task};
+    use crate::lf::{Cli, Commands, TaskCommand};
+
+    #[test]
+    fn every_child_spelling_parses() {
+        let parse = |args: Vec<String>| {
+            Cli::try_parse_from(std::iter::once("lf").chain(args.iter().map(String::as_str)))
+                .and_then(Cli::checked)
+                .unwrap_or_else(|error| panic!("{args:?}: {error}"))
+        };
+        for verb in ["ship", "hold", "claim", "unassign"] {
+            let cli = parse(task::spell_task("LOO-1", verb));
+            if verb == "ship" {
+                assert!(matches!(
+                    cli.command,
+                    Some(Commands::Ship { json: true, .. })
+                ));
+            }
+        }
+        for populated in [false, true] {
+            let optional = |value| populated.then_some(value);
+            let cli = parse(task::spell_run(
+                "LOO-1",
+                optional("implement"),
+                optional("code"),
+                optional("codex"),
+                populated,
+            ));
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Task {
+                    cmd: TaskCommand::Run { json: true, .. }
+                })
+            ));
+            for noun in ["graph", "skill"] {
+                let cli = parse(graph::spell(
+                    noun,
+                    "example",
+                    optional("Keep it small"),
+                    optional("codex"),
+                ));
+                assert!(cli.batch);
+            }
+            parse(repo::spell_release(optional("minor"), optional("lf")));
+            parse(pr::spell_land(&pr::LandInput {
+                strict: populated,
+                local: populated,
+                wait_and_fix: populated,
+                worktree: optional("checkout").map(str::to_owned),
+                message: optional("Commit message").map(str::to_owned),
+                title: optional("PR title").map(str::to_owned),
+                body: optional("PR body").map(str::to_owned),
+                agent: optional("codex").map(str::to_owned),
+            }));
+            parse(checkout::spell_sync(&checkout::SyncInput {
+                onto: optional("main"),
+                manual: populated,
+                preview: false,
+                continue_sync: false,
+                abort: false,
+                adopt: false,
+            }));
+        }
     }
 }

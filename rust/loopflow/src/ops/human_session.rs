@@ -3,6 +3,7 @@ mod resume_explanation;
 pub(crate) use resume_explanation::explain_resume;
 pub use resume_explanation::{SessionResumeAction, SessionResumeExplanation, SessionResumeIntent};
 
+mod turns;
 mod workspace;
 pub use workspace::SessionWorkspace;
 
@@ -21,7 +22,6 @@ use crate::lf::commands::write::SessionOpenIntent;
 use crate::provider_account::LaunchCapacity;
 use crate::session::{LfSession, WorkSource};
 use crate::session_record::SessionTitleSource;
-use crate::store::sqlite::sessions::OwnerRetention;
 use crate::store::sqlite::SqliteStore;
 use crate::store::SharedStore;
 use crate::work::task::Task;
@@ -30,7 +30,6 @@ pub(crate) mod conversation_log;
 pub(crate) mod moves;
 pub(crate) mod moves_bulk;
 pub(crate) mod primary;
-pub(crate) mod restore;
 pub(crate) use primary::ensure_scope_worktree;
 pub(crate) mod provider_conversation;
 
@@ -58,17 +57,19 @@ pub enum SessionTarget<'a> {
 }
 
 impl<'a> SessionTarget<'a> {
+    /// A Session id selects that conversation even beside `--task` or
+    /// `--wave`; naming the Work there only makes the command managed.
     pub fn from_selectors(
         id: Option<&'a str>,
         task: Option<&'a str>,
         wave: Option<&'a str>,
     ) -> Result<Self> {
         match (id, task, wave) {
-            (None, None, None) => Ok(Self::Context),
-            (Some(id), None, None) => Ok(Self::Session(id)),
+            (_, Some(_), Some(_)) => bail!("select one Task or Wave"),
+            (Some(id), _, _) => Ok(Self::Session(id)),
             (None, Some(task), None) => Ok(Self::Task(task)),
             (None, None, Some(wave)) => Ok(Self::Wave(wave)),
-            _ => bail!("select one Session, Task or Wave target"),
+            (None, None, None) => Ok(Self::Context),
         }
     }
 }
@@ -325,6 +326,9 @@ pub(crate) fn session_actions(
 }
 
 fn projected_actions(session: &crate::session::SessionSummary) -> Vec<SessionAction> {
+    if session.interactive && session.held {
+        return held_actions(session);
+    }
     let occupied = session.agent_process_id.is_some()
         && session.agent_process_evidence != crate::journal::ProcessIdentityEvidence::Dead;
     // Listing reads the marker alone: `capture_is_prepared` opens the store per Session.
@@ -348,6 +352,25 @@ fn projected_actions(session: &crate::session::SessionSummary) -> Vec<SessionAct
         name_session_holder(&mut actions, session.terminal_id.as_deref());
     }
     actions
+}
+
+/// A held terminal takes any number of views, so opening one takes no other
+/// terminal's input.
+fn held_actions(session: &crate::session::SessionSummary) -> Vec<SessionAction> {
+    vec![SessionAction {
+        kind: SessionActionKind::Open,
+        label: if session.unviewed {
+            "Reconnect"
+        } else {
+            "Open here"
+        }
+        .to_string(),
+        help: format!(
+            "View the running conversation here: lf resume {}",
+            session.id
+        ),
+        unavailable_reason: None,
+    }]
 }
 
 fn name_session_holder(actions: &mut [SessionAction], terminal: Option<&str>) {
@@ -387,6 +410,7 @@ pub struct SessionPage<T = SessionRecord> {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SessionRecord {
+    pub transition: Option<crate::store::sqlite::provider_transitions::ProviderTransition>,
     pub preview: Option<crate::session::SessionPreview>,
     pub primary_scope: Option<String>,
     /// Available for a person, judged from current stream or terminal reports; absent when it is
@@ -424,6 +448,12 @@ pub struct SessionRecord {
     pub ready_summary: Option<String>,
     pub open_argv: Vec<String>,
     pub terminal_ids: Vec<String>,
+    /// Its current or last turn while it is live; `null` when nothing says.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub turn: Option<crate::transcript::live::SessionTurn>,
+    /// A conversation open here that Loopflow never launched; `id` is the
+    /// provider's conversation ID and no Session records it.
+    pub raw: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -498,7 +528,7 @@ pub(crate) fn publish_prepared_input(
         session.captured.is_some(),
         "Session input must be reserved before artifact publication"
     );
-    crate::session_record::CaptureHandle::prepare(
+    crate::session_record::SessionRecorder::prepare(
         crate::session_record::SessionCaptureSpec {
             harness: session.provider.clone().unwrap_or_default(),
             model: session.model.clone(),
@@ -527,16 +557,19 @@ pub(crate) async fn list(
     // Checkout resolution must precede Task filtering and pagination: SQL path
     // prefixes cannot recognize symlink aliases or nested repositories. Neither
     // can they judge capacity.
-    let association_filter =
-        filter.orphan || filter.task.is_some() || filter.blocked || filter.on.is_some();
+    let association_filter = filter.orphan
+        || filter.task.is_some()
+        || filter.wave.is_some()
+        || filter.blocked
+        || filter.on.is_some();
     let mut selection = filter.clone();
     if association_filter {
         selection.task = None;
+        selection.wave = None;
         selection.orphan = false;
         selection.blocked = false;
         selection.on = None;
         selection.limit = 0;
-        selection.offset = 0;
     }
     let on = match &filter.on {
         Some(raw) => Some(SessionOn::resolve(store, raw).await?),
@@ -548,30 +581,41 @@ pub(crate) async fn list(
     for session in store.session_summaries(&selection, now).await? {
         sessions.push(summary_surface(&session, &capacity));
     }
-    workspace::associate(store, &mut sessions).await?;
+    let mut workspaces = workspace::associate(store, &mut sessions).await?;
+    turns::read(&store.sqlite, &mut sessions)?;
+    let task = match &filter.task {
+        Some(selector) => store.sqlite.resolve_task_id(selector, None)?,
+        None => None,
+    };
+    let in_task = |session: &SessionRecord| {
+        filter.task.is_none()
+            || task
+                .as_ref()
+                .is_some_and(|task| session.task_ids.contains(task))
+    };
+    let wave_tasks = match &filter.wave {
+        Some(wave) => store.sqlite.task_ids_in_wave(wave)?,
+        None => Default::default(),
+    };
+    let mut in_work = |session: &SessionRecord| {
+        (!filter.orphan || (session.task_ids.is_empty() && session.wave_id.is_none()))
+            && in_task(session)
+            && (filter.wave.is_none()
+                || session.wave_id == filter.wave
+                || session
+                    .task_ids
+                    .iter()
+                    .any(|task| wave_tasks.contains(task))
+                || workspaces.in_task_checkout(Path::new(&session.cwd), &wave_tasks))
+    };
     if association_filter {
-        let task = if let Some(selector) = &filter.task {
-            store.sqlite.resolve_task_id(selector, None)?
-        } else {
-            None
-        };
         sessions.retain(|session| {
-            (!filter.orphan || session.task_ids.is_empty())
-                && (filter.task.is_none()
-                    || task
-                        .as_ref()
-                        .is_some_and(|task| session.task_ids.contains(task)))
+            in_work(session)
                 && (!filter.blocked || session.blocked)
                 && on.as_ref().is_none_or(|on| on.selects(session, &capacity))
         });
-        let offset = if filter.after.is_some() {
-            0
-        } else {
-            filter.offset
-        };
         sessions = sessions
             .into_iter()
-            .skip(offset)
             .take(if filter.limit == 0 {
                 usize::MAX
             } else {
@@ -579,7 +623,26 @@ pub(crate) async fn list(
             })
             .collect();
     }
+    if lists_raw(filter) {
+        let raw = turns::raw(&store.sqlite, filter.repo.as_deref())?;
+        sessions.extend(
+            raw.into_iter()
+                .filter(|raw| (!filter.available || raw.availability.is_some()) && in_work(raw)),
+        );
+    }
     Ok(sessions)
+}
+
+/// Raw conversations list unless `--no-raw` asks otherwise. They have no
+/// account or page position, so a selection by any of those leaves
+/// them out. One open in a Task's checkout lists under that Task.
+fn lists_raw(filter: &crate::session::SessionFilter) -> bool {
+    filter.raw
+        && filter.primary.is_none()
+        && !filter.blocked
+        && filter.on.is_none()
+        && filter.search.is_none()
+        && filter.after.is_none()
 }
 
 /// Where a Session's step stands in its Graph: the last one a still-open Graph
@@ -599,14 +662,25 @@ fn graph_occurrence(
     }
 }
 
-/// One Session as `list` reads it; `None` once it is gone.
-pub(crate) fn listed(store: &SharedStore, id: &str) -> Result<Option<SessionRecord>> {
+/// One conversation as `list` reads it: the Session with this ID, else the
+/// open raw conversation whose provider ID it is. `None` once it is gone.
+pub(crate) fn listed(
+    store: &SharedStore,
+    id: &str,
+    capacity: &LaunchCapacity,
+) -> Result<Option<SessionRecord>> {
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    let capacity = LaunchCapacity::read(&store.sqlite)?;
-    Ok(store
+    let Some(mut session) = store
         .sqlite
         .session_summary(id, now)?
-        .map(|session| summary_surface(&session, &capacity)))
+        .map(|session| summary_surface(&session, capacity))
+    else {
+        return Ok(turns::raw(&store.sqlite, None)?
+            .into_iter()
+            .find(|raw| raw.id.as_str() == id));
+    };
+    turns::read(&store.sqlite, std::slice::from_mut(&mut session))?;
+    Ok(Some(session))
 }
 
 /// What `--on <account|harness[:model]>` names, resolved once before filtering.
@@ -684,19 +758,19 @@ fn summary_surface(
         (None, Some(wave)) => Some(WorkRef::Wave(wave.clone())),
         _ => None,
     };
-    let work_path = session.wave_id.as_ref().map(|wave| {
-        let wave = session
+    let wave = session.wave_id.as_ref().map(|wave| {
+        session
             .wave_name
             .clone()
-            .unwrap_or_else(|| format!("Wave {wave} (unavailable)"));
-        match &session.task_id {
-            None => wave,
-            Some(task) => match &session.task_identifier {
-                Some(label) => format!("{wave} / {label}"),
-                None => format!("Task {task} (unavailable)"),
-            },
-        }
+            .unwrap_or_else(|| format!("Wave {wave} (unavailable)"))
     });
+    let task = session.task_id.as_ref().map(|task| {
+        session
+            .task_identifier
+            .clone()
+            .unwrap_or_else(|| format!("Task {task} (unavailable)"))
+    });
+    let work_path = join_work_path(wave, task);
     let graph_membership = match (&session.graph_lf_process_id, &session.graph) {
         (None, _) if session.independent => SessionGraphMembership::Independent,
         (None, _) => SessionGraphMembership::Unknown {
@@ -728,6 +802,7 @@ fn summary_surface(
     };
     let provider = session.provider.clone().unwrap_or_default();
     SessionRecord {
+        transition: session.transition.clone(),
         preview: session.preview.clone(),
         primary_scope: session.primary_scope.clone(),
         availability: session_availability(session),
@@ -767,6 +842,8 @@ fn summary_surface(
         ready_summary: session.ready_summary.clone(),
         open_argv,
         terminal_ids: session.terminal_id.clone().into_iter().collect(),
+        turn: None,
+        raw: false,
     }
 }
 
@@ -829,7 +906,7 @@ async fn serve_locked(store: &SharedStore, session: &LfSession, launch_lock: Fil
     if capture_is_prepared(input)? {
         command.env(PREPARED_CAPTURE_ENV, input.as_str());
     }
-    // The launch runs inside this execution's terminal owner, not a nested one.
+    // The launch runs inside this execution's held terminal, not a nested one.
     crate::transport::carry_across_exec(&mut command);
     pass_launch_lock(&mut command, &launch_lock)?;
     crate::journal::finish_before_exec();
@@ -838,7 +915,7 @@ async fn serve_locked(store: &SharedStore, session: &LfSession, launch_lock: Fil
 }
 
 /// Environment naming the inherited descriptor that holds a Session launch lock.
-const LAUNCH_LOCK_ENV: &str = "LF_LAUNCH_LOCK";
+pub(crate) const LAUNCH_LOCK_ENV: &str = "LF_LAUNCH_LOCK";
 
 fn pass_launch_lock(command: &mut std::process::Command, lock: &File) -> Result<()> {
     use std::os::fd::AsRawFd;
@@ -943,7 +1020,7 @@ pub(crate) fn prepared_artifact_key() -> Result<Option<String>> {
 }
 
 /// Get back to a Session. A terminal showing it hands over control; a provider
-/// client lf started stops only when no live turn, draft or request needs it.
+/// client lf started stops only when no live turn or request needs it.
 /// With `fork`, the holder keeps it and a new Session continues from its log. A
 /// Run is refused; it is never taken over or resumed.
 pub(crate) async fn open(
@@ -953,6 +1030,7 @@ pub(crate) async fn open(
     fork: bool,
     resume: bool,
     json: bool,
+    named_work: bool,
 ) -> Result<SessionRecord> {
     crate::agent_input_timing::record("connect_begin", session_id);
     let progress = resume.then(|| crate::startup::Startup::new("Preparing conversation"));
@@ -971,6 +1049,9 @@ pub(crate) async fn open(
         drop(progress);
         return self::fork(store, session, resume, json).await;
     }
+    if resume {
+        end_earlier_owner(&store.sqlite, &session.id, progress.as_ref())?;
+    }
     let provider_session = match session.artifact_key.as_deref() {
         Some(key) => store.sqlite.input_provider_session(key)?,
         None => None,
@@ -980,7 +1061,15 @@ pub(crate) async fn open(
             conversation_log::read(&store.sqlite, session)?;
         } else {
             drop(progress);
-            new_thread(store, &session.id, Some(&agent), true, json).await?;
+            new_thread(
+                store,
+                &session.id,
+                Some(&agent),
+                true,
+                json,
+                &uuid::Uuid::new_v4().to_string(),
+            )
+            .await?;
             let session = store
                 .session(&session.id)
                 .await?
@@ -1043,10 +1132,10 @@ pub(crate) async fn open(
     }
     if resume {
         if session.interactive && moving.is_none() {
-            if let Some(owner) = store.sqlite.session_transport(&session.id)? {
-                if crate::transport::current() != Some(&owner)
-                    && attaches(&store.sqlite, session, &owner)?
-                {
+            // A held terminal is attached while its child runs, answering or
+            // not: a stopped server never means a second agent for the Session.
+            if let Some(terminal) = store.sqlite.session_terminal(&session.id)? {
+                if crate::transport::current() != Some(&terminal) {
                     // This viewer takes control, so the conversation is now
                     // shown where it runs, not where it was launched.
                     if let Some(attachment) = store.sqlite.session_attachment(&session.id)? {
@@ -1064,7 +1153,7 @@ pub(crate) async fn open(
                         departure_here(),
                     )?;
                     crate::transport::attach(
-                        &owner,
+                        &terminal,
                         Some(&session.id),
                         Some(moved),
                         json.then_some(session.id.as_str()),
@@ -1074,17 +1163,17 @@ pub(crate) async fn open(
             }
         }
         if crate::transport::delegate_session(
-            false,
             json.then_some(session.id.as_str()),
             session.interactive.then_some(session.id.as_str()),
             true,
+            named_work,
         )? {
             return surface(store, session).await;
         }
     }
     if session.captured.is_none() {
         if resume {
-            open_waiting(store, &session.id).await?;
+            open_waiting(store, &session.id, named_work).await?;
         }
         return surface(store, session).await;
     }
@@ -1095,13 +1184,15 @@ pub(crate) async fn open(
     let Some(provider_session) = provider_session else {
         let surface = surface(store, session).await?;
         if resume {
-            open_waiting(store, &session.id).await?;
+            open_waiting(store, &session.id, named_work).await?;
         }
         return Ok(surface);
     };
     let result = surface(store, session).await?;
     if resume {
-        if running()? {
+        // A conversation started with `lf <skill>` belongs to its terminal;
+        // this one runs a second agent on the same thread beside it.
+        if running()? && !store.sqlite.runs_in_its_terminal(&session.id)? {
             crate::harness::agent_process::stop_session_agent(
                 &store.sqlite,
                 &session.id,
@@ -1112,7 +1203,11 @@ pub(crate) async fn open(
                 session.provider.as_deref().unwrap_or("provider")
             ));
         }
-        crate::lf::commands::util::resume_session(session.input_key()?, &provider_session)?;
+        crate::lf::commands::util::resume_session(
+            session.input_key()?,
+            &provider_session,
+            named_work,
+        )?;
     }
     Ok(result)
 }
@@ -1127,6 +1222,7 @@ pub(crate) async fn open_without_replacing(
     intent: SessionOpenIntent,
     launch: bool,
     json: bool,
+    named_work: bool,
 ) -> Result<SessionRecord> {
     let start = intent == SessionOpenIntent::Start;
     let lock_id = id.to_owned();
@@ -1138,11 +1234,19 @@ pub(crate) async fn open_without_replacing(
     if let Some(reason) = run_refusal(&store.sqlite, &session)? {
         bail!(reason);
     }
+    // Opening restarts what an earlier build's owner still runs; reading what
+    // opening would do does not, and counts that owner as no client.
+    let earlier_owner = if launch {
+        end_earlier_owner(&store.sqlite, id, None)?;
+        false
+    } else {
+        store.sqlite.session_owner(id)?.is_some()
+    };
     let mut record = surface(store, &session).await?;
-    let owner = store.sqlite.session_transport(id)?;
-    let attachable = owner
-        .as_ref()
-        .filter(|owner| crate::transport::current() != Some(*owner) && answering(owner));
+    let attachable = store
+        .sqlite
+        .session_terminal(id)?
+        .filter(|terminal| crate::transport::current() != Some(terminal) && answering(terminal));
     let native = session
         .artifact_key
         .as_deref()
@@ -1150,10 +1254,11 @@ pub(crate) async fn open_without_replacing(
         .transpose()?
         .flatten();
     let attachment = store.sqlite.session_attachment(id)?;
-    let occupied = attachment.as_ref().is_some_and(|attachment| {
-        crate::journal::agent_evidence(&store.sqlite, &attachment.agent_process_id)
-            != crate::journal::ProcessIdentityEvidence::Dead
-    });
+    let occupied = !earlier_owner
+        && attachment.as_ref().is_some_and(|attachment| {
+            crate::journal::agent_evidence(&store.sqlite, &attachment.agent_process_id)
+                != crate::journal::ProcessIdentityEvidence::Dead
+        });
     let first_thread = attachable.is_none() && native.is_none();
     let reason = if record.state == SessionState::Active || (occupied && attachable.is_none()) {
         Some(CONTROLLED_ELSEWHERE.to_string())
@@ -1188,22 +1293,26 @@ pub(crate) async fn open_without_replacing(
     if let Some(reason) = reason {
         bail!(reason);
     }
-    if let Some(owner) = attachable {
+    if let Some(terminal) = attachable {
         drop(lock);
-        crate::transport::attach_existing(owner, id, json)?;
+        crate::transport::attach_existing(&terminal, id, json)?;
         return Ok(record);
     }
-    // A new transport re-executes this same intent and acquires the lock again.
-    if crate::transport::current().is_none() {
+    // A held terminal re-executes this same intent and acquires the lock
+    // again; a bare conversation opens here, in this terminal.
+    let lock = if crate::transport::current().is_none() {
         drop(lock);
-        if crate::transport::delegate_session(false, json.then_some(id), Some(id), false)? {
+        if crate::transport::delegate_session(json.then_some(id), Some(id), false, named_work)? {
             return Ok(record);
         }
-        bail!("Conversation transport could not be started");
-    }
+        let lock_id = id.to_owned();
+        tokio::task::spawn_blocking(move || lock_session_process(&lock_id)).await??
+    } else {
+        lock
+    };
     let Some(native) = native else {
         // Keep the ownership read and first-thread admission under one lock.
-        return open_waiting_locked(store, session, lock)
+        return open_waiting_locked(store, session, lock, named_work)
             .await
             .map(|()| record);
     };
@@ -1228,6 +1337,7 @@ pub(crate) async fn open_without_replacing(
         Some(&native),
         &environment,
         Some(lock),
+        named_work,
     )?;
     Ok(record)
 }
@@ -1280,6 +1390,9 @@ async fn fork(
         "Forked {} into {}; the original keeps running.",
         source.id, next.id
     ));
+    store
+        .sqlite
+        .record_provider_lineage(&next, &store.sqlite.provider_lineage(source)?)?;
     let record = surface(store, &next).await?;
     if launch {
         open_prepared(store, &next.id, json).await?;
@@ -1288,10 +1401,11 @@ async fn fork(
 }
 
 /// Preparation has already mutated the Session. Only its resulting identity
-/// crosses to the owner; opening it reacquires the lock and reads current state.
+/// crosses to the launch; opening it reacquires the lock and reads current state.
+/// Its new thread has no native history, so it launches with the Session's Work.
 async fn open_prepared(store: &SharedStore, id: &str, json: bool) -> Result<()> {
     if !crate::transport::delegate_prepared_session(id, json)? {
-        open_waiting(store, id).await?;
+        open_waiting(store, id, false).await?;
     }
     Ok(())
 }
@@ -1337,7 +1451,7 @@ fn departure_here() -> crate::process::Departure {
 
 /// Open a conversation: resume its native history, else
 /// launch its prepared input, else append another attempt to the Session.
-async fn open_waiting(store: &SharedStore, id: &str) -> Result<()> {
+async fn open_waiting(store: &SharedStore, id: &str, named_work: bool) -> Result<()> {
     crate::agent_input_timing::record("launch_lock_begin", id);
     let lock_id = id.to_string();
     let launch_lock =
@@ -1349,13 +1463,14 @@ async fn open_waiting(store: &SharedStore, id: &str) -> Result<()> {
         .session(id)
         .await?
         .ok_or_else(|| session_not_found(id))?;
-    open_waiting_locked(store, session, launch_lock).await
+    open_waiting_locked(store, session, launch_lock, named_work).await
 }
 
 async fn open_waiting_locked(
     store: &SharedStore,
     session: LfSession,
     launch_lock: File,
+    named_work: bool,
 ) -> Result<()> {
     let id = session.id.clone();
     let session = primary::admit_workspace(store, session).await?;
@@ -1366,24 +1481,35 @@ async fn open_waiting_locked(
         session
     };
     let token = session_token(&session);
-    if resume_native_session(store, session.input_key()?, &token, &mut launch_lock)? {
+    // An input launches on the provider it recorded, so another harness
+    // selected here appends its own instead of reopening native history.
+    let handoff = handoff_agent(&session).is_some();
+    if !handoff
+        && resume_native_session(
+            store,
+            session.input_key()?,
+            &token,
+            &mut launch_lock,
+            named_work,
+        )?
+    {
         return Ok(());
     }
     crate::agent_input_timing::record("fresh_launch_selected", &id);
     // A consumed launch without native history gets another attempt under
     // the same Session; its title and feedback never leave the row.
-    let session = if capture_is_prepared(session.input_key()?)? {
+    let session = if handoff {
+        append_input(store, session).await?
+    } else if capture_is_prepared(session.input_key()?)? {
         session
+    } else if session.input_published {
+        append_input(store, session).await?
     } else {
-        if session.input_published {
-            append_input(store, session).await?
-        } else {
-            publish_prepared_input(
-                &store.sqlite,
-                &session,
-                crate::session_record::SessionGraphMembership::Independent,
-            )?
-        }
+        publish_prepared_input(
+            &store.sqlite,
+            &session,
+            crate::session_record::SessionGraphMembership::Independent,
+        )?
     };
     serve_locked(
         store,
@@ -1406,6 +1532,12 @@ pub(super) fn handoff_agent(session: &LfSession) -> Option<String> {
     }
 }
 
+fn switch_agent(session: &mut LfSession, agent: &str) {
+    let (provider, model) = crate::config::parse_agent(agent);
+    session.provider = Some(provider);
+    session.model = model;
+}
+
 /// Start a fresh provider thread on the same Session, on `agent` or its
 /// current provider, seeded with a log of the current thread. The Session
 /// keeps its name, Work and feedback; the old thread stays in its history.
@@ -1416,10 +1548,41 @@ pub(crate) async fn new_thread(
     agent: Option<&str>,
     launch: bool,
     json: bool,
+    request_id: &str,
 ) -> Result<LfSession> {
+    let identity = crate::engine::creation::identity(
+        "session.new",
+        request_id,
+        &serde_json::json!({"id":id,"agent":agent}),
+        false,
+    )?;
+    let request = request_id.to_owned();
+    let _creation_lock =
+        crate::journal::request::spawn_blocking(move || crate::engine::creation::lock(&request))
+            .await??;
+    store.sqlite.check_creation(&identity)?;
+    // Serialize with other Session launches and new-thread requests.
     let lock_id = id.to_string();
     let launch_lock =
         crate::journal::request::spawn_blocking(move || lock_session_process(&lock_id)).await??;
+    if let Some(receipt) = store.sqlite.creation_receipt(request_id)? {
+        if receipt.disposition == crate::store::sqlite::creation::RecoveryDisposition::Inspect {
+            return Err(crate::engine::creation::unknown(&receipt).into());
+        }
+        let next = store
+            .session(id)
+            .await?
+            .ok_or_else(|| session_not_found(id))?;
+        if receipt.disposition == crate::store::sqlite::creation::RecoveryDisposition::Continue {
+            // The input and receipt committed together, before filesystem publication.
+            // Only that exact input may finish publishing; never replace a newer one.
+            if next.artifact_key != receipt.artifact_key {
+                return Err(crate::engine::creation::unknown(&receipt).into());
+            }
+            return finish_thread_creation(store, next, request_id).await;
+        }
+        return Ok(next);
+    }
     let session = store
         .session(id)
         .await?
@@ -1429,7 +1592,23 @@ pub(crate) async fn new_thread(
     if let Some(refusal) = run_refusal(&store.sqlite, &session)? {
         bail!(refusal);
     }
-    let request = conversation_log::continuation(&store.sqlite, &session)?;
+    let threaded = match session.artifact_key.as_deref() {
+        Some(key) => store.sqlite.input_provider_session(key)?.is_some(),
+        None => false,
+    };
+    // A conversation with no provider history carries its original first prompt.
+    let request = if threaded {
+        Some(conversation_log::continuation(&store.sqlite, &session)?)
+    } else {
+        session.request.clone()
+    };
+    let lineage = threaded
+        .then(|| store.sqlite.provider_lineage(&session))
+        .transpose()?;
+    let artifact = crate::session_record::new_artifact_key();
+    store
+        .sqlite
+        .begin_thread_creation(&identity, id, &artifact)?;
     crate::harness::agent_process::stop_session_agent(
         &store.sqlite,
         &session.id,
@@ -1437,15 +1616,23 @@ pub(crate) async fn new_thread(
     )?;
     let mut next = session;
     if let Some(agent) = agent {
-        let (provider, model) = crate::config::parse_agent(agent);
-        next.provider = Some(provider);
-        next.model = model;
+        switch_agent(&mut next, agent);
     }
     // The skill ran in the earlier conversation and is in its log. The
     // continuation is stored so a relaunch after a failed start still carries it.
-    next.skill = None;
-    next.request = Some(request);
-    let next = append_input(store, next).await?;
+    if threaded {
+        next.skill = None;
+    }
+    next.request = request;
+    next.artifact_key = Some(artifact);
+    next.input_published = false;
+    let next = store
+        .replace_session_input(next.captured, next, Some(request_id.into()))
+        .await?;
+    if let Some(lineage) = lineage {
+        store.sqlite.record_provider_lineage(&next, &lineage)?;
+    }
+    let next = finish_thread_creation(store, next, request_id).await?;
     crate::journal::request::diagnostic(format_args!(
         "Started a new {} thread for {}, seeded with what the {from} thread knew.",
         next.provider.as_deref().unwrap_or("provider"),
@@ -1458,12 +1645,40 @@ pub(crate) async fn new_thread(
     Ok(next)
 }
 
+// First submission and recovery finish the same input. Publication may already
+// have succeeded when the process exited before recording its result.
+async fn finish_thread_creation(
+    store: &SharedStore,
+    next: LfSession,
+    request_id: &str,
+) -> Result<LfSession> {
+    let next = if next.input_published {
+        next
+    } else {
+        publish_prepared_input(
+            &store.sqlite,
+            &next,
+            crate::session_record::SessionGraphMembership::Independent,
+        )?
+    };
+    let result = surface(store, &next).await?;
+    store
+        .sqlite
+        .advance_creation(request_id, "admitted", Some(&serde_json::to_value(result)?))?;
+    Ok(next)
+}
+
 /// Append a fresh, published input to the Session; earlier inputs stay in its history.
+/// The input records the agent it launches: another harness this invocation
+/// selected moves the Session to it.
 pub(crate) async fn append_input(store: &SharedStore, mut next: LfSession) -> Result<LfSession> {
     let replaced = next.captured;
+    if let Some(agent) = handoff_agent(&next) {
+        switch_agent(&mut next, &agent);
+    }
     next.artifact_key = Some(crate::session_record::new_artifact_key());
     next.input_published = false;
-    let next = store.replace_session_input(replaced, next).await?;
+    let next = store.replace_session_input(replaced, next, None).await?;
     publish_prepared_input(
         &store.sqlite,
         &next,
@@ -1479,9 +1694,12 @@ pub(crate) fn capture_is_prepared(run_id: &str) -> Result<bool> {
     }
 }
 
-/// An execution owner runs until it records its exit or the OS shows it gone,
-/// as after a restart. Unknown evidence is not exit.
-pub(crate) fn owner_running(store: &SqliteStore, owner: &crate::id::LfProcessId) -> Result<bool> {
+/// How long an earlier build's owner has to exit once signalled.
+const STOP_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// An earlier build's `lf session serve` owner runs until it records its exit
+/// or the OS shows it gone, as after a restart. Unknown evidence is not exit.
+fn owner_running(store: &SqliteStore, owner: &crate::id::LfProcessId) -> Result<bool> {
     Ok(store
         .lf_process(owner)?
         .is_some_and(|process| process.completed_at.is_none())
@@ -1489,103 +1707,67 @@ pub(crate) fn owner_running(store: &SqliteStore, owner: &crate::id::LfProcessId)
             != crate::journal::ProcessIdentityEvidence::Dead)
 }
 
-/// Attach to protected work even when its owner cannot answer: saved history
-/// cannot reconstruct its editor or pending requests. An idle owner that is
-/// superseded or does not answer gives way to native continuation. So does an
-/// unanswering superseded owner with no open Session: no work is known there, while
-/// an answering one may hold a turn or draft nothing records, so a viewer attaches.
-/// Compare builds against the launch entry so a development viewer in the main Home
-/// still selects the installed lf.
-fn attaches(
+/// End the `lf session serve` owner an earlier build left running `session`,
+/// so the conversation restarts from provider history. The owner is
+/// signalled only by its verified pid and birth, and this returns once it has
+/// exited. One whose identity cannot be verified, or that outlives
+/// `STOP_TIMEOUT`, is left running and nothing starts beside it. Nothing ends
+/// these owners but a resume. The wait can take the whole timeout, so a
+/// terminal's `progress` says what it waits for.
+pub(crate) fn end_earlier_owner(
     store: &SqliteStore,
-    session: &LfSession,
-    owner: &crate::id::LfProcessId,
-) -> Result<bool> {
-    if !owner_running(store, owner)? {
-        return Ok(false);
-    }
-    // A quit owner finishing its exit records holds nothing to attach to; its
-    // records land before the conversation continues here.
-    if crate::transport::leaving(owner) {
-        let deadline = std::time::Instant::now() + crate::transport::SETTLE_LINGER;
-        while owner_running(store, owner)? && std::time::Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(50));
-        }
-        return Ok(false);
-    }
-    let unknown = match store.owner_retention(owner)? {
-        Some(OwnerRetention::NoOpenSession) => true,
-        Some(_) => return Ok(true),
-        None => false,
-    };
-    let superseded = crate::journal::live_process_pid(store, owner)
-        .and_then(|pid| Some((pid, crate::journal::OsProcess::executable(pid)?)))
-        .filter(|(_, executable)| crate::installation::superseded(executable));
-    let Some((pid, executable)) = superseded else {
-        return Ok(answering(owner));
-    };
-    if unknown && answering(owner) {
-        return Ok(true);
-    }
-    end_owner(store, owner, pid).with_context(|| {
-        format!(
-            "end the owner on {} so the conversation can move here",
-            executable.display()
-        )
-    })?;
-    crate::journal::request::diagnostic(format_args!(
-        "Moved {} off {}; continuing on the installed lf.",
-        if session.title.is_empty() {
-            session.id.as_str()
-        } else {
-            session.title.as_str()
-        },
-        executable.display(),
-    ));
-    Ok(false)
-}
-
-/// Ask the owner to announce replacement and stop, falling back to a signal
-/// if it cannot answer. Returns once the owner is gone.
-pub(crate) fn end_owner(
-    store: &SqliteStore,
-    owner: &crate::id::LfProcessId,
-    pid: u32,
+    session: &str,
+    progress: Option<&crate::startup::Startup>,
 ) -> Result<()> {
-    const STOP_TIMEOUT: Duration = Duration::from_secs(10);
-    if let Err(error) = crate::transport::replace(owner) {
-        tracing::warn!(%owner, %error, "Owner could not announce replacement; closing by signal");
-        crate::platform::kill_process(pid);
+    let Some(owner) = store.session_owner(session)? else {
+        return Ok(());
+    };
+    if !owner_running(store, &owner)? {
+        return Ok(());
     }
+    let still_running = |pid: Option<u32>| {
+        let pid = pid.map_or_else(|| "unknown".to_owned(), |pid| pid.to_string());
+        anyhow!(
+            "This conversation is still running under an earlier lf (pid {pid}); quit it there, then resume"
+        )
+    };
+    let Some(pid) = crate::journal::live_process_pid(store, &owner) else {
+        let recorded = store.lf_process(&owner)?.and_then(|process| process.pid);
+        return Err(still_running(recorded));
+    };
+    let ending = format!("Ending the earlier lf (pid {pid}) that runs this conversation");
+    match progress {
+        Some(progress) => progress.stage(ending),
+        None => crate::journal::request::diagnostic(format_args!("{ending}")),
+    }
+    crate::platform::kill_process(pid);
     let deadline = std::time::Instant::now() + STOP_TIMEOUT;
-    while owner_running(store, owner)? {
-        anyhow::ensure!(
-            std::time::Instant::now() < deadline,
-            "pid {pid} did not stop within {}s",
-            STOP_TIMEOUT.as_secs()
-        );
+    while owner_running(store, &owner)? {
+        if std::time::Instant::now() >= deadline {
+            return Err(still_running(Some(pid)));
+        }
         std::thread::sleep(Duration::from_millis(100));
     }
     Ok(())
 }
 
-/// Whether a running owner answers its socket. This observes reachability,
+/// Whether a held terminal answers the server. This observes reachability,
 /// not whether its provider can safely be replaced.
-fn answering(owner: &crate::id::LfProcessId) -> bool {
-    match crate::transport::controlled(owner) {
+fn answering(terminal: &crate::id::TerminalId) -> bool {
+    match crate::transport::controlled(terminal) {
         Ok(_) => true,
         Err(error) => {
-            tracing::warn!(%error, %owner, "Session owner does not answer");
+            tracing::warn!(%error, %terminal, "Session terminal does not answer");
             false
         }
     }
 }
 
-/// One Session's summary, with its viewers confirmed by its execution owner.
-/// The owner records its own viewers, but an owner from an earlier lf cannot
-/// write a store a newer lf has advanced: after an upgrade and a Desktop
-/// restart its record still says viewed. Its controlling viewer is the truth,
-/// and an owner that does not answer has no viewer anyone can reach.
+/// One Session's summary, with its viewers confirmed by its held terminal.
+/// The server records the terminal's viewers, but a server from an earlier lf
+/// cannot write a store a newer lf has advanced: after an upgrade and a
+/// Desktop restart its record still says viewed. Its controlling viewer is the
+/// truth, and a terminal that does not answer has no viewer anyone can reach.
 pub(crate) fn viewed_summary(
     store: &SqliteStore,
     id: &str,
@@ -1597,8 +1779,8 @@ pub(crate) fn viewed_summary(
     let released = !summary.unviewed
         && summary.agent_process_evidence == crate::journal::ProcessIdentityEvidence::Live
         && store
-            .session_transport(id)?
-            .is_some_and(|owner| !matches!(crate::transport::controlled(&owner), Ok(true)));
+            .session_terminal(id)?
+            .is_some_and(|terminal| !matches!(crate::transport::controlled(&terminal), Ok(true)));
     if released {
         summary.unviewed = true;
         summary.terminal_id = None;
@@ -1636,6 +1818,7 @@ pub(crate) async fn surface(store: &SharedStore, session: &LfSession) -> Result<
         },
     };
     let mut reading = SessionRecord {
+        transition: store.sqlite.provider_transition(&session.id)?,
         preview: metadata.preview.clone(),
         primary_scope: metadata.primary_scope.clone(),
         availability: session_availability(&metadata),
@@ -1674,8 +1857,11 @@ pub(crate) async fn surface(store: &SharedStore, session: &LfSession) -> Result<
         ready_summary: session.ready_summary.clone(),
         terminal_ids: metadata.terminal_id.clone().into_iter().collect(),
         open_argv,
+        turn: None,
+        raw: false,
     };
     workspace::associate(store, std::slice::from_mut(&mut reading)).await?;
+    turns::read(&store.sqlite, std::slice::from_mut(&mut reading))?;
     Ok(reading)
 }
 
@@ -1689,20 +1875,29 @@ fn launch_model(session: &LfSession) -> String {
 }
 
 async fn session_work_path(store: &SharedStore, session: &LfSession) -> Result<Option<String>> {
-    let Some(wave_id) = &session.wave_id else {
-        return Ok(None);
+    let wave = match &session.wave_id {
+        Some(id) => Some(match store.get_wave(id).await? {
+            Some(wave) => wave.slug().to_string(),
+            None => format!("Wave {id} (unavailable)"),
+        }),
+        None => None,
     };
-    let wave = match store.get_wave(wave_id).await? {
-        Some(wave) => wave.slug().to_string(),
-        None => format!("Wave {wave_id} (unavailable)"),
-    };
-    Ok(Some(match &session.task_id {
-        None => wave,
-        Some(id) => match store.get_task(id).await? {
-            Some(task) => format!("{wave} / {}", task.identifier),
+    let task = match &session.task_id {
+        Some(id) => Some(match store.get_task(id).await? {
+            Some(task) => task.identifier,
             None => format!("Task {id} (unavailable)"),
-        },
-    }))
+        }),
+        None => None,
+    };
+    Ok(join_work_path(wave, task))
+}
+
+/// "Wave / Task", either alone, or nothing for a repository conversation.
+fn join_work_path(wave: Option<String>, task: Option<String>) -> Option<String> {
+    match (wave, task) {
+        (Some(wave), Some(task)) => Some(format!("{wave} / {task}")),
+        (wave, task) => wave.or(task),
+    }
 }
 
 pub(crate) fn local_capture_dir(artifact_key: &str) -> Option<PathBuf> {
@@ -1808,6 +2003,7 @@ pub(crate) fn resume_native_session(
     artifact_key: &String,
     token: &HumanSessionToken,
     launch_lock: &mut Option<File>,
+    named_work: bool,
 ) -> Result<bool> {
     let Some(session) = store.sqlite.session_for_artifact(artifact_key)? else {
         return Ok(false);
@@ -1843,6 +2039,7 @@ pub(crate) fn resume_native_session(
         provider_session.as_ref(),
         &environment,
         launch_lock.take(),
+        named_work,
     )?;
     Ok(true)
 }
@@ -1899,133 +2096,66 @@ fn active_session_token() -> Result<HumanSessionToken> {
     serde_json::from_str(&raw).context("active session token is invalid")
 }
 
-/// The observer owns only this input stream, never the Session or its provider.
-/// A replacement observer fences the previous stream even on the same provider.
-pub(crate) async fn observe_program_status(
+/// One Program Status reading from the terminal showing a Session. `stream`
+/// names one observer; its first reading (`sequence` 1) fences any earlier
+/// stream, even on the same provider. It owns no Session and no provider.
+/// A held terminal's server records its Session's status; a view's reading
+/// of one is ignored.
+pub(crate) async fn record_program_status(
     store: &SharedStore,
     id: &str,
     terminal: &str,
     agent_process: Option<&crate::id::AgentProcessId>,
+    stream: &str,
+    sequence: i64,
+    records: &crate::program_status::Records,
 ) -> Result<()> {
+    anyhow::ensure!(
+        sequence > 0 && records.seen && records.validate(),
+        "invalid Program Status snapshot"
+    );
     let session = find_session(store, id, false)
         .await?
         .context("Session not found")?;
-    let current = store
-        .sqlite
-        .session_summary(
-            &session.id,
-            time::OffsetDateTime::now_utc().unix_timestamp(),
-        )?
-        .context("Session disappeared")?;
-    anyhow::ensure!(
-        current.agent_process_id.as_ref() == agent_process,
-        "Session provider changed"
-    );
-    anyhow::ensure!(
-        current.terminal_id.as_deref() == Some(terminal),
-        "terminal has no active Session attachment"
-    );
-    let stream = uuid::Uuid::new_v4().to_string();
-    anyhow::ensure!(
-        store
-            .sqlite
-            .begin_program_status(&session.id, agent_process, &stream)?,
-        "Session provider changed"
-    );
-    let mut last = None;
-    let mut sequence = 0;
-    let mut pending = None;
-    let mut next_write = std::time::Instant::now();
-    let mut bytes = Vec::new();
-    let mut chunk = [0; 8192];
-    loop {
-        let count = read_observation_chunk(&mut chunk)?;
-        if count == Some(0) {
-            anyhow::ensure!(bytes.is_empty(), "incomplete Program Status snapshot");
-            break;
-        }
-        for byte in &chunk[..count.unwrap_or(0)] {
-            if *byte == b'\n' {
-                let records: crate::program_status::Records = serde_json::from_slice(&bytes)?;
-                bytes.clear();
-                anyhow::ensure!(
-                    records.seen && records.validate(),
-                    "invalid Program Status snapshot"
-                );
-                pending = Some(records);
-            } else {
-                anyhow::ensure!(
-                    bytes.len() < 512 * 1024,
-                    "Program Status snapshot exceeds limit"
-                );
-                bytes.push(*byte);
-            }
-        }
-        if std::time::Instant::now() >= next_write {
-            if let Some(records) = pending.take().filter(|r| last.as_ref() != Some(r)) {
-                sequence += 1;
-                anyhow::ensure!(
-                    store.sqlite.record_program_status(
-                        &session.id,
-                        agent_process,
-                        &stream,
-                        sequence,
-                        &records
-                    )?,
-                    "Program Status stream replaced"
-                );
-                last = Some(records);
-                next_write = std::time::Instant::now() + std::time::Duration::from_millis(250);
-            }
-        }
+    // A held terminal's server records its status; a view's would race it.
+    if store.sqlite.session_is_held(&session.id)? {
+        return Ok(());
     }
-    if let Some(records) = pending.filter(|r| last.as_ref() != Some(r)) {
-        anyhow::ensure!(
-            store.sqlite.record_program_status(
+    if sequence == 1 {
+        let current = store
+            .sqlite
+            .session_summary(
                 &session.id,
-                agent_process,
-                &stream,
-                sequence + 1,
-                &records
-            )?,
-            "Program Status stream replaced"
+                time::OffsetDateTime::now_utc().unix_timestamp(),
+            )?
+            .context("Session disappeared")?;
+        anyhow::ensure!(
+            current.agent_process_id.as_ref() == agent_process,
+            "Session provider changed"
+        );
+        anyhow::ensure!(
+            current.terminal_id.as_deref() == Some(terminal),
+            "terminal has no active Session attachment"
+        );
+        anyhow::ensure!(
+            store
+                .sqlite
+                .begin_program_status(&session.id, agent_process, stream)?,
+            "Session provider changed"
         );
     }
+    anyhow::ensure!(
+        store.sqlite.record_program_status(
+            &session.id,
+            agent_process,
+            stream,
+            sequence,
+            records
+        )?,
+        "Program Status stream replaced"
+    );
     Ok(())
 }
 
-// This command is the sole stdin reader. Polling avoids a blocking stdin worker
-// that could survive a replaced observer and keep the process alive indefinitely.
-#[cfg(unix)]
-fn read_observation_chunk(bytes: &mut [u8]) -> std::io::Result<Option<usize>> {
-    let mut fd = libc::pollfd {
-        fd: libc::STDIN_FILENO,
-        events: libc::POLLIN,
-        revents: 0,
-    };
-    // SAFETY: fd points to one initialized pollfd for the process's stdin.
-    let ready = unsafe { libc::poll(&mut fd, 1, 250) };
-    if ready < 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    if ready == 0 {
-        return Ok(None);
-    }
-    // SAFETY: bytes is writable for its stated length; this is the only reader.
-    let count = unsafe { libc::read(fd.fd, bytes.as_mut_ptr().cast(), bytes.len()) };
-    if count < 0 {
-        Err(std::io::Error::last_os_error())
-    } else {
-        Ok(Some(count as usize))
-    }
-}
-#[cfg(not(unix))]
-fn read_observation_chunk(_: &mut [u8]) -> std::io::Result<Option<usize>> {
-    Err(std::io::Error::new(
-        std::io::ErrorKind::Unsupported,
-        "terminal observation requires Unix",
-    ))
-}
-
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

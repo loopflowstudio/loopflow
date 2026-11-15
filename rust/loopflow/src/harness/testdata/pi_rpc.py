@@ -1,8 +1,10 @@
 # Isolated Pi 1.3 protocol stand-in; no provider, credential or network access.
 import json
 import os
+import socket
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 if "--version" in sys.argv:
@@ -78,30 +80,75 @@ def _record(text):
 
 
 if "--mode" not in args:
+    # The extension's one Machine server connection, opened with the address
+    # its launch spec (the source's first line) carries.
+    extension = Path(args[args.index("--extension") + 1]).read_text()
+    spec = json.loads(extension.split("\n", 1)[0].removeprefix("const spec = ").removesuffix(";"))
+    connection = socket.socket(socket.AF_UNIX)
+    connection.connect(spec["server"]["socket"])
+    server = connection.makefile("rw")
+
+    def _send(message):
+        server.write(json.dumps(message) + "\n")
+        server.flush()
+        answer = json.loads(server.readline())
+        if answer["type"] == "error":
+            raise SystemExit(f"session.boundary refused: {answer['message']}")
+        return answer
+
+    _send(
+        {
+            "type": "hello",
+            "revision": spec["server"]["revision"],
+            "min_revision": spec["server"]["min_revision"],
+            "client": {"kind": "plugin", "platform": "fixture", "name": "pi", "version": "0"},
+        }
+    )
+
+    def _append(entry_id, parent, message):
+        # Pi appends each message to its session file, the usage source.
+        stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        entry = dict(type="message", id=entry_id, parentId=parent, timestamp=stamp)
+        with file.open("a") as transcript:
+            transcript.write(json.dumps(entry | {"message": message}) + "\n")
 
     def _callback(event):
         event = (
             dict(sessionFile=str(file), turn="native-fixture-turn", openTools=0, pendingInput=0)
             | event
         )
-        subprocess.run(
-            [os.environ["LF_BIN"], "__context-block", "--moment", "pi-event"],
-            input=json.dumps(event),
-            text=True,
-            check=True,
+        _send(
+            {
+                "type": "request",
+                "id": "event",
+                "operation": {
+                    "kind": "session.boundary",
+                    "moment": "event",
+                    "delivery": os.environ["LF_CONTEXT_DELIVERY"],
+                    "adapter": json.loads(os.environ["LF_PROVIDER_CONTEXT"]),
+                    "callback": event,
+                    "gap": None,
+                    "printed": [],
+                    "inbox": None,
+                },
+                "select": None,
+            }
         )
 
     _callback({"type": "session_start"})
     _callback({"type": "ui_prompt_start", "turn": None, "pendingInput": 1})
     _callback({"type": "ui_prompt_end", "turn": None})
     _record(args[-1] if "--" in args else "")
+    _append("fixture-user", None, {"role": "user", "content": [{"type": "text", "text": args[-1]}]})
     _callback({"type": "agent_start"})
     events = [_message("Checking")]
+    _append("fixture-step", "fixture-user", events[-1]["message"] | {"stopReason": "toolUse"})
     _callback(events[-1] | {"events": events})
     _callback(events[-1] | {"events": events})  # repeated observation is idempotent
     if os.environ.get("PI_FIXTURE_CRASH"):
         sys.exit(9)
     events.append(_message("native answer"))
+    _append("fixture-answer", "fixture-step", events[-1]["message"])
     _callback(events[-1] | {"events": events})
     _callback({"type": "agent_settled", "aborted": False, "events": events})
     sys.exit(0)

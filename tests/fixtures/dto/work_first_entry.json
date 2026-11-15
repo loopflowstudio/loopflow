@@ -63,7 +63,10 @@
       "unavailable": null,
       "worktree": "/private/tmp/.tmpRKKNhK.repo"
     },
-    "preview": null
+    "preview": null,
+    "transition": null,
+    "turn": null,
+    "raw": false
   },
   "reopened": {
     "actions": [
@@ -120,7 +123,10 @@
       "unavailable": null,
       "worktree": "/private/tmp/.tmpRKKNhK.repo"
     },
-    "preview": null
+    "preview": null,
+    "transition": null,
+    "turn": null,
+    "raw": false
   },
   "roadmap": {
     "generated_at": "2026-10-11T22:28:09.267041Z",
@@ -242,6 +248,7 @@
             "reason": "No Task Graph has run; independent Sessions may still be active",
             "owner": {
               "person": "Jack Heart",
+              "person_id": null,
               "person_key": "jack@loopflow.studio",
               "machine": {
                 "id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b",
@@ -341,7 +348,10 @@
         "unavailable": null,
         "worktree": "/private/tmp/.tmpRKKNhK.repo"
       },
-      "preview": null
+      "preview": null,
+      "transition": null,
+      "turn": null,
+      "raw": false
     },
     {
       "actions": [
@@ -403,7 +413,10 @@
         "unavailable": null,
         "worktree": "/private/tmp/.tmpRKKNhK"
       },
-      "preview": null
+      "preview": null,
+      "transition": null,
+      "turn": null,
+      "raw": false
     },
     {
       "actions": [
@@ -459,7 +472,10 @@
         "unavailable": null,
         "worktree": "/private/tmp/.tmpRKKNhK.unscoped"
       },
-      "preview": null
+      "preview": null,
+      "transition": null,
+      "turn": null,
+      "raw": false
     }
   ],
   "task_primary": {
@@ -522,6 +538,9 @@
       "unavailable": null,
       "worktree": "/private/tmp/.tmpRKKNhK"
     },
-    "preview": null
+    "preview": null,
+    "transition": null,
+    "turn": null,
+    "raw": false
   }
 }

@@ -24,6 +24,7 @@ try:
     spec.loader.exec_module(release_loopflow)
 finally:
     sys.path.pop(0)
+check_desktop_launch = sys.modules["check_desktop_launch"]
 
 
 def test_release_bundle_carries_the_cli(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -124,7 +125,7 @@ def test_resource_check_rejects_a_build_dependent_app(tmp_path: Path, unsigned_c
         f'test -e {quoted_bundle}\nprintf snapshot > "$LOOPFLOW_UI_TEST_SNAPSHOT_PATH"\n',
     )
 
-    with pytest.raises(RuntimeError, match="failed without SwiftPM build resources"):
+    with pytest.raises(RuntimeError, match="App exited 1 from -ui-test-mode"):
         _check(app_path, build_dir)
 
     assert build_bundle.is_dir()
@@ -137,7 +138,7 @@ def test_resource_check_requires_a_rendered_snapshot(tmp_path: Path, unsigned_ch
     app_path = tmp_path / "Loopflow.app"
     _write_test_app(app_path, "exit 0\n")
 
-    with pytest.raises(RuntimeError, match="produced no resource-check snapshot"):
+    with pytest.raises(RuntimeError, match="without writing its -ui-test-mode snapshot"):
         _check(app_path, build_dir)
 
     assert build_bundle.is_dir()
@@ -150,7 +151,7 @@ def test_resource_check_reports_a_hung_app(
     (build_dir / "LoopflowSwift_Loopflow.bundle").mkdir(parents=True)
     app_path = tmp_path / "Loopflow.app"
     _write_test_app(app_path, "echo window opened\nsleep 60 &\nwait\n")
-    monkeypatch.setattr(release_loopflow, "RESOURCE_CHECK_TIMEOUT", 1)
+    monkeypatch.setattr(check_desktop_launch, "LAUNCH_TIMEOUT", 1)
 
     with pytest.raises(RuntimeError, match="did not exit within 1s") as failure:
         _check(app_path, build_dir)
@@ -235,6 +236,68 @@ def test_notarization_retry_reuses_submission_after_checkout_cleanup(
     assert submissions == [b"signed candidate"]
     assert dmg.read_bytes() == b"stapled candidate"
     assert (retained / "Loopflow.dmg").read_bytes() == b"signed candidate"
+
+
+AGREEMENT_403 = (
+    "Error: HTTP status code: 403. A required agreement is missing or has expired. "
+    "This request requires an in-effect agreement that has not been signed or has expired."
+)
+UNAUTHENTICATED_401 = (
+    "Error: HTTP status code: 401. Unauthenticated. "
+    "Ensure that all authentication arguments are correct."
+)
+
+
+@pytest.mark.parametrize(
+    ("step", "stderr", "message"),
+    [
+        (
+            "submit",
+            f"\n{AGREEMENT_403}\n",
+            f"Notarization upload failed: {AGREEMENT_403[:-1]}; "
+            "inspect Apple history before retrying",
+        ),
+        (
+            "wait",
+            UNAUTHENTICATED_401,
+            f"Notarization submission-1 wait failed: {UNAUTHENTICATED_401[:-1]}; "
+            "retry resumes the retained submission",
+        ),
+        (
+            "submit",
+            "",
+            "Notarization upload failed; inspect Apple history before retrying",
+        ),
+    ],
+)
+def test_notarytool_failure_names_apples_message(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    step: str,
+    stderr: str,
+    message: str,
+) -> None:
+    dmg = tmp_path / "Loopflow.dmg"
+    dmg.write_bytes(b"signed candidate")
+    monkeypatch.setenv("LF_RELEASE_NOTARIZATION_DIR", str(tmp_path / "retained"))
+    for name in ("NOTARY_KEY", "NOTARY_KEY_ID", "NOTARY_ISSUER"):
+        monkeypatch.setenv(name, "fixture")
+
+    def capture(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if cmd[0] == "git":
+            return subprocess.CompletedProcess(cmd, 0, "source-commit\n", "")
+        if cmd[2] == step:
+            return subprocess.CompletedProcess(cmd, 1, "", stderr)
+        return subprocess.CompletedProcess(cmd, 0, '{"id":"submission-1"}', "")
+
+    monkeypatch.setattr(release_loopflow, "run_capture", capture)
+    with pytest.raises(RuntimeError) as failure:
+        release_loopflow._notarize_dmg(dmg)
+
+    assert str(failure.value) == message
+    if stderr:
+        assert stderr.strip() in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("changed", ["artifact", "source", "unknown"])

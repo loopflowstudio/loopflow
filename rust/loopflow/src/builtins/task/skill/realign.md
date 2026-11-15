@@ -62,10 +62,14 @@ Bring the plan and the implementation into agreement with what the work has taug
    when someone is in the conversation; headless, leave it for demo.
 
 The plan states what will be built and what remains; quotes there show what
-was said about it and may carry the speaker's name. Write down only what can't
+was said about it and may carry the speaker's name. Write down what can't
 be worked out again from the code, git history or a fresh run: what people said,
 word for word, what a run showed at the time, and facts
-from outside the repo. Quality per word, not volume. Leave out session
+from outside the repo. In the active plan, also keep the few facts from docs
+and code that still explain its approach or remaining work, with source paths
+and symbols. Recheck those affected by implementation or upstream changes;
+correct stale findings and remove those that no longer help. Keep unresolved
+conflicts visible. Quality per word, not volume. Leave out session
 instructions and Machine facts; the plan describes the work, it doesn't direct
 its next reader. Keep transcripts separate and historical skill names
 unprefixed. If no plan exists, update the working context, or write the

@@ -201,5 +201,5 @@ Also            lf wave show designer | lf task run DES-123 | lf debug -c
 ```
 
 Name anything still missing and the command that fixes it; never hide a gap
-behind "setup complete." On macOS, offer `lf open` (this repository in Loopflow
-Desktop) without launching it.
+behind "setup complete." On macOS, offer `lf open --host desktop` (this repository
+in Loopflow Desktop) without launching it.

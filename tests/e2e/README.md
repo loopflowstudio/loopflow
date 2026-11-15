@@ -138,7 +138,7 @@ Provider and terminal transport are simulated, so this is not installed acceptan
 
 Pair this with `session_lifecycle_tests`' interruption, nested Task attribution and
 review replacement cases and `session_cli_tests`' stale actor/identity cases.
-Full affected verification belongs to gate. Do not run installation preflight or
-promotion fixtures on a host account merely by overriding HOME/LF_HOME: installation
+CI owns full affected verification; gate reviews its results by head. Do not run
+installation preflight or promotion fixtures on a host account merely by overriding HOME/LF_HOME: installation
 uses getpwuid. The three tests named in LOO-370's current isolation steer remain
 isolated-CI owned until PR #1444's disposable-account runner is integrated.

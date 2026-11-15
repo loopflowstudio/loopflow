@@ -59,7 +59,7 @@ enum AppUpdates {
         let process = Process()
         process.executableURL = URL(filePath: try LocalWaveAgentLauncher.controlLfPath())
         process.arguments = arguments
-        let errors = Pipe()
+        let errors = Pipe.uninherited()
         process.standardError = errors
         process.standardOutput = FileHandle.nullDevice
         try process.run()

@@ -147,9 +147,9 @@ enum LocalWaveAgentLauncher {
         try Task.checkCancellation()
         let deadline = ProcessInfo.processInfo.systemUptime + 30
         let process = queryProcess(args, cwd: cwd)
-        let stdout = Pipe()
-        let stderr = Pipe()
-        let stdin = input.map { _ in Pipe() }
+        let stdout = Pipe.uninherited()
+        let stderr = Pipe.uninherited()
+        let stdin = input.map { _ in Pipe.uninherited() }
         process.standardOutput = stdout
         process.standardError = stderr
         process.standardInput = stdin.map { $0 as Any } ?? FileHandle.nullDevice

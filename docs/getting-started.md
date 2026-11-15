@@ -72,7 +72,7 @@ A Task gets its own worktree, branch and pull request. Start one and walk away:
 ```bash
 lf task create --title "add a divide-by-zero error"   # prints the Task ID
 lf task run <ID> code                                 # its own worktree; publishes a PR, then waits for you
-lf task steer <ID> "raise ValueError, not ZeroDivisionError"   # reaches the run before its next step
+lf steer <ID> "raise ValueError, not ZeroDivisionError"   # reaches the run before its next step
 ```
 
 `code` is the built-in Graph: build until it holds and publish the PR, stop for
@@ -111,7 +111,9 @@ lf task hold <ID>                # withdraw it; disarms the auto-merge it armed
 ```
 
 `lf ship` stands in for you at each remaining interactive step and runs `deliver`: `gate`,
-then `lf land --wait-and-fix`. It returns once the Task is shipping (`-b` waits);
+then `lf land --wait-and-fix`. `gate` publishes the PR first, so CI is already
+running while it [reviews the change](ops.md#review-while-ci-runs). `lf ship`
+returns once the Task is shipping (`-b` waits);
 `lf task status` follows it. The Task completes when the PR merges, and its
 worktree is cleaned up later by `lf wt prune`.
 

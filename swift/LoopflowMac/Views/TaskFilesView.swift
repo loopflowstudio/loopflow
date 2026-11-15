@@ -237,7 +237,7 @@ struct TaskFilesView: View {
                 Text(reason).font(.caption).padding(8)
             }
             if let document = store.selectedDocument, let external = document.external {
-                Text("\(stateLabel(external.state)) · local draft retained; saving unavailable")
+                Text("\(external.state.title) · local draft retained; saving unavailable")
                     .font(.caption).padding(8)
             }
             content
@@ -325,19 +325,9 @@ struct TaskFilesView: View {
             } else if snapshot.state == .text {
                 TaskDocumentView(document: document)
             } else {
-                ContentUnavailableView(stateLabel(snapshot.state), systemImage: "doc")
+                ContentUnavailableView(snapshot.state.title, systemImage: "doc")
             }
         } else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
-    }
-
-    private func stateLabel(_ state: TaskFileState) -> String {
-        switch state {
-        case .text: "File"
-        case .binary: "Binary file"
-        case .missing: "File no longer exists"
-        case .truncated: "File exceeds 1 MB · preview unavailable"
-        case .unsupportedEncoding: "Unsupported text encoding"
-        }
     }
 }
 

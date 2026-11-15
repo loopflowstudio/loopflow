@@ -14,18 +14,28 @@ struct PortfolioServiceTests {
         // Portfolio initializes the fixture without choosing a portfolio mode.
         _ = try await lf.run(["desktop", "portfolio", "--json"])
         let query = lf.query
+        func observed(_ expected: Portfolio) async throws -> Portfolio {
+            let deadline = ContinuousClock.now + .seconds(10)
+            while true {
+                let current = try await query.portfolio()
+                if current == expected { return current }
+                try #require(ContinuousClock.now < deadline, "Portfolio observation did not reach \(expected): \(current)")
+                try await Task.sleep(for: .milliseconds(50))
+            }
+        }
         let service = PortfolioService(query: query)
         await service.refresh()
         #expect(service.selection?.configured == false)
         await service.perform(["import", home.appendingPathComponent("missing").path])
-        let imported = try await query.portfolio()
+        let imported = try await observed(#require(service.selection))
         #expect(service.selection == imported)
         #expect(imported.mode == .manual)
-        #expect(imported.repos.count == 1)
+        try #require(imported.repos.count == 1)
         #expect(imported.repos[0].error != nil)
         await service.perform(["remove", imported.repos[0].path])
-        #expect(try await query.portfolio().repos.isEmpty)
-        _ = try await query.portfolio(["folder", home.path])
+        #expect(try await observed(#require(service.selection)).repos.isEmpty)
+        let folder = try await query.portfolio(["folder", home.path])
+        _ = try await observed(folder)
         await service.refresh()
         #expect(service.selection?.mode == .folder)
         #expect(service.selection == (try await query.portfolio()))

@@ -28,21 +28,25 @@ and embedded Git checkouts survive. Cargo profiles can be reclaimed separately.
 Discovery excludes symlinks and stops at
 two minutes or 100,000 entries, reporting incomplete coverage.
 
-Idle builds need four hours without writes, one hour below 64 GiB free, or
+Idle builds need two hours without writes, one hour below 64 GiB free, or
 fifteen minutes below 32 GiB. Largest candidates go first; recovering space
-restores normal retention. Held generated output needs **24 hours** before owner teardown.
+restores normal retention. Held generated output needs **six hours** before owner teardown.
 In-use `.venv` and `node_modules` roots always stay; their users are not stopped.
 The cleaner identifies actual owners through cwd, executable mappings and open
 files, sends TERM to verified owners and their descendants, waits five seconds,
 then KILLs verified survivors. It rechecks ownership before removal. PID/start
 identity changes, unknown owners, surviving owners and interruption preserve the
-output and report a failure. An unrelated builder in the same checkout retains
-output without being terminated. Chrome processes and the cleaner's ancestors
+output and report a failure. An unrelated builder in the same checkout (a
+compiler, package manager or interpreter whose cwd is there) retains output
+without being terminated. Agents and their helpers don't count as builders:
+a process descending from `lf session serve`, `codex` or `claude` holds output
+only by having files open under it, so a resident conversation or a finished
+Task's idle agent doesn't keep a checkout's builds. Chrome processes and the cleaner's ancestors
 are never terminated. Owners using `project_owned` state are also preserved.
 Direct new builds can still race inspection; run them after
 cleanup when reusing an otherwise idle output root.
 
-Disposable test evidence retains **24 hours after success**, **seven days after
+Disposable test evidence retains **six hours after success**, **two days after
 failure or an unknown outcome**. This covers pytest runs/garbage, gate artifacts
 under `.lf/tmp/gate/run-*`, and `lf-worlds-`, `ghostty-shaders-`, `swift-test-`
 fixture directories. Pytest and the gate write `.cleanup-evidence.json` with the
@@ -59,7 +63,7 @@ root (copied app or CLI, generated output) and a durable root at
 repository), which is never a candidate. The demo writes the marker at release,
 never at creation: writing it restarts the retention window, so a long live review
 cannot age out. Demos write no `.cleanup-evidence.json`, so a released root has an
-unknown outcome and waits seven days.
+unknown outcome and waits two days.
 Ordinary Home/account history, databases, backups, experiment data, source
 worktrees, simulator devices, general app caches and Trash are never candidates.
 

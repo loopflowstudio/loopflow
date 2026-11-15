@@ -1,6 +1,7 @@
 //! Descriptor changes and signal cleanup run only in disposable child processes.
 
 use std::io::{Read, Write};
+use std::net::Shutdown;
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixListener;
@@ -9,9 +10,9 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use super::wire::{self, Decoder, Event, Incoming, Outgoing, Reply, Request, Tag};
-use super::{attach_with_terminal, endpoint, start, terminal_pair, ViewerTerminal};
+use super::{attach_with_terminal, registry, terminal_pair, ViewerTerminal};
 use crate::ghostty_vt::{Terminal, REVISION};
-use crate::id::LfProcessId;
+use crate::id::TerminalId;
 
 const SESSION: &str = "session_5e55105e000040008000000000000001";
 const MODES: &[u8] = b"\x1b[?2004h\x1b[?1h\x1b[>5u";
@@ -39,22 +40,30 @@ fn snapshot_preview_fixture() {
     }
     let preview = ViewerTerminal::preview(Some(SESSION)).unwrap();
     assert!(preview.is_some());
-    if case == "startup_failure" {
-        // The fixture test executable cannot serve an owner: startup exits
-        // before acknowledgement, exercising the real startup failure path.
-        let result = start(&["/missing-provider".into()], true, &home, &|_| {});
-        assert!(result.is_err());
-        drop(preview);
-        return;
-    }
-    let owner = LfProcessId::new();
-    let listener = UnixListener::bind(endpoint(&owner).unwrap()).unwrap();
+    // This thread stands in for the server's held-terminal entrance.
+    let terminal = TerminalId::new();
+    let listener = UnixListener::bind(registry::entrance().unwrap()).unwrap();
     let execution = home.join("execution");
     std::fs::create_dir(&execution).unwrap();
     let reports_directory = case == "directory";
     let viewer_cwd = home.join("viewer-cwd");
     let peer = std::thread::spawn(move || {
         let (mut socket, _) = listener.accept().unwrap();
+        let mut named = Vec::new();
+        while !named.ends_with(b"\n") {
+            let mut byte = [0];
+            assert_eq!(socket.read(&mut byte).unwrap(), 1);
+            named.push(byte[0]);
+        }
+        socket
+            .write_all(
+                format!(
+                    "{{\"answer\":\"hosted\",\"revision\":{}}}\n",
+                    registry::REVISION
+                )
+                .as_bytes(),
+            )
+            .unwrap();
         let mut decoder = Decoder::default();
         loop {
             let mut bytes = [0; 4096];
@@ -74,6 +83,16 @@ fn snapshot_preview_fixture() {
             let _ = socket.read_to_end(&mut discarded);
             return;
         }
+        if case == "startup_input" {
+            std::fs::write(home.join("pending"), "1").unwrap();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !home.join("typed").exists() {
+                assert!(Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            // Give the relay a readable cooked line before acknowledging attach.
+            std::thread::sleep(Duration::from_millis(250));
+        }
         let mut live = Terminal::new(80, 24).unwrap();
         if case == "modes" {
             live.write(MODES);
@@ -84,11 +103,9 @@ fn snapshot_preview_fixture() {
             seq: 0,
             reply: Reply::Attached {
                 viewer: "viewer".into(),
-                reconnect: "reconnect".into(),
                 nonce: "nonce".into(),
                 token: Some("claim".into()),
                 terminal: true,
-                grace_ms: 60000,
                 owner: Some("viewer".into()),
             },
         };
@@ -101,6 +118,25 @@ fn snapshot_preview_fixture() {
         socket
             .write_all(&wire::frame(Tag::Snapshot, &bytes))
             .unwrap();
+        if case == "completed" {
+            // The agent finished before the viewer could acknowledge readiness.
+            // Its final output and exit status are still waiting to be read.
+            socket.shutdown(Shutdown::Read).unwrap();
+            let mut output = wire::event(
+                "nonce",
+                1,
+                Event::Return {
+                    detach: "native-client".into(),
+                },
+            );
+            output.extend_from_slice(b"provider finished\r\n");
+            output.extend(wire::event("nonce", 2, Event::ChildExited { code: 0 }));
+            socket.write_all(&wire::frame(Tag::Out, &output)).unwrap();
+            socket
+                .write_all(&wire::frame(Tag::Close, br#"{"reason":"finished"}"#))
+                .unwrap();
+            return;
+        }
         if reports_directory {
             socket
                 .write_all(&wire::frame(
@@ -108,6 +144,25 @@ fn snapshot_preview_fixture() {
                     &wire::event("nonce", 1, Event::Directory { cwd: execution }),
                 ))
                 .unwrap();
+        }
+        if case == "startup_input" {
+            socket
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            let mut received = Vec::new();
+            while !received.ends_with(b"\n") {
+                let mut bytes = [0; 4096];
+                let n = socket.read(&mut bytes).unwrap();
+                assert_ne!(n, 0);
+                decoder.extend(&bytes[..n]);
+                while let Some((tag, payload)) = decoder.next().unwrap() {
+                    if tag == Tag::Input {
+                        received.extend(payload);
+                    }
+                }
+            }
+            assert_eq!(received, b"typed while opening\n");
+            std::fs::write(home.join("forwarded"), received).unwrap();
         }
         // A marker outside the screen lets the parent inspect the blank handoff.
         socket
@@ -121,11 +176,11 @@ fn snapshot_preview_fixture() {
             let request: Incoming = serde_json::from_slice(&payload).unwrap();
             assert!(matches!(
                 request.request,
-                Request::Leave | Request::Controlled
+                Request::Leave | Request::Controlled { .. }
             ));
         }
     });
-    attach_with_terminal(&owner, None, None, preview, true).unwrap();
+    attach_with_terminal(&terminal, None, None, preview, true).unwrap();
     peer.join().unwrap();
     std::fs::write(
         viewer_cwd,
@@ -167,18 +222,7 @@ printf '%s\n' "$*" >> "$HOME/launches"
         command
     };
     let initial = command()
-        .args([
-            "session",
-            "serve",
-            "--terminal",
-            "--",
-            &binary,
-            "-i",
-            "--agent",
-            "claude",
-            ":",
-            "original input",
-        ])
+        .args(["-i", "--agent", "claude", ":", "original input"])
         .stdin(Stdio::null())
         .output()
         .unwrap();
@@ -187,6 +231,13 @@ printf '%s\n' "$*" >> "$HOME/launches"
     let session: String = sql
         .query_row("SELECT id FROM agent_sessions", [], |r| r.get(0))
         .unwrap();
+    // Only a scope's conversation, which stays open across exits, resumes
+    // held behind the preview; any other runs bare in the terminal.
+    sql.execute(
+        "UPDATE agent_sessions SET primary_scope='repository', completed_at=NULL WHERE id=?1",
+        [&session],
+    )
+    .unwrap();
     std::fs::rename(
         home.join(format!("screens/{SESSION}.ghostsnp")),
         home.join(format!("screens/{session}.ghostsnp")),
@@ -207,6 +258,8 @@ read -r answer < /dev/tty
         )
         .unwrap();
     }
+    // Resuming a repository conversation starts it under the Machine server.
+    let _server = loopflow_test_support::MachineServer::start(&binary, &home);
     let mut resume = command();
     resume.args(["resume", &session]);
     if case == "reveal" {
@@ -281,6 +334,7 @@ fn preview_case(case: &str) -> (tempfile::TempDir, Vec<u8>) {
     let mut output = Vec::new();
     let mut cancelled = false;
     let mut inspected = false;
+    let mut typed = false;
     let status = loop {
         assert!(
             Instant::now() < deadline,
@@ -298,6 +352,11 @@ fn preview_case(case: &str) -> (tempfile::TempDir, Vec<u8>) {
             let n = master.read(&mut bytes).unwrap();
             display.write(&bytes[..n]);
             output.extend_from_slice(&bytes[..n]);
+        }
+        if case == "startup_input" && !typed && home.path().join("pending").exists() {
+            master.write_all(b"typed while opening\n").unwrap();
+            std::fs::write(home.path().join("typed"), "1").unwrap();
+            typed = true;
         }
         if case == "cancel" && !cancelled && home.path().join("pending").exists() {
             assert!(display.alternate_screen());
@@ -380,14 +439,10 @@ fn preview_case(case: &str) -> (tempfile::TempDir, Vec<u8>) {
     assert!(output
         .windows(b"saved preview".len())
         .any(|w| w == b"saved preview"));
-    assert!(case == "startup_failure" || case == "provider_failure" || cancelled || inspected);
+    assert!(matches!(case, "provider_failure" | "completed") || cancelled || inspected);
     (home, output)
 }
 
-#[test]
-fn snapshot_preview_startup_failure_restores_terminal() {
-    preview_case("startup_failure");
-}
 #[test]
 fn snapshot_preview_cancellation_before_acknowledgement_restores_terminal() {
     preview_case("cancel");
@@ -399,6 +454,12 @@ fn snapshot_preview_hands_off_to_a_fresh_primary_screen() {
 #[test]
 fn snapshot_preview_hands_off_to_mode_only_live_state() {
     preview_case("modes");
+}
+
+#[test]
+fn readiness_after_agent_exit_keeps_final_output_and_status() {
+    let (_, output) = preview_case("completed");
+    assert!(String::from_utf8_lossy(&output).contains("provider finished"));
 }
 
 #[test]
@@ -434,4 +495,13 @@ fn directory_case(case: &str) -> bool {
 #[test]
 fn viewer_taking_a_terminal_enters_the_execution_and_retires_its_report() {
     assert!(directory_case("directory"));
+}
+
+#[test]
+fn snapshot_preview_keeps_typing_until_initial_attachment_is_acknowledged() {
+    let (home, _) = preview_case("startup_input");
+    assert_eq!(
+        std::fs::read(home.path().join("forwarded")).unwrap(),
+        b"typed while opening\n"
+    );
 }

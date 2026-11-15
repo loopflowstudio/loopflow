@@ -12,17 +12,21 @@ pub(crate) fn format_time(unix: i64) -> String {
 }
 
 pub(crate) fn print_process(process: &crate::process::ProcessEntry) {
+    println!("{}", render_process(process));
+}
+
+pub(crate) fn render_process(process: &crate::process::ProcessEntry) -> String {
     let command = process.command().unwrap_or("unknown command");
     let display = serde_json::from_str::<Vec<String>>(command)
         .map(|argv| argv.join(" "))
         .unwrap_or_else(|_| command.to_string());
-    println!(
+    format!(
         "{}  {}  {}  {}",
         process.id(),
         process.started_at(),
         process.outcome().unwrap_or("unknown"),
         display
-    );
+    )
 }
 
 #[derive(Debug, Clone, Copy)]

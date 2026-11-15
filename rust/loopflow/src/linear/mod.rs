@@ -125,7 +125,9 @@ pub(crate) fn validate_project_ownership(
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum LinearError {
-    #[error("Linear rate limit reached; retry after epoch milliseconds {reset_at_ms}")]
+    /// Saved delivery errors show this text, so it stays the same across
+    /// retries; the reset time is logged where the limit is first seen.
+    #[error("Linear rate limit reached; saved changes retry after it resets")]
     RateLimited { reset_at_ms: i64 },
     #[error("{0}")]
     Message(String),

@@ -1,24 +1,55 @@
-//! Native Session updates read existing Task/Graph facts. Receipts live in the
-//! Session history; they are delivery evidence, never another workflow cursor.
+//! Task updates: what changed on a Task since its last reading, saved as
+//! steers its interactive conversations read. No writer sits at each fact:
+//! whoever looks first (a conversation's hook, or the Machine server waking an
+//! idle one) compares the Task with its last reading and writes what moved,
+//! so an exit nobody recorded is still reported.
 use std::collections::{BTreeSet, HashMap};
-use std::time::{Duration, Instant};
+use std::sync::{Mutex, PoisonError};
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use crate::durable::{GraphStepProcess, TaskId};
 use crate::id::LfProcessId;
 use crate::store::sqlite::SqliteStore;
-use crate::store::{RecordingGap, StoreError, StoreResult};
+use crate::store::{StoreError, StoreResult};
 use crate::task_graph::TaskGraphPosition;
 use crate::work::task::comment::TaskCommentAuthor;
 
-#[derive(Debug, Clone)]
-pub(crate) struct TaskUpdate {
-    pub key: String,
-    pub text: String,
-    pub observation: Value,
+/// Run and position changes share one steer; its complete source is on disk.
+const UPDATE_BYTES: usize = 4_000;
+
+/// The `task_updates` revision at which a Task's last reading found nothing
+/// new, by database and Task. Rebuilding Task history costs tens of
+/// milliseconds; until a Task change moves the revision the answer is the
+/// same. Per process: the server keeps it, a hook starts without it.
+type QuietKey = (String, TaskId);
+static QUIET_AT: Mutex<Option<HashMap<QuietKey, i64>>> = Mutex::new(None);
+
+fn quiet_key(store: &SqliteStore, task: &TaskId) -> Option<QuietKey> {
+    let conn = store.conn.lock().expect("store mutex poisoned");
+    let path = conn.path().filter(|path| !path.is_empty())?.to_string();
+    Some((path, task.clone()))
+}
+
+fn quiet_at(key: Option<&QuietKey>) -> Option<i64> {
+    QUIET_AT
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_ref()?
+        .get(key?)
+        .copied()
+}
+
+fn set_quiet_at(key: Option<QuietKey>, revision: i64) {
+    let Some(key) = key else {
+        return;
+    };
+    QUIET_AT
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get_or_insert_with(HashMap::new)
+        .insert(key, revision);
 }
 
 // Keep only reportable facts, not compiled graphs or their full step histories.
@@ -26,9 +57,8 @@ pub(crate) struct TaskUpdate {
 struct TaskObservation {
     position: Option<TaskGraphPosition>,
     runs: HashMap<LfProcessId, RunObservation>,
-    /// Comment IDs this conversation has heard about. Observations recorded
-    /// before comments were reported have none; they baseline on next read.
-    comments: Option<BTreeSet<String>>,
+    /// Comments that are not direction, by ID.
+    comments: BTreeSet<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -62,177 +92,120 @@ impl RunObservation {
     }
 }
 
-#[derive(Debug, Default)]
-pub(crate) struct TaskUpdates {
-    candidates: HashMap<String, (Value, Instant)>,
-    revision: Option<crate::store::sqlite::StoreRevisions>,
-    read_at: Option<Instant>,
+/// Write what changed on the Session's Tasks since their last readings as
+/// Task steers. Only an interactive conversation reads them, so only one
+/// looks; a worker Run pays nothing.
+pub(crate) fn write(store: &SqliteStore, session_id: &str) -> StoreResult<()> {
+    let Some(session) = store.session(session_id)? else {
+        return Ok(());
+    };
+    if !session.interactive || session.completed_at.is_some() {
+        return Ok(());
+    }
+    let revision = store.task_update_revision()?;
+    for task in store.session_task_ids(session_id)? {
+        let quiet = quiet_key(store, &task);
+        if quiet_at(quiet.as_ref()) == Some(revision) {
+            continue;
+        }
+        write_task(store, &task)?;
+        set_quiet_at(quiet, revision);
+    }
+    Ok(())
 }
 
-impl TaskUpdates {
-    // Each run settles independently: another run's churn must not delay it.
-    fn settled<T: Serialize + PartialEq>(
-        &mut self,
-        id: &str,
-        current: &T,
-        previous: Option<&T>,
-    ) -> StoreResult<bool> {
-        if previous == Some(current) {
-            self.candidates.remove(id);
-            return Ok(false);
-        }
-        let value = serde_json::to_value(current)?;
-        match self.candidates.get(id) {
-            Some((candidate, since)) if candidate == &value => {
-                Ok(since.elapsed() >= Duration::from_secs(1))
-            }
-            _ => {
-                self.candidates
-                    .insert(id.to_owned(), (value, Instant::now()));
-                Ok(false)
-            }
-        }
-    }
-
-    /// Read on the native owner's clock. Worker Runs never receive updates.
-    /// Initial history is a baseline; reconnect compares durable observations.
-    pub(crate) fn pending(
-        &mut self,
-        store: &SqliteStore,
-        session_id: &str,
-    ) -> StoreResult<Option<TaskUpdate>> {
-        let mut revision = store.revisions()?;
-        revision.usage = 0;
-        if self.revision == Some(revision)
-            && self.candidates.is_empty()
-            && self
-                .read_at
-                .is_some_and(|at| at.elapsed() < Duration::from_secs(2))
+/// The Task's first reading is a baseline: its history is in every prompt
+/// already. After that, one steer says how its position and runs moved, and
+/// one per comment that is not direction, named for the Session that wrote it
+/// so that Session is not told.
+fn write_task(store: &SqliteStore, task: &TaskId) -> StoreResult<()> {
+    let stored = store.task_update_reading(task)?;
+    let old: Option<TaskObservation> = stored.as_deref().map(serde_json::from_str).transpose()?;
+    let (graph, graphs) = store.task_progress(task)?;
+    let mut observation = TaskObservation {
+        position: graph.map(|graph| graph.position),
+        runs: HashMap::new(),
+        comments: BTreeSet::new(),
+    };
+    let mut changes = Vec::new();
+    for graph in graphs {
+        let id = LfProcessId::parse(&graph.entry.summary.id)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+        let prior = old.as_ref().and_then(|old| old.runs.get(&id));
+        // Exit and next start are separate commits. Keep this run's last
+        // reported facts until its next step or terminal result.
+        if graph.entry.ended_at.is_none()
+            && graph
+                .steps
+                .last()
+                .is_some_and(|step| step.completed_at.is_some())
         {
-            return Ok(None);
+            if let Some(prior) = prior {
+                observation.runs.insert(id, prior.clone());
+            }
+            continue;
         }
-        self.revision = Some(revision);
-        self.read_at = Some(Instant::now());
-        let Some(session) = store.session(session_id)? else {
-            return Ok(None);
+        let run = RunObservation {
+            name: graph.entry.summary.name,
+            outcome: store.lf_process(&id)?.and_then(|process| process.outcome),
+            completed: graph.entry.ended_at.is_some(),
+            step: graph.steps.last().cloned(),
         };
-        if !session.interactive || session.completed_at.is_some() {
-            return Ok(None);
+        if prior != Some(&run) {
+            changes.push(run.report(&id));
         }
-        let previous = store.latest_task_update(session_id)?;
-        let baseline = previous.is_none();
-        let previous: HashMap<TaskId, TaskObservation> = previous
-            .map(serde_json::from_value)
-            .transpose()?
-            .unwrap_or_default();
-        let mut facts = HashMap::new();
-        let mut lines = Vec::new();
-        for task in store.session_task_ids(session_id)? {
-            let (overview, graphs) = store.task_overview(&task)?;
-            let old = previous.get(&task);
-            let position = overview.graph.map(|graph| graph.position);
-            let position_changed = self.settled(
-                task.as_str(),
-                &position,
-                old.map(|observation| &observation.position),
-            )?;
-            let mut observation = TaskObservation {
-                position: if baseline || position_changed {
-                    position
-                } else {
-                    old.and_then(|observation| observation.position.clone())
-                },
-                runs: HashMap::new(),
-                comments: None,
-            };
-            let mut changes = Vec::new();
-            for graph in graphs {
-                let id = LfProcessId::parse(&graph.entry.summary.id)
-                    .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-                let prior = old.and_then(|observation| observation.runs.get(&id));
-                // Exit and next start are separate commits. Preserve this run's
-                // last reported facts until its next step or terminal result.
-                if graph.entry.ended_at.is_none()
-                    && graph
-                        .steps
-                        .last()
-                        .is_some_and(|step| step.completed_at.is_some())
-                {
-                    self.candidates.remove(id.as_str());
-                    if let Some(prior) = prior {
-                        observation.runs.insert(id, prior.clone());
-                    }
-                    continue;
-                }
-                let run = RunObservation {
-                    name: graph.entry.summary.name,
-                    outcome: store.lf_process(&id)?.and_then(|process| process.outcome),
-                    completed: graph.entry.ended_at.is_some(),
-                    step: graph.steps.last().cloned(),
-                };
-                if baseline || self.settled(id.as_str(), &run, prior)? {
-                    if !baseline {
-                        changes.push(run.report(&id));
-                    }
-                    observation.runs.insert(id, run);
-                } else if let Some(prior) = prior {
-                    observation.runs.insert(id, prior.clone());
-                }
-            }
-            let thread = store.task_comments(&task)?;
-            let heard = old.and_then(|observation| observation.comments.as_ref());
-            // A comment this conversation posted is not news to it.
-            let arrived: Vec<String> = heard
-                .map(|heard| {
-                    thread
-                        .comments
-                        .iter()
-                        .filter(|comment| !heard.contains(&comment.id))
-                        .filter(|comment| !written_here(&comment.author, session_id))
-                        .map(|comment| {
-                            format!("New comment from {}: {}", comment.author, comment.body)
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
-            observation.comments = Some(
-                thread
-                    .comments
-                    .into_iter()
-                    .map(|comment| comment.id)
-                    .collect(),
-            );
-            if position_changed || !changes.is_empty() || !arrived.is_empty() {
-                let identifier = store
-                    .task(&task)?
-                    .map(|task| task.identifier)
-                    .unwrap_or_else(|| task.to_string());
-                lines.push(format!(
-                    "Task {identifier}: {}. {}",
-                    position_text(observation.position.as_ref()),
-                    changes.join(" ")
-                ));
-                lines.extend(arrived);
-            }
-            facts.insert(task, observation);
-        }
-        if !baseline && lines.is_empty() {
-            return Ok(None);
-        }
-        let observation = serde_json::to_value(&facts)?;
-        let key = format!("{:x}", Sha256::digest(serde_json::to_vec(&observation)?));
-        if baseline {
-            store.record_task_update(session_id, &key, "baseline", &observation)?;
-            self.candidates.clear();
-            return Ok(None);
-        }
-        Ok(Some(TaskUpdate { key, observation, text: format!(
-            "<lf:task-update>\n{}\nReport this recorded progress briefly. This is observation, not a request or permission to launch work, advance review, publish or merge. Read current Task status before acting. Diffs belong in Files.\n</lf:task-update>", lines.join("\n")) }))
+        observation.runs.insert(id, run);
     }
-}
-
-fn written_here(author: &TaskCommentAuthor, session_id: &str) -> bool {
-    matches!(author, TaskCommentAuthor::Session { session_id: id, .. } if id == session_id)
+    let comments = store.task_undirected_comments(task)?;
+    observation.comments = comments.iter().map(|comment| comment.id.clone()).collect();
+    if old.as_ref() == Some(&observation) {
+        return Ok(());
+    }
+    let reading = serde_json::to_string(&observation)?;
+    let mut updates = Vec::new();
+    if let Some(old) = &old {
+        let identifier = store
+            .task(task)?
+            .map(|task| task.identifier)
+            .unwrap_or_else(|| task.to_string());
+        if old.position != observation.position || !changes.is_empty() {
+            let mut text = format!(
+                "Task {identifier}: {}.",
+                position_text(observation.position.as_ref())
+            );
+            for (shown, change) in changes.iter().enumerate() {
+                if text.len() + change.len() + 1 > UPDATE_BYTES {
+                    text.push_str(&format!(
+                        " {} more changes; read `lf task status` for them.",
+                        changes.len() - shown
+                    ));
+                    break;
+                }
+                text.push(' ');
+                text.push_str(change);
+            }
+            let key = format!("{:x}", Sha256::digest(reading.as_bytes()));
+            updates.push((format!("update:-:{task}:{key}"), text));
+        }
+        for comment in &comments {
+            if old.comments.contains(&comment.id) {
+                continue;
+            }
+            let writer = match &comment.author {
+                TaskCommentAuthor::Session { session_id, .. } => session_id,
+                _ => "-",
+            };
+            updates.push((
+                format!("update:{writer}:{}", comment.id),
+                format!(
+                    "Task {identifier}: new comment from {}: {}",
+                    comment.author, comment.body
+                ),
+            ));
+        }
+    }
+    // Another reader that wrote first reported the same change.
+    store.save_task_update(task, stored.as_deref(), &reading, &updates)
 }
 
 fn position_text(position: Option<&TaskGraphPosition>) -> String {
@@ -242,211 +215,67 @@ fn position_text(position: Option<&TaskGraphPosition>) -> String {
         }
         Some(TaskGraphPosition::At { step }) if step == "start" => "At start".into(),
         Some(TaskGraphPosition::At { step }) => format!("At {step} · available for review"),
-        Some(TaskGraphPosition::Run { step, running, .. }) => format!(
-            "{} from {step}",
-            if *running { "Running" } else { "Stopped" }
-        ),
+        Some(TaskGraphPosition::Run { at, running, .. }) => {
+            format!("{} at {at}", if *running { "Running" } else { "Stopped" })
+        }
         None => "No Task workflow selected".into(),
-    }
-}
-
-/// Native extension/hook observer. Provider identity fences every read and write;
-/// attachment-only handoff leaves the same conversation and observer alive.
-#[cfg(unix)]
-pub(crate) fn watch(
-    home: &std::path::Path,
-    input: &serde_json::Value,
-    adapter: crate::steer::SteerAdapter,
-    thread: &str,
-    mut deliver: impl FnMut(
-        &SqliteStore,
-        &crate::steer::SteerAdapter,
-        &str,
-        &TaskUpdate,
-    ) -> StoreResult<()>,
-) -> anyhow::Result<()> {
-    use crate::steer::NativeBoundary;
-    let store = SqliteStore::new(&home.join("loopflow.db"))?;
-    if !store
-        .session(&adapter.session)?
-        .is_some_and(|session| session.interactive && session.completed_at.is_none())
-    {
-        return Ok(());
-    }
-    // Select before locking: a clear/resume can replace the native conversation
-    // while an older observer still owns its thread's lock.
-    let boundary = if input["hook_event_name"] == "SessionStart" {
-        NativeBoundary::Select {
-            source: input["source"].as_str().unwrap_or("startup"),
-        }
-    } else {
-        NativeBoundary::Turn
-    };
-    store.with_provider_context(&adapter, thread, boundary, || Ok(()))?;
-    let directory = home.join("task-updates");
-    std::fs::create_dir_all(&directory)?;
-    let lock = std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .write(true)
-        .open(directory.join(format!(
-            "{}-{:x}.lock",
-            adapter.agent_process_id,
-            Sha256::digest(thread.as_bytes())
-        )))?;
-    match fs2::FileExt::try_lock_exclusive(&lock) {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(()),
-        Err(error) => return Err(error.into()),
-    }
-    let mut sync_started = false;
-    let mut updates = TaskUpdates::default();
-    let mut gap = RecordingGap::default();
-    loop {
-        if crate::journal::agent_evidence(&store, &adapter.agent_process_id)
-            == crate::journal::ProcessIdentityEvidence::Dead
-        {
-            return Ok(());
-        }
-        let pending = store.with_provider_context(&adapter, thread, NativeBoundary::Turn, || {
-            updates.pending(&store, &adapter.session)
-        });
-        let pending = match pending {
-            Ok(pending) => {
-                gap.recovered();
-                // Baseline local comments before syncing, so a quick tracker
-                // response cannot swallow newly fetched comments as old history.
-                if !sync_started {
-                    for task in store.session_task_ids(&adapter.session)? {
-                        if let Some(task) = store.task(&task)? {
-                            std::thread::spawn(move || {
-                                crate::agent_input_timing::record(
-                                    "task_sync_begin",
-                                    &task.identifier,
-                                );
-                                if let Err(error) =
-                                    crate::ops::task::sync_for_conversation(&task.identifier)
-                                {
-                                    tracing::info!(task = %task.identifier, %error, "Task sync after launch pending");
-                                }
-                                crate::agent_input_timing::record(
-                                    "task_sync_end",
-                                    &task.identifier,
-                                );
-                            });
-                        }
-                    }
-                    sync_started = true;
-                }
-                pending
-            }
-            Err(StoreError::InvalidAuthority(_)) => return Ok(()),
-            Err(error) => {
-                gap.note("native Task updates", &error);
-                None
-            }
-        };
-        if let Some(update) = pending {
-            // Claude's next-priority inbox and Pi's follow-up queue own when
-            // this input runs. A native terminal may have no availability
-            // observation; waiting for one would prevent idle delivery forever.
-            match deliver(&store, &adapter, thread, &update) {
-                Ok(()) => {}
-                Err(StoreError::InvalidAuthority(_)) => return Ok(()),
-                Err(error) => gap.note("native Task update delivery", &error),
-            }
-        }
-        std::thread::sleep(Duration::from_secs(1));
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::TaskUpdates;
+    use super::write;
     use crate::durable::TaskId;
     use crate::id::LfProcessId;
     use crate::store::sqlite::SqliteStore;
     use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
-    use std::sync::{Arc, Barrier};
-    use std::time::{Duration, Instant};
 
-    fn settle(updates: &mut TaskUpdates) {
-        for (_, since) in updates.candidates.values_mut() {
-            *since = Instant::now() - Duration::from_secs(2);
-        }
+    /// The updates `session` has not read, after a reading.
+    fn pending(store: &SqliteStore, session: &str) -> Vec<String> {
+        write(store, session).unwrap();
+        store
+            .session_steers(session, 0, 100)
+            .unwrap()
+            .items
+            .into_iter()
+            .filter(|row| row.delivered_at.is_none() && row.steer.source.starts_with("update:"))
+            .map(|row| row.steer.text)
+            .collect()
     }
 
-    #[test]
-    fn task_update_receipt_admits_one_concurrent_observer() {
-        let home = tempfile::tempdir().unwrap();
-        let path = home.path().join("db");
-        let store = SqliteStore::open_ephemeral(&path).unwrap();
-        store.test_session("reader", &crate::session_record::new_artifact_key());
-        store
-            .record_task_update("reader", "initial", "baseline", &serde_json::json!({}))
-            .unwrap();
-        assert!(!store
-            .record_task_update("reader", "initial", "dispatched", &serde_json::json!({}))
-            .unwrap());
+    fn quiet(store: &SqliteStore) -> bool {
+        pending(store, "reader").is_empty()
+    }
 
-        let reconnected = SqliteStore::new(&path).unwrap();
-        let ready = Arc::new(Barrier::new(2));
-        let other_ready = ready.clone();
-        let observer = std::thread::spawn(move || {
-            other_ready.wait();
-            reconnected
-                .record_task_update(
-                    "reader",
-                    "transition",
-                    "dispatched",
-                    &serde_json::json!({"run":"failed"}),
-                )
-                .unwrap()
-        });
-        ready.wait();
-        let sent = store
-            .record_task_update(
-                "reader",
-                "transition",
-                "dispatched",
-                &serde_json::json!({"run":"failed"}),
+    /// Read the reader's pending updates and mark them read.
+    fn deliver(store: &SqliteStore) -> String {
+        let text = pending(store, "reader").join("\n");
+        assert!(!text.is_empty(), "an update");
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO steer_delivered(session_id,steer_id,claimed_at,delivered_at)
+                 SELECT 'reader',id,1,1 FROM steers WHERE source LIKE 'update:%'
+                 ON CONFLICT DO NOTHING",
+                [],
             )
             .unwrap();
-        assert_ne!(
-            sent,
-            observer.join().unwrap(),
-            "exactly one observer may send"
-        );
-        assert_eq!(
-            store.latest_task_update("reader").unwrap(),
-            Some(serde_json::json!({"run":"failed"}))
-        );
-        assert_eq!(
-            store
-                .session_history("reader", 0, 0)
-                .unwrap()
-                .iter()
-                .filter(|event| event.payload["key"] == "transition")
-                .count(),
-            1
-        );
+        text
     }
 
     #[test]
-    fn task_updates_coalesce_exits_and_starts_and_do_not_replay_uncertain_delivery() {
+    fn a_finished_run_reaches_the_next_boundary_once() {
         let (_home, store, _task) = task_session();
-        let mut updates = TaskUpdates::default();
-        assert!(updates.pending(&store, "reader").unwrap().is_none());
+        assert!(quiet(&store), "baseline");
         let graph = store.test_graph(
             "feature",
             "/task-updates",
             &[("implement", Some("succeeded"))],
             None,
         );
-        assert!(
-            updates.pending(&store, "reader").unwrap().is_none(),
-            "between-step commits are silent"
-        );
+        assert!(quiet(&store), "between-step commits are silent");
         store
             .conn
             .lock()
@@ -456,47 +285,96 @@ mod tests {
                 [graph.as_str()],
             )
             .unwrap();
-        assert!(
-            updates.pending(&store, "reader").unwrap().is_none(),
-            "wait for quiet"
-        );
-        settle(&mut updates);
-        let update = updates.pending(&store, "reader").unwrap().unwrap();
-        assert!(update.text.contains("implement ("));
-        assert!(update.text.contains(": succeeded"));
-        assert!(update.text.contains("not a request or permission"));
-        store
-            .record_task_update("reader", &update.key, "dispatched", &update.observation)
-            .unwrap();
-        let mut reconnected = TaskUpdates::default();
-        assert!(
-            reconnected.pending(&store, "reader").unwrap().is_none(),
-            "unknown delivery must not replay"
-        );
+        let text = deliver(&store);
+        assert!(text.contains(&format!("Run feature ({graph}) · failed")));
+        assert!(text.contains("implement ("));
+        assert!(text.contains(": succeeded"));
+        assert!(quiet(&store), "a delivered reading is not repeated");
         store.test_graph(
             "repair",
             "/task-updates",
             &[("gate", Some("failed"))],
             Some("failed"),
         );
-        assert!(reconnected.pending(&store, "reader").unwrap().is_none());
-        settle(&mut reconnected);
-        let next = reconnected.pending(&store, "reader").unwrap().unwrap();
-        assert!(next.text.contains("gate ("));
-        assert!(next.text.contains(": failed"));
+        let next = deliver(&store);
+        assert!(next.contains("gate ("));
+        assert!(next.contains(": failed"));
+        assert!(!next.contains(graph.as_str()), "unchanged runs stay quiet");
+    }
+
+    #[test]
+    fn a_run_between_steps_keeps_its_last_report() {
+        let (_home, store, _task) = task_session();
+        let run = store.test_graph("feature", "/task-updates", &[("implement", None)], None);
+        assert!(quiet(&store));
+        finish_step(&store, &run);
+        assert!(quiet(&store));
+        // Repeated labels are distinct occurrences, identified by Process id.
+        let step = next_step(&store, &run, 0);
+        assert!(deliver(&store).contains(&format!("implement ({step}): running")));
+        finish_run(&store, &run, "failed");
+        assert!(deliver(&store).contains(&format!("Run feature ({run}) · failed")));
+    }
+
+    #[test]
+    fn review_positions_are_reported_without_repeating_history() {
+        let (_home, store, task) = task_session();
         store
-            .record_task_update("reader", &next.key, "dispatched", &next.observation)
+            .take_up_task_graph(
+                &task,
+                &crate::task_graph::CapturedGraph {
+                    name: "feature".into(),
+                    steps: Vec::new(),
+                },
+            )
             .unwrap();
-        store
-            .record_task_update("reader", &update.key, "accepted", &update.observation)
-            .unwrap();
+        let run = store.test_graph("feature", "/task-updates", &[("gate", None)], None);
+        assert!(quiet(&store));
+        finish_run(&store, &run, "succeeded");
+        store.set_task_graph_step(&task, "demo").unwrap();
+        let available = deliver(&store);
+        assert!(available.contains("At demo · available for review"));
+        assert!(available.contains(&format!("Run feature ({run}) · succeeded")));
+        store.set_task_graph_step(&task, "end").unwrap();
+        let at_end = deliver(&store);
+        assert!(at_end.contains("At end (Task completion is separate)"));
         assert!(
-            TaskUpdates::default()
-                .pending(&store, "reader")
-                .unwrap()
-                .is_none(),
-            "a late acknowledgement cannot rewind the dispatched reading"
+            !at_end.contains(run.as_str()),
+            "unchanged history isn't repeated for position-only changes"
         );
+    }
+
+    #[test]
+    fn two_readers_of_one_change_write_it_once() {
+        let (_home, store, task) = task_session();
+        assert!(quiet(&store), "baseline");
+        let reading = store.task_update_reading(&task).unwrap();
+        let update = [("update:-:fixture".to_string(), "Run failed".to_string())];
+        store
+            .save_task_update(&task, reading.as_deref(), "{\"first\":1}", &update)
+            .unwrap();
+        store
+            .save_task_update(&task, reading.as_deref(), "{\"second\":1}", &update)
+            .unwrap();
+        assert_eq!(
+            store.task_update_reading(&task).unwrap().as_deref(),
+            Some("{\"first\":1}")
+        );
+    }
+
+    #[test]
+    fn a_conversation_that_just_started_skips_updates_written_before_it() {
+        let (_home, store, _task) = task_session();
+        assert!(quiet(&store), "baseline");
+        store.test_graph(
+            "feature",
+            "/task-updates",
+            &[("gate", Some("failed"))],
+            Some("failed"),
+        );
+        assert_eq!(pending(&store, "reader").len(), 1);
+        store.baseline_task_updates("reader").unwrap();
+        assert!(quiet(&store));
     }
 
     fn task_session() -> (tempfile::TempDir, SqliteStore, TaskId) {
@@ -514,7 +392,7 @@ mod tests {
                 due_date: None,
             })
             .unwrap();
-        store.conn.lock().unwrap().execute("UPDATE tasks SET worktree='/task-updates',checkout_machine_id=(SELECT id FROM machines WHERE is_local=1) WHERE id=?1", [task.as_str()]).unwrap();
+        store.conn.lock().unwrap().execute("INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/task-updates') ON CONFLICT(task_id) DO UPDATE SET worktree=excluded.worktree", [task.as_str()]).unwrap();
         store
             .conn
             .lock()
@@ -562,161 +440,6 @@ mod tests {
         step
     }
 
-    #[test]
-    fn task_updates_report_older_failure_independently_of_newer_run() {
-        for newer_state in ["unchanged", "between_steps", "unsettled"] {
-            let (_home, store, _task) = task_session();
-            let older = store.test_graph("feature", "/task-updates", &[("gate", None)], None);
-            let newer = store.test_graph("docs", "/task-updates", &[("write", None)], None);
-            let mut updates = TaskUpdates::default();
-            assert!(updates.pending(&store, "reader").unwrap().is_none());
-            finish_run(&store, &older, "failed");
-            assert!(updates.pending(&store, "reader").unwrap().is_none());
-            settle(&mut updates);
-            match newer_state {
-                "between_steps" => finish_step(&store, &newer),
-                "unsettled" => finish_run(&store, &newer, "succeeded"),
-                _ => {}
-            }
-            let update = updates.pending(&store, "reader").unwrap().unwrap();
-            assert!(
-                update
-                    .text
-                    .contains(&format!("Run feature ({older}) · failed")),
-                "{newer_state}: {}",
-                update.text
-            );
-            assert!(update.text.contains("gate ("));
-            assert!(
-                !update.text.contains(newer.as_str()),
-                "unchanged or unsettled runs aren't announced"
-            );
-            store
-                .record_task_update("reader", &update.key, "dispatched", &update.observation)
-                .unwrap();
-            assert!(
-                TaskUpdates::default()
-                    .pending(&store, "reader")
-                    .unwrap()
-                    .is_none(),
-                "uncertain delivery is suppressed"
-            );
-        }
-    }
-
-    #[test]
-    fn task_updates_reconnect_retains_gap_and_reports_older_runs_next_change() {
-        let (home, store, _task) = task_session();
-        let older = store.test_graph("feature", "/task-updates", &[("implement", None)], None);
-        let newer = store.test_graph("docs", "/task-updates", &[("write", None)], None);
-        let mut updates = TaskUpdates::default();
-        assert!(updates.pending(&store, "reader").unwrap().is_none());
-        finish_step(&store, &older);
-        assert!(
-            updates.pending(&store, "reader").unwrap().is_none(),
-            "step exit/start gap is silent"
-        );
-        // Repeated labels are distinct occurrences, identified by Process id.
-        let next = next_step(&store, &older, 0);
-        finish_step(&store, &newer);
-        assert!(updates.pending(&store, "reader").unwrap().is_none());
-        settle(&mut updates);
-        let update = updates.pending(&store, "reader").unwrap().unwrap();
-        assert!(update
-            .text
-            .contains(&format!("implement ({next}): running")));
-        assert!(!update.text.contains(newer.as_str()));
-        store
-            .record_task_update("reader", &update.key, "dispatched", &update.observation)
-            .unwrap();
-        drop(store);
-        let store = SqliteStore::new(&home.path().join("db")).unwrap();
-        let mut reconnected = TaskUpdates::default();
-        assert!(reconnected.pending(&store, "reader").unwrap().is_none());
-        finish_run(&store, &older, "failed");
-        assert!(reconnected.pending(&store, "reader").unwrap().is_none());
-        settle(&mut reconnected);
-        let failed = reconnected.pending(&store, "reader").unwrap().unwrap();
-        assert!(failed
-            .text
-            .contains(&format!("Run feature ({older}) · failed")));
-        assert!(!failed.text.contains(newer.as_str()));
-        store
-            .record_task_update("reader", &failed.key, "dispatched", &failed.observation)
-            .unwrap();
-        store
-            .record_task_update("reader", &update.key, "accepted", &update.observation)
-            .unwrap();
-        assert!(
-            TaskUpdates::default()
-                .pending(&store, "reader")
-                .unwrap()
-                .is_none(),
-            "late acknowledgement cannot rewind observations"
-        );
-        // B's gap was never consumed by either report about A, even across reopen.
-        let step = next_step(&store, &newer, 0);
-        assert!(reconnected.pending(&store, "reader").unwrap().is_none());
-        settle(&mut reconnected);
-        let resumed = reconnected.pending(&store, "reader").unwrap().unwrap();
-        assert!(resumed
-            .text
-            .contains(&format!("Run docs ({newer}) · running")));
-        assert!(resumed.text.contains(&format!("write ({step}): running")));
-        assert!(!resumed.text.contains(older.as_str()));
-    }
-
-    #[test]
-    fn task_updates_coalesce_while_busy_and_report_review_position_separately() {
-        let (_home, store, task) = task_session();
-        store
-            .take_up_task_graph(
-                &task,
-                &crate::task_graph::CapturedGraph {
-                    name: "feature".into(),
-                    steps: Vec::new(),
-                },
-            )
-            .unwrap();
-        let older = store.test_graph("feature", "/task-updates", &[("gate", None)], None);
-        let mut updates = TaskUpdates::default();
-        assert!(updates.pending(&store, "reader").unwrap().is_none());
-        finish_step(&store, &older);
-        let next = next_step(&store, &older, 0);
-        assert!(updates.pending(&store, "reader").unwrap().is_none());
-        settle(&mut updates);
-        let busy = updates.pending(&store, "reader").unwrap().unwrap();
-        assert!(busy.text.contains(&format!("gate ({next}): running")));
-        // Native owners do not dispatch while busy. Only the latest reading survives.
-        finish_run(&store, &older, "succeeded");
-        store.set_task_graph_step(&task, "demo").unwrap();
-        assert!(updates.pending(&store, "reader").unwrap().is_none());
-        settle(&mut updates);
-        let available = updates.pending(&store, "reader").unwrap().unwrap();
-        assert!(available.text.contains("At demo · available for review"));
-        assert!(available
-            .text
-            .contains(&format!("Run feature ({older}) · succeeded")));
-        assert!(!available.text.contains(": running"));
-        store
-            .record_task_update(
-                "reader",
-                &available.key,
-                "dispatched",
-                &available.observation,
-            )
-            .unwrap();
-        store.set_task_graph_step(&task, "end").unwrap();
-        assert!(updates.pending(&store, "reader").unwrap().is_none());
-        settle(&mut updates);
-        let at_end = updates.pending(&store, "reader").unwrap().unwrap();
-        assert!(at_end.text.contains("At end (Task completion is separate)"));
-        assert!(
-            !at_end.text.contains(older.as_str()),
-            "unchanged history isn't repeated for position-only changes"
-        );
-    }
-
     fn comment(store: &SqliteStore, task: &TaskId, body: &str, author: TaskCommentAuthor) {
         store
             .append_task_comment(
@@ -738,8 +461,7 @@ mod tests {
             name: Some("jack".into()),
         };
         comment(&store, &task, "already in the prompt", person());
-        let mut updates = TaskUpdates::default();
-        assert!(updates.pending(&store, "reader").unwrap().is_none());
+        assert!(quiet(&store));
         comment(
             &store,
             &task,
@@ -750,23 +472,41 @@ mod tests {
             },
         );
         assert!(
-            updates.pending(&store, "reader").unwrap().is_none(),
+            quiet(&store),
             "a conversation is not told about its own comment"
         );
-        comment(&store, &task, "use the staging bucket", person());
-        let update = updates.pending(&store, "reader").unwrap().unwrap();
-        assert!(update
-            .text
-            .contains("New comment from jack: use the staging bucket"));
-        assert!(!update.text.contains("already in the prompt"));
-        assert!(!update.text.contains("own progress"));
+        comment(&store, &task, "PR: https://example.test/pr/1", person());
+        let update = deliver(&store);
+        assert!(update.contains("new comment from jack: PR: https://example.test/pr/1"));
+        assert!(!update.contains("already in the prompt"));
+        assert!(!update.contains("own progress"));
     }
 
     #[test]
-    fn worker_runs_are_never_recipients() {
-        let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
-        store.test_session("worker", &crate::session_record::new_artifact_key());
+    fn direction_comments_arrive_as_steers_not_task_updates() {
+        let (_home, store, task) = task_session();
+        assert!(quiet(&store), "baseline");
+        comment(
+            &store,
+            &task,
+            "use the staging bucket",
+            TaskCommentAuthor::Person {
+                name: Some("jack".into()),
+            },
+        );
+        assert!(
+            quiet(&store),
+            "the steer saved for this comment is its only delivery"
+        );
+    }
+
+    #[test]
+    fn worker_runs_neither_write_nor_read_updates() {
+        let (_home, store, task) = task_session();
+        let worker = store.test_session("worker", &crate::session_record::new_artifact_key());
+        store
+            .bind_session("worker", worker.captured, &task)
+            .unwrap();
         store
             .conn
             .lock()
@@ -776,11 +516,19 @@ mod tests {
                 [],
             )
             .unwrap();
-        let before = store.session_history("worker", 0, 0).unwrap();
-        assert!(TaskUpdates::default()
-            .pending(&store, "worker")
-            .unwrap()
-            .is_none());
-        assert_eq!(store.session_history("worker", 0, 0).unwrap(), before);
+        assert!(pending(&store, "worker").is_empty());
+        assert!(
+            store.task_update_reading(&task).unwrap().is_none(),
+            "a worker's boundary reads no Task history"
+        );
+        assert!(quiet(&store), "baseline");
+        store.test_graph(
+            "feature",
+            "/task-updates",
+            &[("gate", Some("failed"))],
+            Some("failed"),
+        );
+        assert_eq!(pending(&store, "reader").len(), 1);
+        assert!(pending(&store, "worker").is_empty());
     }
 }

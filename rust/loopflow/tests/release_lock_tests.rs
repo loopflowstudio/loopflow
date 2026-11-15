@@ -850,9 +850,9 @@ fn surviving_release_notes_provider_retains_target_checkout_and_context() {
                     |row| row.get(0),
                 )
                 .unwrap();
-            // SAFETY: the capture identifies this fixture's live execution CLI;
-            // the notes.pid launcher above is now only its transport viewer.
-            assert_eq!(unsafe { libc::kill(executor, libc::SIGKILL) }, 0);
+            // Nothing hosts the nested CLI: the process killed above recorded
+            // the capture itself.
+            assert_eq!(executor, pid);
         } else {
             let deadline = Instant::now() + Duration::from_secs(20);
             while parent.child.try_wait().unwrap().is_none() {

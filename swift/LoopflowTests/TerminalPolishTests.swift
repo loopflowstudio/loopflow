@@ -1,5 +1,6 @@
 #if os(macOS)
 import Foundation
+import AppKit
 import Testing
 @testable import Loopflow
 @testable import LoopflowMac
@@ -7,6 +8,31 @@ import Testing
 @Suite("Terminal polish")
 struct TerminalPolishTests {
     #if canImport(GhosttyKit)
+    @Test("Connection feedback never changes terminal geometry")
+    @MainActor
+    func connectionFeedbackKeepsViewport() {
+        let terminal = GhosttyMetalView(terminal: .shell("geometry", machineId: "fixture"))
+        let mount = GhosttyTerminalMount(terminal: terminal)
+        mount.frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+        mount.addSubview(terminal)
+        mount.addSubview(terminal.searchBar)
+        mount.addSubview(terminal.connectionBar)
+        for searchVisible in [false, true] {
+            terminal.searchBar.isHidden = !searchVisible
+            terminal.connectionBar.isHidden = true
+            mount.layout()
+            let frame = terminal.frame
+            terminal.connectionBar.isHidden = false
+            mount.layout()
+            #expect(terminal.frame == frame)
+            #expect(mount.bounds.contains(terminal.connectionBar.frame))
+            #expect(terminal.connectionBar.frame.maxY <= terminal.searchBar.frame.minY)
+            terminal.connectionBar.isHidden = true
+            mount.layout()
+            #expect(terminal.frame == frame)
+        }
+    }
+
     @Test("An unused terminal releases without constructing Find during deinitialization")
     @MainActor
     func unusedTerminalRelease() {

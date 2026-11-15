@@ -638,18 +638,14 @@ pub const CLOSED_TASK_PAGE: usize = 50;
 /// `lf wave status --subscribe`: `lf wave status --json` now and each time it
 /// changes. The subscription reads the store; it does not observe the tracker.
 pub fn subscribe_status(wave: Option<String>) -> Result<()> {
-    super::subscribe::run(
-        (),
-        super::subscribe::Wake::following_checkouts(super::subscribe::PLANNING_CLOCK),
-        |store, ()| {
-            let wave = wave.clone();
-            async move {
-                let store = super::subscribe::require_store(store)?;
-                let wave = resolve_status_wave(&store, wave.as_deref()).await?;
-                Ok(serde_json::to_value(wave_detail(&store, &wave).await?)?)
-            }
-        },
-    )
+    super::subscribe::run((), |store, ()| {
+        let wave = wave.clone();
+        async move {
+            let store = super::subscribe::require_store(store)?;
+            let wave = resolve_status_wave(&store, wave.as_deref()).await?;
+            Ok(serde_json::to_value(wave_detail(&store, &wave).await?)?)
+        }
+    })
 }
 
 /// One Wave's `lf wave status` reading.
@@ -701,32 +697,27 @@ pub fn show(
     observe: bool,
 ) -> Result<()> {
     let directory = std::env::current_dir()?;
+    let roadmap = show_snapshot(&directory, wave, task, all, observe)?;
     if json {
-        let shown = show_json(&directory, wave, task, all, observe)?;
+        let shown = serde_json::to_value(roadmap)?;
         println!("{}", super::subscribe::selected_answer(&shown)?);
-        return Ok(());
-    }
-    let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(async {
-        let store = crate::store::read_existing_registry()?.map(std::sync::Arc::new);
-        let roadmap = show_roadmap(store.as_ref(), &directory, wave, task, all, observe).await?;
+    } else {
         print_roadmap(&roadmap);
-        Ok(())
-    })
+    }
+    Ok(())
 }
 
-/// What `lf wave show --json` prints in `directory`.
-pub(crate) fn show_json(
+/// What `lf wave show` prints in `directory`.
+pub(crate) fn show_snapshot(
     directory: &Path,
     wave: Option<&str>,
     task: Option<&str>,
     all: bool,
     observe: bool,
-) -> Result<serde_json::Value> {
+) -> Result<RoadmapSnapshot> {
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = crate::store::read_existing_registry()?.map(std::sync::Arc::new);
-        let roadmap = show_roadmap(store.as_ref(), directory, wave, task, all, observe).await?;
-        Ok(serde_json::to_value(roadmap)?)
+        show_roadmap(store.as_ref(), directory, wave, task, all, observe).await
     })
 }
 
@@ -741,7 +732,6 @@ pub fn subscribe_show(
 ) -> Result<Option<super::subscribe::Subscription>> {
     super::subscribe::start(
         (),
-        super::subscribe::Wake::following_checkouts(super::subscribe::PLANNING_CLOCK),
         move |store, ()| {
             let (wave, task, directory) = (wave.clone(), task.clone(), directory.clone());
             async move {
@@ -888,14 +878,20 @@ pub fn list_tasks(repo: &Path, query: &TaskListArgs, json: bool) -> Result<()> {
         };
         if json {
             println!("{}", serde_json::to_string(&tasks)?);
-        } else {
+        } else if let Some(store) = &store {
+            // Without a store there are no Tasks to print.
+            let local = store.sqlite.local_machine()?.id;
             for task in tasks {
-                println!(
-                    "{} · {} · {}",
-                    task.task.identifier,
-                    owner_text(task.runtime.as_ref()),
-                    task.task.name
-                );
+                let id = crate::durable::TaskId::from_raw(task.task.id.clone());
+                let ownership = store.sqlite.task_ownership(&id)?;
+                let mut owner = owner_text(task.runtime.as_ref()).to_string();
+                // A move that has not arrived reads as that, as in `lf task status`.
+                let place = crate::ops::task_ownership::move_line(&store.sqlite, &id)?
+                    .or_else(|| crate::ops::task_ownership::runs_elsewhere(&ownership, &local));
+                if let Some(place) = place {
+                    owner = format!("{owner} · {place}");
+                }
+                println!("{} · {owner} · {}", task.task.identifier, task.task.name);
             }
         }
         Ok(())
@@ -904,19 +900,15 @@ pub fn list_tasks(repo: &Path, query: &TaskListArgs, json: bool) -> Result<()> {
 
 /// `lf task list --subscribe`: `lf task list --json` now and each time it changes.
 pub fn subscribe_tasks(repo: &Path, args: TaskListArgs) -> Result<()> {
-    super::subscribe::run(
-        args,
-        super::subscribe::Wake::following_checkouts(super::subscribe::PLANNING_CLOCK),
-        |store, args| {
-            let repo = repo.to_owned();
-            async move {
-                let Some(store) = store else {
-                    return Ok(Vec::new());
-                };
-                open_tasks(&store, &repo, &args).await
-            }
-        },
-    )
+    super::subscribe::run(args, |store, args| {
+        let repo = repo.to_owned();
+        async move {
+            let Some(store) = store else {
+                return Ok(Vec::new());
+            };
+            open_tasks(&store, &repo, &args).await
+        }
+    })
 }
 
 /// What a `lf task status --subscribe` request can select instead.
@@ -964,7 +956,6 @@ where
     let repo = repo.to_owned();
     super::subscribe::start(
         TaskStatusArgs { issue },
-        super::subscribe::Wake::every(super::subscribe::ACTIVITY_CLOCK),
         move |store, args| {
             let repo = repo.to_owned();
             let reading = reading.clone();
@@ -978,8 +969,8 @@ where
     )
 }
 
-/// `lf desktop task`: `lf task status`'s reading plus the Task's Desktop row,
-/// which keeps the pane current after the Task leaves the plan.
+/// The full Task reading used by Desktop and terminal Task views, plus the
+/// Desktop row that keeps the pane current after the Task leaves the plan.
 #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DesktopTaskPane {
     #[serde(flatten)]
@@ -1029,13 +1020,16 @@ pub(crate) async fn task_detail(
     let row = snapshot_task_details(store, vec![&task], false, &shared)?
         .pop()
         .expect("a registered Task has a row");
+    let capacity = crate::provider_account::LaunchCapacity::read(&store.sqlite)?;
     let mut sessions = Vec::new();
     for session in status
         .overview
         .map(|overview| overview.sessions)
         .unwrap_or_default()
     {
-        if let Some(record) = crate::ops::human_session::listed(store, session.id.as_str())? {
+        if let Some(record) =
+            crate::ops::human_session::listed(store, session.id.as_str(), &capacity)?
+        {
             sessions.push(SessionFacts::of(record));
         }
     }
@@ -1321,57 +1315,18 @@ async fn roadmap_snapshot(
 /// of a plan does not grow by a statement per Task.
 #[derive(Debug)]
 struct SharedTaskReads {
-    checkouts: Vec<crate::store::sqlite::TaskCheckout>,
     machines: Vec<crate::durable::Machine>,
     local_machine: crate::durable::MachineId,
 }
 
 impl SharedTaskReads {
     async fn read(store: &SharedStore) -> Result<Self> {
-        let checkouts = store.task_checkouts().await?;
         let local_machine = store.local_machine().await?.id;
-        ask_checkouts_ahead(&checkouts, &local_machine);
         Ok(Self {
-            checkouts,
             machines: store.machines().await?,
             local_machine,
         })
     }
-}
-
-/// Git is asked about each existing checkout in turn by the Task details. A
-/// process that retains answers asks about several checkouts at once first,
-/// so the details find them waiting; any other process would only ask twice.
-fn ask_checkouts_ahead(
-    checkouts: &[crate::store::sqlite::TaskCheckout],
-    local_machine: &crate::durable::MachineId,
-) {
-    const AT_ONCE: usize = 8;
-    if !crate::git::retains_reads() {
-        return;
-    }
-    let existing = checkouts
-        .iter()
-        .filter(|checkout| checkout.machine_id.as_ref() == Some(local_machine))
-        .map(|checkout| checkout.worktree.as_path())
-        .filter(|worktree| worktree.is_dir())
-        .collect::<Vec<_>>();
-    let next = std::sync::atomic::AtomicUsize::new(0);
-    std::thread::scope(|scope| {
-        for _ in 0..AT_ONCE.min(existing.len()) {
-            scope.spawn(|| {
-                while let Some(worktree) =
-                    existing.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
-                {
-                    // The answers are kept by Git's reader; failures are the details' to report.
-                    let _ = crate::git::is_clean(worktree);
-                    let _ = crate::git::rev_parse(worktree, "HEAD");
-                    let _ = crate::git::worktree_root(worktree);
-                    let _ = crate::git::worktrees::git_common_dir(worktree);
-                }
-            });
-        }
-    });
 }
 
 #[derive(Debug)]
@@ -1651,7 +1606,7 @@ fn snapshot_task_details(
     let mut details: Vec<_> = std::thread::scope(|scope| {
         let handles: Vec<_> = (0..workers)
             .map(|_| {
-                scope.spawn(crate::config::observation::inherit(|| {
+                let read = crate::observe::inherit(|| {
                     let mut details = Vec::new();
                     loop {
                         let index = next.fetch_add(1, Ordering::Relaxed);
@@ -1666,7 +1621,8 @@ fn snapshot_task_details(
                         ));
                         details.push((index, detail));
                     }
-                }))
+                });
+                scope.spawn(read)
             })
             .collect();
         handles
@@ -1696,6 +1652,10 @@ struct DetailReads<'a> {
     >,
     /// Each handed-off Task's Auto-Ship progress.
     shipping: HashMap<crate::durable::TaskId, crate::ops::task::ship::ShippingSnapshot>,
+    /// Agents already resolved in this reading, by the configuration that chose
+    /// them. Checkouts of one repository usually share their files, and resolving
+    /// validates every setting, so each distinct configuration resolves once.
+    agents: std::sync::Mutex<HashMap<String, Option<String>>>,
     /// Each Task's latest Graph and what its execution reads, asked once.
     graphs: HashMap<crate::durable::TaskId, crate::ops::graph_process::GraphProcess>,
     execution: crate::store::sqlite::GraphExecutionFacts,
@@ -1707,7 +1667,10 @@ impl<'a> DetailReads<'a> {
         let graphs = store
             .sqlite
             .latest_task_graphs(&tasks.iter().map(|task| &task.id).collect::<Vec<_>>())?;
-        let execution = store.sqlite.graph_execution_facts(graphs.values())?;
+        let execution = store.sqlite.graph_execution_facts(
+            graphs.values(),
+            &tasks.iter().map(|task| &task.id).collect::<Vec<_>>(),
+        )?;
         let mut defaults = HashMap::<_, (String, Option<crate::config::ConfigSource>)>::new();
         let mut selections = HashMap::new();
         let mut wave_names = HashMap::new();
@@ -1773,7 +1736,39 @@ impl<'a> DetailReads<'a> {
             shipping,
             graphs,
             execution,
+            agents: Default::default(),
         })
+    }
+
+    /// The agent Task work at `checkout` would launch with, resolved once per
+    /// distinct configuration in this reading.
+    fn agent(
+        &self,
+        checkout: &Path,
+        wave: Option<&str>,
+        personal: &crate::config::PersonalSettings,
+    ) -> Option<String> {
+        let resolve = || crate::ops::task::resolve_task_agent(checkout, wave, personal, None).ok();
+        let Ok(layers) = crate::config::config_layers_with(Some(checkout), wave, personal) else {
+            return resolve();
+        };
+        // Paths only name where a value came from; the agent depends on the values.
+        let key = serde_json::to_string(
+            &layers
+                .iter()
+                .map(|layer| (&layer.source, &layer.scope, &layer.value))
+                .collect::<Vec<_>>(),
+        )
+        .expect("configuration values serialize");
+        if let Some(agent) = self.agents.lock().expect("agent memo poisoned").get(&key) {
+            return agent.clone();
+        }
+        let agent = resolve();
+        self.agents
+            .lock()
+            .expect("agent memo poisoned")
+            .insert(key, agent.clone());
+        agent
     }
 }
 
@@ -1826,23 +1821,12 @@ async fn snapshot_task_detail(
         .personal
         .get(&(task.wave_id.clone(), task.repository_id.clone()))
         .ok_or_else(|| anyhow!("Task {} has no setup reading", task.id))?;
-    let agent = crate::ops::task::resolve_task_agent(
-        task.worktree.as_deref().unwrap_or(repo),
-        wave,
-        personal,
-        None,
-    );
-    let provider = agent.ok().map(|agent| crate::config::parse_agent(&agent).0);
+    let agent = reads.agent(task.worktree.as_deref().unwrap_or(repo), wave, personal);
+    let provider = agent.map(|agent| crate::config::parse_agent(&agent).0);
     let runtime = snapshot_task_runtime(&execution, task, status, pending, owner, provider);
-    let machine_id = shared
-        .checkouts
-        .iter()
-        .find(|row| row.task_id == task.id)
-        .and_then(|row| row.machine_id.clone());
     let reference = task_reference(
         facts.issue_urls.get(&task.id).cloned(),
         Some(task),
-        machine_id,
         &shared.machines,
         &shared.local_machine,
     );
@@ -1861,8 +1845,10 @@ async fn snapshot_task_detail(
                     crate::store::PlanningState::Invalid | crate::store::PlanningState::Removed
                 )
                 .then(|| {
-                    "Task planning has invalidation or removal evidence; refresh its planning"
-                        .to_string()
+                    format!(
+                        "Task planning has invalidation or removal evidence; run `lf task sync {}`",
+                        task.identifier
+                    )
                 })
             },
         )
@@ -2067,7 +2053,7 @@ fn inspect_task_local_progress(
             reason: Some(blocker.reason.clone()),
         };
     }
-    if !worktree.exists() {
+    if !crate::observe::exists(worktree) {
         if work_status_is_terminal(status) && active_pr_base.is_none() {
             return LocalProgressEvidence {
                 state: LocalProgressEvidenceState::NotApplicable,
@@ -2236,19 +2222,18 @@ fn derive_task_condition(
     }
 }
 
+/// A Task's workspace is its checkout on this Machine, if it has one.
 fn task_reference(
     issue_url: Option<String>,
     task: Option<&Task>,
-    machine_id: Option<crate::durable::MachineId>,
     machines: &[crate::durable::Machine],
     local_machine: &crate::durable::MachineId,
 ) -> TaskReferenceSnapshot {
     let workspace = task.and_then(|task| {
         let task_worktree = task.worktree.as_ref()?;
         let branch = Some(task.branch.clone());
-        let local = machine_id.as_ref() == Some(local_machine);
         // A removed checkout has no root to resolve.
-        let worktree = if local && task_worktree.is_dir() {
+        let worktree = if crate::observe::is_dir(task_worktree) {
             crate::git::worktree_root(task_worktree)
                 .ok()
                 .and_then(|root| root.canonicalize().ok())
@@ -2259,14 +2244,14 @@ fn task_reference(
         Some(TaskWorktreeSnapshot {
             machine_label: machines
                 .iter()
-                .find(|machine| Some(&machine.id) == machine_id.as_ref())
+                .find(|machine| &machine.id == local_machine)
                 .and_then(|machine| machine.label.clone()),
-            machine_id,
+            machine_id: Some(local_machine.clone()),
             slug: task.workspace_slug.clone(),
             branch,
             base_commit: task.base_commit.clone(),
             worktree: worktree.display().to_string(),
-            local_exists: local.then(|| worktree.try_exists().ok()).flatten(),
+            local_exists: crate::observe::try_exists(&worktree).ok(),
         })
     });
     TaskReferenceSnapshot {
@@ -2277,7 +2262,7 @@ fn task_reference(
 
 fn task_pr_empty(task: &Task, pr: &TaskPr) -> Option<bool> {
     let worktree = task.worktree.as_ref()?;
-    if !worktree.exists() {
+    if !crate::observe::exists(worktree) {
         return None;
     }
     let clean = crate::git::is_clean(worktree).ok()?;
@@ -3043,6 +3028,7 @@ mod tests {
         crate::durable::TaskOwner {
             person: Some("Jack Heart".into()),
             person_key: Some("jack@loopflow.studio".into()),
+            person_id: None,
             machine: crate::durable::MachineRef {
                 id: None,
                 label: None,
@@ -3070,7 +3056,7 @@ mod tests {
     use crate::work::wave::Wave;
 
     #[tokio::test]
-    async fn task_reference_names_recorded_checkout_machine_and_its_renames() {
+    async fn task_reference_names_only_this_machines_checkout() {
         let directory = tempfile::tempdir().unwrap();
         let database = directory.path().join("registry.db");
         let store = Arc::new(
@@ -3103,18 +3089,22 @@ mod tests {
             .await
             .unwrap();
         let task = store.list_tasks(Some(wave.id())).await.unwrap().remove(0);
-        let owner = crate::durable::MachineId::new();
-        let assigned = crate::durable::MachineId::new();
-        for (id, label) in [(&owner, "build-server"), (&assigned, "new-default")] {
-            store
-                .add_machine(id, &format!("{label}.invalid"), label)
-                .await
-                .unwrap();
-        }
+        let peer = crate::durable::MachineId::new();
+        store
+            .add_machine(&peer, "build-server.invalid", "build-server")
+            .await
+            .unwrap();
+        let shared = super::SharedTaskReads::read(&store).await.unwrap();
+        let reads = super::DetailReads::read(&store, &[&task], &shared).unwrap();
+        let detail = super::snapshot_task_detail(&store, &task, false, &reads)
+            .await
+            .unwrap();
+        assert!(detail.reference.workspace.is_none());
+
         let db = rusqlite::Connection::open(&database).unwrap();
         db.execute(
-            "UPDATE tasks SET worktree='/remote/checkout',checkout_machine_id=?2 WHERE id=?1",
-            rusqlite::params![task.id.as_str(), owner.as_str()],
+            "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/local/checkout')",
+            [task.id.as_str()],
         )
         .unwrap();
         let task = store.get_task(&task.id).await.unwrap().unwrap();
@@ -3124,21 +3114,12 @@ mod tests {
             .await
             .unwrap();
         let workspace = detail.reference.workspace.unwrap();
-        assert_eq!(workspace.machine_id, Some(owner.clone()));
-        assert_eq!(workspace.machine_label.as_deref(), Some("build-server"));
-        assert_eq!(workspace.local_exists, None);
-        store
-            .rename_machine("build-server", "renamed-server")
-            .await
-            .unwrap();
-        let shared = super::SharedTaskReads::read(&store).await.unwrap();
-        let reads = super::DetailReads::read(&store, &[&task], &shared).unwrap();
-        let detail = super::snapshot_task_detail(&store, &task, false, &reads)
-            .await
-            .unwrap();
-        let workspace = detail.reference.workspace.unwrap();
-        assert_eq!(workspace.machine_id, Some(owner));
-        assert_eq!(workspace.machine_label.as_deref(), Some("renamed-server"));
+        assert_eq!(
+            workspace.machine_id,
+            Some(store.local_machine().await.unwrap().id)
+        );
+        assert_eq!(workspace.worktree, "/local/checkout");
+        assert_eq!(workspace.local_exists, Some(false));
     }
 
     #[tokio::test]
@@ -4251,10 +4232,8 @@ mod tests {
             .replace("}]}','demo',3)", "}]}','end',3)");
         conn.execute_batch(&fixture).unwrap();
         crate::store::migrations::upgrade_from_migration(&conn, "task_paused");
-        conn.execute_batch(
-            "DROP INDEX tasks_ship_process; ALTER TABLE tasks DROP COLUMN ship_lf_process_id",
-        )
-        .unwrap();
+        // The planning read, not this setup, fails.
+        conn.execute_batch("DROP TABLE task_ship_events").unwrap();
         let frontier = crate::store::migrations::latest_applied_version_sqlite(&conn).unwrap();
         let store: crate::store::SharedStore = Arc::new(crate::store::Store {
             sqlite: crate::store::sqlite::SqliteStore::open_read_only(&database).unwrap(),
@@ -4278,7 +4257,7 @@ mod tests {
             );
         };
         assert!(
-            reason.contains("no such column: t.ship_lf_process_id"),
+            reason.contains("no such table: task_ship_events"),
             "{reason}"
         );
         let graph = store.sqlite.task_overview(&task).unwrap().0.graph.unwrap();

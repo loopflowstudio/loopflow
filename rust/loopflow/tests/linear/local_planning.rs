@@ -72,7 +72,8 @@ fn stored_task_publishes_and_completes_after_verified_merge() {
             "Deliver locally owned work",
             "--json",
         ],
-    );
+    )["task"]
+        .clone();
     let id = created["id"].as_str().unwrap();
     let placed = lf(repo.path(), home.path(), &["checkout", id, "--json"]);
     let worktree = Path::new(placed["worktree"].as_str().unwrap());
@@ -179,7 +180,7 @@ fn concurrent_creations_are_distinct_and_failed_checkout_retains_its_task() {
             String::from_utf8_lossy(&output.stderr)
         );
         let task: Value = serde_json::from_slice(&output.stdout).unwrap();
-        assert!(ids.insert(task["id"].as_str().unwrap().to_owned()));
+        assert!(ids.insert(task["task"]["id"].as_str().unwrap().to_owned()));
         assert!(!String::from_utf8_lossy(&output.stderr).contains("Creation identity"));
     }
     let id = ids.first().unwrap();
@@ -244,7 +245,8 @@ fn public_local_plan_matches_desktop() {
             "Keep the escaped quote",
             "--json",
         ],
-    );
+    )["task"]
+        .clone();
     let id = created["id"].as_str().unwrap();
     let comments = lf(
         repo.path(),
@@ -305,7 +307,8 @@ fn task_unassign_clears_the_assignee() {
         &[
             "task", "create", "--wave", "inbox", "--title", "Owned", "--json",
         ],
-    );
+    )["task"]
+        .clone();
     let id = created["id"].as_str().unwrap();
     lf(repo.path(), home.path(), &["task", "claim", id, "--json"]);
     lf(
@@ -333,7 +336,8 @@ fn task_unassign_clears_the_assignee_of_an_unowned_task() {
         &[
             "task", "create", "--wave", "inbox", "--title", "Assigned", "--json",
         ],
-    );
+    )["task"]
+        .clone();
     let id = created["id"].as_str().unwrap();
     lf(
         repo.path(),
@@ -371,7 +375,8 @@ fn stored_fields_preserve_order_assignment_and_project_summary() {
         &[
             "task", "create", "--wave", "inbox", "--title", "Second", "--json",
         ],
-    );
+    )["task"]
+        .clone();
     let id = created["id"].as_str().unwrap();
     lf(
         repo.path(),
@@ -451,7 +456,8 @@ fn nested_waves_create_files_and_store_project_identity() {
             "Nested work",
             "--json",
         ],
-    );
+    )["task"]
+        .clone();
     let status = lf(
         repo.path(),
         home.path(),
@@ -469,7 +475,8 @@ fn nested_waves_create_files_and_store_project_identity() {
             "Another task",
             "--json",
         ],
-    );
+    )["task"]
+        .clone();
     let other = lf(
         repo.path(),
         home.path(),
@@ -528,7 +535,8 @@ fn nested_waves_create_files_and_store_project_identity() {
             "Stable scope",
             "--json",
         ],
-    );
+    )["task"]
+        .clone();
     assert!(by_id["id"].as_str().unwrap().starts_with("task_"));
     assert!(repo.path().join(".lf/wave").exists());
     assert!(!repo.path().join(".lf/config.yaml").exists());
@@ -623,7 +631,7 @@ fn public_local_planning_survives_restart_with_generated_identity() {
         "Keep quoted input",
         "--json",
     ];
-    let created = lf(repo.path(), home.path(), &args);
+    let created = lf(repo.path(), home.path(), &args)["task"].clone();
     let identity = created["id"].as_str().unwrap().to_owned();
     loopflow::durable::TaskId::parse(&identity).unwrap();
     assert!(created["linear_id"].is_null());
@@ -643,7 +651,8 @@ fn public_local_planning_survives_restart_with_generated_identity() {
             "Keep quoted input",
             "--json",
         ],
-    );
+    )["task"]
+        .clone();
     assert_ne!(created["id"], other["id"]);
     lf(
         repo.path(),
@@ -861,7 +870,8 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
             "Local execution",
             "--json",
         ],
-    );
+    )["task"]
+        .clone();
     let id = created["id"].as_str().unwrap();
     let status = lf(repo.path(), home.path(), &["desktop", "task", id, "--json"]);
     let project_id = status["project"]["id"].as_str().unwrap();
@@ -897,13 +907,20 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
         .as_str()
         .unwrap()
         .starts_with(&format!("jack/{}-", &id.trim_start_matches("task_")[..6])));
-    // A bare run may return as its Graph registers; it stops before the
-    // interactive step, where a person takes part.
+    // A bare run returns as its Graph registers. Arrival at the interactive
+    // step precedes process completion; wait for both before reading its state.
     lf(repo.path(), home.path(), &["task", "run", id]);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
     let status = loop {
         let status = lf(repo.path(), home.path(), &["desktop", "task", id, "--json"]);
-        if status["execution"]["work"]["graph"]["position"]["kind"] == "at" {
+        let work = &status["execution"]["work"];
+        if work["graph"]["position"]["kind"] == "at"
+            && work["processes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|process| !process["completed_at"].is_null())
+        {
             break status;
         }
         assert!(std::time::Instant::now() < deadline, "{status}");
@@ -937,7 +954,8 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
             "Later work",
             "--json",
         ],
-    );
+    )["task"]
+        .clone();
     let retained = lf(
         repo.path(),
         home.path(),
@@ -956,7 +974,8 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
             "Local execution",
             "--json",
         ],
-    );
+    )["task"]
+        .clone();
     assert_ne!(retry["id"], id);
     lf(
         repo.path(),
@@ -1708,15 +1727,16 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
                 connected
             );
             let created: Value = serde_json::from_slice(&output.stdout).unwrap();
+            let created = &created["task"];
             let id = TaskId::parse(created["id"].as_str().unwrap()).unwrap();
             let saved = store.task(&id).unwrap().unwrap();
-            assert_eq!(created, serde_json::to_value(saved).unwrap());
+            assert_eq!(*created, serde_json::to_value(saved).unwrap());
             assert_eq!(created["title"], "Independent same title");
             assert_eq!(created["description"], "Original notes");
             assert_eq!(created["project_id"], project_id.as_str());
             assert!(created.get("name").is_none());
             assert!(created["worktree"].is_null());
-            created
+            created.clone()
         };
         let first = TaskId::parse(create()["id"].as_str().unwrap()).unwrap();
         let second = TaskId::parse(create()["id"].as_str().unwrap()).unwrap();
@@ -2255,7 +2275,8 @@ fn wave_documents_and_graphs_follow_files() {
                 "Retain definitions",
                 "--json",
             ],
-        );
+        )["task"]
+            .clone();
         let task_id = task["id"].as_str().unwrap();
         lf(
             repo.path(),
@@ -2355,7 +2376,8 @@ fn deletion_saves_offline_and_retains_execution_and_retry_identity() {
             repo.path(),
             home.path(),
             &["task", "create", "--title", "Remove planning", "--json"],
-        );
+        )["task"]
+            .clone();
         let id = task["id"].as_str().unwrap();
         let store =
             loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
@@ -2420,7 +2442,8 @@ fn task_selectors_use_repository_scope_and_preserve_exact_identity_through_alias
                 repo.path(),
                 home.path(),
                 &["task", "create", "--title", "Original", "--json"],
-            )
+            )["task"]
+                .clone()
         })
         .collect();
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
@@ -2555,6 +2578,52 @@ fn ordinary_task_creation_returns_resolvable_identifier_without_a_public_retry_t
 }
 
 #[test]
+fn wave_sync_without_an_initiative_shows_local_planning() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(repo.path().join(".lf")).unwrap();
+    std::fs::write(
+        repo.path().join(".lf/config.yaml"),
+        "planning:\n  provider: linear\n  team: fixture-team\n",
+    )
+    .unwrap();
+    lf(
+        repo.path(),
+        home.path(),
+        &["wave", "add", "inbox", "--json"],
+    );
+    lf(
+        repo.path(),
+        home.path(),
+        &[
+            "task",
+            "create",
+            "--wave",
+            "inbox",
+            "--title",
+            "Saved plan",
+            "--json",
+        ],
+    );
+    let synced = lf(
+        repo.path(),
+        home.path(),
+        &["wave", "sync", "inbox", "--json"],
+    );
+    assert_eq!(synced["wave"]["name"], "inbox");
+    assert!(synced.to_string().contains("Saved plan"), "{synced}");
+    let Value::String(text) = lf(repo.path(), home.path(), &["wave", "sync", "inbox"]) else {
+        panic!("wave sync prints text");
+    };
+    assert!(
+        text.starts_with(
+            "inbox: no Linear Initiative; showing local planning (lf wave plan connect inbox)\n"
+        ),
+        "{text}"
+    );
+}
+
+#[test]
 fn planning_sync_tracks_creation_errors_uncertainty_conflicts_and_settlement() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
@@ -2581,7 +2650,8 @@ fn planning_sync_tracks_creation_errors_uncertainty_conflicts_and_settlement() {
             "Saved plan",
             "--json",
         ],
-    );
+    )["task"]
+        .clone();
     let id = created["id"].as_str().unwrap();
     let project = created["project_id"].as_str().unwrap();
     lf(
@@ -2717,7 +2787,8 @@ fn wave_planning_reads_current_and_historical_chapters_without_starting_work() {
             "Unstarted proof",
             "--json",
         ],
-    );
+    )["task"]
+        .clone();
     let task_id = loopflow::durable::TaskId::parse(created["id"].as_str().unwrap()).unwrap();
     let store =
         loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
@@ -3000,7 +3071,8 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
         &[
             "task", "create", "--wave", "inbox", "--title", "Original", "--json",
         ],
-    );
+    )["task"]
+        .clone();
     let id = created["id"].as_str().unwrap();
     let id = TaskId::parse(id).unwrap();
     let path = home.path().join("loopflow.db");
@@ -3185,7 +3257,8 @@ fn readable_checkout_names_preserve_explicit_names_and_reject_occupied_branches(
         repo.path(),
         home.path(),
         &["task", "create", "--title", title, "--json"],
-    );
+    )["task"]
+        .clone();
     let id = created["id"].as_str().unwrap();
     let label = created["identifier"].as_str().unwrap();
     assert_eq!(label.len(), 6);
@@ -3229,7 +3302,8 @@ fn offline_linear_checkout_uses_known_identifier_and_caps_title() {
         repo.path(),
         home.path(),
         &["task", "create", "--title", &title, "--json"],
-    );
+    )["task"]
+        .clone();
     let id = created["id"].as_str().unwrap();
     let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     conn.execute(
@@ -3296,7 +3370,8 @@ fn waveless_task_lifecycle() {
             "Standalone proof",
             "--json",
         ],
-    );
+    )["task"]
+        .clone();
     let id = created["id"].as_str().unwrap();
     assert!(created["repo_id"].is_string());
     assert!(created["project_id"].is_null());
@@ -3341,7 +3416,8 @@ fn waveless_task_lifecycle() {
         repo.path(),
         home.path(),
         &["task", "create", "--title", "Always standalone", "--json"],
-    );
+    )["task"]
+        .clone();
     let standalone_id = standalone["id"].as_str().unwrap();
     run_until_waiting(
         repo.path(),
@@ -3376,7 +3452,8 @@ fn unconfigured_repository_runs_tasks_on_the_builtin_code_graph() {
         repo.path(),
         home.path(),
         &["task", "create", "--title", "First Task", "--json"],
-    );
+    )["task"]
+        .clone();
     let id = created["id"].as_str().unwrap();
     let listed = lf(repo.path(), home.path(), &["task", "list", "--json"]);
     assert_eq!(listed[0]["graph_name"], "code");
@@ -3400,7 +3477,8 @@ fn auto_graph_runs_a_task_to_end() {
         repo.path(),
         home.path(),
         &["task", "create", "--title", "Auto Task", "--json"],
-    );
+    )["task"]
+        .clone();
     let id = created["id"].as_str().unwrap();
     let shown = run_until_waiting(repo.path(), home.path(), &["task", "run", id], id);
     assert_eq!(shown["name"], "auto");
@@ -3427,7 +3505,8 @@ fn your_graph_for_a_wave_selects_the_builtin_auto() {
         &[
             "task", "create", "--wave", "product", "--title", "Auto", "--json",
         ],
-    );
+    )["task"]
+        .clone();
     let listed = lf(repo.path(), home.path(), &["task", "list", "--json"]);
     let task = listed
         .as_array()
@@ -3448,6 +3527,7 @@ fn graph_defaults_follow_task_wave_and_repository() {
         ("repository", "repo-review"),
         ("wave", "wave-review"),
         ("explicit", "task-review"),
+        ("code", "default-review"),
     ] {
         repo.create_file(
             &format!(".lf/graphs/{name}.yaml"),
@@ -3479,7 +3559,8 @@ fn graph_defaults_follow_task_wave_and_repository() {
             "Wave default",
             "--json",
         ],
-    );
+    )["task"]
+        .clone();
     let id = task["id"].as_str().unwrap();
     let captured = run_until_waiting(repo.path(), home.path(), &["task", "run", id], id);
     assert_eq!(captured["name"], "wave");
@@ -3501,16 +3582,20 @@ fn graph_defaults_follow_task_wave_and_repository() {
             "create",
             "--no-wave",
             "--title",
-            "Invalid default",
+            "Fallback default",
             "--json",
         ],
-    );
+    )["task"]
+        .clone();
     let standalone_id = standalone["id"].as_str().unwrap();
-    let refused = command(repo.path(), home.path(), &["task", "run", standalone_id])
-        .output()
-        .unwrap();
-    assert!(!refused.status.success());
-    assert!(String::from_utf8_lossy(&refused.stderr).contains("invalid graph name"));
+    let fallback = run_until_waiting(
+        repo.path(),
+        home.path(),
+        &["task", "run", standalone_id],
+        standalone_id,
+    );
+    assert_eq!(fallback["name"], "code");
+    assert_eq!(fallback["position"]["step"], "default-review");
     repo.create_file(".lf/config.yaml", "graph: repository\n");
     let explicit = lf(
         repo.path(),
@@ -3524,7 +3609,8 @@ fn graph_defaults_follow_task_wave_and_repository() {
             "Explicit choice",
             "--json",
         ],
-    );
+    )["task"]
+        .clone();
     let explicit_id = explicit["id"].as_str().unwrap();
     let named = run_until_waiting(
         repo.path(),
@@ -3551,7 +3637,8 @@ fn task_creation_defaults_to_standalone_in_bound_contexts() {
         &[
             "task", "create", "--wave", "product", "--title", "Parent", "--json",
         ],
-    );
+    )["task"]
+        .clone();
     let parent_id = parent["id"].as_str().unwrap();
     let placed = lf(repo.path(), home.path(), &["checkout", parent_id, "--json"]);
     let checkout = Path::new(placed["worktree"].as_str().unwrap());
@@ -3581,6 +3668,7 @@ fn task_creation_defaults_to_standalone_in_bound_contexts() {
                 String::from_utf8_lossy(&output.stderr)
             );
             let task: Value = serde_json::from_slice(&output.stdout).unwrap();
+            let task = &task["task"];
             assert_eq!(task["repo_id"], parent["repo_id"]);
             if flags.first() == Some(&"--wave") {
                 assert_eq!(task["wave_id"], parent["wave_id"]);

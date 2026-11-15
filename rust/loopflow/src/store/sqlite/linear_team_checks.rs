@@ -3,6 +3,20 @@ use rusqlite::{params, OptionalExtension, TransactionBehavior};
 use super::SqliteStore;
 use crate::store::StoreResult;
 
+/// The team's last attempt and the watermark its last finished read reached.
+fn saved_check(
+    conn: &rusqlite::Connection,
+    team: &str,
+) -> StoreResult<Option<(i64, Option<String>)>> {
+    Ok(conn
+        .query_row(
+            "SELECT attempted_at,synced_through FROM linear_team_checks WHERE team_id=?1",
+            [team],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?)
+}
+
 impl SqliteStore {
     // The acquisition file lock spans network/ingestion; this transaction only
     // claims freshness. A crash leaves a bounded delay and the old watermark.
@@ -12,19 +26,17 @@ impl SqliteStore {
         now: i64,
         fresh_for: i64,
     ) -> StoreResult<Option<Option<String>>> {
+        let fresh = |saved: &Option<(i64, Option<String>)>| {
+            saved.as_ref().is_some_and(|(at, _)| now - at < fresh_for)
+        };
         let mut conn = self.conn.lock().expect("store mutex poisoned");
+        // Nearly every check finds the team fresh; that answer takes no write lock.
+        if fresh(&saved_check(&conn, team)?) {
+            return Ok(None);
+        }
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let saved: Option<(i64, Option<String>)> = tx
-            .query_row(
-                "SELECT attempted_at,synced_through FROM linear_team_checks WHERE team_id=?1",
-                [team],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()?;
-        if saved
-            .as_ref()
-            .is_some_and(|(last, _)| now - last < fresh_for)
-        {
+        let saved = saved_check(&tx, team)?;
+        if fresh(&saved) {
             return Ok(None);
         }
         tx.execute(

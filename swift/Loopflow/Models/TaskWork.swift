@@ -103,14 +103,14 @@ public struct TaskGraph: Codable, Sendable, Equatable {
     }
 
     /// `at` waits at `start`, `end` or an interactive step. `run` is a
-    /// `lf task run` carrying the Task on from `step`; one no longer running
-    /// stopped, and the next `lf task run` starts it again.
+    /// `lf task run` carrying the Task on from `step`, running `at`; one no
+    /// longer running stopped, and the next `lf task run` starts it again at `at`.
     public enum Position: Codable, Sendable, Equatable {
         case at(step: String)
-        case run(step: String, lfProcessId: String, running: Bool)
+        case run(step: String, at: String, lfProcessId: String, running: Bool)
 
         enum CodingKeys: String, CodingKey {
-            case kind, step, running
+            case kind, step, at, running
             case lfProcessId = "lf_process_id"
         }
 
@@ -122,6 +122,7 @@ public struct TaskGraph: Codable, Sendable, Equatable {
             case "run":
                 self = .run(
                     step: try container.decode(String.self, forKey: .step),
+                    at: try container.decode(String.self, forKey: .at),
                     lfProcessId: try container.decode(String.self, forKey: .lfProcessId),
                     running: try container.decode(Bool.self, forKey: .running))
             case let kind:
@@ -136,9 +137,10 @@ public struct TaskGraph: Codable, Sendable, Equatable {
             case .at(let step):
                 try container.encode("at", forKey: .kind)
                 try container.encode(step, forKey: .step)
-            case .run(let step, let lfProcessId, let running):
+            case .run(let step, let at, let lfProcessId, let running):
                 try container.encode("run", forKey: .kind)
                 try container.encode(step, forKey: .step)
+                try container.encode(at, forKey: .at)
                 try container.encode(lfProcessId, forKey: .lfProcessId)
                 try container.encode(running, forKey: .running)
             }
@@ -147,7 +149,7 @@ public struct TaskGraph: Codable, Sendable, Equatable {
         /// Where the Task waits, or the step its run left.
         public var step: String {
             switch self {
-            case .at(let step), .run(let step, _, _): step
+            case .at(let step), .run(let step, _, _, _): step
             }
         }
     }

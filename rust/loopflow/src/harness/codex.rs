@@ -98,7 +98,7 @@ async fn read_inherited_config(
 }
 
 /// `-c key=value` pairs for dotted config keys; Codex parses each value as TOML.
-fn config_overrides(config: &Value) -> Result<Vec<String>> {
+pub(crate) fn config_overrides(config: &Value) -> Result<Vec<String>> {
     let Value::Object(entries) = config else {
         anyhow::bail!("Codex configuration is not a table");
     };
@@ -728,7 +728,7 @@ impl CodexHarness {
                         .find(|layer| layer["name"]["type"] == "sessionFlags")
                 })
                 .and_then(|layer| layer["config"].get("hooks"));
-            config["hooks"] = super::context::codex_hooks(context, session_hooks)?;
+            config["hooks"] = super::context::codex_hooks(context, session_hooks, launch.holder)?;
         }
         Ok(config)
     }
@@ -782,6 +782,13 @@ impl CodexHarness {
             // the Session fence before deciding whether to terminate it.
             .kill_on_drop(false);
         super::configure_agent_env(&mut command, launch);
+        if let (ApprovalPolicy::NativeClient, None, Some(context)) =
+            (self.approval, &connection, &launch.conversation_context)
+        {
+            // Hooks run on the app-server. A conversation the person starts
+            // there with /new or /fork has no binding of its own and reads this.
+            context.configure_hooks(command.as_std_mut())?;
+        }
         if let Some(cwd) = &launch.cwd {
             command.current_dir(cwd);
         }
@@ -809,10 +816,16 @@ impl CodexHarness {
             // starts with /new or /fork gets it too. A reconnect joins a server
             // that already has it.
             let instructions = thread_params.remove("developerInstructions");
-            if connection.is_none() {
+            if connection.is_some() {
+                // Rejoining a live server must keep the conversation's current tier.
+                thread_params.remove("serviceTier");
+            } else {
                 let mut config = self
                     .conversation_config(command.as_std(), launch, tool_environment)
                     .await?;
+                if let Some(tier) = launch.codex_service_tier {
+                    config["service_tier"] = tier.as_str().into();
+                }
                 if let Some(instructions) = instructions {
                     config["developer_instructions"] = instructions;
                 }
@@ -838,6 +851,7 @@ impl CodexHarness {
                 command,
                 Some(&lifeline),
                 &owner,
+                launch.holder,
             )?)
         } else {
             None
@@ -1191,6 +1205,8 @@ impl CodexHarness {
                 let (store, session, attachment) = &owner;
                 if let Some(context) = &launch.conversation_context {
                     store.with_session_attachment(session, attachment, || {
+                        let mut context = context.clone();
+                        context.identify(store, session)?;
                         Ok(context.bind_codex_session(thread_id.as_str()))
                     })??;
                 }

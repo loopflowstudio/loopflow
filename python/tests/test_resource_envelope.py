@@ -142,6 +142,37 @@ def test_snapshot_measures_home_session_captures_and_names_retention(
     assert "never auto-deleted" in warning
 
 
+def test_a_cache_too_slow_to_measure_warns_and_lets_verification_start(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    cache = tmp_path / "uv-cache"
+    cache.mkdir()
+    monkeypatch.setenv("LF_HOME", str(tmp_path / "lf-home"))
+    monkeypatch.setenv("UV_CACHE_DIR", str(cache))
+    monkeypatch.setenv("CARGO_HOME", str(tmp_path / "cargo-home"))
+    monkeypatch.setattr(
+        resources,
+        "_discover_worktrees",
+        lambda _repo: ([resources.Worktree(repo, "feature")], None),
+    )
+    monkeypatch.setattr(resources, "_running_cwds", lambda: ({repo}, None))
+    measure = resources._allocated_bytes
+
+    def slow_cache(path: Path) -> int:
+        if path == cache:
+            raise OSError(f"cannot measure {path}: 15-second inventory deadline exceeded")
+        return measure(path)
+
+    monkeypatch.setattr(resources, "_allocated_bytes", slow_cache)
+
+    snapshot = resources.collect_snapshot(repo, _policy())
+
+    assert snapshot.ok
+    assert any("inventory deadline" in warning for warning in snapshot.warnings)
+
+
 @pytest.mark.parametrize("old_entry", [None, "file", "empty-directory"])
 def test_recent_gate_roots_leave_recovery_capacity_for_stale_builds(
     tmp_path: Path, old_entry: str | None, build_owner

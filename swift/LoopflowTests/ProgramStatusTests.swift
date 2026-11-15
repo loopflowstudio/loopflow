@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 import Observation
 import Testing
@@ -169,90 +168,62 @@ struct ProgramStatusTests {
         #expect(surface.snapshot.seen)
     }
 
-    @Test("A later status event recovers an exited observer without replacing the Session")
-    @MainActor func observationFailureRecovers() async throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        let bin = directory.appendingPathComponent("bin")
-        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
-        let helper = bin.appendingPathComponent("lf")
-        try Data("""
-        #!/bin/sh
-        if [ ! -f "$LF_HOME/failed" ]; then
-            IFS= read -r frame
-            touch "$LF_HOME/failed"
-            exit 1
-        fi
-        while IFS= read -r frame; do
-            printf '%s' "$frame" > "$LF_HOME/received.tmp"
-            mv "$LF_HOME/received.tmp" "$LF_HOME/received"
-        done
-        touch "$LF_HOME/closed"
-        """.utf8).write(to: helper)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
-        let environment = ProcessInfo.processInfo.environment
-        for (key, value) in ["LF_HOME": directory.path, "LF_BIN": helper.path] {
-            setenv(key, value, 1)
-        }
-        let surface = ProgramStatusSurface()
-        defer {
-            surface.close()
-            for key in ["LF_HOME", "LF_BIN"] {
-                if let value = environment[key] { setenv(key, value, 1) } else { unsetenv(key) }
+    /// What the server would have recorded, with the first sends refused.
+    private final class StatusSink: @unchecked Sendable {
+        struct Reading { let stream: String; let sequence: Int; let records: ProgramStatusRecords }
+        private let lock = NSLock()
+        private var refusals: Int
+        private var readings: [Reading] = []
+
+        init(refusals: Int = 0) { self.refusals = refusals }
+
+        func send(_ write: ServedWrite) throws {
+            try lock.withLock {
+                if refusals > 0 {
+                    refusals -= 1
+                    throw RegistryQueryError("Status observation unavailable")
+                }
+                guard case .sessionStatus(_, _, _, _, let stream, let sequence, let records) = write else { return }
+                readings.append(Reading(stream: stream, sequence: sequence, records: records))
             }
-            try? FileManager.default.removeItem(at: directory)
         }
+
+        var received: [Reading] { lock.withLock { readings } }
+    }
+
+    @Test("A later status event recovers a refused observer without replacing the Session")
+    @MainActor func observationFailureRecovers() async throws {
+        let sink = StatusSink(refusals: 1)
+        let surface = ProgramStatusSurface(send: { try sink.send($0) })
+        defer { surface.close() }
         surface.associate(sessionId: "retained", terminalId: "terminal", provider: .init(agentProcessId: AgentProcessId(rawValue: "agent")))
         surface.receive(.report(report(.working, msg: "First turn")), incarnation: surface.incarnation)
         try await eventually { surface.observationError != nil }
         #expect(surface.sessionId == "retained")
-        #expect(surface.observationError?.contains("ended (1)") == true)
+        #expect(surface.observationError == "Status observation unavailable")
         // The new turn clears the previous report before its fresh result arrives.
         surface.receive(.reset, incarnation: surface.incarnation)
         try await eventually {
-            guard let data = try? Data(contentsOf: directory.appendingPathComponent("received")),
-                  let records = try? JSONDecoder().decode(ProgramStatusRecords.self, from: data) else { return false }
-            return records.seen && records.records.isEmpty && surface.observationError == nil
+            guard let last = sink.received.last else { return false }
+            return last.records.seen && last.records.records.isEmpty && surface.observationError == nil
         }
         surface.receive(.report(report(.blocked, msg: "New result")), incarnation: surface.incarnation)
-        try await eventually {
-            guard let data = try? Data(contentsOf: directory.appendingPathComponent("received")),
-                  let records = try? JSONDecoder().decode(ProgramStatusRecords.self, from: data) else { return false }
-            return records.summary?.msg == "New result"
-        }
+        try await eventually { sink.received.last?.records.summary?.msg == "New result" }
         #expect(surface.sessionId == "retained")
         surface.close()
-        try await eventually { FileManager.default.fileExists(atPath: directory.appendingPathComponent("closed").path) }
+        // The closing snapshot still reaches the server, in order, on one stream.
+        try await eventually { sink.received.count == 3 }
+        #expect(sink.received.map(\.sequence) == [1, 2, 3])
+        #expect(Set(sink.received.map(\.stream)).count == 1)
+        #expect(sink.received.last?.records.records.isEmpty == true)
     }
 
     @Test("A restored question reaches the first Session reading without leaking to its replacement")
     @MainActor func restoredStatusSurvivesLateAssociation() async throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        let bin = directory.appendingPathComponent("bin")
-        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
-        let helper = bin.appendingPathComponent("lf")
-        try Data("""
-        #!/bin/sh
-        while IFS= read -r frame; do
-            printf '%s' "$frame" > "$LF_HOME/received.tmp"
-            mv "$LF_HOME/received.tmp" "$LF_HOME/received"
-        done
-        """.utf8).write(to: helper)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
-        let environment = ProcessInfo.processInfo.environment
-        setenv("LF_HOME", directory.path, 1)
-        setenv("LF_BIN", helper.path, 1)
-        let surface = ProgramStatusSurface()
-        defer {
-            surface.close()
-            for key in ["LF_HOME", "LF_BIN"] {
-                if let value = environment[key] { setenv(key, value, 1) } else { unsetenv(key) }
-            }
-            try? FileManager.default.removeItem(at: directory)
-        }
-        func received() -> ProgramStatusRecords? {
-            guard let data = try? Data(contentsOf: directory.appendingPathComponent("received")) else { return nil }
-            return try? JSONDecoder().decode(ProgramStatusRecords.self, from: data)
-        }
+        let sink = StatusSink()
+        let surface = ProgramStatusSurface(send: { try sink.send($0) })
+        defer { surface.close() }
+        func received() -> ProgramStatusRecords? { sink.received.last?.records }
         surface.receive(.report(report(.blocked, msg: "Original question")), incarnation: surface.incarnation)
         try await eventually { surface.snapshot.summary?.state == .blocked }
         surface.associate(sessionId: "retained", terminalId: "terminal", provider: .init(agentProcessId: AgentProcessId(rawValue: "first")))
@@ -261,6 +232,9 @@ struct ProgramStatusTests {
         surface.receive(.report(report(.idle, id: "new")), incarnation: surface.incarnation)
         try await eventually { received()?.summary?.state == .idle }
         #expect(received()?.records.count == 1)
+        // The replacement provider is a new observer, counted from one.
+        #expect(sink.received.last?.sequence == 1)
+        #expect(Set(sink.received.map(\.stream)).count == 2)
     }
 
     @MainActor private func eventually(_ condition: () -> Bool) async throws {

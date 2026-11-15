@@ -71,9 +71,10 @@ each Graph and unfinished Process against `lf ps --json`.
 
 3. **Advance the work.** `lf task run <issue>` runs the graph to the next
    interactive step and returns once it's running; `lf task status <issue>`
-   follows it. Launching is not approving. `lf -b task run` and `lf ship` run
-   past every interactive step to `end`, and reaching `end` approves Auto-Ship,
-   which may merge the PR: use them only when asked to ship or land. After
+   follows it. `lf -b task run` and `lf ship` run past every interactive step
+   to `end`, and reaching `end` approves Auto-Ship, which may merge the PR. A
+   plain `lf task run` with no interactive step left ahead, such as one run
+   from the last, approves it too. Use them only when asked to ship or land. After
    shipping is stopped, a relaunch continues the work and never ships it; only a
    requested `lf ship` approves again.
 

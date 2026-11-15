@@ -8,10 +8,11 @@
 
 import Darwin
 import Foundation
+import Loopflow
 import OSLog
 
 enum Perf {
-    static let signposter = OSSignposter(subsystem: "studio.loopflow", category: "perf")
+    static let signposter = PerfClock.signposter
 
     /// Process launch → first outline rows committed.
     static let coldStart: StaticString = "cold_start"
@@ -94,24 +95,5 @@ enum Perf {
         let state = signposter.beginInterval(name, id: signposter.makeSignpostID(), "trace=\(inputTrace, privacy: .public) \(detail, privacy: .public)")
         defer { signposter.endInterval(name, state) }
         return try await body()
-    }
-
-    /// Milliseconds from kernel process start to now: the pre-main share of a
-    /// cold start that no in-process interval can contain.
-    static func millisecondsSinceProcessStart() -> Double? {
-        var info = kinfo_proc()
-        var size = MemoryLayout<kinfo_proc>.stride
-        var name = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
-        guard sysctl(&name, UInt32(name.count), &info, &size, nil, 0) == 0 else { return nil }
-        let start = info.kp_proc.p_starttime
-        let started = Double(start.tv_sec) + Double(start.tv_usec) / 1_000_000
-        return (Date().timeIntervalSince1970 - started) * 1000
-    }
-}
-
-extension ContinuousClock.Instant {
-    var elapsedMs: Double {
-        let elapsed = ContinuousClock.now - self
-        return Double(elapsed.components.seconds) * 1000 + Double(elapsed.components.attoseconds) / 1e15
     }
 }

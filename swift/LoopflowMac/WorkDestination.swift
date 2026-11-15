@@ -70,17 +70,22 @@ struct TaskLink: Equatable, Sendable {
     }
 }
 
-/// A Work destination delivered to its repository window: a Task, or a Wave
-/// whose primary conversation the window selects.
+/// A Work destination delivered to its repository window, optionally selecting
+/// an exact conversation instead of its primary.
 enum LinkedWork: Equatable, Sendable {
     case task(TaskLink)
+    case session(id: String, address: String)
     /// `address` is the public Work address when the Wave arrived as one.
     case wave(id: String, address: String?)
     /// A selection expression from `lf desktop view`, shown in the repository window.
     case view(expression: String, address: String)
 
-    /// An external Work link resolved by Rust; a repository root delivers nothing.
+    /// An external Work link resolved by Rust; an unqualified repository root delivers nothing.
     init?(_ link: WorkLink) {
+        if link.target.kind != .task, let session = link.target.session {
+            self = .session(id: session, address: link.url)
+            return
+        }
         switch link.target.kind {
         case .task: guard let task = TaskLink(link) else { return nil }; self = .task(task)
         case .wave: guard let wave = link.target.wave else { return nil }; self = .wave(id: wave, address: link.url)
@@ -91,6 +96,7 @@ enum LinkedWork: Equatable, Sendable {
     var address: String? {
         switch self {
         case .task(let link): link.address
+        case .session(_, let address): address
         case .wave(_, let address): address
         case .view(_, let address): address
         }
@@ -99,7 +105,7 @@ enum LinkedWork: Equatable, Sendable {
     func with(repo: String) -> LinkedWork {
         switch self {
         case .task(let link): .task(link.with(repo: repo))
-        case .wave, .view: self
+        case .wave, .view, .session: self
         }
     }
 }

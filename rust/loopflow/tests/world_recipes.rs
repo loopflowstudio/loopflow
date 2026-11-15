@@ -25,6 +25,8 @@ fn success(output: Output) -> String {
 
 /// A built World and the commands that read it.
 struct Built {
+    /// The World's Task conversations start only beside its Machine server.
+    _server: loopflow_test_support::MachineServer,
     root: tempfile::TempDir,
     world: PathBuf,
     env: Value,
@@ -39,14 +41,23 @@ impl Built {
         )
         .unwrap();
         let world = root.path().join("world");
-        let env = serde_json::from_str(&success(
+        let env: Value = serde_json::from_str(&success(
             clean(env!("CARGO_BIN_EXE_lf-world"), root.path())
                 .args(["build", recipe, world.to_str().unwrap()])
                 .output()
                 .unwrap(),
         ))
         .unwrap();
-        Self { root, world, env }
+        let server = loopflow_test_support::MachineServer::start(
+            env!("CARGO_BIN_EXE_lf"),
+            env["LF_HOME"].as_str().unwrap().as_ref(),
+        );
+        Self {
+            _server: server,
+            root,
+            world,
+            env,
+        }
     }
 
     fn command(&self, args: &[&str]) -> Command {
@@ -403,14 +414,14 @@ fn one_task_waits_at_demo_after_writing_docs_and_pursuing() {
     assert_eq!(
         nodes,
         [
-            (0, "write-docs"),
-            (1, "implement"),
-            (2, "compress"),
-            (3, "sync"),
-            (4, "realign"),
-            (5, "loop-or-next"),
-            (6, "concept-review"),
-            (7, "loop-or-next"),
+            (0, "kickoff"),
+            (1, "write-docs"),
+            (2, "implement"),
+            (3, "concept-review"),
+            (4, "sync"),
+            (5, "realign"),
+            (6, "loop-or-next"),
+            (7, "compress"),
             (8, "qa"),
             (9, "loop-or-next"),
             (10, "pr-publish"),
@@ -431,8 +442,11 @@ fn portfolio_has_a_stopped_run_and_a_task_waiting_at_demo() {
         .iter()
         .map(|step| step["outcome"].as_str().unwrap())
         .collect();
-    assert_eq!(outcomes, ["succeeded", "succeeded", "succeeded", "failed"]);
-    assert_eq!(steps[3]["label"], "sync");
+    assert_eq!(
+        outcomes,
+        ["succeeded", "succeeded", "succeeded", "succeeded", "failed"]
+    );
+    assert_eq!(steps[4]["label"], "sync");
 
     let graph = built.task_graph(&built.issue_named("Open conversations faster"));
     assert_eq!(

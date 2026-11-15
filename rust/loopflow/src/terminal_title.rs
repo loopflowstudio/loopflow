@@ -1,13 +1,15 @@
-//! Session names projected into their attached terminal. Only the pre-spawn
-//! write uses OSC: writing alongside a native provider can split escape frames.
+//! Session names projected into their attached terminal. The held terminal
+//! serializes OSC renames between complete provider sequences; direct launches
+//! write OSC only before spawning, while they still own terminal output.
 //! cmux and tmux have separate control channels for their workspace, tab and
-//! window names, so those follow renames. A cmux workspace belongs to its Task
+//! window names. A cmux workspace belongs to its Task
 //! and follows only the Task title, unless someone renamed it by hand; tabs and
 //! tmux windows follow the Session.
 
 use std::collections::BTreeMap;
 use std::io::{IsTerminal, Write};
 use std::process::{Command, Stdio};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use crate::os_process::wait_for_exit;
@@ -275,11 +277,11 @@ impl TerminalTitle {
         title.host.is_some().then_some(title)
     }
 
-    fn viewing(owner: &crate::id::LfProcessId) -> Option<Self> {
+    fn viewing(held: &crate::id::TerminalId) -> Option<Self> {
         let load = || -> anyhow::Result<Option<Self>> {
             let store =
                 SqliteStore::open_processes_read_only(&crate::store::database_path_from_env()?)?;
-            let Some(id) = store.transport_session(owner)? else {
+            let Some(id) = store.terminal_session(held)? else {
                 return Ok(None);
             };
             let Some(session) = store.session(&id)? else {
@@ -387,17 +389,121 @@ impl Drop for TerminalTitle {
 /// link its Session after the viewer attaches, so the viewer keeps looking.
 #[derive(Debug)]
 pub(crate) struct ViewerTitle {
-    owner: crate::id::LfProcessId,
+    held: crate::id::TerminalId,
     title: Option<TerminalTitle>,
     /// Until when to look; executions without a Session never get one.
     looking: Option<Instant>,
     checked: Option<Instant>,
 }
 
-impl ViewerTitle {
-    pub(crate) fn new(owner: &crate::id::LfProcessId) -> Self {
+/// One worker reading Session names for every terminal a host serves; store reads
+/// must never hold up provider output or terminal input. It ends once its
+/// handle and every `OutputTitle` made from it are gone.
+#[derive(Debug, Clone)]
+pub(crate) struct TitleReader {
+    requests: mpsc::SyncSender<TitleRequest>,
+}
+
+#[derive(Debug)]
+struct TitleRequest {
+    held: crate::id::TerminalId,
+    answer: mpsc::SyncSender<String>,
+}
+
+/// Requests waiting for the worker; a full queue skips a check until the next tick.
+const TITLE_QUEUE: usize = 64;
+
+impl TitleReader {
+    pub(crate) fn spawn() -> Self {
+        let path = crate::store::database_path_from_env();
+        let (requests, requested) = mpsc::sync_channel::<TitleRequest>(TITLE_QUEUE);
+        std::thread::spawn(move || {
+            let Ok(path) = path else { return };
+            let mut store = None;
+            while let Ok(request) = requested.recv() {
+                let mut read = || -> anyhow::Result<Option<String>> {
+                    if store.is_none() {
+                        store = Some(SqliteStore::open_processes_read_only(&path)?);
+                    }
+                    output_title(store.as_ref().expect("opened above"), &request.held)
+                };
+                if let Ok(Some(name)) = read()
+                    .inspect_err(|error| tracing::debug!(%error, "cannot read output Session name"))
+                {
+                    let _ = request.answer.try_send(name);
+                }
+            }
+        });
+        Self { requests }
+    }
+}
+
+/// The held terminal's Session name, sent through its serialized terminal stream.
+/// Host-specific names remain with each viewer, including remote viewers.
+#[derive(Debug)]
+pub(crate) struct OutputTitle {
+    held: crate::id::TerminalId,
+    reader: TitleReader,
+    answer: mpsc::SyncSender<String>,
+    names: mpsc::Receiver<String>,
+    checked: Option<Instant>,
+}
+
+impl OutputTitle {
+    pub(crate) fn new(held: &crate::id::TerminalId, reader: &TitleReader) -> Self {
+        let (answer, names) = mpsc::sync_channel(1);
         Self {
-            owner: owner.clone(),
+            held: held.clone(),
+            reader: reader.clone(),
+            answer,
+            names,
+            checked: None,
+        }
+    }
+
+    pub(crate) fn tick(&mut self) -> Option<String> {
+        if self
+            .checked
+            .is_none_or(|checked| checked.elapsed() >= Duration::from_millis(500))
+        {
+            self.checked = Some(Instant::now());
+            let _ = self.reader.requests.try_send(TitleRequest {
+                held: self.held.clone(),
+                answer: self.answer.clone(),
+            });
+        }
+        self.names.try_recv().ok()
+    }
+
+    pub(crate) fn deadline(&self) -> Instant {
+        self.checked.unwrap_or_else(Instant::now) + Duration::from_millis(500)
+    }
+}
+
+fn output_title(
+    store: &SqliteStore,
+    held: &crate::id::TerminalId,
+) -> anyhow::Result<Option<String>> {
+    let Some(id) = store.terminal_session(held)? else {
+        return Ok(None);
+    };
+    let Some(session) = store.session(&id)? else {
+        return Ok(None);
+    };
+    // A departing attachment no longer owns publication to this terminal.
+    if store
+        .session_attachment(&id)?
+        .is_none_or(|attachment| attachment.lf_process_id.is_none())
+    {
+        return Ok(None);
+    }
+    Ok(Some(session_title(store, &session)?.names.terminal))
+}
+
+impl ViewerTitle {
+    pub(crate) fn new(held: &crate::id::TerminalId) -> Self {
+        Self {
+            held: held.clone(),
             title: None,
             looking: HostNames::current().map(|_| Instant::now() + Duration::from_secs(10)),
             checked: None,
@@ -417,7 +523,7 @@ impl ViewerTitle {
             return;
         }
         self.checked = Some(Instant::now());
-        self.title = TerminalTitle::viewing(&self.owner);
+        self.title = TerminalTitle::viewing(&self.held);
     }
 }
 
@@ -523,6 +629,15 @@ mod tests {
         let attachment = store
             .claim_session_attachment(&session.id, None, &process, true)
             .unwrap();
+        let terminal = crate::id::TerminalId::new();
+        store.create_terminal(&terminal, "build").unwrap();
+        rusqlite::Connection::open(&path)
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET held_terminal_id=?1 WHERE id=?2",
+                rusqlite::params![terminal, session.id],
+            )
+            .unwrap();
         let title = TerminalTitle {
             store,
             session: session.id.to_string(),
@@ -546,6 +661,10 @@ mod tests {
         assert_eq!(
             title.read_names().unwrap().map(|names| names.terminal),
             Some("Release notes".to_string())
+        );
+        assert_eq!(
+            super::output_title(&title.store, &terminal).unwrap(),
+            Some("Release notes".into())
         );
         title
             .store

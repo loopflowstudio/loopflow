@@ -45,10 +45,11 @@ pub fn refresh(checkout: &Path) -> Result<()> {
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_store().await?;
         let repo_key = repo.to_string_lossy();
-        // Acquisition records its own failure, and proceeds while another
-        // process holds publication; publication then sends pending changes out.
+        // Acquisition records its own failure and never waits on publication.
+        // A refresh waits out another process's publication, then sends this
+        // Machine's pending changes out.
         let acquired = crate::ops::planning_sync::acquire_repository(&store, &repo_key).await;
-        crate::ops::planning_sync::publish_repository(&store, &repo_key).await?;
+        crate::ops::planning_sync::publish_repository_now(&store, &repo_key).await?;
         acquired?;
         let destinations = crate::ops::planning_sync::peer_status(&store, &repo_key).await?;
         let Some(active) = destinations.into_iter().find(|d| d.active) else {
@@ -100,9 +101,6 @@ async fn run_async(repo: &Path, cmd: Option<&PlanCommand>, status_json: bool) ->
     Ok(())
 }
 
-/// Transport selection lives in config, so it changes without a store write.
-const STATUS_CLOCK: std::time::Duration = std::time::Duration::from_secs(5);
-
 /// `lf planning status --subscribe`: `lf planning status --json` now and each time
 /// it changes. The subscription reads stored status; `lf wave status --sync` and
 /// foreground providers exchange planning.
@@ -113,7 +111,6 @@ pub(crate) fn subscribe_status(
     let repo_key = repo.to_string_lossy().into_owned();
     super::subscribe::start(
         (),
-        super::subscribe::Wake::every(STATUS_CLOCK),
         move |store, ()| {
             let repo_key = repo_key.clone();
             async move { Ok(status(store.as_deref(), &repo_key).await?.report()) }

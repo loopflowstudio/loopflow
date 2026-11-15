@@ -26,13 +26,17 @@ pub fn release(
     version: Option<&str>,
     target: Option<&str>,
 ) -> Result<launch::Launched> {
+    launch::start(directory, &spell_release(version, target))
+}
+
+pub(super) fn spell_release(version: Option<&str>, target: Option<&str>) -> Vec<String> {
     let mut args = ["repo", "release", "run"].map(str::to_owned).to_vec();
     args.extend(version.map(str::to_owned));
     if let Some(target) = target {
         args.extend(["--target".to_owned(), target.to_owned()]);
     }
     args.push("--json".to_owned());
-    launch::start(directory, &args)
+    args
 }
 
 /// `lf repo release run` in this process: the whole workflow, through
@@ -64,7 +68,7 @@ mod tests {
     #[test]
     fn receipts_match_the_shared_fixtures_without_defaults() {
         let ci: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../tests/fixtures/dto/server/repo_ci_report.json"
+            "../../tests/fixtures/dto/server/repo_ci_report.json"
         ))
         .unwrap();
         let report: CiReportDto = serde_json::from_value(ci["result"].clone()).unwrap();

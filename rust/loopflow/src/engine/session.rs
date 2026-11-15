@@ -26,7 +26,7 @@ pub enum SteerScope<'a> {
     Repository,
 }
 
-/// `session.steer`: save `message` for `scope`, as `lf session steer` does,
+/// `session.steer`: save `message` for `scope`, as `lf steer` does,
 /// and return the saved steer. Delivery is each Session's, at its next
 /// boundary; `lf session steers <id>` reads it.
 pub async fn steer(

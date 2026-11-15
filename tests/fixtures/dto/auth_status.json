@@ -46,7 +46,39 @@
       ],
       "reset_credits": null,
       "active": true,
-      "held": true
+      "held": true,
+      "launches": [
+        {
+          "model": "fable",
+          "eligible": true,
+          "out_until": null,
+          "blockers": []
+        },
+        {
+          "model": "opus",
+          "eligible": true,
+          "out_until": null,
+          "blockers": []
+        },
+        {
+          "model": "sonnet",
+          "eligible": true,
+          "out_until": null,
+          "blockers": []
+        },
+        {
+          "model": "haiku",
+          "eligible": true,
+          "out_until": null,
+          "blockers": []
+        },
+        {
+          "model": null,
+          "eligible": true,
+          "out_until": null,
+          "blockers": []
+        }
+      ]
     },
     {
       "provider": "codex",
@@ -80,7 +112,15 @@
         ]
       },
       "active": false,
-      "held": false
+      "held": false,
+      "launches": [
+        {
+          "model": null,
+          "eligible": true,
+          "out_until": null,
+          "blockers": []
+        }
+      ]
     },
     {
       "provider": "claude",
@@ -101,7 +141,49 @@
       "verified_windows": [],
       "reset_credits": null,
       "active": false,
-      "held": false
+      "held": false,
+      "launches": [
+        {
+          "model": "fable",
+          "eligible": false,
+          "out_until": null,
+          "blockers": [
+            "credential is missing"
+          ]
+        },
+        {
+          "model": "opus",
+          "eligible": false,
+          "out_until": null,
+          "blockers": [
+            "credential is missing"
+          ]
+        },
+        {
+          "model": "sonnet",
+          "eligible": false,
+          "out_until": null,
+          "blockers": [
+            "credential is missing"
+          ]
+        },
+        {
+          "model": "haiku",
+          "eligible": false,
+          "out_until": null,
+          "blockers": [
+            "credential is missing"
+          ]
+        },
+        {
+          "model": null,
+          "eligible": false,
+          "out_until": null,
+          "blockers": [
+            "credential is missing"
+          ]
+        }
+      ]
     },
     {
       "provider": "claude",
@@ -122,7 +204,49 @@
       "verified_windows": [],
       "reset_credits": null,
       "active": false,
-      "held": false
+      "held": false,
+      "launches": [
+        {
+          "model": "fable",
+          "eligible": false,
+          "out_until": null,
+          "blockers": [
+            "credential is missing"
+          ]
+        },
+        {
+          "model": "opus",
+          "eligible": false,
+          "out_until": null,
+          "blockers": [
+            "credential is missing"
+          ]
+        },
+        {
+          "model": "sonnet",
+          "eligible": false,
+          "out_until": null,
+          "blockers": [
+            "credential is missing"
+          ]
+        },
+        {
+          "model": "haiku",
+          "eligible": false,
+          "out_until": null,
+          "blockers": [
+            "credential is missing"
+          ]
+        },
+        {
+          "model": null,
+          "eligible": false,
+          "out_until": null,
+          "blockers": [
+            "credential is missing"
+          ]
+        }
+      ]
     },
     {
       "provider": "claude",
@@ -156,7 +280,54 @@
       "verified_windows": [],
       "reset_credits": null,
       "active": false,
-      "held": false
+      "held": false,
+      "launches": [
+        {
+          "model": "fable",
+          "eligible": false,
+          "out_until": 1800000300,
+          "blockers": [
+            "routing is explicit_only",
+            "cooling account-wide until 2027-01-15T08:05:00Z"
+          ]
+        },
+        {
+          "model": "opus",
+          "eligible": false,
+          "out_until": 1800000300,
+          "blockers": [
+            "routing is explicit_only",
+            "cooling account-wide until 2027-01-15T08:05:00Z"
+          ]
+        },
+        {
+          "model": "sonnet",
+          "eligible": false,
+          "out_until": 1800000300,
+          "blockers": [
+            "routing is explicit_only",
+            "cooling account-wide until 2027-01-15T08:05:00Z"
+          ]
+        },
+        {
+          "model": "haiku",
+          "eligible": false,
+          "out_until": 1800000300,
+          "blockers": [
+            "routing is explicit_only",
+            "cooling account-wide until 2027-01-15T08:05:00Z"
+          ]
+        },
+        {
+          "model": null,
+          "eligible": false,
+          "out_until": 1800000300,
+          "blockers": [
+            "routing is explicit_only",
+            "cooling account-wide until 2027-01-15T08:05:00Z"
+          ]
+        }
+      ]
     },
     {
       "provider": "claude",
@@ -177,7 +348,8 @@
       "verified_windows": [],
       "reset_credits": null,
       "active": false,
-      "held": false
+      "held": false,
+      "launches": []
     },
     {
       "provider": "codex",
@@ -198,7 +370,8 @@
       "verified_windows": [],
       "reset_credits": null,
       "active": false,
-      "held": false
+      "held": false,
+      "launches": []
     }
   ],
   "browser": {

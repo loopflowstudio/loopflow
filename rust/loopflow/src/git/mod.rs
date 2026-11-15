@@ -3,14 +3,13 @@ pub(crate) mod scratch;
 pub mod worktree_name;
 pub mod worktrees;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Seek, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
-use std::sync::{Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -119,10 +118,10 @@ pub(crate) fn read_layout(repo: &Path) -> Option<GitLayout> {
     let git_dir = if dot.is_dir() {
         dot
     } else {
-        let link = fs::read_to_string(&dot).ok()?;
+        let link = crate::observe::read_to_string(&dot).ok()?;
         top.join(link.strip_prefix("gitdir: ")?.trim_end())
     };
-    let common_dir = match fs::read_to_string(git_dir.join("commondir")) {
+    let common_dir = match crate::observe::read_to_string(&git_dir.join("commondir")) {
         Ok(relative) => git_dir.join(relative.trim_end()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => git_dir.clone(),
         Err(_) => return None,
@@ -145,7 +144,7 @@ pub(crate) fn read_layout(repo: &Path) -> Option<GitLayout> {
 impl GitLayout {
     /// The commit HEAD names, through at most one branch.
     fn head(&self) -> Option<String> {
-        let head = fs::read_to_string(self.git_dir.join("HEAD")).ok()?;
+        let head = crate::observe::read_to_string(&self.git_dir.join("HEAD")).ok()?;
         let head = head.trim_end();
         let Some(name) = head.strip_prefix("ref: ") else {
             return object_id(head);
@@ -154,12 +153,12 @@ impl GitLayout {
             return None;
         }
         // Branches are shared; a checkout keeps only its own pseudo-refs.
-        match fs::read_to_string(self.common_dir.join(name)) {
+        match crate::observe::read_to_string(&self.common_dir.join(name)) {
             Ok(sha) => return object_id(sha.trim_end()),
             Err(error) if error.kind() != std::io::ErrorKind::NotFound => return None,
             Err(_) => {}
         }
-        fs::read_to_string(self.common_dir.join("packed-refs"))
+        crate::observe::read_to_string(&self.common_dir.join("packed-refs"))
             .ok()?
             .lines()
             .filter_map(|line| line.split_once(' '))
@@ -174,100 +173,7 @@ fn object_id(text: &str) -> Option<String> {
 }
 
 fn run_git(repo: &Path, args: &[&str]) -> Result<Output, GitError> {
-    Ok(retained_output(repo, args)?)
-}
-
-type Question = (PathBuf, Vec<String>);
-type RetainedReads = HashMap<Question, (Instant, Output)>;
-
-/// Set by a process with a long-lived reader. A served write in that process
-/// bypasses it: see [`crate::journal::request::writing`].
-static RETAINED_READS: Mutex<Option<RetainedReads>> = Mutex::new(None);
-
-/// How long a retained answer stands: repository layout rarely moves, while a
-/// checkout's files change under a working agent.
-const LAYOUT_RETENTION: Duration = Duration::from_secs(600);
-const CONTENT_RETENTION: Duration = Duration::from_secs(60);
-
-fn retained() -> MutexGuard<'static, Option<RetainedReads>> {
-    RETAINED_READS.lock().expect("git read cache poisoned")
-}
-
-/// Let this process reuse a Git answer for a short time instead of spawning
-/// `git` again. For a long-lived reader that asks the same questions on every
-/// reading; one-shot commands never call this.
-pub(crate) fn retain_reads() {
-    *retained() = Some(HashMap::new());
-}
-
-pub(crate) fn retains_reads() -> bool {
-    !crate::journal::request::writing() && retained().is_some()
-}
-
-fn is_layout(args: &[String]) -> bool {
-    let layout = ["--git-common-dir", "--show-toplevel"];
-    args.iter().any(|arg| layout.contains(&arg.as_str()))
-}
-
-/// Ask Git and retain its answer. A reader must not take the index lock from
-/// an agent working in the checkout.
-fn ask(question: Question) -> std::io::Result<Output> {
-    let output = Command::new("git")
-        .current_dir(&question.0)
-        .args(&question.1)
-        .env("GIT_OPTIONAL_LOCKS", "0")
-        .output()?;
-    if let Some(reads) = retained().as_mut() {
-        reads.insert(question, (Instant::now(), output.clone()));
-    }
-    Ok(output)
-}
-
-/// `git -C repo args`, reusing a retained answer when this process keeps them.
-///
-/// The retained answers are never held while Git runs: a listing asks about
-/// every checkout side by side.
-pub(crate) fn retained_output(repo: &Path, args: &[&str]) -> std::io::Result<Output> {
-    if !retains_reads() {
-        return Command::new("git").current_dir(repo).args(args).output();
-    }
-    let question = (
-        repo.to_path_buf(),
-        args.iter().map(|arg| arg.to_string()).collect::<Vec<_>>(),
-    );
-    let stands = if is_layout(&question.1) {
-        LAYOUT_RETENTION
-    } else {
-        CONTENT_RETENTION
-    };
-    let standing = retained()
-        .as_ref()
-        .and_then(|reads| reads.get(&question))
-        .filter(|(read_at, _)| read_at.elapsed() < stands)
-        .map(|(_, output)| output.clone());
-    match standing {
-        Some(output) => Ok(output),
-        None => ask(question),
-    }
-}
-
-/// Ask again what this process retains about `repo`'s contents. True when an
-/// answer differs from the retained one; layout answers are left standing.
-pub(crate) fn reread_retained(repo: &Path) -> bool {
-    let questions = retained()
-        .iter()
-        .flatten()
-        .filter(|((asked, args), _)| asked == repo && !is_layout(args))
-        .map(|(question, (_, output))| (question.clone(), output.clone()))
-        .collect::<Vec<_>>();
-    let mut changed = false;
-    // Every one is asked again, not only up to the first that differs.
-    for (question, before) in questions {
-        if let Ok(output) = ask(question) {
-            changed |= output.status != before.status || output.stdout != before.stdout;
-        }
-    }
-    changed
+    Ok(crate::observe::git(repo, args)?)
 }
 
 fn run_git_inheriting(
@@ -1664,30 +1570,6 @@ mod tests {
         assert!(read_layout(&dir.path().join("bare.git")).is_none());
     }
 
-    #[test]
-    fn git_reads_from_several_threads_run_side_by_side() {
-        let dir = tempfile::tempdir().expect("create temp dir");
-        // Each read leaves its mark, then succeeds only once the other's is
-        // there too: reads taken in turn would both give up.
-        let meet = "alias.meet=!f() { touch \"$1\"; n=0; \
-                    while [ ! -e \"$2\" ]; do n=$((n+1)); [ $n -gt 300 ] && exit 1; sleep 0.1; done; }; f";
-        let (first, second) = (dir.path().join("first"), dir.path().join("second"));
-        let read = |mine: &Path, theirs: &Path| {
-            let (mine, theirs) = (mine.to_string_lossy(), theirs.to_string_lossy());
-            run_git(dir.path(), &["-c", meet, "meet", &mine, &theirs])
-                .expect("run git")
-                .status
-                .success()
-        };
-
-        let (one, other) = thread::scope(|scope| {
-            let one = scope.spawn(|| read(&first, &second));
-            (read(&second, &first), one.join().expect("reader panicked"))
-        });
-
-        assert!(one && other);
-    }
-
     fn init_repo() -> TempDir {
         let dir = tempfile::tempdir().expect("create temp dir");
         git_stdout(dir.path(), &["init", "-b", "main"]).expect("git init");
@@ -2029,26 +1911,6 @@ mod tests {
             origin_branch(repo.path()).unwrap().as_deref(),
             Some("feature")
         );
-    }
-
-    #[test]
-    fn a_served_write_never_gets_a_watchs_retained_answer() {
-        let _guard = loopflow_test_support::env_lock().lock().unwrap();
-        let repo = loopflow_test_support::TestRepo::new();
-        let previous = retained().take();
-        retain_reads();
-        let head = || git_stdout(repo.path(), &["status", "--porcelain"]).unwrap();
-        assert_eq!(head(), "");
-        std::fs::write(repo.path().join("new.txt"), "text").unwrap();
-        assert_eq!(head(), "", "a reader keeps its retained answer");
-        let seen = crate::journal::request::run(
-            &crate::id::TraceId::default(),
-            &serde_json::json!({}),
-            || Ok(head()),
-        )
-        .unwrap();
-        assert!(seen.contains("new.txt"), "{seen:?}");
-        *retained() = previous;
     }
 
     #[test]

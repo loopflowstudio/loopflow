@@ -141,15 +141,41 @@ moves into the shared home when it resumes.
 ```bash
 lf account                       # one row per login; stale rows refresh
 lf account work@                 # that login: auth, plan, each window's age and source, its browsers
-lf account claude                # every Claude login and Claude's local credentials, with every saved browser
+lf account claude                # every Claude login: which models launch now, and what holds the rest
+lf account next -a claude:fable  # the login a Fable launch or resume takes, or what blocks each one
+lf account claude --json         # refresh Claude usage and inspect saved limits
 lf account --cached              # offline: no provider contact, no writes
 lf account --json                # every login and local service as one document
 ```
 
 Naming a login or a provider asks the provider about each one shown.
 
-`lf account` shows one row per login, then a line per thing to fix with the
-command that fixes it. Naming a login shows that login alone: its auth, plan,
+```
+$ lf account claude
+claude       personal · personal@example.com
+  auth: active (verified)
+  plan: max observed
+  launches: fable, opus, sonnet, haiku
+  ...
+claude       work · work@example.com
+  auth: active (verified)
+  plan: max observed
+  launches: opus, sonnet, haiku · fable out until Wed 04:00
+  ...
+```
+
+`launches` is the answer a fresh launch or a resumed conversation gets on that
+login, per model: the models that can start now, then each held model with the
+time its hold ends. It is the same check routing runs, so a login that reads
+`fable` here takes a `claude:fable` launch, and one that reads `fable out
+until Wed 04:00` is skipped until then. The usage windows below it are
+readings; `launches` is the verdict. A login that needs a login, or is paused,
+says `launches: none · credential is missing` or names its routing state once,
+followed by any model cooldowns. Codex says `launches: ready` or
+`launches: out until <time>`.
+
+`lf account` lists only unavailable models beneath each login, then things to
+fix with their commands. Naming a login shows that login alone: its auth, plan,
 each usage window with its age and source, and the browser profiles it
 connects through. Naming a provider shows stable account IDs beside full
 logins for every login. Codex rows show the credential's observed login, and report mismatches
@@ -175,13 +201,29 @@ reports recorded provider token/cost usage separately.
 JSON contains `accounts` and optional `browser` details. Each row has `scope`
 (`managed` or `local`), provider, account ID, login, cached
 credential state, verification, windows, diagnostic, recovery,
-`expires_at` (a rental's access token, which the laptop renews), `active` and
-`held`. Verification
+`expires_at` (a rental's access token, which the laptop renews), `active`,
+`held` and `launches`. Verification
 is `accepted`, `rejected`, `unavailable`, or `not_checked`. Window rows retain
 `observed_at`, `resets_at`, source and plan; `verified_windows` identifies only
 this invocation's new observations. Null means unknown. A successful report
-does not imply successful authentication. Cron-host requires accepted managed
-evidence:
+does not imply successful authentication.
+
+`launches` has one entry per model a managed login can be asked for: each
+Claude family, and `model: null` for a launch that names no model, which every
+hold on the login blocks. A Codex login has the `null` entry alone, and local
+credentials have an empty list. Each entry carries `eligible`, `out_until`
+(null when nothing with a known end holds it) and `blockers`, the same
+sentences a refused launch prints:
+
+```bash
+lf account claude --json |
+  jq -r '.accounts[] | select(.scope == "managed") | .login as $l
+         | .launches[] | select(.model == "fable") | "\($l) \(.eligible) \(.out_until) \(.blockers | join("; "))"'
+# personal@example.com true null
+# work@example.com false 1795003205 cooling for fable until 2026-11-18T12:00:05Z
+```
+
+Cron-host requires accepted managed evidence:
 
 ```bash
 lf account --json |
@@ -200,11 +242,28 @@ credentials remain visible with older usage and the `lf account connect` recover
 command. Unreadable credentials are distinguished from missing files. Verification
 records provider rejection as missing; locally detected identity mismatches are
 reported without changing cached state. Unavailable usage leaves credential state
-unchanged. Neither changes account configuration. A cooldown comes only from a
-provider's rejection; a fresh read that finds no account-wide window spent
-clears it, so `lf account <login>` mends a wrong one. Provider routes skip
-missing, disabled, cooling and limited accounts and continue to the next
-candidate.
+unchanged. Neither changes account configuration. Provider routes skip missing,
+disabled and cooling accounts, and accounts limited for the requested model,
+then continue to the next candidate.
+
+After a Claude limit, run `lf account claude` to refresh usage. If Fable now
+has room, its fresh weekly reading replaces the older Fable rejection, under
+whatever name that rejection was recorded. If Fable is still at 100% but the
+account-wide windows have room, Fable waits while Sonnet, Opus and Haiku
+remain eligible, including when reopening a conversation on those models. The
+`launches` line shows which model is held and until when. In JSON,
+`cooldown_until` covers the account-wide cooldown alone; read `launches` to
+learn whether a model can start.
+
+A refresh clears an old rejection only when the corresponding usage window
+establishes recovery. Overall weekly room alone does not clear a Fable limit;
+Fable room does not clear an account-wide limit. Included quota does not clear
+paid-credit exhaustion. Failed, empty or incomplete readings retain limits
+they cannot resolve, as do rejections whose cause is unknown. Successful
+authentication alone establishes no capacity. A rejection or other capacity
+update received while a refresh is in flight takes precedence over that
+refresh; the report shows the saved result, and another refresh can check
+again. Discarded readings are absent from `verified_windows`.
 
 A credential replacement detected during verification makes that result
 unavailable and retains prior account evidence. A switch holds Claude's own
@@ -245,9 +304,24 @@ lf account set personal@ --clear-cooldown
 
 Pausing the active login switches the Machine to the route's next login at
 once, and every open Claude follows; with no other login, it stays and says
-so. Clearing cooldown retains credential state, aggregate utilization and every
-observed window. It does not reset provider quota. Once `paid-through` passes,
-an otherwise automatic login behaves as paused until the date is cleared.
+so. Once `paid-through` passes, an otherwise automatic login behaves as paused
+until the date is cleared.
+
+`--clear-cooldown` releases every cooldown recorded against the
+login: the account-wide one and each model's. The login can route again at
+once if its credential and routing state allow it.
+
+```
+$ lf account set work@ --clear-cooldown
+Cleared cooldowns on Claude login 'work@example.com': account-wide until 2026-11-18T12:00:00Z; for fable until 2026-11-18T12:00:05Z
+$ lf account set work@ --clear-cooldown
+Claude login 'work@example.com' has no active cooldown
+```
+
+Readings stay: each window keeps its percent used, reset time and age, and the
+credential is untouched. It does not reset provider quota. A window that is
+really spent is held again by the next refresh or the next rejection, so clear
+a hold you know is wrong and let `lf account` confirm the rest.
 
 ## Route a repository
 
@@ -269,10 +343,26 @@ $ lf account next
                                    without that order: work@example.com, 60% left
 ```
 
-`next` is a dry run of the next launch: which login each provider takes, and
-why. It exits 0 when both can launch, 2 when one is blocked until a reset, and
+Plain `next` explains account routing for each provider without choosing a
+model. It conservatively treats a limit on any model as a blocker, so it can
+report Claude blocked by Fable while a Sonnet launch on that login is eligible.
+Name the model to ask what that launch would get:
+
+```
+$ lf account next -a claude:fable
+  claude  personal@example.com     the only login ready for this launch
+  codex   manabot-eng@example.com  this repository's order names only it
+```
+
+`-a <harness>:<model>` checks capacity for that model on its provider, as a
+fresh launch or a resumed conversation on it does; the other provider stays
+model-unspecified. A model Loopflow has no name for is matched against
+recorded limits the way a launch of it is. When no login can take the model,
+the reason lists each login's blocker with its deadline.
+It exits 0 when both providers are ready, 2 when one is blocked until a reset, and
 3 when one needs a login. `--json` reports the same per provider, with
-`outcome` `ready`, `blocked`, `login_needed` or `ambient`. `--default` ignores
+`outcome` `ready`, `blocked`, `login_needed` or `ambient`, and `model`, the
+model checked or null. `--default` ignores
 repository and Wave orders. An order that names fewer logins than are in
 rotation shows in `lf account` as a `!` line.
 
@@ -341,36 +431,60 @@ A Graph step keeps going by itself:
 ```bash
 lf task status LOO-1
 #   implement went on under another claude account after: provider_rate_limited: rejected: five_hour
+#   compress went on under claude after: codex_error: You've hit your usage limit
 #   implement is waiting for claude capacity until Nov 5 14:00: ... It goes on by itself.
 ```
 
 | What happens | What the step does |
 |---|---|
 | Its account hits a limit, another is eligible | Continues the same conversation under that account |
-| Every eligible account is held back and its harness was named bare (`claude`) | Continues the same conversation on another model of that harness: Opus, then Sonnet, then Haiku |
-| Those are held back too and `default_agent` lists another provider (`claude,codex`) | Continues on the next provider, seeded with the conversation so far, as `lf session new -a` does |
-| Nothing it may use is free | Waits, checking each minute, and continues at the first reset |
-| No account will free up | Fails with the limit, like any other failure |
+| Every eligible account is held back and `agents` has a next entry (`agents: [claude:fable, claude:opus, codex]`) | Continues on that entry: the same conversation on another model of its provider; on another provider, seeded with the conversation so far, as `lf session new -a` does |
+| Every eligible account is held back, no `agents` order is behind it and its harness was named bare (`claude`) | Continues the same conversation on another model of that harness: Opus, then Sonnet, then Haiku |
+| The provider refuses the launch itself with a usage limit, before any turn | The same moves: next login, then the next entry in `agents`. If another entry takes the step, the run continues; if the order runs out, it stops once |
+| The provider reports that the model is unavailable | Moves directly to the next allowed entry, without spending the login’s quota. An explicit model pin stops once with advice to change the pin |
+| Nothing it may use is free, and an account has a known reset | Waits, checking each minute, and continues at the first reset |
+| A usage limit or unavailable model refuses it and no agent it may use is left | Stops once, without automatic retries. The stop line and `lf task status` say what would let it move, such as `lf set --global agents codex,claude`. After a reset or an `agents` change, `lf task run <ID>` starts at that step; earlier steps stay done |
 | Its Process ends during a wait | `lf task run` starts the run again at that step, and earlier steps stay done. An assigned Task that nothing else blocks restarts by itself after the reset, on the `-a` the run was given; no automatic restart starts it sooner |
 
-Only accounts in the resolved route take a step on. An explicit `harness:model`
-stays on its model and changes only accounts; a bare harness may change model;
-only a preference list (`lf set default_agent claude,codex`, no explicit
-`agent`) lets a step change provider. Nothing is written to your preferences.
+Only accounts in the resolved route take a step on. An `agent` choice or `-a`
+keeps the provider, and the model if given. Otherwise,
+[`agents`](config.md#keep-going-when-a-provider-runs-out) supplies the order:
+`lf set --global agents claude,codex` lets a step move from Claude to Codex.
+A launch refused on a login Loopflow does not route fails with its limit once
+the last entry refuses too. Nothing is written to your preferences.
 Commit messages and PR text fail at once, because someone is waiting for them.
+
+A [saved Claude model](config.md#claude-model) supplies bare `claude`'s starting
+model without pinning it. For example, `claude.model=opus` makes routing check
+Opus capacity while keeping the model and provider fallthrough described above.
 
 A limit the provider scopes to one model, such as Claude's weekly Opus or Fable
 limit, holds back only launches of that model: Sonnet on the same account keeps
-going, and a launch that names no model waits for every scope on the account.
+going, and a launch with neither an explicit nor a saved model waits for every
+scope on the account.
 A limit Claude only states in words ("You've reached your Fable limit") is
 scoped the same way. Loopflow then reads that account's usage once, and when
-the read fails the account rests for 15 minutes. Any usage read that finds a
-window spent holds that window's launches back until it resets.
+the read fails the model is held for 15 minutes, plus a five-second grace
+period. A spent window with a known reset holds that window's launches back
+until five seconds after the reset. A missing reset time stays unknown.
 
-Running out of usage credits ("You're out of usage credits", Claude's
-`seven_day_overage_included`) holds back only the model the launch ran, until
-the reset, never the account. A bare `claude` launch runs Fable, so Fable rests
-and the step goes on with Opus on the same account, in the same conversation.
+Claude's `seven_day_overage_included` is an included weekly allocation for a
+model, separate from paid usage credits. Loopflow uses the reported model, or
+the launch's model when Claude omits it, to scope that limit. A fresh weekly
+reading for that model replaces the older rejection whatever name it was
+recorded under: Claude's own window name, the same name behind a status such
+as `rejected:`, the sentence Claude printed ("You've hit your Fable limit"),
+or a name earlier Loopflow versions used (`weekly`, `weekly:fable`,
+`session`). `lf account` lists one window per limit, named as a usage reading
+names it. A rejection recorded after the latest reading still holds. Paid
+credits, a model Loopflow has no name for and any limit it does not recognize
+remain in place until they expire.
+
+A stated credit failure ("You're out of usage credits") holds back the model
+the launch ran. Included-quota readings do not clear that credit failure.
+Bare `claude` uses the saved Claude model, or Fable by default. With no saved
+model or other configured entry behind it, a Fable limit lets the step go on
+with Opus on the same account, in the same conversation, if Opus has capacity.
 
 Open Claude Sessions need nothing either. When one hits a limit, the login
 moves to the eligible account that ranks first, and every open Claude follows

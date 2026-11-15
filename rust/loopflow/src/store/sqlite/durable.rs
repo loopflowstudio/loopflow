@@ -88,23 +88,18 @@ impl SqliteStore {
                 "machine target and label must be nonempty; local is reserved".into(),
             ));
         }
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if map_local_machine(&tx)?.id == *machine_id {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        if map_local_machine(&conn)?.id == *machine_id {
             return Err(StoreError::InvalidData(
                 "cannot add the local machine as remote".into(),
             ));
         }
-        let now = now_unix();
-        tx.execute(
-            "INSERT INTO machines(id,is_local,created_at,observed_at) VALUES(?1,0,?2,?2)
-            ON CONFLICT(id) DO UPDATE SET observed_at=excluded.observed_at",
-            params![machine_id.as_str(), now],
-        )?;
+        // The declaration file is written first, outside any write transaction.
+        // A declared Machine needs no row until it is contacted.
         let declaration = crate::config::placement::MachineDeclaration {
             id: machine_id.clone(),
         };
-        let path = crate::config::placement::home(&tx)
+        let path = crate::config::placement::home(&conn)
             .map_err(|error| StoreError::InvalidData(error.to_string()))?
             .join("config.yaml");
         crate::config::files::update(&path, |document| {
@@ -129,7 +124,11 @@ impl SqliteStore {
             Ok(())
         })
         .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-        tx.commit()?;
+        conn.execute(
+            "INSERT INTO machines(id,is_local,created_at,observed_at) VALUES(?1,0,?2,?2)
+            ON CONFLICT(id) DO UPDATE SET observed_at=excluded.observed_at",
+            params![machine_id.as_str(), now_unix()],
+        )?;
         map_machine_by_id(&conn, machine_id)?.ok_or(StoreError::NotFound)
     }
 
@@ -480,20 +479,29 @@ pub(super) fn map_machine_by_id(
 }
 
 /// Completion and abandonment are durable. An open Task's state follows
-/// what it is doing: a Graph runs for it while its Task run or ship process
-/// has not exited, and the Auto-Ship approval (`shipped_at`) makes that run shipping.
+/// what it is doing: its Task run, ship process or a Graph in its work has not
+/// exited. Its carrier is the latest Auto-Ship log entry naming one; the
+/// Auto-Ship approval (`shipped_at`) makes that run shipping.
 /// Approved with nothing running, it is idle until recovery restarts its ship process.
 pub(crate) fn task_state_sql(t: &str) -> String {
     format!(
         "CASE WHEN {t}.abandoned_at IS NOT NULL THEN 'abandoned' \
          WHEN {t}.planning_completed=1 THEN 'done' \
-         WHEN EXISTS(SELECT 1 FROM processes lp WHERE lp.completed_at IS NULL AND (lp.id={t}.ship_lf_process_id \
+         WHEN EXISTS(SELECT 1 FROM processes lp WHERE lp.completed_at IS NULL AND (lp.id=(SELECT CASE WHEN e.kind IN ('approved','carried') THEN e.lf_process_id END \
+             FROM task_ship_events e WHERE e.task_id={t}.id \
+             AND e.kind IN ('approved','carried','stopped','withdrawn') ORDER BY e.id DESC LIMIT 1) \
              OR lp.id=(SELECT tg.lf_process_id FROM task_graphs tg WHERE tg.task_id={t}.id))) \
+             OR EXISTS({open_processes}) \
          THEN CASE WHEN {t}.shipped_at IS NOT NULL THEN 'shipping' ELSE 'moving' END \
          WHEN {t}.shipped_at IS NULL AND EXISTS(SELECT 1 FROM task_graphs tg WHERE tg.task_id={t}.id \
              AND tg.lf_process_id IS NULL AND tg.step NOT IN ('start','end')) THEN 'active' \
-         WHEN {t}.worktree IS NULL THEN 'unstarted' \
-         ELSE 'idle' END"
+         WHEN NOT EXISTS(SELECT 1 FROM task_checkouts c WHERE c.task_id={t}.id) THEN 'unstarted' \
+         ELSE 'idle' END",
+        open_processes = super::task_work::task_open_process_ids(
+            &format!("{t}.id"),
+            "p.kind='lf' AND EXISTS(SELECT 1 FROM graph_processes g \
+                WHERE g.lf_process_id IN (p.id,p.parent_lf_process_id))",
+        )
     )
 }
 
@@ -988,9 +996,14 @@ mod durable_store_tests {
         )
         .unwrap();
         let other_task = TaskId::new();
-        conn.execute("INSERT INTO tasks(id,repository_id,project_id,external_issue_id,issue_identifier,worktree,created_at)
-            SELECT ?1,repository_id,project_id,?1,?1,'/repo.other',1 FROM tasks WHERE id=?2",
+        conn.execute("INSERT INTO tasks(id,repository_id,project_id,external_issue_id,issue_identifier,created_at)
+            SELECT ?1,repository_id,project_id,?1,?1,1 FROM tasks WHERE id=?2",
             rusqlite::params![other_task.as_str(), task_id.as_str()]).unwrap();
+        conn.execute(
+            "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/repo.other')",
+            [other_task.as_str()],
+        )
+        .unwrap();
         for (invocation, task_input, wave_input, expected_task, expected_wave) in [
             (None, None, None, None, None),
             (
@@ -1138,7 +1151,7 @@ mod durable_store_tests {
             .lock()
             .unwrap()
             .execute(
-                "UPDATE tasks SET worktree=?2,checkout_machine_id=(SELECT id FROM machines WHERE is_local=1) WHERE id=?1",
+                "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)",
                 rusqlite::params![
                     task.id.as_str(),
                     task.worktree.as_ref().unwrap().to_str().unwrap()
@@ -1383,14 +1396,16 @@ mod durable_store_tests {
         let exclusion = store
             .lock_checkout(task.worktree.as_ref().unwrap())
             .unwrap();
-        let result = store.replace_session_input(session.captured, next.clone());
+        let result = store.replace_session_input(session.captured, next.clone(), None);
         assert!(
             result.is_err(),
             "input changed while its Task checkout was excluded"
         );
         assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
         drop(exclusion);
-        let replaced = store.replace_session_input(session.captured, next).unwrap();
+        let replaced = store
+            .replace_session_input(session.captured, next, None)
+            .unwrap();
         assert_eq!(replaced.task_id.as_ref(), Some(&task_id));
         assert_eq!(replaced.cwd, session.cwd);
         assert_ne!(replaced.captured, session.captured);
@@ -1471,6 +1486,7 @@ mod durable_store_tests {
                 None,
                 Some(&session),
                 task.worktree.as_deref(),
+                None,
             )
             .unwrap();
 
@@ -1497,13 +1513,18 @@ mod durable_store_tests {
         conversation.interactive = true;
         let session = store.create_session(conversation, None).unwrap();
         // The caller already prepared placement when completion arrived.
-        store.conn.lock().unwrap().execute(
-            "UPDATE tasks SET worktree=NULL,planning_completed=1,planning_state='completed' WHERE id=?1",
-            [task_id.as_str()],
-        ).unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute_batch(&format!(
+            "DELETE FROM task_checkouts WHERE task_id='{task_id}';
+             UPDATE tasks SET planning_completed=1,planning_state='completed' WHERE id='{task_id}';"
+        ))
+            .unwrap();
         for _ in 0..2 {
             let bound = store
-                .promote_task(&task_id, None, Some(&placement), Some(&session), None)
+                .promote_task(&task_id, None, Some(&placement), Some(&session), None, None)
                 .unwrap();
             assert!(bound.worktree.is_none());
             assert_eq!(
@@ -1697,6 +1718,7 @@ mod durable_store_tests {
                     artifact_key: Some(crate::session_record::new_artifact_key()),
                     ..first.clone()
                 },
+                None,
             )
             .unwrap();
         assert!(
@@ -1708,7 +1730,8 @@ mod durable_store_tests {
                         provider: Some("changed".into()),
                         model: Some("changed".into()),
                         ..first.clone()
-                    }
+                    },
+                    None
                 )
                 .is_err(),
             "an earlier input cannot become a fresh replacement"
@@ -1757,14 +1780,14 @@ mod durable_store_tests {
                 .unwrap(),
             bound
         );
-        // A late cumulative observation belongs to the old turn, never the new bind.
+        // A late observation belongs to the old turn, never the new bind.
         store
             .record_session_event(
                 "orphan",
                 &"thread".into(),
                 "active",
-                crate::session::SessionEventKind::Usage,
-                &serde_json::json!({"input": 30}),
+                crate::session::SessionEventKind::Completed,
+                &serde_json::json!({"status": "completed"}),
             )
             .unwrap();
         // Attribution freezes when the attached LfProcess sends the request.
@@ -1802,6 +1825,7 @@ mod durable_store_tests {
                     artifact_key: Some(crate::session_record::new_artifact_key()),
                     ..bound.clone()
                 },
+                None,
             )
             .unwrap();
         assert_eq!(future.task_id, Some(task_id.clone()));

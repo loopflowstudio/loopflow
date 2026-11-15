@@ -2,23 +2,27 @@
 //!
 //! A served request has no Process to carry a Task run or a ship, and must not
 //! hold one open. The operation starts the same command a terminal would,
-//! under an execution owner of its own, with `LF_LAUNCH_REPORT=<path>`. The
+//! as a detached lf process of its own, with `LF_LAUNCH_REPORT=<path>`. The
 //! command writes its typed result there once it knows it, as its CLI prints
 //! it with `--json`: when its Graph registers, when it refused, or when there
 //! was nothing to run. The command then goes on without its launcher.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use anyhow::Context;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use super::{Error, ErrorCode, Result};
 use crate::id::LfProcessId;
+use crate::journal::ProcessIdentityEvidence;
 
 const REPORT_ENV: &str = "LF_LAUNCH_REPORT";
+const UNKNOWN_GRACE: Duration = Duration::from_secs(5);
 static REPORT: Mutex<Option<PathBuf>> = Mutex::new(None);
+const CREATION_ENV: &str = "LF_CREATION_REQUEST";
+static CREATION: Mutex<Option<String>> = Mutex::new(None);
 
 /// What a detached operation set going: the `lf` Process that carries it.
 /// `process.get` reads how it is going; `log` is its output.
@@ -78,9 +82,13 @@ pub(crate) fn carry(operation: &str, run: impl Into<String>) -> anyhow::Result<O
     Ok(Some(launched))
 }
 
-/// Take the report path this process's launcher passed. The execution owner
-/// between them passes it on; this process's own children never inherit it.
+/// Take the report path this process's launcher passed. The detached
+/// launch passes it on; this process's own children never inherit it.
 pub fn expect() {
+    if let Ok(id) = std::env::var(CREATION_ENV) {
+        std::env::remove_var(CREATION_ENV);
+        *CREATION.lock().expect("creation request poisoned") = Some(id);
+    }
     if let Some(path) = std::env::var_os(REPORT_ENV) {
         std::env::remove_var(REPORT_ENV);
         *REPORT.lock().expect("report path poisoned") = Some(path.into());
@@ -100,6 +108,19 @@ pub fn report<T: Serialize>(result: std::result::Result<&T, &anyhow::Error>) {
         Err(error) => Ok(Err(Error::written(error))),
     }
     .unwrap_or_else(Err);
+    if let Some(id) = CREATION.lock().expect("creation request poisoned").take() {
+        if let Ok(value) = &result {
+            let saved = (|| -> anyhow::Result<()> {
+                let store = crate::store::read_existing_registry()?
+                    .context("Machine registry is unavailable")?;
+                store.sqlite.record_creation_launch(&id, value)?;
+                Ok(())
+            })();
+            if let Err(error) = saved {
+                tracing::warn!(%error, request_id = %id, "Could not record creation launch");
+            }
+        }
+    }
     if let Err(error) = write(&path, &result) {
         tracing::warn!(path = %path.display(), %error, "Could not report the launched command's result");
     }
@@ -115,9 +136,26 @@ fn write(
     Ok(())
 }
 
-/// Start `lf <args>` in `directory` under its own execution owner and return
-/// the result it reports. No deadline: the owner's exit bounds the wait.
+/// Start `lf <args>` in `directory` as a plain detached process and return
+/// the result it reports. Wait while that process is live, but bound the wait when
+/// its liveness cannot be determined. Giving up never stops or retries the work.
 pub(crate) fn start<T: DeserializeOwned>(directory: &Path, args: &[String]) -> Result<T> {
+    start_reported(directory, args, None)
+}
+
+pub(crate) fn start_creation<T: DeserializeOwned>(
+    directory: &Path,
+    args: &[String],
+    request: &str,
+) -> Result<T> {
+    start_reported(directory, args, Some(request))
+}
+
+fn start_reported<T: DeserializeOwned>(
+    directory: &Path,
+    args: &[String],
+    creation: Option<&str>,
+) -> Result<T> {
     let launched = (|| -> anyhow::Result<_> {
         let path = crate::transport::private_directory()?
             .join(format!("report-{}.json", uuid::Uuid::new_v4()));
@@ -127,34 +165,58 @@ pub(crate) fn start<T: DeserializeOwned>(directory: &Path, args: &[String]) -> R
             .into_owned()];
         argv.extend(args.iter().cloned());
         let report = path.to_string_lossy().into_owned();
-        let owner = crate::os_process::start_lf_session(
-            directory,
-            &argv,
-            &[(REPORT_ENV, report.as_str())],
-            &|_| {},
-        )?;
-        Ok((path, owner))
+        let mut environment = vec![(REPORT_ENV, report.as_str())];
+        if let Some(id) = creation {
+            environment.push((CREATION_ENV, id));
+        }
+        let process =
+            crate::os_process::detached::start_lf(directory, &argv, &environment, &|_| {})?;
+        Ok((path, process))
     })();
-    let (path, owner) = launched.map_err(|error| Error::outcome_unknown(&error))?;
-    let registry = crate::store::read_existing_registry()
+    let (path, process) = launched.map_err(|error| Error::outcome_unknown(&error))?;
+    wait(&path, args, || process_evidence(&process), SystemTime::now)
+}
+
+fn process_evidence(process: &LfProcessId) -> ProcessIdentityEvidence {
+    crate::store::read_existing_registry()
         .ok()
         .flatten()
-        .map(|store| store.sqlite);
+        .map_or(ProcessIdentityEvidence::Unknown, |store| {
+            crate::journal::lf_evidence(&store.sqlite, process)
+        })
+}
+
+fn wait<T: DeserializeOwned>(
+    path: &Path,
+    args: &[String],
+    mut observe: impl FnMut() -> ProcessIdentityEvidence,
+    mut now: impl FnMut() -> SystemTime,
+) -> Result<T> {
+    let mut unknown_since = None;
     loop {
-        if let Some(result) = read(&path)? {
+        if let Some(result) = read(path)? {
             return result;
         }
-        let ended = registry.as_ref().is_some_and(|store| {
-            crate::journal::lf_evidence(store, &owner)
-                == crate::journal::ProcessIdentityEvidence::Dead
-        });
-        if ended {
-            // It may have written just before it exited.
-            return read(&path)?.unwrap_or_else(|| {
+        let reason = match observe() {
+            ProcessIdentityEvidence::Live => {
+                unknown_since = None;
+                None
+            }
+            ProcessIdentityEvidence::Dead => Some("ended without a result"),
+            ProcessIdentityEvidence::Unknown => {
+                let now = now();
+                let since = *unknown_since.get_or_insert(now);
+                (now.duration_since(since).unwrap_or_default() >= UNKNOWN_GRACE)
+                    .then_some("has not reported a result and its liveness could not be determined")
+            }
+        };
+        if let Some(reason) = reason {
+            // It may have written while we checked its liveness.
+            return read(path)?.unwrap_or_else(|| {
                 Err(Error::new(
                     ErrorCode::OutcomeUnknown,
                     format!(
-                        "`lf {}` ended without a result; inspect the affected work before retrying",
+                        "`lf {}` {reason}; inspect the affected work before retrying",
                         args.join(" ")
                     ),
                 ))
@@ -171,9 +233,172 @@ fn read<T: DeserializeOwned>(path: &Path) -> Result<Option<Result<T>>> {
         Err(error) => return Err(Error::outcome_unknown(&error.into())),
     };
     let _ = std::fs::remove_file(path);
-    let reported: std::result::Result<serde_json::Value, Error> =
-        serde_json::from_slice(&bytes).map_err(|error| Error::outcome_unknown(&error.into()))?;
-    Ok(Some(reported.and_then(|value| {
-        serde_json::from_value(value).map_err(|error| Error::outcome_unknown(&error.into()))
-    })))
+    serde_json::from_slice(&bytes)
+        .map(Some)
+        .map_err(|error| Error::outcome_unknown(&error.into()))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, SystemTime};
+
+    use super::{process_evidence, wait, write, UNKNOWN_GRACE};
+    use crate::engine::{Error, ErrorCode};
+    use crate::id::LfProcessId;
+    use crate::journal::{ProcessIdentityEvidence, TestLedgerGuard};
+    use crate::store::sqlite::SqliteStore;
+
+    #[test]
+    fn unknown_liveness_returns_an_uncertain_outcome_after_the_grace() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("report.json");
+        let mut times = [
+            SystemTime::UNIX_EPOCH,
+            SystemTime::UNIX_EPOCH + UNKNOWN_GRACE,
+        ]
+        .into_iter();
+        let error = wait::<String>(
+            &path,
+            &["task".into(), "run".into(), "LOO-804".into()],
+            || ProcessIdentityEvidence::Unknown,
+            || times.next().expect("unknown liveness must stop waiting"),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, ErrorCode::OutcomeUnknown);
+        assert!(error.message.contains("lf task run LOO-804"));
+        assert!(error.message.contains("liveness could not be determined"));
+        assert!(error
+            .message
+            .contains("inspect the affected work before retrying"));
+    }
+
+    #[test]
+    fn live_process_resets_the_unknown_grace_and_can_report_later() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("report.json");
+        let mut observations = [
+            ProcessIdentityEvidence::Unknown,
+            ProcessIdentityEvidence::Live,
+            ProcessIdentityEvidence::Unknown,
+            ProcessIdentityEvidence::Unknown,
+        ]
+        .into_iter();
+        let mut seconds = [0, 10, 14].into_iter();
+        let result: String = wait(
+            &path,
+            &[],
+            || observations.next().unwrap(),
+            || {
+                let second = seconds.next().unwrap();
+                if second == 14 {
+                    write(&path, &Ok(serde_json::json!("started"))).unwrap();
+                }
+                SystemTime::UNIX_EPOCH + Duration::from_secs(second)
+            },
+        )
+        .unwrap();
+        assert_eq!(result, "started");
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn reports_win_over_exit_and_expired_unknown_liveness() {
+        for evidence in [
+            ProcessIdentityEvidence::Dead,
+            ProcessIdentityEvidence::Unknown,
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("report.json");
+            let mut observations = 0;
+            let mut time = SystemTime::UNIX_EPOCH;
+            let result: String = wait(
+                &path,
+                &[],
+                || {
+                    observations += 1;
+                    if evidence == ProcessIdentityEvidence::Dead || observations == 2 {
+                        write(&path, &Ok(serde_json::json!("started"))).unwrap();
+                    }
+                    evidence
+                },
+                || {
+                    time += UNKNOWN_GRACE;
+                    time
+                },
+            )
+            .unwrap();
+            assert_eq!(result, "started");
+            assert!(!path.exists());
+        }
+    }
+
+    #[test]
+    fn a_reported_refusal_returns_without_observing_the_process() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("report.json");
+        let refusal = Error::new(ErrorCode::Conflict, "already running");
+        write(&path, &Err(refusal.clone())).unwrap();
+        let error = wait::<String>(
+            &path,
+            &[],
+            || panic!("the report already answered"),
+            SystemTime::now,
+        )
+        .unwrap_err();
+        assert_eq!(error, refusal);
+    }
+
+    #[test]
+    fn malformed_reports_return_an_uncertain_outcome() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("report.json");
+        for report in ["not json", r#"{"Ok":42}"#] {
+            std::fs::write(&path, report).unwrap();
+            let error = wait::<String>(
+                &path,
+                &[],
+                || panic!("an unreadable report must stop waiting"),
+                SystemTime::now,
+            )
+            .unwrap_err();
+            assert_eq!(error.code, ErrorCode::OutcomeUnknown);
+            assert!(!path.exists());
+        }
+    }
+
+    #[test]
+    fn polling_recovers_when_a_missing_or_unreadable_registry_returns() {
+        for unreadable in [false, true] {
+            let ledger = TestLedgerGuard::new();
+            let database = ledger.home().join("loopflow.db");
+            let path = ledger.home().join("report.json");
+            let process = LfProcessId::new();
+            if unreadable {
+                std::fs::write(&database, "not a database").unwrap();
+            }
+            let mut recovered = false;
+            let error = wait::<String>(
+                &path,
+                &[],
+                || process_evidence(&process),
+                || {
+                    assert!(!recovered, "the next poll must see the finished process");
+                    recovered = true;
+                    if unreadable {
+                        std::fs::remove_file(&database).unwrap();
+                    }
+                    let _store = SqliteStore::open_ephemeral(&database).unwrap();
+                    let connection = rusqlite::Connection::open(&database).unwrap();
+                    connection.execute(
+                        "INSERT INTO processes(id,trace_id,started_at,completed_at) VALUES(?1,?1,1,2)",
+                        [&process],
+                    ).unwrap();
+                    SystemTime::UNIX_EPOCH
+                },
+            )
+            .unwrap_err();
+            assert_eq!(error.code, ErrorCode::OutcomeUnknown);
+            assert!(error.message.contains("ended without a result"));
+        }
+    }
 }

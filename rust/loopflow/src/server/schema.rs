@@ -1,5 +1,5 @@
 //! The JSON Schema of the protocol, generated from the wire types. `lf server
-//! describe` prints it; the fixtures in `tests/fixtures/dto/server/` validate
+//! describe` prints it; the fixtures in `rust/loopflow/tests/fixtures/dto/server/` validate
 //! against it.
 use std::borrow::Cow;
 
@@ -27,7 +27,7 @@ pub fn describe() -> Value {
         "x-revision": REVISION,
         "x-min-revision": MIN_REVISION,
         "oneOf": [client, server],
-        "x-owner-close": {"tag": 5, "payload": close},
+        "x-terminal-close": {"tag": 7, "payload": close},
         "$defs": generator.take_definitions(true),
     });
     add_examples(&mut schema);
@@ -77,47 +77,56 @@ fn add_examples(schema: &mut Value) {
 /// Recorded requests, embedded so `describe` needs no source tree. Each
 /// names its operation; a test fails when a request fixture is missing here.
 const REQUESTS: &[&str] = &[
-    include_str!("../../../../tests/fixtures/dto/server/account_connect.json"),
-    include_str!("../../../../tests/fixtures/dto/server/account_disconnect.json"),
-    include_str!("../../../../tests/fixtures/dto/server/account_list.json"),
-    include_str!("../../../../tests/fixtures/dto/server/account_redeem_reset.json"),
-    include_str!("../../../../tests/fixtures/dto/server/account_next_request.json"),
-    include_str!("../../../../tests/fixtures/dto/server/account_set.json"),
-    include_str!("../../../../tests/fixtures/dto/server/account_use.json"),
-    include_str!("../../../../tests/fixtures/dto/server/account_pause.json"),
-    include_str!("../../../../tests/fixtures/dto/server/account_unpause.json"),
-    include_str!("../../../../tests/fixtures/dto/server/attach.json"),
-    include_str!("../../../../tests/fixtures/dto/server/checkout_commit.json"),
-    include_str!("../../../../tests/fixtures/dto/server/checkout_create.json"),
-    include_str!("../../../../tests/fixtures/dto/server/checkout_sync.json"),
-    include_str!("../../../../tests/fixtures/dto/server/configuration.json"),
-    include_str!("../../../../tests/fixtures/dto/server/graph_run.json"),
-    include_str!("../../../../tests/fixtures/dto/server/pr_abandon.json"),
-    include_str!("../../../../tests/fixtures/dto/server/pr_arm.json"),
-    include_str!("../../../../tests/fixtures/dto/server/pr_checks.json"),
-    include_str!("../../../../tests/fixtures/dto/server/pr_land.json"),
-    include_str!("../../../../tests/fixtures/dto/server/pr_open.json"),
-    include_str!("../../../../tests/fixtures/dto/server/pr_publish.json"),
-    include_str!("../../../../tests/fixtures/dto/server/pr_reconcile.json"),
-    include_str!("../../../../tests/fixtures/dto/server/pr_request_review.json"),
-    include_str!("../../../../tests/fixtures/dto/server/pr_reviews.json"),
-    include_str!("../../../../tests/fixtures/dto/server/pr_submit.json"),
-    include_str!("../../../../tests/fixtures/dto/server/repo_ci.json"),
-    include_str!("../../../../tests/fixtures/dto/server/repo_release.json"),
-    include_str!("../../../../tests/fixtures/dto/server/session_steer.json"),
-    include_str!("../../../../tests/fixtures/dto/server/skill_list.json"),
-    include_str!("../../../../tests/fixtures/dto/server/skill_run.json"),
-    include_str!("../../../../tests/fixtures/dto/server/task_from_session.json"),
-    include_str!("../../../../tests/fixtures/dto/server/task_hold.json"),
-    include_str!("../../../../tests/fixtures/dto/server/task_interrupt.json"),
-    include_str!("../../../../tests/fixtures/dto/server/task_report.json"),
-    include_str!("../../../../tests/fixtures/dto/server/task_run.json"),
-    include_str!("../../../../tests/fixtures/dto/server/task_ship.json"),
-    include_str!("../../../../tests/fixtures/dto/server/task_steer.json"),
-    include_str!("../../../../tests/fixtures/dto/server/view_plan.json"),
-    include_str!("../../../../tests/fixtures/dto/server/wave_plan_bind.json"),
-    include_str!("../../../../tests/fixtures/dto/server/wave_plan_connect.json"),
-    include_str!("../../../../tests/fixtures/dto/server/wave_plan_reteam.json"),
+    include_str!("../../tests/fixtures/dto/server/account_connect.json"),
+    include_str!("../../tests/fixtures/dto/server/account_disconnect.json"),
+    include_str!("../../tests/fixtures/dto/server/account_list.json"),
+    include_str!("../../tests/fixtures/dto/server/account_redeem_reset.json"),
+    include_str!("../../tests/fixtures/dto/server/account_next_request.json"),
+    include_str!("../../tests/fixtures/dto/server/account_set.json"),
+    include_str!("../../tests/fixtures/dto/server/account_use.json"),
+    include_str!("../../tests/fixtures/dto/server/account_pause.json"),
+    include_str!("../../tests/fixtures/dto/server/account_unpause.json"),
+    include_str!("../../tests/fixtures/dto/server/attach.json"),
+    include_str!("../../tests/fixtures/dto/server/session_start.json"),
+    include_str!("../../tests/fixtures/dto/server/checkout_commit.json"),
+    include_str!("../../tests/fixtures/dto/server/checkout_create.json"),
+    include_str!("../../tests/fixtures/dto/server/checkout_sync.json"),
+    include_str!("../../tests/fixtures/dto/server/configuration.json"),
+    include_str!("../../tests/fixtures/dto/server/graph_run.json"),
+    include_str!("../../tests/fixtures/dto/server/pr_abandon.json"),
+    include_str!("../../tests/fixtures/dto/server/pr_arm.json"),
+    include_str!("../../tests/fixtures/dto/server/pr_checks.json"),
+    include_str!("../../tests/fixtures/dto/server/pr_land.json"),
+    include_str!("../../tests/fixtures/dto/server/pr_open.json"),
+    include_str!("../../tests/fixtures/dto/server/pr_publish.json"),
+    include_str!("../../tests/fixtures/dto/server/pr_reconcile.json"),
+    include_str!("../../tests/fixtures/dto/server/pr_request_review.json"),
+    include_str!("../../tests/fixtures/dto/server/pr_reviews.json"),
+    include_str!("../../tests/fixtures/dto/server/pr_submit.json"),
+    include_str!("../../tests/fixtures/dto/server/repo_ci.json"),
+    include_str!("../../tests/fixtures/dto/server/repo_release.json"),
+    include_str!("../../tests/fixtures/dto/server/session_steer.json"),
+    include_str!("../../tests/fixtures/dto/server/session_boundary.json"),
+    include_str!("../../tests/fixtures/dto/server/session_status.json"),
+    include_str!("../../tests/fixtures/dto/server/skill_list.json"),
+    include_str!("../../tests/fixtures/dto/server/skill_run.json"),
+    include_str!("../../tests/fixtures/dto/server/task_from_session.json"),
+    include_str!("../../tests/fixtures/dto/server/task_hold.json"),
+    include_str!("../../tests/fixtures/dto/server/task_interrupt.json"),
+    include_str!("../../tests/fixtures/dto/server/task_report.json"),
+    include_str!("../../tests/fixtures/dto/server/task_run.json"),
+    include_str!("../../tests/fixtures/dto/server/task_ship.json"),
+    include_str!("../../tests/fixtures/dto/server/task_steer.json"),
+    include_str!("../../tests/fixtures/dto/server/view_plan.json"),
+    include_str!("../../tests/fixtures/dto/server/wave_plan_bind.json"),
+    include_str!("../../tests/fixtures/dto/server/wave_plan_connect.json"),
+    include_str!("../../tests/fixtures/dto/server/wave_plan_reteam.json"),
+    include_str!("../../tests/fixtures/dto/server/configure_remote.json"),
+    include_str!("../../tests/fixtures/dto/server/mobile_status_request.json"),
+    include_str!("../../tests/fixtures/dto/server/session_page.json"),
+    include_str!("../../tests/fixtures/dto/server/session_continue.json"),
+    include_str!("../../tests/fixtures/dto/server/task_create.json"),
+    include_str!("../../tests/fixtures/dto/server/upload.json"),
 ];
 
 /// Recorded answers and the operation each answers. A new `response`
@@ -126,132 +135,157 @@ const RESPONSES: &[(&str, &str, &str)] = &[
     (
         "account",
         "account.disconnect",
-        include_str!("../../../../tests/fixtures/dto/server/account.json"),
+        include_str!("../../tests/fixtures/dto/server/account.json"),
     ),
     (
         "account_redeemed",
         "account.redeem_reset",
-        include_str!("../../../../tests/fixtures/dto/server/account_redeemed.json"),
+        include_str!("../../tests/fixtures/dto/server/account_redeemed.json"),
     ),
     (
         "account_report",
         "account.list",
-        include_str!("../../../../tests/fixtures/dto/server/account_report.json"),
+        include_str!("../../tests/fixtures/dto/server/account_report.json"),
     ),
     (
         "account_next",
         "account.next",
-        include_str!("../../../../tests/fixtures/dto/server/account_next.json"),
+        include_str!("../../tests/fixtures/dto/server/account_next.json"),
     ),
     (
         "checkout_committed",
         "checkout.commit",
-        include_str!("../../../../tests/fixtures/dto/server/checkout_committed.json"),
+        include_str!("../../tests/fixtures/dto/server/checkout_committed.json"),
     ),
     (
         "checkout_created",
         "checkout.create",
-        include_str!("../../../../tests/fixtures/dto/server/checkout_created.json"),
+        include_str!("../../tests/fixtures/dto/server/checkout_created.json"),
     ),
     (
         "checkout_sync_planned",
         "checkout.sync",
-        include_str!("../../../../tests/fixtures/dto/server/checkout_sync_planned.json"),
+        include_str!("../../tests/fixtures/dto/server/checkout_sync_planned.json"),
     ),
     (
         "checkout_syncing",
         "checkout.sync",
-        include_str!("../../../../tests/fixtures/dto/server/checkout_syncing.json"),
+        include_str!("../../tests/fixtures/dto/server/checkout_syncing.json"),
     ),
     (
         "launched",
         "repo.release",
-        include_str!("../../../../tests/fixtures/dto/server/launched.json"),
+        include_str!("../../tests/fixtures/dto/server/launched.json"),
     ),
     (
         "attached",
         "session.attach",
-        include_str!("../../../../tests/fixtures/dto/server/attached.json"),
+        include_str!("../../tests/fixtures/dto/server/attached.json"),
+    ),
+    (
+        "session_started",
+        "session.start",
+        include_str!("../../tests/fixtures/dto/server/session_started.json"),
     ),
     (
         "pr_abandoned",
         "pr.abandon",
-        include_str!("../../../../tests/fixtures/dto/server/pr_abandoned.json"),
+        include_str!("../../tests/fixtures/dto/server/pr_abandoned.json"),
     ),
     (
         "pr_checks_report",
         "pr.checks",
-        include_str!("../../../../tests/fixtures/dto/server/pr_checks_report.json"),
+        include_str!("../../tests/fixtures/dto/server/pr_checks_report.json"),
     ),
     (
         "pr_delivery_check",
         "pr.reconcile",
-        include_str!("../../../../tests/fixtures/dto/server/pr_delivery_check.json"),
+        include_str!("../../tests/fixtures/dto/server/pr_delivery_check.json"),
     ),
     (
         "pr_prepared",
         "pr.submit",
-        include_str!("../../../../tests/fixtures/dto/server/pr_prepared.json"),
+        include_str!("../../tests/fixtures/dto/server/pr_prepared.json"),
     ),
     (
         "pr_published",
         "pr.publish",
-        include_str!("../../../../tests/fixtures/dto/server/pr_published.json"),
+        include_str!("../../tests/fixtures/dto/server/pr_published.json"),
     ),
     (
         "pr_review_requested",
         "pr.request_review",
-        include_str!("../../../../tests/fixtures/dto/server/pr_review_requested.json"),
+        include_str!("../../tests/fixtures/dto/server/pr_review_requested.json"),
     ),
     (
         "pr_reviews_report",
         "pr.reviews",
-        include_str!("../../../../tests/fixtures/dto/server/pr_reviews_report.json"),
+        include_str!("../../tests/fixtures/dto/server/pr_reviews_report.json"),
     ),
     (
         "repo_ci_report",
         "repo.ci",
-        include_str!("../../../../tests/fixtures/dto/server/repo_ci_report.json"),
+        include_str!("../../tests/fixtures/dto/server/repo_ci_report.json"),
     ),
     (
         "response",
         "session.rename",
-        include_str!("../../../../tests/fixtures/dto/server/response.json"),
+        include_str!("../../tests/fixtures/dto/server/response.json"),
+    ),
+    (
+        "session_boundary_answer",
+        "session.boundary",
+        include_str!("../../tests/fixtures/dto/server/session_boundary_answer.json"),
     ),
     (
         "session_steered",
         "session.steer",
-        include_str!("../../../../tests/fixtures/dto/server/session_steered.json"),
+        include_str!("../../tests/fixtures/dto/server/session_steered.json"),
     ),
     (
         "skill_entries",
         "skill.list",
-        include_str!("../../../../tests/fixtures/dto/server/skill_entries.json"),
+        include_str!("../../tests/fixtures/dto/server/skill_entries.json"),
     ),
     (
         "task_held",
         "task.hold",
-        include_str!("../../../../tests/fixtures/dto/server/task_held.json"),
+        include_str!("../../tests/fixtures/dto/server/task_held.json"),
     ),
     (
         "task_running",
         "task.run",
-        include_str!("../../../../tests/fixtures/dto/server/task_running.json"),
+        include_str!("../../tests/fixtures/dto/server/task_running.json"),
     ),
     (
         "task_shipping",
         "task.ship",
-        include_str!("../../../../tests/fixtures/dto/server/task_shipping.json"),
+        include_str!("../../tests/fixtures/dto/server/task_shipping.json"),
     ),
     (
         "wave_plan_connected",
         "wave.plan.connect",
-        include_str!("../../../../tests/fixtures/dto/server/wave_plan_connected.json"),
+        include_str!("../../tests/fixtures/dto/server/wave_plan_connected.json"),
     ),
     (
         "wave_plan_reteamed",
         "wave.plan.reteam",
-        include_str!("../../../../tests/fixtures/dto/server/wave_plan_reteamed.json"),
+        include_str!("../../tests/fixtures/dto/server/wave_plan_reteamed.json"),
+    ),
+    (
+        "ticket_reply",
+        "request.upload",
+        include_str!("../../tests/fixtures/dto/server/ticket_reply.json"),
+    ),
+    (
+        "mobile_status",
+        "mobile.status",
+        include_str!("../../tests/fixtures/dto/server/mobile_status.json"),
+    ),
+    (
+        "remote",
+        "mobile.configure",
+        include_str!("../../tests/fixtures/dto/server/remote.json"),
     ),
 ];
 
@@ -276,7 +310,7 @@ pub fn summary() -> String {
         n => format!("{n} {many}"),
     };
     format!(
-        "Server protocol revision {REVISION} (oldest {MIN_REVISION}): {}, {}, {}. `--json` prints its JSON Schema. Owner close (0x05): {reasons}.",
+        "Server protocol revision {REVISION} (oldest {MIN_REVISION}): {}, {}, {}. `--json` prints its JSON Schema. Terminal close (0x07): {reasons}.",
         counted("Read", "read", "reads"),
         counted("Write", "write", "writes"),
         counted("ServerOperation", "server operation", "server operations"),
@@ -329,7 +363,7 @@ mod tests {
     }
 
     fn fixtures() -> BTreeMap<String, Value> {
-        std::fs::read_dir(fixtures_root().join("server"))
+        std::fs::read_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dto/server"))
             .unwrap()
             .map(|entry| {
                 let path = entry.unwrap().path();
@@ -457,7 +491,7 @@ mod tests {
         let operations = operations(&describe());
         let wire = |value: Value| value["kind"].as_str().unwrap().to_owned();
         for kind in [
-            wire(serde_json::to_value(Read::Doctor).unwrap()),
+            wire(serde_json::to_value(Read::MachineDoctor).unwrap()),
             wire(
                 serde_json::to_value(Write::TaskComplete {
                     directory: "/".into(),
@@ -480,10 +514,10 @@ mod tests {
     }
 
     #[test]
-    fn owner_close_schema_describes_every_reason_and_requires_one() {
+    fn terminal_close_schema_describes_every_reason_and_requires_one() {
         let schema = describe();
-        assert_eq!(schema["x-owner-close"]["tag"], 5);
-        let validator = validator(&schema, &schema["x-owner-close"]["payload"]);
+        assert_eq!(schema["x-terminal-close"]["tag"], 7);
+        let validator = validator(&schema, &schema["x-terminal-close"]["payload"]);
         for reason in ["replaced", "finished", "retired"] {
             let close = serde_json::json!({"reason":reason});
             assert!(validator.is_valid(&close));

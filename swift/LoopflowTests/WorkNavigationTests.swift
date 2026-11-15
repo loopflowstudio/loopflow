@@ -1,6 +1,7 @@
 #if os(macOS)
 import AppKit
 import Foundation
+import Observation
 import SwiftUI
 import Testing
 import ViewInspector
@@ -745,6 +746,17 @@ struct WorkNavigationTests {
         await model.refresh()
         model.select(.task(id: "issue-review"))
         let owner = model.navigation
+        func waitForAttempt() async {
+            while owner.startingTaskSessions.contains("issue-review") {
+                await withCheckedContinuation { (completion: CheckedContinuation<Void, Never>) in
+                    withObservationTracking {
+                        _ = owner.startingTaskSessions
+                    } onChange: {
+                        completion.resume()
+                    }
+                }
+            }
+        }
         let gate = PlanningGate()
         let view = WorkSurfaceView(model: model, onNewSession: { _ in
             await gate.wait()
@@ -758,10 +770,7 @@ struct WorkNavigationTests {
         model.setRepoPath("/src/context")
         let other = model.navigation
         await gate.release()
-        let deadline = Date().addingTimeInterval(3)
-        while owner.startingTaskSessions.contains("issue-review"), Date() < deadline {
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        await waitForAttempt()
         #expect(owner.startingTaskSessions.isEmpty)
         #expect(other.taskSessionErrors.isEmpty)
         model.setRepoPath("/src/loopflow")
@@ -780,9 +789,7 @@ struct WorkNavigationTests {
         #expect(throws: (any Error).self) {
             try retry.inspect().find(text: "Preparation failed for the original Task")
         }
-        while owner.startingTaskSessions.contains("issue-review"), Date() < deadline {
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        await waitForAttempt()
         #expect(owner.taskSessionErrors.isEmpty)
         #expect(owner.startingTaskSessions.isEmpty)
     }

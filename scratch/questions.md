@@ -22,3 +22,5 @@
 - 2026-11-14 build: Jack: "yeah lets build it with (b)" — B review stream with A's side-by-side and file focus; moved code collapsed with expand. Recorded in the design under "Build direction — November 14".
 
 - 2026-11-14 implement assumptions: next/previous change is `]`/`[` (Files pane focused) plus toolbar arrows; ⌥⌘arrows stay pane focus. **Ask in conversation** types a one-line `path:Lx-y (side, revision)` reference without the code, because terminal input can't carry a newline without submitting. Side by side falls back to unified under 640 pt. Moves are detected only between a pure removal and a pure addition in one file.
+
+- 2026-11-14 tree assumptions: tree files open in Read (Diff is one picker away); badges are `M` changed, `R` renamed, `U` untracked, `•` folder holding changes, since `lf task changes` carries no added/deleted kind; ↓ from the search field moves into the tree; search stays over loaded entries plus changed paths (no server search).

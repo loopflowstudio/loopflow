@@ -1,7 +1,6 @@
 # LOO-515 · Task details beside the conversation
 
-November 14 research update: Jack requested a fresh comparison after syncing main.
-Read `scratch/task-details-research.md` before choosing or implementing this draft.
+Research: `scratch/task-details-research.md`.
 The Changes build direction is in "Build direction — November 14" below.
 
 Status: Changes/Brief built November 14 (see Implementation status); October
@@ -41,20 +40,14 @@ Built (one PR, Swift + one Rust routing line):
 - **Files**: document row and location line (Machine · checkout/dir) only on this page; ⌘P works from every page. Parent SHA and saved versions moved to Changes.
 - Deleted: `TaskPullRequestView`, `GitHubPullRequestFile`, `PullRequestStore.loadFiles` and its state, `publishedDiffDisclosesMissing…` test, stale README tree paragraph.
 
+- **Files tree** (`CheckoutTree`, `TaskFilesStore.tree`): checkout from `lf task files` through a new served read `task.files` (Rust `Read::TaskFiles`, Swift `ServedRead.taskFiles`, `RegistryQuery.taskFiles`); a remote Task's reads carry `--machine` and no cwd. Folders read when opened, pages of 500 with Load more; M/R/U badges and `•` on holding folders; ↑/↓/→/←/Return; search over scratch, loaded entries and changed paths; a failed read shows under its folder with Retry; a write re-reads the loaded folders holding it (as many pages as were loaded). Tree, selection and scroll live on the store, retained per Task workspace. The navigator's `Changed files` section and `showsChanges`/`changedPaths` are deleted.
+
 Remaining:
 
-- Files checkout tree via `lf task files` (restore `RegistryQuery.taskFiles`, `TaskDirectory` DTO + `tests/fixtures/dto/task_files.json` from `db5736d11^`), lazy pages of 500, keyboard ↑/↓/→/←, change badges; then delete the navigator's `Changed files` section.
 - Moves inside mixed change runs; shortcut for Ask (none yet).
-- Demo on a real Task: long brief, no-PR Task, offline `gh`, large patch performance of the LazyVStack stream.
+- Demo on a real Task: long brief, no-PR Task, offline `gh`, large patch performance of the LazyVStack stream, a `node_modules`-scale folder.
 
-Checks: `scripts/test_desktop.sh --filter 'TaskFilesTests|ReviewDiffTests|TaskBriefTests|PullRequestTests|DesktopPaneControlTests|DTOFixtureTests'` → 122 passed. (re-run after compress, 122 passed). `cargo test -p loopflow --lib lf::commands::desktop::` → 15 passed; `--test integration dto_fixtures::desktop` → 4 passed; `documented_commands::` → 4 passed. Gate: golden/clippy not run (Swift-only plus one match arm).
-
-## Problem (October)
-
-Brief, PR and file views had no identity or hierarchy, a PR view gated on a
-GitHub URL with stale-looking freshness and a second GitHub patch renderer, and
-a navigator that could not browse the checkout. The first three are addressed
-above; the checkout tree remains (git `db5736d11^` for the deleted wrapper).
+Checks: `scripts/test_desktop.sh --filter 'TaskFilesTests|ReviewDiffTests|TaskBriefTests|PullRequestTests|DesktopPaneControlTests|DTOFixtureTests|WorkDestinationTests|DesktopPerformanceFixtureTests|RegistryQueryTests'` → 222 run; after one test fix `TaskFilesTests` 33 passed; `ServerProtocolTests` 20 passed. `cargo nextest -p loopflow --lib 'test(server::schema::tests::) | test(lf::commands::read::)'` → 11 passed (schema fixture regenerated). Gate: clippy, `documented_commands::` (README edits), golden not run.
 
 ## Demo
 
@@ -64,11 +57,11 @@ In a Task workspace with the conversation on the left and Files on the right:
    line (`Moving · kickoff running · PR none`), an outline of the brief's
    headings/Acceptance, and related Tasks `LOO-489 LOO-497 LOO-416 LOO-402` as
    chips that open those Tasks in-app. Scroll halfway down.
-2. ⌥⌘2. **Changes** shows the PR card (`Open #1762 · 3 passed · 1 pending ·
-   read 20 s ago`, `Review required`, `Open on GitHub ↗`) above the Task's
-   changed files with +/− counts. Click `TaskFilesView.swift` → its Diff opens
-   in **Files** with the location breadcrumb `this Mac · loopflow.loo-515…/
-   swift/LoopflowMac/Views`.
+2. ⌥⌘2. **Changes** shows the delivery card (`No pull request yet` here;
+   `Open #… · checks · read 20 s ago · Open on GitHub ↗` once published)
+   above the review stream. `]` steps change by change across files; toggle
+   Side by side; expand a collapsed move; select lines → Ask in conversation
+   puts `path:Lx-y (side, revision)` in the terminal unsent.
 3. ⌥⌘3, expand `rust/loopflow/src/ops/task/` in the tree, open `directory.rs`.
 4. Click the conversation, ask "why is PAGE_SIZE 500?", read the answer.
 5. Switch to another Task with Cmd-2 and back with Cmd-1: Files, the tree's
@@ -93,7 +86,8 @@ change and every 60 s only while Changes is visible.
 - **Navigator** = filter field, pinned `scratch` group (agent pages, unchanged
   follow behavior), then the checkout **tree** from `lf task files <issue>
   <dir> --json` (restore `RegistryQuery.taskFiles` + `TaskDirectory` DTO).
-  Directories load lazily on expand, 500 entries per page with `Load more`.
+  Directories load lazily on expand, 500 entries per page; `Load more` passes
+  `next_cursor`.
   Changed paths get a change badge from the existing `changes` snapshot.
   Keyboard: ↑/↓ move, →/← expand/collapse, Return opens, ⌘P toggles, Esc
   dismisses dropdown. Filter matches loaded names plus scratch/changed paths
@@ -111,12 +105,11 @@ change and every 60 s only while Changes is visible.
 ## Risk findings
 
 - `lf task files` works today (`lf task files LOO-515 . --json` returns sorted
-  entries) and is in the remote-routable set (`lf.rs:2729`,
-  `lf/commands/ssh.rs:44`), so remote Tasks browse through their Machine. No
-  Rust change required.
-- Its DTO fixture was removed with the Swift wrapper; restoring the Swift DTO
-  re-adds `tests/fixtures/dto/task_files.json` (git: `db5736d11^`) and the
-  Rust/Swift fixture tests per the DTO rule.
+  entries, 500 per page with `next_cursor`) and is in the remote-routable set,
+  so remote Tasks browse through their Machine. Desktop reads are served, so it
+  gained a `task.files` served read (November 14); nothing else in Rust.
+- #1719 (`db5736d11`) deleted only the Swift wrapper; the `TaskDirectory` DTO
+  and its fixture section survived, so no DTO change is needed.
 - `RoadmapTask` has no dependency relations; detection over description text
   is the only source without a new Linear read. Accepted as the scope here.
 - Page and scroll are not in the persisted `WorkBrowserTab.files` intent;
@@ -134,8 +127,8 @@ Separate Brief/PR panes (violates LOO-497's one Files tool), PR as its own page
 ## Delete — do not maintain
 
 Done: `TaskPullRequestView`, `GitHubPullRequestFile`, `PullRequestStore` file
-state, the published-diff test, the mixed page/tab strip, the navigator footer.
-Pending with the tree: the navigator's `Changed files` section.
+state, the published-diff test, the mixed page/tab strip, the navigator footer,
+the navigator's `Changed files` section (`showsChanges`, `changedPaths`).
 
 ## Forbidden outcomes
 
@@ -158,7 +151,7 @@ Pending with the tree: the navigator's `Changed files` section.
 
 ## Internal slices (one PR)
 
-1–3 and 5 done (delete, header/Brief, Changes, README). 4 remains: Files tree.
+1–5 done (delete, header/Brief, Changes, Files tree, README).
 
 ## Done when
 
@@ -183,13 +176,10 @@ Pending with the tree: the navigator's `Changed files` section.
     appends, failed directory read is local to that node; page/tree/scroll
     state survives `SessionWorkspace` Task switch; remote store never issues a
     local path read.
-  - `TaskDetailsTests` (new): PR card state for each of none/publishing/
-    unavailable/stale/open/merged/abandoned fixtures; merged + open Task shows
-    `Task still open`; related-Task detection over the LOO-515 brief yields
-    LOO-489/497/416/402; outline from headings and `Acceptance:`.
-  - DTO round-trip for restored `tests/fixtures/dto/task_files.json` in Rust
-    and Swift.
+  - Exist: `PullRequestTests.deliveryDistinguishesEveryStateWithDistinctText`
+    (all delivery states, `Task still open`), `TaskBriefTests` (related Tasks,
+    outline), `ReviewDiffTests` (stream, cross-file next/previous, word
+    emphasis, moves, selection reference).
 - Demo/review (Jack): the six-step loop above on a real Task, including a
   no-PR Task and offline `gh`.
 
-Check result: not yet run (design only).

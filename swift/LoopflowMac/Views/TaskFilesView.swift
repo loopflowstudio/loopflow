@@ -19,6 +19,8 @@ struct TaskFilesView: View {
     var addToConversation: ((String) -> Void)? = nil
     @Environment(\.palette) private var palette
     @FocusState private var navigatorFocused: Bool
+    @FocusState private var treeFocused: Bool
+    @State private var treePosition = ScrollPosition()
 
     private var diffIdentity: String {
         "\(store.selection ?? "")|\(store.changes?.baseCommit ?? "")|\(store.selectedDocument?.editVersion ?? 0)|\(store.mode)"
@@ -189,14 +191,20 @@ struct TaskFilesView: View {
         VStack(spacing: 0) {
             HStack {
                 Image(systemName: "magnifyingglass").foregroundStyle(palette.textSecondary)
-                TextField("Find in scratch and changes", text: $store.search)
+                TextField("Find in scratch and opened folders", text: $store.search)
                     .textFieldStyle(.plain).focused($navigatorFocused)
                     .accessibilityIdentifier("files-search")
                     .onSubmit {
-                        let paths = store.scratchPaths + store.changedPaths
-                        if let path = paths.first {
-                            selectFile(path, mode: store.scratchPaths.contains(path) ? .read : .diff)
+                        if let path = store.scratchPaths.first {
+                            selectFile(path, mode: .read)
+                        } else if let entry = store.treeRows.compactMap(\.entry).first(where: { $0.kind != .directory }) {
+                            selectFile(entry.path, mode: .read)
                         }
+                    }
+                    .onKeyPress(.downArrow) {
+                        treeFocused = true
+                        Task { await store.moveTree(.down) }
+                        return .handled
                     }
                 Button { store.togglePinnedNavigator() } label: {
                     Image(systemName: store.navigator == .pinned ? "pin.slash" : "pin")
@@ -206,34 +214,112 @@ struct TaskFilesView: View {
                 .accessibilityIdentifier("files-pin-navigator")
             }.padding(10)
             Divider()
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 4) {
-                    sectionHeader("scratch", expanded: $store.showsScratch)
-                    if store.showsScratch {
-                        ForEach(store.scratchPaths, id: \.self) { path in
-                            row(path, label: String(path.dropFirst("scratch/".count)), mode: .read)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 2) {
+                        sectionHeader("scratch", expanded: $store.showsScratch)
+                        if store.showsScratch {
+                            ForEach(store.scratchPaths, id: \.self) { path in
+                                row(path, label: String(path.dropFirst("scratch/".count)), mode: .read)
+                            }
+                            if store.changes?.scratchTruncated == true {
+                                Text("Scratch list truncated").font(.caption).foregroundStyle(palette.textSecondary)
+                            }
                         }
-                        if store.changes?.scratchTruncated == true {
-                            Text("Scratch list truncated").font(.caption).foregroundStyle(palette.textSecondary)
+                        Text(URL(fileURLWithPath: store.cwd).lastPathComponent)
+                            .font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
+                            .padding(.top, 12).padding(.bottom, 2)
+                            .help(store.cwd)
+                        let badges = store.changeBadges
+                        ForEach(store.treeRows) { row in treeRow(row, badges: badges) }
+                        if let reason = store.changesError {
+                            Text(reason).font(.caption).foregroundStyle(palette.warning)
+                        } else if !store.search.isEmpty, store.scratchPaths.isEmpty, store.treeRows.isEmpty {
+                            Text("No matching files").font(.caption).foregroundStyle(palette.textSecondary)
                         }
+                    }.padding(10)
+                }
+                .scrollPosition($treePosition)
+                .onScrollGeometryChange(for: CGPoint.self, of: \.contentOffset) { _, offset in store.treeOffset = offset }
+                .focusable().focused($treeFocused).focusEffectDisabled()
+                .onKeyPress(keys: [.upArrow, .downArrow, .leftArrow, .rightArrow, .return]) { press in
+                    let move: TaskFilesStore.TreeMove = switch press.key {
+                    case .upArrow: .up
+                    case .downArrow: .down
+                    case .leftArrow: .collapse
+                    case .rightArrow: .expand
+                    default: .open
                     }
-                    sectionHeader("Changed files", expanded: $store.showsChanges).padding(.top, 12)
-                    if store.showsChanges {
-                        ForEach(store.changedPaths, id: \.self) { path in row(path, label: path, mode: .diff) }
+                    Task {
+                        let wasDropdown = store.navigator == .dropdown
+                        await store.moveTree(move)
+                        if move == .open, wasDropdown, store.navigator == .closed { dismissNavigator() }
+                        if let selection = store.tree.selection { proxy.scrollTo("entry:\(selection)") }
                     }
-                    if store.isRefreshingChanges, store.changes == nil { ProgressView().controlSize(.small) }
-                    if let reason = store.changesError {
-                        Text(reason).font(.caption).foregroundStyle(palette.warning)
-                    } else if store.changes != nil, store.scratchPaths.isEmpty, store.changedPaths.isEmpty {
-                        Text(store.search.isEmpty ? "No scratch or changed files" : "No matching files")
-                            .font(.caption).foregroundStyle(palette.textSecondary)
-                    }
-                }.padding(10)
+                    return .handled
+                }
             }
+            .accessibilityIdentifier("files-tree")
         }
         .background(palette.surfaceMuted)
-        .onAppear { if store.navigator == .dropdown { navigatorFocused = true } }
+        .task { await store.openTree() }
+        .onAppear {
+            treePosition.scrollTo(point: store.treeOffset)
+            if store.navigator == .dropdown { navigatorFocused = true }
+        }
         .onExitCommand { dismissNavigator() }
+    }
+
+    @ViewBuilder private func treeRow(_ row: CheckoutTree.Row, badges: [String: CheckoutChange]) -> some View {
+        let indent = CGFloat(row.depth) * 12
+        switch row {
+        case .entry(let entry, _):
+            let label = store.search.isEmpty ? (entry.path as NSString).lastPathComponent : entry.path
+            Button {
+                if entry.kind == .directory {
+                    Task { await store.setDirectory(entry.path, expanded: !store.tree.isExpanded(entry.path)) }
+                } else {
+                    store.tree.selection = entry.path
+                    selectFile(entry.path, mode: .read)
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: entry.kind == .directory
+                          ? (store.tree.isExpanded(entry.path) ? "chevron.down" : "chevron.right")
+                          : entry.kind == .symlink ? "arrow.turn.up.right" : "doc")
+                        .font(.system(size: 9, weight: .semibold)).frame(width: 10)
+                        .foregroundStyle(palette.textSecondary)
+                    Text(label)
+                        .font(.system(size: 11, design: .monospaced)).lineLimit(1).truncationMode(.middle)
+                    if store.documents[entry.path]?.dirty == true { Text("•").help("Unsaved draft") }
+                    Spacer(minLength: 4)
+                    if let badge = badges[entry.path] {
+                        Text(badge.rawValue).font(Typography.code(10))
+                            .foregroundStyle(badge == .untracked ? palette.successTone.ink : palette.actionInk)
+                            .help(badge.help)
+                    }
+                }
+                .padding(.leading, indent + 2).padding(.trailing, 4).padding(.vertical, 2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .workSelection(store.tree.selection == entry.path || store.selection == entry.path)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).help(entry.path)
+            .accessibilityLabel(entry.path)
+            .accessibilityValue(entry.kind == .directory ? (store.tree.isExpanded(entry.path) ? "Expanded" : "Collapsed") : "")
+        case .loading(_, _):
+            ProgressView().controlSize(.mini).padding(.leading, indent + 16)
+        case .more(let directory, _):
+            Button("Load more") { Task { await store.readDirectory(directory, more: true) } }
+                .buttonStyle(.link).font(.caption).padding(.leading, indent + 16)
+                .accessibilityIdentifier("files-load-more")
+        case .failed(let directory, let reason, _):
+            HStack(spacing: 6) {
+                Text(reason).font(.caption).foregroundStyle(palette.warning).lineLimit(2)
+                Button("Retry") { Task { await store.retryDirectory(directory) } }
+                    .buttonStyle(.link).font(.caption)
+            }.padding(.leading, indent + 16)
+        }
     }
 
     private var navigationBar: some View {

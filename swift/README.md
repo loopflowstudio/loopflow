@@ -287,9 +287,14 @@ conversation's unsent input. **Side by side** needs a pane at least 640 pt wide.
 
 **Files** holds open documents and their Read, Edit and Diff controls, with the
 Machine, checkout and directory of the selection under them. Files starts with
-its chooser closed. Click the file-browser toggle or press Command-P to search
-**scratch** and files changed from the branch's recorded parent commit.
-Selection closes the dropdown; pin it to keep the list alongside the document
+its chooser closed. Click the file-browser toggle or press Command-P for
+**scratch** and the Task's checkout tree, read from the Task's Machine as you
+open folders, 500 entries at a time (**Load more** for the rest). `M`, `R` and
+`U` mark files changed from the branch's recorded parent commit; `•` marks the
+folders holding them. ↑/↓ move, → opens a folder, ← closes it, Return opens the
+file. Search matches scratch, the folders you have opened and changed files. A
+folder that can't be read says why under it, with **Retry**. Expanded folders
+and scroll stay put across page and Task switches. Selection closes the dropdown; pin it to keep the list alongside the document
 (Control-Command-B). Escape dismisses the dropdown. Sidebar selection switches
 the whole Task workspace; selections inside a Task can focus its companion.
 Resizing or closing the browser is remembered while the window stays open;

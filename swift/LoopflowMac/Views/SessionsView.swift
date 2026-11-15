@@ -877,7 +877,6 @@ final class SessionsWorkspaceRegistry {
         let content = PaneContent.browser(taskId: destination.task.id, tabs: [.files], selected: BrowserTab.files.id,
             location: identity, execution: destination.location)
         let files = try workspace.files(for: content, task: destination.task, query: query)
-        files.showsChanges = true
         files.page = .files
         workspace.multiplexer.showBrowser(.files, location: identity, execution: destination.location,
             focus: workspace.multiplexer.pane(forSessionId: destination.record.id) != nil)

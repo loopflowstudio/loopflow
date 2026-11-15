@@ -1117,7 +1117,7 @@ struct WorkDestinationTests {
         #expect(workspace.multiplexer.focusedPane.content.selectedBrowserTab == .files)
         #expect(workspace.multiplexer.focusedPane.content.location == identity)
         #expect(files.selection == "retained-draft.rs")
-        #expect(files.showsChanges)
+        #expect(files.page == .files)
         let failure = TaskLink(issue: task.task.identifier, repo: wave.wave.repo, session: "missing", diff: true)
         await model.openTaskLink(failure)
         #expect(model.taskOpening?.status == .failed)

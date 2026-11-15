@@ -180,7 +180,7 @@ struct TaskFilesTests {
         await store.refresh()
         #expect(store.navigator == .closed)
         #expect(store.scratchPaths == ["scratch/notes.md"])
-        #expect(store.changedPaths == ["new.txt"])
+        #expect(store.changes?.files.map(\.path) == ["new.txt"])
         store.autosave = false
         let document = store.document("scratch/notes.md")
         await document.reconcile(snapshot("original"))
@@ -188,7 +188,7 @@ struct TaskFilesTests {
         store.toggleNavigator()
         store.search = "NOTES"
         #expect(store.scratchPaths == ["scratch/notes.md"])
-        #expect(store.changedPaths.isEmpty)
+        #expect(store.treeRows.isEmpty)
         store.selectFile("scratch/notes.md", mode: .edit)
         #expect(store.navigator == .closed)
         #expect(store.selectedDocument === document)
@@ -196,7 +196,8 @@ struct TaskFilesTests {
         store.togglePinnedNavigator()
         store.search = "new"
         #expect(store.scratchPaths.isEmpty)
-        #expect(store.changedPaths == ["new.txt"])
+        // A search reaches changed files even in folders never opened.
+        #expect(store.treeRows.compactMap(\.entry?.path) == ["new.txt"])
         store.selectFile("new.txt", mode: .diff)
         #expect(store.navigator == .pinned)
         store.dismissNavigator()
@@ -412,7 +413,6 @@ struct TaskFilesTests {
         store.autosave = false
         store.selection = "note.txt"
         store.observeFiles()
-        store.showsChanges = true
         await store.refresh()
         #expect(store.changesError == "Task has no active PR")
         #expect(store.error == nil)
@@ -453,6 +453,180 @@ struct TaskFilesTests {
         try await eventually { document.external?.state == .missing }
         #expect(document.text == "draftrecreated\n")
         #expect(!document.canSave)
+    }
+
+    // MARK: Checkout tree
+
+    /// `lf task files` over a fixed checkout; `failing` directories throw until cleared.
+    private final class CheckoutFixture: @unchecked Sendable {
+        let lock = OSAllocatedUnfairLock(initialState: (reads: [[String]], cwds: [String?], failing: Set<String>)(([], [], [])))
+        let pages: [String: [(entries: [(String, String)], next: String?)]]
+
+        init(_ pages: [String: [(entries: [(String, String)], next: String?)]]) { self.pages = pages }
+
+        var reads: [[String]] { lock.withLock { $0.reads } }
+        func fail(_ directory: String, _ failing: Bool) {
+            lock.withLock { if failing { $0.failing.insert(directory) } else { $0.failing.remove(directory) } }
+        }
+
+        func read(_ args: [String], cwd: String?) throws -> String {
+            lock.withLock { $0.reads.append(args); $0.cwds.append(cwd) }
+            let tail = Array(args.drop { $0 != "task" })
+            guard tail.count >= 4, tail[1] == "files" else { throw RegistryQueryError("Only task files expected") }
+            let directory = tail[3] == "." ? "" : tail[3]
+            if lock.withLock({ $0.failing.contains(directory) }) { throw RegistryQueryError("Permission denied: \(directory)") }
+            let cursor = tail.firstIndex(of: "--cursor").map { tail[$0 + 1] }
+            let index = cursor.map { Int($0.dropFirst("page".count))! } ?? 0
+            let page = pages[directory]![index]
+            let value: [String: Any] = ["path": directory,
+                "entries": page.entries.map { ["path": $0.0, "kind": $0.1] },
+                "next_cursor": page.next as Any? ?? NSNull()]
+            return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
+        }
+    }
+
+    private static let checkout: [String: [(entries: [(String, String)], next: String?)]] = [
+        "": [([("src", "directory"), ("a.txt", "file")], "page1"), ([("b.txt", "file")], nil)],
+        "src": [([("src/lib", "directory"), ("src/main.rs", "file")], nil)],
+        "src/lib": [([("src/lib/mod.rs", "file")], nil)],
+    ]
+
+    private func paths(_ rows: [CheckoutTree.Row]) -> [String] {
+        rows.map { row in
+            switch row {
+            case .entry(let entry, let depth): String(repeating: "  ", count: depth) + entry.path
+            case .loading(let directory, _): "loading \(directory)"
+            case .more(let directory, _): "more \(directory)"
+            case .failed(let directory, _, _): "failed \(directory)"
+            }
+        }
+    }
+
+    @Test func treeReadsOpenedDirectoriesOnlyAndPagesWithLoadMore() async throws {
+        let checkout = CheckoutFixture(Self.checkout)
+        let store = TaskFilesStore(issue: "TEST-1", cwd: "/task", query: RegistryQuery { args, cwd in try checkout.read(args, cwd: cwd) })
+        await store.openTree()
+        #expect(paths(store.treeRows) == ["src", "a.txt", "more "])
+        #expect(checkout.reads == [["task", "files", "TEST-1", ".", "--json"]])
+        await store.readDirectory("", more: true)
+        #expect(paths(store.treeRows) == ["src", "a.txt", "b.txt"])
+        #expect(checkout.reads.last == ["task", "files", "TEST-1", ".", "--json", "--cursor", "page1"])
+        // Nothing left to load: Load more reads nothing.
+        await store.readDirectory("", more: true)
+        #expect(checkout.reads.count == 2)
+        // Opening a directory reads it once; closing and reopening keeps its entries.
+        await store.setDirectory("src", expanded: true)
+        #expect(paths(store.treeRows) == ["src", "  src/lib", "  src/main.rs", "a.txt", "b.txt"])
+        await store.setDirectory("src", expanded: false)
+        await store.setDirectory("src", expanded: true)
+        #expect(checkout.reads.count == 3)
+        await store.openTree()
+        #expect(checkout.reads.count == 3)
+    }
+
+    @Test func treeKeysMoveOpenAndCloseDirectories() async throws {
+        let checkout = CheckoutFixture(Self.checkout)
+        let store = TaskFilesStore(issue: "TEST-1", cwd: "/task", query: RegistryQuery { args, cwd in try checkout.read(args, cwd: cwd) })
+        await store.openTree()
+        await store.moveTree(.down)
+        #expect(store.tree.selection == "src")
+        await store.moveTree(.expand)
+        #expect(store.tree.isExpanded("src"))
+        await store.moveTree(.expand)
+        #expect(store.tree.selection == "src/lib")
+        await store.moveTree(.down)
+        #expect(store.tree.selection == "src/main.rs")
+        await store.moveTree(.open)
+        #expect(store.selection == "src/main.rs")
+        #expect(store.page == .files)
+        await store.moveTree(.collapse)
+        #expect(store.tree.selection == "src")
+        await store.moveTree(.collapse)
+        #expect(!store.tree.isExpanded("src"))
+        await store.moveTree(.down)
+        #expect(store.tree.selection == "a.txt")
+        await store.moveTree(.up)
+        await store.moveTree(.up)
+        #expect(store.tree.selection == "src")
+        await store.moveTree(.open)
+        #expect(store.tree.isExpanded("src"))
+    }
+
+    @Test func aFailedDirectoryReadStaysOnThatDirectory() async throws {
+        let checkout = CheckoutFixture(Self.checkout)
+        checkout.fail("src", true)
+        let store = TaskFilesStore(issue: "TEST-1", cwd: "/task", query: RegistryQuery { args, cwd in try checkout.read(args, cwd: cwd) })
+        await store.openTree()
+        await store.setDirectory("src", expanded: true)
+        #expect(paths(store.treeRows) == ["src", "failed src", "a.txt", "more "])
+        guard case .failed(_, let reason, let depth) = store.treeRows[1] else { Issue.record("expected a failure row"); return }
+        #expect(reason.contains("Permission denied"))
+        #expect(depth == 1)
+        #expect(store.error == nil)
+        checkout.fail("src", false)
+        await store.retryDirectory("src")
+        #expect(paths(store.treeRows) == ["src", "  src/lib", "  src/main.rs", "a.txt", "more "])
+        // A failed next page keeps the pages already read.
+        checkout.fail("", true)
+        await store.readDirectory("", more: true)
+        #expect(paths(store.treeRows).suffix(2) == ["a.txt", "failed "])
+        checkout.fail("", false)
+        await store.retryDirectory("")
+        #expect(paths(store.treeRows).suffix(2) == ["a.txt", "b.txt"])
+    }
+
+    @Test func aRemoteTreeReadsThroughItsMachineNeverALocalPath() async throws {
+        let checkout = CheckoutFixture(Self.checkout)
+        let query = RegistryQuery { args, cwd in try checkout.read(args, cwd: cwd) }.onMachine("peer", repository: "plan")
+        let store = TaskFilesStore(issue: "remote-task", cwd: "/peer/checkout", query: query)
+        await store.openTree()
+        await store.setDirectory("src", expanded: true)
+        #expect(paths(store.treeRows).prefix(3) == ["src", "  src/lib", "  src/main.rs"])
+        let reads = checkout.lock.withLock { $0 }
+        #expect(reads.reads.count == 2)
+        #expect(reads.reads.allSatisfy { Array($0.prefix(4)) == ["--machine", "peer", "--repo-id", "plan"] })
+        #expect(reads.cwds.allSatisfy { $0 == nil })
+        #expect(!reads.reads.joined().contains("/peer/checkout"))
+    }
+
+    @Test func treeSurvivesTaskSwitchesWithItsWorkspace() async throws {
+        let checkout = CheckoutFixture(Self.checkout)
+        let query = RegistryQuery { args, cwd in try checkout.read(args, cwd: cwd) }
+        let registry = SessionsWorkspaceRegistry(localMachineId: "local")
+        let location = WorkspaceIdentity(machineId: "local", worktree: "/task/checkout")
+        let content = PaneContent.browser(taskId: "task-files", tabs: [.files], selected: "files", location: location)
+        let store = try fixtureWork(registry, location).files(for: content, task: nil, query: query)
+        await store.openTree()
+        await store.setDirectory("src", expanded: true)
+        store.treeOffset = CGPoint(x: 0, y: 240)
+        store.page = .changes
+        // Another Task's workspace opens its own Files, then you come back.
+        let elsewhere = WorkspaceIdentity(machineId: "local", worktree: "/other/checkout")
+        _ = try fixtureWork(registry, elsewhere).files(for: .browser(taskId: "other", tabs: [.files], selected: "files",
+            location: elsewhere), task: nil, query: query)
+        let returned = try fixtureWork(registry, location).files(for: content, task: nil, query: query)
+        #expect(returned === store)
+        #expect(returned.tree.isExpanded("src"))
+        #expect(returned.tree.selection == "src")
+        #expect(returned.treeOffset.y == 240)
+        #expect(returned.page == .changes)
+        #expect(checkout.reads.count == 2)
+    }
+
+    @Test func changeBadgesMarkFilesAndTheFoldersHoldingThem() {
+        func file(_ path: String, old: String? = nil, untracked: Bool = false) throws -> TaskChangedFile {
+            let value: [String: Any] = ["path": path, "old_path": old as Any? ?? NSNull(), "committed": !untracked,
+                                        "staged": false, "unstaged": false, "untracked": untracked]
+            return try JSONDecoder().decode(TaskChangedFile.self, from: JSONSerialization.data(withJSONObject: value))
+        }
+        let badges = CheckoutChange.badges([try! file("src/lib/mod.rs"), try! file("src/new.rs", untracked: true),
+                                            try! file("README.md", old: "README")])
+        #expect(badges["src/lib/mod.rs"] == .modified)
+        #expect(badges["src/new.rs"] == .untracked)
+        #expect(badges["README.md"] == .renamed)
+        #expect(badges["src/lib"] == .contains)
+        #expect(badges["src"] == .contains)
+        #expect(badges["docs"] == nil)
     }
 
     private func eventually(_ predicate: () -> Bool) async throws {
@@ -629,7 +803,6 @@ struct TaskFilesTests {
             let value = root[args[1] == "files" ? "directory" : args[1] == "changes" ? "changes" : "diff"]!
             return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
         })
-        store.showsChanges = true
         store.observeFiles()
         await store.refreshChanges()
         let before = readings.withLock { $0 }

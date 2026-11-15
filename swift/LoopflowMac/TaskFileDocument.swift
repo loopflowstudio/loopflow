@@ -381,8 +381,96 @@ final class TaskFilesStore {
         (changes?.scratch ?? []).filter(matchesSearch)
     }
 
-    var changedPaths: [String] {
-        (changes?.files ?? []).map(\.path).filter(matchesSearch)
+    // MARK: Checkout tree
+
+    /// The checkout as you have opened it, kept across page and Task switches.
+    var tree = CheckoutTree()
+    /// Where the tree was scrolled.
+    var treeOffset = CGPoint.zero
+
+    var treeRows: [CheckoutTree.Row] {
+        tree.rows(matching: search, also: (changes?.files ?? []).map(\.path))
+    }
+
+    var changeBadges: [String: CheckoutChange] {
+        CheckoutChange.badges(changes?.files ?? [])
+    }
+
+    /// Read the checkout root the first time the tree is shown.
+    func openTree() async {
+        if tree.needsRead("") { await readDirectory("", more: false) }
+    }
+
+    /// One page of `directory` through `lf task files`; a remote Task reads
+    /// through its Machine. A failure stays on that directory.
+    func readDirectory(_ directory: String, more: Bool) async {
+        guard let read = tree.begin(directory, more: more) else { return }
+        do {
+            let page = try await query.taskFiles(issue: issue, directory: directory, cursor: read.cursor)
+            tree.receive(page, for: directory, more: more)
+        } catch {
+            tree.fail(directory, reason: error.localizedDescription)
+        }
+    }
+
+    /// Retry a failed read where it stopped: the first page, or the next one.
+    func retryDirectory(_ directory: String) async {
+        await readDirectory(directory, more: (tree.listings[directory]?.pages ?? 0) > 0)
+    }
+
+    func setDirectory(_ directory: String, expanded: Bool) async {
+        tree.setExpanded(directory, expanded)
+        tree.selection = directory
+        noteInteraction()
+        if expanded, tree.needsRead(directory) { await readDirectory(directory, more: false) }
+    }
+
+    enum TreeMove { case up, down, expand, collapse, open }
+
+    /// The navigator's keys: ↑/↓ move, → opens a directory or enters it, ←
+    /// closes it or goes to its parent, Return opens a file or toggles a directory.
+    func moveTree(_ move: TreeMove) async {
+        let rows = treeRows
+        let current = tree.selection.flatMap { path in rows.compactMap(\.entry).first { $0.path == path } }
+        switch move {
+        case .up, .down:
+            tree.selection = tree.neighbor(move == .up ? -1 : 1, in: rows)
+            noteInteraction()
+        case .expand:
+            guard let current, current.kind == .directory else { return }
+            if tree.isExpanded(current.path) {
+                tree.selection = tree.neighbor(1, in: rows)
+            } else {
+                await setDirectory(current.path, expanded: true)
+            }
+        case .collapse:
+            guard let current else { return }
+            if current.kind == .directory, tree.isExpanded(current.path) {
+                await setDirectory(current.path, expanded: false)
+            } else {
+                let parent = (current.path as NSString).deletingLastPathComponent
+                if !parent.isEmpty { tree.selection = parent }
+            }
+        case .open:
+            guard let current else { return }
+            if current.kind == .directory {
+                await setDirectory(current.path, expanded: !tree.isExpanded(current.path))
+            } else {
+                selectFile(current.path, mode: .read)
+            }
+        }
+    }
+
+    /// Re-read loaded directories a write may have changed, as many pages as were loaded.
+    private func rereadDirectories(holding paths: Set<String>) async {
+        for directory in tree.listingsHolding(paths) {
+            let pages = tree.listings[directory]?.pages ?? 0
+            await readDirectory(directory, more: false)
+            while let listing = tree.listings[directory], listing.pages < pages,
+                  listing.nextCursor != nil, listing.error == nil, !Task.isCancelled {
+                await readDirectory(directory, more: true)
+            }
+        }
     }
 
     private func matchesSearch(_ path: String) -> Bool {
@@ -447,7 +535,6 @@ final class TaskFilesStore {
     private(set) var changes: TaskChangesSnapshot?
     private(set) var isRefreshingChanges = false
     private(set) var changesError: String?
-    var showsChanges = true
     private(set) var documents: [String: TaskFileDocument] = [:]
     private(set) var diff: TaskDiffSnapshot?
     private(set) var patchLines: [TaskPatchLine] = []
@@ -545,7 +632,10 @@ final class TaskFilesStore {
             // output; those writes never move the comparison. A peer filters its own.
             let ignored = self.query.remoteMachine == nil ? await self.ignoredPaths(changed) : []
             guard !Task.isCancelled else { return }
-            comparisonChanged = comparisonChanged || changed.contains { !ignored.contains($0) }
+            let visible = changed.filter { !ignored.contains($0) }
+            comparisonChanged = comparisonChanged || !visible.isEmpty
+            await self.rereadDirectories(holding: visible)
+            guard !Task.isCancelled else { return }
             // A page an agent writes under scratch/ is retained like an open
             // document, so the re-read below brings it to you or into a tab.
             for path in changed where Self.isScratchPage(path) && self.documents[path] == nil {

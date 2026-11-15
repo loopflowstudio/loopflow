@@ -337,7 +337,7 @@ read -r answer < /dev/tty
     }
 }
 /// The revision of what follows the held-terminal entrance's answer.
-const HELD_REVISION: u32 = 2;
+const HELD_REVISION: u32 = 3;
 const REPLY: u8 = 0x01;
 const SNAPSHOT: u8 = 0x02;
 const OUT: u8 = 0x03;

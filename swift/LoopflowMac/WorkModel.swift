@@ -1240,7 +1240,7 @@ final class WorkModel {
     }
     /// The latest row from a Task's own subscription, current after the Task leaves
     /// the plan (completed, canceled).
-    private var subscribedTaskRow: RoadmapTask?
+    private var subscribedTaskRow: WorkReading<RoadmapTask> = .loading
     private(set) var waves: WorkReading<[Wave]> = .loading
     private(set) var processActivity: WorkReading<ActivitySnapshot> = .loading
     private struct RepositoryReadingKey: Hashable {
@@ -1658,6 +1658,7 @@ final class WorkModel {
 
     /// The reader ended. What is shown stays, marked as no longer current.
     private func workUnavailable(_ reason: String) {
+        subscribedTaskRow = .unavailable(lastGood: subscribedTaskRow.value, reason: reason)
         roadmap = .unavailable(lastGood: roadmap.value, reason: reason)
         if let value = waves.value { waves = .unavailable(lastGood: value, reason: reason) }
         if repoPath != nil, let value = sessions.value { sessions = .unavailable(lastGood: value, reason: reason) }
@@ -1737,8 +1738,10 @@ final class WorkModel {
         case .task(let body):
             guard answers >= max(taskFloor, scopeFloor) else { return }
             // A frame about its own Task stays true after the selection moves on.
-            if let body, let row = body.row, row.task.identifier == body.task, subscribedTaskRow != row {
-                subscribedTaskRow = row
+            if let body, let row = body.row, row.task.identifier == body.task {
+                if subscribedTaskRow != .available(row) { subscribedTaskRow = .available(row) }
+            } else if body == nil {
+                subscribedTaskRow = .unavailable(lastGood: subscribedTaskRow.value, reason: reason)
             }
             guard let shown = selection, shown.kind == .task,
                   let task = task(id: shown.id)?.task else { return }
@@ -1828,7 +1831,7 @@ final class WorkModel {
         graphCatalogReadings = [:]
         roadmap = .loading
         waves = .loading
-        subscribedTaskRow = nil
+        subscribedTaskRow = .loading
         showsSavedPlanning = false
         for navigation in navigationByRepo.values {
             navigation.clearSelection()
@@ -2188,14 +2191,13 @@ final class WorkModel {
     }
 
     func taskPresentation(id: String, repository: String? = nil) -> TaskPresentation {
-        let record = task(id: id)?.task
+        let evidence = taskEvidence(id: id)
+        let record = evidence?.task
         let workID = record?.runtime?.workId ?? record?.id ?? id
-        let recordContext: String? = roadmap.errorMessage != nil ? "Last known"
-            : showsSavedPlanning || currentTask(id: id) == nil ? "Updating…" : nil
         var candidates: [TaskPresentation] = []
         if let record {
             candidates.append(TaskPresentation(title: record.task.name, identifier: record.task.identifier,
-                                               context: recordContext))
+                                               context: evidence?.context))
         }
         let listSource: WorkReading<[WorkViewPlan]> = switch taskListReading {
         case .loading: .loading
@@ -2856,12 +2858,23 @@ final class WorkModel {
     }
 
     func task(id: String) -> (wave: WaveRoadmap?, task: RoadmapTask)? {
-        if let current = currentTask(id: id) { return current }
-        if let row = subscribedTaskRow, row.id == id || row.runtime?.workId == id,
-           repoPath.map({ repoIdentity(row.task.repo) == repoIdentity($0) }) ?? true {
-            return (row.task.waveId.flatMap { taskIndex.waves[$0] }, row)
+        guard let evidence = taskEvidence(id: id) else { return nil }
+        return (evidence.wave, evidence.task)
+    }
+
+    private func taskEvidence(id: String) -> (wave: WaveRoadmap?, task: RoadmapTask, context: String?)? {
+        if let current = currentTask(id: id) {
+            let context: String? = roadmap.errorMessage != nil ? "Last known" : showsSavedPlanning ? "Updating…" : nil
+            return (current.wave, current.task, context)
         }
-        if let retained = navigation.selectedTaskEvidence, retained.task.id == id || retained.task.runtime?.workId == id { return retained }
+        if let row = subscribedTaskRow.value, row.id == id || row.runtime?.workId == id,
+           repoPath.map({ repoIdentity(row.task.repo) == repoIdentity($0) }) ?? true {
+            return (row.task.waveId.flatMap { taskIndex.waves[$0] }, row,
+                    subscribedTaskRow.errorMessage != nil ? "Last known" : nil)
+        }
+        if let retained = navigation.selectedTaskEvidence, retained.task.id == id || retained.task.runtime?.workId == id {
+            return (retained.wave, retained.task, "Updating…")
+        }
         return nil
     }
 

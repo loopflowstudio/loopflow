@@ -105,6 +105,11 @@ Session previews and retained panes. Do not add a Legacy/New path, a title store
 another read loop, or stale legal actions. Cached identity is display-only; existing
 action freshness checks still apply.
 
+Remove the blanket roadmap-derived record context in `taskPresentation` and
+the optional-only `subscribedTaskRow`. The surviving record lookup carries its
+source's context; the subscription uses `WorkReading` to retain its row through
+its own failure and recover even when the replacement row is unchanged.
+
 ## Alternatives and failure modes
 
 - Waiting for the complete roadmap before rendering Task-list members hides useful
@@ -197,20 +202,57 @@ The review's three defects are fixed in `WorkModel.taskPresentation` and
 (`WorkModelTests.swift`). No cache or read owner was added, and no product
 choice is open.
 
-Known edge, left as is: a record that came from the Task subscription or the
-selected-Task evidence takes its context from the roadmap's error. It reads
-"Last known" when only the roadmap failed. A fresh list or selection name still
-takes precedence. The rows stay readable and conservative.
+The workspace's interrupted correction carries the supplying record's context
+through the shared lookup and retains the subscription in `WorkReading`.
+`currentSubscriptionName` covers a fresh subscription while the roadmap has no
+last-good row, in both arrival orders and through independent failure and
+unchanged-row recovery. Retained selection-only evidence says Updating rather
+than inheriting an unrelated roadmap error.
 
-Remaining: the gate's broader filter, and native demo/review in Acceptance above.
-`scratch/concept-review.html` reflects the corrected behavior.
+### Next implement direction — retained roadmap versus current subscription
+
+The same source-freshness rule must apply when both record sources contain the
+Task. Source inspection on November 14 found a counterexample not covered by
+`currentSubscriptionName`: publish a named roadmap row, fail planning while
+retaining it, then receive a healthy Task subscription for that same Task.
+`taskEvidence` returns the retained roadmap row before examining the subscription;
+`taskPresentation` therefore still shows Last known (and can keep an older name).
+The existing test starts without a roadmap row, so it cannot catch this case.
+This is a source-traced counterexample, not a recorded failing test run.
+
+For display identity, consider eligible roadmap and subscription rows separately
+before choosing current over retained evidence. Keep the existing order among
+current sources: roadmap, Task subscription, scoped Task list, selection plan;
+then fall back to retained identity. Each candidate carries its own reading's
+context. Keep `task(id:)` metadata/action lookup behavior, scope fences and ID
+mapping intact; name freshness must not change runtime or legal-action authority.
+No additional cache, DTO, persistence or subscription is needed.
+
+Extend the counterexample with a last-good roadmap row and a differently named
+fresh subscription, for planning and runtime Work keys and both arrival orders.
+The row/title/breadcrumb must use the current subscription name without Last known,
+while the planning failure remains visible. If the subscription then fails too,
+retain readable identity with Last known; an identical successful row restores
+current identity. A healthy roadmap still wins when it supplies the name. A saved
+roadmap awaiting refresh must likewise not mask a current subscribed name.
+
+No open product choice: these transitions follow the existing source-freshness
+rule. Outcome for loop-or-next: design changed; iterate to implement this
+remaining candidate-selection repair. Then run the focused tests. The broader
+gate and native demo/review remain later obligations. `scratch/concept-review.html`
+shows this direction as proposed, separately from the built correction.
 
 ### Check results
 
-- November 14 review corrections: `swift build --build-tests --package-path swift`
-  — passed (114.50 s); `scripts/test_desktop.sh --skip-build --filter TaskPlanningReadabilityTests`
-  — 12 tests passed (5.795 s), WindowServer denied. Covers all new source-freshness,
-  empty-description and shipping counterexamples, plus existing scoped recovery.
+- November 14 concept-review continuation: `scripts/test_desktop.sh --skip-build --filter TaskPlanningReadabilityTests`
+  — 13 tests passed (18.970 s), WindowServer denied. No code changed in this
+  review; the competing-record counterexample above remains untested and goes
+  to implement. `git diff --check` — passed.
+- November 14 subscription correction: `swift build --build-tests --package-path swift`
+  — passed (1113.81 s, existing warnings); `scripts/test_desktop.sh --skip-build --filter TaskPlanningReadabilityTests`
+  — 13 tests passed (8.964 s), WindowServer denied. Includes subscription arrival
+  in both orders, independent Task failure and unchanged-row recovery, plus the
+  existing source-freshness, preview, shipping and scoped recovery cases.
 
 - `scripts/test_desktop.sh --skip-build --filter 'TaskPlanningReadabilityTests|TaskRowMetadataTests|WorkOpeningCLITests/localCreatedAndReopenedNamesPrecedeRoadmapDelivery|WorkModelStreamTests/incompletePlanningRetainsSavedWork|WorkCacheTests/failedRefreshKeepsSaved|WorkCacheTests/returningLaunchRestores|WorkNavigationTests/dashboardSidebarHeader'`
   — 25 tests in 6 suites passed in 31.144 s, WindowServer denied. Covers saved

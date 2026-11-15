@@ -544,10 +544,8 @@ provider attach. Log IDs and durations, never authored text. Compare in-process
 fixtures, Desktop local transport and mobile remote transport. Check changed SQL
 with EXPLAIN on the 10,000-Task fixture; unrelated events must not reread every Task.
 
-Proposed local-reaction target: P95 under 100 ms, at least 20 native launch and
-completion, cached/recent selection and disclosure samples per applicable platform;
-report highlight, cached content, input-ready and server-stage distributions
-separately. Neither that target nor a SQL bottleneck has been measured here.
+Proposed target: local reaction P95 under 100 ms, at least 20 native samples per
+journey/platform, endpoints reported separately. Nothing here is measured yet.
 
 ## Implement direction
 

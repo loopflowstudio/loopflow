@@ -259,24 +259,33 @@ presentation to the saved submission; the admitted Task/Session IDs replace no
 invented identity. Keep the current journal, receipt contract and execution owner.
 No backend queue or new persisted lifecycle is implied.
 
-### Next implement direction (within the launch design)
+### Implement direction (within the launch design)
 
-- Bound the launch override to reconciliation. `createdTaskIDs` currently gives
-  every Task created in this window an indefinite exception to ordinary Start
-  routing and workflow chrome. Replace that historical membership with pending
-  reconciliation for the admitted creation. Clear the exception after a current
-  post-admission Task reading catches up, using the existing checkpoint/scope
-  ordering; a cached or unrelated reading cannot clear it. Attachment readiness
-  alone cannot clear a stale-planning exception. Once reconciled, later legitimate
-  unstarted/no-Graph readings must use ordinary Task behavior. While observation
-  is unavailable, show its explanation rather than silently suppressing workflow
-  forever. Do not require a Graph to exist as the only way to finish reconciliation.
-- Creation recovery and attachment failure describe different facts. A matching
-  recovery item must not hide `launch.error` or its Retry opening action after
-  an admitted Session fails to attach. Present the original request once, one
-  current attachment status/action, and the receipt's recovery action when needed.
-  Deduplicate identical text; never deduplicate away the action that can recover.
-  Retrying attachment uses the admitted Session, never a new creation UUID.
+State on 2026-11-14 realign:
+
+- **Remaining — bound the launch override to reconciliation.** Not built.
+  `WorkNavigation.createdTaskIDs` (`WorkProjection.swift`), inserted in
+  `WorkModel.submitTask` and read in `SessionsView` (Start-offer routing and
+  workflow-bar gating), still gives every Task created in this window an
+  indefinite exception. Replace that membership with pending reconciliation for
+  the admitted creation, cleared when a current post-admission Task reading
+  catches up under the existing checkpoint/scope ordering; a cached or unrelated
+  reading cannot clear it, nor can attachment readiness alone. Once reconciled,
+  legitimate unstarted/no-Graph readings use ordinary Task behavior. While
+  observation is unavailable, show its explanation instead of suppressing
+  workflow forever. A Graph's existence must not be the only way to finish.
+  `swift/README.md`/`docs/server.md` describe the window-local set; update them
+  in the same change.
+- **Done — recovery no longer hides attachment errors.** `StartingTaskView`
+  (`Views/NewTaskSheet.swift`) suppressed `launch.error` and Retry opening whenever
+  a recovery item matched the request. It now hides them only before admission
+  (`launch.receipt == nil`), where the recovery item describes the same
+  submission. After admission the error, Retry opening and the recovery item's
+  Inspect all show. Retry uses the admitted Session, never a new UUID.
+  Missing: a headless test. `CreationRecovery.shared.items` is `private(set)` and
+  filled only by `refresh()` against `CreationSubmissions.shared`, so the test
+  needs a recovery fixture (e.g. a `#if DEBUG`/test-only way to set items, or
+  injecting `CreationRecovery` into the view) — choose the smaller.
 - Leave ordinary Task routing and other requests' recovery intact. No change to
   CLI behavior or builtin skill instructions is needed for this Desktop action.
 
@@ -320,7 +329,6 @@ the error without taking focus back from a later selection in either design.
 
 Show next: `scratch/concept-review.html`. Headless review outcome for loop-or-next:
 **open product choice** — selected-conversation behavior on completion, as above.
-The launch reconciliation/error changes are ready as implement direction; this
-review changes no production code and starts no execution. Native launch samples
+The launch reconciliation change remains implement work (see Implement direction). Native launch samples
 remain with demo. Prior test results above are historical; this review reruns only
 `git diff --check`, which passed before these notes were written.

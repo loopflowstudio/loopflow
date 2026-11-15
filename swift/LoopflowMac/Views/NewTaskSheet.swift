@@ -295,6 +295,8 @@ struct StartingTaskView: View {
     @Environment(\.palette) private var palette
 
     private var hasRecovery: Bool { CreationRecovery.shared.items.contains { $0.id == launch.id } }
+    /// Recovery describes the submission; once admitted, attachment errors are a separate fact.
+    private var showsLaunchStatus: Bool { launch.receipt != nil || !hasRecovery }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -304,14 +306,14 @@ struct StartingTaskView: View {
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            if let error = launch.error, !hasRecovery {
+            if let error = launch.error, showsLaunchStatus {
                 Text(error).foregroundStyle(palette.warning).textSelection(.enabled)
                 if launch.canEdit {
                     Button("Edit request") { model.editStartingTask(launch) }
                 } else if launch.receipt?.sessionId != nil {
                     Button("Retry opening") { Task { await model.openCreatedTask(launch) } }
                 }
-            } else if !hasRecovery {
+            } else if showsLaunchStatus {
                 Text("Starting conversation…").foregroundStyle(palette.textSecondary)
             }
             CreationRecoveryView(only: launch.id)

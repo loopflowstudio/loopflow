@@ -81,7 +81,12 @@ pub(crate) async fn execution_of_latest_graph(
         None => crate::journal::lf_process_evidence(
             process,
             &match facts.receipts.get(&process.id) {
-                Some(path) => crate::journal::read_process_receipt(path),
+                Some(locator) => match facts.receipt_home.as_deref() {
+                    Some(home) => crate::journal::read_process_receipt(
+                        &crate::journal::process_receipt_path(home, locator),
+                    ),
+                    None => Ok(None),
+                },
                 None => Ok(None),
             },
             crate::journal::process_identity_evidence,
@@ -148,7 +153,12 @@ fn open_graph_execution_from_facts(
 ) -> Option<TaskExecutionSnapshot> {
     for (graph, process) in facts.open_processes.get(task).into_iter().flatten() {
         let receipt = match facts.receipts.get(&process.id) {
-            Some(path) => crate::journal::read_process_receipt(path),
+            Some(locator) => match facts.receipt_home.as_deref() {
+                Some(home) => crate::journal::read_process_receipt(
+                    &crate::journal::process_receipt_path(home, locator),
+                ),
+                None => Ok(None),
+            },
             None => Ok(None),
         };
         let state = match crate::journal::lf_process_evidence(

@@ -17,7 +17,7 @@ use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Transact
 use time::OffsetDateTime;
 
 use crate::durable::TaskState;
-use crate::linear::{LinearIssueId, LinearProjectId};
+use crate::store::linear_records::{LinearIssueId, LinearProjectId};
 use crate::store::rows::now_unix;
 use crate::store::{PlanningState, StoreError, StoreResult};
 use crate::work::project::{Project, ProjectEvent, ProjectEventKind, ProjectId};
@@ -252,7 +252,6 @@ impl SqliteStore {
         pr: &TaskPr,
         me: &super::task_ownership::OwnershipFacts,
     ) -> StoreResult<Option<Task>> {
-        let _admission = self.lock_checkout(worktree)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if !me.matches_task_in(&tx, task_id)? {
@@ -356,7 +355,7 @@ impl SqliteStore {
         }
         let task = task_on(&tx, task_id)?.ok_or(StoreError::NotFound)?;
         if let Some(identity) = receipt {
-            let result = serde_json::to_value(crate::engine::creation::TaskCreateReceipt {
+            let result = serde_json::to_value(crate::store::sqlite::creation::TaskCreateReceipt {
                 task: task.clone(),
                 graph: None,
                 session_id: session.map(|s| s.id.clone()),
@@ -951,7 +950,7 @@ impl SqliteStore {
     pub(crate) fn apply_linear_observation_prepared(
         &self,
         task_id: &TaskId,
-        observation: &crate::linear::LinearIssueObservation,
+        observation: &crate::store::linear_records::LinearIssueObservation,
         observed_at: OffsetDateTime,
         planning_connected: bool,
         machine_names: &std::collections::HashMap<loopflow_model::durable::MachineId, String>,
@@ -1400,7 +1399,9 @@ pub(super) fn require_task_planning(conn: &Connection, task: &Task) -> StoreResu
         |row| row.get(0),
     )?;
     // Upstream cancellation stops a Task that hasn't set out; one under way keeps going.
-    if crate::linear::terminal_reason(state.as_deref()).is_some() && !under_way(conn, task)? {
+    if crate::store::linear_records::terminal_reason(state.as_deref()).is_some()
+        && !under_way(conn, task)?
+    {
         return Err(StoreError::InvalidAuthority(
             "terminal planning state cannot start work; its execution history is preserved".into(),
         ));
@@ -2745,7 +2746,7 @@ mod local_planning_tests {
             session.work_source = Some(WorkSource::Declared);
             session.title = title.into();
             session.title_source = source;
-            let saved = store.create_session(session, None).unwrap();
+            let saved = crate::store::sessions::create_session(&store, session, None).unwrap();
             assert_eq!(
                 saved.title,
                 if id == "generated" {

@@ -4,7 +4,7 @@ use super::planning_write;
 use crate::work::edit::WorkValue as Edit;
 use rusqlite::{params, Connection, OptionalExtension};
 
-use crate::linear::StateHistory;
+use crate::store::linear_records::StateHistory;
 use crate::store::{StoreError, StoreResult};
 use loopflow_model::durable::TaskId;
 
@@ -88,8 +88,8 @@ pub(crate) fn reconcile_in(
         attempted,
         ..
     } = delivery;
-    if crate::linear::observations::revision_nanos(observed_revision)?
-        < crate::linear::observations::revision_nanos(revision.as_deref())?
+    if crate::store::linear_records::revision_nanos(observed_revision)?
+        < crate::store::linear_records::revision_nanos(revision.as_deref())?
     {
         return Ok(false);
     }

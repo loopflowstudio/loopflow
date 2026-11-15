@@ -139,7 +139,7 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         let wave = Wave::new(WaveId::new(), "product".into(), "/repo".into());
         crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
-        let mut observed: crate::linear::LinearProject = serde_json::from_value(serde_json::json!({
+        let mut observed: crate::store::linear_records::LinearProject = serde_json::from_value(serde_json::json!({
             "id":"linear-project", "revision":"2026-10-10T12:00:00Z", "slug":"product", "name":"Product", "summary":"",
             "workflow":"", "krs":[], "metric_targets":[], "status":"started", "initiative_ids":["initiative"], "team_ids":["team"]
         })).unwrap();
@@ -196,7 +196,7 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         let wave = Wave::new(WaveId::new(), "product".into(), "/repo".into());
         crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
-        let mut observed: crate::linear::LinearProject = serde_json::from_value(serde_json::json!({
+        let mut observed: crate::store::linear_records::LinearProject = serde_json::from_value(serde_json::json!({
             "id":"linear-project", "revision":"2026-10-10T12:00:00Z", "slug":"product", "name":"Product", "summary":"", "description":"Baseline",
             "workflow":"", "krs":[], "metric_targets":[], "status":"started", "initiative_ids":["initiative"], "team_ids":["team"]
         })).unwrap();

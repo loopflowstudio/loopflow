@@ -245,12 +245,7 @@ impl ProcessReceipt {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ProcessIdentityEvidence {
-    Live,
-    Dead,
-    Unknown,
-}
+pub(crate) use crate::store::ProcessIdentityEvidence;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]

@@ -1,4 +1,5 @@
 //! Retained Linear acquisition evidence, independent of accepted Work and delivery.
+pub(crate) use crate::store::linear_records::revision_nanos;
 use crate::store::sqlite::{planning_write, SqliteStore};
 use crate::store::{PlanningState, StoreError, StoreResult};
 use crate::work::edit::WorkValue as Edit;
@@ -306,20 +307,4 @@ impl SqliteStore {
         }
         Ok(())
     }
-}
-
-pub(crate) fn revision_nanos(revision: Option<&str>) -> StoreResult<Option<i64>> {
-    revision
-        .map(|revision| {
-            time::OffsetDateTime::parse(revision, &time::format_description::well_known::Rfc3339)
-                .map_err(|error| {
-                    StoreError::InvalidData(format!("invalid planning revision: {error}"))
-                })
-                .and_then(|time| {
-                    i64::try_from(time.unix_timestamp_nanos()).map_err(|error| {
-                        StoreError::InvalidData(format!("planning revision out of range: {error}"))
-                    })
-                })
-        })
-        .transpose()
 }

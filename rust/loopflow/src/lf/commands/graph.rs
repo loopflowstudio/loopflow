@@ -553,10 +553,11 @@ fn execute(
             interrupt,
         };
         // A chapter rotation moving this checkout's Task excludes new work in it.
-        let admission = running
-            .store
-            .sqlite
-            .lock_task_checkouts(&[running.cwd], running.task.as_ref())?;
+        let admission = crate::store::admission::lock_task_checkouts(
+            &running.store.sqlite,
+            &[running.cwd],
+            running.task.as_ref(),
+        )?;
         // The Graph process's one record of its Graph, written before any step runs.
         running
             .store
@@ -930,10 +931,11 @@ impl RunningGraph<'_> {
         }
         command.args(args);
         let mark = self.store.sqlite.process_mark(&self.process)?;
-        let admission = self
-            .store
-            .sqlite
-            .lock_task_checkouts(&[self.cwd], self.task.as_ref())?;
+        let admission = crate::store::admission::lock_task_checkouts(
+            &self.store.sqlite,
+            &[self.cwd],
+            self.task.as_ref(),
+        )?;
         crate::transport::configure_child(command.as_std_mut());
         let output = crate::terminal_output::TerminalOutput::for_child(command.as_std_mut())?;
         let mut child = command.spawn().context("could not execute Graph step")?;

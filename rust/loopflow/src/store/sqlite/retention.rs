@@ -11,10 +11,9 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Duration;
 
-use rusqlite::{params, Connection, TransactionBehavior};
+use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 
-use crate::journal::{OsProcess, ProcessIdentityEvidence};
 use crate::session_record::{native_baseline, native_peak, native_usage_key};
 use crate::store::{StoreError, StoreResult};
 
@@ -36,7 +35,10 @@ pub struct RetentionReport {
 ///
 /// # Errors
 /// When the store cannot be opened or a prune transaction fails.
-pub(crate) fn prune(database: &Path, now: i64) -> StoreResult<RetentionReport> {
+pub(crate) fn prune(
+    database: &Path,
+    dead: &[(crate::process::ProcessEntry, Option<String>, i64)],
+) -> StoreResult<RetentionReport> {
     let conn = Connection::open(database)?;
     conn.busy_timeout(BUSY_TIMEOUT)?;
     // Nothing references the rows deleted here (see each predicate), and
@@ -46,8 +48,7 @@ pub(crate) fn prune(database: &Path, now: i64) -> StoreResult<RetentionReport> {
     // every capture to facts.
     let _ = std::fs::remove_file(Cursor::beside(database, "retention").0);
     let usage_rows = compact_usage(&conn, &Cursor::beside(database, "usage"))?;
-    let home = database.parent().unwrap_or(Path::new("."));
-    let closed_processes = close_dead_processes(&conn, home, now)?;
+    let closed_processes = close_dead_processes(&conn, dead)?;
     Ok(RetentionReport {
         usage_rows,
         closed_processes,
@@ -246,48 +247,55 @@ fn merge_native_usage(saved: &serde_json::Value, later: &serde_json::Value) -> s
     merged
 }
 
-fn close_dead_processes(conn: &Connection, home: &Path, now: i64) -> StoreResult<u64> {
-    let columns = super::processes::PROCESS_SELECT
-        .strip_suffix(" FROM processes e")
-        .expect("Process select ends with its table");
+/// Saved identities and locators for observation before pruning.
+pub(crate) fn unfinished_processes(
+    database: &Path,
+) -> StoreResult<Vec<(crate::process::ProcessEntry, Option<String>)>> {
+    let conn = Connection::open(database)?;
     let unfinished = conn
         .prepare(&format!(
-            "{columns},e.receipt_locator FROM processes e WHERE e.completed_at IS NULL"
+            "{} WHERE e.completed_at IS NULL",
+            process_receipt_select()
         ))?
-        .query_map([], |row| {
-            Ok((
-                super::processes::read_process(row)?,
-                row.get::<_, Option<String>>("receipt_locator")?,
-            ))
-        })?
+        .query_map([], process_receipt_row)?
         .collect::<Result<Vec<_>, _>>()?;
-    let booted_at = crate::journal::machine_booted_at();
+    Ok(unfinished)
+}
+
+fn process_receipt_select() -> String {
+    super::processes::PROCESS_SELECT
+        .replace(" FROM processes e", ",e.receipt_locator FROM processes e")
+}
+
+fn process_receipt_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<(crate::process::ProcessEntry, Option<String>)> {
+    Ok((
+        super::processes::read_process(row)?,
+        row.get("receipt_locator")?,
+    ))
+}
+
+fn close_dead_processes(
+    conn: &Connection,
+    dead: &[(crate::process::ProcessEntry, Option<String>, i64)],
+) -> StoreResult<u64> {
     let mut closed = 0;
-    for (process, locator) in unfinished {
-        let receipt = match locator {
-            Some(locator) => crate::journal::read_process_receipt(
-                &crate::journal::process_receipt_path(home, &locator),
-            ),
-            None => Ok(None),
-        };
-        let evidence = crate::journal::recorded_process_evidence(
-            &process,
-            &receipt,
-            crate::journal::process_identity_evidence,
-        );
-        // No process holds the PID at all, so the recorded one has exited.
-        let gone = evidence == ProcessIdentityEvidence::Dead
-            || (evidence == ProcessIdentityEvidence::Unknown
-                && process
-                    .pid()
-                    .is_some_and(|pid| matches!(OsProcess::read(pid), Ok(None))));
-        if !gone {
+    for (process, locator, at) in dead {
+        let tx = rusqlite::Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
+        let current = tx
+            .query_row(
+                &format!("{} WHERE e.id=?1", process_receipt_select()),
+                [process.id()],
+                process_receipt_row,
+            )
+            .optional()?;
+        if !current
+            .as_ref()
+            .is_some_and(|(saved, saved_locator)| saved == process && saved_locator == locator)
+        {
             continue;
         }
-        let at = booted_at
-            .filter(|booted_at| process.started_at() < *booted_at)
-            .unwrap_or(now);
-        let tx = conn.unchecked_transaction()?;
         let closed_here = tx.execute(
             "UPDATE processes SET completed_at=?2,
                  spawn_state=CASE WHEN kind!='agent' THEN spawn_state
@@ -297,7 +305,7 @@ fn close_dead_processes(conn: &Connection, home: &Path, now: i64) -> StoreResult
             params![process.id(), at, process.pid(), process.os_started_at()],
         )?;
         if closed_here > 0 {
-            super::processes::complete_dead_headless_run_in(&tx, process.id(), at)?;
+            super::processes::complete_dead_headless_run_in(&tx, process.id(), *at)?;
         }
         tx.commit()?;
         closed += closed_here as u64;
@@ -362,7 +370,7 @@ fn is_busy(error: &rusqlite::Error) -> bool {
 mod tests {
     use rusqlite::Connection;
 
-    use super::prune;
+    use crate::store::retention::prune;
     use crate::store::sqlite::SqliteStore;
 
     #[test]
@@ -575,6 +583,52 @@ mod tests {
         assert_eq!(
             completed,
             [("conversation".into(), None), ("run".into(), Some(now))]
+        );
+    }
+}
+
+#[cfg(test)]
+mod observation_tests {
+    use super::{prune, unfinished_processes};
+    use crate::store::sqlite::SqliteStore;
+
+    #[test]
+    fn pruning_does_not_close_a_process_changed_after_observation() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("store.db");
+        let _store = SqliteStore::open_ephemeral(&path).unwrap();
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        let id = "00000000-0000-4000-8000-000000000001";
+        conn.execute(
+            "INSERT INTO processes(id,trace_id,started_at,via_agent) VALUES(?1,?1,1,1)",
+            [id],
+        )
+        .unwrap();
+        let (saved, locator) = unfinished_processes(&path).unwrap().remove(0);
+        conn.execute(
+            "UPDATE processes SET pid=123,os_started_at=456 WHERE id=?1",
+            [id],
+        )
+        .unwrap();
+        assert_eq!(
+            prune(&path, &[(saved, locator, 10)])
+                .unwrap()
+                .closed_processes,
+            0
+        );
+        assert!(conn
+            .query_row(
+                "SELECT completed_at IS NULL FROM processes WHERE id=?1",
+                [id],
+                |row| row.get::<_, bool>(0)
+            )
+            .unwrap());
+        let (current, locator) = unfinished_processes(&path).unwrap().remove(0);
+        assert_eq!(
+            prune(&path, &[(current, locator, 10)])
+                .unwrap()
+                .closed_processes,
+            1
         );
     }
 }

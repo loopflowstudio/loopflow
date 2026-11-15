@@ -1,5 +1,5 @@
 //! Launch-owned authority for provider context callbacks.
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
@@ -8,46 +8,13 @@ pub(crate) const PROVIDER_CONTEXT_ENV: &str = "LF_PROVIDER_CONTEXT";
 /// The [`SteerAdapter`] of a bare launch, whose hook claims its steers from
 /// the store itself and reports to no server.
 pub(crate) const BARE_STEER_ENV: &str = "LF_BARE_STEER";
-/// The provider process's seen marker; see [`latest_marker`].
+/// The provider process's seen marker; see [`crate::store::steer_markers::latest_marker`].
 pub(crate) const STEER_SEEN_ENV: &str = "LF_STEER_SEEN";
 
 /// The Session's own marker and, when it belongs to exactly one Task, that
-/// Task's; see [`latest_marker`].
+/// Task's; see [`crate::store::steer_markers::latest_marker`].
 pub(crate) const STEER_SESSION_ENV: &str = "LF_STEER_SESSION";
 pub(crate) const STEER_TASK_ENV: &str = "LF_STEER_TASK";
-
-/// Touched when a Wave or repository steer is saved; a Task's or a Session's
-/// steer touches [`task_marker`] or [`session_marker`] instead, so it starts
-/// lf only in the conversations it can reach. A tool-boundary hook skips lf
-/// entirely while its provider's seen marker is strictly newer than all three,
-/// since no steer arrived after its last check. A managed prompt boundary
-/// always checks, which also catches Sessions newly associated with earlier
-/// steers.
-pub(crate) fn latest_marker(home: &Path) -> PathBuf {
-    home.join("steers").join("latest")
-}
-
-pub(crate) fn task_marker(home: &Path, task: &str) -> PathBuf {
-    home.join("steers").join("task").join(task)
-}
-
-pub(crate) fn session_marker(home: &Path, session: &str) -> PathBuf {
-    home.join("steers").join("session").join(session)
-}
-
-pub(crate) fn seen_marker(home: &Path, process: &loopflow_model::id::AgentProcessId) -> PathBuf {
-    home.join("steers").join("seen").join(process.as_str())
-}
-
-pub(crate) fn touch(path: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(path.parent().expect("marker has a parent"))?;
-    std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .write(true)
-        .open(path)?
-        .set_modified(std::time::SystemTime::now())
-}
 
 /// Survives attachment-only handoff; replacement creates another capability.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -242,4 +209,24 @@ fn render(
         "{remaining} pending. Inspect: lf session steers {session} --json\n</lf:steers>\n"
     ));
     Ok(text)
+}
+
+/// Only confirmed live, managed conversations can be woken.
+pub(crate) fn idle_conversations(
+    store: &crate::store::sqlite::SqliteStore,
+    session: Option<&str>,
+) -> crate::store::StoreResult<Vec<IdleConversation>> {
+    Ok(store
+        .idle_conversation_candidates(session)?
+        .into_iter()
+        .filter_map(|candidate| {
+            candidate
+                .identity
+                .is_some_and(|(pid, start)| {
+                    crate::journal::process_identity_evidence(pid, start)
+                        == crate::store::ProcessIdentityEvidence::Live
+                })
+                .then_some(candidate.conversation)
+        })
+        .collect())
 }

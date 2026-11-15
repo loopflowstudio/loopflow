@@ -274,7 +274,7 @@ fn open_unmigrated(path: &Path) -> StoreResult<Connection> {
         path,
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )?;
-    crate::performance::observe_sqlite(&conn);
+    crate::store::instrumentation::observe_sqlite(&conn);
     conn.execute_batch("PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;")?;
     Ok(conn)
 }
@@ -626,7 +626,7 @@ impl SqliteStore {
         #[cfg(test)]
         copy_test_store(path)?;
         let mut conn = Connection::open(path)?;
-        crate::performance::observe_sqlite(&conn);
+        crate::store::instrumentation::observe_sqlite(&conn);
         configure_write_connection(&mut conn, path, SQLITE_WRITE_BUSY_TIMEOUT)?;
         super::migrations::apply_sqlite(&conn)?;
         Ok(Self {
@@ -681,7 +681,7 @@ impl SqliteStore {
             copy_test_store(path)?;
         }
         let mut conn = Connection::open(path)?;
-        crate::performance::observe_sqlite(&conn);
+        crate::store::instrumentation::observe_sqlite(&conn);
         // Install the handler before journal-mode negotiation: that pragma can
         // itself meet another process opening the same WAL database.
         configure_write_connection(&mut conn, path, busy)?;
@@ -739,7 +739,7 @@ impl SqliteStore {
             path,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
-        crate::performance::observe_sqlite(&conn);
+        crate::store::instrumentation::observe_sqlite(&conn);
         conn.busy_timeout(wait.min(Duration::from_secs(5)))?;
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         // An older ledger without the current process owner is not a writable
@@ -757,7 +757,7 @@ impl SqliteStore {
             path,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
-        crate::performance::observe_sqlite(&conn);
+        crate::store::instrumentation::observe_sqlite(&conn);
         conn.execute_batch("PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;")?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),

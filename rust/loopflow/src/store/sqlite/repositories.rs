@@ -398,7 +398,10 @@ mod tests {
         store.relocate_repository(&id, "/after").unwrap();
         store.relocate_repository(&id, "/after").unwrap();
         assert_eq!(
-            store.task_work(&task).unwrap().processes[0].id(),
+            crate::store::task_work::task_work(&store, &task)
+                .unwrap()
+                .processes[0]
+                .id(),
             process.as_str()
         );
         assert_eq!(

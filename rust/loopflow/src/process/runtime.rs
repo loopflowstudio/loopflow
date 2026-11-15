@@ -647,7 +647,7 @@ mod tests {
             })
             .unwrap();
         let runtime = store.session("resume").unwrap().unwrap().captured;
-        store.bind_session("resume", runtime, &task.id).unwrap();
+        crate::store::sessions::bind_session(&store, "resume", runtime, &task.id).unwrap();
         let attached = attachment::claim_session_attachment(
             &store,
             "resume",

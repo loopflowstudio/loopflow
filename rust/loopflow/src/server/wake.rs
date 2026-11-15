@@ -1,6 +1,6 @@
 //! Steers and Task updates for idle managed conversations, pushed by the
 //! Machine server. The store says which conversations are idle and how to
-//! reach them (`SqliteStore::idle_conversations`); when a steer is saved or
+//! reach them (`crate::steer::idle_conversations`); when a steer is saved or
 //! the store's `task_updates` revision moves, one watcher reads them and wakes
 //! each one it has news for. A server restart forgets nothing. No process or
 //! clock per Session: Claude takes the message in its cross-session inbox,
@@ -92,7 +92,7 @@ impl Watcher {
 }
 
 fn wake_idle(store: &SqliteStore, session: Option<&str>) {
-    match store.idle_conversations(session) {
+    match crate::steer::idle_conversations(store, session) {
         Ok(idle) => {
             for conversation in idle {
                 wake(store, &conversation);
@@ -302,7 +302,7 @@ mod tests {
             .unwrap();
         }
         let captured = store.session(session).unwrap().unwrap().captured;
-        store.bind_session(session, captured, &task).unwrap();
+        crate::store::sessions::bind_session(&store, session, captured, &task).unwrap();
         // The conversation's first boundary records what it already knows.
         crate::harness::task_updates::write(&store, session).unwrap();
         let repo = home.path().join("repo");
@@ -547,9 +547,7 @@ mod tests {
         fixture.comment(&fixture.store, "c-2", "PR: https://example.test/pr/1");
         after_turn(&fixture.store, "wake-gone");
         assert_eq!(
-            fixture
-                .store
-                .idle_conversations(Some("wake-gone"))
+            crate::steer::idle_conversations(&fixture.store, Some("wake-gone"))
                 .unwrap()
                 .len(),
             1,
@@ -558,5 +556,24 @@ mod tests {
         let page = fixture.store.session_steers("wake-gone", 0, 8).unwrap();
         assert_eq!(page.pending, 2, "the direction and the Task update");
         assert!(page.items.iter().any(|row| row.steer.text.contains("pr/1")));
+    }
+    #[test]
+    fn an_unknown_provider_identity_is_never_woken() {
+        let fixture = fixture("wake-unknown");
+        let inbox = fixture.claude(&fixture.home.path().join("unknown.sock"));
+        fixture.stop(&fixture.store, &inbox);
+        assert_eq!(
+            crate::steer::idle_conversations(&fixture.store, Some("wake-unknown"))
+                .unwrap()
+                .len(),
+            1
+        );
+        let conn = rusqlite::Connection::open(fixture.store_path()).unwrap();
+        conn.execute("UPDATE processes SET os_started_at=NULL WHERE id=(SELECT agent_process_id FROM agent_sessions WHERE id='wake-unknown')", []).unwrap();
+        assert!(
+            crate::steer::idle_conversations(&fixture.store, Some("wake-unknown"))
+                .unwrap()
+                .is_empty()
+        );
     }
 }

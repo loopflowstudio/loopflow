@@ -55,7 +55,7 @@ pub(crate) fn claim_session_input(
     process: &LfProcessId,
     close: impl FnOnce() -> StoreResult<bool>,
 ) -> StoreResult<(LfSession, SessionAttachment)> {
-    let _admission = store.lock_session_checkouts(&next)?;
+    let _admission = crate::store::admission::lock_session_checkouts(store, &next)?;
     let resume = store.begin_session_transfer(&next.id, expected)?;
     let previous = prepare_resume(store, &resume, false, close)?;
     let start = current_start(process);

@@ -155,7 +155,8 @@ pub(crate) fn entry_of(
 pub(crate) struct GraphExecutionFacts {
     pub open_processes: HashMap<TaskId, Vec<(LfProcessId, crate::process::LfProcess)>>,
     pub inputs: HashMap<LfProcessId, (String, String, i64)>,
-    pub receipts: HashMap<LfProcessId, PathBuf>,
+    pub receipt_home: Option<PathBuf>,
+    pub receipts: HashMap<LfProcessId, String>,
     pub limit_recoveries: HashMap<LfProcessId, AgentLimitRecovery>,
 }
 
@@ -528,7 +529,7 @@ impl SqliteStore {
             .and_then(|path| std::path::Path::new(path).parent())
             .map(std::path::Path::to_path_buf);
         let mut receipts = HashMap::new();
-        if let Some(home) = home {
+        if home.is_some() {
             for row in conn
                 .prepare(
                     "SELECT id,receipt_locator FROM processes
@@ -539,12 +540,13 @@ impl SqliteStore {
                 })?
             {
                 let (id, locator) = row?;
-                receipts.insert(id, crate::journal::process_receipt_path(&home, &locator));
+                receipts.insert(id, locator);
             }
         }
         Ok(GraphExecutionFacts {
             open_processes,
             inputs,
+            receipt_home: home,
             receipts,
             limit_recoveries,
         })

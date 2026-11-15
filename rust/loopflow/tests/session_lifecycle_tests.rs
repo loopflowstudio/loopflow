@@ -1077,8 +1077,7 @@ fn public_history_discovers_unlinked_native_receipts_without_borrowing_a_later_b
     let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
         .unwrap();
     let closed = store.session(&session).unwrap().unwrap();
-    store
-        .bind_session(&session, closed.captured, &task.task.id)
+    loopflow::store::sessions::bind_session(&store, &session, closed.captured, &task.task.id)
         .unwrap();
     let count = serde_json::json!({"inputTokens":12,"outputTokens":3,
         "cachedInputTokens":0,"reasoningOutputTokens":0});
@@ -1525,8 +1524,7 @@ fn provider_parentage_does_not_assign_work_outside_its_checkout() {
         });
     let caller = serde_json::to_string(&attachment.caller(session.clone().into())).unwrap();
     let closed = store.session(&session).unwrap().unwrap();
-    store
-        .bind_session(&session, closed.captured, &task.task.id)
+    loopflow::store::sessions::bind_session(&store, &session, closed.captured, &task.task.id)
         .unwrap();
     // Synthetic provider provenance crosses real public CLI admission. The
     // same causal parent may issue taskless, checkout-bound or explicitly selected work.

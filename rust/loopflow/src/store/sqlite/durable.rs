@@ -607,8 +607,8 @@ mod durable_store_tests {
     use super::super::sessions::reserve_session_in;
     use loopflow_model::durable::{ProjectId, TaskId};
 
-    use crate::linear::{LinearIssueId, LinearProjectId};
     use crate::session::{LfSession, TitleSource, WorkSource};
+    use crate::store::linear_records::{LinearIssueId, LinearProjectId};
     use crate::store::sqlite::SqliteStore;
     use loopflow_model::id::WaveId;
 
@@ -1123,7 +1123,7 @@ mod durable_store_tests {
         let (dir, store, existing) = store_with_task();
         let (task, pr) = unregistered_task(&store, &existing, dir.path().join("missing-root"));
         let cwd = task.worktree.as_ref().unwrap().join("src/nested");
-        let admission = store.lock_checkout(&cwd).unwrap();
+        let admission = crate::store::admission::lock_checkout(&store, &cwd).unwrap();
         let mut earlier = unpublished_conversation(None, None, 1);
         earlier.cwd = cwd;
         earlier.work_source = None;
@@ -1141,7 +1141,7 @@ mod durable_store_tests {
         assert!(store.task(&task.id).unwrap().unwrap().worktree.is_none());
         assert!(store.task_prs(&task.id).unwrap().is_empty());
         drop(admission);
-        let earlier = store.create_session(earlier, None).unwrap();
+        let earlier = crate::store::sessions::create_session(&store, earlier, None).unwrap();
         register().unwrap();
         assert_eq!(
             store.session_task_ids(&earlier.id).unwrap(),
@@ -1159,13 +1159,15 @@ mod durable_store_tests {
         let mut conversation = unpublished_conversation(None, None, 1);
         conversation.cwd = task.worktree.as_ref().unwrap().join("src/nested");
         conversation.work_source = None;
-        let exclusion = store
-            .lock_checkout(task.worktree.as_ref().unwrap())
-            .unwrap();
-        assert!(store.create_session(conversation.clone(), None).is_err());
+        let exclusion =
+            crate::store::admission::lock_checkout(&store, task.worktree.as_ref().unwrap())
+                .unwrap();
+        assert!(
+            crate::store::sessions::create_session(&store, conversation.clone(), None).is_err()
+        );
         assert!(store.session(&conversation.id).unwrap().is_none());
         drop(exclusion);
-        let session = store.create_session(conversation, None).unwrap();
+        let session = crate::store::sessions::create_session(&store, conversation, None).unwrap();
         store.seed_unplaced_task(&task);
         crate::store::ownership::place_task(
             &store,
@@ -1190,9 +1192,11 @@ mod durable_store_tests {
         let (task, pr) =
             unregistered_task(&store, &existing, dir.path().join("independent-checkout"));
 
-        let _unrelated = store
-            .lock_checkout(&dir.path().join("unrelated-checkout/missing/src"))
-            .unwrap();
+        let _unrelated = crate::store::admission::lock_checkout(
+            &store,
+            &dir.path().join("unrelated-checkout/missing/src"),
+        )
+        .unwrap();
         store.seed_unplaced_task(&task);
         crate::store::ownership::place_task(
             &store,
@@ -1217,10 +1221,10 @@ mod durable_store_tests {
         let mut conversation = unpublished_conversation(None, None, 1);
         conversation.cwd = task.worktree.as_ref().unwrap().join("src");
         conversation.work_source = None;
-        let session = store.create_session(conversation, None).unwrap();
-        let exclusion = store
-            .lock_checkout(task.worktree.as_ref().unwrap())
-            .unwrap();
+        let session = crate::store::sessions::create_session(&store, conversation, None).unwrap();
+        let exclusion =
+            crate::store::admission::lock_checkout(&store, task.worktree.as_ref().unwrap())
+                .unwrap();
         store.seed_unplaced_task(&task);
         let register = || {
             crate::store::ownership::place_task(
@@ -1243,7 +1247,7 @@ mod durable_store_tests {
             vec![task.id.clone()]
         );
         assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
-        let work = store.task_work(&task.id).unwrap();
+        let work = crate::store::task_work::task_work(&store, &task.id).unwrap();
         assert_eq!(work.sessions.len(), 1);
         assert_eq!(work.sessions[0].id, session.id.as_str());
         // Allocating the checkout claims the Task; the earlier session does not.
@@ -1258,8 +1262,8 @@ mod durable_store_tests {
         let mut conversation = unpublished_conversation(None, None, 1);
         conversation.cwd = task.worktree.as_ref().unwrap().join("src");
         conversation.work_source = None;
-        let session = store.create_session(conversation, None).unwrap();
-        let before = store.task_work(&task_id).unwrap();
+        let session = crate::store::sessions::create_session(&store, conversation, None).unwrap();
+        let before = crate::store::task_work::task_work(&store, &task_id).unwrap();
         assert_eq!(before.sessions.len(), 1);
         assert_eq!(before.sessions[0].id, session.id.as_str());
         assert_eq!(session.task_id, None);
@@ -1283,7 +1287,7 @@ mod durable_store_tests {
         let retained = store.task(&task_id).unwrap().unwrap();
         assert_eq!(retained.project_id, Some(successor));
         assert_eq!(retained.worktree, task.worktree);
-        let after = store.task_work(&task_id).unwrap();
+        let after = crate::store::task_work::task_work(&store, &task_id).unwrap();
         assert_eq!(after.sessions, before.sessions);
         assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
     }
@@ -1295,19 +1299,23 @@ mod durable_store_tests {
         crate::store::ownership::unassign_task(&store, &task_id).unwrap();
         let mut conversation = unpublished_conversation(None, None, 1);
         conversation.cwd = dir.path().join("elsewhere");
-        let session = store.create_session(conversation, None).unwrap();
-        let exclusion = store
-            .lock_checkout(task.worktree.as_ref().unwrap())
-            .unwrap();
-        assert!(store
-            .bind_session(&session.id, session.captured, &task_id)
-            .is_err());
+        let session = crate::store::sessions::create_session(&store, conversation, None).unwrap();
+        let exclusion =
+            crate::store::admission::lock_checkout(&store, task.worktree.as_ref().unwrap())
+                .unwrap();
+        assert!(crate::store::sessions::bind_session(
+            &store,
+            &session.id,
+            session.captured,
+            &task_id
+        )
+        .is_err());
         assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
         assert!(!store.task_owned(&task_id).unwrap());
         drop(exclusion);
-        let bound = store
-            .bind_session(&session.id, session.captured, &task_id)
-            .unwrap();
+        let bound =
+            crate::store::sessions::bind_session(&store, &session.id, session.captured, &task_id)
+                .unwrap();
         assert_eq!(bound.task_id.as_ref(), Some(&task_id));
         // Binding a session claims nothing.
         assert!(!store.task_owned(&task_id).unwrap());
@@ -1319,22 +1327,27 @@ mod durable_store_tests {
         let task = store.task(&task_id).unwrap().unwrap();
         let mut input = unpublished_conversation(Some(task_id.clone()), None, 1);
         input.cwd = dir.path().join("elsewhere");
-        let session = store.create_session(input, None).unwrap();
+        let session = crate::store::sessions::create_session(&store, input, None).unwrap();
         let mut next = session.clone();
         next.artifact_key = Some(crate::session_record::new_artifact_key());
-        let exclusion = store
-            .lock_checkout(task.worktree.as_ref().unwrap())
-            .unwrap();
-        let result = store.replace_session_input(session.captured, next.clone(), None);
+        let exclusion =
+            crate::store::admission::lock_checkout(&store, task.worktree.as_ref().unwrap())
+                .unwrap();
+        let result = crate::store::sessions::replace_session_input(
+            &store,
+            session.captured,
+            next.clone(),
+            None,
+        );
         assert!(
             result.is_err(),
             "input changed while its Task checkout was excluded"
         );
         assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
         drop(exclusion);
-        let replaced = store
-            .replace_session_input(session.captured, next, None)
-            .unwrap();
+        let replaced =
+            crate::store::sessions::replace_session_input(&store, session.captured, next, None)
+                .unwrap();
         assert_eq!(replaced.task_id.as_ref(), Some(&task_id));
         assert_eq!(replaced.cwd, session.cwd);
         assert_ne!(replaced.captured, session.captured);
@@ -1345,19 +1358,23 @@ mod durable_store_tests {
         let (dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();
         crate::store::ownership::unassign_task(&store, &task_id).unwrap();
-        let exclusion = store
-            .lock_checkout(task.worktree.as_ref().unwrap())
-            .unwrap();
+        let exclusion =
+            crate::store::admission::lock_checkout(&store, task.worktree.as_ref().unwrap())
+                .unwrap();
         let mut conversation = unpublished_conversation(None, None, 1);
         conversation.cwd = task.worktree.as_ref().unwrap().join("missing/subdirectory");
-        assert!(store.create_session(conversation.clone(), None).is_err());
+        assert!(
+            crate::store::sessions::create_session(&store, conversation.clone(), None).is_err()
+        );
         assert!(store.session(&conversation.id).unwrap().is_none());
         conversation.cwd = dir.path().join("elsewhere");
         conversation.task_id = Some(task_id.clone());
-        assert!(store.create_session(conversation.clone(), None).is_err());
+        assert!(
+            crate::store::sessions::create_session(&store, conversation.clone(), None).is_err()
+        );
         assert!(!store.task_owned(&task_id).unwrap());
         drop(exclusion);
-        let created = store.create_session(conversation, None).unwrap();
+        let created = crate::store::sessions::create_session(&store, conversation, None).unwrap();
         assert_eq!(created.task_id.as_ref(), Some(&task_id));
         // A session naming its Task claims nothing.
         assert!(!store.task_owned(&task_id).unwrap());
@@ -1370,7 +1387,7 @@ mod durable_store_tests {
         crate::store::ownership::unassign_task(&store, &task_id).unwrap();
         let mut conversation = unpublished_conversation(None, None, 1);
         conversation.cwd = dir.path().to_path_buf();
-        let session = store.create_session(conversation, None).unwrap();
+        let session = crate::store::sessions::create_session(&store, conversation, None).unwrap();
         assert!(!store.task_owned(&task_id).unwrap());
 
         // Rotation can complete a predecessor after observing untouched backlog.
@@ -1383,9 +1400,9 @@ mod durable_store_tests {
                 [task.project_id.as_ref().unwrap().as_str()],
             )
             .unwrap();
-        let bound = store
-            .bind_session(&session.id, session.captured, &task_id)
-            .unwrap();
+        let bound =
+            crate::store::sessions::bind_session(&store, &session.id, session.captured, &task_id)
+                .unwrap();
         assert_eq!(bound.task_id.as_ref(), Some(&task_id));
         // Binding a session claims nothing.
         assert!(!store.task_owned(&task_id).unwrap());
@@ -1393,8 +1410,7 @@ mod durable_store_tests {
         assert_eq!(retained.project_id, task.project_id);
         assert_eq!(retained.worktree, task.worktree);
         assert_eq!(
-            store
-                .bind_session(&session.id, session.captured, &task_id)
+            crate::store::sessions::bind_session(&store, &session.id, session.captured, &task_id)
                 .unwrap(),
             bound
         );
@@ -1407,7 +1423,7 @@ mod durable_store_tests {
         let mut conversation = unpublished_conversation(None, None, 1);
         conversation.interactive = true;
         conversation.cwd = dir.path().to_path_buf();
-        let session = store.create_session(conversation, None).unwrap();
+        let session = crate::store::sessions::create_session(&store, conversation, None).unwrap();
         crate::store::ownership::promote_task(
             &store,
             &task_id,
@@ -1440,7 +1456,7 @@ mod durable_store_tests {
         let placement = (task.worktree.unwrap(), pr);
         let mut conversation = unpublished_conversation(None, None, 1);
         conversation.interactive = true;
-        let session = store.create_session(conversation, None).unwrap();
+        let session = crate::store::sessions::create_session(&store, conversation, None).unwrap();
         // The caller already prepared placement when completion arrived.
         store
             .conn
@@ -1648,33 +1664,33 @@ mod durable_store_tests {
                 completed_at: None,
                 created_at: 1,
             };
-            store.create_session(session, None).unwrap()
+            crate::store::sessions::create_session(&store, session, None).unwrap()
         };
         let first = open("orphan", None);
-        let replacement = store
-            .replace_session_input(
-                first.captured,
+        let replacement = crate::store::sessions::replace_session_input(
+            &store,
+            first.captured,
+            crate::session::LfSession {
+                caller_artifact_key: None,
+                artifact_key: Some(crate::session_record::new_artifact_key()),
+                ..first.clone()
+            },
+            None,
+        )
+        .unwrap();
+        assert!(
+            crate::store::sessions::replace_session_input(
+                &store,
+                replacement.captured,
                 crate::session::LfSession {
-                    caller_artifact_key: None,
-                    artifact_key: Some(crate::session_record::new_artifact_key()),
+                    cwd: "/changed".into(),
+                    provider: Some("changed".into()),
+                    model: Some("changed".into()),
                     ..first.clone()
                 },
-                None,
+                None
             )
-            .unwrap();
-        assert!(
-            store
-                .replace_session_input(
-                    replacement.captured,
-                    crate::session::LfSession {
-                        cwd: "/changed".into(),
-                        provider: Some("changed".into()),
-                        model: Some("changed".into()),
-                        ..first.clone()
-                    },
-                    None
-                )
-                .is_err(),
+            .is_err(),
             "an earlier input cannot become a fresh replacement"
         );
         assert_eq!(store.session("orphan").unwrap(), Some(replacement.clone()));
@@ -1699,12 +1715,13 @@ mod durable_store_tests {
             )
             .unwrap();
         let earlier = store.session_history("orphan", 0, 0).unwrap();
-        assert!(store
-            .bind_session("orphan", first.captured, &task_id)
-            .is_err());
-        let bound = store
-            .bind_session("orphan", replacement.captured, &task_id)
-            .unwrap();
+        assert!(
+            crate::store::sessions::bind_session(&store, "orphan", first.captured, &task_id)
+                .is_err()
+        );
+        let bound =
+            crate::store::sessions::bind_session(&store, "orphan", replacement.captured, &task_id)
+                .unwrap();
         assert_eq!(bound.artifact_key, replacement.artifact_key);
         assert_eq!(bound.task_id, Some(task_id.clone()));
         assert_eq!(bound.wave_id, task.wave_id.clone());
@@ -1716,8 +1733,7 @@ mod durable_store_tests {
         assert_eq!(store.session_inputs("orphan").unwrap(), old_runs);
         assert_eq!(store.session_history("orphan", 0, 0).unwrap(), earlier);
         assert_eq!(
-            store
-                .bind_session("orphan", replacement.captured, &task_id)
+            crate::store::sessions::bind_session(&store, "orphan", replacement.captured, &task_id)
                 .unwrap(),
             bound
         );
@@ -1757,17 +1773,17 @@ mod durable_store_tests {
             events.last().unwrap().task_id.as_deref(),
             Some(task_id.as_str())
         );
-        let future = store
-            .replace_session_input(
-                replacement.captured,
-                crate::session::LfSession {
-                    caller_artifact_key: None,
-                    artifact_key: Some(crate::session_record::new_artifact_key()),
-                    ..bound.clone()
-                },
-                None,
-            )
-            .unwrap();
+        let future = crate::store::sessions::replace_session_input(
+            &store,
+            replacement.captured,
+            crate::session::LfSession {
+                caller_artifact_key: None,
+                artifact_key: Some(crate::session_record::new_artifact_key()),
+                ..bound.clone()
+            },
+            None,
+        )
+        .unwrap();
         assert_eq!(future.task_id, Some(task_id.clone()));
         assert_eq!(future.work_source, Some(WorkSource::Bound));
         assert!(store
@@ -1785,9 +1801,9 @@ mod durable_store_tests {
             history.last().unwrap().task_id.as_deref(),
             Some(task_id.as_str())
         );
-        let refused = store
-            .bind_session("elsewhere", elsewhere.captured, &task_id)
-            .unwrap_err();
+        let refused =
+            crate::store::sessions::bind_session(&store, "elsewhere", elsewhere.captured, &task_id)
+                .unwrap_err();
         assert!(refused.to_string().contains("another Wave"), "{refused}");
         assert_eq!(store.session("elsewhere").unwrap().unwrap().task_id, None);
         let listed = crate::store::session_projection::sessions(
@@ -1807,9 +1823,12 @@ mod durable_store_tests {
         let (dir, store, task_id) = store_with_task();
         let wave = store.task(&task_id).unwrap().unwrap().wave_id;
         let other_task = TaskId::new();
-        let session = store
-            .create_session(unpublished_conversation(None, None, 1), None)
-            .unwrap();
+        let session = crate::store::sessions::create_session(
+            &store,
+            unpublished_conversation(None, None, 1),
+            None,
+        )
+        .unwrap();
         {
             let conn = store.conn.lock().unwrap();
             conn.execute("INSERT INTO tasks(id,repository_id,project_id,external_issue_id,issue_identifier,worktree,created_at)

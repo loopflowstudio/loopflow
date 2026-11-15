@@ -11,6 +11,12 @@ use crate::steer::{
 };
 use crate::store::{StoreError, StoreResult};
 
+#[derive(Debug)]
+pub(crate) struct IdleCandidate {
+    pub conversation: IdleConversation,
+    pub identity: Option<(u32, i64)>,
+}
+
 impl SqliteStore {
     pub(crate) fn reserve_steer_adapter(
         &self,
@@ -218,10 +224,10 @@ impl SqliteStore {
     /// Managed conversations whose last boundary was a turn end, on a live
     /// AgentProcess the server can reach; only `session` when given. Driven
     /// from unfinished processes: every Session ever recorded is far more.
-    pub(crate) fn idle_conversations(
+    pub(crate) fn idle_conversation_candidates(
         &self,
         session: Option<&str>,
-    ) -> StoreResult<Vec<IdleConversation>> {
+    ) -> StoreResult<Vec<IdleCandidate>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
             "SELECT s.id,p.id,a.capability,s.provider_thread,s.cwd,
@@ -251,13 +257,9 @@ impl SqliteStore {
                         Box::new(error),
                     )
                 })?;
-            let live = row
+            let identity = row
                 .get::<_, Option<u32>>(8)?
-                .zip(row.get::<_, Option<i64>>(9)?)
-                .is_some_and(|(pid, start)| {
-                    crate::journal::process_identity_evidence(pid, start)
-                        == crate::journal::ProcessIdentityEvidence::Live
-                });
+                .zip(row.get::<_, Option<i64>>(9)?);
             let conversation = IdleConversation {
                 adapter: SteerAdapter {
                     session: row.get(0)?,
@@ -268,10 +270,12 @@ impl SqliteStore {
                 cwd: row.get::<_, String>(4)?.into(),
                 reach,
             };
-            Ok(
-                (live && source.is_some_and(crate::session::WorkSource::is_managed))
-                    .then_some(conversation),
-            )
+            Ok(source
+                .filter(|source| source.is_managed())
+                .map(|_| IdleCandidate {
+                    conversation,
+                    identity,
+                }))
         })?;
         Ok(rows
             .filter_map(Result::transpose)
@@ -377,11 +381,11 @@ pub(super) fn save_in(
         .and_then(|path| Path::new(path).parent())
     {
         let marker = match owner.0 {
-            "task" => crate::steer::task_marker(home, owner.1),
-            "session" => crate::steer::session_marker(home, owner.1),
-            _ => crate::steer::latest_marker(home),
+            "task" => crate::store::steer_markers::task_marker(home, owner.1),
+            "session" => crate::store::steer_markers::session_marker(home, owner.1),
+            _ => crate::store::steer_markers::latest_marker(home),
         };
-        crate::steer::touch(&marker)
+        crate::store::steer_markers::touch(&marker)
             .map_err(|error| invalid(format!("Mark saved steer for hooks: {error}")))?;
     }
     let result = conn.query_row(

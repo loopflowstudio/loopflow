@@ -18,93 +18,72 @@ li { margin: .4rem 0; }
 .new { border-left: 3px solid light-dark(#1f6f4a, #7fd1a6); padding-left: .5rem; }
 @media (max-width: 520px) { body { margin-top: 1rem; } table { font-size: .76rem; } }
 </style>
-<header>LOO-650 · concept-review · November 15, 2026 · HEAD 330b485f83 + workspace changes<br>
-Built from <code>scratch/{loo-650,publishing-discussion,questions}.md</code> and
-<code>rust/loopflow/src/store/sqlite/{steers,task_work,sessions,graph_inventory,admission,children,planning_export,scope_defaults,rentals,durable,task_ownership}.rs</code>,
-<code>store/sqlite.rs</code>, <code>performance.rs</code>, <code>naming.rs</code>.</header>
+<header>LOO-650 · concept-review · November 15, 2026 · HEAD 7be8657b77 + uncommitted boundary implementation<br>
+Built from <code>scratch/{loo-650,questions}.md</code>,
+<code>rust/loopflow/src/store/sqlite/{sessions,processes,planning_write}.rs</code>,
+<code>journal/mod.rs</code>, <code>store/{admission,retention,task_work}.rs</code> and PR #1550 (<code>cf754f02cd</code>).</header>
 <main>
-<h1>Iterate to implement: the storage boundary has three kinds of code, and its inventory missed nine sites.</h1>
-<aside><strong>Biggest mismatch.</strong> The working rule was “SQL returns saved facts;
-everything else moves above”. The steer marker breaks it: it is a file touched
-inside the write transaction on purpose, so a hook that checks afterwards waits
-for the commit. Moving it above SQL reopens that race.</aside>
-<p>No open product choice. No command, Work record, schema or wire shape changes.
-Lines marked with a green bar are proposed; the rest is what the code does now.</p>
+<h1>Iterate to implement: three commands take the Session caller as a value; title repair takes none.</h1>
+<aside><strong>Biggest mismatch.</strong> The plan was to thread the caller through
+every command that can repair a Session title: binding, attachment and every
+planning write. The caller check only reaches those commands because automatic
+repair reuses the rename function. Repair computes a title from saved facts; no
+caller is acting on the conversation.</aside>
+<p>No open product choice. No schema, wire shape or command changes. A green bar
+marks what is proposed; the rest is what the code does now.</p>
 
-<h2>What lives in the storage crate</h2>
+<h2>Who checks the caller</h2>
 <table>
-<thead><tr><th>Kind</th><th>Examples</th><th>Where</th></tr></thead>
+<thead><tr><th>Action</th><th>Today</th><th>Proposed</th></tr></thead>
 <tbody>
-<tr><td>Saved facts, atomic SQL effects</td><td>rows, receipts, conditional commits, guards</td><td>storage</td></tr>
-<tr><td class="new">Storage’s own files beside the database</td><td>retention cursor, Session lock files, admission leases, steer marker and its path syntax</td><td>storage (proposed rule; the files are there today)</td></tr>
-<tr><td>Observation of things storage does not own</td><td>configuration, Git, OS process identity, caller environment, provider state</td><td>application, passed in as values</td></tr>
+<tr><td><code>lf session rename</code></td><td>checked; caller and capture key read from the environment inside SQL</td><td class="new">checked; the application passes one <code>SessionCaller</code> value, SQL compares it with saved rows</td></tr>
+<tr><td>Bind a Session to a Task</td><td>checked only when the title is generated</td><td class="new">checked always, same value</td></tr>
+<tr><td>Attach / resume</td><td>checked only when the title is generated</td><td class="new">checked always, same value</td></tr>
+<tr><td>Task identifier changes, titles follow</td><td>checked per Session; a replaced-provider refusal is swallowed, a capture-key failure fails the whole edit</td><td class="new">not checked; every open generated title is rewritten</td></tr>
 </tbody>
 </table>
 
-<h2>Production sites the inventory did not list</h2>
-<table>
-<thead><tr><th>Site</th><th>Reads today</th><th>Proposed</th></tr></thead>
-<tbody>
-<tr><td><code>steers.rs</code> idle conversations</td><td>OS process identity, once per row</td><td class="new">return saved pid/start; evidence supplied like <code>SessionProjection</code></td></tr>
-<tr><td><code>task_work.rs</code> <code>process_may_run</code></td><td><code>journal::lf_evidence</code></td><td class="new">application function over a saved process; unknown stays “may run”</td></tr>
-<tr><td><code>sessions.rs</code> input replacement, current-actor and capture checks</td><td>caller identity from the environment</td><td class="new">caller passed as a value; SQL still compares it with the saved current provider</td></tr>
-<tr><td><code>graph_inventory.rs</code></td><td>builds journal receipt paths</td><td class="new">return saved locators; path built above</td></tr>
-<tr><td><code>admission.rs</code></td><td><code>git::worktree_root</code></td><td class="new">caller supplies roots; lease files stay</td></tr>
-<tr><td><code>children.rs</code></td><td><code>engine::creation::TaskCreateReceipt</code></td><td class="new">a saved record: moves down, <code>engine</code> re-exports</td></tr>
-<tr><td><code>sessions.rs</code></td><td><code>naming::task_session_title</code></td><td class="new">pure; moves down or arrives as a value</td></tr>
-<tr><td>planning export, changes, state delivery</td><td>Linear slug, document rendering, revision ordering</td><td class="new">pure operations; move with the Linear records</td></tr>
-<tr><td><code>sqlite.rs</code> connection open</td><td><code>performance::observe_sqlite</code></td><td class="new">SQLite tracing moves down; subscription measurement reads its counters from above</td></tr>
-</tbody>
-</table>
-
-<h2>Where a saved record lives</h2>
-<p class="new">In the storage crate, unless a crate that does not depend on storage
-needs it; only then in <code>loopflow-model</code>. The model is 1,671 lines and the
-terminal depends on it, so each record added there rebuilds the terminal and
-everything else on every edit. This places <code>TaskGraphPosition</code> in storage.
-The Graph compiler and runner do not move down: storage keeps the serialized
-captured Graph and cursor it saves.</p>
-
-<h2>What storage extraction can buy</h2>
-<table>
-<thead><tr><th>Module</th><th>Lines, inline tests included</th></tr></thead>
-<tbody>
-<tr><td>application total</td><td>331,503</td></tr>
-<tr><td><code>ops</code></td><td>62,478</td></tr>
-<tr><td><code>lf</code></td><td>60,873</td></tr>
-<tr><td><code>store</code> (<code>store/sqlite</code> without test files: 35,921)</td><td>59,107</td></tr>
-<tr><td><code>harness</code></td><td>17,661</td></tr>
-<tr><td><code>server</code></td><td>12,817</td></tr>
-</tbody>
-</table>
-<p>An edit under <code>ops/task/</code> still recompiles <code>ops</code>, <code>lf</code>,
-<code>server</code> and the rest of the application after storage moves. Lines are
-not compile cost. <span class="new">Run the benchmark right after the storage crate
-moves; its number decides whether definitions, providers and runtime are the right
-next order, or whether the cost sits in the application itself. Report the
-fresh-worktree win and the edit win separately.</span></p>
+<h2>What changes for people</h2>
+<ul>
+<li class="new">A replaced provider can no longer bind or resume its former Session when a person named it. It already could not when the name was generated.</li>
+<li class="new">When a Task gets its Linear identifier, every open generated Session name picks up the new label, including the Session of the agent that made the edit.</li>
+<li class="new">An identifier update no longer fails with “capture does not belong to a recorded Session in this Machine” because the process carried another store’s <code>LF_CAPTURE_KEY</code>.</li>
+<li>Served requests see no agent caller and read the server’s environment for the capture key. Unchanged in this cut.</li>
+</ul>
 
 <h2>Normal → failure → recovery</h2>
-<p>A steer is saved and its marker touched under the write lock; the next hook
-check sees it. A reconnecting viewer whose recorded PID was reused stays unknown:
-never dead, never idle, never permission to close. A replaced provider still
-cannot change its conversation, and a capture from another Session is still
-refused, when the caller arrives as a value. Add focused regressions for the
-steer-marker ordering and the replaced-actor refusal before those files move.</p>
+<p>An agent renames its own Session: the facade reads the caller once, SQL finds
+it is the current attached provider, the name is saved. The provider is replaced
+and the old process tries again: SQL finds a different current provider and
+answers “Session provider was replaced”; nothing is written. The old process
+then edits its Task’s identifier: the edit succeeds and the live conversation’s
+name follows.</p>
+<p>Neither refusal string has a test today. Add: rename, bind and attach by a
+replaced provider, generated and human title; a capture owned by another Session
+refused on rename; an identifier update that repairs every open generated title
+and succeeds with a foreign capture key.</p>
+
+<h2>Also settled</h2>
+<ul>
+<li class="new">Storage stamps its own writes (<code>now_unix()</code>, <code>unixepoch()</code>). Only a time that decides membership arrives as a value. No clock parameter on every write.</li>
+<li class="new">Down with storage: <code>store::{steer_markers,instrumentation,linear_records}</code>. Stay application: <code>store::{admission,retention,task_work}</code>.</li>
+<li>Production SQL names no application facade module. <code>journal::agent_caller</code>, twice in <code>require_current_actor_in</code>, is the last production name from SQL into application code that is not a saved record.</li>
+</ul>
 
 <h2>Order</h2>
 <ol>
-<li>Ownership/placement, rental hand-back and Machine declarations: saved scope → observed configuration → SQL command (already specified).</li>
-<li>The nine sites above.</li>
-<li>Move synchronous storage with its records, its own files, migrations and schema generation in one cut. Before moving, classify every remaining <code>crate::</code> name under <code>store/sqlite</code> as stays, record moving down, or supplied by caller.</li>
+<li class="new">The caller value for rename, bind and attach; repair without a caller; the regressions above.</li>
+<li>Upgrade preflights: saved read → act above → compare in the exclusive transaction.</li>
+<li>Classify <code>store/</code>, split <code>store/mod.rs</code>.</li>
+<li>Move synchronous storage with records, its own files, migrations and schema generation.</li>
 <li>Measure, then choose the next cut.</li>
 </ol>
 
 <h2>Questions</h2>
-<p>None blocks this pass. These would change the direction if answered differently:</p>
+<p>None blocks this pass. A different answer would change the direction:</p>
 <ol>
-<li>If the measurement after storage shows most of an <code>ops/task</code> edit’s cost is <code>ops</code> + <code>lf</code> themselves: (a) split the application next, ahead of providers and runtime; (b) keep the planned order.</li>
-<li>Records beside their SQL in the storage crate: (a) as proposed; (b) all saved records in <code>loopflow-model</code>, accepting a wider rebuild on each record edit.</li>
+<li>Caller check on bind and attach: (a) always, as proposed; (b) exactly as today, only when the title is generated, which needs the caller threaded through planning writes too.</li>
+<li>If the storage measurement shows an <code>ops/task</code> edit’s cost sits in <code>ops</code> + <code>lf</code>: (a) split the application next; (b) continue with definitions, providers and runtime.</li>
 </ol>
 </main>
 </html>

@@ -245,8 +245,7 @@ fn task_selection_in(
                 });
             // A conversation Loopflow never attached cannot be running here.
             if session.agent_process_id.is_some()
-                && session.agent_process_evidence
-                    == crate::journal::ProcessIdentityEvidence::Unknown
+                && session.agent_process_evidence == crate::store::ProcessIdentityEvidence::Unknown
             {
                 activity.known = false;
             }

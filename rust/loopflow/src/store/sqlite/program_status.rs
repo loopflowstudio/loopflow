@@ -241,7 +241,7 @@ mod tests {
                 assert!(summary.program_status.is_none());
                 assert_eq!(
                     summary.agent_process_evidence,
-                    crate::journal::ProcessIdentityEvidence::Dead
+                    crate::store::ProcessIdentityEvidence::Dead
                 );
                 assert_eq!(
                     store.session_attachment("session").unwrap(),

@@ -623,9 +623,13 @@ fn task_view_keeps_workflow_checkout_and_conversations_after_live_updates() {
     let session = home
         .store
         .test_session("task-view", &crate::session_record::new_artifact_key());
-    home.store
-        .bind_session(session.id.as_str(), session.captured, &task.id)
-        .unwrap();
+    crate::store::sessions::bind_session(
+        &home.store,
+        session.id.as_str(),
+        session.captured,
+        &task.id,
+    )
+    .unwrap();
     home.store.test_graph(
         "debug",
         checkout.to_str().unwrap(),

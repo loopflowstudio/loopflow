@@ -172,17 +172,17 @@ fn context_environment(
     command.env(capability_env, serde_json::to_string(&capability)?);
     command.env(
         crate::steer::STEER_SEEN_ENV,
-        crate::steer::seen_marker(&home, &capability.agent_process_id),
+        crate::store::steer_markers::seen_marker(&home, &capability.agent_process_id),
     );
     command.env(
         crate::steer::STEER_SESSION_ENV,
-        crate::steer::session_marker(&home, session),
+        crate::store::steer_markers::session_marker(&home, session),
     );
     // A Session belongs to at most one Task: Task checkouts do not nest.
     if let [task] = store.session_task_ids(session)?.as_slice() {
         command.env(
             crate::steer::STEER_TASK_ENV,
-            crate::steer::task_marker(&home, task.as_str()),
+            crate::store::steer_markers::task_marker(&home, task.as_str()),
         );
     }
     Ok(())

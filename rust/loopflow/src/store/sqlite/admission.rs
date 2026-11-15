@@ -8,39 +8,11 @@ use fs2::FileExt;
 use sha2::{Digest, Sha256};
 
 use crate::store::{StoreError, StoreResult};
-use loopflow_model::durable::TaskId;
 
 use super::SqliteStore;
 
 impl SqliteStore {
-    pub(crate) fn lock_checkout(&self, cwd: &Path) -> StoreResult<Vec<File>> {
-        self.lock_task_checkouts(&[cwd], None)
-    }
-
-    pub(crate) fn lock_task_checkouts(
-        &self,
-        workspaces: &[&Path],
-        task: Option<&TaskId>,
-    ) -> StoreResult<Vec<File>> {
-        let roots = task
-            .map(|id| self.task(id))
-            .transpose()?
-            .flatten()
-            .and_then(|task| task.worktree)
-            .into_iter()
-            .collect::<Vec<_>>();
-        self.lock_checkout_roots(workspaces, &roots)
-    }
-
-    pub(crate) fn lock_checkout_roots(
-        &self,
-        workspaces: &[&Path],
-        roots: &[PathBuf],
-    ) -> StoreResult<Vec<File>> {
-        let canonical = |path: &Path| {
-            crate::store::canonicalize_with_missing_tail(path)
-                .map_err(|error| StoreError::InvalidData(error.to_string()))
-        };
+    pub(crate) fn lock_checkout_roots(&self, roots: &[PathBuf]) -> StoreResult<Vec<File>> {
         // Ancestor intent survives registration of a previously unknown Task root.
         // Siblings share ancestors; an exclusive root excludes every descendant.
         // Merge modes before locking so overlapping workspaces never upgrade a lock.
@@ -52,11 +24,7 @@ impl SqliteStore {
             locks.insert(path, true);
         };
         for root in roots {
-            include(canonical(root)?);
-        }
-        for cwd in workspaces {
-            let cwd = canonical(cwd)?;
-            include(canonical(&crate::git::worktree_root(&cwd).unwrap_or(cwd))?);
+            include(root.clone());
         }
         let database = self
             .conn

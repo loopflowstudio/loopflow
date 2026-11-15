@@ -58,7 +58,8 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
     let execution = crate::ops::task_execution::task_execution(store, &task)
         .await
         .map_err(task_error)?;
-    let work_set = store.sqlite.task_work(&task.id).map_err(task_error)?;
+    let work_set =
+        crate::store::task_work::task_work(&store.sqlite, &task.id).map_err(task_error)?;
     let status = store.task_state(&task.id).await.map_err(task_error)?;
     let actions = if store.sqlite.task_deleted(&task).map_err(task_error)? {
         TaskActionModel {

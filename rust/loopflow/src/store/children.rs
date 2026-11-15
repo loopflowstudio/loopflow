@@ -69,8 +69,7 @@ impl Store {
         roots: Vec<std::path::PathBuf>,
     ) -> StoreResult<Vec<Arc<std::fs::File>>> {
         run_sqlite(&self.sqlite, move |store| {
-            store
-                .lock_checkout_roots(&[], &roots)
+            super::admission::lock_checkout_roots(&store, &roots)
                 .map(|locks| locks.into_iter().map(Arc::new).collect())
         })
         .await
@@ -293,7 +292,7 @@ impl Store {
     pub(crate) async fn apply_linear_observation(
         &self,
         task_id: &TaskId,
-        observation: crate::linear::LinearIssueObservation,
+        observation: crate::store::linear_records::LinearIssueObservation,
         observed_at: OffsetDateTime,
         planning_connected: bool,
     ) -> StoreResult<LinearObservationOutcome> {

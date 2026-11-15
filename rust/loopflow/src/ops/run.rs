@@ -234,7 +234,7 @@ async fn bind_selected_work(
             pr.as_ref(),
             wave.as_ref().map(Wave::slug),
         );
-        if let Ok(Some(graph)) = store.sqlite.task_graph(&task.id) {
+        if let Ok(Some(graph)) = crate::store::task_work::task_graph(&store.sqlite, &task.id) {
             context.push_str(&format!("\n\n{}", graph.guidance(&task.identifier)));
         }
         let cwd = task.worktree()?.clone();
@@ -516,7 +516,9 @@ mod tests {
         ));
         assert!(store.task_prs(&task.id).await.unwrap().is_empty());
         assert!(store.task_checkout(&task.id).await.unwrap().is_none());
-        assert!(store.sqlite.task_graph(&task.id).unwrap().is_none());
+        assert!(crate::store::task_work::task_graph(&store.sqlite, &task.id)
+            .unwrap()
+            .is_none());
         assert!(report.render().contains("Checkout: unbound"));
         assert!(report
             .render()

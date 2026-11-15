@@ -1,7 +1,6 @@
 //! Session transactions share the invocation's SQLite transaction and fences.
 
 use loopflow_model::id::AgentSessionId;
-use std::fs::File;
 use std::path::Path;
 
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
@@ -27,17 +26,17 @@ pub(crate) struct SessionProcessIdentity {
 pub(crate) struct SessionProjection {
     pub now: i64,
     pub live_agents: String,
-    pub evidence: std::collections::HashMap<String, crate::journal::ProcessIdentityEvidence>,
+    pub evidence: std::collections::HashMap<String, crate::store::ProcessIdentityEvidence>,
 }
 
 impl SessionProjection {
     fn evidence(
         &self,
         id: Option<&loopflow_model::id::AgentProcessId>,
-    ) -> crate::journal::ProcessIdentityEvidence {
+    ) -> crate::store::ProcessIdentityEvidence {
         id.and_then(|id| self.evidence.get(id.as_str()))
             .copied()
-            .unwrap_or(crate::journal::ProcessIdentityEvidence::Unknown)
+            .unwrap_or(crate::store::ProcessIdentityEvidence::Unknown)
     }
 }
 
@@ -441,7 +440,7 @@ fn read_summary(
         };
         let agent_process_id: Option<loopflow_model::id::AgentProcessId> = row.get(31)?;
         let agent_process_evidence = projection.evidence(agent_process_id.as_ref());
-        let live = agent_process_evidence == crate::journal::ProcessIdentityEvidence::Live;
+        let live = agent_process_evidence == crate::store::ProcessIdentityEvidence::Live;
         let unviewed: bool = row.get(34)?;
         let task_identifier = task_id
             .as_ref()
@@ -1471,17 +1470,12 @@ impl SqliteStore {
         .transpose()
     }
 
-    pub(crate) fn lock_session_checkouts(&self, session: &LfSession) -> StoreResult<Vec<File>> {
-        self.lock_task_checkouts(&[session.cwd.as_path()], session.task_id.as_ref())
-    }
-
     /// Admit the conversation and its captured input before provider effects.
-    pub fn create_session(
+    pub(crate) fn create_session_prepared(
         &self,
         session: LfSession,
         caller_process: Option<&loopflow_model::id::LfProcessId>,
     ) -> StoreResult<LfSession> {
-        let _admission = self.lock_session_checkouts(&session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if let Some(existing) = session_in(&tx, &session.id)? {
@@ -1597,14 +1591,13 @@ impl SqliteStore {
     /// Replace captured input, retaining the conversation's workspace, native
     /// history, title, feedback and assignment. Explicit opening may retry a
     /// retired conversation without making it primary again.
-    pub fn replace_session_input(
+    pub(crate) fn replace_session_input_prepared(
         &self,
         expected_input: Option<i64>,
         mut session: LfSession,
         creation: Option<&str>,
+        caller: Option<&loopflow_model::id::LfProcessId>,
     ) -> StoreResult<LfSession> {
-        let stored = self.session(&session.id)?.ok_or(StoreError::NotFound)?;
-        let _admission = self.lock_session_checkouts(&stored)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let previous = session_in(&tx, &session.id)?.ok_or(StoreError::NotFound)?;
@@ -1620,11 +1613,7 @@ impl SqliteStore {
                 "conversation changed before input replacement".into(),
             ));
         }
-        replace_input_in(
-            &tx,
-            &mut session,
-            crate::journal::current_lf_process_id().as_ref(),
-        )?;
+        replace_input_in(&tx, &mut session, caller)?;
         let session = session_in(&tx, &session.id)?.ok_or(StoreError::NotFound)?;
         if let Some(id) = creation {
             let changed = tx.execute("UPDATE creation_receipts SET milestone='admitted',updated_at=?3 WHERE request_id=?1 AND artifact_key=?2 AND milestone='stopping'",
@@ -1640,18 +1629,17 @@ impl SqliteStore {
     }
 
     /// Assign future work without changing earlier attribution. Closed Sessions bind too.
-    pub fn bind_session(
+    pub(crate) fn bind_session_prepared(
         &self,
         id: &str,
         expected_capture: Option<i64>,
         task: &TaskId,
+        cwd: &Path,
     ) -> StoreResult<LfSession> {
-        let before = self.session(id)?.ok_or(StoreError::NotFound)?;
-        let _admission = self.lock_task_checkouts(&[&before.cwd], Some(task))?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let current = session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
-        if current.cwd != before.cwd || current.captured != expected_capture {
+        if current.cwd != cwd || current.captured != expected_capture {
             return Err(StoreError::InvalidAuthority(
                 "Session changed before binding".into(),
             ));
@@ -1838,7 +1826,7 @@ fn generated_title_in(
     if source == TitleSource::Generated {
         if let Some(id) = &session.task_id {
             if let Some(label) = super::children::short_task_id(conn, id)? {
-                return Ok(crate::naming::task_session_title(
+                return Ok(crate::session::task_session_title(
                     title, id, &label, previous,
                 ));
             }
@@ -2151,7 +2139,8 @@ pub(crate) fn test_capture(conn: &Connection, session: &str, artifact: &str) {
 #[cfg(test)]
 impl SqliteStore {
     pub(crate) fn test_session(&self, id: &str, artifact: &str) -> LfSession {
-        self.create_session(
+        crate::store::sessions::create_session(
+            self,
             LfSession {
                 captured: None,
                 id: id.into(),
@@ -2296,27 +2285,45 @@ mod metadata_tests {
             )
             .unwrap();
         }
-        assert_eq!(store.task_work(&task).unwrap().sessions.len(), 1);
-        let exclusion = store.lock_checkout(&session.cwd).unwrap();
+        assert_eq!(
+            crate::store::task_work::task_work(&store, &task)
+                .unwrap()
+                .sessions
+                .len(),
+            1
+        );
+        let exclusion = crate::store::admission::lock_checkout(&store, &session.cwd).unwrap();
         let mut next = session.clone();
         next.cwd = home.path().join("destination");
         next.artifact_key = Some(crate::session_record::new_artifact_key());
-        assert!(store
-            .replace_session_input(session.captured, next.clone(), None)
-            .is_err());
-        let retained = store.task_work(&task).unwrap().sessions;
+        assert!(crate::store::sessions::replace_session_input(
+            &store,
+            session.captured,
+            next.clone(),
+            None
+        )
+        .is_err());
+        let retained = crate::store::task_work::task_work(&store, &task)
+            .unwrap()
+            .sessions;
         drop(exclusion);
         assert_eq!(
             retained.len(),
             1,
             "input replacement removed Task work while its source checkout was excluded"
         );
-        let replacement = store
-            .replace_session_input(session.captured, next, None)
-            .unwrap();
+        let replacement =
+            crate::store::sessions::replace_session_input(&store, session.captured, next, None)
+                .unwrap();
         assert_eq!(replacement.cwd, session.cwd);
         assert_eq!(replacement.task_id, None);
-        assert_eq!(store.task_work(&task).unwrap().sessions.len(), 1);
+        assert_eq!(
+            crate::store::task_work::task_work(&store, &task)
+                .unwrap()
+                .sessions
+                .len(),
+            1
+        );
         assert_ne!(replacement.captured, session.captured);
     }
 
@@ -2381,15 +2388,19 @@ mod metadata_tests {
             )
             .unwrap();
         let before = store.session_history("retired", 0, 100).unwrap();
-        assert!(store
-            .replace_session_input(first.captured, next.clone(), None)
-            .is_err());
+        assert!(crate::store::sessions::replace_session_input(
+            &store,
+            first.captured,
+            next.clone(),
+            None
+        )
+        .is_err());
         assert_eq!(store.session_history("retired", 0, 100).unwrap(), before);
 
         next.completed_at = Some(10);
-        let next = store
-            .replace_session_input(first.captured, next, None)
-            .unwrap();
+        let next =
+            crate::store::sessions::replace_session_input(&store, first.captured, next, None)
+                .unwrap();
         store.publish_capture(&next.id, next.captured).unwrap();
         let retained = store.session("retired").unwrap().unwrap();
         assert_eq!(retained.completed_at, Some(10));
@@ -2413,9 +2424,9 @@ mod metadata_tests {
         let mut next = first.clone();
         next.artifact_key = Some(crate::session_record::new_artifact_key());
         next.input_published = false;
-        let next = store
-            .replace_session_input(first.captured, next, None)
-            .unwrap();
+        let next =
+            crate::store::sessions::replace_session_input(&store, first.captured, next, None)
+                .unwrap();
         assert_ne!(next.captured, first.captured);
         drop(store);
         let store = SqliteStore::open_ephemeral(&path).unwrap();
@@ -2428,9 +2439,13 @@ mod metadata_tests {
             first.id
         );
         assert!(store.publish_capture(&first.id, first.captured).is_err());
-        assert!(store
-            .replace_session_input(first.captured, first.clone(), None)
-            .is_err());
+        assert!(crate::store::sessions::replace_session_input(
+            &store,
+            first.captured,
+            first.clone(),
+            None
+        )
+        .is_err());
         store
             .publish_capture(&retained.id, retained.captured)
             .unwrap();
@@ -2668,7 +2683,7 @@ mod metadata_tests {
         });
         // Bound after its input was captured: binding assigns future work only.
         let bound = store.test_session("bound", &crate::session_record::new_artifact_key());
-        store.bind_session("bound", bound.captured, &task).unwrap();
+        crate::store::sessions::bind_session(&store, "bound", bound.captured, &task).unwrap();
         {
             let conn = store.conn.lock().unwrap();
             // (session, Task on the capture, on its manifest, on its `started` origin)

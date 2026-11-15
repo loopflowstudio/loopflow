@@ -269,7 +269,8 @@ pub fn ship_begin(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsRe
                 });
             }
         }
-        let current = store.sqlite.task_graph(&task.id).map_err(task_error)?;
+        let current =
+            crate::store::task_work::task_graph(&store.sqlite, &task.id).map_err(task_error)?;
         if current.is_none() || graph.is_some() {
             let TaskRunSelection {
                 graph: selected,
@@ -523,9 +524,7 @@ pub fn ship_next(issue: &str) -> OpsResult<ShipStep> {
         {
             return Ok(ShipStep::Stopped);
         }
-        let graph = store
-            .sqlite
-            .task_graph(&task.id)
+        let graph = crate::store::task_work::task_graph(&store.sqlite, &task.id)
             .map_err(task_error)?
             .ok_or_else(|| task_error(format!("Task {issue} has no graph to ship")))?;
         next_step(&graph, &task.identifier)
@@ -594,9 +593,7 @@ pub(crate) fn restart_ships() -> OpsResult<()> {
             }
             // A run another `lf task run` carries, such as one a move continued
             // on this Machine, ships once it stops.
-            if store
-                .sqlite
-                .task_graph(&id)
+            if crate::store::task_work::task_graph(&store.sqlite, &id)
                 .map_err(task_error)?
                 .is_some_and(|graph| {
                     matches!(graph.position, TaskGraphPosition::Run { running: true, .. })

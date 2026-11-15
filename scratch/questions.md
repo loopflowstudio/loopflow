@@ -39,5 +39,11 @@
   storage compares inside the exclusive transaction). The alternative, a
   callback run inside the transaction, is less code but puts application code
   under storage's lock and contradicts the no-callback direction.
+- Rename, bind and attach check the Session caller whatever the title source;
+  title repair checks none. This newly refuses a replaced provider binding or
+  attaching a Session a person named, and lets a Task identifier update repair
+  the editor's own replaced Session. The alternative keeps today's behavior
+  exactly (check only when the title is generated, skip repair for a stale
+  editor), which needs the caller threaded through every planning write.
 - Acquisition modules under `store/` keep their paths until the storage
   measurement picks the next cut; renaming them now changes no rebuild closure.

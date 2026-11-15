@@ -1766,7 +1766,7 @@ impl<'a> DetailReads<'a> {
                 .states
                 .get(&task.id)
                 .ok_or_else(|| anyhow!("Task {} has no state", task.id))?;
-            let graph = store.sqlite.task_graph(&task.id)?;
+            let graph = crate::store::task_work::task_graph(&store.sqlite, &task.id)?;
             if let Some(snapshot) = crate::ops::task::ship::read_shipping(
                 &store.sqlite,
                 &task.id,
@@ -4611,7 +4611,11 @@ mod tests {
             reason.contains("no such table: task_ship_events"),
             "{reason}"
         );
-        let graph = store.sqlite.task_overview(&task).unwrap().0.graph.unwrap();
+        let graph = crate::store::task_work::task_overview(&store.sqlite, &task)
+            .unwrap()
+            .0
+            .graph
+            .unwrap();
         assert_eq!(graph.name, "feature");
         assert!(
             matches!(graph.position, crate::task_graph::TaskGraphPosition::At { ref step } if step == "end")

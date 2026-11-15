@@ -360,14 +360,14 @@ fn a_conversation_on_an_app_server_records_its_turns_from_hooks() {
 #[test]
 fn saving_a_steer_wakes_tool_hooks() {
     let (home, store, _) = fixture();
-    let marker = crate::steer::session_marker(home.path(), "session");
+    let marker = crate::store::steer_markers::session_marker(home.path(), "session");
     assert!(!marker.exists());
     store
         .save_session_steer("session", "Named author", "Change direction")
         .unwrap();
     assert!(marker.exists(), "a saved steer must reach gated tool hooks");
     assert!(
-        !crate::steer::latest_marker(home.path()).exists(),
+        !crate::store::steer_markers::latest_marker(home.path()).exists(),
         "one Session's steer starts lf in no other conversation"
     );
 }
@@ -861,4 +861,35 @@ fn dropping_the_adapter_thread_keeps_capabilities() {
         )
         .unwrap();
     assert_eq!(kept, ("capability".into(), 2));
+}
+
+#[test]
+fn a_hook_check_after_the_marker_waits_for_the_steer_commit() {
+    let (home, store, adapter) = fixture();
+    let mut writer = rusqlite::Connection::open(home.path().join("store.db")).unwrap();
+    let tx = writer
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .unwrap();
+    save_in(
+        &tx,
+        ("session", "session"),
+        "marker-order",
+        "1",
+        &Author::Named("writer".into()),
+        "keep this",
+    )
+    .unwrap();
+    assert!(crate::store::steer_markers::session_marker(home.path(), "session").exists());
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .busy_timeout(std::time::Duration::ZERO)
+        .unwrap();
+    assert!(
+        matches!(store.claim_session_steers(&adapter, "native"), Err(StoreError::Sqlite(error))
+        if error.sqlite_error_code() == Some(rusqlite::ErrorCode::DatabaseBusy))
+    );
+    tx.commit().unwrap();
+    assert_eq!(read(&store, &adapter, "native")[0].text, "keep this");
 }

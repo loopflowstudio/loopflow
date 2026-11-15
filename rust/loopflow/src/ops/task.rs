@@ -731,7 +731,9 @@ pub(crate) fn select_task_run(
     };
     let take_up = row.is_none();
     if let Some((_, process)) = row.as_ref().and_then(|row| row.run.as_ref()) {
-        if process.completed_at.is_none() && store.sqlite.process_may_run(process) {
+        if process.completed_at.is_none()
+            && crate::store::task_work::process_may_run(&store.sqlite, process)
+        {
             return Err(task_error(format!(
                 "Task {issue} is running graph {} from {}; read `lf task status {issue}`, or `lf task interrupt {issue}` to stop it",
                 graph.name, row.as_ref().expect("a run belongs to a row").step
@@ -2200,7 +2202,8 @@ pub(crate) async fn registered_task_status(
         .sqlite
         .task_acquisition(&task.id)
         .map_err(task_error)?;
-    let (overview, graph_processes) = store.sqlite.task_overview(&task.id).map_err(task_error)?;
+    let (overview, graph_processes) =
+        crate::store::task_work::task_overview(&store.sqlite, &task.id).map_err(task_error)?;
     let mut result = TaskStatus {
         sync: Some(store.task_planning_sync(&task.id).map_err(task_error)?),
         project: match &task.project_id {

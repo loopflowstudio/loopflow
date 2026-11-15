@@ -185,7 +185,7 @@ pub fn run_prune(json: bool, dry_run: bool) -> Result<()> {
         // their receipts go.
         let database = crate::store::database_path_from_env()?;
         if database.exists() {
-            match crate::store::sqlite::retention::prune(&database, now) {
+            match crate::store::retention::prune(&database, now) {
                 Ok(store) => report.store = Some(store),
                 Err(error) => {
                     tracing::warn!(%error, "failed to apply store retention");

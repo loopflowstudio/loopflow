@@ -66,7 +66,7 @@ fn standing(
             .is_some_and(|summary| summary.available),
         None => false,
     };
-    let graph = store.task_graph(task)?;
+    let graph = crate::store::task_work::task_graph(store, task)?;
     let node = graph
         .as_ref()
         .and_then(|graph| graph.waiting_step())

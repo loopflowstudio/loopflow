@@ -6,12 +6,26 @@ use std::collections::{HashMap, HashSet};
 use crate::graph::runner::ExecutionCursor;
 use crate::process::LfProcess;
 use crate::store::StoreResult;
-use crate::task_graph::{CapturedGraph, TaskGraph, TaskGraphPosition, END, START};
-use crate::task_work::{TaskSession, TaskWork};
+use crate::task_graph::{CapturedGraph, END, START};
+use crate::task_work::TaskSession;
 use loopflow_model::durable::TaskId;
 use loopflow_model::id::LfProcessId;
 
 use super::SqliteStore;
+
+#[derive(Debug)]
+pub(crate) struct TaskOverviewRecords {
+    pub sessions: Vec<TaskSession>,
+    pub graph_processes: Vec<crate::durable::GraphProcessInventoryEntry>,
+    pub graph: Option<TaskGraphRow>,
+}
+#[derive(Debug)]
+pub(crate) struct TaskWorkRecords {
+    pub sessions: Vec<TaskSession>,
+    pub graph_processes: Vec<crate::durable::GraphProcessInventoryEntry>,
+    pub processes: Vec<crate::process::ProcessEntry>,
+    pub graph: Option<TaskGraphRow>,
+}
 
 /// Each Task with this Machine's checkout of it: `worktree` is NULL for a Task
 /// not checked out here.
@@ -232,6 +246,7 @@ fn latest_task_graphs(
 /// The Task's Graph row: the graph it took up, the step it stands at or its
 /// run left, and that run with the cursor its next attempt sets out from: where
 /// it began, then the step after the last one it finished.
+#[derive(Debug)]
 pub(crate) struct TaskGraphRow {
     pub graph: CapturedGraph,
     pub step: String,
@@ -747,13 +762,10 @@ impl SqliteStore {
     /// Current workspace facts, without enumerating mechanical Process history.
     /// The Task's overview and, for each of its Graphs in the same order, what
     /// `lf graph show --processes` says of it.
-    pub fn task_overview(
+    pub(crate) fn task_overview_records(
         &self,
         task: &TaskId,
-    ) -> StoreResult<(
-        crate::task_work::TaskOverview,
-        Vec<crate::durable::GraphProcessDetail>,
-    )> {
+    ) -> StoreResult<(TaskOverviewRecords, Vec<crate::durable::GraphProcessDetail>)> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.savepoint()?;
         let (sessions, graphs) = members(&tx, task)?;
@@ -765,10 +777,10 @@ impl SqliteStore {
             .map(|(graph, entry)| graph.detail(entry.clone()))
             .collect();
         Ok((
-            crate::task_work::TaskOverview {
+            TaskOverviewRecords {
                 sessions,
                 graph_processes: graphs.into_iter().map(|(_, entry)| entry).collect(),
-                graph: graph.map(|row| self.read_task_graph(row)),
+                graph,
             },
             details,
         ))
@@ -776,10 +788,13 @@ impl SqliteStore {
 
     /// The Task's Graph position and what `lf graph show --processes` says of
     /// each of its Graphs, without listing its Sessions: a hook reads this.
-    pub(crate) fn task_progress(
+    pub(crate) fn task_progress_records(
         &self,
         task: &TaskId,
-    ) -> StoreResult<(Option<TaskGraph>, Vec<crate::durable::GraphProcessDetail>)> {
+    ) -> StoreResult<(
+        Option<TaskGraphRow>,
+        Vec<crate::durable::GraphProcessDetail>,
+    )> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.savepoint()?;
         let graphs = member_graphs(&tx, task)?;
@@ -790,11 +805,11 @@ impl SqliteStore {
             .iter()
             .map(|(graph, entry)| graph.detail(entry.clone()))
             .collect();
-        Ok((graph.map(|row| self.read_task_graph(row)), details))
+        Ok((graph, details))
     }
 
     /// Read all three owners in one SQLite snapshot, including closed history.
-    pub fn task_work(&self, task: &TaskId) -> StoreResult<TaskWork> {
+    pub(crate) fn task_work_records(&self, task: &TaskId) -> StoreResult<TaskWorkRecords> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.savepoint()?;
         let (sessions, graphs) = members(&tx, task)?;
@@ -810,11 +825,11 @@ impl SqliteStore {
         let graph = task_graph_row(&tx, task)?;
         tx.commit()?;
         drop(conn);
-        Ok(TaskWork {
+        Ok(TaskWorkRecords {
             sessions,
             graph_processes: graphs,
             processes,
-            graph: graph.map(|row| self.read_task_graph(row)),
+            graph,
         })
     }
 
@@ -836,44 +851,10 @@ impl SqliteStore {
         Ok(processes)
     }
 
-    /// Whether a command with no recorded exit may still be running.
-    /// Unknown is not stopped.
-    pub(crate) fn process_may_run(&self, process: &crate::process::LfProcess) -> bool {
-        crate::journal::lf_evidence(self, &process.id)
-            != crate::journal::ProcessIdentityEvidence::Dead
-    }
-
-    /// The Task's Graph and where it stands.
-    pub(crate) fn task_graph(&self, task: &TaskId) -> StoreResult<Option<TaskGraph>> {
-        let row = self.task_graph_row(task)?;
-        Ok(row.map(|row| self.read_task_graph(row)))
-    }
-
     /// The Task's Graph as captured, for running it.
     pub(crate) fn task_graph_row(&self, task: &TaskId) -> StoreResult<Option<TaskGraphRow>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         task_graph_row(&conn, task)
-    }
-
-    /// Whether the carrying run still runs is its Process's, read here.
-    fn read_task_graph(&self, row: TaskGraphRow) -> TaskGraph {
-        let position = match row.run {
-            None => TaskGraphPosition::At { step: row.step },
-            Some((cursor, process)) => TaskGraphPosition::Run {
-                at: row
-                    .graph
-                    .step_name_of(&cursor)
-                    .unwrap_or_else(|| row.step.clone()),
-                step: row.step,
-                lf_process_id: process.id.to_string(),
-                running: process.completed_at.is_none() && self.process_may_run(&process),
-            },
-        };
-        TaskGraph {
-            name: row.graph.name.clone(),
-            interactive_steps: row.graph.interactive_summary(),
-            position,
-        }
     }
 
     /// The Task's Graph as it moves to another Machine.
@@ -1677,7 +1658,9 @@ mod tests {
             )],
         };
         store.take_up_task_graph(&task, &definition).unwrap();
-        let before = store.task_graph(&task).unwrap().unwrap();
+        let before = crate::store::task_work::task_graph(&store, &task)
+            .unwrap()
+            .unwrap();
         let row = store.task_graph_row(&task).unwrap().unwrap();
         let start = crate::graph::runner::ExecutionCursor::default();
         drop(store);
@@ -1686,7 +1669,12 @@ mod tests {
             store.task_state(&task).unwrap(),
             crate::durable::TaskState::Idle
         );
-        assert_eq!(store.task_graph(&task).unwrap().unwrap(), before);
+        assert_eq!(
+            crate::store::task_work::task_graph(&store, &task)
+                .unwrap()
+                .unwrap(),
+            before
+        );
         assert_eq!(
             store.task(&task).unwrap().unwrap().worktree,
             Some(std::path::PathBuf::from("/repo/task"))
@@ -1821,7 +1809,7 @@ mod tests {
         store
             .fail_task_completion(&task, request, "provider unavailable")
             .unwrap();
-        let graph = store.task_graph(&task).unwrap();
+        let graph = crate::store::task_work::task_graph(&store, &task).unwrap();
         drop(store);
         let store = SqliteStore::open_ephemeral(&path).unwrap();
         assert_eq!(
@@ -1832,7 +1820,10 @@ mod tests {
         assert!(store.complete_task(&retained, request).unwrap());
         assert!(store.complete_task(&retained, request).unwrap());
         assert!(store.task_completion_pending(&task).unwrap().is_none());
-        assert_eq!(store.task_graph(&task).unwrap(), graph);
+        assert_eq!(
+            crate::store::task_work::task_graph(&store, &task).unwrap(),
+            graph
+        );
         let conn = store.conn.lock().unwrap();
         assert_eq!(
             super::super::durable::task_state_in(&conn, &task).unwrap(),
@@ -1844,7 +1835,10 @@ mod tests {
         store.reopen_task(&task, Some("Continue findings")).unwrap();
         assert!(!store.complete_task(&retained, request).unwrap());
         assert!(store.task_completion_pending(&task).unwrap().is_none());
-        assert_eq!(store.task_graph(&task).unwrap(), graph);
+        assert_eq!(
+            crate::store::task_work::task_graph(&store, &task).unwrap(),
+            graph
+        );
         assert_ne!(
             store.task_state(&task).unwrap(),
             crate::durable::TaskState::Done
@@ -2373,7 +2367,7 @@ mod tests {
             None,
         );
         store.test_graph("unrelated", "/other", &[("implement", None)], None);
-        let work = store.task_work(&task).unwrap();
+        let work = crate::store::task_work::task_work(&store, &task).unwrap();
         assert_eq!(
             work.sessions
                 .iter()
@@ -2431,7 +2425,9 @@ mod tests {
                 .map(|process| process.id().to_owned())
                 .collect::<Vec<_>>()
         };
-        let all = ids(store.task_work(&task).unwrap().processes);
+        let all = ids(crate::store::task_work::task_work(&store, &task)
+            .unwrap()
+            .processes);
         assert_eq!(all.len(), 5);
         assert_eq!(ids(store.task_open_processes(&task).unwrap()), all);
         store.conn.lock().unwrap().execute_batch(
@@ -2532,8 +2528,7 @@ mod tests {
             None,
         );
         let graph_ids = |task: &TaskId| {
-            store
-                .task_work(task)
+            crate::store::task_work::task_work(&store, task)
                 .unwrap()
                 .graph_processes
                 .into_iter()
@@ -2543,7 +2538,7 @@ mod tests {
         let enclosing = graph_ids(&task);
         assert!(!enclosing.contains(&child_graph.to_string()));
         assert_eq!(graph_ids(&child), [child_graph.to_string()]);
-        let work = store.task_work(&task).unwrap();
+        let work = crate::store::task_work::task_work(&store, &task).unwrap();
         assert!(work
             .sessions
             .iter()
@@ -2559,7 +2554,7 @@ mod tests {
             .unwrap();
         }
         // Without its checkout the Task keeps the Graphs started for it.
-        let work = store.task_work(&task).unwrap();
+        let work = crate::store::task_work::task_work(&store, &task).unwrap();
         assert_eq!(
             work.sessions
                 .iter()

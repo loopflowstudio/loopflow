@@ -11,16 +11,8 @@ use sha2::{Digest, Sha256};
 use super::{Error, ErrorCode};
 use crate::store::sqlite::creation::{CreationIdentity, CreationReceipt, RecoveryDisposition};
 use crate::store::{open_store, storage_config_from_env};
-use crate::work::task::Task;
-use loopflow_model::id::LfSessionId;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct TaskCreateReceipt {
-    pub task: Task,
-    pub graph: Option<String>,
-    pub session_id: Option<LfSessionId>,
-    pub milestone: String,
-}
+pub use crate::store::sqlite::creation::TaskCreateReceipt;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskCreation {
@@ -165,9 +157,7 @@ pub fn create(id: &str, mut input: TaskCreation) -> Result<TaskCreateReceipt> {
             .sqlite
             .record_creation_launch(id, &serde_json::to_value(launched)?)?;
     }
-    let graph = store
-        .sqlite
-        .task_graph(&receipt.task.id)?
+    let graph = crate::store::task_work::task_graph(&store.sqlite, &receipt.task.id)?
         .context("the run did not take up a Graph")?
         .name;
     receipt.graph = Some(graph);

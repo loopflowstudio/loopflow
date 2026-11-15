@@ -88,7 +88,7 @@ impl Store {
         creation: Option<String>,
     ) -> StoreResult<LfSession> {
         run_sqlite(&self.sqlite, move |store| {
-            store.replace_session_input(expected_capture, session, creation.as_deref())
+            replace_session_input(&store, expected_capture, session, creation.as_deref())
         })
         .await
     }
@@ -102,7 +102,7 @@ impl Store {
         let id = id.to_string();
         let task = task.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.bind_session(&id, expected_capture, &task)
+            bind_session(&store, &id, expected_capture, &task)
         })
         .await
     }
@@ -175,7 +175,8 @@ pub fn create_session(
     caller: Option<&LfProcessId>,
 ) -> StoreResult<LfSession> {
     discover_session_repo(&mut session)?;
-    store.create_session(session, caller)
+    let _admission = super::admission::lock_session_checkouts(store, &session)?;
+    store.create_session_prepared(session, caller)
 }
 
 pub fn ensure_primary_session(
@@ -200,6 +201,32 @@ fn discover_session_repo(session: &mut LfSession) -> StoreResult<()> {
             .map(|repo| repo.to_string());
     }
     Ok(())
+}
+
+/// Capture caller provenance before entering synchronous storage.
+pub fn replace_session_input(
+    store: &SqliteStore,
+    expected: Option<i64>,
+    session: LfSession,
+    creation: Option<&str>,
+) -> StoreResult<LfSession> {
+    let caller = crate::journal::current_lf_process_id();
+    let saved = store
+        .session(&session.id)?
+        .ok_or(super::StoreError::NotFound)?;
+    let _admission = super::admission::lock_session_checkouts(store, &saved)?;
+    store.replace_session_input_prepared(expected, session, creation, caller.as_ref())
+}
+
+pub fn bind_session(
+    store: &SqliteStore,
+    id: &str,
+    capture: Option<i64>,
+    task: &TaskId,
+) -> StoreResult<LfSession> {
+    let saved = store.session(id)?.ok_or(super::StoreError::NotFound)?;
+    let _admission = super::admission::lock_task_checkouts(store, &[&saved.cwd], Some(task))?;
+    store.bind_session_prepared(id, capture, task, &saved.cwd)
 }
 
 #[cfg(test)]

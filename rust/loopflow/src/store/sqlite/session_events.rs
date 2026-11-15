@@ -1076,9 +1076,7 @@ mod tests {
             attachment::claim_session_attachment(&store, &session.id, None, &process, false)
                 .unwrap();
         let before = store.session_turn_origin(&session.id, &attachment).unwrap();
-        store
-            .bind_session(&session.id, session.captured, &task)
-            .unwrap();
+        crate::store::sessions::bind_session(&store, &session.id, session.captured, &task).unwrap();
         let after = store.session_turn_origin(&session.id, &attachment).unwrap();
         let seq = store
             .record_session_turn_origin(&"thread".into(), "late", &before)
@@ -1342,9 +1340,12 @@ mod tests {
             session.id = format!("conversation-{at}").into();
             session.artifact_key = Some(format!("run_{at:032x}"));
             session.created_at = at;
-            let session = store
-                .create_session(session, (at == 1).then_some(&attached))
-                .unwrap();
+            let session = crate::store::sessions::create_session(
+                &store,
+                session,
+                (at == 1).then_some(&attached),
+            )
+            .unwrap();
             record_captured_start(&store, &session.id, &at.to_string());
             if at != 1 {
                 store
@@ -1468,7 +1469,7 @@ mod tests {
                 "INSERT INTO processes(id,trace_id,started_at,completed_at) VALUES(?1,'fixture',1,25)", [&creator],
             ).unwrap();
             // Preparation may exit before another lf attaches and starts the turn.
-            store.create_session(session, Some(&creator)).unwrap();
+            crate::store::sessions::create_session(&store, session, Some(&creator)).unwrap();
             {
                 let conn = store.conn.lock().unwrap();
                 conn.execute("UPDATE agent_sessions SET input_published=?1", [captured])
@@ -1714,7 +1715,7 @@ mod tests {
             // Close leaves reaping to the parent; an unreaped zombie is dead.
             assert_eq!(
                 crate::journal::process_identity_evidence(child.id(), started),
-                crate::journal::ProcessIdentityEvidence::Dead
+                crate::store::ProcessIdentityEvidence::Dead
             );
             let _ = child.wait();
             assert!(attachment::session_connection(&store, &session.id)
@@ -2078,9 +2079,13 @@ mod tests {
         };
         let mut replacement = session.clone();
         replacement.artifact_key = Some(crate::session_record::new_artifact_key());
-        store
-            .replace_session_input(session.captured, replacement.clone(), None)
-            .unwrap();
+        crate::store::sessions::replace_session_input(
+            &store,
+            session.captured,
+            replacement.clone(),
+            None,
+        )
+        .unwrap();
         attachment::claim_session_attachment(&store, &session.id, Some(&attachment), &second, true)
             .unwrap();
         // The replacement AgentProcess observes the first one's surviving turn.

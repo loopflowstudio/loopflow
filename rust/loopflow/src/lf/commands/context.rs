@@ -294,7 +294,7 @@ pub fn emit_block(
             adapter.is_some() && matches!(moment, ContextMoment::Tool | ContextMoment::Steer)
         });
     if let Some(seen) = &seen {
-        crate::steer::touch(seen)?;
+        crate::store::steer_markers::touch(seen)?;
     }
     // A conversation lf did not start (a Codex app-server thread) has no
     // provider context; only its turn end reports, to refresh planning.

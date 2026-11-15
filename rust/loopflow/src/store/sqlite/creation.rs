@@ -206,3 +206,11 @@ fn recovery_in(
         _ => Ok((Inspect, "Creation needs inspection")),
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TaskCreateReceipt {
+    pub task: crate::work::task::Task,
+    pub graph: Option<String>,
+    pub session_id: Option<loopflow_model::id::LfSessionId>,
+    pub milestone: String,
+}

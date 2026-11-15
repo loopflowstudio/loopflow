@@ -121,9 +121,9 @@ pub(crate) fn provider_lineage(
     let summary = session_summary(store, &source.id, crate::store::rows::now_unix())?;
     let process = summary.as_ref().and_then(|s| s.agent_process_id.clone());
     let running = summary.and_then(|s| match s.agent_process_evidence {
-        crate::journal::ProcessIdentityEvidence::Live => Some(true),
-        crate::journal::ProcessIdentityEvidence::Dead => Some(false),
-        crate::journal::ProcessIdentityEvidence::Unknown => None,
+        crate::store::ProcessIdentityEvidence::Live => Some(true),
+        crate::store::ProcessIdentityEvidence::Dead => Some(false),
+        crate::store::ProcessIdentityEvidence::Unknown => None,
     });
     Ok(
         crate::store::sqlite::provider_transitions::ProviderLineage {
@@ -206,7 +206,7 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .agent_process_evidence,
-            crate::journal::ProcessIdentityEvidence::Unknown
+            crate::store::ProcessIdentityEvidence::Unknown
         );
     }
 

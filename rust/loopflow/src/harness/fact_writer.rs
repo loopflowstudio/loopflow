@@ -828,9 +828,9 @@ mod tests {
         let original = store.session("conversation").unwrap().unwrap();
         let mut next = original.clone();
         next.artifact_key = Some(crate::session_record::new_artifact_key());
-        let next = store
-            .replace_session_input(original.captured, next, None)
-            .unwrap();
+        let next =
+            crate::store::sessions::replace_session_input(&store, original.captured, next, None)
+                .unwrap();
         hear(
             &mut decoder,
             &mut writer,
@@ -1137,9 +1137,13 @@ mod tests {
             .unwrap();
             let mut next = original.clone();
             next.artifact_key = Some(crate::session_record::new_artifact_key());
-            let next = store
-                .replace_session_input(original.captured, next, None)
-                .unwrap();
+            let next = crate::store::sessions::replace_session_input(
+                &store,
+                original.captured,
+                next,
+                None,
+            )
+            .unwrap();
             let current = attachment::claim_session_attachment(
                 &store,
                 "conversation",
@@ -1318,9 +1322,13 @@ mod tests {
         let previous = store.session("conversation").unwrap().unwrap();
         let mut next = previous.clone();
         next.artifact_key = Some(crate::session_record::new_artifact_key());
-        store
-            .replace_session_input(previous.captured, next.clone(), None)
-            .unwrap();
+        crate::store::sessions::replace_session_input(
+            &store,
+            previous.captured,
+            next.clone(),
+            None,
+        )
+        .unwrap();
         let replacement = LfProcessId::new();
         sql.execute(
             "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",

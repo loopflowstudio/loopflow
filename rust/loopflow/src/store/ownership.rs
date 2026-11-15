@@ -144,6 +144,7 @@ pub fn place_task(
     workspace_slug: &str,
     pr: &TaskPr,
 ) -> StoreResult<Task> {
+    let _admission = super::admission::lock_checkout(store, worktree)?;
     loop {
         let scope = store.task_scope(task_id)?;
         let facts = acquire(store, scope)?;
@@ -287,7 +288,7 @@ pub fn task_detail_facts(
 pub(crate) fn apply_linear_observation(
     store: &SqliteStore,
     task_id: &TaskId,
-    observation: &crate::linear::LinearIssueObservation,
+    observation: &crate::store::linear_records::LinearIssueObservation,
     observed_at: time::OffsetDateTime,
     planning_connected: bool,
 ) -> StoreResult<crate::work::task::LinearObservationOutcome> {

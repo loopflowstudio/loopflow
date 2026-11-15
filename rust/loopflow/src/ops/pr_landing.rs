@@ -271,10 +271,12 @@ fn admit_ci_fix(
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
         let store = landing_store().await?;
-        let lock = store
-            .sqlite
-            .lock_task_checkouts(&[&landing.worktree], landing.task_id.as_ref())
-            .map_err(repair_error)?;
+        let lock = crate::store::admission::lock_task_checkouts(
+            &store.sqlite,
+            &[&landing.worktree],
+            landing.task_id.as_ref(),
+        )
+        .map_err(repair_error)?;
         let reservation = store
             .sqlite
             .repair_reservation(&incident.identity)
@@ -1140,9 +1142,7 @@ async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResul
         }
         return Ok(());
     }
-    let _admission = store
-        .sqlite
-        .lock_checkout(&landing.worktree)
+    let _admission = crate::store::admission::lock_checkout(&store.sqlite, &landing.worktree)
         .map_err(repair_error)?;
     // A conversation is history; only a running Process holds the checkout.
     if let Some(reason) = checkout_execution_blockers(store, &landing.worktree)?

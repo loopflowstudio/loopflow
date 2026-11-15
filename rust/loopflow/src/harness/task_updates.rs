@@ -122,7 +122,7 @@ pub(crate) fn write(store: &SqliteStore, session_id: &str) -> StoreResult<()> {
 fn write_task(store: &SqliteStore, task: &TaskId) -> StoreResult<()> {
     let stored = store.task_update_reading(task)?;
     let old: Option<TaskObservation> = stored.as_deref().map(serde_json::from_str).transpose()?;
-    let (graph, graphs) = store.task_progress(task)?;
+    let (graph, graphs) = crate::store::task_work::task_progress(store, task)?;
     let mut observation = TaskObservation {
         position: graph.map(|graph| graph.position),
         runs: HashMap::new(),
@@ -407,9 +407,7 @@ mod tests {
                 [],
             )
             .unwrap();
-        store
-            .bind_session("reader", session.captured, &task)
-            .unwrap();
+        crate::store::sessions::bind_session(&store, "reader", session.captured, &task).unwrap();
         (home, store, task)
     }
 
@@ -509,9 +507,7 @@ mod tests {
     fn worker_runs_neither_write_nor_read_updates() {
         let (_home, store, task) = task_session();
         let worker = store.test_session("worker", &crate::session_record::new_artifact_key());
-        store
-            .bind_session("worker", worker.captured, &task)
-            .unwrap();
+        crate::store::sessions::bind_session(&store, "worker", worker.captured, &task).unwrap();
         store
             .conn
             .lock()

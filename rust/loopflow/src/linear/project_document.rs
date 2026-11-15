@@ -231,33 +231,12 @@ pub(crate) fn parse_project_document(source: &str) -> LinearResult<ProjectDocume
     })
 }
 
-pub(crate) fn render_project_content(krs: &[ProjectKR], metric_targets: &[MetricTarget]) -> String {
-    let mut content = render_metric_targets(metric_targets);
-    content.push_str("\n\n");
-    content.push_str(&render_krs(krs));
-    content.push('\n');
-    content
-}
-
-pub(super) fn render_metric_targets(metric_targets: &[MetricTarget]) -> String {
-    format!(
-        "## Metric targets\n\n```json\n{}\n```",
-        serde_json::to_string_pretty(metric_targets).expect("validated metric targets serialize")
-    )
-}
-
-pub(super) fn render_krs(krs: &[ProjectKR]) -> String {
-    let mut content = String::from("## KRs");
-    for kr in krs {
-        let marker = if kr.holds { "x" } else { " " };
-        content.push_str(&format!("\n\n- [{marker}] {}", kr.text.trim()));
-    }
-    content
-}
+pub(crate) use crate::store::linear_records::{render_krs, render_metric_targets};
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_project_document, render_project_content};
+    use super::parse_project_document;
+    use crate::store::linear_records::render_project_content;
     use crate::work::project::ProjectKR;
     use crate::work::wave::metrics::MetricTarget;
 

@@ -841,9 +841,13 @@ fn screen_reads_are_compact_passive_and_match_cli() {
 
     // The detail names the recorded primary and observed PR checks.
     let conn = rusqlite::Connection::open(&database).unwrap();
-    store
-        .bind_session(session.id.as_str(), session.captured, &registered.task.id)
-        .unwrap();
+    loopflow::store::sessions::bind_session(
+        &store,
+        session.id.as_str(),
+        session.captured,
+        &registered.task.id,
+    )
+    .unwrap();
     conn.execute(
         "INSERT OR REPLACE INTO task_primary_sessions(session_id,task_id) VALUES(?1,?2)",
         rusqlite::params![session.id.as_str(), registered.task.id.as_str()],

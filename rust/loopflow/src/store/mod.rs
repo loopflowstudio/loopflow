@@ -7,6 +7,7 @@ use crate::profile::{AccessProfile, AuthBrowserBinding, EmailAddress, ProfileId,
 use crate::provider_auth::Provider;
 use crate::work::wave::{Wave, WaveLocator};
 use loopflow_model::id::{AgentSessionId, WaveId};
+pub(crate) mod admission;
 mod canonical_ids;
 pub(crate) mod capacity;
 pub(crate) mod changes;
@@ -15,6 +16,8 @@ pub(crate) mod ci_incidents;
 pub mod contention;
 pub(crate) mod copy;
 mod durable;
+pub(crate) mod instrumentation;
+pub mod linear_records;
 pub mod machines;
 mod metrics;
 #[cfg(test)]
@@ -36,12 +39,22 @@ pub(crate) mod query_plans;
 mod recording_gap;
 pub mod rentals;
 mod repositories;
+pub(crate) mod retention;
 pub mod rows;
 pub(crate) mod selections;
 pub(crate) mod session_projection;
 pub mod sessions;
 pub mod sqlite;
+pub(crate) mod steer_markers;
+pub mod task_work;
 mod token_crypto;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProcessIdentityEvidence {
+    Live,
+    Dead,
+    Unknown,
+}
 
 pub use planning_peers::{PeerPlanningStatus, PeerProjectionConflict, PlanningJournal};
 pub use recording_gap::{GapSpan, RecordingGap};
@@ -95,7 +108,7 @@ pub enum StoreError {
     #[error(transparent)]
     Selection(#[from] crate::work::selection::SelectionError),
     #[error(transparent)]
-    Planning(#[from] crate::linear::LinearBindingError),
+    Planning(#[from] crate::store::linear_records::LinearBindingError),
     #[error(transparent)]
     TaskData(#[from] crate::work::task::TaskDataError),
     #[error("sqlite error: {0}")]
@@ -1207,8 +1220,8 @@ mod tests {
         ProviderAccountId, RoutingState, StorageConfig,
     };
     use crate::child::ChildRef;
-    use crate::linear::{LinearIssueId, LinearProjectId};
     use crate::profile::EmailAddress;
+    use crate::store::linear_records::{LinearIssueId, LinearProjectId};
     use crate::test_linear_input::{InventoryFixture, SeedLinear};
     use crate::work::project::{Project, ProjectId};
     use crate::work::task::{
@@ -1622,7 +1635,7 @@ mod tests {
                 .sqlite
                 .set_task_graph_step(&task.id, "review")
                 .unwrap();
-            let graph = store.sqlite.task_graph(&task.id).unwrap();
+            let graph = crate::store::task_work::task_graph(&store.sqlite, &task.id).unwrap();
             snapshot.snapshot.items[0].revision = Some("2026-10-05T12:01:00Z".into());
             snapshot.snapshot.items[0].state = None;
             snapshot.snapshot.items[0].completed = true;
@@ -1632,7 +1645,10 @@ mod tests {
                 store.sqlite.task(&task.id).unwrap().unwrap().completed_at,
                 snapshot.snapshot.items[0].completed_at
             );
-            assert_eq!(store.sqlite.task_graph(&task.id).unwrap(), graph);
+            assert_eq!(
+                crate::store::task_work::task_graph(&store.sqlite, &task.id).unwrap(),
+                graph
+            );
             store
                 .complete_task(
                     &task,
@@ -1653,7 +1669,7 @@ mod tests {
                 .sqlite
                 .set_task_graph_step(&task.id, "review")
                 .unwrap();
-            let reopened = store.sqlite.task_graph(&task.id).unwrap();
+            let reopened = crate::store::task_work::task_graph(&store.sqlite, &task.id).unwrap();
             snapshot.snapshot.items[0].state = Some("unstarted".into());
             snapshot.snapshot.items[0].completed = false;
             snapshot.snapshot.items[0].completed_at = None;
@@ -1675,7 +1691,10 @@ mod tests {
             assert_eq!(record.assignee, None);
             assert_eq!(record.rank, 0);
             assert_eq!(record.pm_snapshot_synced_at, Some(17));
-            assert_eq!(store.sqlite.task_graph(&task.id).unwrap(), reopened);
+            assert_eq!(
+                crate::store::task_work::task_graph(&store.sqlite, &task.id).unwrap(),
+                reopened
+            );
         }
     }
 
@@ -1857,7 +1876,9 @@ mod tests {
                     crate::durable::TaskState::Unstarted
                 }
             );
-            assert!(store.sqlite.task_graph(&task.id).unwrap().is_none());
+            assert!(crate::store::task_work::task_graph(&store.sqlite, &task.id)
+                .unwrap()
+                .is_none());
             assert!(store.task_prs(&task.id).await.unwrap().is_empty());
             assert_eq!(store.task_events_after(&task.id, 0).await.unwrap(), events);
             snapshot.snapshot.items[0].revision = Some("2026-10-05T12:02:00Z".into());
@@ -1909,7 +1930,9 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
-        assert!(store.sqlite.task_graph(&task.id).unwrap().is_none());
+        assert!(crate::store::task_work::task_graph(&store.sqlite, &task.id)
+            .unwrap()
+            .is_none());
     }
 
     #[tokio::test]
@@ -2227,7 +2250,8 @@ mod tests {
         );
         store.create_wave(&other).await.unwrap();
         let mut foreign = make_project(&other);
-        foreign.linear_id = Some(crate::linear::LinearProjectId::new("foreign-project").unwrap());
+        foreign.linear_id =
+            Some(crate::store::linear_records::LinearProjectId::new("foreign-project").unwrap());
         store.create_project(&foreign).await.unwrap();
         let mut response = snapshot.clone();
         response.synced_at = 2;
@@ -2558,7 +2582,7 @@ mod tests {
         select_project(&store, &predecessor);
         let mut successor = make_project(&wave);
         successor.linear_id =
-            Some(crate::linear::LinearProjectId::new("successor-project").unwrap());
+            Some(crate::store::linear_records::LinearProjectId::new("successor-project").unwrap());
         let task = make_task(&store, &wave, &predecessor);
         let pr = make_task_pr(&task);
         store.seed_task(&task, &pr).await.unwrap();

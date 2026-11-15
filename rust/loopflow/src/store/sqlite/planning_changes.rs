@@ -138,8 +138,8 @@ impl SqliteStore {
             // Deletion competes with the whole issue. Only an explicitly active
             // issue at a newer revision can restore planning visibility.
             if baseline.is_some()
-                && crate::linear::observations::revision_nanos(Some(revision))?
-                    > crate::linear::observations::revision_nanos(baseline)?
+                && crate::store::linear_records::revision_nanos(Some(revision))?
+                    > crate::store::linear_records::revision_nanos(baseline)?
             {
                 tx.execute(
                     "UPDATE task_changes SET conflict_json=?2,error=NULL WHERE id=?1 AND conflict_json IS NULL",
@@ -169,8 +169,8 @@ impl SqliteStore {
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         if let Some(revision) = revision {
             let retained = PlanningChanges::Task(id).observed_revision(&tx)?;
-            if crate::linear::observations::revision_nanos(Some(revision))?
-                < crate::linear::observations::revision_nanos(retained.as_deref())?
+            if crate::store::linear_records::revision_nanos(Some(revision))?
+                < crate::store::linear_records::revision_nanos(retained.as_deref())?
             {
                 return Ok(false);
             }
@@ -260,8 +260,8 @@ impl<'a> PlanningChanges<'a> {
             else {
                 continue;
             };
-            if crate::linear::observations::revision_nanos(revision)?
-                < crate::linear::observations::revision_nanos(
+            if crate::store::linear_records::revision_nanos(revision)?
+                < crate::store::linear_records::revision_nanos(
                     change.base.as_ref().and_then(|b| b.revision.as_deref()),
                 )?
             {

@@ -855,10 +855,7 @@ fn task_checkout_machine_survives_without_lifecycle_reconciliation() {
         )
         .unwrap();
     assert_eq!(
-        fixture
-            .store
-            .sqlite
-            .task_work(&fixture.task.id)
+        crate::store::task_work::task_work(&fixture.store.sqlite, &fixture.task.id)
             .unwrap()
             .sessions
             .len(),
@@ -1009,7 +1006,8 @@ fn task_without_a_local_checkout_never_reads_a_local_path() {
                 .unwrap_err()
                 .to_string()
                 .contains(expected));
-            let work = fixture.store.sqlite.task_work(&fixture.task.id).unwrap();
+            let work = crate::store::task_work::task_work(&fixture.store.sqlite, &fixture.task.id)
+                .unwrap();
             assert_eq!(
                 work.sessions
                     .iter()

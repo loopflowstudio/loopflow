@@ -23,7 +23,8 @@ Sources: <code>scratch/loo-650.md</code>, <code>scratch/publishing-discussion.md
 <code>scripts/dev-lf</code>, <code>scripts/testing.md</code>, model/terminal crate READMEs,
 <code>store/{planning_reads,capacity}.rs</code>, <code>store/sqlite.rs</code>,
 <code>store/sqlite/{task_comments,planning_sync,task_ownership,planning_peers,sessions,processes}.rs</code>,
-<code>provider_account/capacity.rs</code>,
+<code>provider_account/{capacity,catalog}.rs</code>,
+<code>store/sqlite/account_selection.rs</code>,
 <code>scripts/benchmarks/crate-rebuild/{README.md,probe.py}</code>.</header>
 <main>
 <h1>Iterate to implement: finish the synchronous storage owner.</h1>
@@ -40,8 +41,9 @@ source-retention question is closed for this cut. No new product choice is open.
 <tbody>
 <tr><td><code>scripts/dev-lf --version</code><br>after a shipping edit</td><td>Cargo rebuilds the application; existing model/content/terminal libraries are separate.</td><td>Same command. Application → storage, definitions, providers/runtime → shared records. Only the changed dependency closure rebuilds.</td></tr>
 <tr><td>Read pending Task comments</td><td>Implemented preparation: <code>task_comment_thread</code> and <code>task_planning_receipts</code> return saved evidence with repository scope. The application observes connection state afterward.</td><td>Extend that separation to ownership and peers. Read facts together → release SQL lock → observe configuration → compose presentation. Preserve batching and enclosing pinned reads.</td></tr>
-<tr><td>Recover after an account limit</td><td>Implemented preparation: account policy reconciles historical aliases; SQL conditionally commits capacity updates. Account selection still ranks under SQL using configuration.</td><td>Proposed: read candidates and limits → account policy ranks → SQL conditionally records the choice. Recompute if saved ranking facts changed. Preserve atomic selection, not just quota writes.</td></tr>
+<tr><td>Recover after an account limit</td><td>Implemented preparation: account policy reconciles historical aliases and ranks candidates outside SQL. SQL compares the complete saved reading before recording selection.</td><td>Retain this API through extraction: read → rank → conditional commit. Retry rereads preferences; an unchanged empty choice takes no write lock.</td></tr>
 <tr><td>Watch a quiet Session</td><td>SQL calls request-local deadline observation; process insertion acquires runtime identity.</td><td>Proposed: explicit time/start/transport values at SQL APIs; application retains deadline recomputation and attributed <code>run_sqlite</code>.</td></tr>
+<tr><td>Resume the same conversation</td><td>Code in <code>sqlite/processes.rs</code> coordinates attachment locking, process observation, close and claim.</td><td>Proposed: runtime owns that sequence above storage. Hold the same attachment lock throughout; SQL atomically checks and records settlement/reservation. Saved identity is a value, observation is a runtime action.</td></tr>
 <tr><td>Build a fresh worktree</td><td>Private probe hits with newer sccache; shared root upkeep is unbuilt.</td><td>Git root inventory → coordinated idle daemon refresh in build tooling. Until safe, compile with misses.</td></tr>
 <tr><td><code>scripts/dev-lf --isolated-build --version</code></td><td>Implemented: own <code>target/isolated</code>, both compiler wrappers disabled.</td><td>Keep this recovery when cached debug paths name a removed checkout.</td></tr>
 </tbody>
@@ -62,6 +64,10 @@ including other candidates and intervening selections.</p>
 Observing ignored configuration after the local lock releases must still
 invalidate the watch; reaching a quiet deadline must update it without a store
 write. No new Work record, migration or conversation lifecycle is proposed.</p>
+<p>If a PID is reused or another resume replaces an attachment, unknown identity
+remains unknown and the old attachment cannot retire its replacement. Moving
+coordination above SQL must retain the attachment lock across observation, close,
+settlement and claim. Keep the native thread and pending input.</p>
 
 <h2>Next demonstration</h2>
 <p>Show the application edit closure and fresh-worktree hit, correct-checkout execution,
@@ -71,12 +77,12 @@ not shared-daemon integration or whole-application savings. Keep demo and review
 before merge.</p>
 
 <h2>Review questions for the next pass</h2>
+<p>Implementation checks; no pending product decision.
+<strong>Loop-or-next: design changed → iterate to implement.</strong></p>
 <ol>
 <li>Does a SQL-only edit rebuild storage and its callers, with application acquisition and policy outside storage?</li>
-<li>Do disconnected reads, historical quota recovery, concurrent account selection and served quiet deadlines behave identically after extraction?</li>
+<li>Do disconnected reads, historical quota recovery, concurrent selection, quiet deadlines and fenced resume retain their behavior after extraction?</li>
 <li>Does a fresh worktree reuse libraries without disturbing an active build, and can an isolated build recover local source debugging?</li>
 </ol>
-<p>These are implementation checks, not pending product decisions.
-<strong>Loop-or-next: design changed → iterate to implement.</strong></p>
 </main>
 </html>

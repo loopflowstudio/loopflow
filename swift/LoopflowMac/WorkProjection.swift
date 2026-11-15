@@ -249,7 +249,11 @@ final class WorkNavigation {
     }
     var startingTask: StartingTask?
     var newTaskDraft: StartingTask?
-    var createdTaskIDs: Set<String> = []
+    struct PendingTaskReconciliation {
+        let requestID: String
+        var floor: Int
+    }
+    var pendingTaskReconciliations: [String: PendingTaskReconciliation] = [:]
 
     enum SidebarFilter: String, CaseIterable {
         case working = "Working tasks"

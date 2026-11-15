@@ -1620,7 +1620,7 @@ struct SessionsContentView: View {
     private var navigation: WorkNavigation { model.navigation }
     private var terminalsVisible: Bool {
         navigation.startingTask == nil && !navigation.showsSelection && workspaces.selectedWork != nil
-            && (fileTask?.task.awaitsStart != true || fileTask.map { navigation.createdTaskIDs.contains($0.task.id) } == true)
+            && (fileTask?.task.awaitsStart != true || fileTask.map { navigation.pendingTaskReconciliations[$0.task.id] != nil } == true)
             && showsTerminals(currentKey, fileTask?.task, workspace)
     }
 
@@ -1680,9 +1680,13 @@ struct SessionsContentView: View {
                 }
                 VStack(spacing: 0) {
                     // The main pane alone: the sidebar stays put when a Task opens.
-                    if navigation.startingTask == nil, let task = model.breadcrumb?.task?.task,
-                       !navigation.createdTaskIDs.contains(task.id) || model.taskWork[task.id].value?.graph != nil {
-                        TaskWorkflowBar(model: model, task: task, work: model.taskWork[task.id])
+                    if navigation.startingTask == nil, let task = model.breadcrumb?.task?.task {
+                        if navigation.pendingTaskReconciliations[task.id] == nil {
+                            TaskWorkflowBar(model: model, task: task, work: model.taskWork[task.id])
+                        } else if let error = model.taskWork[task.id].errorMessage {
+                            Text("Workflow could not be read: \(error)")
+                                .foregroundStyle(palette.warning).padding(12)
+                        }
                     }
                     if navigation.startingTask == nil, let transition = model.visibleSessions.first(where: { $0.id == navigation.selectedSessionId })?.transition {
                         ProviderTransitionRow(transition: transition)
@@ -1838,7 +1842,7 @@ struct SessionsContentView: View {
                         }
                     }
             }
-            if let task, task.task.awaitsStart, active, navigation.startingTask == nil, !navigation.createdTaskIDs.contains(task.task.id) {
+            if let task, task.task.awaitsStart, active, navigation.startingTask == nil, navigation.pendingTaskReconciliations[task.task.id] == nil {
                 // The Session slot offers Start; its brief stays beside it.
                 GeometryReader { geometry in
                     HStack(spacing: 0) {

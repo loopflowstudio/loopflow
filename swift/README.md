@@ -67,7 +67,10 @@ The sheet closes immediately into the new conversation, with your request and
 **Starting conversation…** visible while its workspace and provider prepare.
 The live conversation replaces that status in place; typing becomes available
 when it is connected and ready. You can navigate elsewhere while it starts;
-completion leaves your newer selection alone.
+completion leaves your newer selection alone. Launch presentation lasts until a
+current Task reading confirms the admitted creation. A stale reading cannot bring
+back Start; a current reading with no Graph restores ordinary Task controls.
+An unavailable reading shows its error while the conversation stays open.
 
 Launch errors appear in the conversation. If the request could not be saved,
 return to the New Task editor to edit and submit it. If the Task exists but its
@@ -855,7 +858,11 @@ presentation. No local milestone ledger is stored.
 New Task presents the submitted request before saving or sending it. That starting
 view does not retire the saved submission; the actual result must mount first.
 An earlier New Task reply leaves later navigation and a newer New Task sheet
-alone. Its result stays registered for recovery until presented.
+alone. Its result stays registered for recovery until presented. Admission also
+requests a Task checkpoint: only a matching row at or beyond that checkpoint and
+the current scope ends launch reconciliation. Native readiness and unrelated
+frames cannot confirm it. Reopening observation requests another checkpoint;
+navigation away retains reconciliation until a current reading arrives on return.
 See the [creation contract](../rust/loopflow/src/server/README.md#creation-receipts).
 
 The parts: the plan, the repository's Dashboard plans

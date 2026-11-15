@@ -294,7 +294,9 @@ struct StartingTaskView: View {
     let launch: WorkNavigation.StartingTask
     @Environment(\.palette) private var palette
 
-    private var hasRecovery: Bool { CreationRecovery.shared.items.contains { $0.id == launch.id } }
+    var recovery: CreationRecovery = .shared
+
+    private var hasRecovery: Bool { recovery.items.contains { $0.id == launch.id } }
     /// Recovery describes the submission; once admitted, attachment errors are a separate fact.
     private var showsLaunchStatus: Bool { launch.receipt != nil || !hasRecovery }
 
@@ -316,7 +318,7 @@ struct StartingTaskView: View {
             } else if showsLaunchStatus {
                 Text("Starting conversation…").foregroundStyle(palette.textSecondary)
             }
-            CreationRecoveryView(only: launch.id)
+            CreationRecoveryView(only: launch.id, recovery: recovery)
             Spacer(minLength: 0)
         }
         .padding(28)

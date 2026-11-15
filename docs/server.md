@@ -76,7 +76,14 @@ Submit once. New Task opens a conversation view immediately with your request
 and **Starting conversation…**. This view stays visible while preparation runs;
 typing becomes available when the live conversation is ready. Errors and recovery
 for this request appear there. Other unresolved submissions remain available
-separately.
+separately. After admission, an attachment error keeps **Retry opening** available
+even when recovery also offers **Inspect**. Retrying opens the admitted Session;
+it does not submit another Task.
+
+Desktop keeps launch presentation rules until a current reading of that Task
+arrives after admission. A current result without a Graph returns to ordinary
+Task controls. An unavailable reading shows its explanation; input readiness
+alone does not confirm the Task update.
 
 Desktop clears the saved submission when the actual Task or Session result
 appears, after preparation. If Desktop closes with a saved submission before

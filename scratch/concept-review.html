@@ -2,51 +2,53 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-906 · Concept review</title>
+<title>LOO-906 · Immediate interactions</title>
 <style>
 :root{color-scheme:light dark;--ink:#252621;--paper:#faf9f5;--muted:#65665d;--line:#cbcfc3;--accent:#426343}*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:17px/1.5 system-ui,sans-serif}main{max-width:780px;margin:auto;padding:36px 24px 60px}header{font-size:13px;color:var(--muted)}h1{font-size:30px;line-height:1.18;margin:24px 0 16px}h2{font-size:21px;margin:30px 0 10px}p{margin:10px 0}code{font-size:.85em;overflow-wrap:anywhere}section{border-top:1px solid var(--line);margin-top:24px;padding-top:6px}.journey{padding:14px 18px;border-left:3px solid var(--accent);margin:12px 0}.status{color:var(--muted)}table{width:100%;border-collapse:collapse;font-size:15px}td,th{text-align:left;vertical-align:top;padding:10px 6px;border-bottom:1px solid var(--line)}th{font-weight:600}ol{padding-left:24px}li{margin:12px 0}.sources{font-size:12px;overflow-wrap:anywhere} @media(prefers-color-scheme:dark){:root{--ink:#eceee5;--paper:#1d211d;--muted:#b1b8ac;--line:#495146;--accent:#a0c398}}@media(max-width:520px){main{padding:24px 16px}table{font-size:13px}td,th{padding:8px 4px}h1{font-size:26px}}
 </style>
 <main>
 <header>LOO-906 · concept-review · 2026-11-14
-<p class="sources">Built from scratch/instant-task-session.md; scratch/desktop-reactivity-feedback.md; swift/LoopflowMac/{WorkModel,WorkProjection,CreationSubmissions}.swift; Views/{NewTaskSheet,SessionsView,TaskWorkView}.swift; swift/README.md; docs/server.md; rust/loopflow/src/ops/task.rs.</p></header>
-<h1>When a completed Task leaves the list, does its conversation stay?</h1>
-<p>Immediate row removal is stated direction. Moving focus is an open choice. Launch already has a clear design: enter one conversation immediately and let preparation finish there.</p>
-<section>
-<h2>Start: one destination through preparation</h2>
-<p class="status">Before this patch</p>
-<div class="journey">⌘N → write request → Start → sheet waits → Task/workspace/workflow readings → conversation</div>
-<p class="status">Implemented in the current diff; native latency unmeasured</p>
-<div class="journey">⌘N → write request → Start<br><br>Fix the sidebar search<br><span class="status">Starting conversation…</span><br><br>→ the attached conversation replaces this view in place</div>
-<table><thead><tr><th>Action</th><th>Concept</th><th>API / owner</th></tr></thead><tbody>
-<tr><td>Start</td><td>Submitted request, identified by UUID</td><td><code>beginTask</code> changes presentation synchronously; existing <code>createTask</code> saves and sends</td></tr>
-<tr><td>Wait here or navigate away</td><td>Real admitted Task + Session</td><td>Creation receipt → <code>prepareSession</code> → existing workspace and native attachment</td></tr>
-<tr><td>Edit / Inspect / Retry opening</td><td>Unsaved words / saved submission / attachment</td><td>Existing editor, creation journal lookup, exact Session owner</td></tr>
+<p class="sources">Built from scratch/instant-task-session.md; scratch/desktop-reactivity-feedback.md; scratch/questions.md; swift/LoopflowMac/{WorkModel,WorkProjection,CreationSubmissions}.swift; Views/{NewTaskSheet,SessionsView}.swift; swift/Loopflow/Services/{RegistryQuery,WorkObservation}.swift; swift/LoopflowTests/{WorkModelTests,WorkDestinationTests}.swift; swift/README.md; docs/server.md.</p></header>
+<h1>Implement one shared interaction model across Desktop and mobile</h1>
+<p>Next step: confirmed cache + ordered operation overlays + a transactional outbox. This is the headless implementation direction, not a recorded product preference. No unanswered product choice stops implementation.</p>
+<p><strong>Biggest mismatch:</strong> each screen currently decides when a command, a refresh and navigation have finished. The proposed store makes local intent visible everywhere before I/O; Machine facts confirm it later. Native readiness still controls input.</p>
+<table><thead><tr><th>Action</th><th>Concept</th><th>Proposed API / owner</th></tr></thead><tbody>
+<tr><td>Start, Complete, edit</td><td>Durable operation + projected Work</td><td><code>begin(command, origin)</code> → shared store/outbox</td></tr>
+<tr><td>Receive result / refresh</td><td>Receipt + complete stamped reading</td><td><code>receive(receipt)</code>, <code>receive(reading)</code> → rebase only the affected operation</td></tr>
+<tr><td>Select Task / expand Wave</td><td>Local selection + disclosure</td><td><code>select(destination)</code>, <code>setExpanded(wave, expanded)</code> → synchronous interaction owner</td></tr>
+<tr><td>Retry opening</td><td>Exact admitted Session</td><td>Existing retained workspace/native owner; no new creation</td></tr>
 </tbody></table>
-<p><strong>Biggest mismatch:</strong> the interaction is temporary, but <code>createdTaskIDs</code> makes its routing exception last for the window. A creation recovery item can also hide a different attachment error and its retry action.</p>
-<p><strong>Next implement direction:</strong> retire the exception on a current post-admission Task observation; keep attachment failure and Retry opening visible alongside relevant receipt recovery. No new stored state machine or backend queue.</p>
+<section>
+<h2>The experience, before → proposed</h2>
+<p class="status">Existing sequencing; launch has a partial Desktop implementation</p>
+<p>Command → wait → refresh → change screen. Cached selection still performs preparation; Wave navigation delays selection by 120 ms. Mobile has separate submission and view-owned conversation lifetimes.</p>
+<div class="journey"><strong>Start</strong> → submitted words appear in the conversation immediately → persist/send → bind real Task and Session → attach in place.<br>
+<strong>Complete</strong> → row disappears and next Task opens, or an empty view → confirm in background.<br>
+<strong>Select recent Task</strong> → highlight + retained content → refresh.<br>
+<strong>Expand Wave</strong> → arrow + cached children, or local loading → populate.</div>
+<p>Jack Heart: “1b for the question (or show noting)”<br>Completion navigation is answered. Neither a failed command nor a late refresh changes a later deliberate selection.</p>
 </section>
 <section>
-<h2>Complete: immediate disappearance, then confirmation</h2>
-<p class="status">Existing</p>
-<div class="journey">Complete → await command → await confirmed Work refresh → row changes</div>
-<p class="status">Proposed; completion is unbuilt in this patch</p>
-<div class="journey">Complete → row leaves working list immediately → existing completion command → reconcile<br><br>Command rejected: restore row with error.<br>Command accepted, refresh unavailable: retain pending confirmation.</div>
-<table><thead><tr><th>Action</th><th>Concept</th><th>API / owner</th></tr></thead><tbody><tr><td>Complete</td><td>Pending local action on a real Task</td><td><code>completeTask</code> → existing <code>task complete</code> → <code>confirmWorkUpdate</code></td></tr><tr><td>Receive current reading</td><td>Authoritative Task section</td><td>Existing Work projection; retire local pending presentation</td></tr></tbody></table>
-<p>Completion keeps its existing Graph/Process semantics. Immediate presentation does not require fabricated completed DTOs. Abandonment already demonstrates local row removal before a slow command returns.</p>
-<p>No SQL timing trace has been collected. The visible delay follows awaited command and refresh sequencing; the cost inside those awaits remains unmeasured. Surface timing and provider input readiness are separate endpoints.</p>
+<h2>Try to break it</h2>
+<p><strong>Normal:</strong> a receipt binds the operation to real IDs. Each affected query keeps its overlay until a complete reading covers the commit fence. A current no-Graph result restores ordinary Task controls.</p>
+<p><strong>Failure:</strong> completion refusal removes only its overlay and restores membership from the latest base. Success followed by refresh failure keeps pending confirmation. Attachment failure shows Retry opening beside Inspect, using the same Session.</p>
+<p><strong>Recovery:</strong> save before send; restart loads outbox layers before cached lists. Lost replies look up the same operation on its original Machine. Uncertain execution is never blindly replayed.</p>
+<p><strong>Counterexamples:</strong> A completes, then is reopened; A→B→A replies reorder; expand→collapse finishes loading late. Preserve the later intent. Unrelated revisions, partial pages, native readiness and old Task frames cannot retire an operation.</p>
 </section>
 <section>
-<h2>Try to break the model</h2>
-<p><strong>Normal:</strong> the request stays visible until the admitted Session is usable. Current Task data ends launch-specific routing rules.</p>
-<p><strong>Failure:</strong> a saved creation with failed attachment still offers Retry opening for that same Session. An unsaved request offers Edit request; an uncertain submission keeps its UUID.</p>
-<p><strong>Recovery:</strong> closing after save uses the existing journal. Navigating away prevents a late reply from taking focus. A later legitimate no-Graph Task uses ordinary UI after launch reconciliation.</p>
-<p><strong>Completion counterexample:</strong> the command succeeds but refresh fails. Restoring the row as though completion was rejected would contradict the saved result. A later selection must also survive failure recovery.</p>
+<h2>What changes underneath</h2>
+<p class="status">Proposed; the cross-platform rewrite is unbuilt</p>
+<p>One store in <code>swift/Loopflow</code> owns normalized facts, ordered projections and transactional persistence. Rust supplies durable command receipts, commit fences and complete query stamps. Desktop and mobile share reconciliation and membership semantics; routes keep selection and drafts; native owners retain execution and input control.</p>
+<p>Delete creation-only ledgers, per-action pending maps and duplicate cache/freshness owners as consumers move. Preserve saved requests, exact Session identity and domain recovery. Validate one membership vocabulary and GRDB support on both toolchains before adoption.</p>
+<p class="status">Source checkpoint: immediate Desktop launch, exact attachment, request-scoped Task reconciliation and attachment-retry cases exist. The latest focused Swift run was stopped before tests finished. Native latency and SQL costs remain unmeasured.</p>
 </section>
 <section>
-<h2>Product choice</h2>
-<p>Jack Heart: “another thing i will add is that completing a task should make it disappear immediately”</p>
-<ol><li>When completing the selected Task:<br><strong>1a.</strong> Remove its row immediately and keep its conversation open.<br><strong>1b.</strong> Remove its row and move to the next Task immediately; use the Wave/repository when no Task remains.</li></ol>
-<p class="status">Headless outcome: open product choice for loop-or-next. Launch fixes are recorded as next implement direction. Production code and execution are unchanged by this review.</p>
+<h2>Questions for the next demonstration</h2>
+<ol>
+<li>Do all affected lists and counts react before held replies, including overlapping operations?<br><strong>1a.</strong> Yes, with shared tests and both clients. <strong>1b.</strong> A surface still bypasses the store; finish its migration.</li>
+<li>Do restart, lost replies and reordered reads retain the same operation and Session without stealing focus?<br><strong>2a.</strong> Yes, demonstrated. <strong>2b.</strong> A counterexample remains; repair the shared owner.</li>
+</ol>
+<p class="status">Verification questions, not pending product choices. Headless outcome: design changed → iterate to implement. No production code, Task execution, publishing or merge changed in this review.</p>
 </section>
 </main>
 </html>

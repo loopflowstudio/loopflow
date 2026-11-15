@@ -1554,6 +1554,15 @@ final class WorkModel {
                 graphCatalogRevisions = [:]
                 graphCatalogRequests = [:]
                 (planningFloor, sessionsFloor, scopeFloor, taskFloor, sentScope) = (0, 0, 0, 0, nil)
+                // Opening can buffer a read before admission. Replay after opening,
+                // rather than treating the reader's initial cache as confirmation.
+                let pending = navigationByRepo.values.contains { !$0.pendingTaskReconciliations.isEmpty }
+                let floor = pending ? send { .checkpoint(id: $0, replay: ["task"]) } : 0
+                for owner in navigationByRepo.values {
+                    for id in owner.pendingTaskReconciliations.keys {
+                        owner.pendingTaskReconciliations[id]?.floor = floor
+                    }
+                }
                 syncWorkScope()
                 for try await frame in opened.frames {
                     guard !Task.isCancelled else { break }
@@ -1734,12 +1743,16 @@ final class WorkModel {
                 cache?.saveSessions([page], repo: repoPath)
             }
         case .task(let body):
-            // A frame about its own Task stays true after the selection moves on.
-            if let body, let row = body.row, row.task.identifier == body.task, subscribedTaskRow != row {
+            guard answers >= max(taskFloor, scopeFloor) else { return }
+            // Retain authoritative rows even when planning has dropped their Task.
+            if let body, let row = body.row, row.task.identifier == body.task,
+               answers >= (navigation.pendingTaskReconciliations[row.id]?.floor ?? 0), subscribedTaskRow != row {
                 subscribedTaskRow = row
             }
-            guard answers >= max(taskFloor, scopeFloor), let shown = selection, shown.kind == .task,
+            guard let shown = selection, shown.kind == .task,
                   let task = task(id: shown.id)?.task else { return }
+            let pending = navigation.pendingTaskReconciliations[task.id]
+            guard answers >= (pending?.floor ?? 0) else { return }
             guard let body else {
                 taskWork.values[task.id] = .unavailable(lastGood: taskWork[task.id].value, reason: reason)
                 comments.values[task.id] = .unavailable(lastGood: comments[task.id].value, reason: reason)
@@ -1747,6 +1760,14 @@ final class WorkModel {
                 break
             }
             guard body.task == task.task.identifier else { return }
+            if pending != nil, body.row?.task.id != task.id || body.row?.task.identifier != body.task {
+                taskWork.values[task.id] = .unavailable(lastGood: taskWork[task.id].value,
+                    reason: "The admitted Task is absent from its current reading")
+                break
+            }
+            if let row = body.row, row.task.id == task.id, row.task.identifier == body.task {
+                navigation.pendingTaskReconciliations.removeValue(forKey: task.id)
+            }
             if comments[task.id] != .available(body.comments) { comments.values[task.id] = .available(body.comments) }
             let next = WorkReading.available(body.work)
             if taskWork[task.id] != next { taskWork.values[task.id] = next }
@@ -2443,15 +2464,40 @@ final class WorkModel {
                 Perf.agentInput("creation_admitted", task: receipt.task.id, session: receipt.sessionId ?? "")
             }
             launch.receipt = receipt
-            owner.createdTaskIDs.insert(receipt.task.id)
+            let floor = workObservation == nil ? 0 : send { .checkpoint(id: $0, replay: ["task"]) }
+            owner.pendingTaskReconciliations[receipt.task.id] = .init(requestID: launch.id, floor: floor)
+            taskWork.values[receipt.task.id] = workObservation == nil
+                ? .unavailable(lastGood: nil, reason: "Task update accepted; Work observation is unavailable")
+                : .loading
             CreationRecovery.shared.awaitingPresentation(launch.id, of: .task(receipt.task.id))
             guard navigation === owner, owner.startingTask === launch,
                   destinationGeneration == destination else { return }
             await openCreatedTask(launch)
+            if !query.streamsWork { await reconcileCreatedTask(launch, owner: owner) }
             try? await confirmWorkUpdate()
         } catch {
             launch.error = error.localizedDescription
             launch.canEdit = !(error is SubmittedCreationError)
+        }
+    }
+
+    private func reconcileCreatedTask(_ launch: WorkNavigation.StartingTask, owner: WorkNavigation) async {
+        guard let receipt = launch.receipt else { return }
+        let destination = destinationGeneration
+        do {
+            let reading = try await query.taskStatus(task: receipt.task.identifier, cwd: launch.directory)
+            guard navigation === owner, destinationGeneration == destination, selection == .task(id: receipt.task.id),
+                  owner.pendingTaskReconciliations[receipt.task.id]?.requestID == launch.id else { return }
+            guard let row = reading.row, row.id == receipt.task.id, let work = reading.overview else {
+                throw RegistryQueryError("The admitted Task is absent from its current reading")
+            }
+            subscribedTaskRow = row
+            taskWork.values[receipt.task.id] = .available(work)
+            owner.pendingTaskReconciliations.removeValue(forKey: receipt.task.id)
+        } catch {
+            guard navigation === owner, destinationGeneration == destination else { return }
+            taskWork.values[receipt.task.id] = .unavailable(lastGood: taskWork[receipt.task.id].value,
+                                                          reason: error.localizedDescription)
         }
     }
 

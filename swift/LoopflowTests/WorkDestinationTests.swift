@@ -310,6 +310,25 @@ struct WorkDestinationTests {
             try await waitForOpening(model)
             #expect(launch.error == "Temporary attachment failure")
             #expect(!launch.canEdit)
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: root) }
+            let recoveryReceipt = """
+            {"request_id":"\(launch.id)","kind":"task.create","milestone":"admitted",
+             "task_id":"\(task.id)","session_id":"\(record.id)","result":null,"disposition":"inspect",
+             "explanation":"Task admitted; inspect its result","run":true,"artifact_key":null,
+             "launch":null,"created_at":1,"updated_at":2}
+            """
+            let submissions = CreationSubmissions(directory: root, machine: { "machine-local" },
+                lookup: { _ in recoveryReceipt }, send: { _ in throw RegistryQueryError("Never resubmit") })
+            try await submissions.save(SubmittedCreation(requestID: launch.id, destination: "machine-local",
+                payload: Data(#"{"directory":"/src/task"}"#.utf8), version: ServerProtocol.revision, submittedAt: Date()))
+            let recovery = CreationRecovery(submissions: submissions)
+            await recovery.refresh()
+            #expect(recovery.items.map(\.id) == [launch.id])
+            let view = try StartingTaskView(model: model, launch: launch, recovery: recovery).inspect()
+            _ = try view.find(text: "Temporary attachment failure")
+            _ = try view.find(button: "Retry opening")
+            _ = try view.find(button: "Inspect")
             await model.openCreatedTask(launch)
             #expect(created.withLock { $0.count } == 1)
             #expect(installedSession(model, registry)?.id == record.id)
@@ -326,6 +345,8 @@ struct WorkDestinationTests {
         await barrier.release("layout")
         try await waitForOpening(model)
         #expect(model.navigation.startingTask == nil)
+        // Native readiness alone cannot confirm a post-admission Task reading.
+        #expect(model.navigation.pendingTaskReconciliations[task.id]?.requestID == submitted[3])
         #expect(CreationRecovery.shared.requests(for: .task(task.task.id)).contains(submitted[3]))
         await CreationRecovery.shared.presented([submitted[3]])
     }

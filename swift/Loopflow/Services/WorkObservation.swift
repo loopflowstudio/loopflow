@@ -207,7 +207,7 @@ public struct WorkFrame: Sendable {
         }
     }
 
-    public struct TaskStatusReading: Decodable {
+    public struct TaskStatusReading: Decodable, Sendable {
         public let overview: TaskOverview?
         public let graphProcesses: [GraphProcessDetail]
         public let comments: TaskComments?

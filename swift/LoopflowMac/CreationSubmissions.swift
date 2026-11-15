@@ -118,7 +118,7 @@ struct CreationRecoveryView: View {
     private var items: [CreationRecovery.Item] {
         recovery.items.filter { $0.id != excluding && (only == nil || $0.id == only) }
     }
-    private let recovery = CreationRecovery.shared
+    var recovery: CreationRecovery = .shared
     @State private var inspecting: CreationRecovery.Item?
     var body: some View {
         VStack(alignment: .leading) {

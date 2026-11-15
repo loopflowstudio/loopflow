@@ -668,10 +668,6 @@ mod tests {
         config.port().unwrap()
     }
 
-    fn listening(port: u16) -> bool {
-        std::net::TcpStream::connect(("127.0.0.1", port)).is_ok()
-    }
-
     #[test]
     fn restoration_keeps_the_saved_address_and_setup_moves_off_an_occupied_port() {
         with_home(|home| {
@@ -694,7 +690,14 @@ mod tests {
             let repaired = manager.configure(Some(saved.clone())).unwrap();
             assert_ne!(port(&repaired), port(&saved));
             assert_eq!(repaired.owner, saved.owner);
-            assert!(listening(port(&repaired)));
+            // Check ownership without opening a connection: that would launch
+            // a concurrent Tailscale WhoIs subprocess during shutdown.
+            assert_eq!(
+                std::net::TcpListener::bind(("127.0.0.1", port(&repaired)))
+                    .unwrap_err()
+                    .kind(),
+                std::io::ErrorKind::AddrInUse
+            );
             let ready = manager.status();
             assert!(ready.ready);
             assert_eq!(
@@ -710,7 +713,8 @@ mod tests {
 
             // Turning access off closes the listener and saves it disabled.
             assert!(manager.configure(None).is_none());
-            assert!(!listening(port(&repaired)));
+            let _released = std::net::TcpListener::bind(("127.0.0.1", port(&repaired)))
+                .expect("disable releases the mobile listener before replying");
             let off = manager.status();
             assert!(!off.ready);
             assert!(!off.configuration.unwrap().enabled);

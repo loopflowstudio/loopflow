@@ -17,14 +17,15 @@ li{margin:.4rem 0}.proposed{border-left:3px solid light-dark(#23734c,#8cd6ad);pa
 </style>
 <header>LOO-650 · concept-review · November 15, 2026<br>
 Built from <code>scratch/loo-650.md</code>, retained relocation compiler logs,
-<code>store/sqlite/{desktop_shells,linear_observations,children}.rs</code>,
+<code>store/sqlite/{desktop_shells,linear_observations,session_events,steers_tests,rentals_tests}.rs</code>,
+<code>store/children_tests.rs</code>,
 <code>store/{session,execution,pr_landing,opening,migration_runner,canonical_ids_tests}.rs</code>,
 <code>harness/fact_writer.rs</code> and migration build/check/package scripts.</header>
 <main>
 <h1>Iterate to implement: carry the storage boundary through test setup.</h1>
 <aside><strong>Biggest mismatch.</strong> Production storage takes prepared facts,
 but mixed tests still acquire application state and call private SQL helpers in
-one module. Moving that module across a crate boundary cannot retain both owners.
+one function. Moving that function across a crate boundary cannot retain both owners.
 The withdrawn attempt also left fixture includes relative to their old locations.</aside>
 <p><strong>Built preparation:</strong> Desktop and Linear SQL now live under
 <code>store/sqlite/</code>; tally arithmetic and pure record operations live with
@@ -42,8 +43,10 @@ crate, its independent test build, and rebuild measurements.</p>
 </table>
 <h2>Proposed source contract</h2>
 <p class="proposed">Application acquisition and policy → synchronous storage →
-saved records. The same direction holds in tests. Split mixed modules by test
-function before relocating them. Shared setup does not determine ownership.</p>
+saved records. The same direction holds in tests. Split mixed tests by behavior
+before relocating them; a single function can contain both owners. Keep the full
+application recovery scenario through public operations and test private SQL
+separately with prepared facts. Shared setup does not determine ownership.</p>
 <p>Keep raw-schema and private transaction checks in storage. Keep CLI execution,
 repository/Wave bootstrap and process attachment in application tests. Storage
 fixtures use the prepared opener with explicit build, upgrade and key inputs.
@@ -58,6 +61,12 @@ unsupported values never invent a launch or completion.</p>
 application. A fresh root should reuse unchanged libraries. Measure these three
 cases separately, including CPU, memory and cache receipts.</p>
 <p>A shell’s lost acknowledgment leaves its consumed receipt discoverable.
+Replacing an attachment and input must still leave once-only native usage on the
+original input with its original attribution; the replacement inherits neither,
+and native completion invents no command outcome. Retain that application
+regression after separating the private summary-selection assertions. Fixtures
+must admit stale and contradictory facts so failure paths remain testable.</p>
+<p>
 An interrupted upgrade keeps its transaction, export fences and existing refusal
 policy. A migration move retains ordered SQL bytes and staging age; refreshing
 only origin/main updates the catalogue. No new recovery lifecycle is proposed.</p>
@@ -70,7 +79,7 @@ demo and review remain open.</p>
 <h2>Review questions</h2>
 <ol>
 <li>Does a product choice remain? No; fixture ownership follows the existing production design.</li>
-<li>What changed for loop-or-next? The design now specifies mixed-test placement, fixture paths and independent test compilation. Iterate to implement.</li>
+<li>What changed for loop-or-next? Split tests by behavior while retaining the full application recovery scenarios. Iterate to implement; fixture paths and independent test compilation remain required.</li>
 </ol>
 </main>
 </html>

@@ -335,35 +335,12 @@ implementation cut. The phone attachment now names **Reconnect**.
 
 ### A submitted conversation is one thing on both hosts
 
-2026-11-15 creation presentation cut. The inspected predecessor map and complete
-acceptance direction are at `908e317e4f3605766b6dc67c0a4be87ce32eb19f:scratch/instant-task-session.md`
-under this heading. Shared `PendingOperation.presentation` now supplies status,
-actions and inspection text. `PendingCommandActions` renders the same controls
-in both conversations and Desktop's pending row, including after native readiness.
-Both hosts list `WorkInteraction.listedOperations`;
-ordinary Task and Session mounts acknowledge by resource. Inspect acknowledges
-only when its receipt sheet mounts. A shown filed result hides normal Graph
-preparation; a later admission failure restores its request row without navigation.
-All command families now share the same failure presentation; the later cut
-deletes `CreationRecovery` entirely.
-
-The phone binds `SessionView` directly to the receipt's Session without a Work
-query or fabricated Task DTO. Native attachment owns input and Retry opening;
-command recovery remains visible alongside a recorded conversation. Desktop Start
-requires a repository and keeps the editor words when none is resolved.
-
-Retirement removes authored payloads and receipts. A compact identity in the same
-SQLite owner retains request ID, draft ID, command digest and retirement time.
-Source rewrites no longer release it. Opening
-an older branch-format database compacts its retired payloads before file import.
-An editor cleanup crash must still prevent duplicate creation.
-
-Headless production-path acceptance: Start A, leave, A files, open its ordinary
-row; no redundant request after restart. Held query never delays conversation
-opening. Failed save offers same-ID retry and editable words, neither after save.
-Attachment retry opens the recorded Session. Hold Graph admission after filing;
-restart after uncertain send; retire before editor cleanup. Native display and
-input latency remain demo/benchmark work, separate from these deterministic checks.
+Built at `72bb1d06d4`; account and acceptance at
+`a8ca5c4cbb:scratch/instant-task-session.md` under this heading. The phone binds
+`SessionView` to the receipt's Session with no Work query or fabricated Task DTO.
+Mounts acknowledge by resource; Inspect acknowledges when its sheet mounts. A
+later admission failure restores the request row without navigation. An editor
+cleanup crash must still prevent duplicate creation.
 
 ### A pending command is one thing, whatever its kind
 

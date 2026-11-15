@@ -7,7 +7,8 @@
   import the owning crate. Public enums retain their non-exhaustive contract.
 - Cross-root hits retain A's absolute debug-source paths in B's rlib. Runtime
   identity is correct, but debugger source lookup can outlive a deleted worktree.
-  Decide the canonical debug-source mapping before enabling automatic reuse;
-  do not hide this with a blanket source remap or claim production acceptance.
+  Open question 1 in loo-650.md: (a) automatic exact-source lookup after A is
+  removed, or (b) documented manual debugger mapping. Neither is selected;
+  extraction beyond the prototype waits on it. No blanket source remap.
 - LOO-908 is done with no PR; no live root-refresh integration is available.
   The private probe tests refresh; a shared-daemon owner remains unselected.

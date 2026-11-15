@@ -135,6 +135,12 @@ requests. A `TerminalId` names one PTY and is never reused: a `read` of a
 terminal the holder does not hold, or from a position past what that
 terminal has written, is an error and never an answer from byte 0.
 
+Revision 2 closes an unfinished bracketed paste when its writer disconnects.
+A server reconnecting that writer restores only the paste's delimiters before
+forwarding its unsent tail; content is never replayed. Older holders leave the
+paste open, so their writers continue without restoring delimiters. Those
+holders keep their original behavior until their conversations end.
+
 Output frames are `tag u8 · length u32 BE · payload`:
 
 | Tag | Payload |
@@ -318,6 +324,18 @@ Input then goes straight to the holder's PTY; only bytes not yet written are
 queued, and no store read or write delays forwarding. Returning does not
 resubmit input. Unsent input is lost when the conversation is quit and
 resumed.
+
+An interrupted bracketed paste ends when its controlling view leaves or loses
+control. This releases the native parser's accumulated draft without submitting
+it. A reconnect tracks paste delimiters even while dropping queued input and
+restores paste framing before forwarding any remaining content. Ctrl+] inside
+a paste is content; outside a paste it detaches the view. No paste timeout or
+Return is added.
+Held-terminal protocol revision 3 pairs this behavior with relays that restore
+paste framing after a reconnect; a relay from another revision is replaced by
+the selected installation before it attaches.
+The entrance handshakes in `tests/transport_tests.rs` and
+`tests/machine_commands.rs` pin this revision; update both when advancing it.
 
 A local attachment waits up to five seconds for acknowledgement. Over command
 pipes it allows sixty seconds for SSH setup and destination Session

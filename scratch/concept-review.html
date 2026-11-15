@@ -5,91 +5,66 @@
 <title>LOO-650 · concept review</title>
 <style>
 :root { color-scheme: light dark; font: 16px/1.45 system-ui, sans-serif; }
-body { max-width: 780px; margin: 2rem auto; padding: 0 1rem 2rem; }
+body { max-width: 760px; margin: 2rem auto; padding: 0 1rem 2rem; }
 header { font-size: .78rem; color: light-dark(#555d66, #b8c0ca); }
-h1 { font-size: 1.7rem; line-height: 1.15; }
+h1 { font-size: 1.6rem; line-height: 1.2; }
 h2 { font-size: 1.05rem; margin: 1.3rem 0 .4rem; }
 p { margin: .6rem 0; }
 code { font: .85em ui-monospace, monospace; overflow-wrap: anywhere; }
 aside { border-left: 3px solid light-dark(#944218, #edb58b); padding-left: 1rem; }
 table { border-collapse: collapse; width: 100%; font-size: .86rem; }
-th, td { text-align: left; vertical-align: top; padding: .5rem .35rem; border-bottom: 1px solid light-dark(#ccc, #4b5159); overflow-wrap: anywhere; }
-th:first-child, td:first-child { padding-left: 0; }
+th, td { text-align: left; vertical-align: top; padding: .5rem .3rem; border-bottom: 1px solid light-dark(#ccc, #4b5159); overflow-wrap: anywhere; }
 li { margin: .4rem 0; }
-@media (max-width: 520px) { body { margin-top: 1rem; } table { font-size: .76rem; } th, td { padding: .4rem .2rem; } }
+@media (max-width: 520px) { body { margin-top: 1rem; } table { font-size: .76rem; } }
 </style>
-<header>LOO-650 · concept-review · November 15, 2026<br>
-Sources: <code>scratch/loo-650.md</code>, <code>scratch/publishing-discussion.md</code>,
-<code>scripts/dev-lf</code>, <code>scripts/testing.md</code>, model/terminal crate READMEs,
-<code>store/{planning_reads,capacity}.rs</code>, <code>store/sqlite.rs</code>,
-<code>store/sqlite/{task_comments,planning_sync,task_ownership,planning_peers,sessions,processes}.rs</code>,
-<code>store/sqlite/selections.rs</code>, <code>process/attachment.rs</code>,
-<code>provider_account/{capacity,catalog}.rs</code>,
-<code>store/sqlite/account_selection.rs</code>,
-<code>scripts/benchmarks/crate-rebuild/{README.md,probe.py}</code>.</header>
+<header>LOO-650 · concept-review · November 15, 2026 · HEAD 1916b9185a<br>
+Built from <code>scratch/{loo-650,publishing-discussion}.md</code>,
+<code>scripts/dev-lf</code>, <code>scripts/benchmarks/crate-rebuild/README.md</code>,
+<code>store/session_projection.rs</code>, <code>store/sqlite/{sessions,selections,task_ownership,planning_peers,scope_defaults}.rs</code>,
+and <code>config/placement.rs</code>.</header>
 <main>
-<h1>Iterate to implement: separate watched Session projection from storage.</h1>
-<aside><strong>Biggest mismatch.</strong> Shipping, SQL, definition resolution and account
-policy still compile together. Model, content and terminal hits prove reusable
-pieces; they do not yet deliver the intended application edit closure.</aside>
-<p><strong>Existing direction:</strong> substantial private-crate separation; runtime
-identity stays correct. Isolated builds settle source-debugging recovery. The old
-source-retention question is closed for this cut. No new product choice is open.</p>
-
+<h1>Iterate to implement: finish scope acquisition above SQL, then extract storage.</h1>
+<aside><strong>Biggest mismatch.</strong> Shipping, SQL, configuration and runtime still
+compile together. Returning saved scope addresses lets configuration stop depending
+on a SQL connection. Leaf-library hits alone do not deliver the intended edit closure.</aside>
+<p>No open product choice. The substantial private-crate split and isolated debugging
+path remain the direction. This review changes implementation guidance only.</p>
 <h2>Actions → concepts → APIs</h2>
 <table>
-<thead><tr><th>Action</th><th>Before / existing</th><th>Proposed ownership</th></tr></thead>
+<thead><tr><th>Action</th><th>Existing behavior</th><th>Proposed ownership</th></tr></thead>
 <tbody>
-<tr><td><code>scripts/dev-lf --version</code><br>after a shipping edit</td><td>Cargo rebuilds the application; existing model/content/terminal libraries are separate.</td><td>Same command. Application → storage, definitions, providers/runtime → shared records. Only the changed dependency closure rebuilds.</td></tr>
-<tr><td>Read pending Task comments</td><td>Implemented preparation: <code>task_comment_thread</code> and <code>task_planning_receipts</code> return saved evidence with repository scope. The application observes connection state afterward.</td><td>Extend that separation to ownership and peers. Read facts together → release SQL lock → observe configuration → compose presentation. Preserve batching and enclosing pinned reads.</td></tr>
-<tr><td>Recover after an account limit</td><td>Implemented preparation: account policy reconciles historical aliases and ranks candidates outside SQL. SQL compares the complete saved reading before recording selection.</td><td>Retain this API through extraction: read → rank → conditional commit. Retry rereads preferences; an unchanged empty choice takes no write lock.</td></tr>
-<tr><td>List available Sessions;<br>watch Task activity</td><td>SQL summary decoding observes process identity and quiet deadlines. Task selections consume those summaries. Eligibility filters before pagination.</td><td>Proposed: batched saved identities → application observation → SQL filtering at explicit time before limit/cursor → one composed projection for list and selection. Application retains deadline recomputation and attributed <code>run_sqlite</code>.</td></tr>
-<tr><td>Resume the same conversation</td><td>Implemented: <code>process::attachment</code> coordinates observation, close and claim above SQL. Storage takes explicit start/terminal receipts and owns transfer/settlement guards.</td><td>Retain that sequence during extraction. Hold the same attachment lock throughout; SQL atomically checks and records settlement/reservation. Unknown identity stays unknown.</td></tr>
-<tr><td>Build a fresh worktree</td><td>Private probe hits with newer sccache; shared root upkeep is unbuilt.</td><td>Git root inventory → coordinated idle daemon refresh in build tooling. Until safe, compile with misses.</td></tr>
-<tr><td><code>scripts/dev-lf --isolated-build --version</code></td><td>Implemented: own <code>target/isolated</code>, both compiler wrappers disabled.</td><td>Keep this recovery when cached debug paths name a removed checkout.</td></tr>
+<tr><td><code>scripts/dev-lf --version</code><br>after a shipping edit</td><td>Separate model, content and terminal crates; application still owns SQL and runtime.</td><td>Same command → changed owner and its downstream crates rebuild. Storage moves with migrations and schema generation.</td></tr>
+<tr><td>Claim or move a Task;<br>import peer planning</td><td>Ownership facts and placement resolution still load configuration using a SQL connection.</td><td>Saved scope/address reading → application observes Git/files → SQL checks scope and commits current ownership atomically.</td></tr>
+<tr><td>List available Sessions;<br>watch Task activity</td><td><strong>Implemented preparation:</strong> batched identity/deadline acquisition outside the mutex; SQL compares saved inputs and filters before pagination. Quiet/death checks are recorded passing.</td><td>Move facade entry methods above SQL. Keep explicit projection values, final comparison and deadline recomputation.</td></tr>
+<tr><td>Edit Dashboard or Task order</td><td>SQL entry methods still acquire Session projections and prepare edits.</td><td>Application prepares → SQL compares Dashboard revision or saved order → atomic write. Preserve repair of ambiguous queries.</td></tr>
+<tr><td>Build a fresh worktree;<br>debug locally</td><td>Private cache probe hits; shared root upkeep remains unbuilt. <code>scripts/dev-lf --isolated-build</code> is implemented.</td><td>Git root inventory → coordinated idle daemon refresh. Until safe, allow misses. Isolated debugging stays checkout-local.</td></tr>
 </tbody>
 </table>
-
 <h2>Normal → failure → recovery</h2>
-<p>Unchanged B reuses A’s libraries; editing an owner invalidates its dependents.
-B must still execute as B. A missing cache falls back to ordinary compilation.
-An unknown root may miss while another build runs; it must not restart that build’s
-daemon. Deleted A can leave stale debug paths: rebuild B with the isolated command.</p>
-<p>A disconnected planning read must retain uncertain and conflicting deliveries.
-Moving quota normalization only to new writes would mishandle historical rows;
-read-time reconciliation now survives in the account owner. Two simultaneous
-launches must not rank old candidates and then blindly stamp their choices.
-The selection commit must detect changes to every saved fact used in ranking,
-including other candidates and intervening selections.</p>
-<p>Served reads retain their SQL snapshot, external revisions and deadlines.
-Observing ignored configuration after the local lock releases must still
-invalidate the watch; reaching a quiet deadline must update it without a store
-write. If the first row is dead or unknown and the next is live and available,
-<code>limit=1</code> must return the next row. Filtering an already limited page
-would hide it. A quiet deadline must recompute page membership as well as displayed
-availability; Task selections must agree. Observe outside the connection mutex,
-retain the pinned reading, and avoid loading every full summary to fill a page.
-No new Work record, migration or conversation lifecycle is proposed.</p>
-<p>If a PID is reused or another resume replaces an attachment, unknown identity
-remains unknown and the old attachment cannot retire its replacement. Extracting
-storage must retain the attachment lock across observation, close,
-settlement and claim. Keep the native thread and pending input.</p>
-
+<p>A claim reads its repository and scope, observes that scope’s preferences, then
+commits. If Project membership, Wave ancestry or the repository address changes
+during acquisition, reacquire for the new scope before writing. Existing claims
+remain independent of changed preferences. No SQL mutex spans Git or file reads.</p>
+<p>A dead or unknown first Session cannot hide a live available second row at
+<code>limit=1</code>. Quiet deadlines update list and Task selection without a
+store write. The implemented short-read → observe → compare approach retains the
+enclosing Work snapshot without lending a shared connection during observation.</p>
+<p>Disconnected peer imports retain conflicts and routing. Concurrent Dashboard
+edits retain stale-write checks. Cached debug paths may name a deleted checkout:
+use the isolated build. An unknown root may miss while another build runs; it
+cannot restart that build’s daemon.</p>
 <h2>Next demonstration</h2>
-<p>Show the application edit closure and fresh-worktree hit, correct-checkout execution,
-and isolated debugging recovery; then compare whole-build elapsed time, CPU and RSS.
-The recorded probe proves owner hits and root-refresh behavior in a private daemon,
-not shared-daemon integration or whole-application savings. Keep demo and review
-before merge.</p>
-
-<h2>Review questions for the next pass</h2>
-<p>Implementation checks; no pending product decision.
-<strong>Loop-or-next: design changed → iterate to implement.</strong></p>
+<p>After the substantial cuts, show representative rebuild closures, fresh-worktree
+hits, correct-checkout execution and isolated debugging recovery. Compare elapsed
+time, CPU and RSS. Shared-daemon integration and whole-build savings remain unproved;
+interactive demo and review remain before merge.</p>
+<h2>Questions for the next review</h2>
+<p>Implementation checks; <strong>loop-or-next: design changed → iterate to implement.</strong></p>
 <ol>
-<li>Does a SQL-only edit rebuild storage and its callers, with application acquisition and policy outside storage?</li>
-<li>Do available pages filter before pagination, and do quiet deadlines and process changes update list and Task selection together without a SQL write?</li>
-<li>Do disconnected reads, historical quota recovery, concurrent selection and fenced resume retain their behavior after extraction?</li>
-<li>Does a fresh worktree reuse libraries without disturbing an active build, and can an isolated build recover local source debugging?</li>
+<li>Does changed scope during acquisition trigger fresh configuration before a claim commits?</li>
+<li>Are observation and edit preparation above SQL, with pagination, pinned reads and atomic comparisons intact?</li>
+<li>Do linked-worktree preferences, disconnected peer history and stale Dashboard/order edits retain their behavior?</li>
+<li>Do measured rebuild closures and whole-build costs establish the Task outcome?</li>
 </ol>
 </main>
 </html>

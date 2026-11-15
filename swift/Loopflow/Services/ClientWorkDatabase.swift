@@ -95,6 +95,10 @@ final class ClientWorkDatabase {
         try execute("CREATE TABLE IF NOT EXISTS operations (sequence INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, state BLOB NOT NULL)")
         try execute("CREATE UNIQUE INDEX IF NOT EXISTS operations_draft ON operations(json_extract(CAST(state AS TEXT),'$.record.draftID'))")
         try execute("CREATE INDEX IF NOT EXISTS operations_pending ON operations(sequence) WHERE json_extract(CAST(state AS TEXT),'$.retiredAt') IS NULL")
+        try execute("""
+            CREATE INDEX IF NOT EXISTS operations_field_stages ON operations(json_extract(CAST(state AS TEXT),'$.record.destination'))
+            WHERE json_extract(CAST(state AS TEXT),'$.receipt.validation')='bound'
+            """)
         try execute("DROP INDEX IF EXISTS operations_sources")
         try execute("CREATE TABLE IF NOT EXISTS retired_operations (id TEXT PRIMARY KEY, state BLOB NOT NULL)")
         try execute("CREATE UNIQUE INDEX IF NOT EXISTS retired_operations_draft ON retired_operations(json_extract(CAST(state AS TEXT),'$.draftID'))")
@@ -111,6 +115,7 @@ final class ClientWorkDatabase {
         try execute("CREATE TABLE IF NOT EXISTS work_epochs (id TEXT PRIMARY KEY, state BLOB NOT NULL)")
         try execute("CREATE TABLE IF NOT EXISTS work_requirements (id TEXT PRIMARY KEY, state BLOB NOT NULL)")
         try execute("CREATE TABLE IF NOT EXISTS work_fields (id TEXT PRIMARY KEY, state BLOB NOT NULL)")
+        try execute("CREATE INDEX IF NOT EXISTS work_fields_resource ON work_fields(json_extract(CAST(state AS TEXT),'$.work.id'))")
         // Confirmed caches are replaceable. The outbox and its reload floors
         // survive a membership vocabulary change; never reinterpret an old plan.
         try execute("DELETE FROM work_queries WHERE EXISTS (SELECT 1 FROM json_each(CAST(work_queries.state AS TEXT),'$.plans') WHERE json_type(value,'$.membership.domains') IS NULL)")
@@ -262,9 +267,16 @@ final class ClientWorkDatabase {
         state.receiptEpoch = epoch
         // Learning the receipt's lifetime makes an imported journal recoverable.
         state.sentEpoch = epoch
+        let accepted = state.receipt ?? receipt
         try transaction {
             try update(state)
-            for commit in receipt.commits where receipt.kind == "session.rename" && receipt.validation == .bound
+            if accepted.validation == .bound, let declaration = OperationDeclaration(kind: accepted.kind),
+               let field = declaration.field {
+                for commit in accepted.commits where declaration.stages.contains(commit.stage) {
+                    try incorporate(commit, field: field, machine: state.record.destination)
+                }
+            }
+            for commit in accepted.commits where accepted.kind == "session.rename" && accepted.validation == .bound
                 && commit.stage == "session.renamed" && commit.resolution == .committed {
                 guard commit.fence.machine == state.record.destination, commit.fence.epoch == epoch,
                       case .string(let session) = commit.result["id"],
@@ -444,8 +456,9 @@ final class ClientWorkDatabase {
             guard try observeMachineEpoch(stamp.epoch, machine: stamp.machine) else {
                 return try cached(machine: stamp.machine, key: key)
             }
+            let stages = try fieldStages(machine: stamp.machine)
             for fact in reading.plans.flatMap({ $0.membership.facts }) {
-                try receiveFields(fact, stamp: stamp, observation: observation)
+                try receiveFields(fact, stamp: stamp, observation: observation, stages: stages[fact.work.id] ?? [])
             }
             // Field ingestion is useful even when this body cannot replace the
             // exact-query base. Incompleteness cannot certify filtered absence.
@@ -479,7 +492,8 @@ final class ClientWorkDatabase {
     }
 
     private func receiveFields(_ fact: WorkMembershipPlan.Facts, stamp: ReadingStamp,
-                               observation: MachineConnection.ObservationConnection?) throws {
+                               observation: MachineConnection.ObservationConnection?,
+                               stages: [(WorkField, OperationCommit)]) throws {
         let id = try fieldID(machine: stamp.machine, work: fact.work)
         let previous = try fields(id)
         var facts = previous ?? WorkFieldFacts(machine: stamp.machine, work: fact.work)
@@ -489,6 +503,7 @@ final class ClientWorkDatabase {
             stamp: stamp, observation: observation, key: id + "/lifecycle")
         facts.activity = join(WorkFieldStates(fact.activity), support: fact.activity.support, previous: facts.activity,
             stamp: stamp, observation: observation, key: id + "/activity")
+        for (field, commit) in stages { facts.incorporate(commit, field: field) }
         guard facts != previous, facts.parent != nil || facts.lifecycle != nil || facts.activity != nil else { return }
         try execute("INSERT OR REPLACE INTO work_fields(id,state) VALUES(?,?)", id: id, data: JSONEncoder().encode(facts))
     }
@@ -534,7 +549,60 @@ final class ClientWorkDatabase {
         }
         if case .captured = support.observations { fieldConnections[key] = observation?.generation }
         else { fieldConnections[key] = nil }
-        return WorkFieldFact(value: value, support: support, needsReconciliation: false)
+        return WorkFieldFact(value: value, support: support, needsReconciliation: false,
+            incorporated: previous?.incorporated?.mapValues { fences in
+                fences.filter { $0.epoch == support.epoch && $0.schema == support.schema }
+            })
+    }
+
+    private func incorporate(_ commit: OperationCommit, field: WorkField, machine: String) throws {
+        guard commit.fence.machine == machine, commit.fence.schema == ServerProtocol.revision,
+              try activeEpoch(machine: machine) == commit.fence.epoch else { return }
+        for resource in Set(commit.resources) {
+            for data in try rows("SELECT state FROM work_fields WHERE json_extract(CAST(state AS TEXT),'$.work.id')=?", id: resource) {
+                var facts = try JSONDecoder().decode(WorkFieldFacts.self, from: data)
+                guard facts.machine == machine else { continue }
+                let previous = facts
+                facts.incorporate(commit, field: field)
+                if facts != previous {
+                    try execute("UPDATE work_fields SET state=?2 WHERE id=?1",
+                        id: fieldID(machine: machine, work: facts.work), data: JSONEncoder().encode(facts))
+                }
+            }
+        }
+    }
+
+    /// Reuse the outbox and retained effects as stage owners. Incorporation is
+    /// not another receipt ledger and never turns an unknown send into a retry.
+    private func fieldStages(machine: String) throws -> [String: [(WorkField, OperationCommit)]] {
+        let epoch = try activeEpoch(machine: machine)
+        var stages: [(WorkField, OperationCommit)] = []
+        let pendingStages = try rows("""
+            SELECT state FROM operations WHERE json_extract(CAST(state AS TEXT),'$.record.destination')=?
+                AND json_extract(CAST(state AS TEXT),'$.receipt.validation')='bound'
+            """, id: machine)
+        for data in pendingStages {
+            let state = try JSONDecoder().decode(State.self, from: data)
+            guard state.receiptEpoch == epoch,
+                  state.receiptUnavailable != true, let receipt = state.receipt, receipt.validation == .bound,
+                  let declaration = OperationDeclaration(kind: receipt.kind), let field = declaration.field else { continue }
+            stages.append(contentsOf: receipt.commits.filter { declaration.stages.contains($0.stage) }.map { (field, $0) })
+        }
+        let prefix = queryID(machine: machine, query: "")
+        for data in try rows("SELECT state FROM work_queries WHERE id>=?1 AND id<(?1 || char(1114111)) AND json_array_length(CAST(state AS TEXT),'$.effects')>0", id: prefix) {
+            let query = try JSONDecoder().decode(ClientWorkQuery.self, from: data)
+            for effect in query.effects ?? [] {
+                guard let declaration = OperationDeclaration(kind: effect.kind), let field = declaration.field,
+                      let commit = effect.resolution, declaration.stages.contains(commit.stage),
+                      commit.fence.machine == machine, commit.fence.epoch == epoch else { continue }
+                stages.append((field, commit))
+            }
+        }
+        var resources: [String: [(WorkField, OperationCommit)]] = [:]
+        for (field, commit) in stages {
+            for resource in Set(commit.resources) { resources[resource, default: []].append((field, commit)) }
+        }
+        return resources
     }
 
     func fieldReading(machine: String, work: WorkWorkspaceKey,

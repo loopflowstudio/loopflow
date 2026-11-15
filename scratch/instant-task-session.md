@@ -3,8 +3,8 @@
 Built on origin/main `9cafc410ee`: conversation/Machine link `a2a0a0fb33`,
 unreachable Machine and Desktop rename `35e2835de1`, fixture teardown `5231746858`,
 observation source `86f99e3315`, typed field support `f9a8da8ae9`. SQL-only and attributed external
-normalization are now persisted; field-effect incorporation and derived-answer
-coverage precede dynamic
+normalization and field-stage incorporation are now persisted; derived-answer
+coverage and projection consumption precede dynamic
 membership with disconnected Move. No shipping or merge decision; no Wave selected.
 
 ## Direction
@@ -543,28 +543,14 @@ Unresolved run `7bb50caf-46f5-485f-a8ff-d882ea6e5a98`: nextest marked
 `server::schema::tests::bare_time_serializes_as_its_described_tuple` LEAK;
 that case launches no children. Gate owns it; no retry was taken as a fix.
 
-### Concept review: fields carry their own support · 2026-11-15
+### Independent ingestion and normalization
 
-Review against `f9a8da8ae9`. Producer-declared parent, lifecycle and activity
-support and strict cross-platform fixtures are built. Consume each field's full
-SQLite/observation support and derivation identity, never split the invocation bag.
-Missing/invalid support differs from validated empty observations. SQL-only fields
-normalize independently; invalid activity stays last-known/unavailable. Keep the
-existing capture owner and producer lifecycle rules on both clients.
-
-Add the failure/recovery counterexample: a reading contains a newer committed
-parent and activity whose dependency changes during capture. Incorporate the
-parent once, retain the prior activity as last-known, and make only answers that
-consume the missing activity incomplete. An unfiltered destination may still
-show the real cached Task; Busy membership, activity-based ordering and their
-counts cannot claim freshness. A later complete activity capture repairs those
-answers without reapplying Move or changing selection. Reordered old fields,
-restart and source replacement must retain the same separation on both hosts.
-
-Next implement: persisted normalization and incorporation → derived-answer
-coverage → dynamic membership and disconnected
-Move with deletion of the old reducer. Keep the proposed Move usage above;
-no new product vocabulary or builtin rule is needed.
+Producer-declared parent, lifecycle and activity support is built. Consume each
+field's complete support and derivation identity; missing support differs from
+validated empty observations. SQL-only fields normalize independently. A newer
+parent with invalid activity incorporates only the parent; retain last-known
+activity and make only dependent answers incomplete. A later valid capture repairs
+those answers without reapplying Move or changing selection.
 
 **Ingestion precedes query replacement.** The next client API must accept a
 reading as a source of independently supported fields, not only as a replacement
@@ -589,63 +575,47 @@ the other as a coherent Machine snapshot. Repeat reordered and after offline
 restart on both hosts. Receipt delivery remains unresolved until its own recovery
 answers; field incorporation never authorizes a resend or changes navigation.
 
-Typed-field cut (`f9a8da8ae9`): activity declares the repository Session read's
-consumed set. The transient union setter
-(`WorkMembershipPlan.Facts.states`) clears support and repeats Rust's
-`SelectionState::is_activity` split as a literal Swift set; both go with the
-state-only reducer. Wire values alone do not complete normalization acceptance.
+Built receiving-link attribution: `ReceivedReading` retains unchanged bytes,
+Machine, source and link generation before buffering through both hosts' decoding
+and checkpoint reuse. The shared Machine owner validates the link at ingestion.
+Unattributed/departed activity cannot revoke current coverage; independent SQL-only
+fields remain eligible. Reconnect requires another capture even for the same
+source. Field/query writes and in-memory proof roll back together. Local link
+generations never become wire DTOs, Machine revisions or another ledger.
 
-Prior typed-field checks and 10k query plans: `0883b66cf0` (this section).
-
-### Persisted normalization and receiving-link gap · 2026-11-15
-
-Built in the client SQLite owner: independent parent/lifecycle/activity field
-joins before exact-query replacement, retained last-known values, incomparable
-support reconciliation, field fence comparison, and connection-local external
-coverage. A newer SQL-only parent survives rejected/incomplete query bodies and
-invalid activity. Facts and exact query writes commit or roll back together;
-unsupported fields cannot acquire provenance from an older cache. No predecessor
-membership reducer was extended or removed in this prerequisite.
-
-**Receiving-link attribution is built.** `ReceivedReading` retains unchanged
-bytes plus Machine, observation source and link generation. `ServerSubscription`
-constructs it before buffering; Desktop subscriptions, Work frames/checkpoint
-reuse, Dashboard and phone detached decoding retain it through SQLite ingestion.
-CLI/cache inputs and welcomes without a Machine ID remain unattributed without
-discarding their baseline. The shared Machine owner compares the received link
-with its active one. Disconnect/reconnect makes earlier proof
-last-known even when the source is unchanged; a reading never elects a source.
-Departed/unattributed activity cannot replace or revoke a current capture, while
-its supported SQL-only parent/lifecycle facts remain eligible. Transaction
-rollback restores the previously committed in-memory proof with the SQL facts.
-
-Queued-A → reconnect-B counterexample and earlier checks: `9183e2bba7:scratch/instant-task-session.md`.
-Local generations never become wire DTOs, Machine revisions or a ledger.
-
-Next: field-targeted effects (`WorkFieldFact.covers(_:CommitFence)`, test-only
-caller), derived-answer dependencies, then dynamic membership/Move with the
-predecessor deletion. Exact-query inputs, resume/checkpoint ordering and scope
-cancellation are unchanged. Gate owns the prior nextest LEAK.
-
-Checks: `scripts/test_desktop.sh --filter 'ClientWorkQueryTests/testField|ServerClientTests|WorkObservationTransportTests'` passes 8 XCTest and 29 Swift Testing cases; final two-window reconnect case also passes alone. `scripts/test_ios.py -only-testing:LoopflowiOSTests/ClientWorkQueryTests/testFieldBufferedReadingsCannotBorrowReconnectedLinkInEitherOrder -only-testing:LoopflowiOSTests/ClientWorkQueryTests/testFieldAndQueryWritesRollbackTogetherAndFieldLookupIsKeyedAtTenThousandRows` passes 2 cases. `check_swift_multiplatform_boundaries.py` passes. Gate owns broader suites.
+Normalization/transport checks and queued-A → reconnect-B details:
+`2c6146e43f:scratch/instant-task-session.md` (Persisted normalization and receiving-link gap).
+Earlier typed-field/query-plan checks: `0883b66cf0:scratch/instant-task-session.md`.
 
 ### Concept review: incorporation survives stale answers · 2026-11-15
 
-Review of `9183e2bba7` plus the receiving-link workspace changes. The transport
-prerequisite is built; it does not yet change query projection. Next implement
-binds each effect to its exact resource, field and semantic stage in the existing
-declaration. A coincidentally newer revision on another field cannot absorb it.
-Persist incorporation with normalized facts and receipt state in the same SQLite
-transaction; do not infer delivery from incorporation. Conflicting or incomparable
-support cannot establish new incorporation. Once established, stale activity,
+Review of `2c6146e43f` plus the field-incorporation workspace changes. Transport
+attribution and persisted resource/field/stage incorporation are built; neither
+yet changes query projection. The remaining mismatch is a saved field fact that
+has absorbed Complete while a held query still applies Complete to its old body.
+Consume that saved incorporation when replacing the projection; do not infer
+delivery from it. Conflicting or incomparable support cannot establish new
+incorporation. Once established, stale activity,
 conflict, eviction or query closure cannot reactivate the old effect: retain its
 incorporation or make the affected base unavailable under its reload floor.
 
-Derived answers record their consumed fields, candidate/content coverage and
-program identity separately. Disconnect invalidates dependent live coverage and
+The next implement direction is one derived answer per query, owned by the
+existing SQLite/cache owner, with program identity, candidate/content coverage
+and the field dependencies it actually consumes. It is replaceable cache state,
+not another confirmed query body, receipt ledger or readiness state. Keep exact
+Machine bodies immutable. Publish the answer's rows and coverage together to both
+hosts; a stale Busy dependency cannot invalidate an independent SQL-only parent
+or lifecycle answer, and a current parent cannot certify Busy or an exact count.
+Index dependency fan-out rather than scanning every retained query on a gesture.
+
+Disconnect invalidates dependent live coverage and
 publishes that change to leased queries even if no new query body arrives; it
 does not undo incorporated parent/lifecycle effects. Reconnect alone cannot repair
 those answers. A current-link capture repairs only the answers it supports.
+Exercise this without command traffic: retain a Busy answer and an unfiltered
+parent-based answer in two windows, disconnect, then reconnect with no new body.
+Only the dependent live coverage changes; both windows retain last-known content,
+and neither welcome nor an unrelated field repairs Busy. A current capture does.
 Replace stamp-only incorporation, arbitrary revision shortcuts and the state-only
 projection with dynamic membership and disconnected Move; no parallel reducer.
 
@@ -664,6 +634,27 @@ shows Task titles or shows/renames Session names. Built provisional behavior is
 in `questions.md`. These do not prevent the engineering cut above, but remain
 open product choices for this concept-review's Blocked outcome; (3) decides
 whether phone rename exists. No answer is inferred in a headless run.
+
+### Persisted field incorporation · 2026-11-15
+
+The existing declaration targets Complete/Abandon/Reopen at lifecycle and Move at
+parent. Bound accepted receipts and independently supported readings join stages
+into the exact resource's field in the SQLite owner, in either arrival order.
+Only known, nonconflicting support can establish incorporation; later conflicts,
+missing activity, query closure and command retirement retain it. Same-revision
+receipt content cannot advance incorporation beyond the saved receipt. Stage
+fences compact comparable commits without keeping request IDs or command bodies;
+retained query effects supply still-needed stages after retirement. Resource and
+bound-receipt lookups use indexes, with stage fan-out grouped by resource.
+
+This prerequisite does not change query projection. The deletion cut still removes
+`WorkQueryEffect.covered`, `effectsCover`, the union setter and state-only reducer
+together with dynamic membership/Move. Derived-answer dependencies and
+disconnect-driven coverage publication are next; no second evaluator was added
+to the predecessor. Full Complete→Reopen and Move A→B→C presentation acceptance
+remains open, including two clients and incomplete destinations.
+
+Checks: `scripts/test_desktop.sh --skip-build --filter 'ClientWorkQueryTests/testField|SessionRenameTests'` passes 14 XCTest + 6 Swift Testing cases after a fresh `swift build --build-tests --package-path swift`; `scripts/test_ios.py` with six explicit `testFieldIncorporation…` selections passes all 6; `check_swift_multiplatform_boundaries.py` passes. Resource/receipt EXPLAIN checks use indexes at 10k rows. Logs: `/tmp/loo-906-field-{build,tests,ios}.log`. Gate owns broader suites and the prior nextest LEAK.
 
 ## Current implementation cut
 
@@ -692,7 +683,7 @@ including without a network event. Retirement cancels its receipt observer and
 transfers lagging effects or scoped reload floors. The complete prior contracts and
 query checks remain at `6e944e73b5a:scratch/instant-task-session.md`.
 
-Remaining: field-effect incorporation and derived-answer coverage,
+Remaining: projection consumption of field incorporation and derived-answer coverage,
 then disconnected Move; effect-policy duplication; cross-client closed-query convergence; exhaustive
 effect/dependency declarations and cross-query provenance; other mutation recovery
 and resource lanes; retained mobile `SessionLink`; projected inspection;

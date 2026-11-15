@@ -39,6 +39,15 @@ public struct OperationDeclaration {
 
     var changesMembership: Bool { kind == .complete || kind == .abandon }
 
+    /// The field written by the semantic stage, independent of query scope.
+    var field: WorkField? {
+        switch kind {
+        case .complete, .abandon, .reopen: .lifecycle
+        case .move: .parent
+        default: nil
+        }
+    }
+
     func effect(id: String, sequence: Int64, directory: String, issue: String, receipt: OperationReceipt?) -> WorkQueryEffect? {
         guard changesMembership else { return nil }
         return WorkQueryEffect(operationID: id, sequence: sequence, directory: directory, kind: kind.rawValue, issue: issue,

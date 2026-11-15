@@ -1,5 +1,9 @@
 import Foundation
 
+enum WorkField: String, Codable, Hashable, Sendable {
+    case parent, lifecycle, activity
+}
+
 /// A confirmed field is independent of the query that happened to carry it.
 /// Unavailable captures never replace its last-known value or its incorporation.
 struct WorkFieldFact<Value: Codable & Equatable & Sendable>: Codable, Equatable, Sendable {
@@ -7,6 +11,26 @@ struct WorkFieldFact<Value: Codable & Equatable & Sendable>: Codable, Equatable,
     let support: WorkMembershipPlan.FieldSupport
     var needsReconciliation: Bool
     var conflictingSupports: [WorkMembershipPlan.FieldSupport] = []
+    // Cache-local incorporation, bounded by semantic stage rather than request
+    // count. It survives a later conflict or loss of live answer coverage.
+    var incorporated: [String: [CommitFence]]?
+
+    mutating func incorporate(_ commit: OperationCommit) {
+        guard commit.resolution != .definitelyRefused, !needsReconciliation,
+              covers(commit.fence) else { return }
+        var stages = incorporated ?? [:]
+        var fences = stages[commit.stage] ?? []
+        if fences.contains(where: { $0.covers(commit.fence) }) { return }
+        fences.removeAll { commit.fence.covers($0) }
+        fences.append(commit.fence)
+        stages[commit.stage] = fences
+        incorporated = stages
+    }
+
+    func incorporates(_ commit: OperationCommit) -> Bool {
+        commit.resolution != .definitelyRefused
+            && incorporated?[commit.stage]?.contains(where: { $0.covers(commit.fence) }) == true
+    }
 
     mutating func reconcile(_ support: WorkMembershipPlan.FieldSupport) {
         needsReconciliation = true
@@ -18,11 +42,8 @@ struct WorkFieldFact<Value: Codable & Equatable & Sendable>: Codable, Equatable,
     /// Revision coverage is independent of answer completeness and delivery.
     /// A captured unknown still orders older captures; it supplies no known state.
     func covers(_ fence: CommitFence) -> Bool {
-        support.machine == fence.machine && support.epoch == fence.epoch && support.schema == fence.schema
-            && !fence.revisions.isEmpty
-            && fence.revisions.allSatisfy { domain, revision in
-                support.revisions[domain].map { $0 >= revision } == true
-            }
+        CommitFence(machine: support.machine, epoch: support.epoch, schema: support.schema,
+            revisions: support.revisions).covers(fence)
     }
 }
 
@@ -38,6 +59,38 @@ struct WorkFieldFacts: Codable, Equatable, Sendable {
     var parent: WorkFieldFact<String?>?
     var lifecycle: WorkFieldFact<WorkFieldStates>?
     var activity: WorkFieldFact<WorkFieldStates>?
+
+    mutating func incorporate(_ commit: OperationCommit, field: WorkField) {
+        // The resource and field are part of the address. A coincidentally
+        // newer revision on another resource or field cannot absorb this stage.
+        guard work.kind == .task, commit.resources.contains(work.id) else { return }
+        switch field {
+        case .parent: parent?.incorporate(commit)
+        case .lifecycle:
+            if lifecycle?.value.known == true { lifecycle?.incorporate(commit) }
+        case .activity:
+            if activity?.value.known == true { activity?.incorporate(commit) }
+        }
+    }
+
+    func incorporates(_ commit: OperationCommit, field: WorkField) -> Bool {
+        guard work.kind == .task, commit.resources.contains(work.id) else { return false }
+        switch field {
+        case .parent: return parent?.incorporates(commit) == true
+        case .lifecycle: return lifecycle?.incorporates(commit) == true
+        case .activity: return activity?.incorporates(commit) == true
+        }
+    }
+}
+
+extension CommitFence {
+    func covers(_ previous: CommitFence) -> Bool {
+        machine == previous.machine && epoch == previous.epoch && schema == previous.schema
+            && !previous.revisions.isEmpty
+            && previous.revisions.allSatisfy { domain, revision in
+                revisions[domain].map { $0 >= revision } == true
+            }
+    }
 }
 
 /// This is local field coverage, never a replacement Machine query stamp.

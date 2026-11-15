@@ -256,6 +256,193 @@ final class ClientWorkQueryTests: XCTestCase {
         return try JSONDecoder().decode(WorkViewPlan.self, from: JSONSerialization.data(withJSONObject: wire))
     }
 
+    private func fieldReceipt(kind: String = "task.complete", stage: String = "task.completed",
+                              resource: String = "a", revision: Int64 = 8,
+                              resolution: OperationCommit.Resolution = .committed) throws -> OperationReceipt {
+        var wire = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(
+            receipt(kind: kind, stage: stage, resolution: resolution))) as? [String: Any])
+        var commits = try XCTUnwrap(wire["commits"] as? [[String: Any]])
+        commits[0]["resources"] = [resource]
+        commits[0]["fence"] = ["machine": "machine", "epoch": "epoch", "schema": ServerProtocol.revision,
+            "revisions": ["planning": revision]]
+        wire["commits"] = commits
+        return try JSONDecoder().decode(OperationReceipt.self, from: JSONSerialization.data(withJSONObject: wire))
+    }
+
+    func testFieldIncorporationJoinsReceiptAndNewerReopenInEitherOrderWithoutSettlingDelivery() throws {
+        for receiptFirst in [true, false] {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+            let database = try complete(directory)
+            let commit = try fieldReceipt()
+            let old = fieldStamp(planning: 7)
+            let reopened = fieldStamp("reopened", planning: 9)
+            let plan = try fieldPlan(old)
+            let work = try XCTUnwrap(plan.membership.facts.first?.work)
+            _ = try database.cache(ClientWorkQuery(stamp: old, plans: [plan]), key: "held")
+            if receiptFirst { try database.receive(commit, epoch: "epoch", id: "saved") }
+            _ = try database.cache(ClientWorkQuery(stamp: reopened,
+                plans: [fieldPlan(reopened, lifecycle: [.working], clock: nil)]), key: "other")
+            if !receiptFirst { try database.receive(commit, epoch: "epoch", id: "saved") }
+            // Reordered held readings cannot change the newer lifecycle or the
+            // field's incorporation. Delivery is still the original receipt.
+            _ = try database.cache(ClientWorkQuery(stamp: old, plans: [plan]), key: "held")
+            let facts = try XCTUnwrap(database.fieldReading(machine: "machine", work: work)).facts
+            XCTAssertEqual(facts.lifecycle?.value.states, [.working])
+            XCTAssertTrue(facts.incorporates(commit.commits[0], field: .lifecycle))
+            XCTAssertFalse(facts.incorporates(commit.commits[0], field: .parent))
+            XCTAssertFalse(facts.incorporates(commit.commits[0], field: .activity))
+            XCTAssertEqual(try database.state("saved")?.receipt, commit)
+            XCTAssertEqual(try database.pending().map(\.id), ["saved"])
+            let restored = try XCTUnwrap(ClientWorkDatabase(directory: directory)
+                .fieldReading(machine: "machine", work: work))
+            XCTAssertTrue(restored.facts.incorporates(commit.commits[0], field: .lifecycle))
+            XCTAssertFalse(restored.activityCurrent)
+        }
+    }
+
+    func testFieldIncorporationRequiresTheResourceFieldStageAndNonconflictingSupport() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let database = try complete(directory)
+        let stamp = fieldStamp(planning: 9)
+        let plan = try fieldPlan(stamp)
+        let work = try XCTUnwrap(plan.membership.facts.first?.work)
+        _ = try database.cache(ClientWorkQuery(stamp: stamp, plans: [plan]), key: "first")
+        // Equal support with a different value is a conflict, not a newer fact.
+        _ = try database.cache(ClientWorkQuery(stamp: stamp,
+            plans: [fieldPlan(stamp, lifecycle: [.done])]), key: "conflict")
+        let receipt = try fieldReceipt()
+        try database.receive(receipt, epoch: "epoch", id: "saved")
+        var fields = try XCTUnwrap(database.fieldReading(machine: "machine", work: work))
+        XCTAssertTrue(fields.parentCurrent)
+        XCTAssertFalse(fields.lifecycleCurrent)
+        XCTAssertFalse(fields.facts.incorporates(receipt.commits[0], field: .lifecycle),
+            "A newer parent or conflicted lifecycle cannot absorb Complete")
+        let newer = fieldStamp(planning: 10)
+        _ = try database.cache(ClientWorkQuery(stamp: newer,
+            plans: [fieldPlan(newer, lifecycle: [.working], clock: nil)]), key: "repair")
+        fields = try XCTUnwrap(database.fieldReading(machine: "machine", work: work))
+        XCTAssertTrue(fields.facts.incorporates(receipt.commits[0], field: .lifecycle))
+        XCTAssertFalse(fields.facts.incorporates(try fieldReceipt(resource: "other").commits[0], field: .lifecycle))
+        XCTAssertFalse(fields.facts.incorporates(try fieldReceipt(stage: "task.reopened").commits[0], field: .lifecycle))
+        XCTAssertFalse(fields.facts.incorporates(try fieldReceipt(revision: 11).commits[0], field: .lifecycle))
+        XCTAssertFalse(fields.facts.incorporates(try fieldReceipt(resolution: .definitelyRefused).commits[0], field: .lifecycle))
+        // A later conflict cannot reactivate a stage already incorporated.
+        _ = try database.cache(ClientWorkQuery(stamp: newer,
+            plans: [fieldPlan(newer, lifecycle: [.done])]), key: "later conflict")
+        fields = try XCTUnwrap(database.fieldReading(machine: "machine", work: work))
+        XCTAssertFalse(fields.lifecycleCurrent)
+        XCTAssertTrue(fields.facts.incorporates(receipt.commits[0], field: .lifecycle))
+    }
+
+    func testFieldIncorporationRollsBackWithItsReceiptAndReading() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let database = try complete(directory)
+        let stamp = fieldStamp(planning: 9)
+        let plan = try fieldPlan(stamp)
+        let work = try XCTUnwrap(plan.membership.facts.first?.work)
+        _ = try database.cache(ClientWorkQuery(stamp: stamp, plans: [plan]), key: "first")
+        var sqlite: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(directory.appendingPathComponent("work.sqlite").path, &sqlite), SQLITE_OK)
+        defer { sqlite3_close(sqlite) }
+        XCTAssertEqual(sqlite3_exec(sqlite, "CREATE TRIGGER reject_field BEFORE UPDATE ON work_fields BEGIN SELECT RAISE(ABORT,'disk failure'); END", nil, nil, nil), SQLITE_OK)
+        let receipt = try fieldReceipt()
+        XCTAssertThrowsError(try database.receive(receipt, epoch: "epoch", id: "saved"))
+        XCTAssertNil(try database.state("saved")?.receipt)
+        XCTAssertFalse(try XCTUnwrap(database.fieldReading(machine: "machine", work: work))
+            .facts.incorporates(receipt.commits[0], field: .lifecycle))
+        XCTAssertEqual(sqlite3_exec(sqlite, "DROP TRIGGER reject_field", nil, nil, nil), SQLITE_OK)
+        try database.receive(receipt, epoch: "epoch", id: "saved")
+        XCTAssertTrue(try XCTUnwrap(database.fieldReading(machine: "machine", work: work))
+            .facts.incorporates(receipt.commits[0], field: .lifecycle))
+    }
+
+    func testFieldIncorporationOfMoveSurvivesRetirementStaleActivityAndRestart() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let database = try ClientWorkDatabase(directory: directory)
+        try database.save(SubmittedOperation(requestID: "saved", destination: "machine",
+            payload: JSONEncoder().encode(ServedWrite.taskMove(directory: "/repo", issue: "a", wave: "b", machine: nil)),
+            version: ServerProtocol.revision, submittedAt: Date()))
+        XCTAssertTrue(try database.observeEpoch("epoch", id: "saved"))
+        let connection = MachineConnection.ObservationConnection(source: "observer", generation: UUID())
+        let old = fieldStamp()
+        let plan = try fieldPlan(old)
+        let work = try XCTUnwrap(plan.membership.facts.first?.work)
+        _ = try database.cache(ClientWorkQuery(stamp: old, plans: [plan]), key: "held", observation: connection)
+        let receipt = try fieldReceipt(kind: "task.move", stage: "task.membership_changed")
+        try database.receive(receipt, epoch: "epoch", id: "saved")
+        let newer = fieldStamp("other", planning: 9, complete: false)
+        _ = try database.cache(ClientWorkQuery(stamp: newer,
+            plans: [fieldPlan(newer, wave: "c", clock: nil)]), key: "other", observation: connection)
+        let joined = try XCTUnwrap(database.fieldReading(machine: "machine", work: work, observation: connection))
+        XCTAssertEqual(joined.facts.parent?.value, "c")
+        XCTAssertTrue(joined.facts.incorporates(receipt.commits[0], field: .parent))
+        XCTAssertFalse(joined.activityCurrent)
+        XCTAssertNil(try database.cached(machine: "machine", key: "other"), "The incomplete body was never installed")
+        try database.retireIfConverged("saved")
+        try database.forgetQueries(machine: "machine")
+        XCTAssertTrue(try database.pending().isEmpty)
+        let restored = try ClientWorkDatabase(directory: directory)
+        _ = try restored.cache(ClientWorkQuery(stamp: old, plans: [plan]), key: "held")
+        let offline = try XCTUnwrap(restored.fieldReading(machine: "machine", work: work))
+        XCTAssertEqual(offline.facts.parent?.value, "c")
+        XCTAssertTrue(offline.facts.incorporates(receipt.commits[0], field: .parent))
+        XCTAssertFalse(offline.activityCurrent)
+        XCTAssertTrue(try restored.pending().isEmpty, "Coverage loss cannot restore the delivered command")
+    }
+
+    func testFieldIncorporationAfterRetirementUsesTheExistingRetainedEffectAndRollsBackWithQuery() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let database = try complete(directory)
+        let old = fieldStamp()
+        let plan = try fieldPlan(old)
+        let work = try XCTUnwrap(plan.membership.facts.first?.work)
+        _ = try database.cache(ClientWorkQuery(stamp: old, plans: [plan]), key: "held")
+        try database.retainQueries(machine: "machine", keys: ["held"])
+        let receipt = try fieldReceipt()
+        try database.receive(receipt, epoch: "epoch", id: "saved")
+        try database.retireIfConverged("saved")
+        XCTAssertTrue(try database.pending().isEmpty)
+        var sqlite: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(directory.appendingPathComponent("work.sqlite").path, &sqlite), SQLITE_OK)
+        defer { sqlite3_close(sqlite) }
+        XCTAssertEqual(sqlite3_exec(sqlite, "CREATE TRIGGER reject_query BEFORE INSERT ON work_queries BEGIN SELECT RAISE(ABORT,'disk failure'); END", nil, nil, nil), SQLITE_OK)
+        let newer = fieldStamp("other", planning: 9)
+        XCTAssertThrowsError(try database.cache(ClientWorkQuery(stamp: newer,
+            plans: [fieldPlan(newer, lifecycle: [.working])]), key: "other"))
+        let before = try XCTUnwrap(database.fieldReading(machine: "machine", work: work))
+        XCTAssertEqual(before.facts.lifecycle?.support.revisions["planning"], 7)
+        XCTAssertFalse(before.facts.incorporates(receipt.commits[0], field: .lifecycle))
+        XCTAssertEqual(sqlite3_exec(sqlite, "DROP TRIGGER reject_query", nil, nil, nil), SQLITE_OK)
+        _ = try database.cache(ClientWorkQuery(stamp: newer,
+            plans: [fieldPlan(newer, lifecycle: [.working])]), key: "other")
+        let after = try XCTUnwrap(database.fieldReading(machine: "machine", work: work))
+        XCTAssertTrue(after.facts.incorporates(receipt.commits[0], field: .lifecycle))
+        XCTAssertEqual(try database.cached(machine: "machine", key: "held")?.stamp, old)
+    }
+
+    func testFieldIncorporationUsesOnlyTheAcceptedReceiptRevision() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let database = try complete(directory)
+        let stamp = fieldStamp(planning: 10)
+        let plan = try fieldPlan(stamp)
+        let work = try XCTUnwrap(plan.membership.facts.first?.work)
+        _ = try database.cache(ClientWorkQuery(stamp: stamp, plans: [plan]), key: "first")
+        let accepted = try fieldReceipt()
+        try database.receive(accepted, epoch: "epoch", id: "saved")
+        let conflicting = try fieldReceipt(revision: 9)
+        try database.receive(conflicting, epoch: "epoch", id: "saved")
+        XCTAssertEqual(try database.state("saved")?.receipt, accepted)
+        let facts = try XCTUnwrap(database.fieldReading(machine: "machine", work: work)).facts
+        XCTAssertTrue(facts.incorporates(accepted.commits[0], field: .lifecycle))
+        XCTAssertFalse(facts.incorporates(conflicting.commits[0], field: .lifecycle))
+    }
+
     func testFieldIngestionPrecedesIncompleteAndIncomparableQueryReplacement() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
@@ -549,12 +736,18 @@ final class ClientWorkQueryTests: XCTestCase {
         XCTAssertTrue(fields.activityCurrent, "Rollback retains only the previously committed revalidation proof")
         XCTAssertNil(try database.cached(machine: "machine", key: "failed"))
         XCTAssertEqual(sqlite3_exec(sqlite, "WITH RECURSIVE ids(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM ids WHERE n<10000) INSERT INTO work_fields(id,state) SELECT 'fixture-'||n,'{}' FROM ids", nil, nil, nil), SQLITE_OK)
-        var statement: OpaquePointer?
-        XCTAssertEqual(sqlite3_prepare_v2(sqlite, "EXPLAIN QUERY PLAN SELECT state FROM work_fields WHERE id=?", -1, &statement, nil), SQLITE_OK)
-        defer { sqlite3_finalize(statement) }
-        XCTAssertEqual(sqlite3_step(statement), SQLITE_ROW)
-        let detail = String(cString: sqlite3_column_text(statement, 3))
-        XCTAssertTrue(detail.contains("SEARCH work_fields USING INDEX"), detail)
+        for (query, index) in [
+            ("SELECT state FROM work_fields WHERE id=?", "SEARCH work_fields USING INDEX"),
+            ("SELECT state FROM work_fields WHERE json_extract(CAST(state AS TEXT),'$.work.id')=?", "USING INDEX work_fields_resource"),
+            ("SELECT state FROM operations WHERE json_extract(CAST(state AS TEXT),'$.record.destination')=? AND json_extract(CAST(state AS TEXT),'$.receipt.validation')='bound'", "USING INDEX operations_field_stages")
+        ] {
+            var statement: OpaquePointer?
+            XCTAssertEqual(sqlite3_prepare_v2(sqlite, "EXPLAIN QUERY PLAN " + query, -1, &statement, nil), SQLITE_OK)
+            defer { sqlite3_finalize(statement) }
+            XCTAssertEqual(sqlite3_step(statement), SQLITE_ROW)
+            let detail = String(cString: sqlite3_column_text(statement, 3))
+            XCTAssertTrue(detail.contains(index), detail)
+        }
     }
 
     func testFieldProtocolUpgradeRequiresFreshSupportWithoutReinterpretingStoredFacts() throws {

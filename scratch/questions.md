@@ -1,10 +1,13 @@
 # Working assumptions
 
-- Headless concept review, 2026-11-15: incorporation binds to resource/field/stage
-  and survives later loss of answer coverage; disconnect publishes dependent
-  coverage loss without needing a new body. This refines the existing design,
-  not a product preference. The three unanswered product choices below remain
-  open for loop-or-next; provisional behavior is not an answer.
+- Field incorporation now persists per resource/field/stage in the existing fact
+  owner. Headless engineering choice: retain an antichain of commit fences per
+  stage, compacting comparable commits rather than retaining request IDs or full
+  commands. Projection consumption and disconnect-driven answer coverage are
+  still unbuilt. The three product questions below remain unanswered.
+  Headless review keeps derived answers as replaceable state in that same owner,
+  publishing rows and their consumed-dependency coverage together on both hosts;
+  no new product preference or second synchronization owner is implied.
 
 - Receiving-link attribution is local transport metadata on each reading, captured
   before buffering and checked against the shared Machine owner at ingestion.

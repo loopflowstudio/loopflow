@@ -686,6 +686,71 @@ reordered-reading matrix; no native latency result is inferred.
 The usage in Representative timelines stays proposed until both clients consume
 the full shared projection.
 
+### A destination identifies a query, not its last answer
+
+Concept-review at `a41877f304` (2026-11-15): the synchronous Complete handoff
+now exists on both hosts. The next direction removes the competing presentation
+owner that remains in Desktop's arbitrary views and post-write refreshes. This
+is implied by the shared-query and local-navigation contracts; no product choice
+is open. No implementation or benchmark ran during this review.
+
+Proposed usage: open a Dashboard or expression and select it immediately. Show
+its usable cached projection while refreshing; a cold query shows loading within
+that selected destination. Complete removes its affected occurrences and counts
+there as well as in the sidebar and phone feed. Back/forward returns to the query
+with current local intent, rather than replaying a captured answer. A refresh
+failure leaves the usable projection visible with its error and Retry.
+
+Represent a query destination by its original Machine/repository and query
+identity, keeping the requested expression when canonical resolution is pending.
+Store selection/history separately from answers, errors and freshness. A saved
+Dashboard keeps its identity across expression edits; the changed plan/version
+still needs new coverage as already specified. Do not put `WorkViewPlan` or
+`ProjectedWorkPlan` in navigation history. Keep retained Task/Session destinations
+and native readiness under their existing owners.
+
+Mount every displayed Work query through `WorkInteraction.open`/`close`, including
+arbitrary expressions and post-write Dashboard replacements. Stamped subscription
+answers enter `receive`; only the shared publication supplies displayed plans.
+Route `refreshPlan`/`refreshSelectedView` through that path and delete raw
+`replacePlan` publication and `.view(WorkViewPlan)` navigation. A write's returned
+plan may inform its command result, but cannot replace displayed membership
+without query provenance and projection. Do not manufacture a stamp for a
+one-shot response. Reuse the existing served-read subscription contract; a
+checkpoint requests freshness but does not itself incorporate an effect.
+
+Keep destination generation separate from query freshness. A late answer can
+warm its own confirmed cache under existing stamp/epoch checks; it cannot select
+its query again, replace another destination, or present native tiles on behalf
+of a departed route. Leases belong to their mount, even when another window
+shares the same query. Reopening a cached query applies pending effects before
+the first displayed frame. Persisted cache identity, plan coverage and outbox
+obligations remain in the existing database, not in a second view cache.
+
+Complete's navigation input is the origin's displayed occurrence order after its
+filter/arrangement, deduplicated by full Work identity. Desktop currently passes
+sidebar order even from other surfaces; replace that assumption at the action
+origin. The shared owner still publishes all affected queries synchronously and
+selects next/empty only in the origin. An explicit retained occurrence may remain
+reachable without remaining in Working membership.
+
+Next implement acceptance: open a cached expression during a held Complete save;
+refresh a saved Dashboard after an unrelated write; navigate expression A→B→A
+with replies reordered. In each case A's completed Task stays projected out and
+counts agree until its own covering read, without a selection change from a
+reply. Use a Dashboard order opposite the sidebar to prove next selection follows
+the origin. Fail refresh, close one of two same-query mounts, then restart with a
+lagging saved base: keep usable projected content, original command identity and
+later deliberate navigation. Exercise the same query-open/refresh/recovery rules
+on mobile's existing picker/feed, without adding a Dashboard or tree there.
+Retain the earlier success/refusal/supersession and epoch counterexamples.
+
+This is the next implementation direction, not completion of the full migration.
+Finite closed-query invalidation, exhaustive effect declarations, other mutation
+families, launch/retained-occurrence cutover and valid native measurements remain
+required. Existing skill guidance needs no new rule; proposed usage above belongs
+in host docs when these readers are cut over.
+
 ## Current implementation cut
 
 This pass connects production Complete on both hosts through shared

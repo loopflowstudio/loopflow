@@ -15,10 +15,10 @@ pre,code{background:var(--code);font: .85rem/1.55 ui-monospace,Menlo,monospace}p
 </style>
 </head>
 <body><main>
-<p class="meta">LOO-811 · concept-review · November 14, 2026 · headless · bc18b3d3fb</p>
+<p class="meta">LOO-811 · concept-review · November 14, 2026 · headless · 5a959ef9d4</p>
 <p class="meta">Built from scratch/interactive-limit-recovery.md; docs/sessions.md; docs/subscriptions.md; swift/README.md; .lf/skills/qa.md; rust/loopflow/src/{session_recovery.rs,store/sqlite/session_events.rs,server/recovery.rs,harness/claude_recovery.rs,harness/codex_recovery.rs}; swift/Loopflow/Models/SessionRecord.swift; swift/LoopflowMac/Views/{SessionRecoveryView.swift,WorkspacePanesView.swift}.</p>
 <h1>Advance: the row now ends when you carry on</h1>
-<p class="decision"><strong>No further design change or open product choice.</strong> Both prior directions are implemented. Gate and demo still need fresh checks on this candidate. This page describes source behavior, not installed acceptance.</p>
+<p class="decision"><strong>No further design change or open product choice.</strong> Both prior directions remain implemented after compression and the main sync. Advance to gate; retain the remaining demo checks. This review adds no execution receipt or installed acceptance.</p>
 <h2>Actions → concepts → APIs</h2>
 <div class="table"><table>
 <tr><th>You</th><th>Concept</th><th>API and owner</th></tr>
@@ -50,7 +50,8 @@ This conversation was opened before Loopflow could resend for it
 <p><strong>Failure:</strong> a lost installation or resend reply remains uncertain. A second click or server reconnect cannot authorize another dispatch.</p>
 <p><strong>Recovery:</strong> your later message ends the old row. If that message hits a limit too, its own failed turn gets a new row. A late old-worker result cannot replace it.</p>
 <h2>What to show next</h2>
-<p>Several disposable conversations recover together, including one with a draft and another with an approval. Continue typing, answer the approval once, then show the rows disappear. Fresh native checks must include Codex token callbacks across a Machine-server restart. Rendered Desktop, physical typing after reopen, and installed real-login behavior remain unverified.</p>
+<p><strong>Recorded before the main sync:</strong> the final compressed candidate passed native Claude bulk recovery and Codex approval checks with synthetic logins and local inference. Drafts were visible before and after recovery, remained unsent until edited, and completed after submission. Each affected Session had one resend; rows ended; Codex's approval executed its effect once. Fixture processes were reaped. Receipts: <code>.lf/tmp/loo-811-compress-final/</code>.</p>
+<p><strong>Still to check:</strong> gate rebuilds the synced tree and runs the focused selection and served/DTO/Swift matrix. Native checks must include Codex token callbacks across a Machine-server restart. Demo shows several recovering conversations, retained drafts and approval, continued input and disappearing rows in Desktop. Rendered Desktop, physical typing after reopen, and installed real-login behavior remain unverified.</p>
 <p><strong>Proposed behavior:</strong> none added by this pass. Existing docs and QA guidance stay as written. Labels and the row-ending direction remain agent-written; no new person decision is recorded.</p>
 <h2>Questions</h2>
 <ol><li>Any unresolved product choice for loop-or-next? None. Advance; retain the existing gate/demo checks.</li></ol>

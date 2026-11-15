@@ -90,3 +90,8 @@ missing input to a product defect.
 2026-11-14 compress: keep completed strategy experiments in Git (source
 reference in the design), and keep the surviving runtime probe in this
 checkout. Future native validation should exercise that runtime.
+
+2026-11-14 QA after main sync: an answered Codex refresh logs at info, which
+the server's file filter (`warn,loopflow::server=info`) drops; only failures
+reach `logs/lf.log`. Reversible alternative: log answers at warn or widen the
+filter to `loopflow::harness=info`.

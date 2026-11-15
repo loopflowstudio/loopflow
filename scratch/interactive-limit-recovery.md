@@ -223,6 +223,17 @@ accepting later input and removing the row. Keep the existing gate/demo limits
 below, especially Codex token callbacks across a Machine-server restart;
 this source review supplies no new native or installed receipt.
 
+### Concept review — November 14, after compression and main sync
+
+Reviewed current `5a959ef9d4` against the working design, usage docs and QA
+instructions. No further design change or open product choice: advance.
+The normal path, lost-reply recovery and later-input counterexamples still fit
+the same conversation → failed turn → derived reading model. Keep the existing
+gate/demo obligations, including Codex token callbacks across a Machine-server
+restart. The draft-confirmed native receipts below predate the main sync; this
+review adds no execution receipt or installed acceptance. The refreshed
+`scratch/concept-review.html` distinguishes those results from remaining checks.
+
 ### QA — November 14 (repairs on the holder candidate)
 
 The native probe on `bc18b3d3fb` (Codex 0.169.0, Claude 2.1.325) recovered
@@ -356,6 +367,33 @@ missing inbox. A failed spent-limit write returns the error to the server log
 instead of reading "The chosen login could not be signed in". Both providers
 write one `wait:` phase; the two new tests use `test_ambient::EnvGuard`.
 
+### QA — November 14, after the main sync
+
+Branch `lf` on `5a959ef9d4` plus two repairs (final SHA256
+`7ad9a2ef8cf64eeb3c0510284e8b770a5f599657d38b209da235dc8960728682`), Codex 0.169.0,
+Claude 2.1.325. All six native scenarios passed on both providers; receipts
+under `.lf/tmp/loo-811-qa-sync/`, details in `scratch/qa.html`.
+
+- New probe modes `--unauthorized` and `--restart` (Codex): after recovery the
+  probe rotates `second`'s broker access token and 401s its next request.
+  Both runs retried that input with the rotated token, so the native refresh
+  was answered by Loopflow's side connection, including after the Machine
+  server was replaced. This closes the restart/token-callback obligation for
+  synthetic logins; real-token rotation is still unverified.
+- Repair: the recovery reader's `LIKE 'recovery:%'` could not use
+  `session_observation_receipt`, so each `session.list` row scanned its whole
+  history under the store mutex (real store, read-only: 533 ms for 876
+  interactive Sessions; with a range predicate 14 ms). Same for
+  `recovery_request_revision`.
+- Repair: a failed Codex refresh callback now warns in `logs/lf.log`.
+- Unexplained: one 8.5 s and one 2.0 s served `session.list` while two Claude
+  clients were launching; no log line or contention warning covers them, and
+  the rerun had none.
+- Headless Desktop: `scripts/test_desktop.sh --filter
+  'SessionRecoveryViewTests|DTOFixtureTests|SessionsStoreTests'` — 97 passed.
+  Focused Rust selection 18 passed; `cargo clippy -p loopflow --all-targets
+  -- -D warnings` clean.
+
 ### Remaining verification
 
 Native receipts are from candidate `2239def0…` (tree `de855332a3`). The
@@ -372,9 +410,8 @@ approval, held-lock cancellation and continued-input cases. November 9 receipts
 below establish only the earlier implementation. Gate owns the revised
 served/DTO/Swift matrix and the remaining native counterexamples. Include a
 Machine-server restart while Codex is using
-supplied-token login: retention of dispatch does not establish transfer of
-its native token-refresh callback connection. Do not infer that from the
-metadata-only reopen test.
+supplied-token login now passes with synthetic logins (QA after the main sync);
+Claude across a restart remains unexercised.
 
 PR #1862's body still describes the November 9 candidate ("Existing Session
 owners guard submission", 870 selected Rust tests); its checks and wording

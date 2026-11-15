@@ -45,7 +45,8 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn.query_row(
             "SELECT COALESCE(MAX(seq),0) FROM session_events
-            WHERE session_id=?1 AND kind='observed' AND receipt_key LIKE 'quota_retry:%'",
+            WHERE session_id=?1 AND kind='observed'
+              AND receipt_key >= 'quota_retry:' AND receipt_key < 'quota_retry;'",
             [crate::id::canonical_session(session)],
             |row| row.get(0),
         )?)
@@ -97,12 +98,15 @@ impl SqliteStore {
         // Writer fences still belong to the current owner; replacing that owner
         // cannot erase dispatch for the same native conversation.
         // The savepoint also pins subsequent turn starts to this reading.
+        // A range, not LIKE, keeps the read on session_observation_receipt
+        // instead of the Session's whole history.
         let mut query = conn.prepare(
             "WITH facts AS (
                 SELECT e.seq,e.receipt_key,e.payload,
                        json_extract(e.payload,'$.failed_turn') AS failed_turn
                 FROM session_events e JOIN agent_sessions s ON s.id=e.session_id
-                WHERE e.session_id=?1 AND e.kind='observed' AND e.receipt_key LIKE 'recovery:%'
+                WHERE e.session_id=?1 AND e.kind='observed'
+                  AND e.receipt_key >= 'recovery:' AND e.receipt_key < 'recovery;'
                   AND json_extract(e.payload,'$.thread')=s.provider_thread
              ), latest AS (
                 SELECT failed_turn FROM facts GROUP BY failed_turn ORDER BY MIN(seq) DESC LIMIT 1

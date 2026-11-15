@@ -107,6 +107,10 @@ parser.add_argument("--claude", type=Path)
 parser.add_argument("--output", type=Path, required=True)
 parser.add_argument("--cancel", action="store_true")
 parser.add_argument("--approval", action="store_true")
+# Codex: after recovery, answer the recovered login's next request with 401
+# so Codex asks for a token refresh; --restart replaces the Machine server first.
+parser.add_argument("--unauthorized", action="store_true")
+parser.add_argument("--restart", action="store_true")
 args = parser.parse_args()
 signal.signal(signal.SIGALRM, _watchdog)
 signal.alarm(900)
@@ -118,6 +122,8 @@ out = args.output.resolve()
 out.mkdir(parents=True, exist_ok=True)
 release = threading.Event()
 approval_sent = threading.Event()
+unauthorized = threading.Event()
+unauthorized_sent = []
 requests = []
 served_slow = []
 get_paths = []
@@ -182,13 +188,27 @@ class Backend(http.server.BaseHTTPRequestHandler):
                 "unknown",
             )
         requests.append(
-            {"account": account, "input": request.get("input", request.get("messages"))}
+            {
+                "account": account,
+                "input": request.get("input", request.get("messages")),
+                "rotated": self.headers.get("Authorization", "").endswith(".rotated"),
+            }
         )
         approval_turn = (
             args.approval
             and "REJECTED_PROMPT_1" in json.dumps(request)
             and not approval_sent.is_set()
         )
+        if unauthorized.is_set() and account == "second":
+            unauthorized.clear()
+            unauthorized_sent.append(len(requests) - 1)
+            data = json.dumps({"error": {"type": "invalid_token", "message": "fixture expiry"}})
+            self.send_response(401)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data.encode())
+            return
         if account == "first" and len(requests) <= 2 and not approval_turn:
             release.wait()
             data = json.dumps(
@@ -844,6 +864,38 @@ trust_level="trusted"
             results["completed_effect_once"] = (root / "approval-effect").read_text() == "EFFECT\n"
             assert results["completed_effect_once"]
             paste_draft(1)
+        if args.restart:
+            assert provider == "codex" and not args.cancel and not args.approval
+            server.terminate()
+            server.wait(timeout=30)
+            server = subprocess.Popen(
+                [str(bindir / "lf"), "server", "run"],
+                cwd=root,
+                env=env,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+
+            def replacement_ready():
+                try:
+                    return json.loads(lf("server", "status"))["ready"]
+                except RuntimeError:
+                    return False
+
+            wait_for(replacement_ready, "replacement Machine server did not become ready")
+            read(5)  # The replacement reader reconnects to each live conversation.
+            results["sessions_after_restart"] = sessions()
+        if args.unauthorized or args.restart:
+            # Rotate the broker's copy: only a refresh answered from it can carry it.
+            stored = root / "machine/accounts/codex/second/auth.json"
+            login = json.loads(stored.read_text())
+            login["tokens"]["access_token"] = (
+                login["tokens"]["access_token"].removesuffix(".fixture") + ".rotated"
+            )
+            stored.write_text(json.dumps(login))
+            unauthorized.set()
         for fd in masters:
             os.write(fd, b"\x1b[200~_EDITED\x1b[201~")
         wait_for(
@@ -933,6 +985,14 @@ trust_level="trusted"
         results["rows_ended_after_input"] = all(
             session.get("recovery") is None for session in results["sessions_after_input"]
         )
+        if args.unauthorized or args.restart:
+            # The 401'd request is retried with the token only the broker held.
+            [rejected] = unauthorized_sent
+            results["refresh_from_broker"] = any(
+                request["rotated"] and request["input"] == requests[rejected]["input"]
+                for request in requests[rejected + 1 :]
+            )
+            assert results["refresh_from_broker"], "Codex's retry did not use the refreshed login"
         results["requests"] = requests
         results["get_paths"] = get_paths
         assert all(
@@ -983,6 +1043,12 @@ trust_level="trusted"
         results["get_paths"] = get_paths
         results["requests"] = requests
         results["served_slow"] = served_slow
+        results["unauthorized_sent"] = unauthorized_sent
+        if args.unauthorized or args.restart:
+            # Codex's own log says whether the 401 asked Loopflow for a refresh.
+            for log in native.glob("logs_*.sqlite"):
+                with sqlite3.connect(log) as source, sqlite3.connect(out / log.name) as copy:
+                    source.backup(copy)
         stop_reader.set()
         if reader is not None:
             reader.join()

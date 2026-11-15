@@ -274,6 +274,13 @@ Graphs with `lf graph list --processes`, then `lf process show <ID>`; the live
 process list cannot find a finished run. Stop the private server and every
 remaining child after the scenarios.
 
+The server's `logs/lf.log` keeps `warn` and `loopflow::server` info only; an
+info line from `harness` or elsewhere never reaches it. To show that a native
+callback was answered, change what only that answer can carry (for a Codex
+token refresh, rotate the broker copy's access token, then 401 the next
+request) and check the retried request. Codex's own `logs_*.sqlite` in its
+home stops flushing early in a run and cannot show it.
+
 For Task-run retries, a bare `lf task run` returns at registration; poll
 `lf task status <id>` (`Graph <name>: running|stopped at <step>`) rather than
 `lf task wait`, which blocks until the Task is done. `lf task show <id> --json`

@@ -348,20 +348,27 @@ impl Connection {
             return Ok(());
         }
         if rpc["method"] == "account/chatgptAuthTokens/refresh" {
+            let session = &self.client.adapter.session;
             let response = match &self.route {
-                Some(route) => route.prepare_codex_auth_tokens(&|| Ok(())).await.ok(),
-                None => None,
+                Some(route) => route
+                    .prepare_codex_auth_tokens(&|| Ok(()))
+                    .await
+                    .map_err(anyhow::Error::from),
+                None => Err(anyhow::anyhow!("this connection has no managed login")),
             };
             let reply = match response {
-                Some(tokens) => {
+                Ok(tokens) => {
                     let tokens: Value = serde_json::from_str(tokens.expose_secret())?;
                     if tokens["chatgptAccountId"] != rpc["params"]["previousAccountId"] {
+                        tracing::warn!(%session, "Codex asked to refresh a login this conversation no longer uses");
                         json!({"id":rpc["id"],"error":{"code":-32603,"message":"The requested login changed; refresh was not applied"}})
                     } else {
+                        tracing::info!(%session, "Answered Codex's login refresh");
                         json!({"id":rpc["id"], "result":tokens})
                     }
                 }
-                None => {
+                Err(error) => {
+                    tracing::warn!(%session, "Could not refresh Codex's login: {error:#}");
                     json!({"id":rpc["id"],"error":{"code":-32603,"message":"Loopflow could not refresh this login"}})
                 }
             };

@@ -99,7 +99,12 @@ pub enum ServerOperation {
     /// Durably admit a command, returning its receipt before domain execution.
     #[serde(rename = "operation.submit")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::store::sqlite::operations::OperationReceipt>()))]
-    OperationSubmit { request_id: String, command: Write },
+    OperationSubmit {
+        request_id: String,
+        /// The database lifetime of the receipt reading that authorized admission.
+        epoch: String,
+        command: Write,
+    },
 
     /// A ticket for the Session's held terminal, answered `{ticket,
     /// terminal_id, expires_in_ms}`. A new connection presents the ticket as

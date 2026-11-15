@@ -29,7 +29,10 @@ you**, **Working now**, **Backlog** or **Done** — in the Machine's order, with
 with a conversation come first; started Tasks nobody has opened a conversation
 for fold under "N without a conversation". Search covers title and checkout
 path. Pull to refresh. **+** opens New Task: describe the work, pick a
-repository, **Create & start**.
+repository, **Create & start**. The shared SQLite outbox saves the original request
+before `operation.submit` admits it. Receipt subscriptions observe preparation;
+a lost answer is recovered by its original request ID. A replacement Machine
+database never authorizes another submission of an unanswered request.
 
 ## Task
 

@@ -153,10 +153,10 @@ public enum ServerOperation: Encodable, Sendable {
     case read(ServedRead)
     case command(ServedWrite)
     /// Durable admission; the receipt is available before command execution.
-    case operationSubmit(requestID: String, command: ServedWrite)
+    case operationSubmit(requestID: String, epoch: String, command: ServedWrite)
     case config(ConfigOperation)
-    /// The unchanged payload of a submitted creation; never arbitrary command replay.
-    case submittedCreation(JSONValue)
+    /// The saved operation envelope; admission retains the original command.
+    case submittedOperation(JSONValue)
     /// A ticket for the Session's held terminal, answered `{ticket, terminal_id,
     /// expires_in_ms}`.
     case sessionAttach(session: String)
@@ -175,22 +175,23 @@ public enum ServerOperation: Encodable, Sendable {
 
     private enum Keys: String, CodingKey {
         case kind, bytes, session, request, argv, cwd, env, rows, cols, placement, terminalID = "terminal_id"
-        case moment, delivery, adapter, callback, gap, printed, inbox, command, requestID = "request_id"
+        case moment, delivery, adapter, callback, gap, printed, inbox, command, epoch, requestID = "request_id"
     }
     public func encode(to encoder: Encoder) throws {
         switch self {
         case .read(let query): try query.encode(to: encoder)
         case .command(let change): try change.encode(to: encoder)
-        case .operationSubmit(let requestID, let command):
+        case .operationSubmit(let requestID, let epoch, let command):
             var box = encoder.container(keyedBy: Keys.self)
             try box.encode("operation.submit", forKey: .kind)
             try box.encode(requestID, forKey: .requestID)
             try box.encode(command, forKey: .command)
+            try box.encode(epoch, forKey: .epoch)
         case .requestUpload(let bytes):
             var box = encoder.container(keyedBy: Keys.self)
             try box.encode("request.upload", forKey: .kind)
             try box.encode(bytes, forKey: .bytes)
-        case .submittedCreation(let payload): try payload.encode(to: encoder)
+        case .submittedOperation(let payload): try payload.encode(to: encoder)
         case .config(let operation): try operation.encode(to: encoder)
         case .sessionAttach(let session):
             var box = encoder.container(keyedBy: Keys.self)

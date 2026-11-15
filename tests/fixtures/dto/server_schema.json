@@ -10547,6 +10547,7 @@
                 "issue": "LOO-1",
                 "kind": "task.complete"
               },
+              "epoch": "epoch_fixture",
               "kind": "operation.submit",
               "request_id": "operation_fixture"
             }
@@ -10554,6 +10555,10 @@
           "properties": {
             "command": {
               "$ref": "#/$defs/Write"
+            },
+            "epoch": {
+              "description": "The database lifetime of the receipt reading that authorized admission.",
+              "type": "string"
             },
             "kind": {
               "const": "operation.submit",
@@ -10566,6 +10571,7 @@
           "required": [
             "kind",
             "request_id",
+            "epoch",
             "command"
           ],
           "type": "object",

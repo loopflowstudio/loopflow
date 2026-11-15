@@ -39,7 +39,7 @@ Retired history stores and intermediate branch schemas have no runtime readers.
 | Native starts, outcomes, retries, provider transitions and usage | LfSession history, correlated to native turn and driving Process |
 | Submitted command identity and outcome | `creation_receipts`, shared by creation recovery and durable native commands; transactional domain commit fences and command delivery are separate |
 | Confirmed database lifetime | `client_store_epoch`; stamps and commit fences compare only within the same Machine/epoch/schema |
-| Desktop submissions awaiting reconciliation | Versioned immutable request payloads in the device's Work cache; outcomes come from server receipts |
+| Native submissions awaiting reconciliation | `ClientWorkStore` owns the device's SQLite `operations` outbox: immutable commands in local save order, send epochs and observed server receipts. Released creation journal files import transactionally; the Machine remains the outcome authority. |
 | A Graph's identity, state and step results | Its Graph process and child step processes in `processes` |
 | A Graph's name, launched graph, the Task it started for and each step's node | GraphProcess: `graph_processes` and `graph_process_steps`, appended by the Graph process |
 | A Task's graph and the step it stands at | `task_graphs`, one row per Task updated in place; written only by `lf task run` and its child Graph process |

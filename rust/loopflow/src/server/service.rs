@@ -1297,6 +1297,7 @@ async fn operate(
         .map_err(unavailable),
         Operation::Server(ServerOperation::OperationSubmit {
             request_id,
+            epoch,
             command,
         }) => {
             // The request worker only waits for the local admission transaction.
@@ -1305,7 +1306,7 @@ async fn operate(
             let trace = trace_id.clone();
             tokio::task::spawn_blocking(move || {
                 crate::journal::request::isolate(|| {
-                    let (store,receipt) = crate::engine::operation::admit(&request_id,&command)?;
+                    let (store,receipt) = crate::engine::operation::admit(&request_id,&epoch,&command)?;
                     let target = serde_json::json!({"kind":"operation.submit","request_id":request_id,"command_kind":receipt.kind});
                     tokio::task::spawn_blocking(move || {
                         let _held = reservation;
@@ -1763,6 +1764,7 @@ mod tests {
                     id: "admit".into(),
                     operation: Operation::Server(ServerOperation::OperationSubmit {
                         request_id: id.into(),
+                        epoch: store.reading_identity().unwrap().1,
                         command: command.clone(),
                     }),
                     select: None,
@@ -1854,7 +1856,9 @@ mod tests {
             let task = final_receipt.result.as_ref().unwrap()["task"]["id"].clone();
             assert_eq!(task, serde_json::to_value(&direct.task.id).unwrap());
             assert_eq!(store.list_tasks(None).unwrap().len(), 1);
-            let (reopened, duplicate) = crate::engine::operation::admit(id, &command).unwrap();
+            let (reopened, duplicate) =
+                crate::engine::operation::admit(id, &store.reading_identity().unwrap().1, &command)
+                    .unwrap();
             crate::engine::operation::execute(&reopened, id).unwrap();
             assert_eq!(duplicate.result.as_ref().unwrap()["task"]["id"], task);
             assert_eq!(

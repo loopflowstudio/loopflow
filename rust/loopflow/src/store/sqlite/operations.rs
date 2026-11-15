@@ -155,6 +155,7 @@ impl SqliteStore {
     /// or replaces the immutable command, including after a server restart.
     pub(crate) fn admit_operation(
         &self,
+        epoch: &str,
         id: &str,
         kind: &str,
         submitted_fingerprint: &str,
@@ -186,10 +187,30 @@ impl SqliteStore {
             }
             Ok(known_command.is_some())
         };
-        if duplicate(&conn)? {
-            return operation_in(&conn, id)?.ok_or(StoreError::NotFound);
+        let check_epoch = |conn: &Connection| -> StoreResult<()> {
+            let current: String = conn.query_row(
+                "SELECT epoch FROM client_store_epoch WHERE singleton=1",
+                [],
+                |row| row.get(0),
+            )?;
+            if current != epoch {
+                return Err(StoreError::Stale(
+                    "the Machine database changed before operation admission".into(),
+                ));
+            }
+            Ok(())
+        };
+        {
+            let snapshot = conn.savepoint()?;
+            check_epoch(&snapshot)?;
+            if duplicate(&snapshot)? {
+                let receipt = operation_in(&snapshot, id)?.ok_or(StoreError::NotFound)?;
+                snapshot.commit()?;
+                return Ok(receipt);
+            }
         }
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        check_epoch(&tx)?;
         if !duplicate(&tx)? {
             let now = crate::store::rows::now_unix();
             let validation = if matches!(kind, "task.create" | "session.new") {
@@ -627,6 +648,36 @@ mod tests {
     }
 
     #[test]
+    fn admission_epoch_rejects_a_delayed_send_before_saving_or_dispatching() {
+        let (_dir, store) = store();
+        let epoch = store.reading_identity().unwrap().1;
+        let command = json!({"kind":"task.complete","issue":"LOO-1"});
+        store
+            .admit_operation(&epoch, "known", "task.complete", "hash", &command)
+            .unwrap();
+        let before = store.operation_receipt("known").unwrap().unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE client_store_epoch SET epoch='replacement' WHERE singleton=1",
+                [],
+            )
+            .unwrap();
+        for id in ["known", "new"] {
+            assert!(store
+                .admit_operation(&epoch, id, "task.complete", "hash", &command)
+                .is_err());
+        }
+        assert!(store.operation_receipt("new").unwrap().is_none());
+        assert_eq!(
+            serde_json::to_value(store.operation_receipt("known").unwrap().unwrap()).unwrap(),
+            serde_json::to_value(before).unwrap()
+        );
+    }
+
+    #[test]
     fn receipt_fixture_keeps_nullable_fields_required() {
         let message: serde_json::Value = serde_json::from_str(include_str!(
             "../../../tests/fixtures/dto/server/operation_receipt.json"
@@ -672,7 +723,13 @@ mod tests {
         let (_dir, store) = store();
         let command = json!({"kind":"task.create","directory":"/spelled/path"});
         let receipt = store
-            .admit_operation("one", "task.create", "submitted", &command)
+            .admit_operation(
+                &store.reading_identity().unwrap().1,
+                "one",
+                "task.create",
+                "submitted",
+                &command,
+            )
             .unwrap();
         assert_eq!(receipt.fingerprint, None);
         assert_eq!(receipt.submitted_fingerprint.as_deref(), Some("submitted"));
@@ -693,6 +750,7 @@ mod tests {
         );
         assert!(store
             .admit_operation(
+                &store.reading_identity().unwrap().1,
                 "one",
                 "task.create",
                 "another",
@@ -712,7 +770,13 @@ mod tests {
             VALUES ('old','task.create','canonical',1,'task','admitted','{"task":1}','{"graph":2}',1,2)"#,[]).unwrap();
         let before = store.creation_receipt("old").unwrap().unwrap();
         let wrong = store
-            .admit_operation("old", "task.create", "wrong", &json!({"directory":"wrong"}))
+            .admit_operation(
+                &store.reading_identity().unwrap().1,
+                "old",
+                "task.create",
+                "wrong",
+                &json!({"directory":"wrong"}),
+            )
             .unwrap();
         assert_eq!(wrong.validation, super::OperationValidation::Candidate);
         assert_eq!(wrong.delivery, OperationDelivery::Untracked);
@@ -720,6 +784,7 @@ mod tests {
         assert!(!store.dispatch_operation("old").unwrap());
         assert!(store
             .admit_operation(
+                &store.reading_identity().unwrap().1,
                 "old",
                 "task.create",
                 "correct",
@@ -733,6 +798,7 @@ mod tests {
         assert_eq!(conflict.validation, super::OperationValidation::Conflict);
         let next = store
             .admit_operation(
+                &store.reading_identity().unwrap().1,
                 "old",
                 "task.create",
                 "correct",
@@ -816,6 +882,7 @@ mod tests {
             );
             store
                 .admit_operation(
+                    &store.reading_identity().unwrap().1,
                     id,
                     "task.create",
                     "submitted",
@@ -846,7 +913,13 @@ mod tests {
         store.claim_creation(&identity("old", "canonical")).unwrap();
         let command = json!({"directory":"/unavailable"});
         store
-            .admit_operation("old", "task.create", "submitted", &command)
+            .admit_operation(
+                &store.reading_identity().unwrap().1,
+                "old",
+                "task.create",
+                "submitted",
+                &command,
+            )
             .unwrap();
         let generation = store.submitted_command("old").unwrap().unwrap().generation;
         store
@@ -855,7 +928,13 @@ mod tests {
         drop(store);
         let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
         let duplicate = store
-            .admit_operation("old", "task.create", "submitted", &command)
+            .admit_operation(
+                &store.reading_identity().unwrap().1,
+                "old",
+                "task.create",
+                "submitted",
+                &command,
+            )
             .unwrap();
         assert_eq!(duplicate.validation, super::OperationValidation::Candidate);
         assert_eq!(duplicate.error.as_deref(), Some("repository unavailable"));
@@ -877,7 +956,13 @@ mod tests {
         let (_dir, store) = store();
         let original = json!({"directory":"original"});
         store
-            .admit_operation("one", "task.create", "submitted", &original)
+            .admit_operation(
+                &store.reading_identity().unwrap().1,
+                "one",
+                "task.create",
+                "submitted",
+                &original,
+            )
             .unwrap();
         store
             .claim_creation(&identity("one", "cli-winner"))
@@ -888,6 +973,7 @@ mod tests {
             .unwrap());
         assert!(store
             .admit_operation(
+                &store.reading_identity().unwrap().1,
                 "one",
                 "task.create",
                 "replacement",
@@ -896,7 +982,13 @@ mod tests {
             .is_err());
         assert_eq!(
             store
-                .admit_operation("one", "task.create", "submitted", &original)
+                .admit_operation(
+                    &store.reading_identity().unwrap().1,
+                    "one",
+                    "task.create",
+                    "submitted",
+                    &original
+                )
                 .unwrap()
                 .validation,
             super::OperationValidation::Conflict
@@ -909,14 +1001,26 @@ mod tests {
         let (dir, store) = store();
         let command = json!({"kind":"task.complete","issue":"LOO-1"});
         let queued = store
-            .admit_operation("one", "task.complete", "hash", &command)
+            .admit_operation(
+                &store.reading_identity().unwrap().1,
+                "one",
+                "task.complete",
+                "hash",
+                &command,
+            )
             .unwrap();
         assert_eq!(queued.delivery, OperationDelivery::Queued);
         assert!(store.dispatch_operation("one").unwrap());
         drop(store);
         let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
         let duplicate = store
-            .admit_operation("one", "task.complete", "hash", &command)
+            .admit_operation(
+                &store.reading_identity().unwrap().1,
+                "one",
+                "task.complete",
+                "hash",
+                &command,
+            )
             .unwrap();
         assert_eq!(duplicate.delivery, OperationDelivery::Dispatched);
         assert!(duplicate.revision > queued.revision);
@@ -930,7 +1034,13 @@ mod tests {
         assert!(receipt.revision > duplicate.revision);
         assert_eq!(
             store
-                .admit_operation("one", "task.complete", "hash", &command)
+                .admit_operation(
+                    &store.reading_identity().unwrap().1,
+                    "one",
+                    "task.complete",
+                    "hash",
+                    &command
+                )
                 .unwrap()
                 .revision,
             receipt.revision
@@ -950,7 +1060,13 @@ mod tests {
             json!({"version":1,"command":command})
         );
         assert!(store
-            .admit_operation("one", "task.complete", "other", &json!({}))
+            .admit_operation(
+                &store.reading_identity().unwrap().1,
+                "one",
+                "task.complete",
+                "other",
+                &json!({})
+            )
             .is_err());
     }
 
@@ -958,7 +1074,13 @@ mod tests {
     fn domain_facts_and_their_result_and_fence_commit_or_rollback_together() {
         let (_dir, store) = store();
         store
-            .admit_operation("one", "wave.rename", "hash", &json!({}))
+            .admit_operation(
+                &store.reading_identity().unwrap().1,
+                "one",
+                "wave.rename",
+                "hash",
+                &json!({}),
+            )
             .unwrap();
         let wave = crate::id::WaveId::new();
         let before = store.revisions().unwrap();
@@ -1067,7 +1189,13 @@ mod tests {
             params![json!({"session":"session"}).to_string(),json!({"started":true}).to_string()]).unwrap();
         let before = store.operation_revision().unwrap();
         let receipt = store
-            .admit_operation("old", "session.new", "hash", &json!({"kind":"session.new"}))
+            .admit_operation(
+                &store.reading_identity().unwrap().1,
+                "old",
+                "session.new",
+                "hash",
+                &json!({"kind":"session.new"}),
+            )
             .unwrap();
         assert_eq!(receipt.request_id, "old");
         assert!(
@@ -1101,7 +1229,13 @@ mod tests {
             })
             .unwrap();
         store
-            .admit_operation("complete", "task.complete", "hash", &json!({}))
+            .admit_operation(
+                &store.reading_identity().unwrap().1,
+                "complete",
+                "task.complete",
+                "hash",
+                &json!({}),
+            )
             .unwrap();
         crate::journal::request::with_operation(Some("complete".into()), || {
             let request = store
@@ -1127,7 +1261,13 @@ mod tests {
             store.revisions().unwrap().planning
         );
         store
-            .admit_operation("already", "task.complete", "hash", &json!({}))
+            .admit_operation(
+                &store.reading_identity().unwrap().1,
+                "already",
+                "task.complete",
+                "hash",
+                &json!({}),
+            )
             .unwrap();
         crate::journal::request::with_operation(Some("already".into()), || {
             assert!(store
@@ -1139,7 +1279,13 @@ mod tests {
         assert_eq!(already.commits[0].stage, "task.completed");
         assert_eq!(already.commits[0].result, stage.result);
         store
-            .admit_operation("reopen", "task.reopen", "hash", &json!({}))
+            .admit_operation(
+                &store.reading_identity().unwrap().1,
+                "reopen",
+                "task.reopen",
+                "hash",
+                &json!({}),
+            )
             .unwrap();
         let reopened = crate::journal::request::with_operation(Some("reopen".into()), || {
             store.reopen_task(&task.id, None)
@@ -1232,8 +1378,9 @@ mod tests {
             tx.commit().unwrap();
         }
         let command = json!({"kind":"task.complete"});
+        let epoch = store.reading_identity().unwrap().1;
         store
-            .admit_operation("selected", "task.complete", "hash", &command)
+            .admit_operation(&epoch, "selected", "task.complete", "hash", &command)
             .unwrap();
         store.dispatch_operation("selected").unwrap();
         let traced = crate::store::query_plans::assert_no_empty_writes(&store, || {
@@ -1241,7 +1388,7 @@ mod tests {
                 assert!(store.operation_receipt("selected").unwrap().is_some());
                 assert!(store.operation_revision().unwrap() > 0);
                 store
-                    .admit_operation("selected", "task.complete", "hash", &command)
+                    .admit_operation(&epoch, "selected", "task.complete", "hash", &command)
                     .unwrap();
                 assert!(!store.dispatch_operation("selected").unwrap());
             })
@@ -1251,7 +1398,7 @@ mod tests {
             let began = std::time::Instant::now();
             store.operation_receipt("selected").unwrap().unwrap();
             store
-                .admit_operation("selected", "task.complete", "hash", &command)
+                .admit_operation(&epoch, "selected", "task.complete", "hash", &command)
                 .unwrap();
             assert!(!store.dispatch_operation("selected").unwrap());
             samples.push(began.elapsed().as_secs_f64() * 1_000.0);

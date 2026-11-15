@@ -412,9 +412,18 @@ gate or CI; it never blocks an earlier step. Real failures still get fixed.
 Scratch keeps one line per check: command, result, and who runs it later;
 once gate clears scratch, the PR body keeps them.
 
+A Swift class whose stored properties are initialized runs `deinit` when its
+initializer throws. Give native handles one cleanup owner; an initializer's catch
+must not close a handle that `deinit` owns.
+
 Swift async process fixtures install `terminationHandler` before `run()` and
 await its completion. Don't call blocking `waitUntilExit()` on a cooperative
 executor; it can stay in Foundation's run loop after the child has exited.
+
+Tests that touch `ClientWorkStore.shared` use a private `LF_HOME` inside the
+network boundary, so opening the outbox cannot import the account's real pending
+submissions. Put `env LF_HOME=/tmp/<fixture-home>` after `scripts/test_network.py
+--desktop`, before `swift test`.
 
 Opt-in benchmark `LF_*` variables are cleared by the network boundary. Set them
 on its child command: `uv run python scripts/test_network.py --desktop env LF_WORKSPACE_PERF_OUTPUT=/tmp/projection.json swift test --skip-build --disable-sandbox --package-path swift --filter WorkspacePerformanceTests`.

@@ -866,17 +866,19 @@ Desktop's UI automation remains app-owned.
 
 Canceling releases the client's wait, but an admitted mutation may still complete.
 After a lost response, refresh authoritative state before another deliberate edit.
-Task creation (including Session adoption) and new Session threads additionally
-have creation receipts. `CreationSubmissions` saves the exact submitted payload,
-request ID, original Machine and protocol version before sending; the payload
-contains the original repository directory. A single app recovery owner looks up
-receipts after restart and continues only absent or safely resumable submissions.
-The server derives `complete`, `continue` or `inspect`; Desktop does not infer
-continuation from milestones. `CreationPresentation` retires a submission when
-its Task or Session view mounts, including promotion. Cold recovery's Show result
-uses the same completion owner after displaying the resource; Inspect retains
-unconfirmed launches or conversation changes. Failed removal repeats lookup and
-presentation. No local milestone ledger is stored.
+Task creation (including Session adoption) and new Session threads use the shared
+`ClientWorkStore` outbox. It saves the exact command, request ID, original Machine
+and protocol version in SQLite before sending `operation.submit`. Admission saves
+the request before Git, planning or provider preparation; it does not enable input.
+Stamped `operation.get` subscriptions report validation, execution and committed
+results without a status poll. Receipt revisions compare only within one database
+epoch. Recovery on a replacement database retains an unanswered request rather
+than sending it again. Released journal files import transactionally with their
+original payloads; an absent receipt cannot prove that an imported request was
+never sent.
+`CreationPresentation` retires a finished submission when its Task or Session view
+mounts, including promotion. Inspect retains unconfirmed launches or conversation
+changes. Current Task readings still reconcile through the launch checkpoint.
 New Task presents the submitted request before saving or sending it. That starting
 view does not retire the saved submission; the actual result must mount first.
 An earlier New Task reply leaves later navigation and a newer New Task sheet

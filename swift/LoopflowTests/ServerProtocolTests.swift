@@ -12,7 +12,7 @@ struct ServerProtocolTests {
 
     @Test func operationAdmissionAndRecoveryUseDurableIdentity() throws {
         let change = ServedWrite.taskComplete(directory: "/repo", issue: "LOO-1")
-        #expect(try encoded(.request(id: "admit", operation: .operationSubmit(requestID: "operation_fixture", command: change), select: nil)) == value("operation_submit"))
+        #expect(try encoded(.request(id: "admit", operation: .operationSubmit(requestID: "operation_fixture", epoch: "epoch_fixture", command: change), select: nil)) == value("operation_submit"))
         #expect(try encoded(.request(id: "receipt", operation: .read(.operationGet(requestID: "operation_fixture")), select: nil)) == value("operation_get"))
         for name in ["operation_admitted", "operation_receipt", "operation_pending", "operation_candidate", "operation_conflict"] {
             guard case .response(_, _, let result) = try message(name) else { Issue.record("Expected receipt"); return }

@@ -2571,7 +2571,7 @@ final class WorkModel {
             try? await confirmWorkUpdate()
         } catch {
             launch.error = error.localizedDescription
-            launch.canEdit = !(error is SubmittedCreationError)
+            launch.canEdit = !(error is OperationSubmissionError)
         }
     }
 
@@ -2854,7 +2854,7 @@ final class WorkModel {
             await refreshSessions()
             if owner.selectedSessionId == draft.sessionId { owner.selection = .task(id: task.id) }
             if owner.binding?.id == draft.id { owner.binding = nil }
-        } catch is SubmittedCreationError {
+        } catch is OperationSubmissionError {
             // The saved submission now owns recovery; another form submission
             // would create a different request for the same conversation.
             if owner.binding?.id == draft.id { owner.binding = nil }

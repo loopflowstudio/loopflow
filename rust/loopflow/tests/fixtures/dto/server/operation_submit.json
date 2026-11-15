@@ -8,7 +8,8 @@
       "kind": "task.complete",
       "directory": "/repo",
       "issue": "LOO-1"
-    }
+    },
+    "epoch": "epoch_fixture"
   },
   "select": null
 }

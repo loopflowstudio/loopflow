@@ -26,7 +26,11 @@ pub fn subscribe(id: String, transport: Transport) -> Result<Option<Subscription
     )
 }
 
-pub(crate) fn admit(id: &str, command: &Write) -> Result<(SqliteStore, OperationReceipt)> {
+pub(crate) fn admit(
+    id: &str,
+    epoch: &str,
+    command: &Write,
+) -> Result<(SqliteStore, OperationReceipt)> {
     let span = tracing::info_span!("operation_admission", operation_id = id);
     let _entered = span.enter();
     if id.is_empty() || id.len() > 128 {
@@ -56,7 +60,7 @@ pub(crate) fn admit(id: &str, command: &Write) -> Result<(SqliteStore, Operation
     anyhow::ensure!(path.exists(), "Machine registry is unavailable");
     let store = SqliteStore::new(&path)?;
     let receipt = store
-        .admit_operation(id, kind, &fingerprint, &payload)
+        .admit_operation(epoch, id, kind, &fingerprint, &payload)
         .map_err(|error| match error {
             crate::store::StoreError::Stale(message) => anyhow::Error::from(
                 Error::new(ErrorCode::Conflict, message).with(serde_json::json!({"request_id":id})),
@@ -213,8 +217,9 @@ mod tests {
         .unwrap();
         std::fs::set_permissions(&git, std::fs::Permissions::from_mode(0o755)).unwrap();
         let _path = EnvVarGuard::set("PATH", bin.to_str().unwrap());
+        let epoch = store.reading_identity().unwrap().1;
         let submitted = command(home.path().to_path_buf(), "new");
-        let (_, receipt) = super::admit("new", &submitted).unwrap();
+        let (_, receipt) = super::admit("new", &epoch, &submitted).unwrap();
         assert!(!marker.exists(), "admission must not invoke Git");
         assert_eq!(receipt.validation, OperationValidation::Pending);
         assert_eq!(receipt.fingerprint, None);
@@ -227,15 +232,19 @@ mod tests {
         assert!(pending.error.is_some());
         assert!(pending.commits.is_empty());
         drop(store);
-        let (reopened, duplicate) = super::admit("new", &submitted).unwrap();
+        let (reopened, duplicate) = super::admit("new", &epoch, &submitted).unwrap();
         assert_eq!(duplicate.revision, pending.revision);
         assert_eq!(
             reopened.submitted_command("new").unwrap().unwrap().command,
             serde_json::to_value(submitted).unwrap()
         );
         // IDs are excluded from content identity, but not from saved commands.
-        let (_, another) =
-            super::admit("other", &command(home.path().to_path_buf(), "other")).unwrap();
+        let (_, another) = super::admit(
+            "other",
+            &epoch,
+            &command(home.path().to_path_buf(), "other"),
+        )
+        .unwrap();
         assert_eq!(another.submitted_fingerprint, receipt.submitted_fingerprint);
     }
 
@@ -266,7 +275,8 @@ mod tests {
         let store = SqliteStore::new(&crate::store::default_db_path()).unwrap();
         let before = store.operation_receipt("cli").unwrap().unwrap();
         let submitted = command(subdirectory, "cli");
-        let (_, admitted) = super::admit("cli", &submitted).unwrap();
+        let (_, admitted) =
+            super::admit("cli", &store.reading_identity().unwrap().1, &submitted).unwrap();
         assert_eq!(admitted.validation, OperationValidation::Candidate);
         assert_eq!(admitted.delivery, OperationDelivery::Untracked);
         super::execute(&store, "cli").unwrap();
@@ -303,6 +313,7 @@ mod tests {
             let change = command(directory, "old");
             store
                 .admit_operation(
+                    &store.reading_identity().unwrap().1,
                     "old",
                     "task.create",
                     "submitted",

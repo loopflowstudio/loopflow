@@ -205,7 +205,12 @@ observations do not share that transaction.
 
 ### Durable command admission
 
-`operation.submit {request_id, command}` accepts any typed `Write` and returns
+The required `epoch` comes from the receipt subscription that authorized the send.
+Admission checks it in the receipt transaction, including duplicate submissions;
+a delayed send after database replacement changes nothing and starts no worker.
+An old domain-recovery reply cannot authorize a command in the replacement epoch.
+
+`operation.submit {request_id, epoch, command}` accepts any typed `Write` and returns
 its durable `OperationReceipt` before Git discovery, planning, creation locks or
 provider startup. Admission saves a versioned submitted-content identity and exact
 typed command. The worker resolves the canonical creation `fingerprint` separately;

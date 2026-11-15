@@ -1,15 +1,16 @@
-// Only immutable submitted creations live here. Outcomes are read from the server.
+// Creation presentation reads the shared operation owner; it keeps no second receipt store.
 import Foundation
 import Observation
 import SwiftUI
 import Loopflow
 
-extension CreationSubmissions {
-    static let shared = CreationSubmissions(
+extension ClientWorkStore {
+    static let shared = ClientWorkStore(
         directory: WorkCache.homeDirectory.appendingPathComponent("submissions"),
         machine: { try await localMachine() },
-        lookup: { try await ServerClient.read(.creationGet(requestID: $0)) },
-        send: { try await ServerClient.submittedCreation($0) })
+        read: { try await ServerClient.read($0) },
+        observe: { ServerClient.operationReceipts($0) },
+        send: { _ = try await ServerClient.submittedOperation($0) })
 
     static func localMachine() async throws -> String {
         struct Identity: Decodable { let id: String }
@@ -37,11 +38,16 @@ final class CreationRecovery {
         case task(String)
         case session(String)
     }
-    private let submissions: CreationSubmissions
+    private let submissions: ClientWorkStore
     private(set) var presentations: [String: Presentation] = [:]
     private(set) var items: [Item] = []
 
-    init(submissions: CreationSubmissions = .shared) { self.submissions = submissions }
+    init(submissions: ClientWorkStore = .shared) { self.submissions = submissions }
+
+    deinit {
+        observation?.cancel()
+        for task in recoveryTasks.values { task.cancel() }
+    }
 
     func awaitingPresentation(_ id: String, of resource: Presentation) {
         presentations[id] = resource
@@ -57,6 +63,8 @@ final class CreationRecovery {
             do {
                 try Task.checkCancellation()
                 try await submissions.presented(id)
+                recoveryTasks.removeValue(forKey: id)?.cancel()
+                recoveryErrors.removeValue(forKey: id)
                 presentations.removeValue(forKey: id)
                 items.removeAll { $0.id == id }
             } catch is CancellationError { return }
@@ -67,17 +75,26 @@ final class CreationRecovery {
             }
         }
     }
+    private var recoveryErrors: [String: String] = [:]
+    @ObservationIgnored private var recoveryTasks: [String: Task<Void, Never>] = [:]
     private var refreshing = false
-    private var observation: Task<Void, Never>?
+    @ObservationIgnored private var observation: Task<Void, Never>?
 
     func start() {
         guard observation == nil else { return }
-        observation = Task {
-            while !Task.isCancelled {
-                await refresh()
-                do { try await Task.sleep(for: .seconds(5)) } catch { return }
+        let submissions = self.submissions
+        observation = Task { [weak self] in
+            for await _ in await submissions.changes() {
+                guard let self else { return }
+                await self.refresh()
             }
         }
+    }
+
+    func retry(_ id: String) async {
+        recoveryTasks.removeValue(forKey: id)?.cancel()
+        recoveryErrors.removeValue(forKey: id)
+        await refresh()
     }
 
     func refresh() async {
@@ -86,10 +103,39 @@ final class CreationRecovery {
         defer { refreshing = false }
         do {
             let records = try await submissions.pending()
+            for record in records where recoveryTasks[record.id] == nil {
+                if await submissions.isRecovering(record.id) { continue }
+                recoveryTasks[record.id] = Task { [weak self, submissions] in
+                    do { _ = try await submissions.reconcile(record) }
+                    catch is CancellationError { }
+                    catch {
+                        self?.recoveryErrors[record.id] = error.localizedDescription
+                        await self?.refresh()
+                    }
+                }
+            }
             var current: [Item] = []
             for record in records {
                 do {
-                    guard let receipt = try await submissions.reconcile(record) else { continue }
+                    guard let operation = try await submissions.receipt(record.id) else {
+                        if let error = recoveryErrors[record.id] {
+                            current.append(Item(id: record.id, text: error, complete: false, resource: nil))
+                        }
+                        continue
+                    }
+                    let result = operation.result ?? operation.commits.last(where: { $0.stage == "task.filed" })?.result
+                    var task: String?
+                    var session: String?
+                    if let result {
+                        let data = try JSONEncoder().encode(result)
+                        if operation.kind == "task.create" {
+                            let receipt = try JSONDecoder().decode(TaskCreateReceipt.self, from: data)
+                            task = receipt.task.id
+                            session = receipt.sessionId
+                        } else if operation.kind == "session.new" {
+                            session = try JSONDecoder().decode(SessionRecord.self, from: data).id
+                        }
+                    }
                     let payload = try JSONSerialization.jsonObject(with: record.payload) as? [String: Any]
                     guard let directory = payload?["directory"] as? String else {
                         throw RegistryQueryError("The saved creation has no repository; its original request is retained.")
@@ -97,10 +143,10 @@ final class CreationRecovery {
                     let encoder = JSONEncoder()
                     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
                     let resource = Resource(destination: record.destination, directory: directory,
-                        task: receipt.taskId, session: receipt.sessionId,
-                        receipt: String(decoding: try encoder.encode(receipt), as: UTF8.self))
-                    current.append(Item(id: record.id, text: receipt.explanation,
-                        complete: receipt.disposition == .complete, resource: resource))
+                        task: task, session: session,
+                        receipt: String(decoding: try encoder.encode(operation), as: UTF8.self))
+                    current.append(Item(id: record.id, text: recoveryErrors[record.id] ?? operation.error ?? (operation.delivery == .finished ? "Request completed" : "Request saved; preparing its conversation"),
+                        complete: operation.delivery == .finished && operation.validation == .bound && recoveryErrors[record.id] == nil, resource: resource))
                 } catch {
                     current.append(Item(id: record.id, text: "Creation \(record.id): \(error.localizedDescription)", complete: false, resource: nil))
                 }
@@ -126,6 +172,7 @@ struct CreationRecoveryView: View {
                 HStack {
                     Text(item.text).textSelection(.enabled)
                     if item.resource != nil { Button(item.complete ? "Show result" : "Inspect") { inspecting = item } }
+                    if !item.complete { Button("Retry recovery") { Task { await recovery.retry(item.id) } } }
                 }
             }
         }
@@ -167,7 +214,7 @@ private struct RecoveredCreationInspector: View {
         .padding(20).frame(minWidth: 600, minHeight: 400)
         .task {
             do {
-                guard try await CreationSubmissions.localMachine() == resource.destination else {
+                guard try await ClientWorkStore.localMachine() == resource.destination else {
                     throw RegistryQueryError("The original Machine is unavailable; this request has not moved.")
                 }
                 if let task = resource.task {
@@ -187,6 +234,8 @@ private struct RecoveredCreationInspector: View {
                     detail = .success(lines.filter { !$0.isEmpty }.joined(separator: "\n\n"))
                 } else if let session = resource.session {
                     detail = .success(try JSONDecoder().decode(String.self, from: Data(try await ServerClient.read(.processHistory(id: session)).utf8)))
+                } else {
+                    detail = .success(resource.receipt)
                 }
             } catch { detail = .failure(error) }
         }

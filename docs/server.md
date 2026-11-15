@@ -100,10 +100,13 @@ editor to submit again. Nothing was sent. Other creation forms stay open with
 the save error. This saves submitted creations, not an editable offline
 queue; submissions do not sync to other devices.
 
-The server's receipt determines what happened. Desktop checks it after reconnect
-or app restart, and sends the identical creation again only when the server
-confirms it is absent or safe to continue. An unavailable server leaves the
-submission unresolved. Once Desktop presents a confirmed result, it removes the
+The server's receipt determines what happened. Desktop subscribes after reconnect
+or app restart and sends the identical saved envelope only when its receipt
+confirms absence in the original database lifetime or a safe creation continuation.
+Admission checks that lifetime before saving or starting a worker. A replacement
+database or an unavailable server leaves an unanswered submission unresolved.
+Released journal files import with their original words and identities; missing
+receipts cannot authorize resending those files because they have no saved lifetime. Once Desktop presents a confirmed result, it removes the
 saved request.
 
 **Task created; start unconfirmed** means the Task exists but its launch has not

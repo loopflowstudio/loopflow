@@ -222,7 +222,7 @@ struct WorkDestinationTests {
             let directory = cwd ?? "missing"
             requests.withLock { $0[directory] = args[3] }
             await barrier.wait(directory)
-            throw SubmittedCreationError(requestID: args[3], cause: RegistryQueryError("Reply lost"))
+            throw OperationSubmissionError(requestID: args[3], cause: RegistryQueryError("Reply lost"))
         }
         let (first, _) = destinationModel(query: query, repoPath: "/first")
         let (second, _) = destinationModel(query: query, repoPath: "/second")
@@ -312,16 +312,15 @@ struct WorkDestinationTests {
             #expect(!launch.canEdit)
             let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
             defer { try? FileManager.default.removeItem(at: root) }
-            let recoveryReceipt = """
-            {"request_id":"\(launch.id)","kind":"task.create","milestone":"admitted",
-             "task_id":"\(task.id)","session_id":"\(record.id)","result":null,"disposition":"inspect",
-             "explanation":"Task admitted; inspect its result","run":true,"artifact_key":null,
-             "launch":null,"created_at":1,"updated_at":2}
-            """
-            let submissions = CreationSubmissions(directory: root, machine: { "machine-local" },
-                lookup: { _ in recoveryReceipt }, send: { _ in throw RegistryQueryError("Never resubmit") })
-            try await submissions.save(SubmittedCreation(requestID: launch.id, destination: "machine-local",
-                payload: Data(#"{"directory":"/src/task"}"#.utf8), version: ServerProtocol.revision, submittedAt: Date()))
+            let operation = try operationTestFrame(id: launch.id, delivery: "uncertain",
+                error: "Task admitted; inspect its result", result: nil)
+            let server = try OperationServer(frame: operation)
+            let submissions = ClientWorkStore(directory: root, machine: { "machine" }, read: { _ in "null" },
+                observe: { server.observe($0) }, send: { _ in throw RegistryQueryError("Never resubmit") })
+            let saved = SubmittedOperation(requestID: launch.id, destination: "machine",
+                payload: Data(#"{"directory":"/src/task"}"#.utf8), version: ServerProtocol.revision, submittedAt: Date())
+            try await submissions.save(saved)
+            _ = try await submissions.reconcile(saved)
             let recovery = CreationRecovery(submissions: submissions)
             await recovery.refresh()
             #expect(recovery.items.map(\.id) == [launch.id])
@@ -409,7 +408,7 @@ struct WorkDestinationTests {
                 submitted.withLock { $0 = args[3] }
                 await barrier.wait("creation")
                 if unknownOutcome {
-                    throw SubmittedCreationError(requestID: args[3], cause: RegistryQueryError("Outcome unknown"))
+                    throw OperationSubmissionError(requestID: args[3], cause: RegistryQueryError("Outcome unknown"))
                 }
                 return receipt
             }
@@ -463,7 +462,7 @@ struct WorkDestinationTests {
     @Test("An uncertain submission stays inline without a second submit button")
     func submittedCreationHasNoSecondSubmitButton() async throws {
         let query = RegistryQuery { _, _ in
-            throw SubmittedCreationError(requestID: "original", cause: RegistryQueryError("Outcome unknown"))
+            throw OperationSubmissionError(requestID: "original", cause: RegistryQueryError("Outcome unknown"))
         }
         let (model, _) = destinationModel(query: query, repoPath: "/repo")
         model.navigation.palette = .newTask

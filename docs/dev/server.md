@@ -187,6 +187,8 @@ is separate from the typed preferences in `config.yaml`. The
 shapes, bounds and the ticket flow shared by both carriers.
 
 Durable native command admission uses `operation.submit` and `operation.get`.
+Admission carries the authorizing receipt reading’s database epoch and compares it
+in the receipt transaction before scheduling execution, including duplicates.
 The single [receipt owner](../../rust/loopflow/src/store/sqlite/operations.rs)
 keeps admission, command output and transactional domain commit fences separate;
 [the server protocol](../../rust/loopflow/src/server/README.md#durable-command-admission)

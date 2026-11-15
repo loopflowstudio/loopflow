@@ -29,15 +29,24 @@ final class RemoteMobileClient: MobileTaskCreationClient {
 
 
     /// Creations saved before their first send, for this Machine.
-    private lazy var journal: CreationSubmissions = {
+    private lazy var journal: ClientWorkStore = {
         let directory = URL.applicationSupportDirectory.appending(path: "submissions-\(savedMachine.machineID)")
         let machineID = savedMachine.machineID
-        return CreationSubmissions(directory: directory, machine: { machineID }, lookup: { [self] id in
-            try await connection().request(.read(.creationGet(requestID: id)), deadline: Self.requestDeadline).printed
-        }, send: { [self] payload in
+        return ClientWorkStore(directory: directory, machine: { machineID }, read: { [weak self] query in
+            guard let self else { throw RegistryQueryError("The original Machine connection is closed") }
+            return try await connection().request(.read(query), deadline: Self.requestDeadline).printed
+        }, observe: { [weak self] id in
+            ServerLink.subscribe(.operationGet(requestID: id), connect: { [weak self] in
+                guard let self else { throw RegistryQueryError("The original Machine connection is closed") }
+                return try await self.connection()
+            }) { update in
+                guard case .reading(let frame) = update else { return nil }
+                return try frame.decode(SubscriptionReading<OperationReceipt>.self)
+            }
+        }, send: { [weak self] payload in
+            guard let self else { throw RegistryQueryError("The original Machine connection is closed") }
             let creation = try JSONDecoder().decode(JSONValue.self, from: payload)
-            return String(decoding: try await connection().request(.submittedCreation(creation), deadline: Self.requestDeadline).bytes,
-                          as: UTF8.self)
+            _ = try await connection().request(.submittedOperation(creation), deadline: Self.requestDeadline)
         })
     }()
 
@@ -94,10 +103,11 @@ final class RemoteMobileClient: MobileTaskCreationClient {
         let id = submission.id.uuidString.lowercased()
         let record = try await journal.record(.taskCreate(directory: submission.directory, requestID: id, title: nil,
             request: submission.request, wave: nil, graph: nil, session: nil, run: true), requestID: id)
-        guard let lookup = try await journal.reconcile(record) else {
+        guard let operation = try await journal.reconcile(record) else {
             throw RegistryQueryError("This request is already being sent")
         }
-        guard lookup.kind == "task.create", lookup.run, let taskID = lookup.taskId else {
+        let lookup = try await request(.read(.creationGet(requestID: id))).decode(CreationLookup.self)
+        guard operation.kind == "task.create", lookup.run, let taskID = lookup.taskId else {
             throw RegistryQueryError("The Machine returned a different creation receipt")
         }
         let receipt = try lookup.result.map { try JSONDecoder().decode(TaskCreateReceipt.self, from: JSONEncoder().encode($0)) }
@@ -105,7 +115,7 @@ final class RemoteMobileClient: MobileTaskCreationClient {
             throw RegistryQueryError("The creation receipt names a different Task")
         }
         return MobileTaskOutcome(taskId: taskID,
-            state: lookup.disposition == .complete ? .started : .unknown,
+            state: operation.delivery == .finished && lookup.disposition == .complete ? .started : .unknown,
             receipt: receipt, message: lookup.disposition == .inspect ? lookup.explanation : nil)
     }
 

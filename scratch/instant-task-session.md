@@ -1,7 +1,7 @@
 # LOO-906: immediate interactions across Desktop and mobile
 
-Realigned 2026-11-15 after checkpoint `221b9a8a82` on origin/main `42b31bc791`
-(no newer upstream commits); next step is implement. Supersedes the Desktop-only delivery
+Implementation continues 2026-11-15 from checkpoint `8b42a874db` on origin/main
+`42b31bc791`. Supersedes the Desktop-only delivery
 boundary. No shipping or merge decision is recorded. Placement remains this Task;
 no Wave is selected.
 
@@ -59,7 +59,7 @@ when an interaction has happened:
 | Desktop mutations | `WorkModel.performTaskAction`, `TaskRunDraft`, `confirmWorkUpdate`; Complete waits through command and observation | Immediate shared projection; acceptance survives refresh failure |
 | Desktop removal | `abandoningTaskIDs` filters rows and separately advances selection | Same operation projection as Complete; navigation remains its own choice |
 | Desktop creation | `StartingTask`, creation journal/recovery/presentation, exact Session attachment; branch reconciliation map | Shared operation destination and reconciliation, retain exact Session owner |
-| Mobile creation | `MobileTaskDraft.submission/outcome/savedRequests` plus a separate `CreationSubmissions` journal; sheet owns/cancels async work, then opens a Task | One durable submitted-operation owner; draft stores editable text only |
+| Mobile creation | Shared `ClientWorkStore` now admits creations; `MobileTaskDraft.submission/outcome/savedRequests` and sheet-owned lifetime still duplicate presentation | One durable submitted-operation owner; draft stores editable text only |
 | Read freshness | Desktop part sequence/floors and checkpoint waiters; mobile `RemoteTaskObservation` refresh/coalescing; saved Work and list files | One stamped read/reconciliation engine, platform-specific transport only |
 | Task selection | Desktop `select` sets selection synchronously but continues through `openSelectedWorkspace`/warm conversation reconciliation; mobile pushes `NavigationLink` content and creates/closes a view-owned `SessionLink` | Small immediate navigation reducer; cached content/native occurrence retention independent of refresh |
 | Wave navigation/disclosure | `WorkNavigator.waveRow` now selects synchronously; the delayed `pressedScope` path is deleted | Keep disclosure/route changes local before loading children |
@@ -75,38 +75,19 @@ and are not durable command identities.
 
 ## Established designs and dependency choices
 
-Research checked on 2026-11-14:
+Research sources and the architecture comparison remain at
+`8b42a874db6d925382c2e113c172c840496c6ea0:scratch/instant-task-session.md`.
+Apollo/TanStack supply operation-layer and rebase precedents; neither supplies
+LF domain recovery. Apollo iOS would require GraphQL migration. Observation stays
+as the native rendering model; SwiftData, Sharing and TCA do not establish causal
+synchronization. A mutable replica would also require reproducing server-derived
+Work membership and conflict policies. The selected engineering direction remains
+confirmed cache plus ordered operation overlays, with one normalized owner.
 
-- [Apollo optimistic mutations](https://www.apollographql.com/docs/react/performance/optimistic-ui)
-  keep optimistic data separate from confirmed cache data and notify affected
-  queries. Adopt operation layers and shared invalidation; rollback removes one
-  operation, rather than restoring an entire old snapshot.
-- [TanStack optimistic updates](https://tanstack.com/query/latest/docs/framework/react/guides/optimistic-updates)
-  show both pending-variable projections and cache updates, cancel stale refetches,
-  and invalidate after settling. Its [mutation guidance](https://tanstack.com/query/latest/docs/framework/react/guides/mutations)
-  addresses persistent/offline mutations. Adopt stable identity, explicit retry
-  policy and concurrency tests. Network uncertainty needs our domain receipts.
-- [Apollo iOS](https://www.apollographql.com/docs/ios/caching/introduction)
-  normalizes entities across query results and offers memory/SQLite caches.
-  Direct adoption would require GraphQL schema/code generation and transport
-  migration. That cost does not supply LF operation recovery or native ownership.
-- [Apple Observation](https://developer.apple.com/documentation/observation.md)
-  tracks observable model changes; [SwiftData](https://developer.apple.com/documentation/swiftdata/modelcontext)
-  manages persistent models. Neither alone defines reconciliation with this Rust
-  server. Replacing Observation would leave the synchronization problem intact.
-- [Expo local-first guidance](https://docs.expo.dev/guides/local-first/)
-  distinguishes local storage from synchronization and describes several sync
-  systems. Those JavaScript/client-centric ecosystems are architectural references;
-  replacing the native clients or Machine execution authority is a separate cost.
-- [GRDB](https://github.com/groue/GRDB.swift) supplies SQLite transactions and
-  database observation. [Sharing](https://github.com/pointfreeco/swift-sharing)
-  shares observable persisted values; [TCA](https://github.com/pointfreeco/swift-composable-architecture)
-  supplies reducers, effects and test stores. None removes the need for LF command
-  semantics. A full TCA conversion adds navigation/effect migration; Sharing alone
-  leaves our causal protocol. Proposed library choice: GRDB for transactional
-  client persistence, existing Observation for UI, and a small shared typed
-  reconciliation reducer. Verify supported toolchains and dependency build cost
-  before adopting; no new dependency has been installed in this pass.
+The outbox now uses system SQLite3 directly on both native targets. This simpler
+reversible dependency choice replaces the unadopted GRDB proposal; confirmed
+cache/query transactions still belong in that same database. No new library is
+installed. Membership coverage must be proved before client projection migration.
 
 The comparison bar is behavioral: stable identity across surfaces, immediate shared
 reads, overlapping-operation rebase, stale-response protection, operation-local
@@ -329,6 +310,46 @@ This refines the existing cache/overlay and stage-fence design. It introduces no
 open product choice. Implement domain recovery and effect/stage coverage before
 cutting both clients over; keep the recorded launch counterexamples intact.
 
+### Seeing a result does not incorporate its effects
+
+Next implement direction: replace presentation-driven deletion with a presentation
+acknowledgment in the same durable operation record. A mounted Task/Session or
+Inspect result can acknowledge that its saved result was shown. It cannot confirm
+query membership, release a resource lane, establish native input readiness or
+resolve domain uncertainty. No new receipt ledger or user-facing phase is needed.
+
+Keep three independent retention obligations: unresolved domain recovery,
+unincorporated effect/query coverage, and an unpresented creation result. Retire
+the saved command only when all applicable obligations are discharged. Persist
+the presentation acknowledgment alongside the operation; query incorporation,
+cache replacement and resulting retirement remain one transaction. A closed query
+can discharge coverage through persisted invalidation and its required reload
+fence, never by silently treating its old cache as current. Queries already
+incorporated stop applying the effect even while the operation remains retained.
+
+For Start, show the exact admitted conversation immediately. Once its result is
+shown, remove the redundant recovery prompt, while retaining the command and
+remaining effects internally until covering facts arrive. Closing that window or
+restarting cannot lose the pending list/count obligations. Conversely, converged
+queries do not discard an unseen recoverable creation result. Attachment failure
+still offers Retry opening for the same Session; viewing an Inspect receipt does
+not settle that failure, hide its recovery action or authorize another creation.
+An epoch change invalidates
+old fact comparisons without undoing the local fact that a result was shown;
+that acknowledgment cannot certify the replacement database.
+
+Required counterexamples: mount a finished creation while another window's list
+and count are held, then restart; inspect only receipt text without a stamped Work
+reading; converge all queries before any result mounts; show a partially committed
+creation whose attachment failed; replace the epoch between presentation and
+incorporation. Each retains exactly its outstanding obligations, with no duplicate
+count delta, replay, recovery prompt or navigation change. Cover both clients.
+
+This settles an implementation consequence of the existing lossless recovery and
+per-query incorporation contracts. There is no open product choice. Replace the
+interim `presented` deletion and creation-only presentation map as part of the
+shared projection migration, after domain recovery and effect/stage coverage.
+
 ## Local navigation, disclosure and retained content
 
 Publish selection/highlight and disclosure in a bounded synchronous reducer before
@@ -413,8 +434,9 @@ existing bounded input owners: no offline keystroke queue or automatic resend.
 - Mobile `MobileTaskOutcome`, submitted/outcome/savedRequests portions of
   `MobileTaskDraft`, sheet-owned mutation lifetime and result-owned Open Task gate.
   Keep unsent drafts, repository selection and device protection.
-- `CreationSubmissions` as a creation-only parallel owner, `CreationRecovery`'s
-  separate status poll and per-view retirement map. Generalize/migrate their exact
+- Removed: creation-only `CreationSubmissions` and `CreationRecovery`'s status
+  poll. The shared SQLite outbox replaces the sender and saved-command owner.
+  Remaining: per-view retirement map. Generalize/migrate their exact
   saved requests and receipt semantics into the operation store, without loss.
 - WorkCache/TaskFeed duplicate authoritative caches and Desktop/mobile duplicate
   freshness reconciliation. Keep UI-only workspace/layout/draft persistence where
@@ -448,10 +470,10 @@ and their consumers must converge together.
    membership and persistence dependencies before cutting consumers over.
    Completion navigation is specified above.
 2. Extend receipt/commit-stamp contracts and domain recovery; migrate saved data.
-   Done server-side: stamped subscription readings (revision 6), Git-free
+   Done: stamped subscription readings (revision 6), Git-free
    `operation.submit` admission, submitted/canonical identity, legacy envelope
-   adoption and saved-command dispatch. Remaining: client use of that admission,
-   domain continuation and all-writer stage fences.
+   adoption, saved-command dispatch and both creation clients' outbox admission.
+   Remaining: domain continuation and all-writer stage fences.
 3. Build shared transactional client store and projection reducer; cut both
    transports over, including query membership. Delete predecessor owners.
 4. Move selection, disclosure, launch, completion and every mutation family through
@@ -460,7 +482,9 @@ and their consumers must converge together.
 5. Measure actual latency and remove demonstrated backend waits independently of
    presentation; run the full acceptance matrix and native demo.
 
-Slices 3–4 have not started. Slice 5 now includes instrumentation and benchmark
+Slice 3 now has the shared SQLite outbox and receipt owner; its confirmed cache,
+projection and query membership remain unfinished. Slice 4's full migration has
+not started. Slice 5 now includes instrumentation and benchmark
 coverage/preflight work before native demo. The Desktop launch checkpoint and synchronous Wave
 selection are interim; slice 3 deletes the launch exception.
 
@@ -503,8 +527,8 @@ separately. Neither that target nor a SQL bottleneck has been measured here.
 
 Cache plus overlays is a headless engineering choice, not a recorded product
 preference (see `questions.md`). Prove one membership vocabulary across Rust and
-both clients before migration; check GRDB on both app toolchains before adopting
-it. The transactional cache/outbox contract holds regardless of library.
+both clients before migration. Extend the existing system SQLite3 owner with the
+confirmed cache and incorporation records; no GRDB adoption is planned.
 
 Preserve the launch counterexamples in the shared tests: pre-admission cached
 Task data, a fresh unrelated planning frame, unavailable or missing Task rows,
@@ -532,6 +556,9 @@ Proposed usage text for the affected Desktop/mobile docs:
 > restores its row with an explanation without changing your later selection.
 > An interrupted or partly committed completion stays pending while its outcome
 > is recovered; a refresh failure does not undo it.
+> Opening a finished result clears its Show result prompt. List and count updates
+> continue in the background; leaving the result does not cancel them. Unresolved
+> failures keep their recovery actions.
 > Selecting a recent Task shows its retained content while refreshing. Expanding
 > a Wave opens its children immediately; a cold section loads in place.
 
@@ -580,23 +607,37 @@ fixtures expose pending/candidate/bound/conflict separately from delivery.
 Transactional stages remain Task filing, completion request/settlement, reopen and
 Session input replacement. Failed output retains committed stages as uncertain.
 Completed command output cannot be overwritten by a late recovery worker.
-**Live clients still run Git before admission.** Desktop and mobile Start send
-the `task.create` write (`RegistryQuery.createTask`, also
-`createTaskFromSession`), which reaches
-`engine::creation::create`: `repo::require_repo_root` runs before `claim_creation`,
-so nothing durable exists while Git is held. Only `operation.submit` is Git-free,
-and no production Swift caller sends it (ServerProtocol encodes it for fixtures).
-The fix is the client cut: Start submits the envelope through the shared outbox
-and observes `operation.get`; the served `task.create` write stays the CLI/direct
-path sharing the canonical claim. Until then the immediate-admission
-counterexample holds only for the server fixture.
+The live Desktop and mobile creation transports now send the saved command as
+`operation.submit` through `ClientWorkStore`, replacing `CreationSubmissions` and
+its JSON-file sender. The shared actor owns a SQLite ordered outbox and stamped
+`operation.get` subscriptions; admission responses establish no execution result.
+The released files import in one transaction before removal, retaining payloads,
+IDs, Machine and protocol revision. Their unknown send epochs prohibit absence
+from authorizing replay. Generic receipt revisions cannot regress within an epoch;
+departed epochs cannot replace the active stream. A mounted result can retire only
+a finished receipt observed in its current epoch. Confirmed Work cache and query
+incorporation are not implemented yet, so presentation retirement and the launch
+checkpoint remain interim obligations.
 
-Remaining, in order: client submission through `operation.submit` with receipt
-ordering/epoch recovery; domain recovery continuations, definite-refusal
-classification and terminal fences for every mutation family (including
+Counterexample found during this cut: a domain recovery reply can arrive after
+database replacement, between a lookup and a retry send. The envelope now requires
+`epoch` from the authorizing receipt reading. The server compares it inside admission,
+including duplicates, before starting a worker. It is transport causality, outside
+submitted command identity. This closes that race without changing submitted words
+or granting generic replay. Domain-proven creation Complete/Continue can request
+the same saved envelope; Inspect never does. Broader mutation recovery is unfinished.
+Desktop recovery listens to store changes instead of a five-second poll. The phone
+still has its older sheet/outcome presentation; no full interaction migration is
+claimed. Desktop and Rust admission checks pass; native projection migration is still open.
+A held identity check during presentation now re-reads receipt state before
+retirement, retaining a request whose epoch changed during that wait. A failed
+journal import retains its source and can reopen after repair; initialized Swift
+classes run deinit on an init throw, so that owner alone closes SQLite.
+
+Remaining, in order: domain recovery continuations, definite-refusal classification and terminal fences for every mutation family (including
 remote/detached and external file/config confirmation; dispatched errors stay
 uncertain; SQLite fences cannot certify filesystem/provider effects); the
-transactional confirmed cache/outbox and normalized query membership; both
+transactional confirmed cache and ordered effect/query membership projection; both
 clients' interaction and retained-occurrence migration with the launch checkpoint
 exception and other predecessors deleted; epoch reset on historical restoration;
 held/reordered/crash and native acceptance. `complete` in a read stamp still means
@@ -676,8 +717,9 @@ Required counterexamples before dependent work:
    revision update the client; admission never enables input or retires overlays.
 
 These are engineering consequences of immediate admission and lossless recovery,
-not a new product choice. Cases 1–4 have server fixtures; case 1 is not yet true
-for the live client path (above). Case 5 belongs to the shared client owner. The
+not a new product choice. Cases 1–4 have server fixtures; the live clients now use that admission. The shared receipt cursor and epoch
+admission race have focused checks. Full cross-platform presentation acceptance
+remains open. The
 Swift receipt mirror and exact-query fence comparison are shared with iOS; no
 client projection cutover is claimed.
 
@@ -718,63 +760,28 @@ projection measurement now includes 10,000 Tasks/Sessions, preserves each sample
 with an atomic checkpoint outside the interval and refuses to overwrite an old
 result. The rebuilt diagnostic ran; the quiet-host baseline remains missing. Native display/input benchmarks remain unmeasured.
 
-Owned observations, preserved here because a fresh run cannot reproduce them:
-
-- Current Mac, macOS 26.0.1, 16 logical CPUs, 2026-11-15 04:56:49 UTC:
-  aggregate process CPU 634.6%; load 217.00/222.38/182.45. Rejected.
-  Raw `/tmp/loo-906-host-20261114-current/preflight.json`.
-- `mini-heart`, macOS 15.5, 8 logical CPUs, 04:59:16 UTC: CPU 336.3%;
-  load 4.49/4.61/5.44. Rejected; three Python processes each used about a core.
-  Desktop also requires macOS 26, so this mini cannot run the present app target.
-  Console account was signed in; capture/input capability was not probed after
-  load rejection. Raw `/tmp/loo-906-host-20261114-mini/preflight.json` on mini;
-  local copy `/tmp/loo-906-host-20261114-mini.json`.
-- Existing debug test binary SHA256
-  `e0d99f8a4993a7cc19d923e2ece97fbe25c1e093c76bc9c4548649ca70df9b2a`:
-  WorkProjection constructor only, 21 observations/population at 21:10 local.
-  256 Tasks/Sessions: first 10.65 ms, warm n=20 median 32.57 ms/P95 63.70 ms.
-  2,048: first 340.15 ms, warm n=20 median 287.11 ms/P95 523.89 ms.
-  Raw and report `/tmp/loo-906-projection-existing-build-20261114/`.
-  Invalid for regression comparison: host rejected, build source provenance was
-  not recorded. No gesture, native paint, input or server endpoint was measured.
-  These distributions do not establish a SQL bottleneck or the >10-second cause.
-
-- Rebuilt current debug test binary SHA256
-  `6547da6b33e05fb2914a44e6d54161ea8775360882ae9e5ba11de64664e2254d`,
-  Swift/fixture/harness source digest
-  `1b938dface06ba3093c792f27f87762e4e87d4a257b2ff31d60f3374befaaf45`
-  unchanged before/after. At 22:12 local, constructor-only first / warm n=20
-  median / P95: 256 Tasks/Sessions 4.10 / 3.72 / 4.57 ms; 2,048
-  31.00 / 29.46 / 31.77 ms; 10,000 144.71 / 142.08 / 235.92 ms
-  (maximum 296.58 ms). Raw samples, metadata and log:
-  `/tmp/loo-906-projection-current-20261114/`. Preflight at 06:12:26 UTC
-  measured CPU 1018.4%, rejected; raw
-  `/tmp/loo-906-host-20261114-current-rebuilt/preflight.json`.
-  Invalid as a regression baseline; no comparison against the earlier binary.
-  This still measures neither native paint/input nor SQL/planning/provider time.
-- The first projection invocation skipped because the network runner cleared its
-  `LF_*` output variable. The corrected invocation places `env` inside that
-  boundary; the convention is now in AGENTS.md and the harness docs.
-- `measureWriteToVisible` still names removed `pm_items.body` in its old native
-  fixture. That journey needs migration to current authoritative planning facts;
-  it is not live coverage of the new store.
-
-- Receipt-path diagnostic, 2026-11-14, nextest run
-  `7f2b652c-19e3-4026-8961-d4e3f4d84d37`: 10,000 Tasks/receipts, 20 warm
-  lookup + duplicate admission + no-redispatch samples, median 0.027 ms/P95
-  0.033 ms. Debug build on the loaded host; not a native baseline or SQL
-  attribution for the reported interaction delays. Source-level EXPLAIN over all
-  20 receipt SELECT/UPDATE/INSERT statements at 10,000 receipts found no table
-  scans; keyed reads/updates use the request-ID primary index.
+Benchmark observations and raw-file locations are preserved at
+`8b42a874db6d925382c2e113c172c840496c6ea0:scratch/instant-task-session.md`.
+Both hosts failed load preflight on 2026-11-14; the mini also runs macOS 15.5
+against Desktop's macOS 26 target. The rebuilt debug 10k constructor warm P95
+was 235.92 ms on the rejected host; it is diagnostic, not a regression baseline
+or native/SQL attribution. No gesture, native paint/input or full backend-stage
+baseline exists. The 10k receipt diagnostic (nextest run
+`7f2b652c-19e3-4026-8961-d4e3f4d84d37`) had lookup/admission P95 0.033 ms;
+all 20 receipt SQL statements used keyed indexes without table scans.
+`measureWriteToVisible` still refers to removed `pm_items.body` and needs migration.
+The corrected benchmark invocation puts its output variable inside the network
+boundary; the first invocation skipped when that boundary cleared `LF_*`.
 
 Checks:
 
 - `uv run python scripts/check_migrations.py`: passed; one finished draft migration.
 - `uv run pytest python/tests/test_desktop_performance.py -q -k 'host_load or preflight or sql_profile_time or native_runner or sandbox_paths_do_not_change'`: 5 passed; unchanged since the recorded benchmark-instrumentation cut.
 - `uv run python scripts/check_swift_multiplatform_boundaries.py`: passed.
-- `cargo nextest run -p loopflow --lib --build-jobs 4 -E 'test(store::sqlite::operations::tests::) | test(engine::operation::tests::) | test(server::service::tests::operation_admission_answers_while_git_is_held_and_survives_disconnect)'` at `221b9a8a82`, 2026-11-15: 17 passed, including the checkpoint's legacy-adoption, completed-CLI adoption and held-Git service tests. `engine::operation::tests::admission_saves_exact_content_before_git_and_unavailable_validation_is_recoverable` reported LEAK (a handle outlived the test); not yet investigated. `server::schema::tests::` not rerun since 25 passed before the checkpoint.
-- `swift build --package-path swift --build-tests --jobs 2`: passed. `scripts/test_desktop.sh --skip-build --no-parallel --filter 'ServerProtocolTests|CreationSubmissionTests|WorkModelStreamTests.launchReconciliation|WorkDestinationTests.newTask|WorkDestinationTests.lateCreationReply|WorkDestinationTests.failedAutomatic|WorkNavigationTests.waveClickSelectsBeforeReturningFromTheGesture'`: 44 passed.
-- `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/ReadingStampTests`: 3 passed; app/test targets built and the disposable Simulator was removed.
+- `cargo nextest run -p loopflow --lib --build-jobs 4 -E 'test(store::sqlite::operations::tests::admission_epoch_rejects_a_delayed_send_before_saving_or_dispatching) | test(store::sqlite::operations::tests::receipt_reads_and_duplicate_admission_use_point_queries_at_ten_thousand_tasks) | test(engine::operation::tests::admission_saves_exact_content_before_git_and_unavailable_validation_is_recoverable) | test(server::service::tests::operation_admission_answers_while_git_is_held_and_survives_disconnect) | test(server::schema::tests::every_fixture_validates_against_its_definition) | test(server::schema::tests::the_checked_in_schema_is_what_describe_prints)'`: 6 passed; run `d8c45edf-304e-40ef-95da-25ff8aa6d013`, log `/tmp/loo-906-epoch-tests.log`. LEAK moved to the pure checked-in-schema test; the admission case passed without it. Both inspected bodies await their subprocesses or do none; no cause is established. The previous admission warning remains at `8b42a874db:scratch/instant-task-session.md`. CLI/test builds also emitted macOS ld's large `__eh_frame` warning.
+- `target/debug/lf server describe --json > tests/fixtures/dto/server_schema.json`: regenerated from the built CLI; includes required admission epoch.
+- `swift build --package-path swift --build-tests --jobs 2`: passed. The headless network runner with private `LF_HOME` and filter `ClientWorkStoreTests|ServerProtocolTests|WorkModelStreamTests.launchReconciliation|WorkDestinationTests.newTask|WorkDestinationTests.lateCreationReply|WorkDestinationTests.failedAutomatic|WorkNavigationTests.waveClickSelectsBeforeReturningFromTheGesture`: 47 passed, including epoch change during presentation and failed journal import/reopen; log `/tmp/loo-906-client-tests.log`.
+- `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/ReadingStampTests -only-testing:LoopflowiOSTests/ClientWorkStoreTests`: 4 passed on current sources; app/test targets built and the disposable Simulator was removed. Log `/tmp/loo-906-client-ios.log`.
 - `uv run python scripts/check_architecture.py`: passed, 89/89 SQLite owners.
 
 The schema fixture is generated by the real CLI.

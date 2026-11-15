@@ -397,8 +397,49 @@ APIs/transactions are deleted. Start rotates the editor's in-memory draft revisi
 before asynchronous cleanup; a failed file rewrite cannot re-submit the original
 revision. Existing branch-format retired payloads compact on open.
 
-Disconnected delivery and Waiting for connection remain implementation work;
-READMEs do not claim that behavior yet. The one presentation above is its owner.
+### Next implement direction: a healthy change shows nothing extra
+
+Headless concept review of `e010cda519`, 2026-11-15. Engineering direction drawn
+from the quoted words above; the three copy/layout assumptions are in
+`questions.md`. No code changed in the review.
+
+Read in the code: `PendingOperation.isListed` lists every non-creation operation
+until `delivery == .finished`. A healthy Complete therefore removes the Task row
+and adds "Complete Task · LOO-12 / Request pending…" above the list on both hosts
+until settlement returns: a new intermediate state for the gesture that should
+show none. A failed send sets `deliveryFailed` and waits for a manual Check
+request, which contradicts 1a's send on reconnect. Neither has a failing test.
+
+1. `PendingOperation.status` is typed: delivering, waiting for connection, needs
+   attention (with its messages). It replaces `Presentation.messages` and the host
+   fallback strings ("Request pending…" and "Starting conversation…", twice each).
+   A row is listed while waiting or needing attention; a creation also until its
+   result is shown. A routine change being delivered shows only its projection:
+   the row is gone, the value changed, open details say Completing….
+2. An unreachable Machine is a status, never an error: no action offered, effect
+   retained, delivery resumes on the connection event through the same `reconcile`
+   by original ID. No timer and no retry on store publication. Attention needs an
+   answer from the Machine or an unknown outcome after a send.
+3. One name: operation in code (the wire says `operation.submit`), "request" in
+   copy. Rename `PendingCommandActions`/`PendingCommandRow`, `pendingCommands`,
+   and `WorkModel.retryCreation`/`inspectedCreation`, which serve every kind.
+4. One shared row view (title, status, actions) serves both lists and both
+   conversations. It takes `WorkInteraction` and an edit callback; the four host
+   action switches and the Inspect acknowledgment move into it.
+5. `OperationDeclaration` owns each kind's facts: a kind enum, label, stages,
+   whether a result must be shown, target issue and projected effect. Decode the
+   target once. `isCompleting` JSON-decodes every pending payload per Task row
+   render; under 1a that set grows while disconnected. Make it a keyed lookup.
+6. Leaving a list is one interaction. Complete and Abandon share removal and next
+   selection in `WorkInteraction`; delete `abandoningTaskIDs` and Desktop's second
+   next-row rule. Declare `task.abandon` and `task.claim`.
+
+Acceptance, held replies on both hosts: Complete shows no request row while
+delivering; disconnect shows the row as Waiting for connection with no action;
+reconnect delivers once without a gesture; restart while waiting keeps it; a
+refusal becomes attention and restores membership; Abandon selects like Complete.
+READMEs stop saying each pending command has a row, and claim disconnected
+delivery only once built.
 
 ## Current implementation cut
 
@@ -427,8 +468,8 @@ including without a network event. Retirement cancels its receipt observer and
 transfers lagging effects or scoped reload floors. The complete prior contracts and
 query checks remain at `6e944e73b5a:scratch/instant-task-session.md`.
 
-Remaining: disconnected Complete/rename/move delivery and
-Waiting for connection under the recorded 1a direction, built on that one presentation; cross-client closed-query convergence; exhaustive
+Remaining: the next implement direction above, then disconnected rename/move
+under the recorded 1a direction; cross-client closed-query convergence; exhaustive
 effect/dependency declarations and cross-query provenance; other mutation recovery
 and resource lanes; retained mobile `SessionLink`; projected inspection;
 historical-restoration epoch reset; valid native benchmark baseline. One cross-platform PR; no shipping decision. SQLite
@@ -492,11 +533,8 @@ Machine request can finish. Completion removes its displayed occurrence and move
 to the next Task (the earlier quoted 1b); rejection restores membership without
 undoing a later selection. Successful domain changes survive later sync errors.
 
-Current inspected code: shared `WorkInteraction.complete` and `createTask` publish
-before save and invoke origin selection synchronously. `assignTask`, `moveTask`, `reopenTask` still use
-`performTaskAction` and confirmation waits; Abandon retains a separate local set.
-`OperationDeclaration` covers six kinds. These are unfinished cutover, not the
-final shared contract. The review changed no production code or execution state.
+Desktop `assignTask`, `moveTask` and `reopenTask` still wait in `performTaskAction`;
+`OperationDeclaration` covers six kinds. Unfinished cutover.
 
 Proposed usage, implementation still required:
 > Select a recent Task to see its retained conversation immediately. Expand a

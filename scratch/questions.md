@@ -91,3 +91,15 @@
 - The portfolio's Waves status strip retains its prior non-creation scope and
   renders the shared pending-command row. Creation destinations and their editors
   live in repository windows; the Task navigator and phone feed list all kinds.
+
+- Request rows, headless reversible choices from the 2026-11-15 concept review of
+  `e010cda519`; nobody has stated a preference on any of the three:
+  - A routine change being delivered normally (Complete, rename, move) shows no
+    request row, only its projected result. Read from “completing a task should
+    make it disappear immediately” and “a lot of intermediate states”; the built
+    cut lists a “Complete Task · LOO-12” row until settlement.
+  - Waiting for connection shows one row per held change, reusing the existing
+    row. One summary line (“3 changes waiting for connection”) is the undiscussed
+    alternative.
+  - Abandon takes Complete's next-Task rule (next in list order, wrapping, else
+    empty). Desktop Abandon today picks next, then previous, then the Wave.

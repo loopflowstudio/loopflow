@@ -9645,6 +9645,10 @@
             }
           ]
         },
+        "lifecycle": {
+          "$ref": "#/$defs/TaskState",
+          "description": "Effective lifecycle, including planning withdrawal of never-started work."
+        },
         "next_move": {
           "$ref": "#/$defs/NextMove"
         },
@@ -9677,6 +9681,14 @@
         "section": {
           "$ref": "#/$defs/TaskSection"
         },
+        "selection_states": {
+          "description": "The same lifecycle, section and conversation activity states as selections.",
+          "items": {
+            "$ref": "#/$defs/SelectionState"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
         "ship_control": {
           "$ref": "#/$defs/TaskRunControl"
         },
@@ -9697,6 +9709,8 @@
       "required": [
         "task",
         "reference",
+        "lifecycle",
+        "selection_states",
         "runtime",
         "next_move",
         "condition",
@@ -9979,17 +9993,17 @@
         },
         {
           "const": "available",
-          "description": "Session axis: a Task Session's turn ended and it is ready for the person.",
+          "description": "Session axis: a Task conversation is available for the person's next turn.",
           "type": "string"
         },
         {
           "const": "busy",
-          "description": "Session axis: a Task Session is mid-turn.",
+          "description": "Session axis: a current Task Session report says it is working.",
           "type": "string"
         },
         {
           "const": "unstarted",
-          "description": "Task axis: the Task's own state, as `TaskState` derives it.",
+          "description": "Task axis: effective lifecycle, including withdrawal of never-started work.",
           "type": "string"
         },
         {

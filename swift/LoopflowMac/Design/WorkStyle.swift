@@ -264,7 +264,8 @@ extension ProgramStatusState {
         case .blocked: .warning
         case .error: .failure
         case .done: .done
-        case .idle, .clear: .neutral
+        case .idle: .available
+        case .clear: .neutral
         }
     }
 }

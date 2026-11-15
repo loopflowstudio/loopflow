@@ -14,19 +14,23 @@ struct TaskWorkflowHeader: View {
     @State private var confirmingAbandon = false
     @State private var expandedTasks: Set<String> = []
 
+    private var lifecycleLabel: String {
+        switch task.lifecycle {
+        case .done: "Completed"
+        case .abandoned: "Canceled"
+        default: task.lifecycle.label.capitalized
+        }
+    }
+
     private var controls: some View {
             HStack(alignment: .center, spacing: Spacing.md) {
-                if let label = task.task.terminalLabel {
-                    Text(label)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(task.task.isSuccessful ? palette.success : palette.failure)
-                        .accessibilityIdentifier("task-lifecycle-status")
-                }
+                Text(lifecycleLabel)
+                    .fontWeight(task.isCompleted ? .semibold : .regular)
+                    .foregroundStyle(task.lifecycle == .done ? palette.success
+                        : task.lifecycle == .abandoned ? palette.failure : palette.textSecondary)
+                    .accessibilityIdentifier("task-lifecycle-status")
                 if task.isUnassigned {
                     Text("Unassigned").foregroundStyle(palette.textSecondary)
-                } else if task.task.terminalLabel == nil, let state = task.task.state {
-                    Text(state.capitalized).foregroundStyle(palette.textSecondary)
-                        .accessibilityIdentifier("task-lifecycle-status")
                 }
                 if let workflow = work.value?.graph {
                     Text(positionLabel(workflow))
@@ -74,7 +78,7 @@ struct TaskWorkflowHeader: View {
                         .foregroundStyle(palette.textSecondary)
                     Spacer()
                 }
-                if task.task.isTerminal || task.runtime?.status.isTerminal == true {
+                if task.isCompleted {
                     Button("Reopen") { Task { await model.reopenTask(task) } }
                         .disabled(acting || readingUnavailable != nil)
                         .accessibilityIdentifier("task-reopen")
@@ -174,14 +178,14 @@ struct TaskWorkflowHeader: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
             palette.background
-            if task.task.terminalLabel != nil {
-                (task.task.isSuccessful ? palette.success : palette.failure).opacity(0.14)
+            if task.isCompleted {
+                (task.lifecycle == .done ? palette.success : palette.failure).opacity(0.14)
             }
         }
         .overlay(alignment: .leading) {
-            if task.task.terminalLabel != nil {
+            if task.isCompleted {
                 Rectangle()
-                    .fill(task.task.isSuccessful ? palette.success : palette.failure)
+                    .fill(task.lifecycle == .done ? palette.success : palette.failure)
                     .frame(width: 3)
             }
         }
@@ -231,7 +235,6 @@ struct TaskWorkflowHeader: View {
     /// Why no run can be started now.
     private var unavailable: String? {
         if acting { return draft?.progress ?? "Updating Task…" }
-        if task.task.isTerminal { return "Reopen the Task before starting work" }
         return readingUnavailable ?? task.runControl.unavailable
     }
 
@@ -268,7 +271,7 @@ struct TaskShipControl: View {
                     .disabled(acting || readingUnavailable != nil)
                     .help("lf --task \(task.task.identifier) ship --stop: withdraw it and disarm auto-merge")
                     .accessibilityIdentifier("task-ship-stop")
-            } else if !(task.task.isTerminal || task.runtime?.status.isTerminal == true) {
+            } else if !task.isCompleted {
                 let refusal = readingUnavailable ?? task.shipControl.unavailable
                 HStack(spacing: Spacing.sm) {
                     // Hovering Auto-Ship offers the other ways out of this Task.
@@ -555,19 +558,7 @@ struct TaskHeading: View {
     /// The Task's lifecycle, the state Working Tasks and Shipping list by;
     /// Linear's planning state never overrides it. What shipping is doing
     /// now reads in the Workflow bar.
-    var state: String {
-        switch task.runtime?.status {
-        case .idle: return "Idle"
-        case .active: return "Active"
-        case .moving: return "Moving"
-        case .shipping: return "Shipping"
-        case .done: return "Done"
-        case .abandoned: return "Abandoned"
-        case .unstarted, nil:
-            guard task.task.isTerminal else { return "Unstarted" }
-            return task.task.isSuccessful ? "Done" : "Abandoned"
-        }
-    }
+    var state: String { task.lifecycle.label.capitalized }
 
     var body: some View {
         HStack(spacing: 6) {
@@ -636,7 +627,7 @@ struct TaskActionItems: View {
                 }.disabled(destination.wave.id == task.task.waveId)
             }
         }.disabled(unavailable).accessibilityIdentifier("task-move-wave")
-        if task.task.isTerminal || task.runtime?.status.isTerminal == true {
+        if task.isCompleted {
             Button("Reopen Task") { Task { await model.reopenTask(task) } }.disabled(unavailable)
         } else {
             Button("Complete Task") { Task { await model.completeTask(task) } }.disabled(unavailable)

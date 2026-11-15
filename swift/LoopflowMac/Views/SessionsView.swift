@@ -964,8 +964,7 @@ final class SessionsWorkspaceRegistry {
                 let belongs: Bool?
                 switch workspace.key.kind {
                 case .task:
-                    let tasks = record.taskMemberships
-                    belongs = tasks.isEmpty ? nil : tasks.contains(workspace.key.id)
+                    belongs = record.taskIds.isEmpty ? nil : record.names(task: workspace.key.id)
                 case .wave: belongs = record.waveId.map { $0 == workspace.key.id }
                 case .repository: belongs = nil
                 }
@@ -1920,8 +1919,8 @@ struct SessionsContentView: View {
         if let task = fileTask, task.task.reference.workspace?.localExists == false,
            navigation.preparedTaskWorktrees[task.task.id] == nil {
             HStack(spacing: Spacing.sm) {
-                if let runtime = task.task.runtime, runtime.status.isTerminal {
-                    Text("Recorded checkout is missing. This Task is \(runtime.status.label); it cannot be restored.")
+                if task.task.isCompleted {
+                    Text("Recorded checkout is missing. This Task is \(task.task.lifecycle.label); it cannot be restored.")
                 } else {
                     Text("Recorded checkout is missing")
                     Button("Restore checkout") { prepareTaskWorkspace() }

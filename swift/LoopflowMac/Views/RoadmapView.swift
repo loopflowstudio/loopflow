@@ -382,9 +382,9 @@ struct RoadmapTaskRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: Spacing.sm) {
-            Image(systemName: task.task.isSuccessful ? "checkmark.circle.fill" : "circle")
+            Image(systemName: task.lifecycle == .done ? "checkmark.circle.fill" : "circle")
                 .font(Typography.caption(11))
-                .foregroundStyle(task.task.isSuccessful ? palette.success : task.section.color(in: palette))
+                .foregroundStyle(task.lifecycle == .done ? palette.success : task.section.color(in: palette))
                 .frame(width: 14)
             VStack(alignment: .leading, spacing: Spacing.xxs) {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
@@ -429,8 +429,7 @@ struct RoadmapTaskRow: View {
     }
 }
 
-/// The shared Task condition plus its orthogonal planning facts. `runtime == nil`
-/// means Work has not started.
+/// The shared Task condition, lifecycle and orthogonal planning facts.
 struct WorkChannelChips: View {
     let task: RoadmapTask
     @Environment(\.palette) private var palette
@@ -440,11 +439,7 @@ struct WorkChannelChips: View {
             channel("Condition", task.condition.state.rawValue, task.condition.state.color(in: palette))
             channel("PM", task.task.terminalLabel ?? "open",
                     task.task.isSuccessful ? palette.success : palette.textSecondary)
-            if let runtime = task.runtime {
-                channel("Status", runtime.status.label, statusColor(runtime.status))
-            } else {
-                channel("Work", "none", palette.textSecondary)
-            }
+            channel("Status", task.lifecycle.label, statusColor(task.lifecycle))
         }
     }
 

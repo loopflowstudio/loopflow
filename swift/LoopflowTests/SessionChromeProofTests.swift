@@ -107,9 +107,9 @@ struct SessionChromeProofTests {
         let surfaces = try terminals.map { try #require($0.surface) }
         let (roadmap, _) = try latestRoadmap()
         let record = try renameFixtureRecord("palette-session", title: "Retained conversation", source: "human",
-                                             work: .task(id: "ts_review00000000000000000000000000"))
+                                             work: .task(id: "issue-review"))
         let companion = try renameFixtureRecord("palette-companion", title: "Companion conversation", source: "human",
-                                                work: .task(id: "ts_review00000000000000000000000000"))
+                                                work: .task(id: "issue-review"))
         let records = try [record, companion].enumerated().map { index, record in
             var value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any])
             value["state"] = "active"

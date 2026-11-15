@@ -73,7 +73,7 @@ public struct WorkSelection: Codable, Equatable, Sendable {
     }
 }
 
-public enum WorkSelectionState: String, Codable, Sendable {
+public enum WorkSelectionState: String, Codable, Sendable, Hashable {
     case open, available, busy, blocked, unstarted, idle, active, moving, shipping, backlog, working, autonomous, done
 }
 

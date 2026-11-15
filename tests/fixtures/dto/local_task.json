@@ -94,6 +94,11 @@
       "wave_id": null
     },
     "graph_name": "code",
-    "graph_source": "builtin"
+    "graph_source": "builtin",
+    "lifecycle": "unstarted",
+    "selection_states": [
+      "unstarted",
+      "backlog"
+    ]
   }
 }

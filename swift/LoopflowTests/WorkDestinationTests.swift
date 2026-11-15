@@ -582,6 +582,9 @@ struct WorkDestinationTests {
             var allTasks = try #require(inventory["items"] as? [[String: Any]])
             let index = try #require(allTasks.firstIndex { ($0["task"] as? [String: Any])?["id"] as? String == task.id })
             allTasks[index]["runtime"] = NSNull()
+            allTasks[index]["lifecycle"] = "unstarted"
+            allTasks[index]["section"] = "backlog"
+            allTasks[index]["selection_states"] = ["unstarted", "backlog"]
             var reference = allTasks[index]["reference"] as! [String: Any]
             reference["workspace"] = NSNull()
             allTasks[index]["reference"] = reference
@@ -2463,6 +2466,9 @@ struct WorkDestinationTests {
         var tasks = try #require(inventory["items"] as? [[String: Any]])
         for index in tasks.indices {
             guard var runtime = tasks[index]["runtime"] as? [String: Any] else { continue }
+            tasks[index]["lifecycle"] = "idle"
+            tasks[index]["section"] = "working"
+            tasks[index]["selection_states"] = ["open", "idle", "working"]
             runtime["status"] = "idle"
             runtime["owner"] = ["person": "Jack Heart", "person_id": NSNull(), "person_key": "jack@loopflow.studio",
                                 "machine": ["id": "machine-local", "label": "laptop"]] as [String: Any]

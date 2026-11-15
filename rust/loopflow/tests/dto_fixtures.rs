@@ -7,6 +7,23 @@ const ROADMAP: &str = include_str!("../../../tests/fixtures/dto/roadmap_snapshot
 const METRIC_PORTFOLIO: &str = include_str!("../../../tests/fixtures/dto/metric_portfolio.json");
 
 #[test]
+fn roadmap_requires_shared_lifecycle_and_selection_states() {
+    use loopflow::lf::commands::waves::RoadmapTask;
+    let wire: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/task_concepts.json"
+    ))
+    .unwrap();
+    let row = &wire[0]["tasks"][0];
+    for field in ["lifecycle", "selection_states"] {
+        let mut missing = row.clone();
+        missing.as_object_mut().unwrap().remove(field);
+        assert!(serde_json::from_value::<RoadmapTask>(missing).is_err());
+    }
+    let task: RoadmapTask = serde_json::from_value(row.clone()).unwrap();
+    assert_eq!(serde_json::to_value(task).unwrap(), *row);
+}
+
+#[test]
 fn activity_retains_unknown_record_identity_without_a_pid() {
     use loopflow::lf::commands::top::{ActivitySnapshot, ActivityState};
     let snapshot: ActivitySnapshot = serde_json::from_str(include_str!(

@@ -1560,7 +1560,7 @@ pub(crate) async fn new_thread(
     let _creation_lock =
         crate::journal::request::spawn_blocking(move || crate::engine::creation::lock(&request))
             .await??;
-    store.sqlite.check_creation(&identity)?;
+    store.sqlite.claim_creation(&identity)?;
     // Serialize with other Session launches and new-thread requests.
     let lock_id = id.to_string();
     let launch_lock =

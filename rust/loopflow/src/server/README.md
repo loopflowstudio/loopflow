@@ -229,7 +229,8 @@ Delivery is `queued`, `dispatched`, `finished` or `uncertain`; historical creati
 rows without an envelope are `untracked`. A duplicate reads the same outcome and
 never generically dispatches a sent command again. Adopted creations consult their
 existing Complete/Continue/Inspect recovery rules; only a domain-proven continuation
-can resume after dispatch. Server exit leaves other operations for domain inspection. There is no generic retry of uncertain effects.
+can resume after dispatch. Server exit leaves other operations for domain inspection.
+There is no generic retry of uncertain effects.
 
 `commits` contains semantic stages with resource IDs, an authoritative result and
 Machine/epoch/schema/domain revision fences written in the domain transaction.

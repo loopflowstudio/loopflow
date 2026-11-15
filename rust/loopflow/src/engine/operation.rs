@@ -240,6 +240,52 @@ mod tests {
     }
 
     #[test]
+    fn adopting_a_completed_cli_creation_returns_the_same_task_without_another_effect() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home = EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        let repo = loopflow_test_support::TestRepo::new();
+        let subdirectory = repo.path().join("nested");
+        std::fs::create_dir(&subdirectory).unwrap();
+        let original = crate::engine::creation::create(
+            "cli",
+            crate::engine::creation::TaskCreation {
+                directory: repo.path().to_path_buf(),
+                title: Some("Submitted title".into()),
+                request: None,
+                wave: None,
+                graph: None,
+                session: None,
+                worktree: None,
+                run: false,
+                agent: None,
+                approve: false,
+            },
+        )
+        .unwrap();
+        let store = SqliteStore::new(&crate::store::default_db_path()).unwrap();
+        let before = store.operation_receipt("cli").unwrap().unwrap();
+        let submitted = command(subdirectory, "cli");
+        let (_, admitted) = super::admit("cli", &submitted).unwrap();
+        assert_eq!(admitted.validation, OperationValidation::Candidate);
+        assert_eq!(admitted.delivery, OperationDelivery::Untracked);
+        super::execute(&store, "cli").unwrap();
+        let finished = store.operation_receipt("cli").unwrap().unwrap();
+        assert_eq!(finished.delivery, OperationDelivery::Finished);
+        assert_eq!(
+            finished.result,
+            Some(serde_json::to_value(original).unwrap())
+        );
+        assert_eq!(finished.commits, before.commits);
+        assert_eq!(store.list_tasks(None).unwrap().len(), 1);
+        super::execute(&store, "cli").unwrap();
+        assert_eq!(
+            store.operation_receipt("cli").unwrap().unwrap().revision,
+            finished.revision
+        );
+    }
+
+    #[test]
     fn equivalent_creation_paths_validate_against_one_released_canonical_identity() {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let repo = loopflow_test_support::TestRepo::new();
@@ -253,7 +299,7 @@ mod tests {
         for directory in [repo.path().to_path_buf(), subdirectory, symlink] {
             let home = tempfile::tempdir().unwrap();
             let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
-            store.check_creation(&canonical).unwrap();
+            store.claim_creation(&canonical).unwrap();
             let change = command(directory, "old");
             store
                 .admit_operation(

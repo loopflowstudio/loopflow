@@ -42,11 +42,11 @@ public struct OperationReceipt: Codable, Equatable, Sendable {
     public enum Delivery: String, Codable, Sendable {
         case untracked, queued, dispatched, finished, uncertain
     }
-    public let requestID: String
-    public let kind: String
     public enum Validation: String, Codable, Sendable {
         case unbound, pending, candidate, bound, conflict
     }
+    public let requestID: String
+    public let kind: String
     public let fingerprint: String?
     public let submittedFingerprint: String?
     public let validation: Validation

@@ -16,7 +16,7 @@
   This supersedes the draft keep-conversation-open assumption. Failure or refresh
   never steals a later deliberate selection.
 - Proposed 100 ms P95 local reaction target, at least 20 native samples per
-  journey/platform. Native reaction, input readiness and backend timings remain
+  journey/platform. Native reaction, input readiness and full backend stage timings remain
   unmeasured; no SQL diagnosis is asserted. Implementation now owns benchmark
   collection too. Both hosts failed load preflight; the mini also runs macOS 15.5
   against Desktop's macOS 26 target. Current debug 10k constructor samples are
@@ -25,5 +25,5 @@
 - Admission identity: headless engineering choice is immutable submitted content
   plus deferred canonical creation identity. Released rows bind the first verified
   envelope through recoverable candidate validation in the same receipt owner;
-  candidate conflict never replaces the existing creation outcome. This remains
-  proposed implementation, not a recorded product preference.
+  candidate conflict never replaces the existing creation outcome. This is an
+  engineering choice, not a recorded product preference.

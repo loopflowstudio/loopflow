@@ -9,14 +9,15 @@
 <main>
 <header>LOO-906 · concept-review · 2026-11-14
 <p class="sources">Built from scratch/{instant-task-session,desktop-reactivity-feedback,questions}.md; swift/LoopflowMac/{WorkModel,WorkProjection}.swift; swift/LoopflowMac/Views/WorkNavigator.swift; swift/Loopflow/Services/{ReadingStamp,WorkObservation}.swift; swift/LoopflowiOS/{RemoteTaskObservation,SessionView}.swift; rust/loopflow/src/engine/{operation,creation}.rs; rust/loopflow/src/store/sqlite/operations.rs; rust/loopflow/src/store/migrations/client_operations.sql; rust/loopflow/src/server/service.rs.</p></header>
-<h1>Save the request before discovering its repository</h1>
-<p><strong>Next implement direction:</strong> admit immutable submitted content first; resolve canonical creation identity in the worker. Keep released receipts recoverable. No open product choice stops this work.</p>
-<p><strong>Biggest mismatch:</strong> <code>engine::operation::admit</code> currently runs <code>git rev-parse</code> before saving the envelope. Its acknowledgment can still wait on Git. Moving that call without separating submitted identity from canonical identity would break saved creation recovery.</p>
+<p class="status">Shared-owner design review. Current implementation and remaining work are in scratch/instant-task-session.md.</p>
+<h1>Confirm the effect, not the whole request</h1>
+<p><strong>Next implement direction:</strong> map each projected effect to the domain stage and query reading that confirm it. Preserve committed facts when a later stage fails. No open product choice stops this work.</p>
+<p><strong>Biggest mismatch:</strong> admission now saves before Git, but neither client uses the shared projection owner yet. A saved completion request is not a completed Task. Retiring the whole removal at that first stage would make the row reappear while settlement is still pending.</p>
 <p class="status">Proposed contract below; the shared cache/outbox and both-client migration remain unfinished.</p>
 <table><thead><tr><th>Action</th><th>Concept</th><th>Proposed API / owner</th></tr></thead><tbody>
 <tr><td>Start, Complete, edit</td><td>Durable operation + projected Work</td><td><code>begin(command, origin)</code> → shared store/outbox</td></tr>
 <tr><td>Admit / validate</td><td>Saved envelope + canonical creation identity</td><td><code>operation.submit</code> → receipt transaction → domain validation</td></tr>
-<tr><td>Receive result / refresh</td><td>Receipt + complete stamped reading</td><td><code>receive(receipt)</code>, <code>receive(reading)</code> → rebase only the affected operation</td></tr>
+<tr><td>Receive result / refresh</td><td>Effect + confirming stage + complete stamped reading</td><td><code>receive(receipt)</code>, <code>receive(reading)</code> → incorporate each effect per query</td></tr>
 <tr><td>Select Task / expand Wave</td><td>Local selection + disclosure</td><td><code>select(destination)</code>, <code>setExpanded(wave, expanded)</code> → synchronous interaction owner</td></tr>
 <tr><td>Retry opening</td><td>Exact admitted Session</td><td>Existing retained workspace/native owner; no new creation</td></tr>
 </tbody></table>
@@ -31,27 +32,29 @@
 <p>Jack Heart: “1b for the question (or show noting)”<br>Completion navigation is answered. Neither a failed command nor a late refresh changes a later deliberate selection.</p>
 </section>
 <section>
-<h2>One request, through recovery</h2>
-<p><strong>New operation:</strong> show submitted words → save exact typed content → acknowledge → discover repository and validate → claim execution → bind real Task/Session. Same ID/content returns the saved receipt; changed content conflicts. Input waits for native readiness.</p>
-<p><strong>Released creation:</strong> preserve its canonical fingerprint and outcome → save one adoption candidate → validate off the admission path → bind the first verified envelope. Equivalent symlink/subdirectory spelling can adopt the old creation. Later retries use that saved envelope.</p>
-<p><strong>Mismatch:</strong> release only the invalid candidate; keep the old creation and its recovery available. An unavailable repository leaves validation pending. A held worker cannot release or replace a newer candidate.</p>
-<p><strong>Restart:</strong> repeat effect-free validation; recover an existing creation through Complete/Continue/Inspect. Never generically dispatch a released or uncertain creation. Racing CLI and served requests share the same domain claim.</p>
-<p><strong>Counterexample to test:</strong> hold Git, receive acknowledgment, disconnect, restart, then release validation. Recover the same operation and Session exactly once. Try wrong content before valid legacy adoption, and reorder their replies.</p>
-<p><strong>Shared-cache requirements remain:</strong> a fresh count must not apply Complete twice while another list is held. Newer facts cannot regress under older detail replies. Filtered absence removes membership, not a retained workspace. Epoch replacement never permits uncertain replay.</p>
+<h2>Complete, through recovery</h2>
+<p class="status">Proposed shared behavior on Desktop and mobile</p>
+<div class="journey">Tap Complete → row disappears + next Task opens → save/send → request saved → settlement commits → each covering list/count incorporates the removal.</div>
+<p><strong>Held settlement:</strong> a refreshed list covers <code>task.completion_requested</code> only. Keep the row projected out: that stage confirms intent, not completed membership.</p>
+<p><strong>Partial failure:</strong> settlement commits, then planning sync or command output fails. Keep the completed facts and recover the remaining work in place. A definite refusal can restore only effects proved not to have committed; it never changes a later selection.</p>
+<p><strong>Restart:</strong> restore confirmed cache and remaining effects atomically. A fresh count must not subtract Complete twice while another list is held. Recover the saved operation on its original Machine; uncertainty never authorizes generic replay.</p>
+<p><strong>Start uses the same distinction:</strong> <code>task.filed</code> binds actual Task/Session identity; Graph admission and native readiness remain their own facts. Failed attachment keeps submitted words and offers Retry opening for the same Session.</p>
+<p><strong>No-op/external success:</strong> command output alone cannot acknowledge an effect. Require a domain-established result/fence or covering confirmation; filesystem/provider effects need their own confirmation contract.</p>
+<p><strong>Admission is built:</strong> immutable envelope before Git, deferred canonical identity, recoverable legacy adoption and one atomic CLI/served creation claim. Preserve these paths during the client migration.</p>
 </section>
 <section>
 <h2>What changes underneath</h2>
-<p class="status">Built: revision-6 stamped reads and immediate Wave/repository selection. In progress: generalized receipt owner and stage fences. Proposed: revised admission identity, full domain recovery, shared store and client migration.</p>
+<p class="status">Built: revision-6 stamped reads, immediate Wave/repository selection, admission identity and generalized receipts with several stage fences. Proposed: full domain recovery, effect/stage coverage, shared store and both-client migration.</p>
 <p>One store in <code>swift/Loopflow</code> owns normalized facts, ordered projections and transactional persistence. Rust supplies stamped reads; generalized receipts and transactional stage fences are partly implemented. Complete writer coverage and domain recovery remain. Desktop and mobile share reconciliation and membership semantics; routes keep selection and drafts; native owners retain execution and input control.</p>
 <p>Delete creation-only ledgers, per-action pending maps and duplicate cache/freshness owners as consumers move. Preserve saved requests, exact Session identity and domain recovery. Validate one membership vocabulary and GRDB support on both toolchains before adoption.</p>
-<p>Keep revision provenance on normalized fact groups and incorporation on each affected query. Filtered absence changes membership, not entity existence. Epoch changes invalidate old comparisons; pending operation identities survive for receipt recovery.</p>
-<p class="status">No checks rerun for this prose review. Recorded receipt-cut checks include production Rust library compilation, Swift build, 43 focused Desktop tests and two iOS stamp tests; new Rust behavior/schema tests remain unexecuted. Native latency remains unmeasured; rejected-load constructor diagnostics establish neither native response time nor a SQL bottleneck.</p>
+<p>The exhaustive command registry maps projected effects to confirming stages, domains and query dependencies. Keep revision provenance on normalized fact groups and incorporation on each effect/query obligation. Filtered absence changes membership, not entity existence. Epoch changes invalidate old comparisons; pending operation identities survive for receipt recovery.</p>
+<p class="status">No checks rerun for this prose review. The working design records 25 focused Rust tests, 44 Desktop tests and three iOS stamp tests passing for the admission cut. These do not demonstrate the proposed shared projection. Native latency remains unmeasured; rejected-load constructor diagnostics establish neither native response time nor a SQL bottleneck.</p>
 </section>
 <section>
 <h2>Questions for the next implementation check</h2>
 <ol>
-<li>Does admission return while Git is held, preserving released identities through validation and restart?<br><strong>1a.</strong> Yes, including wrong-candidate recovery and CLI races. <strong>1b.</strong> A counterexample remains; finish the identity contract.</li>
-<li>Do both clients project all affected lists/counts immediately and retain the same operation and Session through recovery?<br><strong>2a.</strong> Yes, demonstrated. <strong>2b.</strong> A counterexample remains; repair the shared owner.</li>
+<li>Does a read covering only the completion-request stage keep the pending removal, while a settlement read incorporates it exactly once per query?<br><strong>1a.</strong> Demonstrated on both clients, including restart. <strong>1b.</strong> Finish effect/stage coverage.</li>
+<li>Do partial failure, no-op success and external confirmation retain the right facts and recover the same operation and Session?<br><strong>2a.</strong> Demonstrated. <strong>2b.</strong> Finish domain recovery before client cutover.</li>
 </ol>
 <p class="status">Verification questions, not pending product choices. Headless outcome: design changed → iterate to implement. No production code, Task execution, publishing or merge changed in this review.</p>
 </section>

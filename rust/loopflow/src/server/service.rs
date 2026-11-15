@@ -1666,14 +1666,86 @@ mod tests {
             .block_on(body);
     }
 
+    /// Hold only the first Git invocation, using FIFOs rather than elapsed time.
+    struct HeldGit {
+        _directory: tempfile::TempDir,
+        entered: std::fs::File,
+        release: std::fs::File,
+        _path: crate::lf::commands::graph::EnvVarGuard,
+    }
+
+    impl HeldGit {
+        fn new() -> Self {
+            use std::os::unix::fs::PermissionsExt;
+            let directory = tempfile::tempdir().unwrap();
+            let real_git = std::process::Command::new("which")
+                .arg("git")
+                .output()
+                .unwrap();
+            assert!(real_git.status.success());
+            let real_git = String::from_utf8(real_git.stdout).unwrap();
+            let entered = directory.path().join("entered");
+            let release = directory.path().join("release");
+            assert!(std::process::Command::new("mkfifo")
+                .args([&entered, &release])
+                .status()
+                .unwrap()
+                .success());
+            // O_RDWR keeps release nonblocking even during panic cleanup.
+            let release = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(release)
+                .unwrap();
+            let entered = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(entered)
+                .unwrap();
+            let quote = |name: &str| {
+                crate::os_process::shell_escape(&directory.path().join(name).to_string_lossy())
+            };
+            let script = format!("#!/bin/sh\nif /bin/mkdir {} 2>/dev/null; then\n  printf x > {}\n  read -r release < {}\nfi\nexec {} \"$@\"\n",
+                quote("held"),quote("entered"),quote("release"),crate::os_process::shell_escape(real_git.trim()));
+            let git = directory.path().join("git");
+            std::fs::write(&git, script).unwrap();
+            std::fs::set_permissions(&git, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let path = format!(
+                "{}:{}",
+                directory.path().display(),
+                std::env::var("PATH").unwrap()
+            );
+            let path = crate::lf::commands::graph::EnvVarGuard::set("PATH", &path);
+            Self {
+                _directory: directory,
+                entered,
+                release,
+                _path: path,
+            }
+        }
+
+        fn wait(&self) {
+            use std::io::Read;
+            let mut entered = &self.entered;
+            entered.read_exact(&mut [0]).unwrap();
+        }
+    }
+
+    impl Drop for HeldGit {
+        fn drop(&mut self) {
+            use std::io::Write;
+            let _ = self.release.write_all(b"continue\n");
+        }
+    }
+
     #[test]
-    fn operation_admission_answers_while_creation_is_held_and_survives_disconnect() {
+    fn operation_admission_answers_while_git_is_held_and_survives_disconnect() {
         with_empty_home(async {
             let repo = loopflow_test_support::TestRepo::new();
             let path = crate::store::default_db_path();
             let store = crate::store::sqlite::SqliteStore::new(&path).unwrap();
             let id = "held-creation";
-            let held = crate::engine::creation::lock(id).unwrap();
+            let held = HeldGit::new();
             let mut client = Client::connect();
             client.hello(REVISION, REVISION).await;
             let command = crate::lf::commands::write::Write::TaskCreate {
@@ -1700,10 +1772,39 @@ mod tests {
                 panic!("expected durable admission")
             };
             assert_eq!(result["delivery"], "queued");
+            assert_eq!(result["validation"], "pending");
+            held.wait();
+            assert_eq!(
+                store.operation_receipt(id).unwrap().unwrap().validation,
+                crate::store::sqlite::operations::OperationValidation::Pending
+            );
             assert!(
                 store.creation_receipt(id).unwrap().is_none(),
                 "the domain writer is still held"
             );
+            // A direct CLI creation can win the canonical claim while the
+            // envelope's repository discovery is held. Both retain one result.
+            let directory = repo.path().to_path_buf();
+            let direct = tokio::task::spawn_blocking(move || {
+                crate::engine::creation::create(
+                    id,
+                    crate::engine::creation::TaskCreation {
+                        directory,
+                        title: Some("Receipt fixture".into()),
+                        request: None,
+                        wave: None,
+                        graph: None,
+                        session: None,
+                        worktree: None,
+                        run: false,
+                        agent: None,
+                        approve: false,
+                    },
+                )
+            })
+            .await
+            .unwrap()
+            .unwrap();
             drop(client.writer);
             drop(client.reader);
             client.server.await.unwrap().unwrap();
@@ -1751,6 +1852,8 @@ mod tests {
             );
             assert_eq!(final_receipt.commits[0].stage, "task.filed");
             let task = final_receipt.result.as_ref().unwrap()["task"]["id"].clone();
+            assert_eq!(task, serde_json::to_value(&direct.task.id).unwrap());
+            assert_eq!(store.list_tasks(None).unwrap().len(), 1);
             let (reopened, duplicate) = crate::engine::operation::admit(id, &command).unwrap();
             crate::engine::operation::execute(&reopened, id).unwrap();
             assert_eq!(duplicate.result.as_ref().unwrap()["task"]["id"], task);

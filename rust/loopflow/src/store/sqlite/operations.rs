@@ -256,6 +256,11 @@ impl SqliteStore {
         if validation == "conflict" {
             return Ok(false);
         }
+        if validation == "bound" {
+            // The first verified envelope won. Another validator of that same
+            // reservation cannot revoke it if repository discovery changed later.
+            return Ok(true);
+        }
         if kind != identity.kind
             || canonical
                 .as_ref()
@@ -266,10 +271,8 @@ impl SqliteStore {
             tx.commit()?;
             return Ok(false);
         }
-        if validation != "bound" {
-            tx.execute("UPDATE creation_receipts SET fingerprint=?3,validation='bound',command_error=NULL WHERE request_id=?1 AND candidate_generation=?2",
-                params![id,generation,identity.fingerprint])?;
-        }
+        tx.execute("UPDATE creation_receipts SET fingerprint=?3,validation='bound',command_error=NULL WHERE request_id=?1 AND candidate_generation=?2",
+            params![id,generation,identity.fingerprint])?;
         tx.commit()?;
         Ok(true)
     }
@@ -482,8 +485,24 @@ impl SqliteStore {
         .transpose()
     }
 
-    pub(crate) fn check_creation(&self, identity: &CreationIdentity) -> StoreResult<()> {
+    pub(crate) fn claim_creation(&self, identity: &CreationIdentity) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
+        let existing: Option<(String, Option<String>)> = conn
+            .query_row(
+                "SELECT kind,fingerprint FROM creation_receipts WHERE request_id=?1",
+                [&identity.request_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        if let Some((kind, Some(fingerprint))) = existing {
+            if kind == identity.kind && fingerprint == identity.fingerprint {
+                return Ok(());
+            }
+            return Err(StoreError::Stale(format!(
+                "creation request {} has different content",
+                identity.request_id
+            )));
+        }
         let now = crate::store::rows::now_unix();
         if conn.execute("INSERT INTO creation_receipts(request_id,kind,fingerprint,run,milestone,created_at,updated_at)
             VALUES(?1,?2,?3,?4,'queued',?5,?5)
@@ -661,8 +680,8 @@ mod tests {
         assert!(!store.dispatch_operation("one").unwrap());
         let saved = store.submitted_command("one").unwrap().unwrap();
         // A direct CLI request claims the same canonical identity, atomically.
-        store.check_creation(&identity("one", "canonical")).unwrap();
-        assert!(store.check_creation(&identity("one", "other")).is_err());
+        store.claim_creation(&identity("one", "canonical")).unwrap();
+        assert!(store.claim_creation(&identity("one", "other")).is_err());
         assert!(store
             .validate_operation("one", saved.generation, &identity("one", "canonical"))
             .unwrap());
@@ -732,6 +751,14 @@ mod tests {
         assert!(store
             .validate_operation("old", generation, &identity("old", "canonical"))
             .unwrap());
+        let bound_revision = store.operation_receipt("old").unwrap().unwrap().revision;
+        assert!(store
+            .validate_operation("old", generation, &identity("old", "late-wrong-discovery"))
+            .unwrap());
+        assert_eq!(
+            store.operation_receipt("old").unwrap().unwrap().revision,
+            bound_revision
+        );
         let after = store.creation_receipt("old").unwrap().unwrap();
         assert_eq!(before.result, after.result);
         assert_eq!(before.launch, after.launch);
@@ -746,9 +773,77 @@ mod tests {
     }
 
     #[test]
+    fn legacy_adoption_keeps_complete_continue_and_inspect_dispositions_and_original_sessions() {
+        let (_dir, store) = store();
+        let repository_id = store.ensure_repository("/adoption").unwrap();
+        let task = store
+            .create_task(&crate::work::task::NewTask {
+                id: crate::durable::TaskId::new(),
+                repository_id,
+                project_id: None,
+                title: "Original".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        for (id, milestone, run, disposition) in [
+            (
+                "complete",
+                "filed",
+                false,
+                super::RecoveryDisposition::Complete,
+            ),
+            (
+                "continue",
+                "filed",
+                true,
+                super::RecoveryDisposition::Continue,
+            ),
+            (
+                "inspect",
+                "run_requested",
+                true,
+                super::RecoveryDisposition::Inspect,
+            ),
+        ] {
+            let original = json!({"task":task.id,"session_id":"original-session"});
+            store.conn.lock().unwrap().execute("INSERT INTO creation_receipts(request_id,kind,fingerprint,run,task_id,session_id,milestone,result,created_at,updated_at)
+                VALUES(?1,'task.create','canonical',?2,?3,'original-session',?4,?5,1,1)",
+                params![id,run,task.id.as_str(),milestone,original.to_string()]).unwrap();
+            assert_eq!(
+                store.creation_receipt(id).unwrap().unwrap().disposition,
+                disposition
+            );
+            store
+                .admit_operation(
+                    id,
+                    "task.create",
+                    "submitted",
+                    &json!({"directory":"equivalent"}),
+                )
+                .unwrap();
+            let generation = store.submitted_command(id).unwrap().unwrap().generation;
+            assert!(store
+                .validate_operation(id, generation, &identity(id, "canonical"))
+                .unwrap());
+            let adopted = store.creation_receipt(id).unwrap().unwrap();
+            assert_eq!(adopted.disposition, disposition);
+            assert_eq!(adopted.session_id.as_deref(), Some("original-session"));
+            assert_eq!(adopted.result, Some(original));
+            assert_eq!(adopted.milestone, milestone);
+            assert!(store
+                .operation_receipt(id)
+                .unwrap()
+                .unwrap()
+                .commits
+                .is_empty());
+        }
+    }
+
+    #[test]
     fn unavailable_candidate_normalization_survives_restart_without_replacement_or_dispatch() {
         let (dir, store) = store();
-        store.check_creation(&identity("old", "canonical")).unwrap();
+        store.claim_creation(&identity("old", "canonical")).unwrap();
         let command = json!({"directory":"/unavailable"});
         store
             .admit_operation("old", "task.create", "submitted", &command)
@@ -785,7 +880,7 @@ mod tests {
             .admit_operation("one", "task.create", "submitted", &original)
             .unwrap();
         store
-            .check_creation(&identity("one", "cli-winner"))
+            .claim_creation(&identity("one", "cli-winner"))
             .unwrap();
         let generation = store.submitted_command("one").unwrap().unwrap().generation;
         assert!(!store
@@ -1151,6 +1246,19 @@ mod tests {
                 assert!(!store.dispatch_operation("selected").unwrap());
             })
         });
+        let mut samples = Vec::new();
+        for _ in 0..20 {
+            let began = std::time::Instant::now();
+            store.operation_receipt("selected").unwrap().unwrap();
+            store
+                .admit_operation("selected", "task.complete", "hash", &command)
+                .unwrap();
+            assert!(!store.dispatch_operation("selected").unwrap());
+            samples.push(began.elapsed().as_secs_f64() * 1_000.0);
+        }
+        samples.sort_by(f64::total_cmp);
+        println!("10k Tasks/receipts; lookup + duplicate admission + no redispatch; n=20, median={:.3} ms, P95={:.3} ms (loaded-host diagnostic, not native latency)",
+            (samples[9]+samples[10])/2.0,samples[18]);
         let conn = store.conn.lock().unwrap();
         for sql in traced {
             if !sql.starts_with("SELECT") {
@@ -1164,7 +1272,11 @@ mod tests {
                 })
                 .unwrap();
             for detail in details {
-                assert!(!detail.unwrap().starts_with("SCAN"), "{sql}");
+                let detail = detail.unwrap();
+                assert!(
+                    !detail.starts_with("SCAN") || detail == "SCAN CONSTANT ROW",
+                    "{detail}: {sql}"
+                );
             }
         }
     }

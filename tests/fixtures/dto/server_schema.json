@@ -2943,7 +2943,7 @@
           "properties": {
             "items": {
               "items": {
-                "$ref": "#/$defs/PlanBoardTask"
+                "$ref": "#/$defs/ProjectSummary"
               },
               "type": "array"
             },
@@ -2989,7 +2989,7 @@
           "properties": {
             "items": {
               "items": {
-                "$ref": "#/$defs/ProjectSummary"
+                "$ref": "#/$defs/RoadmapTask"
               },
               "type": "array"
             },
@@ -3035,7 +3035,7 @@
           "properties": {
             "items": {
               "items": {
-                "$ref": "#/$defs/RoadmapTask"
+                "$ref": "#/$defs/SessionHistory"
               },
               "type": "array"
             },
@@ -3081,7 +3081,7 @@
           "properties": {
             "items": {
               "items": {
-                "$ref": "#/$defs/SessionHistory"
+                "$ref": "#/$defs/PlanBoardTask"
               },
               "type": "array"
             },
@@ -6340,7 +6340,7 @@
           "type": "string"
         },
         "tasks": {
-          "$ref": "#/$defs/Evidence"
+          "$ref": "#/$defs/Evidence4"
         }
       },
       "required": [
@@ -9814,7 +9814,7 @@
           "type": "string"
         },
         "tasks": {
-          "$ref": "#/$defs/Evidence3",
+          "$ref": "#/$defs/Evidence2",
           "description": "Every Task once; each names its Wave."
         },
         "waves": {
@@ -16077,7 +16077,7 @@
       "description": "`lf wave status <wave>` and `lf wave plan <wave>`: current planning,\nTask conditions and Session history. Wire type; no defaults.",
       "properties": {
         "history": {
-          "$ref": "#/$defs/Evidence4",
+          "$ref": "#/$defs/Evidence3",
           "description": "This Wave's Machine-local Session history, newest first."
         },
         "metric_portfolio": {
@@ -16088,14 +16088,14 @@
           "$ref": "#/$defs/ProjectReadiness"
         },
         "projects": {
-          "$ref": "#/$defs/Evidence2"
+          "$ref": "#/$defs/Evidence"
         },
         "setup": {
           "$ref": "#/$defs/WaveSetup",
           "description": "What the Wave's Tasks run, where, and which logins pay, with each source."
         },
         "tasks": {
-          "$ref": "#/$defs/Evidence3"
+          "$ref": "#/$defs/Evidence2"
         },
         "unavailable_tasks": {
           "description": "Durable Project Work that cannot join the current PM plan, including\nnon-terminal Tasks stranded under a terminal historical Project.",
@@ -16326,7 +16326,7 @@
           "$ref": "#/$defs/ProjectReadiness"
         },
         "projects": {
-          "$ref": "#/$defs/Evidence2"
+          "$ref": "#/$defs/Evidence"
         },
         "unavailable_tasks": {
           "items": {

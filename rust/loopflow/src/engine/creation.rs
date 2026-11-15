@@ -89,7 +89,7 @@ pub fn create(id: &str, mut input: TaskCreation) -> Result<TaskCreateReceipt> {
     );
     store
         .sqlite
-        .check_creation(&identity)
+        .claim_creation(&identity)
         .map_err(|error| match error {
             crate::store::StoreError::Stale(message) => anyhow::Error::from(
                 Error::new(ErrorCode::Conflict, message).with(serde_json::json!({"request_id":id})),

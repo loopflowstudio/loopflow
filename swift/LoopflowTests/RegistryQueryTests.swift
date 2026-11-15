@@ -14,12 +14,12 @@ struct RegistryQueryTests {
             func submit(title: String) throws -> String {
                 attempts += 1
                 if title == "Uncertain" { throw RegistryQueryError("Outcome unknown") }
-                return #"{"id":"task-retained","identifier":"FIX-1","title":"Keep the conversation"}"#
+                return #"{"task":{"id":"task-retained","identifier":"FIX-1","title":"Keep the conversation"},"graph":null,"session_id":null,"milestone":"filed"}"#
             }
         }
         let adoption = Adoption()
         let query = RegistryQuery(write: { change in
-            guard case .taskCreate(_, _, let title) = change else {
+            guard case .taskCreate(_, _, let title?, _, _, _, _, _) = change else {
                 throw RegistryQueryError("Unexpected write")
             }
             return try await adoption.submit(title: title)
@@ -68,7 +68,7 @@ struct RegistryQueryTests {
         var iterator = subscription.lines.makeAsyncIterator()
         let line = try #require(await iterator.next())
         let frame = try WorkFrame.decode(part: .task,
-            scope: WorkScope(repo: nil, headless: false, task: "task", activity: nil), sequence: 0, line: line)
+            scope: WorkScope(repo: nil, headless: false, task: "task", activity: nil, taskListWave: nil), sequence: 0, line: line)
         guard case .task(let reading?) = frame.content else { Issue.record("Missing Task reading"); return }
         #expect(reading.graphProcesses == [expected])
         #expect(reading.work.graph?.position == .at(step: "demo"))
@@ -96,12 +96,12 @@ struct RegistryQueryTests {
         }
         #expect(try object(ServedRead.sessionHistory(since: "7d", limit: 50, wave: nil, project: "p", task: nil))
             == object(#"{"kind":"session.history","since":"7d","limit":50,"wave":null,"project":"p","task":null}"#))
-        let sessions = ServedRead.sessionList(directory: "/r", headless: true, after: nil, limit: nil)
-        #expect(try object(sessions) == object(#"{"kind":"session.list","directory":"/r","headless":true,"after":null,"limit":null}"#))
-        #expect(sessions.argv == ["session", "list", "--interactive", "all", "--json", "--limit", "0"])
-        let page = ServedRead.sessionList(directory: "/r", headless: true, after: "cursor", limit: 100)
-        #expect(try object(page) == object(#"{"kind":"session.list","directory":"/r","headless":true,"after":"cursor","limit":100}"#))
-        #expect(page.argv == ["session", "list", "--json", "--page", "--interactive", "all", "--limit", "100", "--after", "cursor"])
+        let sessions = ServedRead.sessionList(directory: "/r", headless: true, after: nil, limit: nil, task: nil)
+        #expect(try object(sessions) == object(#"{"kind":"session.list","directory":"/r","headless":true,"after":null,"limit":null,"task":null}"#))
+        #expect(sessions.argv == ["session", "list", "--headless", "--json", "--limit", "0"])
+        let page = ServedRead.sessionList(directory: "/r", headless: true, after: "cursor", limit: 100, task: nil)
+        #expect(try object(page) == object(#"{"kind":"session.list","directory":"/r","headless":true,"after":"cursor","limit":100,"task":null}"#))
+        #expect(page.argv == ["session", "list", "--json", "--page", "--headless", "--limit", "100", "--after", "cursor"])
         #expect(try object(ServedRead.taskDiff(issue: "FIX-1", path: nil, base: "parent", head: nil, draft: nil))
             == object(#"{"kind":"task.diff","issue":"FIX-1","path":null,"base":"parent","head":null,"draft":null}"#))
         let view = ServedRead.desktopViewGet(directory: "/r", expression: "state:backlog")
@@ -119,8 +119,8 @@ struct RegistryQueryTests {
         func object(_ json: String) throws -> NSDictionary {
             try #require(JSONSerialization.jsonObject(with: Data(json.utf8)) as? NSDictionary)
         }
-        let move = ServedWrite.taskMove(directory: "/r", issue: "FIX-1", wave: nil)
-        #expect(try object(move) == object(#"{"kind":"task.move","directory":"/r","issue":"FIX-1","wave":null}"#))
+        let move = ServedWrite.taskMove(directory: "/r", issue: "FIX-1", wave: nil, machine: nil)
+        #expect(try object(move) == object(#"{"kind":"task.move","directory":"/r","issue":"FIX-1","wave":null,"machine":null}"#))
         #expect(move.argv == ["task", "move", "FIX-1", "--no-wave", "--json"])
         #expect(move.cwd == "/r")
         let stop = ServedWrite.taskHold(directory: "/r", issue: "FIX-1")
@@ -146,10 +146,10 @@ struct RegistryQueryTests {
         #expect(try object(start) == object(
             #"{"kind":"session.resume","directory":"/r","id":null,"task":"FIX-1","wave":null,"agent":null,"intent":"start"}"#))
         #expect(start.argv == ["session", "resume", "--start-if-free", "--task", "FIX-1", "--prepare", "--json"])
-        let restart = ServedWrite.sessionNew(directory: "/r", id: "session_1", agent: "codex")
+        let restart = ServedWrite.sessionNew(directory: "/r", requestID: "fixture-thread", id: "session_1", agent: "codex")
         #expect(try object(restart) == object(
-            #"{"kind":"session.new","directory":"/r","id":"session_1","agent":"codex"}"#))
-        #expect(restart.argv == ["--agent", "codex", "session", "new", "session_1", "--prepare", "--json"])
+            #"{"kind":"session.new","directory":"/r","request_id":"fixture-thread","id":"session_1","agent":"codex"}"#))
+        #expect(restart.argv == ["--agent", "codex", "session", "new", "session_1", "--request-id", "fixture-thread", "--prepare", "--json"])
     }
 
     @Test("Paired task and dashboard actions keep distinct wire kinds")
@@ -390,7 +390,7 @@ struct RegistryQueryTests {
           "reason": "ready",
           "updated_at": "2026-07-06T00:00:00Z",
           "provider": "codex",
-          "owner": {"person": "Jack Heart", "machine": {"id": null, "label": null}}
+          "owner": {"person": "Jack Heart", "person_id": null, "machine": {"id": null, "label": null}}
         },
         "graph_name":"feature","graph_source":"repository","latest_graph_process":null,"execution":null,"run_control":{"unavailable":null},"ship_control":{"unavailable":null},"shipping":null,
         "next_move": {

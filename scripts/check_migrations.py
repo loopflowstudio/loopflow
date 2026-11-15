@@ -25,6 +25,7 @@ Stdlib only, so CI can run it without a Python environment.
 
 from __future__ import annotations
 
+import argparse
 import datetime as dt
 import os
 import re
@@ -436,6 +437,12 @@ def _check_contract(name: str, sql: str, drops: list[str], catalog: Catalog) -> 
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--write-package-order", action="store_true",
+        help="record origin/main's migration order in the source package",
+    )
+    args = parser.parse_args()
     local = _local_migrations()
     released = _released_names(local)
     for name in local:
@@ -447,6 +454,16 @@ def main() -> None:
     if main_migrations is not None and unmerged:
         _check_staging(local, main_migrations, unmerged)
     _check_runtime_sql()
+    if args.write_package_order:
+        if main_migrations is None or unmerged:
+            _fail("package order requires every migration on origin/main")
+        catalog = Catalog.of_origin_main(local)
+        slugs = [name for name in catalog.ordered() if SLUG.match(name)]
+        if any(name not in catalog.added for name in slugs):
+            _fail("package order requires origin/main's full migration history")
+        (REPO_ROOT / "rust/loopflow/migration-order.txt").write_text(
+            "".join(f"{Path(name).stem}\n" for name in slugs)
+        )
     # A merge-queue group may carry several Tasks' migrations at once.
     print(f"unmerged: {', '.join(unmerged)}" if unmerged else "no unmerged migration")
 

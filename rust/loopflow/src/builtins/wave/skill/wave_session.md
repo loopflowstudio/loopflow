@@ -39,9 +39,10 @@ watch, check back or follow up.
   lands and repairs it, and reading its status restarts one that died. Nothing
   resumes a stopped Graph: read its history and what it changed before starting
   fresh work with `lf task run`.
-- `lf task run <issue>` launches a Task. `lf -b task run` and `lf ship` approve
-  Auto-Ship, which may merge its PR: run them only when asked to ship or land,
-  and never to re-ship a Task someone stopped.
+- `lf task run <issue>` launches a Task. `lf -b task run`, `lf ship` and an
+  `lf task run` with no interactive step left ahead approve Auto-Ship, which
+  may merge its PR: run them only when asked to ship or land, and never to
+  re-ship a Task someone stopped.
 - This conversation keeps the instructions it launched with.
   `lf session new --wave <wave>` restarts it on a fresh thread with current
   instructions, seeded with what this one knew.

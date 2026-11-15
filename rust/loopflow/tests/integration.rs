@@ -38,6 +38,7 @@ mod settings_launch_tests;
 mod store_contention;
 mod sync_tests;
 mod task_abandonment;
+mod task_create_tests;
 mod task_diff_tests;
 mod task_github_cache_tests;
 mod task_handoff_tests;

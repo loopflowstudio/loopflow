@@ -131,15 +131,6 @@ impl OpenCodeDecoder {
             if message["type"] == "assistant" {
                 joined.push((request_id, message));
                 assistants.push(message);
-                if !message["time"]["completed"].is_null() {
-                    facts.push(
-                        ProviderFact::Usage {
-                            turn: turn(request_id),
-                            receipt: json!({"provider":"opencode","message":message}),
-                        }
-                        .into(),
-                    );
-                }
             }
             if message["type"] != "idle" {
                 continue;

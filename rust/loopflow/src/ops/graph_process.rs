@@ -68,6 +68,19 @@ impl GraphProcess {
             .unwrap_or_default()
     }
 
+    pub(crate) fn step_detail(&self, step: &GraphProcessStep) -> crate::durable::GraphStepProcess {
+        crate::durable::GraphStepProcess {
+            lf_process_id: step.process.id.clone(),
+            label: self.label(step),
+            key: step.key,
+            iterations: step.iterations.clone(),
+            started_at: step.process.started_at,
+            completed_at: step.process.completed_at,
+            outcome: step.process.outcome.clone(),
+            exit_code: step.process.exit_code,
+        }
+    }
+
     /// How far the Graph got on the graph it launched with.
     pub(crate) fn detail(
         &self,
@@ -94,16 +107,7 @@ impl GraphProcess {
             steps: self
                 .steps
                 .iter()
-                .map(|step| crate::durable::GraphStepProcess {
-                    lf_process_id: step.process.id.clone(),
-                    label: self.label(step),
-                    key: step.key,
-                    iterations: step.iterations.clone(),
-                    started_at: step.process.started_at,
-                    completed_at: step.process.completed_at,
-                    outcome: step.process.outcome.clone(),
-                    exit_code: step.process.exit_code,
-                })
+                .map(|step| self.step_detail(step))
                 .collect(),
         }
     }

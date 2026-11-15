@@ -114,7 +114,7 @@ mod tests {
     #[test]
     fn planning_receipts_match_the_shared_fixtures() {
         let connected: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../tests/fixtures/dto/server/wave_plan_connected.json"
+            "../../tests/fixtures/dto/server/wave_plan_connected.json"
         ))
         .unwrap();
         let results: Vec<LinearInitResult> =
@@ -122,7 +122,7 @@ mod tests {
         assert_eq!(serde_json::to_value(&results).unwrap(), connected["result"]);
         assert_eq!(results[0].wave, "product");
         let reteamed: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../tests/fixtures/dto/server/wave_plan_reteamed.json"
+            "../../tests/fixtures/dto/server/wave_plan_reteamed.json"
         ))
         .unwrap();
         let result: LinearReteamResult =

@@ -1,0 +1,13 @@
+{
+  "type": "event",
+  "id": "task",
+  "seq": 1,
+  "event": {
+    "kind": "task.shipped",
+    "task_id": "task_11111111111111111111111111111111",
+    "pr_id": "pr_11111111111111111111111111111111",
+    "number": 42,
+    "url": "https://example.com/pull/42",
+    "merge_commit": "abc"
+  }
+}

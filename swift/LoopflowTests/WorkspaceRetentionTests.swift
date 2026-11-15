@@ -184,10 +184,9 @@ struct WorkspaceRetentionTests {
         let repository = WorkWorkspaceKey(repository: "repo", kind: .repository, id: "repo")
         let wave = WorkWorkspaceKey(repository: "repo", kind: .wave, id: "wave-1")
         registry.prefetchPrimary(repository, title: "repo", location: location)
-        registry.prefetchPrimary(wave, title: "product", wave: "product", location: location)
-        registry.prefetchPrimary(wave, title: "product", wave: "product", location: location)
+        registry.prefetchPrimary(wave, title: "product", location: location)
+        registry.prefetchPrimary(wave, title: "product", location: location)
         #expect(registry.warmPrimaries == [repository, wave])
-        #expect(registry.retained(wave)?.wave == "product")
         let limit = SessionsWorkspaceRegistry.warmConversationLimit
         let keys = (0..<limit + 1).map { WorkWorkspaceKey(repository: "repo", kind: .task, id: "task-\($0)") }
         for key in keys { registry.prefetch(key, title: key.id, location: location, completed: false) }
@@ -200,7 +199,7 @@ struct WorkspaceRetentionTests {
         primary.closePane(primary.multiplexer.sessionPane!.id)
         #expect(primary.conversationClosed)
         #expect(registry.warmPrimaries == [repository])
-        registry.prefetchPrimary(wave, title: "product", wave: "product", location: location)
+        registry.prefetchPrimary(wave, title: "product", location: location)
         #expect(registry.warmPrimaries == [repository], "refresh never undoes Close")
         registry.open(wave, title: "product", location: location)
         #expect(!primary.conversationClosed)

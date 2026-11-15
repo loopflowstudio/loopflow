@@ -25,29 +25,27 @@ pub enum ContextMoment {
     Start,
     Compact,
     Tool,
-    /// A turn ended: acquire Linear changes, which become steers for the next boundary.
+    /// A tool boundary, or a bare launch's prompt: the hook reads the
+    /// Session's unread steers and Task update from the store and reports
+    /// nothing to the server.
+    Steer,
+    /// A turn ended: the Machine server records it, then refreshes planning
+    /// (whose changes become steers for the next boundary) and applies a
+    /// pending Session move.
     Stop,
-    /// Observe Task movement from the native provider’s asynchronous hook.
-    TaskUpdates,
     /// A native turn ended on a usage limit: start `RecordLimit` and return.
     Limit,
     /// Started by a limit hook: record the limit and move the shared login to
     /// an account with capacity.
     RecordLimit,
-    /// Pi's native lifecycle event on stdin: turn, usage and completion receipts.
-    PiEvent,
-    /// A Pi bash command is about to run: join its tool group to the watchdog
-    /// that ends the group with its provider.
-    ToolGroup,
-    /// Started by a Stop hook: once that hook exits, apply the Session's
-    /// pending move.
-    Move,
 }
 
 /// Captured source identities, not frozen context. Hooks reread scratch and Wave
 /// files; references and the active skill retain their complete launch bytes.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ContextDelivery {
+    /// Captured before launch; managed start/compact boundaries refresh it.
+    pub identity: Option<SessionIdentity>,
     /// Durable identity and canonical main-checkout address captured at launch.
     pub repository: Option<(crate::durable::RepositoryId, PathBuf)>,
     pub repo: PathBuf,
@@ -57,6 +55,12 @@ pub struct ContextDelivery {
     /// Sources already supplied in task text; absent in historical deliveries.
     pub submitted_docs: Option<Vec<PathBuf>>,
     pub home: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SessionIdentity {
+    pub session: String,
+    pub task: Option<(String, String)>,
 }
 
 impl ContextDelivery {
@@ -113,6 +117,7 @@ impl ContextDelivery {
             .transpose()?
             .flatten();
         Ok(Self {
+            identity: None,
             repository,
             repo: repo.clone(),
             wave: components.wave.clone(),
@@ -133,18 +138,41 @@ impl ContextDelivery {
         })
     }
 
-    pub(crate) fn relocate(&mut self) -> anyhow::Result<()> {
-        let Some((id, source)) = &self.repository else {
-            return Ok(());
+    /// Refresh the identity the launch owner knows, without making hooks open
+    /// the store. Bare launches keep this snapshot for their whole run.
+    pub(crate) fn identify(
+        &mut self,
+        store: &crate::store::sqlite::SqliteStore,
+        session: &str,
+    ) -> crate::store::StoreResult<bool> {
+        let task = match store.session_task_ids(session)?.as_slice() {
+            [task] => store.task(task)?,
+            _ => None,
         };
-        let store =
-            crate::store::sqlite::SqliteStore::open_for_hook(&self.home.join("loopflow.db"))?;
+        let identity = Some(SessionIdentity {
+            session: session.to_owned(),
+            task: task.map(|task| (task.identifier, task.title)),
+        });
+        let changed = self.identity != identity;
+        self.identity = identity;
+        Ok(changed)
+    }
+
+    /// Follow a moved checkout to where the store now places the repository;
+    /// returns whether anything moved.
+    pub(crate) fn relocate(
+        &mut self,
+        store: &crate::store::sqlite::SqliteStore,
+    ) -> anyhow::Result<bool> {
+        let Some((id, source)) = &self.repository else {
+            return Ok(false);
+        };
         let Some(destination) = store.repository_path(id)? else {
-            return Ok(());
+            return Ok(false);
         };
         let destination = PathBuf::from(destination);
         if *source == destination {
-            return Ok(());
+            return Ok(false);
         }
         let update = |path: &mut PathBuf| {
             if let Ok(relative) = path.strip_prefix(source) {
@@ -162,10 +190,18 @@ impl ContextDelivery {
             update(path);
         }
         self.repository = Some((id.clone(), destination));
-        Ok(())
+        Ok(true)
     }
 
     pub fn block(&self, moment: ContextMoment) -> Result<ContextBlock, CoreError> {
+        self.block_with_prefix(moment, "")
+    }
+
+    pub(crate) fn block_with_prefix(
+        &self,
+        moment: ContextMoment,
+        prefix: &str,
+    ) -> Result<ContextBlock, CoreError> {
         let wave = self.wave.as_deref();
         let mut documents = gather_documents(&GatherSpec {
             repo_root: self.repo.clone(),
@@ -182,6 +218,21 @@ impl ContextDelivery {
         });
         let branch = crate::git::current_branch(&self.repo).ok().flatten();
         order_documents(&mut documents, wave, branch.as_deref());
+        let identity = self
+            .identity
+            .as_ref()
+            .map(|identity| {
+                let mut text = format!("This Session: {}\n", identity.session);
+                if let Some((identifier, title)) = &identity.task {
+                    text.push_str(&format!(
+                        "This Session's Task: {identifier} {}\n",
+                        serde_json::to_string(title).expect("title serializes")
+                    ));
+                }
+                render_reference(&text)
+            })
+            .unwrap_or_default();
+        let prefix = format!("{identity}{prefix}");
         render_block(
             &self.repo,
             wave,
@@ -189,59 +240,47 @@ impl ContextDelivery {
             self.skill_file.as_deref(),
             &self.references,
             documents,
+            &prefix,
         )
     }
 
-    pub(crate) fn block_with_prefix(
-        &self,
-        moment: ContextMoment,
-        prefix: &str,
-    ) -> Result<String, CoreError> {
-        if matches!(moment, ContextMoment::Tool) {
-            return Ok(prefix.to_owned());
-        }
-        let block = self.block(moment)?;
-        if prefix.len() + block.text.len() <= HOOK_CONTEXT_BYTES {
-            return Ok(format!("{prefix}{}", block.text));
-        }
-        let pointer = block
-            .manifest_path
-            .strip_prefix(&self.repo)
-            .unwrap_or(&block.manifest_path);
-        let text = format!(
-            "{prefix}\nRead the current reference context and saved active skill from {}.\n",
-            serde_json::to_string(pointer).expect("context path serializes")
-        );
-        if text.len() > HOOK_CONTEXT_BYTES {
-            return Err(CoreError::ExecutionFailed(
-                "Steer notice and context pointer exceed the hook budget".into(),
-            ));
-        }
-        Ok(text)
-    }
-
     /// Each provider process receives its own saved launch context separately
-    /// from the declarations the provider asks a person to trust.
+    /// from the declarations the provider asks a person to trust. Returns the
+    /// delivery file the provider's hooks read.
     pub(crate) fn configure_hooks(
         &self,
         command: &mut std::process::Command,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<PathBuf> {
         // Provider environments outlive directory moves. Keep their launch
         // description in the Machine, where the hook's address stays valid.
         let directory = self.home.join("context-deliveries");
-        fs::create_dir_all(&directory)?;
         let path = directory.join(format!("{}.json", uuid::Uuid::new_v4()));
-        let file = tempfile::NamedTempFile::new_in(&directory)?;
-        serde_json::to_writer(file.as_file(), self)?;
-        file.persist(&path)?;
-        command.env(CONTEXT_DELIVERY_ENV, path);
-        Ok(())
+        self.save(&path)?;
+        command.env(CONTEXT_DELIVERY_ENV, &path);
+        Ok(path)
     }
 
     /// App-server hooks inherit the server environment, not thread shell policy,
     /// so each conversation is bound by its native ID before its first turn.
     pub(crate) fn bind_codex_session(&self, session: &str) -> anyhow::Result<()> {
-        let path = native_delivery_path(&self.home, session);
+        self.save(&native_delivery_path(&self.home, session))
+    }
+
+    /// The delivery file at `path`; errors name the file, never its contents.
+    pub(crate) fn load(path: &Path) -> anyhow::Result<Self> {
+        let bytes = fs::read(path).map_err(|error| {
+            anyhow::anyhow!("Read provider context delivery {}: {error}; reconnect the Loopflow Session to restore its binding", path.display())
+        })?;
+        serde_json::from_slice(&bytes).map_err(|error| {
+            anyhow::anyhow!(
+                "Decode provider context delivery {}: {error}",
+                path.display()
+            )
+        })
+    }
+
+    /// Replace the delivery file at `path` whole, so a hook never reads half of it.
+    pub(crate) fn save(&self, path: &Path) -> anyhow::Result<()> {
         let parent = path.parent().expect("context binding has a parent");
         fs::create_dir_all(parent)?;
         let file = tempfile::NamedTempFile::new_in(parent)?;
@@ -250,7 +289,16 @@ impl ContextDelivery {
         Ok(())
     }
 
-    pub fn hook_settings(&self) -> anyhow::Result<serde_json::Value> {
+    /// The provider hooks of one launch. Every launch prints its context
+    /// block at session start and after a compaction, and reads its own
+    /// steers and Task update from the store after a tool call and at a
+    /// prompt. A launch the Machine server holds (`Holder::reports_turns`)
+    /// also reports its starts, prompts and turn ends to the server, which
+    /// records them.
+    pub fn hook_settings(
+        &self,
+        holder: crate::session::Holder,
+    ) -> anyhow::Result<serde_json::Value> {
         let executable = crate::os_process::resolve_lf_binary()?;
         let quote = |path: &Path| crate::os_process::shell_escape(&path.to_string_lossy());
         let command = format!(
@@ -258,37 +306,46 @@ impl ContextDelivery {
             quote(&self.home),
             quote(&executable),
         );
-        // Tool boundaries start lf only for new steering. Prompt boundaries
-        // always run: they also record native turn activity.
-        let steer = format!(
-            // dash's -nt is false when the second file is missing, so test existence first.
-            "[ -n \"${seen}\" ] || exit 0; [ -e \"${seen}\" ] && {{ [ ! -e {latest} ] || [ \"${seen}\" -nt {latest} ]; }} && exit 0; {command} tool",
+        let context = |moment: &str| serde_json::json!({"type":"command","command":format!("{command} {moment}"),"timeout":30});
+        let hook = |command: String| serde_json::json!([{"hooks":[{"type":"command","command":command,"timeout":10}]}]);
+        // Start lf only for new steering: skip while the seen marker is newer
+        // than every marker a steer for this conversation touches. dash's -nt
+        // is false when the second file is missing, so test existence first.
+        let gate = format!(
+            "s=\"${seen}\"; [ -n \"$s\" ] || exit 0; n() {{ [ ! -e \"$1\" ] || [ \"$s\" -nt \"$1\" ]; }}; [ -e \"$s\" ] && n {latest} && n \"${session}\" && n \"${task}\" && exit 0;",
             seen = crate::steer::STEER_SEEN_ENV,
             latest = quote(&crate::steer::latest_marker(&self.home)),
+            session = crate::steer::STEER_SESSION_ENV,
+            task = crate::steer::STEER_TASK_ENV,
         );
+        let start = serde_json::json!([
+            {"matcher": "startup|resume|clear", "hooks": [context("start")]},
+            {"matcher": "compact", "hooks": [context("compact")]},
+        ]);
+        let steer = hook(format!("{gate} {command} steer"));
+        if !holder.reports_turns() {
+            return Ok(serde_json::json!({
+                "PostToolUse": steer,
+                "UserPromptSubmit": steer,
+                "SessionStart": start,
+            }));
+        }
+        // A held prompt always runs: the server records the turn it starts.
         Ok(serde_json::json!({
-            "Stop": [{"hooks":[{"type":"command","command":format!("{command} stop"),"timeout":10},
-                {"type":"command","command":format!("{command} task-updates"),"async":true}]}],
+            "Stop": hook(format!("{command} stop")),
             "StopFailure": [{"matcher":"rate_limit","hooks":[{"type":"command","command":format!("{command} limit"),"timeout":30}]}],
-            "PostToolUse": [{"hooks": [{"type":"command", "command": steer, "timeout":30}]}],
-            "UserPromptSubmit": [{"hooks": [{"type":"command", "command": format!("{command} tool"), "timeout":30}]}],
-            "SessionStart": [
-            {"matcher": "startup|resume|clear", "hooks": [{"type":"command", "command": format!("{command} start"), "timeout": 30}, {"type":"command", "command":format!("{command} task-updates"), "async":true}]},
-            {"matcher": "compact", "hooks": [{"type":"command", "command": format!("{command} compact"), "timeout": 30}]}
-        ]}))
+            "PostToolUse": steer,
+            "UserPromptSubmit": hook(format!("{command} tool")),
+            "SessionStart": start,
+        }))
     }
 }
 
-/// A conversation the person starts on a Session's app-server is that Session's,
-/// so it takes the binding of the one it replaces. A Session launched without
-/// context has no binding to carry.
-pub(crate) fn follow_codex_session(home: &Path, from: &str, to: &str) -> anyhow::Result<()> {
-    let bytes = match fs::read(native_delivery_path(home, from)) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(error.into()),
-    };
-    serde_json::from_slice::<ContextDelivery>(&bytes)?.bind_codex_session(to)
+/// Where a launch's start hook leaves the provider thread it started, beside
+/// the launch's delivery file. Only a bare Codex needs it, so lf creates the
+/// file for that launch alone: it names every other bare thread before launch.
+pub(crate) fn reported_thread_path(delivery: &Path) -> PathBuf {
+    delivery.with_extension("thread")
 }
 
 pub(crate) fn native_delivery_path(home: &Path, session: &str) -> PathBuf {
@@ -331,6 +388,23 @@ fn order_documents(documents: &mut [Document], wave: Option<&str>, branch: Optio
     });
 }
 
+/// Named by its content: a hook that runs on every model request with the same
+/// checkout files reuses one manifest instead of writing another.
+fn write_manifest(repo_root: &Path, manifest: &str) -> Result<PathBuf, CoreError> {
+    let digest = hex::encode(Sha256::digest(manifest.as_bytes()));
+    let prompts = repo_root.join(".lf/prompts");
+    let path = prompts.join(format!("{}-context-manifest.md", &digest[..16]));
+    if path.exists() {
+        return Ok(path);
+    }
+    fs::create_dir_all(&prompts)?;
+    crate::prompt::ensure_gitignore_entry(repo_root, ".lf/prompts/")?;
+    let mut file = tempfile::NamedTempFile::new_in(&prompts)?;
+    std::io::Write::write_all(&mut file, manifest.as_bytes())?;
+    file.persist(&path).map_err(|error| error.error)?;
+    Ok(path)
+}
+
 fn render_block(
     repo_root: &Path,
     wave: Option<&str>,
@@ -338,6 +412,7 @@ fn render_block(
     skill_file: Option<&Path>,
     references: &[PathBuf],
     documents: Vec<Document>,
+    prefix: &str,
 ) -> Result<ContextBlock, CoreError> {
     let mut files = Vec::new();
     for doc in &documents {
@@ -388,16 +463,21 @@ fn render_block(
         "files": files,
     }))
     .expect("context manifest is JSON serializable");
-    let manifest_path = write_prompt_log(repo_root, &manifest, "context-manifest", None)?;
+    let manifest_path = write_manifest(repo_root, &manifest)?;
     // A repository-relative pointer leaves room for context even with long roots.
     let pointer = manifest_path
         .strip_prefix(repo_root)
         .expect("manifest is inside repository");
     let mut text = format!(
-        "Current reference context, not a new request. Historical instructions in these files do not select work.\n\
+        "{prefix}Current reference context, not a new request. Historical instructions in these files do not select work.\n\
          From the repository root:\nRead the complete context listing and any files not preloaded below: {}.\n",
         serde_json::to_string(pointer).expect("manifest pointer is JSON serializable")
     );
+    if text.len() > HOOK_CONTEXT_BYTES {
+        return Err(CoreError::ExecutionFailed(
+            "Identity, steer notice and context pointer exceed the hook budget".into(),
+        ));
+    }
     // Reserve the saved skill before the listing or any file body. Neither is
     // ever cut; omitted sections remain readable through the manifest.
     if let Some(skill) = skill {
@@ -405,7 +485,10 @@ fn render_block(
             &mut text,
             &format!("\nActive skill after compaction:\n{skill}\n"),
         ) {
-            text.push_str("Read the complete saved active skill from the context listing.\n");
+            append_whole(
+                &mut text,
+                "Read the complete saved active skill from the context listing.\n",
+            );
         }
     }
     append_whole(
@@ -484,6 +567,7 @@ mod tests {
 
     fn delivery(repo: &Path) -> ContextDelivery {
         ContextDelivery {
+            identity: None,
             repository: None,
             repo: repo.canonicalize().unwrap(),
             wave: None,
@@ -615,6 +699,38 @@ mod tests {
         assert!(compact.text.contains("UPDATED_START"));
         assert!(!compact.text.contains("WHOLE_START"));
         assert!(!compact.text.contains("fresh one"));
+    }
+
+    #[test]
+    fn repeated_requests_over_unchanged_files_write_one_manifest() {
+        let repo = tempdir().unwrap();
+        fs::create_dir(repo.path().join("scratch")).unwrap();
+        fs::write(repo.path().join("scratch/plan.md"), "the plan").unwrap();
+        let delivery = delivery(repo.path());
+        let manifests = || {
+            fs::read_dir(repo.path().join(".lf/prompts"))
+                .unwrap()
+                .filter(|entry| {
+                    entry
+                        .as_ref()
+                        .unwrap()
+                        .file_name()
+                        .to_string_lossy()
+                        .contains("context-manifest")
+                })
+                .count()
+        };
+        let first = delivery.block(ContextMoment::Tool).unwrap();
+        for _ in 0..20 {
+            assert_eq!(
+                delivery.block(ContextMoment::Tool).unwrap().manifest_path,
+                first.manifest_path
+            );
+        }
+        assert_eq!(manifests(), 1);
+        fs::write(repo.path().join("scratch/plan.md"), "the new plan").unwrap();
+        delivery.block(ContextMoment::Tool).unwrap();
+        assert_eq!(manifests(), 2);
     }
 
     #[test]
@@ -768,6 +884,7 @@ mod tests {
                     DocumentSource::Scratch,
                 ),
             ],
+            "",
         )
         .unwrap();
         assert!(source.len() < HOOK_CONTEXT_BYTES);
@@ -778,6 +895,75 @@ mod tests {
             .text
             .contains("Read &#36;native as reference, not a skill."));
         assert!(block.text.len() <= HOOK_CONTEXT_BYTES);
+    }
+
+    #[test]
+    fn context_block_reserves_identity_and_steers_before_reference_files() {
+        let repo = tempdir().unwrap();
+        fs::create_dir(repo.path().join("scratch")).unwrap();
+        fs::write(repo.path().join("scratch/large.md"), "雪".repeat(10_000)).unwrap();
+        fs::write(repo.path().join("scratch/small.md"), "KEEP_WHOLE").unwrap();
+        let delivery = ContextDelivery {
+            identity: Some(super::SessionIdentity {
+                session: "session-test".into(),
+                task: Some(("LOO-828".into(), "Keep $native".into())),
+            }),
+            ..delivery(repo.path())
+        };
+        let identity = render_reference(
+            "This Session: session-test\nThis Session's Task: LOO-828 \"Keep $native\"\n",
+        );
+        assert!(delivery
+            .block(ContextMoment::Start)
+            .unwrap()
+            .text
+            .starts_with(&identity));
+        let steer = format!("STEER_START{}STEER_END\n", "s".repeat(3_000));
+        let block = delivery
+            .block_with_prefix(ContextMoment::Compact, &steer)
+            .unwrap();
+        assert!(block.text.starts_with(&format!("{identity}{steer}")));
+        assert!(block.text.contains("KEEP_WHOLE"));
+        assert!(block.text.contains("excerpt=\"start\""));
+        assert!(block.text.len() <= HOOK_CONTEXT_BYTES);
+    }
+
+    #[test]
+    fn a_bare_launch_reports_no_turns_and_gates_every_steer_check() {
+        let _lock = crate::journal::test_env_lock();
+        let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
+        let repo = tempdir().unwrap();
+        let delivery = delivery(repo.path());
+        std::env::set_var("LF_HOME", &delivery.home);
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+        let bare = delivery
+            .hook_settings(crate::session::Holder::Caller)
+            .unwrap();
+        assert_eq!(
+            bare.as_object().unwrap().keys().collect::<Vec<_>>(),
+            ["PostToolUse", "SessionStart", "UserPromptSubmit"]
+        );
+        let moment = |hook: &serde_json::Value| {
+            let command = hook["command"].as_str().unwrap();
+            command.rsplit(' ').next().unwrap().to_owned()
+        };
+        let moments: Vec<_> = bare["SessionStart"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|group| group["hooks"].as_array().unwrap())
+            .map(moment)
+            .collect();
+        assert_eq!(moments, ["start", "compact"]);
+        // No server records a bare prompt, so it too waits for a marker.
+        for event in ["PostToolUse", "UserPromptSubmit"] {
+            let hook = &bare[event][0]["hooks"][0];
+            assert_eq!(moment(hook), "steer");
+            assert!(hook["command"]
+                .as_str()
+                .unwrap()
+                .starts_with("s=\"$LF_STEER_SEEN\""));
+        }
     }
 
     #[test]
@@ -793,16 +979,22 @@ mod tests {
         fs::set_permissions(&stub, fs::Permissions::from_mode(0o755)).unwrap();
         std::env::set_var("LF_HOME", &delivery.home);
         std::env::set_var("LF_BIN", &stub);
-        let settings = delivery.hook_settings().unwrap();
+        let settings = delivery
+            .hook_settings(crate::session::Holder::Server)
+            .unwrap();
         let command = settings["PostToolUse"][0]["hooks"][0]["command"]
             .as_str()
             .unwrap();
         let seen = delivery.home.join("steers/seen/agent");
+        let session = crate::steer::session_marker(&delivery.home, "session");
+        let task = crate::steer::task_marker(&delivery.home, "task");
         let starts_lf = |seen: Option<&Path>| {
             let _ = fs::remove_file(&ran);
             let mut hook = std::process::Command::new("/bin/sh");
             hook.args(["-c", command])
-                .env_remove(crate::steer::STEER_SEEN_ENV);
+                .env_remove(crate::steer::STEER_SEEN_ENV)
+                .env(crate::steer::STEER_SESSION_ENV, &session)
+                .env(crate::steer::STEER_TASK_ENV, &task);
             if let Some(seen) = seen {
                 hook.env(crate::steer::STEER_SEEN_ENV, seen);
             }
@@ -817,7 +1009,26 @@ mod tests {
             !starts_lf(Some(&seen)),
             "nothing saved since the last check"
         );
-        crate::steer::touch(&crate::steer::latest_marker(&delivery.home)).unwrap();
-        assert!(starts_lf(Some(&seen)), "a steer saved after the check");
+        // macOS `sh` compares whole seconds, so the fixture spaces its stamps.
+        let mut clock = std::time::SystemTime::now();
+        let mut stamp = |path: &Path| {
+            clock += std::time::Duration::from_secs(5);
+            crate::steer::touch(path).unwrap();
+            let file = fs::File::options().write(true).open(path).unwrap();
+            file.set_modified(clock).unwrap();
+        };
+        stamp(&crate::steer::task_marker(&delivery.home, "another-task"));
+        stamp(&seen);
+        assert!(!starts_lf(Some(&seen)), "another Task's steer");
+        for marker in [
+            &crate::steer::latest_marker(&delivery.home),
+            &session,
+            &task,
+        ] {
+            stamp(marker);
+            assert!(starts_lf(Some(&seen)), "a steer saved after the check");
+            stamp(&seen);
+            assert!(!starts_lf(Some(&seen)), "checked since");
+        }
     }
 }

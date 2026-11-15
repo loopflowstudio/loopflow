@@ -92,18 +92,22 @@ on, supersedes, verified by). In lists, put the ID first: `[Task ID or PR number
 For designed work, pick a Graph that continues the design: the one asked for,
 else the Wave chapter's recommendation.
 
-`--graph pursue` runs write-docs → implement → compress → refresh → loop-or-next
-→ concept-review → loop-or-next. Refresh is sync → realign. Either decider's
-Iterate goes back to implement; the second's Advance publishes and ends the
-pursuit. `code` starts with that pursuit; `feature` drafts the design first;
+`--graph pursue` runs kickoff → write-docs → implement → concept-review
+→ refresh → loop-or-next → compress → qa → loop-or-next → pr-publish.
+Refresh is sync → realign. Both deciders' Iterate goes back to implement.
+The first decides after concept review and reconciliation; compression runs
+only after it advances, immediately before QA. The second's Advance publishes
+and ends the pursuit. `code` starts with
+that pursuit; `feature` drafts the design first;
 both land an accepted PR through `ship`. Design review and the demo are
 interactive steps: `lf task run <issue>` stops before each, the person takes
 part in the Task conversation, and the next `lf task run <issue>` continues
 after it. `--from <step>` goes back or skips ahead; `lf task run <issue>
 <graph>` takes up another graph. `lf --task <issue> graph <graph>` runs any
 Graph without moving the Task. `lf -b task run` and `lf ship` approve
-Auto-Ship and run headless to `end`, which may merge the PR: use them only when
-shipping or landing was asked for.
+Auto-Ship and run headless to `end`, which may merge the PR, and so does `lf
+task run` with no interactive step left ahead: use them only when shipping or
+landing was asked for.
 
 Put intent, constraints and "Done when" somewhere that outlives scratch
 cleanup.

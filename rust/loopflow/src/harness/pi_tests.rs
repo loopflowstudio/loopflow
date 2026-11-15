@@ -60,6 +60,14 @@ async fn pi_turns_resume_the_exact_conversation_and_capture_tools_usage() {
     let mut pi = PiHarness::new(tx);
     pi.start(&config).await.unwrap();
     let token = pi.agent_session().unwrap();
+    // Selecting another Machine must not redirect this admitted conversation's
+    // input or shutdown to that Machine's store.
+    let other_home = tempfile::tempdir().unwrap();
+    let other_store =
+        crate::store::sqlite::SqliteStore::open_ephemeral(&other_home.path().join("loopflow.db"))
+            .unwrap();
+    let selection = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
+    std::env::set_var("LF_HOME", other_home.path());
     pi.send_input("tool").await.unwrap();
     let events = completed(&mut rx).await;
     assert!(events.iter().any(|e| matches!(
@@ -74,6 +82,8 @@ async fn pi_turns_resume_the_exact_conversation_and_capture_tools_usage() {
     )));
     assert!(events.iter().any(|e| matches!(e, ConversationEvent::UsageCheckpoint { final_receipt: true, usage, .. } if usage.input_tokens == Some(20) && usage.total_input_tokens == Some(26))));
     pi.stop().await.unwrap();
+    assert!(other_store.agent_processes().unwrap().is_empty());
+    drop(selection);
     let (store, session, attachment) =
         super::agent_process::open_owner(config.session_attachment.as_ref()).unwrap();
     let next = store
@@ -507,4 +517,57 @@ async fn pi_steering_receipts_preserve_one_turn_and_distinguish_uncertainty() {
     ));
     completed(&mut rx).await;
     pi.stop().await.unwrap();
+}
+
+#[test]
+fn bare_pi_names_its_thread_and_resumes_it_by_that_id() {
+    let _lock = crate::journal::test_env_lock();
+    let _env = crate::test_ambient::EnvGuard::clear(&["PI_CODING_AGENT_DIR"]);
+    let agent_dir = tempfile::tempdir().unwrap();
+    std::env::set_var("PI_CODING_AGENT_DIR", agent_dir.path());
+    let config = AgentConfig {
+        agent: Some("pi".into()),
+        cwd: Some(agent_dir.path().into()),
+        ..Default::default()
+    };
+    let id: crate::id::AgentSessionId = "8f0c5e2a-0000-4000-8000-944455556666".into();
+    let start = crate::agent::build_session_command(
+        &config,
+        crate::agent::ProviderInvocation::Terminal {
+            session_id: Some(&id),
+        },
+        None,
+    )
+    .unwrap();
+    assert!(start
+        .args
+        .windows(2)
+        .any(|a| a == ["--session-id", id.as_str()]));
+
+    // Before Pi wrote the conversation (no reply yet), a resume starts it
+    // fresh under the same id.
+    let fresh = crate::agent::build_session_command(
+        &config,
+        crate::agent::ProviderInvocation::Resume { session_id: &id },
+        None,
+    )
+    .unwrap();
+    assert!(fresh
+        .args
+        .windows(2)
+        .any(|a| a == ["--session-id", id.as_str()]));
+    let project = agent_dir.path().join("sessions").join("--repo--");
+    std::fs::create_dir_all(&project).unwrap();
+    let file = project.join(format!("2026-11-11T11-22-55-913Z_{id}.jsonl"));
+    std::fs::write(&file, format!("{{\"type\":\"session\",\"id\":\"{id}\"}}\n")).unwrap();
+    let resume = crate::agent::build_session_command(
+        &config,
+        crate::agent::ProviderInvocation::Resume { session_id: &id },
+        None,
+    )
+    .unwrap();
+    assert!(resume
+        .args
+        .windows(2)
+        .any(|a| a == ["--session", file.to_str().unwrap()]));
 }

@@ -52,7 +52,7 @@ fn create(repo: &Path, home: &Path, wave: &str) -> String {
         args.extend(["--wave", wave]);
     }
     let output = run(repo, home, &args);
-    serde_json::from_str::<serde_json::Value>(&output).unwrap()["id"]
+    serde_json::from_str::<serde_json::Value>(&output).unwrap()["task"]["id"]
         .as_str()
         .unwrap()
         .into()

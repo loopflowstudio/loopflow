@@ -15,11 +15,11 @@ use crate::program_status::{Kind, Records, Report, State};
 /// The Ghostty revision the linked library was built from.
 pub const REVISION: &str = env!("LOOPFLOW_GHOSTTY_REVISION");
 
-/// How much of the program's unfinished escape sequence the owner retains for
+/// How much of the program's unfinished escape sequence a held terminal retains for
 /// a reconnecting viewer.
 const CONTINUATION_LIMIT: usize = 64 * 1024;
 
-/// Scrollback the owner keeps. Ghostty prunes whole pages of about 400 KiB.
+/// Scrollback a held terminal keeps. Ghostty prunes whole pages of about 400 KiB.
 const SCROLLBACK_LIMIT: usize = 8 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -206,7 +206,7 @@ impl Terminal {
         Ok(terminal)
     }
 
-    /// Callbacks and limits every owner terminal uses, including one restored
+    /// Callbacks and limits every held terminal uses, including one restored
     /// from a snapshot.
     fn configure(&mut self) -> Result<(), Error> {
         let userdata: *mut Effects = &mut *self.effects;
@@ -408,7 +408,9 @@ impl Terminal {
     /// Kitty keyboard flags, charsets, palette, modes (alternate screen, mouse,
     /// bracketed paste), scrolling region, tabstops and pwd.
     pub fn repaint_screen(&self) -> Result<Vec<u8>, Error> {
-        self.format(ffi::FORMAT_VT, Range::Active, true)
+        let mut repaint = self.format(ffi::FORMAT_VT, Range::Active, true)?;
+        drop_pwd_nul(&mut repaint);
+        Ok(repaint)
     }
 
     /// VT bytes that print the newest `rows` scrollback rows of the active
@@ -429,8 +431,8 @@ impl Terminal {
         )
     }
 
-    /// `restore` adds the escape sequences that put a terminal in the owner's
-    /// state (cursor, styles, hyperlinks, keyboard, charsets, modes, scrolling
+    /// `restore` adds the escape sequences that put a terminal in the held
+    /// terminal's state (cursor, styles, hyperlinks, keyboard, charsets, modes, scrolling
     /// region, tabstops, pwd) around the formatted rows.
     fn format(&self, emit: i32, range: Range, restore: bool) -> Result<Vec<u8>, Error> {
         let (cols, rows) = self.size();
@@ -544,7 +546,7 @@ impl Terminal {
         }
     }
 
-    /// A terminal restored from a snapshot stream, with the owner's callbacks and limits.
+    /// A terminal restored from a snapshot stream, with a held terminal's callbacks and limits.
     pub fn decode(snapshot: &[u8]) -> Result<Self, Error> {
         let mut decoder: ffi::SnapshotDecoder = std::ptr::null_mut();
         let mut raw: ffi::Terminal = std::ptr::null_mut();
@@ -560,7 +562,7 @@ impl Terminal {
                     snapshot.len(),
                 ),
             )?;
-            // Keep the unfinished input the owner had, as a live terminal would.
+            // Keep the unfinished input the held terminal had, as a live terminal would.
             let retain = true;
             let result = (|| {
                 check(
@@ -634,7 +636,22 @@ enum Range {
     },
 }
 
-/// The subset of `include/ghostty/vt/*.h` the owner uses. Enums are `int`
+/// Ghostty's formatter ends the pwd it restores with its C string's NUL, inside
+/// the OSC 7 before ST, where a terminal reads it as part of the path.
+fn drop_pwd_nul(repaint: &mut Vec<u8>) {
+    let Some(start) = repaint.windows(4).position(|w| w == b"\x1b]7;") else {
+        return;
+    };
+    let Some(end) = repaint[start..].windows(2).position(|w| w == b"\x1b\\") else {
+        return;
+    };
+    let before = start + end - 1;
+    if repaint[before] == 0 {
+        repaint.remove(before);
+    }
+}
+
+/// The subset of `include/ghostty/vt/*.h` held terminals use. Enums are `int`
 /// (`GHOSTTY_ENUM_TYPED`); structs carry their size first where the header does.
 mod ffi {
     use std::ffi::c_void;
@@ -926,6 +943,18 @@ mod tests {
         let repaint = String::from_utf8_lossy(&owner.repaint_screen().unwrap()).into_owned();
         assert!(repaint.contains("\x1b[?2004h"), "{repaint:?}");
         assert!(repaint.contains("\x1b[?1000h"), "{repaint:?}");
+    }
+
+    #[test]
+    fn repaint_reports_the_directory_without_a_nul() {
+        let mut owner = Terminal::new(80, 24).unwrap();
+        owner.write(b"\x1b]7;file://host/work/repo/\x1b\\prompt");
+        let repaint = owner.repaint_screen().unwrap();
+        let repaint = String::from_utf8_lossy(&repaint);
+        assert!(
+            repaint.contains("\x1b]7;file://host/work/repo/\x1b\\"),
+            "{repaint:?}"
+        );
     }
 
     #[test]

@@ -142,9 +142,9 @@ Graph history, review conversations, worktrees and ownership intact.
 - Continue a Task you own with `lf task run <issue-id>`; it runs the Task's
   graph to the next interactive step. Each run is a fresh Graph process and
   returns once it is running; `lf task status <issue-id>` follows it. Leave a
-  live one running instead of duplicating it. `lf -b task run` and `lf ship`
-  approve Auto-Ship, which may merge the PR; use them only when asked to ship
-  or land.
+  live one running instead of duplicating it. `lf -b task run`, `lf ship` and
+  an `lf task run` with no interactive step left ahead approve Auto-Ship, which
+  may merge the PR; use them only when asked to ship or land.
 - Use `lf` Task commands, not raw stores, signals to processes you don't own,
   or a competing worker on this Machine. A missing Machine is a blocker to
   report.

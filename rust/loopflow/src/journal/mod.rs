@@ -78,6 +78,12 @@ impl TestLedgerGuard {
     }
 }
 
+/// The store this test thread is pinned to, for a worker it starts.
+#[cfg(test)]
+pub(crate) fn test_ledger_path() -> Option<PathBuf> {
+    TEST_LEDGER_DB_PATH.with(|path| path.borrow().clone())
+}
+
 /// Pin a blocking fixture worker to its owning test's store; the caller holds
 /// the environment lock. Production processes already share one admitted ledger.
 #[cfg(test)]
@@ -124,13 +130,18 @@ static READ: AtomicBool = AtomicBool::new(false);
 
 /// Set by a Graph on the step it starts, and only on that child.
 pub const GRAPH_STEP_ENV: &str = "LF_GRAPH_STEP";
-
+static GRAPH_STEP: AtomicBool = AtomicBool::new(false);
 /// Whether a Graph started this process as its step. Clears the mark, so the
 /// step's own children are not steps.
 pub fn take_graph_step() -> bool {
     let step = std::env::var_os(GRAPH_STEP_ENV).is_some();
     std::env::remove_var(GRAPH_STEP_ENV);
-    step
+    GRAPH_STEP.fetch_or(step, Ordering::Relaxed) || step
+}
+
+/// Whether a Graph started this process as its step, once taken.
+pub(crate) fn graph_step() -> bool {
+    GRAPH_STEP.load(Ordering::Relaxed)
 }
 
 /// A command that changes no Work records no Process. Admission still
@@ -476,8 +487,11 @@ pub fn admit_process(repo_root: &Path, command: &[String]) {
             ..LfEventFields::default()
         },
     );
-    if current_context().is_none() {
-        eprintln!("Process history unavailable: no compatible process ledger for this process");
+    match current_context() {
+        Some(context) => crate::os_process::detached::acknowledge(&context.lf_process_id),
+        None => {
+            eprintln!("Process history unavailable: no compatible process ledger for this process")
+        }
     }
     tracing::debug!(
         elapsed_ms = started.elapsed().as_millis(),
@@ -749,7 +763,7 @@ fn ledger_insert(context: &ProcessContext, event: &LfEvent, exit_code: Option<i3
             let wait = context
                 .receipt_wait
                 .saturating_sub(already_waited + started.elapsed());
-            match store.record_process_within(&record, wait) {
+            match store.record_process_within(&record, crate::transport::current(), wait) {
                 Ok(()) => true,
                 Err(err) => {
                     let waited = (already_waited + started.elapsed()).as_secs_f64();
@@ -799,6 +813,12 @@ fn first_ledger_failure() -> bool {
 /// Open the local ledger store, creating and migrating it if needed.
 pub fn open_ledger() -> Result<SqliteStore, crate::store::StoreError> {
     SqliteStore::new(&ledger_db_path()?)
+}
+
+/// Whether the ledger exists, so a read that could only find nothing can
+/// skip creating it.
+pub(crate) fn ledger_exists() -> bool {
+    ledger_db_path().is_ok_and(|path| path.exists())
 }
 
 /// This Process's retained ledger connection, opening one only when no receipt
@@ -1277,12 +1297,12 @@ pub(crate) fn process_receipt_path(lf_home: &Path, locator: &str) -> PathBuf {
 }
 
 pub(crate) fn read_process_receipt(path: &Path) -> Result<Option<ProcessReceipt>, std::io::Error> {
-    let bytes = match fs::read(path) {
-        Ok(bytes) => bytes,
+    let text = match crate::observe::read_to_string(path) {
+        Ok(text) => text,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error),
     };
-    let receipt: ProcessReceipt = serde_json::from_slice(&bytes).map_err(std::io::Error::other)?;
+    let receipt: ProcessReceipt = serde_json::from_str(&text).map_err(std::io::Error::other)?;
     if receipt.schema_version != 1 {
         return Err(std::io::Error::other("unsupported Process receipt schema"));
     }

@@ -48,7 +48,7 @@ const AMBIENT_ONLY: &[&[&str]] = &[];
 
 /// Task identity selects its owning Wave; an optional Wave only checks that
 /// ownership. Ambient Wave selection must not redirect an explicit Task.
-const ISSUE_OWNED: &[&[&str]] = &[&["task", "update"], &["task", "steer"], &["task", "report"]];
+const ISSUE_OWNED: &[&[&str]] = &[&["task", "update"], &["task", "report"]];
 
 /// Authored inputs do not select an ambient execution Wave: context reads
 /// directories.
@@ -56,7 +56,12 @@ const AUTHORED_CONTEXT: &[&[&str]] = &[&["context"]];
 
 /// Session entry uses an explicit Work target or checkout discovery, never an
 /// ambient Wave. `session_launch_contract` covers both forms and their effects.
-const SESSION_TARGETS: &[&[&str]] = &[&["session", "resume"], &["session", "new"]];
+const SESSION_TARGETS: &[&[&str]] = &[
+    &["session", "resume"],
+    &["session", "new"],
+    &["open"],
+    &["workspace"],
+];
 
 /// Membership changes name an explicit destination and preserve execution context.
 /// `lf set` and `lf unset` take only the typed root `--wave`, else apply to the
@@ -68,6 +73,7 @@ const MEMBERSHIP_TARGETS: &[&[&str]] = &[&["task", "move"]];
 /// selecting ambient Wave context. These must not inherit `LF_WAVE_ID`.
 /// Typed historical filters may resolve an explicit name to its stored ID.
 const FILTER_ONLY: &[&[&str]] = &[
+    &["session", "list"],
     &["task", "list"],
     &["session", "history"],
     &["repo", "ci"],
@@ -111,6 +117,13 @@ const COMMANDS: &[Cmd] = &[
         id: "planning list",
         path: &["plan", "list"],
         base_args: &["plan", "list", "--json"],
+        wave_form: WaveForm::Positional,
+        global_default: true,
+    },
+    Cmd {
+        id: "planning board",
+        path: &["plan", "board"],
+        base_args: &["plan", "board", "--json"],
         wave_form: WaveForm::Positional,
         global_default: true,
     },

@@ -66,6 +66,40 @@
       ],
       "type": "object"
     },
+    "AccountLaunch": {
+      "additionalProperties": false,
+      "properties": {
+        "blockers": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "eligible": {
+          "type": "boolean"
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "out_until": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "model",
+        "eligible",
+        "out_until",
+        "blockers"
+      ],
+      "type": "object"
+    },
     "AccountLimitRow": {
       "description": "A stored window observation for one managed account.",
       "properties": {
@@ -260,6 +294,12 @@
           "description": "Held there by `lf account use`.",
           "type": "boolean"
         },
+        "launches": {
+          "items": {
+            "$ref": "#/$defs/AccountLaunch"
+          },
+          "type": "array"
+        },
         "login": {
           "type": [
             "string",
@@ -335,6 +375,7 @@
         "cooldown_until",
         "expires_at",
         "windows",
+        "launches",
         "verified_windows",
         "reset_credits",
         "active",
@@ -816,6 +857,55 @@
         }
       ]
     },
+    "BoardPr": {
+      "properties": {
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "type": "object"
+    },
+    "BoundaryGap": {
+      "additionalProperties": false,
+      "description": "Boundaries the hook could not record, in Unix seconds.",
+      "properties": {
+        "first": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "last": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "first",
+        "last"
+      ],
+      "type": "object"
+    },
+    "BoundaryMoment": {
+      "description": "Where in a native conversation a hook fired.",
+      "oneOf": [
+        {
+          "enum": [
+            "start",
+            "compact",
+            "tool",
+            "stop"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "event",
+          "description": "A Pi event the extension reports (`callback` is the event): the server\nrecords the turn from it and, while a turn runs, answers steers.",
+          "type": "string"
+        }
+      ]
+    },
     "BrowserDetails": {
       "additionalProperties": false,
       "properties": {
@@ -1064,7 +1154,7 @@
           "type": "string"
         },
         "status": {
-          "$ref": "#/$defs/Status"
+          "$ref": "#/$defs/Status2"
         }
       },
       "required": [
@@ -1745,6 +1835,13 @@
             "operation": {
               "$ref": "#/$defs/Read"
             },
+            "resume": {
+              "description": "The last applied reading's opaque checkpoint; null starts fresh.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "select": {
               "items": {
                 "type": "string"
@@ -1763,7 +1860,8 @@
             "type",
             "id",
             "operation",
-            "select"
+            "select",
+            "resume"
           ],
           "type": "object"
         },
@@ -2018,6 +2116,26 @@
       ],
       "type": "string"
     },
+    "Configuration": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "endpoint": {
+          "type": "string"
+        },
+        "owner": {
+          "$ref": "#/$defs/TailscaleIdentity",
+          "description": "The Machine owner's identity: their other devices are admitted."
+        }
+      },
+      "required": [
+        "enabled",
+        "endpoint",
+        "owner"
+      ],
+      "type": "object"
+    },
     "ConnectedClient": {
       "additionalProperties": false,
       "description": "One welcomed connection, from `welcome` until it closes.",
@@ -2032,9 +2150,19 @@
         "id": {
           "type": "string"
         },
+        "open": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
         "requests": {
           "description": "Requests the connection has sent, subscriptions included.",
           "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "retained_bytes": {
+          "format": "uint",
           "minimum": 0,
           "type": "integer"
         }
@@ -2043,7 +2171,9 @@
         "id",
         "client",
         "connected_at",
-        "requests"
+        "requests",
+        "open",
+        "retained_bytes"
       ],
       "type": "object"
     },
@@ -2114,6 +2244,72 @@
         "unknown"
       ],
       "type": "string"
+    },
+    "CreationReceipt": {
+      "properties": {
+        "artifact_key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "created_at": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "disposition": {
+          "$ref": "#/$defs/RecoveryDisposition"
+        },
+        "explanation": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "launch": true,
+        "milestone": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "result": true,
+        "run": {
+          "type": "boolean"
+        },
+        "session_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "task_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updated_at": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "disposition",
+        "explanation",
+        "run",
+        "request_id",
+        "kind",
+        "milestone",
+        "task_id",
+        "session_id",
+        "artifact_key",
+        "result",
+        "launch",
+        "created_at",
+        "updated_at"
+      ],
+      "type": "object"
     },
     "Customized": {
       "description": "What `lf graph customize` wrote.",
@@ -2333,7 +2529,7 @@
       "description": "`layout` reads and writes a Work's pane intent or a Dashboard's slot layout."
     },
     "DesktopTaskPane": {
-      "description": "`lf desktop task`: `lf task status`'s reading plus the Task's Desktop row,\nwhich keeps the pane current after the Task leaves the plan.",
+      "description": "The full Task reading used by Desktop and terminal Task views, plus the\nDesktop row that keeps the pane current after the Task leaves the plan.",
       "properties": {
         "comments": {
           "anyOf": [
@@ -2686,7 +2882,7 @@
           "properties": {
             "items": {
               "items": {
-                "$ref": "#/$defs/ProjectSummary"
+                "$ref": "#/$defs/PlanBoardTask"
               },
               "type": "array"
             },
@@ -2732,7 +2928,7 @@
           "properties": {
             "items": {
               "items": {
-                "$ref": "#/$defs/RoadmapTask"
+                "$ref": "#/$defs/ProjectSummary"
               },
               "type": "array"
             },
@@ -2771,6 +2967,52 @@
       ]
     },
     "Evidence3": {
+      "description": "A reading, or the reason there is none. \"We looked and found nothing\" and\n\"we could not look\" are different facts, and an audit surface that renders\nthem the same is lying — so the wire says which.",
+      "oneOf": [
+        {
+          "description": "The source answered. `truncated` says a cap hid older items, so a full\npage never reads as \"that was all there was\".",
+          "properties": {
+            "items": {
+              "items": {
+                "$ref": "#/$defs/RoadmapTask"
+              },
+              "type": "array"
+            },
+            "state": {
+              "const": "ok",
+              "type": "string"
+            },
+            "truncated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "state",
+            "items",
+            "truncated"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The source could not be read. Never rendered as emptiness.",
+          "properties": {
+            "reason": {
+              "type": "string"
+            },
+            "state": {
+              "const": "unavailable",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "reason"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Evidence4": {
       "description": "A reading, or the reason there is none. \"We looked and found nothing\" and\n\"we could not look\" are different facts, and an audit surface that renders\nthem the same is lying — so the wire says which.",
       "oneOf": [
         {
@@ -3646,6 +3888,27 @@
       ],
       "type": "object"
     },
+    "HeldTask": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "identifier": {
+          "type": "string"
+        },
+        "since": {
+          "description": "Unix seconds when the Task's claim reached the Machine.",
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "identifier",
+        "since"
+      ],
+      "type": "object"
+    },
     "Hello": {
       "additionalProperties": false,
       "properties": {
@@ -3711,6 +3974,51 @@
         "home",
         "policy",
         "transcripts"
+      ],
+      "type": "object"
+    },
+    "InitiativeArchive": {
+      "properties": {
+        "error": {
+          "description": "Why Linear still has it live; `None` once archived.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "initiative": {
+          "type": "string"
+        },
+        "wave": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "wave",
+        "initiative",
+        "error"
+      ],
+      "type": "object"
+    },
+    "InitiativeRename": {
+      "properties": {
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "initiative": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "initiative",
+        "title",
+        "error"
       ],
       "type": "object"
     },
@@ -3997,11 +4305,23 @@
           "format": "uint",
           "minimum": 0,
           "type": "integer"
+        },
+        "max_open": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_retained_bytes": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
         }
       },
       "required": [
         "max_message",
-        "max_connections"
+        "max_connections",
+        "max_open",
+        "max_retained_bytes"
       ],
       "type": "object"
     },
@@ -4373,6 +4693,13 @@
         },
         "route": {
           "type": "string"
+        },
+        "tasks": {
+          "description": "Unfinished Tasks it owns, as this Machine reads their ownership.",
+          "items": {
+            "$ref": "#/$defs/HeldTask"
+          },
+          "type": "array"
         }
       },
       "required": [
@@ -4381,7 +4708,8 @@
         "route",
         "created_at",
         "observed_at",
-        "defaults"
+        "defaults",
+        "tasks"
       ],
       "type": "object"
     },
@@ -5081,6 +5409,12 @@
             "null"
           ]
         },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "outcome": {
           "$ref": "#/$defs/NextOutcome"
         },
@@ -5104,6 +5438,7 @@
       },
       "required": [
         "provider",
+        "model",
         "scope",
         "outcome",
         "account_id",
@@ -5513,20 +5848,24 @@
       "type": "string"
     },
     "OpenRoute": {
-      "description": "Destinations this invocation would try, in order, from its own context.",
+      "description": "The selected host, or no host when focusing a recorded view.",
       "properties": {
-        "hosts": {
-          "items": {
-            "$ref": "#/$defs/OpenHost"
-          },
-          "type": "array"
+        "host": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OpenHost"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "reason": {
           "type": "string"
         }
       },
       "required": [
-        "hosts",
+        "host",
         "reason"
       ],
       "type": "object"
@@ -5548,24 +5887,13 @@
     "OwnershipKind": {
       "oneOf": [
         {
-          "enum": [
-            "claim"
-          ],
-          "type": "string"
-        },
-        {
-          "const": "handoff",
-          "description": "Moves the claim to `machine_id`, keeping the person.",
+          "const": "claim",
+          "description": "Puts the Task on `machine_id`. A move is a claim by the same person\nnaming another Machine; entries an earlier lf wrote as `handoff`, and\nthe never-delivered `recorded` entries, read as claims.",
           "type": "string"
         },
         {
           "const": "unclaim",
           "description": "Stored and sent as `unclaim`, its released spelling.",
-          "type": "string"
-        },
-        {
-          "const": "recorded",
-          "description": "What a Machine knew before ownership existed; never delivered.",
           "type": "string"
         }
       ]
@@ -5828,6 +6156,70 @@
         "use_existing_worktree"
       ],
       "type": "string"
+    },
+    "PlanBoard": {
+      "properties": {
+        "generated_at": {
+          "type": "string"
+        },
+        "tasks": {
+          "$ref": "#/$defs/Evidence"
+        }
+      },
+      "required": [
+        "tasks",
+        "generated_at"
+      ],
+      "type": "object"
+    },
+    "PlanBoardTask": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "identifier": {
+          "type": "string"
+        },
+        "pr": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BoardPr"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "section": {
+          "$ref": "#/$defs/TaskSection"
+        },
+        "state": {
+          "$ref": "#/$defs/TaskState"
+        },
+        "title": {
+          "type": "string"
+        },
+        "waiting_on": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NextMove"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "identifier",
+        "title",
+        "section",
+        "state",
+        "pr",
+        "waiting_on"
+      ],
+      "type": "object"
     },
     "PlanStatus": {
       "description": "What `repo.plan` answers: the transport, and for Git the\ndestinations with their import and publication evidence.",
@@ -6931,6 +7323,62 @@
         }
       ]
     },
+    "ProviderTransition": {
+      "properties": {
+        "from_agent_process": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentProcessId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "from_provider_session": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/TransitionKind"
+        },
+        "observed_at": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "original_running": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "seed": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "to_agent_process": {
+          "$ref": "#/$defs/AgentProcessId"
+        },
+        "to_provider_session": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "from_provider_session",
+        "to_provider_session",
+        "from_agent_process",
+        "to_agent_process",
+        "original_running",
+        "seed",
+        "observed_at"
+      ],
+      "type": "object"
+    },
     "Published": {
       "additionalProperties": false,
       "description": "What `pr.publish` or `pr.open` left on the provider.",
@@ -7036,6 +7484,55 @@
       "oneOf": [
         {
           "additionalProperties": false,
+          "description": "The CLI's retained process or Session history, as display text.",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "process.history",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "id"
+          ],
+          "type": "object",
+          "x-result": {
+            "type": "string"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "Look up a creation without starting or retrying it. Null confirms absence.",
+          "properties": {
+            "kind": {
+              "const": "creation.get",
+              "type": "string"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "request_id"
+          ],
+          "type": "object",
+          "x-result": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/CreationReceipt"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        {
+          "additionalProperties": false,
           "description": "`lf process list`: live Loopflow call trees.",
           "properties": {
             "kind": {
@@ -7077,7 +7574,44 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf --cwd <directory> session list`, with `--interactive all`\nwhen `headless` Sessions are shown too: every row, or with a `limit`\none page (`--page --limit <limit> [--after <after>]`). Only the whole\nlist has a subscription.",
+          "description": "`lf desktop view list --all [--expression <expression>]`: one selection\nacross the portfolio repositories, as the phone lists open Tasks.",
+          "properties": {
+            "expression": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "const": "view.select",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "expression"
+          ],
+          "type": "object",
+          "x-result": {
+            "items": {
+              "$ref": "#/$defs/ViewPlan"
+            },
+            "type": "array"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "`lf --cwd <directory> session list`, with `--headless`\nwhen `headless` Sessions are shown too: every row, or with a `limit`\none page (`--page --limit <limit> [--after <after>]`). Only the whole\nlist has a subscription.",
+          "examples": [
+            {
+              "after": null,
+              "directory": "/repo",
+              "headless": false,
+              "kind": "session.list",
+              "limit": 100,
+              "task": "task_00000000000000000000000000000001"
+            }
+          ],
           "properties": {
             "after": {
               "type": [
@@ -7102,6 +7636,13 @@
                 "integer",
                 "null"
               ]
+            },
+            "task": {
+              "description": "Only the Sessions of this Task, as `--task <task>` filters them.",
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [
@@ -7109,7 +7650,8 @@
             "directory",
             "headless",
             "after",
-            "limit"
+            "limit",
+            "task"
           ],
           "type": "object",
           "x-result": {
@@ -7124,6 +7666,91 @@
                 "$ref": "#/$defs/SessionPage"
               }
             ]
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "`lf plan board`: compact Task rows for a board.",
+          "properties": {
+            "all": {
+              "type": "boolean"
+            },
+            "directory": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "plan.board",
+              "type": "string"
+            },
+            "task": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "wave": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "directory",
+            "wave",
+            "task",
+            "all"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/PlanBoard"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "`lf task detail <issue>`: one Task and its supporting detail.",
+          "properties": {
+            "directory": {
+              "type": "string"
+            },
+            "issue": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "task.detail",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "directory",
+            "issue"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/TaskDetail"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "`lf session card <id>`: a passive reading of one recorded Session.",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "session.card",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "id"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/SessionCard"
           }
         },
         {
@@ -8150,6 +8777,38 @@
                 "diagnostic": null,
                 "expires_at": 1794614400,
                 "held": false,
+                "launches": [
+                  {
+                    "blockers": [],
+                    "eligible": true,
+                    "model": "fable",
+                    "out_until": null
+                  },
+                  {
+                    "blockers": [],
+                    "eligible": true,
+                    "model": "opus",
+                    "out_until": null
+                  },
+                  {
+                    "blockers": [],
+                    "eligible": true,
+                    "model": "sonnet",
+                    "out_until": null
+                  },
+                  {
+                    "blockers": [],
+                    "eligible": true,
+                    "model": "haiku",
+                    "out_until": null
+                  },
+                  {
+                    "blockers": [],
+                    "eligible": true,
+                    "model": null,
+                    "out_until": null
+                  }
+                ],
                 "login": "maya@example.com",
                 "observed_plan": "max",
                 "provider": "claude",
@@ -8181,9 +8840,10 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf --cwd <directory> account next [--repo <repo>] [--default]\n--json`: how the repository selects an account for each provider.",
+          "description": "`lf --cwd <directory> account next [-a <harness>:<model>] [--repo <repo>] [--default]\n--json`: how the repository selects an account for each provider.",
           "examples": [
             {
+              "agent": null,
               "default": false,
               "directory": "/repo",
               "kind": "account.next",
@@ -8191,6 +8851,12 @@
             }
           ],
           "properties": {
+            "agent": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "default": {
               "type": "boolean"
             },
@@ -8212,7 +8878,8 @@
             "kind",
             "directory",
             "repo",
-            "default"
+            "default",
+            "agent"
           ],
           "type": "object",
           "x-result": {
@@ -8225,6 +8892,7 @@
             {
               "account_id": "engineering",
               "login": "engineering@example.com",
+              "model": null,
               "outcome": "ready",
               "provider": "claude",
               "reason": "the only login ready for this launch",
@@ -8234,6 +8902,7 @@
             {
               "account_id": "manabot",
               "login": "manabot-eng@example.com",
+              "model": null,
               "outcome": "ready",
               "provider": "codex",
               "reason": "this repository's order names only it",
@@ -8439,6 +9108,14 @@
       ],
       "type": "object"
     },
+    "RecoveryDisposition": {
+      "enum": [
+        "complete",
+        "continue",
+        "inspect"
+      ],
+      "type": "string"
+    },
     "Redemption": {
       "additionalProperties": false,
       "description": "What `account.redeem_reset` spent, and the usage before and after.",
@@ -8489,6 +9166,29 @@
         "before",
         "after",
         "refresh_error"
+      ],
+      "type": "object"
+    },
+    "RemovalTask": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "identifier": {
+          "type": "string"
+        },
+        "started": {
+          "type": "boolean"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "identifier",
+        "title",
+        "started"
       ],
       "type": "object"
     },
@@ -8850,7 +9550,7 @@
           "type": "string"
         },
         "tasks": {
-          "$ref": "#/$defs/Evidence2",
+          "$ref": "#/$defs/Evidence3",
           "description": "Every Task once; each names its Wave."
         },
         "waves": {
@@ -9404,10 +10104,10 @@
         },
         {
           "additionalProperties": false,
-          "description": "The answer to `attach`: the connection now speaks the owner protocol\nwith this LfProcess, and nothing more arrives from the server.",
+          "description": "The answer to `attach`: the connection now speaks the viewer protocol\nwith this held terminal, and nothing more arrives from the server.",
           "properties": {
-            "owner_lf_process_id": {
-              "$ref": "#/$defs/LfProcessId"
+            "terminal_id": {
+              "$ref": "#/$defs/TerminalId"
             },
             "type": {
               "const": "bridged",
@@ -9416,7 +10116,7 @@
           },
           "required": [
             "type",
-            "owner_lf_process_id"
+            "terminal_id"
           ],
           "type": "object"
         },
@@ -9424,6 +10124,10 @@
           "additionalProperties": false,
           "description": "One subscription line; its `body` has the shape of the read's `x-result`.",
           "properties": {
+            "checkpoint": {
+              "description": "Resume this reading on another connection to the same server.",
+              "type": "string"
+            },
             "frame": {
               "$ref": "#/$defs/SubscriptionFrame"
             },
@@ -9438,7 +10142,78 @@
           "required": [
             "type",
             "id",
+            "checkpoint",
             "frame"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The answer for `id` is `bytes` long, more than `limits.max_message`:\na ticketed connection delivers it as one message.",
+          "properties": {
+            "bytes": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "id": {
+              "type": "string"
+            },
+            "ticket": {
+              "type": "string"
+            },
+            "type": {
+              "const": "bulk",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "ticket",
+            "bytes"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A ticketed connection's answer; what follows is what the ticket names.",
+          "properties": {
+            "type": {
+              "const": "admitted",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Connection-local ordering; never a replay or reading checkpoint.",
+          "properties": {
+            "event": {
+              "$ref": "#/$defs/SubscriptionEvent"
+            },
+            "id": {
+              "type": "string"
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "event",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "seq",
+            "event"
           ],
           "type": "object"
         },
@@ -9500,12 +10275,12 @@
       "oneOf": [
         {
           "additionalProperties": false,
-          "description": "A ticket for the Session's terminal: the server resolves the Session's\ncurrent owner LfProcess and answers `{ticket, owner_lf_process_id,\nexpires_in_ms}`. A new connection presents the ticket as its first\nmessage (`attach`) and becomes the bridge; this connection stays a\nclient. When the owner ends, the bridge closes; attaching again by the\nsame Session reaches its next owner. With `owner_lf_process_id`, the\nSession must still be owned by exactly that LfProcess, for a client that\nreconnects only to the owner it had.",
+          "description": "A ticket for the Session's held terminal, answered `{ticket,\nterminal_id, expires_in_ms}`. A new connection presents the ticket as\nits first message (`attach`) and becomes the bridge; this connection\nstays a client. When the terminal ends, the bridge closes; attaching\nagain by the same Session reaches its next one. A Session no terminal\nruns is `not_found`; attaching never starts a provider.",
           "examples": [
             {
               "kind": "session.attach",
-              "owner_lf_process_id": "85c31c1e-850c-4821-878d-55527b6dba46",
-              "session": "session_5e55105e000040008000000000000001"
+              "session": "session_5e55105e000040008000000000000001",
+              "terminal_id": null
             }
           ],
           "properties": {
@@ -9513,15 +10288,179 @@
               "const": "session.attach",
               "type": "string"
             },
-            "owner_lf_process_id": {
+            "session": {
+              "$ref": "#/$defs/LfSessionId"
+            },
+            "terminal_id": {
               "anyOf": [
                 {
-                  "$ref": "#/$defs/LfProcessId"
+                  "$ref": "#/$defs/TerminalId"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Attach only to this held terminal."
+            }
+          },
+          "required": [
+            "kind",
+            "session",
+            "terminal_id"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/SessionAttached"
+          },
+          "x-result-example": {
+            "expires_in_ms": 60000,
+            "terminal_id": "7c1d9a40-e5b2-4f6a-8d3e-2b1c0f9a8e7d",
+            "ticket": "Qk9nM3hLcjJwVnc5YVptRQ"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "Start the Session's agent in this build's holder and answer\n`{terminal_id}`. `env` is the caller's whole environment; the server's\nis not used. Repeating `request` answers the terminal it started.\nThis is the only operation here that creates a process.",
+          "examples": [
+            {
+              "argv": [
+                "/usr/local/bin/lf",
+                "session",
+                "resume",
+                "session_5e55105e000040008000000000000001"
+              ],
+              "cols": 80,
+              "cwd": "/Users/me/src/app",
+              "env": [
+                [
+                  "PATH",
+                  "/usr/bin:/bin"
+                ],
+                [
+                  "HOME",
+                  "/Users/me"
+                ]
+              ],
+              "kind": "session.start",
+              "placement": "desktop-shell",
+              "request": "0b9c1f0e-6d1c-4a43-9f0e-2f6c8f0f5a11",
+              "rows": 24,
+              "session": "session_5e55105e000040008000000000000001"
+            }
+          ],
+          "properties": {
+            "argv": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "cols": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "cwd": {
+              "type": "string"
+            },
+            "env": {
+              "items": {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ],
+                "type": "array"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "session.start",
+              "type": "string"
+            },
+            "placement": {
+              "description": "The Desktop pane (`LF_TERMINAL_ID`) the caller's own terminal was\nvalidated as; the held child continues it on its PTY. Null outside\na pane.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "request": {
+              "type": "string"
+            },
+            "rows": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "session": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/LfSessionId"
                 },
                 {
                   "type": "null"
                 }
               ]
+            }
+          },
+          "required": [
+            "kind",
+            "session",
+            "request",
+            "argv",
+            "cwd",
+            "env",
+            "rows",
+            "cols",
+            "placement"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/SessionStarted"
+          },
+          "x-result-example": {
+            "terminal_id": "3f2a1b0c-5d4e-4f6a-8b7c-9d0e1f2a3b4c"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "Continue an existing Session in a held terminal: `lf session resume`\nof exactly `session`, in its directory, with the server's environment.\nAnswers `{terminal_id}`; repeating `request` answers the terminal it\nstarted. For a client with no environment of its own to send.",
+          "examples": [
+            {
+              "cols": 60,
+              "kind": "session.continue",
+              "request": "3f2a7c1e-9b4d-4e8a-a1c6-5d0e7f9b2c34",
+              "rows": 40,
+              "session": "session_5e55105e000040008000000000000001"
+            }
+          ],
+          "properties": {
+            "cols": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "session.continue",
+              "type": "string"
+            },
+            "request": {
+              "type": "string"
+            },
+            "rows": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
             },
             "session": {
               "$ref": "#/$defs/LfSessionId"
@@ -9530,16 +10469,256 @@
           "required": [
             "kind",
             "session",
-            "owner_lf_process_id"
+            "request",
+            "rows",
+            "cols"
           ],
           "type": "object",
           "x-result": {
-            "$ref": "#/$defs/SessionAttached"
+            "$ref": "#/$defs/SessionStarted"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "Mobile access readiness; same-user local socket only.",
+          "examples": [
+            {
+              "kind": "mobile.status"
+            }
+          ],
+          "properties": {
+            "kind": {
+              "const": "mobile.status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/Status"
           },
           "x-result-example": {
-            "expires_in_ms": 60000,
-            "owner_lf_process_id": "85c31c1e-850c-4821-878d-55527b6dba46",
-            "ticket": "Qk9nM3hLcjJwVnc5YVptRQ"
+            "configuration": {
+              "enabled": true,
+              "endpoint": "https://host.tail.ts.net:8443",
+              "owner": {
+                "node": "node-host",
+                "user": 1
+              }
+            },
+            "error": "Sign in to Tailscale on this Machine",
+            "ready": false
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "Turn mobile access on with `configuration`, or off with null; same-user\nlocal socket only. Answers `{configuration}`.",
+          "examples": [
+            {
+              "configuration": {
+                "enabled": true,
+                "endpoint": "https://host.tail.ts.net:8443",
+                "owner": {
+                  "node": "node-host",
+                  "user": 1
+                }
+              },
+              "kind": "mobile.configure"
+            }
+          ],
+          "properties": {
+            "configuration": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Configuration"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "kind": {
+              "const": "mobile.configure",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "configuration"
+          ],
+          "type": "object",
+          "x-result": {
+            "additionalProperties": false,
+            "properties": {
+              "configuration": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/Configuration"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "configuration"
+            ],
+            "type": "object"
+          },
+          "x-result-example": {
+            "configuration": {
+              "enabled": true,
+              "endpoint": "https://host.tail.ts.net:8443",
+              "owner": {
+                "node": "node-host",
+                "user": 1
+              }
+            }
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "A ticket for a connection that carries one request of `bytes` bytes,\nlarger than `limits.max_message`; answers `{ticket}`. The uploaded\nrequest is answered here under its own id.",
+          "examples": [
+            {
+              "bytes": 2097152,
+              "kind": "request.upload"
+            }
+          ],
+          "properties": {
+            "bytes": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "request.upload",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "bytes"
+          ],
+          "type": "object",
+          "x-result": {
+            "additionalProperties": false,
+            "properties": {
+              "ticket": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "ticket"
+            ],
+            "type": "object"
+          },
+          "x-result-example": {
+            "ticket": "f06b5872-b113-47e5-be82-4320e33d7a3d"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "A provider hook at a turn or tool boundary. The server records what the\nboundary says (the native turn, the acknowledged input, `gap`) and\nanswers the Session's pending steers. At `stop` it answers first, then\nrefreshes planning and applies a pending Session move.",
+          "examples": [
+            {
+              "adapter": {
+                "agent_process_id": "85c31c1e-850c-4821-878d-55527b6dba46",
+                "capability": "4b0e1f2a-9c3d-4e5f-8a6b-7c8d9e0f1a2b",
+                "session": "session_5e55105e000040008000000000000001"
+              },
+              "callback": {
+                "hook_event_name": "Stop",
+                "prompt_id": "p-12",
+                "session_id": "5f1c0d2e-native"
+              },
+              "delivery": "/Users/maya/.lf/context-deliveries/0b9f2c1e.json",
+              "gap": {
+                "first": 1794358000,
+                "last": 1794358020
+              },
+              "inbox": "/Users/maya/.claude/sessions/4242.9c1d.key",
+              "kind": "session.boundary",
+              "moment": "stop",
+              "printed": [
+                "54dc6432-26f1-43fe-ad9d-20b7e91bad69"
+              ]
+            }
+          ],
+          "properties": {
+            "adapter": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SteerAdapter"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The provider context the launch gave the agent; null for a\nconversation lf did not start (a Codex app-server thread), whose\n`stop` only refreshes planning."
+            },
+            "callback": {
+              "$ref": "#/$defs/Untyped",
+              "description": "The JSON the provider sent the hook, unchanged."
+            },
+            "delivery": {
+              "description": "The Session's context delivery file.",
+              "type": "string"
+            },
+            "gap": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/BoundaryGap"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The hook's open recording gap; the server writes it into the\nSession's history as one `store-gap` observation."
+            },
+            "inbox": {
+              "description": "The key file Claude publishes for the conversation's cross-session\ninbox, `sessions/<pid>.<sha256 of socket>.key` in its configuration\ndirectory, where an idle conversation takes steers and Task updates.\nA path; the server reads the key when it sends. Null for other\nproviders and a Claude with no inbox.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "const": "session.boundary",
+              "type": "string"
+            },
+            "moment": {
+              "$ref": "#/$defs/BoundaryMoment"
+            },
+            "printed": {
+              "description": "Unused: hooks claim their own steers from the store. Conversations\nstarted before then still send it. TODO(LOO-838): delete it with\n`ContextMoment::TaskUpdates`, once none of them is live.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "kind",
+            "moment",
+            "delivery",
+            "adapter",
+            "callback",
+            "gap",
+            "printed",
+            "inbox"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/SessionBoundaryAnswer"
+          },
+          "x-result-example": {
+            "steers": null,
+            "update": null,
+            "waiting": false
           }
         }
       ]
@@ -9588,17 +10767,18 @@
           "minimum": 0,
           "type": "integer"
         },
-        "owner_lf_process_id": {
-          "$ref": "#/$defs/LfProcessId"
+        "terminal_id": {
+          "$ref": "#/$defs/TerminalId",
+          "description": "The held terminal the bridge reaches."
         },
         "ticket": {
-          "description": "16 random bytes as 22 base64url characters; single use.",
+          "description": "Opaque random ticket; single use.",
           "type": "string"
         }
       },
       "required": [
         "ticket",
-        "owner_lf_process_id",
+        "terminal_id",
         "expires_in_ms"
       ],
       "type": "object"
@@ -9630,6 +10810,58 @@
         "task_id",
         "identifier",
         "title"
+      ],
+      "type": "object"
+    },
+    "SessionBoundaryAnswer": {
+      "additionalProperties": false,
+      "description": "What `session.boundary` answers: nothing. Hooks claim their own steers and\nTask update from the store. The three fields are what conversations\nstarted before then still parse. TODO(LOO-838): delete them with\n`ContextMoment::TaskUpdates`, once none of those conversations is live.",
+      "properties": {
+        "steers": {
+          "$ref": "#/$defs/Untyped"
+        },
+        "update": {
+          "$ref": "#/$defs/Untyped"
+        },
+        "waiting": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "steers",
+        "update",
+        "waiting"
+      ],
+      "type": "object"
+    },
+    "SessionCard": {
+      "properties": {
+        "control_holder": {
+          "description": "The recorded occupied terminal, never an input-control credential.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "last_line": {
+          "description": "Last nonempty line of the current provider preview, not terminal scrollback.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "liveness": {
+          "$ref": "#/$defs/SessionLiveness"
+        },
+        "session": {
+          "$ref": "#/$defs/SessionRecord"
+        }
+      },
+      "required": [
+        "session",
+        "liveness",
+        "control_holder",
+        "last_line"
       ],
       "type": "object"
     },
@@ -9909,6 +11141,14 @@
       ],
       "type": "object"
     },
+    "SessionLiveness": {
+      "enum": [
+        "live",
+        "dead",
+        "unknown"
+      ],
+      "type": "string"
+    },
     "SessionOpenIntent": {
       "description": "Whether opening may take control, start a thread, or only reveal history.",
       "enum": [
@@ -10070,6 +11310,10 @@
             "null"
           ]
         },
+        "raw": {
+          "description": "A conversation open here that Loopflow never launched; `id` is the\nprovider's conversation ID and no Session records it.",
+          "type": "boolean"
+        },
         "ready_summary": {
           "type": [
             "string",
@@ -10100,6 +11344,27 @@
         },
         "title_source": {
           "$ref": "#/$defs/SessionTitleSource"
+        },
+        "transition": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProviderTransition"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "turn": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionTurn"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Its current or last turn while it is live; `null` when nothing says."
         },
         "wave_id": {
           "anyOf": [
@@ -10139,6 +11404,7 @@
         }
       },
       "required": [
+        "transition",
         "preview",
         "primary_scope",
         "availability",
@@ -10165,7 +11431,22 @@
         "state",
         "ready_summary",
         "open_argv",
-        "terminal_ids"
+        "terminal_ids",
+        "turn",
+        "raw"
+      ],
+      "type": "object"
+    },
+    "SessionStarted": {
+      "additionalProperties": false,
+      "description": "What `session.start` answers.",
+      "properties": {
+        "terminal_id": {
+          "$ref": "#/$defs/TerminalId"
+        }
+      },
+      "required": [
+        "terminal_id"
       ],
       "type": "object"
     },
@@ -10198,6 +11479,61 @@
         "unavailable"
       ],
       "type": "string"
+    },
+    "SessionTurn": {
+      "description": "A conversation's current or last turn: a transcript `Turn` without what\nwas said in it.",
+      "properties": {
+        "ended_at": {
+          "description": "RFC 3339; absent while it runs.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "The provider's name for the turn.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "started_at": {
+          "description": "RFC 3339; absent when the turn began before what was read.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/TurnState"
+        },
+        "usage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TurnUsage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Tokens across the turn's model calls so far; absent when nothing\nreports them."
+        }
+      },
+      "required": [
+        "id",
+        "state",
+        "started_at",
+        "ended_at",
+        "model",
+        "usage"
+      ],
+      "type": "object"
     },
     "SessionUsage": {
       "description": "Provider-authored cumulative usage reduced once per independent stream.\n\nOptional counters stay unknown when no stream reported them. Finality is a\ncount of direct provider receipts; Recorder settlement never upgrades it.",
@@ -10753,12 +12089,58 @@
       "type": "string"
     },
     "Status": {
+      "properties": {
+        "configuration": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Configuration"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ready": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "configuration",
+        "ready",
+        "error"
+      ],
+      "type": "object"
+    },
+    "Status2": {
       "enum": [
         "ok",
         "warn",
         "fail"
       ],
       "type": "string"
+    },
+    "StatusRecorded": {
+      "description": "The snapshot a Session's Program Status now holds.",
+      "properties": {
+        "sequence": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "stream": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "stream",
+        "sequence"
+      ],
+      "type": "object"
     },
     "Steer": {
       "properties": {
@@ -10789,6 +12171,27 @@
         "revision",
         "author",
         "text"
+      ],
+      "type": "object"
+    },
+    "SteerAdapter": {
+      "additionalProperties": false,
+      "description": "Survives attachment-only handoff; replacement creates another capability.",
+      "properties": {
+        "agent_process_id": {
+          "$ref": "#/$defs/AgentProcessId"
+        },
+        "capability": {
+          "type": "string"
+        },
+        "session": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session",
+        "agent_process_id",
+        "capability"
       ],
       "type": "object"
     },
@@ -10930,6 +12333,104 @@
         "migration_error"
       ],
       "type": "object"
+    },
+    "SubscriptionEvent": {
+      "description": "An occurrence within the Tasks included in a subscription reading.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "task.shipped",
+              "type": "string"
+            },
+            "merge_commit": {
+              "type": "string"
+            },
+            "number": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "pr_id": {
+              "type": "string"
+            },
+            "task_id": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "task_id",
+            "pr_id",
+            "number",
+            "url",
+            "merge_commit"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "comment": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TaskComment"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The thread entry when this direction came from a retained comment."
+            },
+            "kind": {
+              "const": "task.steer",
+              "type": "string"
+            },
+            "steer": {
+              "$ref": "#/$defs/Steer"
+            },
+            "task_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "task_id",
+            "steer",
+            "comment"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "graph_process_id": {
+              "$ref": "#/$defs/LfProcessId"
+            },
+            "kind": {
+              "const": "graph.step_finished",
+              "type": "string"
+            },
+            "step": {
+              "$ref": "#/$defs/GraphStepProcess"
+            },
+            "task_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "task_id",
+            "graph_process_id",
+            "step"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "SubscriptionFrame": {
       "description": "One line of a subscription.",
@@ -11120,6 +12621,26 @@
         "merge_target"
       ],
       "type": "string"
+    },
+    "TailscaleIdentity": {
+      "description": "A device's Tailscale identity, as `tailscale status` and `whois` report it.",
+      "properties": {
+        "node": {
+          "description": "The device's Tailscale StableID.",
+          "type": "string"
+        },
+        "user": {
+          "description": "The Tailscale user ID that owns the device.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "node",
+        "user"
+      ],
+      "type": "object"
     },
     "Task": {
       "properties": {
@@ -11398,6 +12919,33 @@
       ],
       "type": "object"
     },
+    "TaskChecks": {
+      "description": "Recorded required checks, pinned to the observed PR head. Null means unobserved.",
+      "properties": {
+        "failing_checks": {
+          "items": {
+            "$ref": "#/$defs/CiCheck"
+          },
+          "type": "array"
+        },
+        "head_sha": {
+          "type": "string"
+        },
+        "observed_at": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/CiState"
+        }
+      },
+      "required": [
+        "head_sha",
+        "state",
+        "failing_checks",
+        "observed_at"
+      ],
+      "type": "object"
+    },
     "TaskComment": {
       "properties": {
         "author": {
@@ -11593,6 +13141,109 @@
         "task_id",
         "receipt",
         "observation"
+      ],
+      "type": "object"
+    },
+    "TaskCreateReceipt": {
+      "properties": {
+        "graph": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "milestone": {
+          "type": "string"
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LfSessionId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "task": {
+          "$ref": "#/$defs/Task"
+        }
+      },
+      "required": [
+        "task",
+        "graph",
+        "session_id",
+        "milestone"
+      ],
+      "type": "object"
+    },
+    "TaskDetail": {
+      "properties": {
+        "checks": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskChecks"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "comments": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskComments"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "current_session": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionRecord"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "graph_processes": {
+          "items": {
+            "$ref": "#/$defs/GraphProcessDetail"
+          },
+          "type": "array"
+        },
+        "pr": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PrSnapshot"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "section": {
+          "$ref": "#/$defs/TaskSection"
+        },
+        "state": {
+          "$ref": "#/$defs/TaskState"
+        },
+        "task": {
+          "$ref": "#/$defs/TaskSummary"
+        }
+      },
+      "required": [
+        "task",
+        "section",
+        "state",
+        "pr",
+        "checks",
+        "graph_processes",
+        "comments",
+        "current_session"
       ],
       "type": "object"
     },
@@ -12423,8 +14074,11 @@
           "type": "object"
         },
         {
-          "description": "`lf task run` (`lf_process_id`) carries the Task on from `step`.\n`running` is read from that Process: a run that ended without\narriving stopped, and the next `lf task run` starts it again.",
+          "description": "`lf task run` (`lf_process_id`) carries the Task on from `step`, and\nruns `at`. `running` is read from that Process: a run that ended\nwithout arriving stopped, and the next `lf task run` starts it again\nat `at`; the steps before it stay done.",
           "properties": {
+            "at": {
+              "type": "string"
+            },
             "kind": {
               "const": "run",
               "type": "string"
@@ -12442,6 +14096,7 @@
           "required": [
             "kind",
             "step",
+            "at",
             "lf_process_id",
             "running"
           ],
@@ -12493,6 +14148,13 @@
             "null"
           ]
         },
+        "person_id": {
+          "description": "The person's `people` id, where the entry named one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "person_key": {
           "type": [
             "string",
@@ -12503,6 +14165,7 @@
       "required": [
         "person",
         "person_key",
+        "person_id",
         "machine"
       ],
       "type": "object"
@@ -12545,7 +14208,7 @@
       "type": "object"
     },
     "TaskOwnershipEntry": {
-      "description": "One immutable entry in a Task's ownership log. `machine_id` names the\nclaimant, the handoff target, or the unclaiming Machine.",
+      "description": "One immutable entry in a Task's ownership log. `machine_id` names the\nMachine the Task is on after a claim, or the unclaiming Machine;\n`writer_machine_id` the Machine that wrote it.",
       "properties": {
         "at": {
           "format": "int64",
@@ -12576,6 +14239,13 @@
             "null"
           ]
         },
+        "person_id": {
+          "description": "The person's `people` id, their planning provider's identity for them.\nAbsent from entries released lf wrote and where the writer knew none.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "person_key": {
           "description": "The person's stable key; names are display only.",
           "type": [
@@ -12585,6 +14255,13 @@
         },
         "task_id": {
           "type": "string"
+        },
+        "writer_machine_id": {
+          "description": "Absent from entries released lf wrote, which name no writer (Task 538340\ndrops `written_here`, after which every entry names one).",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -12593,8 +14270,10 @@
         "kind",
         "person",
         "person_key",
+        "person_id",
         "machine_id",
         "machine_label",
+        "writer_machine_id",
         "at"
       ],
       "type": "object"
@@ -12936,6 +14615,10 @@
               "description": "The graph and where the run set out: `code from implement`.",
               "type": "string"
             },
+            "ships": {
+              "description": "No interactive step is left ahead: Auto-Ship is approved and the\nrun may merge the PR.",
+              "type": "boolean"
+            },
             "state": {
               "const": "running",
               "type": "string"
@@ -12945,6 +14628,7 @@
             "state",
             "issue",
             "run",
+            "ships",
             "graph_process",
             "log"
           ],
@@ -13635,6 +15319,9 @@
       ],
       "type": "object"
     },
+    "TerminalId": {
+      "type": "string"
+    },
     "Threshold": {
       "oneOf": [
         {
@@ -13675,6 +15362,49 @@
     },
     "TraceId": {
       "type": "string"
+    },
+    "TransitionKind": {
+      "enum": [
+        "retained",
+        "resumed",
+        "forked",
+        "started"
+      ],
+      "type": "string"
+    },
+    "TurnState": {
+      "enum": [
+        "running",
+        "ended",
+        "interrupted"
+      ],
+      "type": "string"
+    },
+    "TurnUsage": {
+      "description": "`input_tokens` counts every input token, cached ones included.",
+      "properties": {
+        "cached_input_tokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "input_tokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "output_tokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "input_tokens",
+        "cached_input_tokens",
+        "output_tokens"
+      ],
+      "type": "object"
     },
     "UnavailableTaskEvidence": {
       "description": "Non-terminal durable Task Work whose historical Project is no longer in the\ncurrent PM snapshot.",
@@ -13773,6 +15503,13 @@
             }
           ]
         },
+        "identifier": {
+          "description": "A Task's short name, as people say it: `LOO-809`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "location": {
           "anyOf": [
             {
@@ -13822,6 +15559,7 @@
         "work",
         "title",
         "states",
+        "identifier",
         "primary_session",
         "location",
         "argv",
@@ -13881,6 +15619,10 @@
         "repo": {
           "type": "string"
         },
+        "repo_path": {
+          "description": "The repository's canonical path on this Machine; its last component is\nthe name people see.",
+          "type": "string"
+        },
         "resolution": {
           "$ref": "#/$defs/SelectionResolution"
         },
@@ -13904,6 +15646,7 @@
         "pinned",
         "dashboard_id",
         "repo",
+        "repo_path",
         "selection",
         "saved_revision",
         "resolution",
@@ -13974,7 +15717,7 @@
       "description": "`lf wave status <wave>` and `lf wave plan <wave>`: current planning,\nTask conditions and Session history. Wire type; no defaults.",
       "properties": {
         "history": {
-          "$ref": "#/$defs/Evidence3",
+          "$ref": "#/$defs/Evidence4",
           "description": "This Wave's Machine-local Session history, newest first."
         },
         "metric_portfolio": {
@@ -13985,14 +15728,14 @@
           "$ref": "#/$defs/ProjectReadiness"
         },
         "projects": {
-          "$ref": "#/$defs/Evidence"
+          "$ref": "#/$defs/Evidence2"
         },
         "setup": {
           "$ref": "#/$defs/WaveSetup",
           "description": "What the Wave's Tasks run, where, and which logins pay, with each source."
         },
         "tasks": {
-          "$ref": "#/$defs/Evidence2"
+          "$ref": "#/$defs/Evidence3"
         },
         "unavailable_tasks": {
           "description": "Durable Project Work that cannot join the current PM plan, including\nnon-terminal Tasks stranded under a terminal historical Project.",
@@ -14050,6 +15793,163 @@
     "WaveId": {
       "type": "string"
     },
+    "WaveRemoval": {
+      "description": "The preview Desktop and the CLI render before removal, and the receipt after.",
+      "properties": {
+        "already_removed": {
+          "type": "boolean"
+        },
+        "chapters": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "completed_tasks": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "deleted": {
+          "items": {
+            "$ref": "#/$defs/RemovalTask"
+          },
+          "type": "array"
+        },
+        "destination": {
+          "description": "Where open Tasks go: the parent Wave, or the repository when `None`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "files": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AuthoredFiles"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "`None` in a preview."
+        },
+        "has_files": {
+          "type": "boolean"
+        },
+        "id": {
+          "$ref": "#/$defs/WaveId"
+        },
+        "initiatives": {
+          "items": {
+            "$ref": "#/$defs/InitiativeArchive"
+          },
+          "type": "array"
+        },
+        "moved": {
+          "items": {
+            "$ref": "#/$defs/RemovalTask"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "preview": {
+          "type": "boolean"
+        },
+        "sessions": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "summary": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "uncommitted": {
+          "description": "Files under `.lf/wave/<name>` with edits nobody committed on the main\ncheckout; removal deletes them with the directory, and Git keeps no copy.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "waves": {
+          "description": "The Wave and every child Wave that retires with it.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "preview",
+        "already_removed",
+        "destination",
+        "waves",
+        "moved",
+        "deleted",
+        "completed_tasks",
+        "chapters",
+        "sessions",
+        "initiatives",
+        "has_files",
+        "uncommitted",
+        "files",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "WaveRenamed": {
+      "description": "`lf wave rename --json`: the receipt Desktop and the CLI both show. `summary`\nholds what is left to do after the rename, one sentence per line; empty when\nnothing is.",
+      "properties": {
+        "files": {
+          "$ref": "#/$defs/AuthoredFiles"
+        },
+        "from": {
+          "type": "string"
+        },
+        "id": {
+          "$ref": "#/$defs/WaveId"
+        },
+        "initiative": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InitiativeRename"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The connected Initiative's new title, or why Linear kept the old one."
+        },
+        "renamed": {
+          "type": "boolean"
+        },
+        "summary": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "to": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "from",
+        "to",
+        "renamed",
+        "files",
+        "initiative",
+        "summary"
+      ],
+      "type": "object"
+    },
     "WaveRoadmap": {
       "properties": {
         "graph": {
@@ -14066,7 +15966,7 @@
           "$ref": "#/$defs/ProjectReadiness"
         },
         "projects": {
-          "$ref": "#/$defs/Evidence"
+          "$ref": "#/$defs/Evidence2"
         },
         "unavailable_tasks": {
           "items": {
@@ -14729,39 +16629,90 @@
       "oneOf": [
         {
           "additionalProperties": false,
-          "description": "`lf task create --session <id> --title <title> --json`, without launching.",
+          "description": "File or adopt a Task, with a durable request identity; optionally start it.",
           "examples": [
             {
               "directory": "/repo",
-              "id": "session_5e55105e000040008000000000000001",
+              "graph": null,
               "kind": "task.create",
-              "title": "Keep the conversation"
+              "request": null,
+              "request_id": "fixture-creation",
+              "run": false,
+              "session": "session_5e55105e000040008000000000000001",
+              "title": "Keep the conversation",
+              "wave": null
+            },
+            {
+              "directory": "/repo",
+              "graph": null,
+              "kind": "task.create",
+              "request": "Fix the retry test",
+              "request_id": "00000000-0000-4000-8000-000000000001",
+              "run": true,
+              "session": null,
+              "title": null,
+              "wave": null
             }
           ],
           "properties": {
             "directory": {
               "type": "string"
             },
-            "id": {
-              "type": "string"
+            "graph": {
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "kind": {
               "const": "task.create",
               "type": "string"
             },
-            "title": {
+            "request": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "request_id": {
               "type": "string"
+            },
+            "run": {
+              "type": "boolean"
+            },
+            "session": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "title": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "wave": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [
             "kind",
             "directory",
-            "id",
-            "title"
+            "request_id",
+            "title",
+            "request",
+            "wave",
+            "graph",
+            "session",
+            "run"
           ],
           "type": "object",
           "x-result": {
-            "$ref": "#/$defs/Task"
+            "$ref": "#/$defs/TaskCreateReceipt"
           }
         },
         {
@@ -14927,6 +16878,7 @@
               "approve": false,
               "directory": "/repo",
               "from": "implement",
+              "graph": null,
               "issue": "LOO-1",
               "kind": "task.run"
             }
@@ -14950,6 +16902,12 @@
                 "null"
               ]
             },
+            "graph": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "issue": {
               "type": "string"
             },
@@ -14962,6 +16920,7 @@
             "kind",
             "directory",
             "issue",
+            "graph",
             "from",
             "agent",
             "approve"
@@ -14975,6 +16934,7 @@
             "issue": "LOO-1",
             "log": "/Users/maya/.lf/logs/graph-85c31c1e-850c-4821-878d-55527b6dba46.log",
             "run": "code from implement",
+            "ships": false,
             "state": "running"
           }
         },
@@ -15054,7 +17014,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf task steer <issue> <message> --json`: direction for the Task's\nruns, whoever writes it.",
+          "description": "`lf steer <issue> <message> --json`: direction for the Task's\nruns, whoever writes it.",
           "examples": [
             {
               "directory": "/repo",
@@ -15172,6 +17132,12 @@
               "const": "task.move",
               "type": "string"
             },
+            "machine": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "wave": {
               "type": [
                 "string",
@@ -15183,11 +17149,20 @@
             "kind",
             "directory",
             "issue",
-            "wave"
+            "wave",
+            "machine"
           ],
           "type": "object",
           "x-result": {
-            "$ref": "#/$defs/TaskEdit"
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TaskEdit"
+              },
+              {
+                "$ref": "#/$defs/TaskOwnership"
+              }
+            ],
+            "description": "Moving a Task changes its Wave membership or its Machine ownership."
           }
         },
         {
@@ -15229,7 +17204,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf [--wave <wave>] session steer [<id>] <message> --json`: a steer\none Session, every Session of the Wave or, with neither, every Session\nof the repository reads at its next boundary.",
+          "description": "`lf [--wave <wave>] steer [<id>] <message> --json`: a steer\none Session, every Session of the Wave or, with neither, every Session\nof the repository reads at its next boundary.",
           "examples": [
             {
               "directory": "/repo",
@@ -15353,6 +17328,7 @@
             "primary_scope": null,
             "program_status": null,
             "provider": "codex",
+            "raw": false,
             "ready_summary": "The design now reflects Jack's requested changes.",
             "state": "unknown",
             "task_ids": [
@@ -15362,6 +17338,8 @@
             "terminal_ids": [],
             "title": "Served name",
             "title_source": "generated",
+            "transition": null,
+            "turn": null,
             "wave_id": "00000000-0000-0000-0000-000000000001",
             "work": {
               "id": "task_00000000000000000000000000000001",
@@ -15374,6 +17352,80 @@
               "unavailable": null,
               "worktree": "/src/loopflow.task"
             }
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "`lf session observe-status --json <id> --terminal <terminal> --stream\n<stream> --sequence <n> [--agent-process <id>]`, `records` on stdin: one\nProgram Status reading from the terminal showing the Session.",
+          "examples": [
+            {
+              "agent_process": "5e55105e-0000-4000-8000-000000000007",
+              "directory": "/",
+              "id": "session_5e55105e000040008000000000000001",
+              "kind": "session.status",
+              "records": {
+                "records": [
+                  {
+                    "app": null,
+                    "id": null,
+                    "kind": "question",
+                    "msg": "Proceed?",
+                    "progress": null,
+                    "state": "blocked",
+                    "title": null
+                  }
+                ],
+                "seen": true
+              },
+              "sequence": 1,
+              "stream": "5e55105e-0000-4000-8000-000000000008",
+              "terminal": "pane-1"
+            }
+          ],
+          "properties": {
+            "agent_process": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "directory": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "session.status",
+              "type": "string"
+            },
+            "records": {
+              "$ref": "#/$defs/Records"
+            },
+            "sequence": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "stream": {
+              "type": "string"
+            },
+            "terminal": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "directory",
+            "id",
+            "terminal",
+            "agent_process",
+            "stream",
+            "sequence",
+            "records"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/StatusRecorded"
           }
         },
         {
@@ -15488,17 +17540,105 @@
             "kind": {
               "const": "session.new",
               "type": "string"
+            },
+            "request_id": {
+              "type": "string"
             }
           },
           "required": [
             "kind",
             "directory",
+            "request_id",
             "id",
             "agent"
           ],
           "type": "object",
           "x-result": {
             "$ref": "#/$defs/SessionRecord"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "directory": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "wave.rename",
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "wave": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "directory",
+            "wave",
+            "name"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/WaveRenamed"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "directory": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "wave.remove",
+              "type": "string"
+            },
+            "preview": {
+              "type": "boolean"
+            },
+            "wave": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "directory",
+            "wave",
+            "preview"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/WaveRemoval"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "directory": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "wave.machine",
+              "type": "string"
+            },
+            "machine": {
+              "type": "string"
+            },
+            "wave": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "directory",
+            "wave",
+            "machine"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/Declaration"
           }
         },
         {
@@ -17365,6 +19505,6 @@
     }
   ],
   "title": "Loopflow server protocol",
-  "x-min-revision": 2,
-  "x-revision": 2
+  "x-min-revision": 5,
+  "x-revision": 5
 }

@@ -1,0 +1,77 @@
+[
+  {
+    "label": "Conversation",
+    "url": "loopflow://repo?session=session-a",
+    "host": "desktop",
+    "destination": null,
+    "container": null,
+    "status": "opening",
+    "reason": "Still opening",
+    "fallback_argv": [
+      "lf",
+      "open",
+      "--session",
+      "session-a"
+    ]
+  },
+  {
+    "label": "Conversation",
+    "url": "loopflow://repo?session=session-a",
+    "host": "desktop",
+    "destination": null,
+    "container": null,
+    "status": "usable",
+    "reason": null,
+    "fallback_argv": [
+      "lf",
+      "open",
+      "--session",
+      "session-a"
+    ]
+  },
+  {
+    "label": "Conversation",
+    "url": "loopflow://repo?session=session-a",
+    "host": "desktop",
+    "destination": null,
+    "container": null,
+    "status": "focused",
+    "reason": "Attachment failed; view retained",
+    "fallback_argv": [
+      "lf",
+      "open",
+      "--session",
+      "session-a"
+    ]
+  },
+  {
+    "label": "Conversation",
+    "url": "loopflow://repo?session=session-a",
+    "host": "desktop",
+    "destination": null,
+    "container": null,
+    "status": "elsewhere",
+    "reason": "Conversation input is held by another client.",
+    "fallback_argv": [
+      "lf",
+      "open",
+      "--session",
+      "session-a"
+    ]
+  },
+  {
+    "label": "Conversation",
+    "url": "loopflow://repo?session=session-a",
+    "host": "desktop",
+    "destination": null,
+    "container": null,
+    "status": "failed",
+    "reason": "Attachment failed",
+    "fallback_argv": [
+      "lf",
+      "open",
+      "--session",
+      "session-a"
+    ]
+  }
+]

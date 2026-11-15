@@ -82,24 +82,10 @@ impl Store {
         &self,
         expected_capture: Option<i64>,
         session: LfSession,
+        creation: Option<String>,
     ) -> StoreResult<LfSession> {
         run_sqlite(&self.sqlite, move |store| {
-            store.replace_session_input(expected_capture, session)
-        })
-        .await
-    }
-
-    pub async fn retarget_unpublished_capture(
-        &self,
-        artifact_key: &str,
-        provider: &str,
-        model: Option<&str>,
-    ) -> StoreResult<()> {
-        let artifact_key = artifact_key.to_owned();
-        let provider = provider.to_string();
-        let model = model.map(str::to_string);
-        run_sqlite(&self.sqlite, move |store| {
-            store.retarget_unpublished_capture(&artifact_key, &provider, model.as_deref())
+            store.replace_session_input(expected_capture, session, creation.as_deref())
         })
         .await
     }

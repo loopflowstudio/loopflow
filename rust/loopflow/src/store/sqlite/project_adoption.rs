@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use rusqlite::params;
 
 use crate::durable::TaskId;
@@ -71,10 +73,22 @@ pub(super) fn task_started_or_published_in(
     task: &TaskId,
 ) -> StoreResult<bool> {
     Ok(super::task_ownership::owned_in(conn, task)?
-        || conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM task_prs WHERE task_id=?1 AND historical=0
-                AND publication_requested_at IS NOT NULL)",
-            [task.as_str()],
-            |row| row.get(0),
-        )?)
+        || published_in(conn, std::slice::from_ref(task))?.contains(task))
+}
+
+/// The listed Tasks whose current delivery has a published PR, in one statement.
+pub(super) fn published_in(
+    conn: &rusqlite::Connection,
+    tasks: &[TaskId],
+) -> StoreResult<HashSet<TaskId>> {
+    let mut statement = conn.prepare(
+        "SELECT DISTINCT task_id FROM task_prs WHERE historical=0
+            AND publication_requested_at IS NOT NULL
+            AND task_id IN (SELECT value FROM json_each(?1))",
+    )?;
+    let rows = statement.query_map(
+        [super::children::ids_json(tasks.iter().map(TaskId::as_str))],
+        |row| Ok(TaskId::from_raw(row.get::<_, String>(0)?)),
+    )?;
+    rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
 }

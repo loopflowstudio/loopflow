@@ -408,7 +408,7 @@ fn task_status_preserves_canonical_work_and_acquisition_evidence() {
             .collect::<Vec<_>>(),
         [
             loopflow::durable::OwnershipKind::Claim,
-            loopflow::durable::OwnershipKind::Handoff
+            loopflow::durable::OwnershipKind::Claim
         ]
     );
     let value: serde_json::Value = serde_json::from_str(json).unwrap();
@@ -485,6 +485,7 @@ fn task_work_preserves_all_owners() {
         graph.position,
         loopflow::task_graph::TaskGraphPosition::Run {
             step: "review-design".into(),
+            at: "implement".into(),
             lf_process_id: work.graph_processes[0].summary.id.to_string(),
             running: true,
         }
@@ -807,7 +808,8 @@ fn desktop_opening_distinguishes_launch_acceptance_from_usable_and_failed() {
         vec![
             DesktopOpeningStatus::Opening,
             DesktopOpeningStatus::Usable,
-            DesktopOpeningStatus::Failed
+            DesktopOpeningStatus::Failed,
+            DesktopOpeningStatus::Elsewhere
         ]
     );
     assert!(readings[0].reason.is_none());
@@ -855,6 +857,7 @@ fn work_links_carry_readable_labels_routes_and_conversation_relation() {
         ConversationRelation::OtherConversation
     );
     assert!(links[0].target.execution_machine.is_some());
+    assert!(links[0].route.host.is_none());
     assert_eq!(links[1].conversation, ConversationRelation::Unknown);
     assert!(links[1].url.contains("?repository="));
     assert_eq!(
@@ -863,6 +866,9 @@ fn work_links_carry_readable_labels_routes_and_conversation_relation() {
     );
     let mut missing: serde_json::Value = serde_json::from_str(json).unwrap();
     missing[0].as_object_mut().unwrap().remove("fallback_argv");
+    assert!(serde_json::from_value::<Vec<WorkLink>>(missing).is_err());
+    let mut missing: serde_json::Value = serde_json::from_str(json).unwrap();
+    missing[0]["route"].as_object_mut().unwrap().remove("host");
     assert!(serde_json::from_value::<Vec<WorkLink>>(missing).is_err());
 }
 
@@ -920,15 +926,18 @@ fn work_authors_preserve_names_and_historical_attribution() {
 }
 
 #[test]
-fn session_steer_status_preserves_excerpt_evidence() {
+fn session_steers_say_when_each_was_read() {
     let fixture = include_str!("../../../tests/fixtures/dto/session_steers.json");
     let page: loopflow::steer::SessionSteerPage = serde_json::from_str(fixture).unwrap();
-    assert_eq!(page.items[0].excerpted, Some(true));
-    assert_eq!(page.items[0].evidence, "emitted");
+    assert_eq!(page.items[0].delivered_at, Some(1794000000));
+    assert_eq!((page.items[1].delivered_at, page.pending), (None, 1));
     assert_eq!(
         serde_json::to_value(page).unwrap(),
         serde_json::from_str::<serde_json::Value>(fixture).unwrap()
     );
+    // A page missing a nullable key is not a complete page.
+    let partial = fixture.replace(r#""delivered_at": null"#, r#""unrelated": null"#);
+    assert!(serde_json::from_str::<loopflow::steer::SessionSteerPage>(&partial).is_err());
 }
 
 #[test]
@@ -1169,6 +1178,10 @@ fn desktop_state_retains_outer_and_inner_layouts() {
     assert_eq!(window.history.back, 1);
     assert_eq!(window.open_work, [window.workspaces[0].work.clone()]);
     assert_eq!(window.workspaces[0].layout.ratio, Some(0.6));
+    assert_eq!(
+        window.workspaces[0].layout.children[0].attachment,
+        Some(loopflow::lf::commands::desktop::DesktopOpeningStatus::Usable)
+    );
     assert_eq!(window.workspaces[0].hidden_panes, ["files-pane"]);
     assert!(window.view_parts.is_empty());
     let parts = &reading.windows[1].view_parts;
@@ -1293,7 +1306,7 @@ fn wave_renamed_receipt_round_trips_with_its_leftovers() {
 #[test]
 fn task_create_receipt_names_the_graph_and_admitted_conversation_or_a_failed_run() {
     let json = include_str!("../../../tests/fixtures/dto/task_create_receipt.json");
-    let receipts: Vec<loopflow::lf::commands::task_create::TaskCreateReceipt> =
+    let receipts: Vec<loopflow::engine::creation::TaskCreateReceipt> =
         serde_json::from_str(json).unwrap();
     assert_eq!(receipts[0].graph.as_deref(), Some("code"));
     assert!(receipts[0].session_id.is_some());
@@ -1335,4 +1348,39 @@ fn session_open_intents_distinguish_explicit_resume_from_passive_reveal() {
         ]
     );
     assert_eq!(serde_json::to_value(intents).unwrap(), wire);
+}
+
+#[test]
+fn creation_recovery_dispositions_round_trip() {
+    let json = include_str!("../../../tests/fixtures/dto/creation_lookup.json");
+    let receipts: Vec<loopflow::store::sqlite::creation::CreationReceipt> =
+        serde_json::from_str(json).unwrap();
+    assert_eq!(
+        serde_json::to_value(receipts).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+}
+
+#[test]
+fn opening_receipts_distinguish_focus_from_attachment() {
+    use loopflow::lf::commands::open::{OpenReceipt, OpenStatus};
+    let json = include_str!("../../../tests/fixtures/dto/open_receipts.json");
+    let receipts: Vec<OpenReceipt> = serde_json::from_str(json).unwrap();
+    assert_eq!(
+        receipts
+            .iter()
+            .map(|receipt| receipt.status)
+            .collect::<Vec<_>>(),
+        [
+            OpenStatus::Opening,
+            OpenStatus::Usable,
+            OpenStatus::Focused,
+            OpenStatus::Elsewhere,
+            OpenStatus::Failed
+        ]
+    );
+    assert_eq!(
+        serde_json::to_value(receipts).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
 }

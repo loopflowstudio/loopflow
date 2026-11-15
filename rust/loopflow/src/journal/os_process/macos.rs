@@ -34,6 +34,59 @@ impl ProcessInfo {
 }
 
 pub(super) fn read(pid: u32) -> io::Result<Option<OsProcess>> {
+    let Some(info) = read_info(pid)? else {
+        return Ok(None);
+    };
+    let command = arguments(pid)?
+        .map(|args| args.join(" "))
+        .unwrap_or_else(|| name(&info.name));
+    Ok(Some(info.into_process(command)))
+}
+
+/// Every process named by `p_comm`; arguments are never read.
+pub(super) fn sample_names() -> io::Result<Vec<OsProcess>> {
+    let mut processes = Vec::new();
+    for pid in pids()? {
+        if let Some(info) = read_info(pid)? {
+            let command = name(&info.name);
+            processes.push(info.into_process(command));
+        }
+    }
+    Ok(processes)
+}
+
+pub(super) fn cwd(pid: u32) -> Option<PathBuf> {
+    let mut info = MaybeUninit::<libc::proc_vnodepathinfo>::zeroed();
+    let size = size_of::<libc::proc_vnodepathinfo>() as libc::c_int;
+    // SAFETY: `info` is writable for `size` bytes; libproc fills at most that
+    // and retains no pointer.
+    let written = unsafe {
+        libc::proc_pidinfo(
+            pid as libc::c_int,
+            libc::PROC_PIDVNODEPATHINFO,
+            0,
+            info.as_mut_ptr().cast(),
+            size,
+        )
+    };
+    if written != size {
+        return None;
+    }
+    // SAFETY: libproc wrote the whole structure.
+    let info = unsafe { info.assume_init() };
+    // SAFETY: `vip_path` is a fixed array the kernel NUL-terminates.
+    let bytes = unsafe {
+        std::slice::from_raw_parts(
+            info.pvi_cdir.vip_path.as_ptr().cast::<u8>(),
+            size_of_val(&info.pvi_cdir.vip_path),
+        )
+    };
+    let path = CStr::from_bytes_until_nul(bytes).ok()?;
+    let path = path.to_string_lossy();
+    (!path.is_empty()).then(|| PathBuf::from(path.as_ref()))
+}
+
+fn read_info(pid: u32) -> io::Result<Option<ProcessInfo>> {
     unsafe extern "C" {
         fn loopflow_read_process(pid: u32, output: *mut ProcessInfo) -> i32;
     }
@@ -53,11 +106,7 @@ pub(super) fn read(pid: u32) -> io::Result<Option<OsProcess>> {
         }
     }
     // SAFETY: the shim returned a complete initialized structure.
-    let info = unsafe { info.assume_init() };
-    let command = arguments(pid)?
-        .map(|args| args.join(" "))
-        .unwrap_or_else(|| name(&info.name));
-    Ok(Some(info.into_process(command)))
+    Ok(Some(unsafe { info.assume_init() }))
 }
 
 /// Members of one process group in a single kernel query, named by `p_comm`.

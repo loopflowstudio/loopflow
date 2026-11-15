@@ -48,7 +48,8 @@ boundary executors remain domain-specific because their settlement rules differ.
 - **Skill runner:** execute one reusable instruction set through one provider
   harness and leave local evidence.
 - **Graph composition:** sequence Skill and mechanical Command nodes, route Xor
-  branches and follow backward edges. Every step is autonomous.
+  branches and follow backward edges. `interactive:` marks the steps where a
+  person takes part; Task runs stop there for their conversation.
 - **Durable planning:** preserve Wave and Task intent across crashes;
   each Task Graph is a fresh Graph process and the steps it starts.
 - **Task delivery:** attach one active remote branch, worktree, and PR to concrete Work.
@@ -133,7 +134,7 @@ Graph LfProcess --< step LfProcess   GraphProcess graph; result is the step's ex
 | --- | --- |
 | Repository | Wave membership |
 | Wave | Enduring objective, memory, cadence, budget and metric instruments; its planning holds status, Tasks, KRs and targets (one Linear Project when connected) |
-| Task | Worktree, optional PR and every associated Session, Graph and Process; no Graph is privileged |
+| Task | Worktree, optional PR, captured graph and position, and every associated Session, Graph and Process; independent Graphs do not move that position |
 | Graph | Reusable authored graph of agent/mechanical/router nodes; a running one is a Graph process and its step processes |
 | LfProcess | One actual lf process: durable `id` (`LfProcessId`), optional Unix `pid`, immutable causal ancestry (`parent_lf_process_id`) and command completion |
 | AgentProcess | The provider OS process Loopflow started: durable `id` (`AgentProcessId`), a `processes` row of kind `agent` with its parent LfProcess, served Session, attached LfProcess and fresh attachment token; survives attachment handoff |
@@ -147,6 +148,19 @@ The LOO-441 names are integrated. Process inventory readers return
 `ProcessEntry`, tagged by `kind`: `lf` rows are `LfProcess`, `agent` rows are
 `AgentProcess`. Both IDs are UUID text in the one `processes.id` column; only
 the row's `kind` decides which type it reads as.
+
+A skill invocation keeps one `LfProcess` identity while retries replace its
+`AgentProcess`. `process::LfProcessRuntime` is the shared in-memory resource
+handle for that work: its private state holds the current attachment, provider
+thread/account and outcome. It has no separate execution ID or persisted
+lifecycle. Helper requests inside a mechanical command can scope their own
+runtime resources under the same command provenance.
+
+`session_record::SessionRecorder` publishes the captured input and writes attempt
+history and the terminal receipt. It cannot launch or stop a provider. Native
+exit adopts only its recording position through `CaptureHandoff`; attachment
+cleanup remains with the process owner. Runtime cleanup runs before receipt
+writing, so a recording failure cannot skip cleanup or stop a replacement.
 
 ## Definition and execution projections
 
@@ -182,17 +196,20 @@ provider generation in caller provenance, turn origin and Program Status.
 | --- | --- |
 | `processes` | Durable `id`, lf/agent kind, nullable Unix PID/birth, immutable parent, command, cwd and terminal evidence. Agent rows own served Session, provider/launch mode, endpoint, attachment/token and exit reference. Lf rows retain incoming agent provenance. Admit, attach, finish, filter/page. |
 | `agent_sessions` | Stable ID, purpose and independent interactive flag; title/provenance, request/feedback, typed Task/Wave ancestry, native identity and current AgentProcess reference; reserve, resume, bind and rename; historical feedback/completion retained |
-| `tasks` | Wave planning row, issue, durable disposition and worktree/delivery facts |
-| `task_ownership` | Append-only `claim`/`handoff`/`unclaim` entries (`own_…`; `lf task unassign` writes `unclaim`, shown as unassign) with person, Machine and time; migration-only `recorded` entries are never delivered |
-| `projects` | A Wave's planning: stable Linear Project identity, status, Graph and planning facts |
+| `tasks` | Shared planning row: identity, repository, project, title, description, state, rank and provider revision; no Machine-local column |
+| `task_checkouts` | This Machine's checkout of a Task (worktree path, branch, base commit, parent PR); absent on every other Machine |
+| `task_primary_sessions` | The conversation this Machine opens for a Task, with or without a checkout; absent on every other Machine |
+| `task_ownership` | Append-only `claim`/`unclaim` entries (`own_…`; `lf task unassign` writes `unclaim`, shown as unassign) with person, the Machine they name, the Machine that wrote them and time; a move is a claim naming another Machine, and earlier `handoff` entries read as one |
+| `projects` | A Wave's plan: stable local identity, optional provider binding, status, prose, KRs and targets; the default graph belongs to the Wave |
 | `waves` | Stable identity and repository address; objective, memory and instruments are read from checkout files |
 
 ### Conversation and attachment lifetime
 
 Every agent conversation is an LfSession: skills, inline prompts, helpers,
-reviews, interactive and headless work. Default views select interactive
-conversations. `lf session list --available` selects conversations Available for a
-person, using the same Rust projection as Desktop. `session_activity` holds both
+reviews, interactive and headless work. Default views select unfinished interactive
+conversations. `lf session list --headless` adds unfinished headless Sessions;
+`lf history` owns finished conversations. `lf session list --available` selects
+conversations Available for a person, using the same Rust projection as Desktop. `session_activity` holds both
 the attached LfProcess's latest stream reading and an optional terminal-reported snapshot.
 Its optional preview carries bounded provider text, native thread/turn identity,
 source and observation time. Only the current live AgentProcess and attachment
@@ -204,12 +221,14 @@ A recorded AgentProcess alone decides whether its Session is active: completed
 means closed; otherwise exact PID/birth evidence is live, dead or unknown. Unknown
 is never Available and never ages into replacement or checkout-cleanup authority.
 Every owned launch records an AgentProcess before exec, including native terminals.
-Sessions without one remain unknown; client files are not read. The Session's
-`transport_lf_process_id` names its detached terminal owner. The
-execution child owns capture settlement and the frozen provider attachment;
-viewers receive separate revocable input tokens. Passive viewing takes no claim.
-Saved sockets are offered only for live records; a live endpoint's connection
-failure is an error, not permission to start another agent. Input completion uses
+Sessions without one remain unknown; client files are not read. A held
+Session names its terminal in `held_terminal_id`; `transport_lf_process_id`
+names an owner only for a conversation an earlier build started, which
+`lf resume` restarts held. The execution child owns capture settlement and the
+frozen provider attachment; viewers receive separate revocable input tokens.
+Passive viewing takes no claim. A view is offered only for a live held
+terminal; a connection failure is an error, not permission to start another
+agent. Input completion uses
 its latest turn's LfProcess completion (the capture owner before any turn), not
 attachment exit events. Events retain
 turn outcomes and history, not process liveness.
@@ -222,14 +241,14 @@ or 120 seconds of silence without an unresolved tool call means Available.
 No current reading is unknown; replacement providers need fresh observations.
 
 Desktop consumes the embedded Ghostty action for every retained surface. Shell
-panes keep local records; Session panes publish bounded snapshots through
-`lf session observe-status` with the current terminal receipt and the
-reading's AgentProcess. Stream identity and increasing sequence fence replacements in SQLite.
+panes keep local records; Session panes send each bounded snapshot to the
+server as one `session.status` write with the current terminal receipt and the
+reading's AgentProcess, on the connection Desktop already holds. No process
+runs per pane. Stream identity and increasing sequence fence replacements in SQLite.
 An unchanged provider keeps reports across attachment handoff. Report text is literal
 and display-sanitized; protocol IDs never select Sessions or grant process,
-Graph or completion authority. Detached relay observation remains unimplemented. Explicit filters expose headless and
-completed history; `--all`
-continues to mean all repositories. Interactive mode grants neither review
+Graph or completion authority. Detached relay observation remains unimplemented.
+`--headless` includes headless Sessions; `--all` means all repositories. Interactive mode grants neither review
 completion nor Graph authority.
 
 A primary Session is the one ongoing conversation of a scope. It is an ordinary
@@ -248,12 +267,13 @@ row, seeded with a log of its current AgentSession, which stays in its history.
 Scope locks serialize admission. Primary grants no Graph, review or process authority, and
 the Wave's goal and memory reach it as ordinary Wave context.
 
-A Task's primary is one of its own conversations, named by
-`tasks.primary_session_id`; its row carries no scope mark and it stays a Task
-member. `lf resume --task ISSUE` keeps the chosen primary, else selects the
-sole unfinished interactive conversation, else the most recently used by
-native human input, then last opening. It creates one when the Task has none.
-Opening an exact Session leaves the Task's primary unchanged.
+A Task's primary is one of its own conversations, named by its
+Machine-local `task_primary_sessions` row; the Session row carries no scope mark and it stays a Task
+member. `lf resume --task ISSUE` keeps the selected primary. Without one, it
+selects an unfinished interactive member by latest native human input, falling
+back to interactive opening and creation time; it creates one when none exists.
+`lf session bind` selects the primary explicitly. Opening an exact Session leaves
+an already selected Task primary unchanged.
 
 AgentSessionId preserves the provider's exact id, including non-UUID ids. The
 selected AgentSession belongs to the LfSession row; the provider endpoint belongs
@@ -326,9 +346,14 @@ left running with a close error.
 Closing clears the live endpoint and retains the native thread ID and history.
 Native terminal providers own their own process exit. An observed
 normal or interrupted exit retires an unbound, non-primary conversation only
-when that LfProcess launched its AgentProcess. Task/Wave conversations, primary
-Sessions, Asks and Graph reviews remain available. A stopped turn or missing
-process never completes a conversation, and retirement never settles a Graph.
+when that LfProcess launched its AgentProcess. Interactive Task/Wave conversations, primary
+Sessions, Asks and Graph reviews remain available. A headless conversation
+completes when its AgentProcess exits, whatever its Work, purpose or Graph:
+completion means it is no longer doing work, not that it cannot continue.
+A new AgentProcess on it, such as a Graph correcting its own step, reopens it
+until that process exits. Pruning a dead AgentProcess also completes its headless
+Session. A stopped turn alone never completes a conversation, and retirement
+never settles a Graph.
 Completed Sessions retain their history but contribute no current rows or counts.
 Terminal Tasks cannot acquire current review obligations;
 independent unresolved Asks remain discoverable.
@@ -377,12 +402,15 @@ boundaries and retained paths after removal. It neither follows causal ancestry
 nor rewrites recorded work or usage. Session inventory exposes `task_ids` so
 Desktop navigation uses the same membership as Task status.
 
-No Graph is privileged: every one naming the Task, or run in its checkout,
-is equally its work. `task status`'s `work` contains all Sessions, Graphs and
-Processes, including headless and closed history. Its `execution` and Task Graph
-record observe the most recently launched Graph only: `none`, `latest` or
-`finished`. The one control is `start`, available whenever the Task can run,
-even when an earlier Graph exists.
+No Graph is privileged: every one started for the Task, by naming it or in its
+checkout, is equally its work. The Graph records that Task when it starts, so
+reading a Task's Graphs costs the same however many other Graphs ran.
+`task status`'s `work` contains all Sessions, Graphs and Processes, including
+headless and closed history. Its Task Graph record observes the most recently
+launched Graph: `none`, `latest` or `finished`. Execution also reports an open
+Graph in the Task's work, including one started before checkout adoption. The
+`start` control is available whenever the Task can run, even when an earlier
+Graph exists.
 
 Cleanup, abandon, restore and landing repair treat all Task Graphs alike and ask
 one question of one gate: does OS process evidence show any of the work's
@@ -411,8 +439,8 @@ and releases its attachment without reporting a provider turn.
 
 A step is told nothing about its Graph and writes nothing about it. The Graph process
 writes GraphProcess, and only by appending: `graph_processes` holds one row per Graph process
-(Graph process, Graph name, graph as compiled at launch) and `graph_process_steps` one
-row per step it started (child Process, graph node key, per-edge iterations). The
+(Graph process, Graph name, graph as compiled at launch, the Task it started for
+or none) and `graph_process_steps` one row per step it started (child Process, graph node key, per-edge iterations). The
 Graph process finds a step's Process as its own newest child. Running, finished and each
 step's result are read from the Processes. Nothing reads the record back to resume,
 and no command changes a running Graph; the control is ending its Graph process.
@@ -447,7 +475,7 @@ A Session's permanent assignment is write-once: null to a Task, validating any
 explicit Wave against its membership. Reassignment and clearing are unavailable.
 Public binding also selects that unfinished interactive Session as primary and
 immediately sets its cwd to the Task's worktree; repeating binding reselects it.
-Closed Sessions and headless Runs cannot become primary. Done/landed Tasks remain
+Closed or headless Sessions cannot become primary. Done/landed Tasks remain
 valid without reopening them. CLI states the permanent target; Desktop confirms
 the exact target before writing. CLI adds no confirmation prompt. The writer
 commits assignment, primary choice and cwd atomically, preserving live input and

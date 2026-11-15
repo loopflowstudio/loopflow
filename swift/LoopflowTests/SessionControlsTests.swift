@@ -98,6 +98,11 @@ import ViewInspector
             #expect(promoted.agentProcessId == session.agentProcessId)
             #expect(promoted.taskPrimary)
             #expect(await source.bindCount == (existing ? 1 : 0))
+            if !existing {
+                let requestID = try #require(await source.creationID)
+                #expect(CreationRecovery.shared.requests(for: .task("task-exact")).contains(requestID))
+                await CreationRecovery.shared.presented([requestID])
+            }
         }
     }
 
@@ -155,6 +160,7 @@ private actor ControlsSource {
     private var pending: CheckedContinuation<Void, Never>?
     private var waiter: CheckedContinuation<Void, Never>?
     private(set) var bindCount = 0
+    private(set) var creationID: String?
 
     init(assigned: Bool = false) throws {
         let session = try renameFixtureRecord("interactive", title: "Conversation")
@@ -180,11 +186,12 @@ private actor ControlsSource {
             return String(decoding: snapshot, as: UTF8.self)
         }
         if args.starts(with: ["task", "create"]) {
+            creationID = args[3]
             #expect(args.contains("--session"))
             #expect(!args.contains("--run"))
             record["work"] = ["kind": "task", "id": "task-exact"]
             record["task_primary"] = true
-            return #"{"id":"task-exact","identifier":"INF-123","title":"Conversation"}"#
+            return #"{"task":{"id":"task-exact","identifier":"INF-123","title":"Conversation"},"graph":null,"session_id":null,"milestone":"filed"}"#
         }
         if args.contains("--dry-run") {
             return #"{"session_id":"interactive","task_id":"task-exact","identifier":"INF-123","title":"Completed off-roadmap Task"}"#

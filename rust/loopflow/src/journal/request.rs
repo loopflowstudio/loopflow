@@ -101,7 +101,7 @@ where
     let diagnostics = DIAGNOSTICS.with(|sink| sink.borrow().clone());
     let settings = crate::config::settings::invocation_values();
     let span = tracing::Span::current();
-    tokio::task::spawn_blocking(crate::git::inherit_reads(move || {
+    tokio::task::spawn_blocking(crate::observe::inherit(move || {
         let _entered = span.enter();
         scope(active, diagnostics, || {
             let _settings = crate::config::settings::replace_invocation(settings);
@@ -116,7 +116,8 @@ mod tests {
     use crate::id::TraceId;
 
     #[test]
-    fn subscription_git_retention_follows_nested_workers_without_leaking_into_requests() {
+    fn observations_follow_nested_workers_without_leaking_into_writes() {
+        let cache = crate::observe::Cache::shared();
         let repo = loopflow_test_support::TestRepo::new();
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let status = || {
@@ -129,9 +130,9 @@ mod tests {
                 .unwrap()
             })
         };
-        crate::git::retain_reads(true, || assert_eq!(status(), ""));
+        cache.capture(|| assert_eq!(status(), ""));
         std::fs::write(repo.path().join("new.txt"), "text").unwrap();
-        crate::git::retain_reads(true, || assert_eq!(status(), ""));
+        cache.capture(|| assert_eq!(status(), ""));
         let seen = run(&TraceId::default(), &serde_json::json!({}), || Ok(status())).unwrap();
         assert!(seen.contains("new.txt"), "{seen:?}");
     }

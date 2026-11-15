@@ -235,13 +235,17 @@ pub fn sync(directory: &Path, input: &SyncInput<'_>) -> Result<Sync> {
     if !input.moves() {
         return carry_sync(directory, input, &super::Diagnostics);
     }
+    launch::start(directory, &spell_sync(input))
+}
+
+pub(super) fn spell_sync(input: &SyncInput<'_>) -> Vec<String> {
     let mut args = vec!["sync".to_owned()];
     args.extend(input.onto.map(str::to_owned));
     if input.manual {
         args.push("--manual".to_owned());
     }
     args.push("--json".to_owned());
-    launch::start(directory, &args)
+    args
 }
 
 /// `lf sync` in this process. Started by [`sync`], a sync that moves the
@@ -279,19 +283,19 @@ mod tests {
     #[test]
     fn receipts_match_the_shared_fixtures_without_defaults() {
         let committed: Committed = result(include_str!(
-            "../../../../tests/fixtures/dto/server/checkout_committed.json"
+            "../../tests/fixtures/dto/server/checkout_committed.json"
         ));
         assert!(committed.committed);
         let created: Checkout = result(include_str!(
-            "../../../../tests/fixtures/dto/server/checkout_created.json"
+            "../../tests/fixtures/dto/server/checkout_created.json"
         ));
         assert!(created.created);
         let planned: Sync = result(include_str!(
-            "../../../../tests/fixtures/dto/server/checkout_sync_planned.json"
+            "../../tests/fixtures/dto/server/checkout_sync_planned.json"
         ));
         assert!(planned.render().starts_with("branch: "));
         let running: Sync = result(include_str!(
-            "../../../../tests/fixtures/dto/server/checkout_syncing.json"
+            "../../tests/fixtures/dto/server/checkout_syncing.json"
         ));
         assert!(running.render().contains("running as process"));
         assert!(serde_json::from_str::<Sync>(r#"{"state":"finished"}"#).is_err());

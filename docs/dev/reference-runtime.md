@@ -79,8 +79,9 @@ lf task run ISSUE [GRAPH] -> place the worktree, take up GRAPH, the Wave's, the 
                          -> current, completed or stopped
 ```
 
-Every Graph naming a Task is equally its work; none is selected over
-another. `task run` returns to its launcher once its Graph process registers,
+Every Graph naming a Task is part of its work. Only a Task run advances its
+captured graph position; independent Graphs do not. `task run` returns to its
+launcher once its Graph process registers,
 leaving output in `logs/graph-<id>.log`; `-b` blocks and prints. The Graph process holds the cursor in memory and
 advances it from each step's exit; the position a step ran at is on that step
 Process's argv.
@@ -104,14 +105,13 @@ Provider delivery converges independently; there is no cross-system atomic switc
 ## Durable communication
 
 ```bash
-lf task steer INF-123 "keep the public name"
-lf --wave infrastructure session steer "preserve native history"
-lf session steer "retain source attribution"
-lf session steer SESSION "inspect the last failure"
+lf steer INF-123 "keep the public name"
+lf --wave infrastructure steer "preserve native history"
+lf --repo . steer "retain source attribution"
+lf steer SESSION "inspect the last failure"
 lf session steers SESSION --json --limit 32
 lf session steers SESSION --after 42 --json
 lf session steers SESSION --source STEER_ID
-lf session steers SESSION --retry STEER_ID
 ```
 
 Steers retain immutable source revisions and authorship. Task steers and
@@ -120,8 +120,9 @@ Linear delivery receipts remain separate. Repository and Wave steers are
 Machine-local and report unavailable shared planning exchange for those scopes.
 
 Each Session selects its steers from its repository, Task association and
-Wave ancestors. Peers receive independent receipts. Saving a steer starts no turn;
-an idle Session receives pending steers on its next supported provider boundary.
+Wave ancestors. Peers receive independent receipts. An idle managed Session is
+woken with pending steers by the Machine server; any other Session receives them
+on its next supported provider boundary.
 Startup, user continuation, tools and compaction share the receipt path. Task
 brief references contain no consumed steers.
 
@@ -151,7 +152,7 @@ These examples use current command spellings; the lifecycle contract is above.
 
 ```bash
 lf -b implement
-lf session list --interactive false --task INF-123 --json
+lf session list --headless --task INF-123 --json
 lf resume SESSION
 lf session rename SESSION "Migration review"
 lf session bind SESSION --task INF-123
@@ -163,10 +164,11 @@ turn. Name, feedback, native identity and history survive reconnect and recovery
 A suggested title cannot overwrite a human-assigned title. CLI and Desktop use
 the same action and availability reason.
 
-Ready saves feedback and keeps the conversation open. Complete persists its
-closed state and exact feedback before teardown. A Graph review returns
-feedback for the following decision; it never selects that decision's edge.
-Pane close, provider exit and readiness do not complete the review.
+Review takes place at the Task's interactive graph step in its conversation.
+Feedback alone starts no run and selects no edge; `lf task run` continues the
+Task after the review. Historical readiness and feedback fields remain readable,
+but there are no `session ready` or `session complete` commands. Pane closure
+and provider exit do not complete a Task review.
 
 The desktop terminal pool keys on stable LfSession identity. Rename, bind,
 reconnect and replacement retain the pane and draft when reusing that surface.
@@ -181,9 +183,10 @@ lf task run INF-124 incident  # explicit override
 lf graph example                    # with or without Task attribution
 ```
 
-The Graph process compiles the graph, every router and Xor alternative, and holds it
-with the cursor and return counts in memory. Definition changes affect new
-Graphs. A past Graph keeps the graph its Graph process recorded at launch. Backward edges stay finite graph structure; future loop passes are
+The Graph process holds the compiled graph, every router and Xor alternative,
+with its cursor and return counts in memory. A Task run uses the definition the
+Task took up; direct Graph launches compile current source. Definition changes
+affect newly selected graphs, not a Task's already captured one. A past Graph keeps the graph its Graph process recorded at launch. Backward edges stay finite graph structure; future loop passes are
 not preallocated. Node IDs are local typed identities, not path strings.
 
 Taking an Iterate edge updates the Graph process's cursor and return counters. The

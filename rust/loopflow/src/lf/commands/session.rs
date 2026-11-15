@@ -14,8 +14,8 @@ use crate::session_record::SessionTitleSource;
 use crate::store::{open_store, storage_config_from_env, Store};
 
 pub fn run(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()> {
-    if let SessionCommand::Serve { terminal, argv } = command {
-        return crate::transport::serve(argv, *terminal);
+    if let SessionCommand::Card { id, .. } = command {
+        return super::screens::print(super::read::Read::SessionCard { id: id.clone() });
     }
     if let SessionCommand::List(args) = command {
         return list_sessions(args);
@@ -49,33 +49,70 @@ pub fn run(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()>
     }
 }
 
+/// `lf steer`: save `message` for a Session or a Task named by `target`, or
+/// with none for the Wave or repository the invocation selected. A target
+/// that names no Session is a Task. `--json` prints what the server answers:
+/// `task.steer` the Task's thread with the entry, `session.steer` the steer.
+pub fn steer(
+    cli: &crate::lf::Cli,
+    target: Option<&str>,
+    message: &str,
+    json: bool,
+) -> anyhow::Result<()> {
+    use crate::engine::session::SteerScope;
+    let directory = std::env::current_dir()?;
+    let runtime = tokio::runtime::Runtime::new()?;
+    let (store, session) = runtime.block_on(async {
+        let store = open_shared_store().await?;
+        let session = match target {
+            Some(id) => crate::ops::human_session::session_by_id(&store, id).await?,
+            None => None,
+        };
+        anyhow::Ok((store, session))
+    })?;
+    let scope = match (&session, target, cli.wave.as_deref()) {
+        (Some(session), _, _) => SteerScope::Session(&session.id),
+        (None, Some(issue), wave) => {
+            let unknown = || format!("{issue} names no Session and no Task");
+            let repo = super::mutation::selected_task_repository(cli, &directory, Some(issue))
+                .with_context(unknown)?;
+            let thread = runtime.block_on(async {
+                let (store, task) = crate::ops::task::resolve_saved_task(&repo, wave, issue)
+                    .await
+                    .with_context(unknown)?;
+                let scope = SteerScope::Task { issue, wave };
+                let steer = crate::engine::session::steer(&store, &repo, scope, message).await?;
+                anyhow::Ok((steer, store.sqlite.task_comments(&task.id)?))
+            })?;
+            match json {
+                true => println!("{}", serde_json::to_string(&thread.1)?),
+                false => println!("Saved {}", thread.0.id),
+            }
+            return Ok(());
+        }
+        (None, None, Some(wave)) => SteerScope::Wave(wave),
+        // Global `--repo` has already entered the selected repository.
+        (None, None, None) if cli.repo.is_some() => SteerScope::Repository,
+        (None, None, None) => anyhow::bail!(
+            "name who to steer: a Session ID, a Task ID, `--wave WAVE` or `--repo NAME_OR_PATH`"
+        ),
+    };
+    let steer = runtime.block_on(crate::engine::session::steer(
+        &store, &directory, scope, message,
+    ))?;
+    if json {
+        println!("{}", serde_json::to_string(&steer)?);
+    } else {
+        println!("Saved {}", steer.id);
+    }
+    Ok(())
+}
+
 async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()> {
     match command {
-        SessionCommand::Serve { .. } => {
-            unreachable!("serve owns its process before any runtime")
-        }
-        SessionCommand::Steer { id, message, json } => {
-            use crate::engine::session::SteerScope;
-            let store = open_shared_store().await?;
-            // Global `--repo` has already entered the selected repository.
-            let scope = match (id.as_deref(), cli.wave.as_deref()) {
-                (Some(id), _) => SteerScope::Session(id),
-                (None, Some(wave)) => SteerScope::Wave(wave),
-                (None, None) => SteerScope::Repository,
-            };
-            let directory = std::env::current_dir()?;
-            let steer = crate::engine::session::steer(&store, &directory, scope, message).await?;
-            if *json {
-                println!("{}", serde_json::to_string(&steer)?);
-            } else {
-                println!("Saved {}", steer.id);
-            }
-            Ok(())
-        }
         SessionCommand::Steers {
             id,
             json,
-            retry,
             after,
             limit,
             source,
@@ -84,11 +121,6 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             let session = crate::ops::human_session::session_by_id(&store, id)
                 .await?
                 .context("Session not found")?;
-            if let Some(steer) = retry {
-                store
-                    .sqlite
-                    .retry_session_steer(&session.id, &crate::id::SteerId::parse(steer)?)?;
-            }
             if let Some(source) = source {
                 let steer = store
                     .sqlite
@@ -100,12 +132,16 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             if *json {
                 println!("{}", serde_json::to_string_pretty(&status)?);
             } else {
-                println!("{}; {} pending", status.capability, status.pending);
+                println!("{} pending", status.pending);
                 if let Some(after) = status.next_after {
                     println!("Next page: --after {after}");
                 }
                 for row in status.items {
-                    println!("{} {}", row.steer.id, row.evidence);
+                    let state = match row.delivered_at {
+                        Some(_) => "delivered",
+                        None => "pending",
+                    };
+                    println!("{} {state}", row.steer.id);
                 }
             }
             Ok(())
@@ -114,19 +150,25 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             id,
             terminal,
             agent_process,
+            stream,
+            sequence,
+            json,
         } => {
-            let store = open_shared_store().await?;
-            let agent_process = agent_process
-                .as_deref()
-                .map(crate::id::AgentProcessId::parse)
-                .transpose()?;
-            crate::ops::human_session::observe_program_status(
-                &store,
+            let records = serde_json::from_reader(std::io::stdin().lock())
+                .context("invalid Program Status snapshot")?;
+            let recorded = status_recorded(
                 id,
                 terminal,
-                agent_process.as_ref(),
+                agent_process.as_deref(),
+                stream,
+                *sequence,
+                &records,
             )
-            .await
+            .await?;
+            if *json {
+                println!("{}", serde_json::to_string(&recorded)?);
+            }
+            Ok(())
         }
         SessionCommand::History { id: None, .. } => {
             unreachable!("the history feed and its commands return before any runtime")
@@ -159,7 +201,10 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             }
             Ok(())
         }
-        SessionCommand::List(_) | SessionCommand::Usage(_) | SessionCommand::Retention { .. } => {
+        SessionCommand::Card { .. }
+        | SessionCommand::List(_)
+        | SessionCommand::Usage(_)
+        | SessionCommand::Retention { .. } => {
             unreachable!("reads return before any runtime")
         }
         SessionCommand::Move {
@@ -202,16 +247,39 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             )
             .await
         }
-        SessionCommand::New { id, connection } => {
-            new_thread(cli, connection, connection.target(cli, id.as_deref())?).await
+        SessionCommand::New {
+            id,
+            connection,
+            request_id,
+        } => {
+            new_thread(
+                cli,
+                connection,
+                connection.target(cli, id.as_deref())?,
+                request_id.as_deref(),
+            )
+            .await
         }
         SessionCommand::Rename { .. } => unreachable!("rename uses shared mutation dispatch"),
-        SessionCommand::Send { id, task, to } => {
+        SessionCommand::Send {
+            id,
+            task,
+            to,
+            arrived,
+        } => {
             let store = open_shared_store().await?;
             let to = crate::ops::task_ownership::resolve_machine(&store.sqlite, to)?;
+            if *arrived {
+                let task = task
+                    .as_deref()
+                    .expect("Clap requires --task with --arrived");
+                return crate::ops::human_session::moves::sent_task_arrived(&store, task, &to)
+                    .await;
+            }
             let moved = match (id, task) {
-                (_, Some(task)) => {
-                    crate::ops::human_session::moves::send_task(&store, task, &to).await?
+                (id, Some(task)) => {
+                    crate::ops::human_session::moves::send_task(&store, task, &to, id.as_deref())
+                        .await?
                 }
                 (Some(id), None) => crate::ops::human_session::moves::send(&store, id, &to).await?,
                 (None, None) => unreachable!("Clap requires a Session or a Task"),
@@ -220,13 +288,46 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             Ok(())
         }
         SessionCommand::Receive {
-            check: true, task, ..
+            check: true,
+            task: Some(task),
+            issue: Some(issue),
+            repository: Some(repository),
+            origin,
+            planning_key,
+            from,
+            ..
         } => {
             let store = open_shared_store().await?;
-            if let Some(task) = task {
-                let id = crate::durable::TaskId::parse(task)?;
-                crate::ops::human_session::moves::known_task(&store, &id, task).await?;
+            let path = crate::ops::human_session::moves::checkout_of(
+                &store,
+                repository,
+                origin.as_deref(),
+            )?;
+            let main = crate::git::worktrees::main_repo_root(&path)?;
+            if let Some(key) = planning_key {
+                crate::ops::planning_sync::adopt_personal_key(&store, &main, key).await?;
             }
+            let id = crate::durable::TaskId::parse(task)?;
+            crate::ops::human_session::moves::arriving_task(&store, &main, &id, issue).await?;
+            if let Some(from) = from {
+                store.sqlite.record_move_checked(&id, from)?;
+            }
+            Ok(())
+        }
+        SessionCommand::Receive {
+            arrived: Some(task),
+            ..
+        } => {
+            let store = open_shared_store().await?;
+            let here = store.sqlite.local_machine()?.id;
+            anyhow::ensure!(
+                store.sqlite.task_move_arrived_on(task, &here)?,
+                "Task {task} did not arrive here"
+            );
+            Ok(())
+        }
+        SessionCommand::Receive { check: true, .. } => {
+            open_shared_store().await?;
             Ok(())
         }
         SessionCommand::Receive { json, .. } => {
@@ -298,6 +399,10 @@ impl SessionFacts {
 pub fn list_sessions(args: &SessionListArgs) -> anyhow::Result<()> {
     let filter = list_filter(args, &std::env::current_dir()?)?;
     if args.subscribe {
+        // This process reads the subscription itself, so it watches
+        // transcripts the way the Machine server does.
+        let observations = crate::observe::Cache::shared();
+        let _transcripts = crate::transcript::watch::watch(&observations);
         return subscribe_list(filter, super::subscribe::Transport::Stdio).map(drop);
     }
     tokio::runtime::Runtime::new()?.block_on(async {
@@ -316,18 +421,29 @@ pub(crate) fn list_filter(
         blocked: args.selector.blocked,
         on: args.selector.on.clone(),
         available: args.available,
+        raw: !args.no_raw,
         repo: if args.all {
             None
         } else {
             crate::repository::CanonicalRepo::containing(directory)?.map(|repo| repo.to_string())
         },
         task: args.task.clone(),
+        wave: args
+            .wave
+            .as_deref()
+            .map(|wave| {
+                crate::work::wave::context::resolve_managed_wave_sync(
+                    (!args.all).then_some(directory),
+                    Some(wave),
+                )
+                .map(|wave| wave.id().clone())
+            })
+            .transpose()?,
+        primary: args.primary,
         orphan: args.orphan,
         search: args.search.clone(),
-        interactive: args.interactive.interactive(),
-        history: args.history,
+        headless: args.headless,
         limit: args.limit,
-        offset: args.offset,
         after: args.page.then(|| args.after.clone().unwrap_or_default()),
     })
 }
@@ -340,8 +456,8 @@ struct SessionWatchArgs {
     repo: Option<String>,
     task: Option<String>,
     search: Option<String>,
-    /// `null` selects both Sessions and Runs.
-    interactive: Option<bool>,
+    /// Include headless Sessions alongside interactive conversations.
+    headless: bool,
 }
 
 pub(crate) fn subscribe_list(
@@ -352,24 +468,16 @@ pub(crate) fn subscribe_list(
         repo: filter.repo.clone(),
         task: filter.task.clone(),
         search: filter.search.clone(),
-        interactive: filter.interactive,
+        headless: filter.headless,
     };
-    // A clock tick rereads every summary only when an AgentProcess lived or
-    // died, a Session went quiet long enough to become available, or a
-    // persistent checkout appeared or vanished.
-    let subscribed =
-        super::subscribe::Wake::every(super::subscribe::ACTIVITY_CLOCK).probing(|store| {
-            Ok(store.session_observations(time::OffsetDateTime::now_utc().unix_timestamp())?)
-        });
     super::subscribe::start(
         args,
-        subscribed,
         move |store, args| {
             let filter = crate::session::SessionFilter {
                 repo: args.repo,
                 task: args.task,
                 search: args.search,
-                interactive: args.interactive,
+                headless: args.headless,
                 ..filter.clone()
             };
             async move {
@@ -402,17 +510,65 @@ pub(crate) fn renamed(id: &str, name: &str) -> anyhow::Result<SessionRecord> {
     ))
 }
 
+/// The snapshot a Session's Program Status now holds.
+#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+pub(crate) struct StatusRecorded {
+    pub stream: String,
+    pub sequence: i64,
+}
+
+/// `lf session observe-status <id> --terminal <terminal> --stream <stream>
+/// --sequence <n>`, the snapshot on stdin.
+pub(crate) async fn status_recorded(
+    id: &str,
+    terminal: &str,
+    agent_process: Option<&str>,
+    stream: &str,
+    sequence: i64,
+    records: &crate::program_status::Records,
+) -> anyhow::Result<StatusRecorded> {
+    let store = open_shared_store().await?;
+    let agent_process = agent_process
+        .map(crate::id::AgentProcessId::parse)
+        .transpose()?;
+    crate::ops::human_session::record_program_status(
+        &store,
+        id,
+        terminal,
+        agent_process.as_ref(),
+        stream,
+        sequence,
+        records,
+    )
+    .await?;
+    Ok(StatusRecorded {
+        stream: stream.to_owned(),
+        sequence,
+    })
+}
+
+// The bound Session, or the Task a preview would assign.
+#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+#[serde(untagged)]
+#[schemars(inline)]
+pub(crate) enum SessionBinding {
+    Bound(Box<crate::ops::human_session::SessionRecord>),
+    Preview(Box<crate::ops::human_session::SessionBindingPreview>),
+}
+
 /// `lf session bind <id> --task <task> --json`: the bound Session, or with
 /// `preview` (`--dry-run`) the Task a bind would assign, assigning nothing.
-pub(crate) fn bound(id: &str, task: &str, preview: bool) -> anyhow::Result<serde_json::Value> {
+pub(crate) fn bound(id: &str, task: &str, preview: bool) -> anyhow::Result<SessionBinding> {
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_shared_store().await?;
         Ok(if preview {
-            serde_json::to_value(
+            SessionBinding::Preview(Box::new(
                 crate::ops::human_session::preview_binding(&store, id, task).await?,
-            )?
+            ))
         } else {
-            serde_json::to_value(crate::ops::human_session::bind(&store, id, task).await?)?
+            SessionBinding::Bound(Box::new(
+                crate::ops::human_session::bind(&store, id, task).await?,
+            ))
         })
     })
 }
@@ -509,8 +665,18 @@ async fn list(
     if sessions.is_empty() && copied.is_empty() {
         println!("No Sessions.");
     } else {
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
         for session in sessions {
-            println!(
+            let place = if session.raw {
+                format!("raw {}", session.provider.as_deref().unwrap_or_default())
+            } else {
+                session
+                    .work_path
+                    .as_deref()
+                    .unwrap_or("Repository")
+                    .to_owned()
+            };
+            let mut line = format!(
                 "{}  {:<7} {}  {}",
                 session.id,
                 match session.state {
@@ -520,12 +686,16 @@ async fn list(
                     SessionState::Detached => "detached",
                     SessionState::Closed => "closed",
                 },
-                session.work_path.as_deref().unwrap_or("Repository"),
+                place,
                 match &session.account {
                     Some(account) => format!("{}  on {account}", session.title),
                     None => session.title.clone(),
                 }
             );
+            if let Some(turn) = &session.turn {
+                line.push_str(&format!("  {}", turn.describe(now)));
+            }
+            println!("{line}");
             for action in session.actions {
                 println!(
                     "  {} — {}",
@@ -600,6 +770,7 @@ async fn resume(
     let store = open_shared_store().await?;
     let cwd = std::env::current_dir()?;
     drop(progress);
+    let named_work = connection.work_flag(cli).is_some();
     if let Some(message) = message {
         let id = select(&store, &cwd, target).await?;
         let session = crate::ops::human_session::session_by_id(&store, &id)
@@ -613,7 +784,9 @@ async fn resume(
         let session = crate::ops::human_session::admit_workspace(&store, session).await?;
         drop(launch);
         let id = session.id;
-        return tokio::task::block_in_place(|| crate::lf::commands::run::resume(&id, message, cli));
+        return tokio::task::block_in_place(|| {
+            crate::lf::commands::run::resume(&id, message, cli, named_work)
+        });
     }
     let session = reopen(
         &store,
@@ -622,6 +795,7 @@ async fn resume(
         connection,
         fork,
         connection.json || cli.json,
+        named_work,
     )
     .await?;
     print_opened(connection.json || cli.json, &session)
@@ -657,6 +831,7 @@ async fn reopen(
     connection: &SessionConnectionArgs,
     fork: bool,
     json: bool,
+    named_work: bool,
 ) -> anyhow::Result<SessionRecord> {
     let intent = connection.intent();
     if intent != SessionOpenIntent::Resume {
@@ -669,11 +844,21 @@ async fn reopen(
             intent,
             !connection.prepare,
             json,
+            named_work,
         )
         .await;
     }
     let id = select(store, directory, target).await?;
-    crate::ops::human_session::open(store, directory, &id, fork, !connection.prepare, json).await
+    crate::ops::human_session::open(
+        store,
+        directory,
+        &id,
+        fork,
+        !connection.prepare,
+        json,
+        named_work,
+    )
+    .await
 }
 
 /// What `lf session resume|new --prepare` run from `directory` records and
@@ -692,11 +877,34 @@ pub(crate) fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result
                 fork,
             } if connection.prepare => {
                 let target = connection.target(cli, id.as_deref())?;
-                reopen(&store, directory, target, connection, *fork, false).await
+                let named_work = connection.work_flag(cli).is_some();
+                let mut record = reopen(
+                    &store, directory, target, connection, *fork, false, named_work,
+                )
+                .await?;
+                // The opening terminal resumes this Session by id, managed
+                // when the prepare named its Work.
+                if let Some(flag) = connection.work_flag(cli) {
+                    record.open_argv.extend(flag.map(str::to_string));
+                }
+                Ok(record)
             }
-            SessionCommand::New { id, connection } if connection.prepare => {
+            SessionCommand::New {
+                id,
+                connection,
+                request_id,
+            } if connection.prepare => {
                 let target = connection.target(cli, id.as_deref())?;
-                restarted(&store, directory, target, false, false).await
+                restarted(
+                    &store,
+                    directory,
+                    target,
+                    false,
+                    false,
+                    request_id.as_deref(),
+                    cli.agent.as_deref(),
+                )
+                .await
             }
             _ => bail!("only `--prepare` opens a Session without starting its provider"),
         }
@@ -709,6 +917,7 @@ async fn new_thread(
     cli: &crate::lf::Cli,
     connection: &SessionConnectionArgs,
     target: crate::ops::human_session::SessionTarget<'_>,
+    request_id: Option<&str>,
 ) -> anyhow::Result<()> {
     anyhow::ensure!(
         connection.message.is_none(),
@@ -721,6 +930,8 @@ async fn new_thread(
         target,
         true,
         connection.json || cli.json,
+        request_id,
+        cli.agent.as_deref(),
     )
     .await?;
     print_opened(connection.json || cli.json, &record)
@@ -734,6 +945,8 @@ async fn restarted(
     target: crate::ops::human_session::SessionTarget<'_>,
     launch: bool,
     json: bool,
+    request_id: Option<&str>,
+    agent: Option<&str>,
 ) -> anyhow::Result<SessionRecord> {
     let selected = crate::ops::human_session::select_connection(
         store,
@@ -742,34 +955,25 @@ async fn restarted(
         SessionOpenIntent::Resume,
     )
     .await?;
-    let session = crate::ops::human_session::session_by_id(store, &selected.id)
-        .await?
-        .context("Session not found")?;
-    let threaded = match session.artifact_key.as_deref() {
-        Some(key) => store.sqlite.input_provider_session(key)?.is_some(),
-        None => false,
-    };
-    if !threaded {
-        // No earlier thread to hand off from: opening starts the first one.
-        if selected.started {
-            crate::journal::request::diagnostic(format_args!(
-                "Nothing to restart here; starting a new conversation."
-            ));
-        }
-        return crate::ops::human_session::open(
-            store,
-            directory,
-            &selected.id,
-            false,
-            launch,
-            json,
-        )
-        .await;
+    let request_id = request_id
+        .map(str::to_owned)
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let next = crate::ops::human_session::new_thread(
+        store,
+        &selected.id,
+        agent,
+        launch,
+        json,
+        &request_id,
+    )
+    .await?;
+    if let Some(result) = store
+        .sqlite
+        .creation_receipt(&request_id)?
+        .and_then(|r| r.result)
+    {
+        return Ok(serde_json::from_value(result)?);
     }
-    let agent = crate::config::agent_override();
-    let next =
-        crate::ops::human_session::new_thread(store, &selected.id, agent.as_deref(), launch, json)
-            .await?;
     crate::ops::human_session::surface(store, &next).await
 }
 

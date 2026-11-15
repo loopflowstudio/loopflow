@@ -197,9 +197,13 @@ fn prepare_prompt(
         .and_then(|skill| skill.action_style.as_deref());
     let launch = AgentConfig {
         chrome: config.chrome,
+        codex_service_tier: config.codex.service_tier,
+        claude_model: config.claude.model.clone(),
         session_attachment: None,
         system_prompt,
         conversation_context,
+        // The command that names the launch's Work decides this.
+        holder: crate::session::Holder::Caller,
         task_prompt,
         skill_invocation,
         output_schema: None,

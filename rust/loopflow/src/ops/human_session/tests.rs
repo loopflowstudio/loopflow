@@ -1,3 +1,8 @@
+fn listed_session(store: &crate::store::SharedStore, id: &str) -> super::SessionRecord {
+    let capacity = crate::provider_account::LaunchCapacity::read(&store.sqlite).unwrap();
+    super::listed(store, id, &capacity).unwrap().unwrap()
+}
+
 #[test]
 fn resume_refuses_a_run_and_leaves_its_provider_running() {
     let ledger = crate::journal::TestLedgerGuard::new();
@@ -13,7 +18,7 @@ fn resume_refuses_a_run_and_leaves_its_provider_running() {
                 ))
                 .await?,
             );
-            let capture = crate::session_record::CaptureHandle::begin_at(
+            let capture = crate::session_record::SessionRecorder::begin_at(
                 home,
                 crate::session_record::SessionCaptureSpec {
                     harness: "claude".into(),
@@ -27,7 +32,7 @@ fn resume_refuses_a_run_and_leaves_its_provider_running() {
                     graph: crate::session_record::SessionGraphMembership::Independent,
                     work: None,
                 },
-            )?;
+            ).map(crate::process::LfProcessRuntime::new)?;
             let session = store
                 .sqlite
                 .session_for_artifact(&capture.artifact_key())?
@@ -44,9 +49,10 @@ fn resume_refuses_a_run_and_leaves_its_provider_running() {
                 command,
                 None,
                 &(store.sqlite.clone(), session.id.to_string(), first.clone()),
+                crate::session::Holder::Caller,
             )?;
-            let opened = super::open(&store, home, &session.id, false, true, false).await;
-            let forked = super::open(&store, home, &session.id, true, true, false).await;
+            let opened = super::open(&store, home, &session.id, false, true, false, false).await;
+            let forked = super::open(&store, home, &session.id, true, true, false, false).await;
             let running = provider.try_wait()?.is_none();
             provider.kill().await?;
             assert!(running, "resume stopped the Run's provider");
@@ -135,6 +141,7 @@ fn session_metadata_keeps_unknown_position_visible() {
     let task = TaskId::new();
     let wave = crate::id::WaveId::new();
     let mut summary = crate::session::SessionSummary {
+        transition: None,
         preview: None,
         has_provider_history: true,
         program_status: None,
@@ -144,6 +151,7 @@ fn session_metadata_keeps_unknown_position_visible() {
         available: false,
         terminal_id: None,
         unviewed: false,
+        held: false,
         task_terminal: false,
         task_primary: false,
         task_ids: vec![task.clone()],
@@ -265,14 +273,14 @@ use crate::session::LfSession;
 use crate::store::{open_ephemeral_store, SharedStore, StorageConfig};
 use crate::work::task::TaskId;
 
-pub(super) struct SessionHome {
+pub(crate) struct SessionHome {
     home: tempfile::TempDir,
     previous: Vec<(&'static str, Option<OsString>)>,
     _ambient: crate::test_ambient::EnvGuard,
 }
 
 impl SessionHome {
-    pub(super) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let ambient = crate::test_ambient::EnvGuard::new();
         let home = tempfile::tempdir().unwrap();
         let previous = ["LF_HOME", "LF_BIN"]
@@ -292,7 +300,11 @@ impl SessionHome {
         }
     }
 
-    pub(super) async fn store(&self) -> SharedStore {
+    pub(crate) fn path(&self) -> &std::path::Path {
+        self.home.path()
+    }
+
+    pub(crate) async fn store(&self) -> SharedStore {
         std::sync::Arc::new(
             open_ephemeral_store(&StorageConfig::sqlite(self.home.path().join("loopflow.db")))
                 .await
@@ -555,7 +567,7 @@ async fn session_work_labels_follow_stable_ancestry_without_a_roadmap() {
         super::session_work_path(&store, &session(Some(missing.clone())))
             .await
             .unwrap(),
-        Some(format!("Task {missing} (unavailable)"))
+        Some(format!("product / Task {missing} (unavailable)"))
     );
 }
 
@@ -824,6 +836,7 @@ impl Logins {
                     session.id.to_string(),
                     attachment,
                 ),
+                crate::session::Holder::Caller,
             )
             .unwrap(),
         )
@@ -966,6 +979,102 @@ async fn moving_an_unknown_login_says_so_instead_of_moving_nothing() {
     assert!(error.to_string().contains("no stored login matches"));
 }
 
+#[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "multi_thread")]
+async fn task_detail_reads_capacity_once_for_all_sessions() {
+    let _lock = crate::journal::test_env_lock();
+    let logins = Logins::new().await;
+    let account = logins.store_login(crate::provider_auth::Provider::Codex, "work", None);
+    logins.sign_in("work");
+    let repo = loopflow_test_support::TestRepo::new();
+    let task = logins
+        .store
+        .sqlite
+        .create_task(&crate::work::task::NewTask {
+            repository_id: logins
+                .store
+                .sqlite
+                .ensure_repository(repo.path().to_str().unwrap())
+                .unwrap(),
+            id: crate::durable::TaskId::new(),
+            project_id: None,
+            title: "Many Sessions".into(),
+            description: String::new(),
+            due_date: None,
+        })
+        .unwrap();
+    // `lf task status`, Desktop and screens read this on the write store.
+    let mut status =
+        crate::store::query_plans::assert_no_empty_writes(&logins.store.sqlite, || {
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current()
+                    .block_on(crate::ops::task::registered_task_status(
+                        &logins.store,
+                        task,
+                    ))
+                    .unwrap()
+            })
+        });
+    let capacity = crate::provider_account::LaunchCapacity::read(&logins.store.sqlite).unwrap();
+    let mut expected = Vec::new();
+    for id in ["first", "second", "third"] {
+        let session = logins.codex_session(id, Some("gpt-5"), &account);
+        expected.push(crate::lf::commands::session::SessionFacts::of(
+            super::listed(&logins.store, id, &capacity)
+                .unwrap()
+                .unwrap(),
+        ));
+        status
+            .overview
+            .as_mut()
+            .unwrap()
+            .sessions
+            .push(crate::task_work::TaskSession {
+                id: session.id,
+                title: session.title,
+                interactive: session.interactive,
+                graph_lf_process_id: None,
+                completed_at: None,
+            });
+    }
+    crate::provider_account::CAPACITY_READS.set(0);
+    let detail = crate::lf::commands::waves::task_detail(&logins.store, status)
+        .await
+        .unwrap();
+    assert_eq!(crate::provider_account::CAPACITY_READS.get(), 1);
+    assert_eq!(
+        serde_json::to_value(detail.sessions).unwrap(),
+        serde_json::to_value(expected).unwrap()
+    );
+}
+
+#[test]
+fn no_raw_leaves_raw_conversations_out_of_the_list() {
+    use clap::Parser;
+    let lists_raw = |argv: &[&str]| {
+        let cli = crate::lf::Cli::try_parse_from(argv).unwrap();
+        let Some(crate::lf::Commands::Session {
+            cmd: crate::lf::SessionCommand::List(args),
+        }) = cli.command
+        else {
+            panic!("not a session list");
+        };
+        let filter =
+            crate::lf::commands::session::list_filter(&args, std::path::Path::new("/")).unwrap();
+        super::lists_raw(&filter)
+    };
+    assert!(lists_raw(&["lf", "session", "list", "--all"]));
+    assert!(lists_raw(&["lf", "session", "list", "--all", "--headless"]));
+    assert!(lists_raw(&[
+        "lf",
+        "session",
+        "list",
+        "--all",
+        "--available"
+    ]));
+    assert!(!lists_raw(&["lf", "session", "list", "--all", "--no-raw"]));
+}
+
 #[test]
 fn only_a_consumed_first_launch_offers_try_again() {
     use super::{SessionActionKind::*, SessionState::*};
@@ -1006,6 +1115,7 @@ fn automatic_start_prepares_new_history_but_never_replays_consumed_input() {
             SessionOpenIntent::Start,
             false,
             false,
+            false,
         )
         .await
         .unwrap();
@@ -1030,6 +1140,7 @@ fn automatic_start_prepares_new_history_but_never_replays_consumed_input() {
             SessionOpenIntent::Start,
             true,
             false,
+            false,
         )
         .await
         .unwrap_err();
@@ -1047,13 +1158,14 @@ fn automatic_start_prepares_new_history_but_never_replays_consumed_input() {
                 .any(|action| action.kind == super::SessionActionKind::Open));
             action
         };
-        let listed = super::listed(&store, &record.id).unwrap().unwrap();
+        let listed = listed_session(&store, &record.id);
         assert_eq!(retry(&listed).label, "Try again");
         assert!(retry(&listed).unavailable_reason.is_none());
         let refused = super::open_without_replacing(
             &store,
             &record.id,
             SessionOpenIntent::Start,
+            false,
             false,
             false,
         )
@@ -1065,6 +1177,7 @@ fn automatic_start_prepares_new_history_but_never_replays_consumed_input() {
             &store,
             std::path::Path::new("/"),
             &record.id,
+            false,
             false,
             false,
             false,
@@ -1100,6 +1213,7 @@ fn reveal_requires_history_and_never_publishes_a_first_turn() {
             SessionOpenIntent::Reveal,
             false,
             false,
+            false,
         )
         .await
         .unwrap();
@@ -1116,7 +1230,7 @@ fn reveal_requires_history_and_never_publishes_a_first_turn() {
             .contains("No saved provider history"));
         for refreshed in [
             super::surface(&store, &before).await.unwrap(),
-            super::listed(&store, &record.id).unwrap().unwrap(),
+            listed_session(&store, &record.id),
             super::list(&store, &crate::session::SessionFilter::default())
                 .await
                 .unwrap()
@@ -1138,6 +1252,7 @@ fn reveal_requires_history_and_never_publishes_a_first_turn() {
             &record.id,
             SessionOpenIntent::Reveal,
             true,
+            false,
             false,
         )
         .await
@@ -1173,6 +1288,7 @@ fn recovery_refresh_follows_current_holder_and_history() {
             SessionOpenIntent::Reveal,
             false,
             false,
+            false,
         )
         .await
         .unwrap();
@@ -1205,7 +1321,7 @@ fn recovery_refresh_follows_current_holder_and_history() {
             )
             .unwrap();
         // An admitted holder with unknown OS evidence cannot be replaced by a reveal.
-        let refreshed = super::listed(&store, &record.id).unwrap().unwrap();
+        let refreshed = listed_session(&store, &record.id);
         let takeover = refreshed
             .actions
             .iter()
@@ -1216,6 +1332,7 @@ fn recovery_refresh_follows_current_holder_and_history() {
             &store,
             &record.id,
             SessionOpenIntent::Reveal,
+            false,
             false,
             false,
         )
@@ -1235,7 +1352,7 @@ fn recovery_refresh_follows_current_holder_and_history() {
             .sqlite
             .record_agent_process_exit(&record.id, &holder, true)
             .unwrap();
-        let refreshed = super::listed(&store, &record.id).unwrap().unwrap();
+        let refreshed = listed_session(&store, &record.id);
         assert!(!refreshed
             .actions
             .iter()
@@ -1297,10 +1414,11 @@ fn recovery_refresh_recognizes_imported_history_before_attachment() {
                 SessionOpenIntent::Reveal,
                 false,
                 false,
+                false,
             )
             .await
             .unwrap();
-            let refreshed = super::listed(&store, &record.id).unwrap().unwrap();
+            let refreshed = listed_session(&store, &record.id);
             assert_eq!(prepared.actions, refreshed.actions);
             assert_eq!(
                 refreshed
@@ -1331,10 +1449,11 @@ fn recovery_refresh_recognizes_imported_history_before_attachment() {
                 SessionOpenIntent::Reveal,
                 false,
                 false,
+                false,
             )
             .await
             .unwrap();
-            let refreshed = super::listed(&store, &next.id).unwrap().unwrap();
+            let refreshed = listed_session(&store, &next.id);
             assert_eq!(prepared.actions, refreshed.actions);
             assert_eq!(
                 refreshed
@@ -1346,6 +1465,59 @@ fn recovery_refresh_recognizes_imported_history_before_attachment() {
                 "Start conversation"
             );
         }
+    });
+}
+
+#[test]
+fn a_session_switched_to_another_provider_resumes_on_it() {
+    let _lock = crate::journal::test_env_lock();
+    let home = SessionHome::new();
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let store = home.store().await;
+        let repo = loopflow_test_support::TestRepo::new();
+        let (record, _) = {
+            let _claude = crate::config::settings::select_invocation(
+                serde_yaml_ng::from_str("agent: claude").unwrap(),
+            );
+            super::primary::ensure(&store, repo.path(), None)
+                .await
+                .unwrap()
+        };
+        let session = store.session(&record.id).await.unwrap().unwrap();
+        assert_eq!(session.provider.as_deref(), Some("claude"));
+
+        // `lf -a codex resume`: the input it appends runs on Codex.
+        let switched = {
+            let _codex = crate::config::settings::select_invocation(
+                serde_yaml_ng::from_str("agent: codex").unwrap(),
+            );
+            super::append_input(&store, session).await.unwrap()
+        };
+        assert_eq!(switched.provider.as_deref(), Some("codex"));
+        let (_, manifest) = crate::session_record::resolve_manifest(
+            &crate::store::lf_home_dir(),
+            switched.input_key().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(manifest.harness, "codex");
+        let observation = crate::session_record::provider_session_observation(
+            &switched,
+            switched.input_key().unwrap(),
+            &"codex-thread".into(),
+            None,
+        );
+        store
+            .sqlite
+            .retain_session_observation(&switched, &observation)
+            .unwrap();
+
+        // A plain resume stays on Codex, in Codex's conversation.
+        let resumed = store.session(&record.id).await.unwrap().unwrap();
+        assert_eq!(resumed.provider.as_deref(), Some("codex"));
+        let config =
+            crate::agent::resolve_session_config(&resumed, &crate::lf::Cli::default()).unwrap();
+        assert_eq!(config.agent().unwrap(), "codex");
+        assert_eq!(config.resume_token, Some("codex-thread".into()));
     });
 }
 
@@ -1371,4 +1543,529 @@ fn opening_any_primary_without_a_request_only_reads() {
         assert!(skill.contains("Steers delivered with that turn are recorded direction"));
         assert!(!skill.contains("without waiting for a greeting"));
     }
+}
+
+#[test]
+fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
+    let _lock = crate::journal::test_env_lock();
+    let home = SessionHome::new();
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let store = home.store().await;
+        let repo = loopflow_test_support::TestRepo::new();
+        let (record, _) = super::primary::ensure(&store, repo.path(), None)
+            .await
+            .unwrap();
+        let original = store.session(&record.id).await.unwrap().unwrap();
+        let identity = crate::engine::creation::identity(
+            "session.new",
+            "interrupted",
+            &serde_json::json!({"id":record.id,"agent":null}),
+            false,
+        )
+        .unwrap();
+        let artifact = crate::session_record::new_artifact_key();
+        store
+            .sqlite
+            .begin_thread_creation(&identity, &record.id, &artifact)
+            .unwrap();
+        let stopped = store
+            .sqlite
+            .creation_receipt("interrupted")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            stopped.disposition,
+            crate::store::sqlite::creation::RecoveryDisposition::Inspect
+        );
+        assert_eq!(stopped.explanation, "Conversation change unconfirmed");
+        // A crash while stopping is uncertain, even if no provider is live now.
+        let refused = super::new_thread(&store, &record.id, None, false, false, "interrupted")
+            .await
+            .unwrap_err();
+        assert_eq!(
+            refused.downcast_ref::<crate::engine::Error>().unwrap().code,
+            crate::engine::ErrorCode::OutcomeUnknown
+        );
+        assert_eq!(
+            store.session(&record.id).await.unwrap().unwrap().captured,
+            original.captured
+        );
+
+        let mut next = original.clone();
+        next.artifact_key = Some(artifact.clone());
+        next.input_published = false;
+        let next = store
+            .replace_session_input(original.captured, next, Some("interrupted".into()))
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .sqlite
+                .creation_receipt("interrupted")
+                .unwrap()
+                .unwrap()
+                .milestone,
+            "admitted"
+        );
+        assert_eq!(
+            store
+                .sqlite
+                .creation_receipt("interrupted")
+                .unwrap()
+                .unwrap()
+                .disposition,
+            crate::store::sqlite::creation::RecoveryDisposition::Continue
+        );
+        // Simulate app/server death after the atomic append, before publication.
+        let recovered = super::new_thread(&store, &record.id, None, false, false, "interrupted")
+            .await
+            .unwrap();
+        assert_eq!(recovered.captured, next.captured);
+        assert_eq!(recovered.artifact_key.as_deref(), Some(artifact.as_str()));
+        assert!(recovered.input_published);
+        let result = store
+            .sqlite
+            .creation_receipt("interrupted")
+            .unwrap()
+            .unwrap()
+            .result;
+        assert!(result.is_some());
+        assert_eq!(
+            store
+                .sqlite
+                .creation_receipt("interrupted")
+                .unwrap()
+                .unwrap()
+                .disposition,
+            crate::store::sqlite::creation::RecoveryDisposition::Complete
+        );
+        let mut newer = recovered.clone();
+        newer.request = Some("A later independent input".into());
+        let newer = super::append_input(&store, newer).await.unwrap();
+        super::new_thread(&store, &record.id, None, false, false, "interrupted")
+            .await
+            .unwrap();
+        assert_eq!(
+            store.session(&record.id).await.unwrap().unwrap().captured,
+            newer.captured
+        );
+        assert_eq!(
+            store
+                .sqlite
+                .creation_receipt("interrupted")
+                .unwrap()
+                .unwrap()
+                .result,
+            result
+        );
+
+        let identity = crate::engine::creation::identity(
+            "session.new",
+            "superseded",
+            &serde_json::json!({"id":record.id,"agent":null}),
+            false,
+        )
+        .unwrap();
+        let artifact = crate::session_record::new_artifact_key();
+        store
+            .sqlite
+            .begin_thread_creation(&identity, &record.id, &artifact)
+            .unwrap();
+        let mut pending = newer.clone();
+        pending.artifact_key = Some(artifact);
+        pending.input_published = false;
+        let pending = store
+            .replace_session_input(newer.captured, pending, Some("superseded".into()))
+            .await
+            .unwrap();
+        // A lookup can permit continuation, then newer input wins before retry.
+        assert_eq!(
+            store
+                .sqlite
+                .creation_receipt("superseded")
+                .unwrap()
+                .unwrap()
+                .disposition,
+            crate::store::sqlite::creation::RecoveryDisposition::Continue
+        );
+        let newest = super::append_input(&store, pending).await.unwrap();
+        let refused = super::new_thread(&store, &record.id, None, false, false, "superseded")
+            .await
+            .unwrap_err();
+        assert_eq!(
+            refused.downcast_ref::<crate::engine::Error>().unwrap().code,
+            crate::engine::ErrorCode::OutcomeUnknown
+        );
+        let receipt = store
+            .sqlite
+            .creation_receipt("superseded")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            receipt.disposition,
+            crate::store::sqlite::creation::RecoveryDisposition::Inspect
+        );
+        assert_eq!(
+            receipt.explanation,
+            "Newer conversation input replaced this change"
+        );
+        assert_eq!(
+            store.session(&record.id).await.unwrap().unwrap().captured,
+            newest.captured
+        );
+
+        let identity = crate::engine::creation::identity(
+            "session.new",
+            "published",
+            &serde_json::json!({"id":record.id,"agent":null}),
+            false,
+        )
+        .unwrap();
+        let artifact = crate::session_record::new_artifact_key();
+        store
+            .sqlite
+            .begin_thread_creation(&identity, &record.id, &artifact)
+            .unwrap();
+        let mut pending = newest.clone();
+        pending.artifact_key = Some(artifact);
+        pending.input_published = false;
+        let pending = store
+            .replace_session_input(newest.captured, pending, Some("published".into()))
+            .await
+            .unwrap();
+        let published = super::publish_prepared_input(
+            &store.sqlite,
+            &pending,
+            crate::session_record::SessionGraphMembership::Independent,
+        )
+        .unwrap();
+        // Publication succeeded but the result was not recorded before exit.
+        let recovered = super::new_thread(&store, &record.id, None, false, false, "published")
+            .await
+            .unwrap();
+        assert_eq!(recovered.captured, published.captured);
+        assert!(recovered.input_published);
+        assert_eq!(
+            store
+                .sqlite
+                .creation_receipt("published")
+                .unwrap()
+                .unwrap()
+                .disposition,
+            crate::store::sqlite::creation::RecoveryDisposition::Complete
+        );
+    });
+}
+
+#[test]
+fn new_thread_before_a_first_provider_keeps_the_original_prompt_and_retries_once() {
+    let _lock = crate::journal::test_env_lock();
+    let home = SessionHome::new();
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let store = home.store().await;
+        let repo = loopflow_test_support::TestRepo::new();
+        let (record, _) = super::primary::ensure(&store, repo.path(), None)
+            .await
+            .unwrap();
+        let first = super::new_thread(&store, &record.id, None, false, false, "first")
+            .await
+            .unwrap();
+        let retry = super::new_thread(&store, &record.id, None, false, false, "first")
+            .await
+            .unwrap();
+        assert_eq!(first.captured, retry.captured);
+        assert_eq!(first.request, retry.request);
+        assert!(store
+            .sqlite
+            .provider_transition(&record.id)
+            .unwrap()
+            .is_none());
+    });
+}
+
+/// A held Task conversation nobody views is the Task's, and any terminal
+/// attaches to it: there is no other terminal's input to take back.
+#[allow(clippy::await_holding_lock)]
+#[tokio::test]
+async fn a_held_task_conversation_without_a_view_offers_attach() {
+    let _lock = crate::journal::test_env_lock();
+    let logins = Logins::new().await;
+    let work = logins.store_login(crate::provider_auth::Provider::Codex, "work", None);
+    let session = logins.codex_session("held", None, &work);
+    let _agent = logins.run(&session);
+    let task = TaskId::new();
+    let created = logins
+        .store
+        .sqlite
+        .create_task(&crate::work::task::NewTask {
+            repository_id: logins.store.sqlite.ensure_repository("/fixture").unwrap(),
+            id: task.clone(),
+            project_id: None,
+            title: "Held".into(),
+            description: String::new(),
+            due_date: None,
+        })
+        .unwrap();
+    let terminal = crate::id::TerminalId::new();
+    rusqlite::Connection::open(&logins.database)
+        .unwrap()
+        .execute_batch(&format!(
+            "INSERT INTO held_terminals(id,holder_build,created_at,viewer_hold,viewer_hold_at,viewed)
+                 VALUES('{terminal}','fixture',1,'absent',1,0);
+             UPDATE agent_sessions SET task_id='{task}',held_terminal_id='{terminal}' WHERE id='held';"
+        ))
+        .unwrap();
+
+    let rows = super::list(&logins.store, &crate::session::SessionFilter::default())
+        .await
+        .unwrap();
+    let row = rows.iter().find(|row| row.id == session.id).unwrap();
+    assert_eq!(row.state, super::SessionState::Detached);
+    assert_eq!(row.work_path.as_deref(), Some(created.identifier.as_str()));
+    let offered: Vec<_> = row
+        .actions
+        .iter()
+        .map(|action| (action.label.as_str(), action.unavailable_reason.as_deref()))
+        .collect();
+    assert_eq!(offered, [("Reconnect", None)]);
+    assert!(row.actions[0]
+        .help
+        .ends_with(&format!("lf resume {}", session.id)));
+}
+
+struct ListFilters {
+    home: SessionHome,
+    store: SharedStore,
+    wave: crate::id::WaveId,
+    repo: loopflow_test_support::TestRepo,
+}
+
+impl ListFilters {
+    async fn new() -> Self {
+        let home = SessionHome::new();
+        let store = home.store().await;
+        let repo = loopflow_test_support::TestRepo::new();
+        let wave = crate::id::WaveId::new();
+        let project = crate::work::project::ProjectId::new();
+        let task = crate::durable::TaskId::new();
+        let db = rusqlite::Connection::open(home.home.path().join("loopflow.db")).unwrap();
+        db.execute(
+            "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'craft',?2,1)",
+            rusqlite::params![wave, repo.path().to_str().unwrap()],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_00000000000000000000000000000001',?1,1)",
+            [repo.path().to_str().unwrap()],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO projects(id,wave_id,created_at) VALUES(?1,?2,1)",
+            rusqlite::params![project.as_str(), wave],
+        )
+        .unwrap();
+        db.execute("INSERT INTO tasks(id,repository_id,project_id,issue_identifier,created_at) VALUES(?1,'repo_00000000000000000000000000000001',?2,'TEST-1',1)", rusqlite::params![task.as_str(), project.as_str()]).unwrap();
+        db.execute(
+            "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)",
+            rusqlite::params![task.as_str(), repo.path().to_str().unwrap()],
+        )
+        .unwrap();
+        for id in [
+            "outside",
+            "wave-primary",
+            "ad-hoc",
+            "task-primary",
+            "former",
+            "bare",
+            "repository-primary",
+            "repository-in-task",
+        ] {
+            store
+                .sqlite
+                .test_session(id, &crate::session_record::new_artifact_key());
+            db.execute("UPDATE agent_sessions SET title=id WHERE id=?1", [id])
+                .unwrap();
+        }
+        db.execute("UPDATE agent_sessions SET wave_id=?1 WHERE id IN ('wave-primary','ad-hoc','task-primary','former')", [&wave]).unwrap();
+        db.execute(
+            "UPDATE agent_sessions SET primary_scope='wave' WHERE id='wave-primary'",
+            [],
+        )
+        .unwrap();
+        db.execute("UPDATE agent_sessions SET primary_scope='repository', repo=id WHERE id IN ('repository-primary','repository-in-task')", []).unwrap();
+        db.execute(
+            "UPDATE agent_sessions SET task_id=?1 WHERE id IN ('task-primary','former')",
+            [task.as_str()],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO task_primary_sessions(task_id,session_id) VALUES(?1,'task-primary')",
+            [task.as_str()],
+        )
+        .unwrap();
+        db.execute(
+            "UPDATE agent_sessions SET cwd=?1 WHERE id IN ('bare','repository-in-task')",
+            [repo.path().to_str().unwrap()],
+        )
+        .unwrap();
+        Self {
+            home,
+            store,
+            wave,
+            repo,
+        }
+    }
+
+    async fn ids(&self, filter: crate::session::SessionFilter) -> Vec<String> {
+        let mut ids = super::list(&self.store, &filter)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|row| row.id.to_string())
+            .collect::<Vec<_>>();
+        ids.sort();
+        ids
+    }
+}
+
+#[test]
+fn list_wave_includes_attribution_and_raw_checkout_conversations_before_paging() {
+    use clap::Parser;
+    let _lock = crate::journal::test_env_lock();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let fixture = runtime.block_on(ListFilters::new());
+    let cli = crate::lf::Cli::try_parse_from(["lf", "session", "list", "--all", "--wave", "craft"])
+        .unwrap();
+    let Some(crate::lf::Commands::Session {
+        cmd: crate::lf::SessionCommand::List(args),
+    }) = cli.command
+    else {
+        panic!("session list")
+    };
+    let filter = crate::lf::commands::session::list_filter(&args, fixture.repo.path()).unwrap();
+    assert_eq!(filter.wave, Some(fixture.wave.clone()));
+    assert!(filter.repo.is_none());
+    let raw = crate::observe::Cache::with_raw_conversations(vec![
+        crate::transcript::raw::RawDirectory::fixture(
+            fixture.repo.path().to_path_buf(),
+            "raw-in-task",
+        ),
+        crate::transcript::raw::RawDirectory::fixture(
+            fixture.home.home.path().to_path_buf(),
+            "raw-outside",
+        ),
+    ]);
+    raw.capture(|| {
+        runtime.block_on(async {
+            assert_eq!(
+                fixture.ids(filter.clone()).await,
+                [
+                    "ad-hoc",
+                    "bare",
+                    "former",
+                    "raw-in-task",
+                    "repository-in-task",
+                    "task-primary",
+                    "wave-primary"
+                ]
+            );
+            let filter = crate::session::SessionFilter {
+                after: Some("outside".into()),
+                limit: 1,
+                ..filter
+            };
+            assert_eq!(fixture.ids(filter).await, ["repository-in-task"]);
+        })
+    });
+}
+
+#[test]
+fn list_orphan_means_no_task_and_no_wave_including_raw_conversations() {
+    let _lock = crate::journal::test_env_lock();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let fixture = runtime.block_on(ListFilters::new());
+    let raw = crate::observe::Cache::with_raw_conversations(vec![
+        crate::transcript::raw::RawDirectory::fixture(
+            fixture.repo.path().to_path_buf(),
+            "raw-in-task",
+        ),
+        crate::transcript::raw::RawDirectory::fixture(
+            fixture.home.home.path().to_path_buf(),
+            "raw-outside",
+        ),
+    ]);
+    raw.capture(|| {
+        runtime.block_on(async {
+            let filter = crate::session::SessionFilter {
+                orphan: true,
+                ..Default::default()
+            };
+            assert_eq!(
+                fixture.ids(filter.clone()).await,
+                [
+                    "outside",
+                    "raw-outside",
+                    "repository-in-task",
+                    "repository-primary"
+                ]
+            );
+            assert_eq!(
+                fixture
+                    .ids(crate::session::SessionFilter {
+                        raw: false,
+                        ..filter
+                    })
+                    .await,
+                ["outside", "repository-in-task", "repository-primary"]
+            );
+        })
+    });
+}
+
+#[test]
+fn list_primary_selects_current_scopes_before_paging() {
+    use crate::session::{SessionFilter, SessionPrimary};
+    let _lock = crate::journal::test_env_lock();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let fixture = runtime.block_on(ListFilters::new());
+    runtime.block_on(async {
+        for (primary, expected) in [
+            (
+                SessionPrimary::All,
+                vec![
+                    "repository-in-task",
+                    "repository-primary",
+                    "task-primary",
+                    "wave-primary",
+                ],
+            ),
+            (SessionPrimary::Task, vec!["task-primary"]),
+            (SessionPrimary::Wave, vec!["wave-primary"]),
+            (
+                SessionPrimary::Repository,
+                vec!["repository-in-task", "repository-primary"],
+            ),
+        ] {
+            let filter = SessionFilter {
+                primary: Some(primary),
+                ..Default::default()
+            };
+            assert_eq!(fixture.ids(filter.clone()).await, expected);
+            assert_eq!(
+                fixture.ids(SessionFilter { limit: 1, ..filter }).await,
+                expected[..1]
+            );
+        }
+        assert_eq!(
+            fixture
+                .ids(SessionFilter {
+                    primary: Some(SessionPrimary::Wave),
+                    wave: Some(fixture.wave.clone()),
+                    limit: 1,
+                    ..Default::default()
+                })
+                .await,
+            ["wave-primary"]
+        );
+    });
 }

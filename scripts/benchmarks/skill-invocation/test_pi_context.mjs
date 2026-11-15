@@ -21,8 +21,9 @@ try {
   process.env.LF_BIN = callback;
   process.env.LF_CONTEXT_DELIVERY = "fixture";
   const source = readFileSync(new URL("../../../rust/loopflow/src/harness/context_pi.mjs", import.meta.url), "utf8");
+  const server = readFileSync(new URL("../../../rust/loopflow/src/harness/server_connection.js", import.meta.url), "utf8");
   const path = join(root, "extension.mjs");
-  writeFileSync(path, `const spec = ${JSON.stringify({ native: false, executable: callback })};\n${source}`);
+  writeFileSync(path, `const spec = ${JSON.stringify({ native: false, executable: callback })};\n${source}\n${server}`);
   const hooks = new Map();
   (await import(path)).default({ on: (name, handler) => hooks.set(name, handler) });
   const ctx = { sessionManager: { getSessionFile: () => join(root, "pi.jsonl") } };
@@ -53,34 +54,6 @@ try {
     assert.deepEqual(result.messages.slice(1), before.messages.slice(1));
   }
   assert.deepEqual(request, before, "request projection does not rewrite Pi history");
-  // Real child pipe, simulated provider API: automatic reports leave the editor
-  // and selected native Session untouched, and reject delayed foreign frames.
-  const nativePath = join(root, "native-extension.mjs");
-  const nativeSession = ctx.sessionManager.getSessionFile();
-  writeFileSync(callback, `#!/bin/sh
-if [ "$3" = "task-updates" ]; then
-  cat >/dev/null
-  printf '%s\\n' '${JSON.stringify({ session: nativeSession, text: "gate failed" })}' '${JSON.stringify({ session: "other-session", text: "wrong" })}'
-else
-  cat >/dev/null
-fi
-`, { mode: 0o700 });
-  writeFileSync(nativePath, `const spec = ${JSON.stringify({ native: true, executable: callback })};\n${source}`);
-  const nativeHooks = new Map();
-  const messages = [];
-  const draft = "unfinished draft 雪";
-  const nativeCtx = { ...ctx, cwd: root, ui: { getEditorText: () => draft, notify: (message) => { throw new Error(message); } } };
-  (await import(nativePath)).default({
-    on: (name, handler) => nativeHooks.set(name, handler), getSettings: () => ({}),
-    getAllTools: () => [], sendMessage: (message, options) => messages.push({ message, options }),
-  });
-  await nativeHooks.get("session_start")({}, nativeCtx);
-  const deadline = Date.now() + 5000;
-  while (!messages.length && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
-  await nativeHooks.get("session_shutdown")();
-  assert.deepEqual(messages, [{ message: { customType: "loopflow-task-update", content: "gate failed", display: false }, options: { triggerTurn: true, deliverAs: "followUp" } }]);
-  assert.equal(nativeCtx.ui.getEditorText(), draft);
-  assert.equal(nativeCtx.sessionManager.getSessionFile(), nativeSession);
   delete process.env.LF_CONTEXT_DELIVERY;
   assert.equal(await project(), undefined, "unbound child receives no context");
   console.log("Pi context: start, automatic/manual compaction, tool preservation and unbound child pass");

@@ -4,13 +4,11 @@
 from __future__ import annotations
 
 import argparse
-import gzip
 import hashlib
 import json
 import re
 import shutil
 import subprocess
-import tarfile
 import tempfile
 import zipfile
 from pathlib import Path
@@ -24,6 +22,7 @@ TARGETS = (
     "aarch64-unknown-linux-gnu",
     "x86_64-unknown-linux-gnu",
 )
+GHOSTTY_SCOPE = "GhosttyKit"
 RESOURCE_DIRS = (
     "swift/Loopflow/Fonts",
     "swift/Loopflow/Themes",
@@ -181,13 +180,11 @@ def refresh(root: Path = ROOT) -> None:
         "ancillary notices retained from upstream source packages.\n\n"
         "FreeType is used under the FreeType License: portions of this software are "
         "copyright © The FreeType Project (www.freetype.org). All rights reserved.\n\n"
-        "GhosttyKit statically combines GNU libintl (LGPL-2.1-or-later). Its uncombined "
-        "libraries, source, and rebuild instructions accompany packaged artifacts in "
-        "ThirdPartySources. You may modify and reverse engineer the application to "
-        "debug modifications to that library. See REBUILD.md in that directory.\n\n"
-        "GPL shell integration scripts are shipped as source. MPL-covered z2d and "
-        "option-ext sources also accompany the application. System frameworks are "
-        "provided by the operating system. ViewInspector is test-only.\n",
+        "GPL shell integration scripts are shipped as source. The source of each "
+        "MPL-2.0 component accompanies the application in ThirdPartySources; every "
+        "component's upstream source is pinned by URL and SHA-256 in inventory.json. "
+        "System frameworks are provided by the operating system. ViewInspector is "
+        "test-only.\n",
     ]
     for component in manifest["components"]:
         text = "\n\n".join(_reviewed_notice(root, n) for n in component["notices"])
@@ -240,113 +237,34 @@ def check(root: Path = ROOT) -> dict:
     return inventory
 
 
-def _source_snapshot(root: Path, destination: Path) -> None:
-    paths = _run(["git", "ls-files", "-z"], root).split("\0")
-    # Newly authored code is included in local verification before its first commit.
-    paths += _run(
-        [
-            "git",
-            "ls-files",
-            "--others",
-            "--exclude-standard",
-            "-z",
-            "scripts",
-            "third_party",
-            "swift",
-        ],
-        root,
-    ).split("\0")
-    with tarfile.open(destination, "w:gz") as archive:
-        for name in sorted(set(paths)):
-            if not name or name.startswith(("scratch/", ".lf/")):
-                continue
-            path = root / name
-            if path.is_file():
-                archive.add(path, arcname="loopflow/" + name, recursive=False)
+def _sourced(inventory: dict, scope: str | None) -> list[dict]:
+    """Components whose source ships beside the binary: those under MPL-2.0, which
+    requires it be available to recipients. Every other license needs its notice only.
+    An app carries all of them; a framework only its own scope's."""
+    return [
+        c
+        for c in inventory["components"]
+        if "MPL-2.0" in c.get("license", "") and (scope is None or c["scope"] == scope)
+    ]
 
 
-def _split_libintl(library: Path, members: list[str], output: Path) -> None:
-    present = _run(["ar", "t", str(library)]).splitlines()
-    if any(present.count(name) != 1 for name in members):
-        raise ValueError(
-            "GhosttyKit libintl objects changed; audit pkg/libintl/build.zig and archive"
-        )
-    with tempfile.TemporaryDirectory() as temp:
-        directory = Path(temp)
-        for name in members:
-            (directory / name).write_bytes(subprocess.check_output(["ar", "p", str(library), name]))
-        subprocess.run(["ar", "qc", str(output), *members], cwd=directory, check=True)
-        subprocess.run(["ranlib", str(output)], check=True)
-
-
-def _package_source(source: Path, destination: Path, specification: dict) -> None:
-    packaged = specification.get("packaged")
-    if packaged is None:
-        shutil.copyfile(source, destination)
-        return
-    omitted = set(packaged["omit_binary_fixtures"])
-    found = set()
-    with (
-        tarfile.open(source) as upstream,
-        destination.open("wb") as raw,
-        gzip.GzipFile(filename="", fileobj=raw, mode="wb", compresslevel=9, mtime=0) as compressed,
-        tarfile.open(fileobj=compressed, mode="w", format=tarfile.PAX_FORMAT) as archive,
-    ):
-        for member in upstream:
-            if member.name in omitted:
-                found.add(member.name)
-                continue
-            archive.addfile(member, upstream.extractfile(member) if member.isfile() else None)
-    if found != omitted or _sha(destination) != packaged["sha256"]:
-        raise ValueError("Packaged source differs from its audited fixture omissions")
-
-
-def _package_sources(root: Path, output: Path, inventory: dict, framework: Path) -> None:
+def _package_sources(root: Path, output: Path, inventory: dict, scope: str | None) -> None:
     output.mkdir(parents=True, exist_ok=True)
     cache = root / ".lf/tmp/third-party"
-    for component in inventory["components"]:
-        if "source" not in component:
-            continue
+    for component in _sourced(inventory, scope):
         source = _download(component["source"], cache)
-        _package_source(source, output / (component["id"] + ".tar.gz"), component["source"])
-    with zipfile.ZipFile(output / "GhosttyKit.zip", "w", zipfile.ZIP_DEFLATED) as original:
-        for path in sorted(framework.rglob("*")):
-            relative = path.relative_to(framework)
-            if path.is_file() and not relative.parts[0].startswith("ThirdParty"):
-                original.write(path, str(Path("GhosttyKit.xcframework") / relative))
-    _source_snapshot(root, output / "loopflow.tar.gz")
-    shutil.copyfile(root / "third_party/REBUILD.md", output / "REBUILD.md")
-    shutil.copyfile(root / "scripts/rebuild_third_party.py", output / "rebuild.py")
-    shutil.copyfile(root / "scripts/app_bundle.py", output / "app_bundle.py")
-    libraries = sorted(framework.glob("*/libghostty.a"))
-    if len(libraries) != 1:
-        raise ValueError("Expected one universal macOS GhosttyKit library")
-    architectures = _run(["lipo", "-archs", str(libraries[0])]).split()
-    for architecture in architectures:
-        with tempfile.TemporaryDirectory() as temp:
-            thin = Path(temp) / "ghostty.a"
-            if len(architectures) == 1:
-                shutil.copyfile(libraries[0], thin)
-            else:
-                subprocess.run(
-                    ["lipo", str(libraries[0]), "-thin", architecture, "-output", str(thin)],
-                    check=True,
-                )
-            _split_libintl(
-                thin, inventory["ghostty"]["libintl_members"], output / f"libintl-{architecture}.a"
-            )
+        shutil.copyfile(source, output / (component["id"] + ".tar.gz"))
 
 
-def package(destination: Path, framework: Path, root: Path = ROOT) -> None:
+def package(destination: Path, scope: str | None = None, root: Path = ROOT) -> None:
     """Assemble notice/source material before signing an app or zipping a framework."""
     destination = destination.resolve()
-    framework = framework.resolve()
     inventory = check(root)
     for name in ["ThirdPartyNotices", "ThirdPartySources"]:
         if (destination / name).exists():
             shutil.rmtree(destination / name)
     shutil.copytree(root / NOTICES, destination / "ThirdPartyNotices")
-    _package_sources(root, destination / "ThirdPartySources", inventory, framework)
+    _package_sources(root, destination / "ThirdPartySources", inventory, scope)
     files = {
         str(p.relative_to(destination)): _sha(p)
         for name in ["ThirdPartyNotices", "ThirdPartySources"]
@@ -354,39 +272,25 @@ def package(destination: Path, framework: Path, root: Path = ROOT) -> None:
         if p.is_file()
     }
     _write_json(destination / "ThirdPartyNotices" / "contents.json", files)
-    verify(destination)
+    verify(destination, scope)
 
 
-def verify(destination: Path) -> None:
+def verify(destination: Path, scope: str | None = None) -> None:
     """Validate the final artifact, including missing or corrupted source material."""
     receipt = _json(destination / "ThirdPartyNotices/contents.json")
     inventory = _json(destination / "ThirdPartyNotices/inventory.json")
-    required = {
-        "ThirdPartyNotices/NOTICES.txt",
-        "ThirdPartyNotices/inventory.json",
-        "ThirdPartySources/REBUILD.md",
-        "ThirdPartySources/rebuild.py",
-        "ThirdPartySources/app_bundle.py",
-        "ThirdPartySources/loopflow.tar.gz",
-        "ThirdPartySources/GhosttyKit.zip",
-        "ThirdPartySources/libintl-arm64.a",
-        "ThirdPartySources/libintl-x86_64.a",
-    }
-    required.update(
-        "ThirdPartySources/" + c["id"] + ".tar.gz" for c in inventory["components"] if "source" in c
-    )
+    required = {"ThirdPartyNotices/NOTICES.txt", "ThirdPartyNotices/inventory.json"}
+    required.update("ThirdPartySources/" + c["id"] + ".tar.gz" for c in _sourced(inventory, scope))
     if not required <= receipt.keys():
         raise ValueError("Incomplete third-party packaging receipt")
     for name, checksum in receipt.items():
         path = destination / name
         if not path.is_file() or _sha(path) != checksum:
             raise ValueError(f"Missing or corrupted third-party material: {name}")
-    for component in inventory["components"]:
-        if "source" in component:
-            path = destination / "ThirdPartySources" / (component["id"] + ".tar.gz")
-            source = component["source"]
-            if _sha(path) != source.get("packaged", source)["sha256"]:
-                raise ValueError(f"Source does not match inventory: {component['id']}")
+    for component in _sourced(inventory, scope):
+        path = destination / "ThirdPartySources" / (component["id"] + ".tar.gz")
+        if _sha(path) != component["source"]["sha256"]:
+            raise ValueError(f"Source does not match inventory: {component['id']}")
     print(f"Verified {len(receipt)} third-party files in {destination}")
 
 
@@ -398,16 +302,7 @@ def verify_archive(archive: Path) -> None:
         frameworks = list(root.glob("*.xcframework"))
         if len(frameworks) != 1:
             raise ValueError("Expected one GhosttyKit framework in archive")
-        verify(frameworks[0])
-        # The relink copy must contain the same library and headers as the
-        # distributed framework, including after final archive assembly.
-        with zipfile.ZipFile(frameworks[0] / "ThirdPartySources/GhosttyKit.zip") as relink:
-            for path in frameworks[0].rglob("*"):
-                relative = path.relative_to(frameworks[0])
-                if path.is_file() and not relative.parts[0].startswith("ThirdParty"):
-                    name = str(Path(frameworks[0].name) / relative)
-                    if hashlib.sha256(relink.read(name)).hexdigest() != _sha(path):
-                        raise ValueError(f"Relink framework differs from shipped framework: {name}")
+        verify(frameworks[0], GHOSTTY_SCOPE)
 
 
 def main() -> None:
@@ -417,7 +312,7 @@ def main() -> None:
     sub.add_parser("check")
     pack = sub.add_parser("package")
     pack.add_argument("destination", type=Path)
-    pack.add_argument("--framework", type=Path)
+    pack.add_argument("--scope", help="package only this scope's sources (a framework archive)")
     verify_parser = sub.add_parser("verify")
     verify_parser.add_argument("destination", type=Path)
     archive = sub.add_parser("verify-archive")
@@ -432,15 +327,7 @@ def main() -> None:
     elif args.command == "verify-archive":
         verify_archive(args.archive)
     else:
-        if args.framework:
-            package(args.destination, args.framework)
-        else:
-            pin = _json(ROOT / MANIFEST)["ghostty"]
-            cached = _download(pin, ROOT / ".lf/tmp/third-party")
-            with tempfile.TemporaryDirectory() as temp:
-                with zipfile.ZipFile(cached) as source:
-                    source.extractall(temp)
-                package(args.destination, Path(temp) / "GhosttyKit.xcframework")
+        package(args.destination, args.scope)
 
 
 if __name__ == "__main__":

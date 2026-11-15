@@ -31,8 +31,8 @@ and change, without losing required behavior. The output is a diff.
 5. Build changed code and run its focused test when behavior changed. No edits
    means no rerun. Fix real failures. A check that can't run headless goes to
    gate or CI; don't block the Graph on it. Ask for a judgment you need when
-   someone is in the conversation; headless, leave it for demo. Gate runs the
-   affected suites.
+   someone is in the conversation; headless, leave it for demo. Gate selects a
+   few high-risk tests; CI runs the suites.
 
 Keep rationale beside the code or in the plan, plus one command/result line.
 If nothing needs reducing, say so. Realign reconciles the plan.
@@ -44,7 +44,10 @@ and current usage. Read sources in full before curating them, and bring anything
 over budget under both the token and byte limits. Keep what can't be worked out
 again from the code, git history or a fresh run: what people said, word for
 word, what a run showed at the time, facts from outside the repo, plus
-open questions and contrary findings. Cut the rest: merge duplicates, drop
+open questions and contrary findings. In the active plan, also keep the few
+facts from docs and code that still explain its approach or remaining work,
+with source paths and symbols. Correct facts and references affected by your
+changes; remove those that no longer help. Cut the rest: merge duplicates, drop
 obsolete notes inherited from a stacked parent, and leave history in git with a
 precise reference when older detail still matters. Quality per word, not
 volume. Commit or move uncommitted notes before removing them. Edit existing

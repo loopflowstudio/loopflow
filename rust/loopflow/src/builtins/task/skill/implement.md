@@ -64,8 +64,9 @@ Graph calls for it.
    - One build at a time: never run two compilers, test runners or linters
      against the same build directory at once, in the background or in
      parallel tool calls.
-   - Gate runs affected suites and the design's acceptance checks, once. Don't
-     run them early because they appear in "Done when".
+   - Gate starts CI for the suites and selects a few high-risk tests, including
+     the design's acceptance checks. Don't run suites early because they appear
+     in "Done when".
    - If a check can't run headless here, use a headless equivalent or leave it
      to gate/CI. Ask for a judgment when someone is in the conversation;
      headless, leave it for demo or review. A real build or test failure still
@@ -84,6 +85,21 @@ Graph calls for it.
 Legacy/New enums, v2 types, adapters, fallbacks, dual writes, compatibility
 shims and parallel stores block by default; use one only when the reviewed
 design calls for it and names when it is deleted.
+
+**Write for the load it will carry.** Take the data size and concurrency from
+what the repository says it serves (its agent guide or docs), not from the
+fixture. For every query you add or change:
+
+- Read its plan (`EXPLAIN` in SQLite and Postgres). A full scan of a table that
+  grows with use needs an index on the columns it filters, joins or sorts by.
+- Bound what a hot path reads. Code that runs per request, turn or event
+  touches its own rows by key, with a `LIMIT` where a result can grow; no
+  query in a loop where one query would do.
+- Keep writes short. A write transaction or lock holds every other writer
+  back; take none when there is nothing to change, and do no slow work inside
+  one.
+- Check it at realistic size: time it against a store as large as the one it
+  will run on, and record the number in the plan.
 
 **Test behavior.** Test what people see, not implementation details. Assert on
 results, not mock calls.

@@ -81,8 +81,8 @@ Swift decodes it for the Task's Session history.
 
 `work_links.json` pins `lf open --link --json`: a readable label, the public Work
 address, its executable fallback, the resolved target (including a remote execution
-owner), the caller's conversation relation and the proposed route. Rust and Swift
-round-trip it; Desktop resolves incoming addresses through it. A link is not an
+owner), the caller's conversation relation and one route host (`null` for focus).
+Rust and Swift round-trip it; Desktop resolves incoming addresses through it. A link is not an
 opening receipt.
 
 `desktop_openings.json` distinguishes request acceptance, usable endpoints and failures;
@@ -149,3 +149,9 @@ headless `-b` run; both are null when the run failed after the Task was filed.
 repository (`--no-wave`); `default` is Rust's resolution and the setting that
 chose it, which Desktop's New Task sheet shows instead of rebuilding it. Rust and
 Swift decode both.
+
+`plan_board.json`, `task_screen_detail.json` and `session_card.json` pin the
+complete screen reads. Rust tests in `lf::commands::screens` round-trip them;
+Swift's `DTOFixtureTests` decodes them and rejects selected, incomplete answers.
+The board omits runtime payloads; detail retains observed checks, PR and Graphs;
+a card with unknown liveness invents neither a control holder nor preview text.

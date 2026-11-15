@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import platform
 import plistlib
 import shutil
@@ -17,7 +16,6 @@ sys.path[:0] = [str(SCRIPTS), str(SCRIPTS / "benchmarks/desktop-performance")]
 
 import app_bundle  # noqa: E402
 import launch  # noqa: E402
-import rebuild_third_party as rebuild  # noqa: E402
 
 pytestmark = pytest.mark.skipif(
     platform.system() != "Darwin" or shutil.which("cc") is None,
@@ -74,12 +72,11 @@ def _info_plist(path: Path, executable: str = "Loopflow") -> Path:
 
 
 def test_bare_swiftpm_binary_in_a_bundle_cannot_load_sparkle(tmp_path: Path) -> None:
-    build_dir = tmp_path / "build"
-    _swiftpm_build(build_dir)
-    # Copied as builders did before embedding: the executable alone.
-    executable = tmp_path / "Loopflow.app/Contents/MacOS/Loopflow"
+    built_executable = _swiftpm_build(tmp_path / "build")
+    # Copy only the executable; name the deliberate dyld abort as a test in crash reports.
+    executable = tmp_path / "BareSwiftPM.app/Contents/MacOS/BareSwiftPM"
     executable.parent.mkdir(parents=True)
-    shutil.copy(build_dir / "LoopflowMac", executable)
+    shutil.copy(built_executable, executable)
 
     with pytest.raises(RuntimeError, match="cannot load Sparkle.framework/Versions/B/Sparkle"):
         app_bundle.verify_rpath_libraries(executable)
@@ -143,34 +140,3 @@ def test_launch_benchmark_bundle_embeds_sparkle(
 
     shutil.rmtree(swift / ".build")
     _assert_launches_with_embedded_sparkle(tmp_path / "Loopflow Bench.app")
-
-
-def test_third_party_rebuild_embeds_sparkle(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    source = tmp_path / "loopflow"
-    swift = source / "swift"
-    _swift_package(swift)
-    (swift / "Package.swift").write_text("// package")
-    (swift / "GhosttyKit.xcframework/macos").mkdir(parents=True)
-    (swift / "GhosttyKit.xcframework/macos/libghostty.a").write_bytes(b"")
-    (source / "third_party").mkdir()
-    (source / "third_party/manifest.json").write_text(
-        json.dumps({"ghostty": {"revision": "r", "libintl_members": []}})
-    )
-    (source / "target/release").mkdir(parents=True)
-    (source / "target/release/lf").write_bytes(b"")
-    # Compiling libintl, relinking GhosttyKit and the swift/cargo builds are out of scope here.
-    monkeypatch.setattr(rebuild, "build_libintl", lambda *args: None)
-    monkeypatch.setattr(
-        rebuild,
-        "_run",
-        lambda args, cwd: (
-            subprocess.run(args, cwd=cwd, check=True) if args[0] == "codesign" else None
-        ),
-    )
-
-    rebuild.build(tmp_path)
-
-    shutil.rmtree(swift / ".build")
-    _assert_launches_with_embedded_sparkle(tmp_path / "Loopflow Rebuilt.app")

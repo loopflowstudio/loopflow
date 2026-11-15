@@ -1,8 +1,8 @@
 [
   {
-    "label": "LOO-507 · Pi integration",
+    "label": "LOO-507 \u00b7 Pi integration",
     "url": "loopflow://loopflow/task/LOO-507",
-    "markdown": "[LOO-507 · Pi integration](loopflow://loopflow/task/LOO-507)",
+    "markdown": "[LOO-507 \u00b7 Pi integration](loopflow://loopflow/task/LOO-507)",
     "fallback_argv": [
       "lf",
       "open",
@@ -22,18 +22,14 @@
     "conversation": "other_conversation",
     "conversation_reason": null,
     "route": {
-      "hosts": [
-        "desktop",
-        "cmux",
-        "terminal"
-      ],
-      "reason": "Automatic order: Desktop when Launch Services finds it, then this cmux workspace, then a plain terminal"
+      "host": null,
+      "reason": "focus the recorded live view without opening another"
     }
   },
   {
-    "label": "loopflow · product Wave",
+    "label": "loopflow \u00b7 product Wave",
     "url": "loopflow://loopflow/wave/product?repository=repo_22222222222222222222222222222222",
-    "markdown": "[loopflow · product Wave](loopflow://loopflow/wave/product?repository=repo_22222222222222222222222222222222)",
+    "markdown": "[loopflow \u00b7 product Wave](loopflow://loopflow/wave/product?repository=repo_22222222222222222222222222222222)",
     "fallback_argv": [
       "lf",
       "open",
@@ -53,10 +49,8 @@
     "conversation": "unknown",
     "conversation_reason": "No calling conversation identity was supplied",
     "route": {
-      "hosts": [
-        "terminal"
-      ],
-      "reason": "a terminal was requested"
+      "host": "terminal",
+      "reason": "attach in the calling terminal"
     }
   }
 ]

@@ -46,6 +46,7 @@ pub(crate) fn pinned_checkout(issue: &str, expected: &Path) -> Result<TaskChecko
 /// and neither do git-ignored writes such as `lf`'s own journal traces.
 pub fn watch_task_files(issue: &str, expected: &Path, request: &str) -> Result<()> {
     let checkout = pinned_checkout(issue, expected)?;
+    let machine_id = file_store()?.local_machine()?.id;
     let metadata = crate::git::absolute_git_dir(expected)?;
     // Watchers report either the watched spelling or the resolved one.
     let roots = EventRoots {
@@ -97,13 +98,13 @@ pub fn watch_task_files(issue: &str, expected: &Path, request: &str) -> Result<(
         }
         let current = pinned_checkout(issue, expected)?;
         ensure!(
-            current.task_id == checkout.task_id && current.machine_id == checkout.machine_id,
+            current.task_id == checkout.task_id,
             "Task execution ownership changed; reopen the Task"
         );
         let frame = TaskFilesFrame {
             request: request.into(),
             task_id: current.task_id,
-            machine_id: current.machine_id.expect("file_context requires a Machine"),
+            machine_id: machine_id.clone(),
             checkout: expected.to_string_lossy().into_owned(),
             paths,
         };

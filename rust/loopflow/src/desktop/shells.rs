@@ -1,8 +1,8 @@
 //! Desktop shell execution: create once, reattach, close, and retain history.
-//! The shared transport owns the PTY and SSH stream; Session viewers alone hold
-//! Task checkouts. This runtime needs no GUI on either execution Machine.
+//! The Machine server's holder keeps the PTY; Session viewers alone hold Task
+//! checkouts. This runtime needs no GUI on either execution Machine.
 mod store;
-pub(crate) use store::{jobs_settled, owners, request_retirement};
+pub(crate) use store::{hosts, jobs_settled};
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -11,11 +11,6 @@ use anyhow::{anyhow, ensure, Result};
 use clap::Args;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
-
-use crate::durable::TaskId;
-use crate::id::LfProcessId;
-use crate::store::sqlite::SqliteStore;
-use crate::store::StoreResult;
 
 /// Private Desktop launch inputs, also carried verbatim across Machine routing.
 #[derive(Args, Debug)]
@@ -59,10 +54,6 @@ pub fn run(args: &ShellArgs) -> Result<()> {
             .task_checkout(&task)?
             .ok_or_else(|| anyhow!("Task has no checkout"))?;
         ensure!(
-            checkout.machine_id.as_ref() == Some(&store.local_machine()?.id),
-            "Task checkout belongs to another Machine; reopen the Task"
-        );
-        ensure!(
             checkout.worktree == *expected,
             "The Task checkout changed; reopen the Task. No shell was retargeted."
         );
@@ -71,10 +62,16 @@ pub fn run(args: &ShellArgs) -> Result<()> {
             "The recorded Task checkout is unavailable"
         );
         let argv = shell_command(id, initial, bootstrap.as_deref())?;
-        if store.create_desktop_shell(id, &checkout.task_id, &expected.to_string_lossy())? {
-            crate::transport::start(&argv, true, expected, &|command| {
-                command.env("LF_DESKTOP_SHELL", id);
-            })?;
+        let launcher = crate::journal::current_lf_process_id();
+        if store.create_desktop_shell(
+            id,
+            &checkout.task_id,
+            &expected.to_string_lossy(),
+            launcher.as_ref(),
+        )? {
+            // A shell is a plain terminal: nothing in it is managed.
+            let terminal = crate::transport::start_held(&argv, expected, None, &|_| {})?;
+            store.bind_desktop_shell(id, &terminal)?;
         }
     }
     let receipt = store
@@ -86,22 +83,35 @@ pub fn run(args: &ShellArgs) -> Result<()> {
     );
     if *close {
         store.close_desktop_shell(id)?;
+        // An earlier build's owner ends itself on the recorded Close.
+        if let Some(terminal) = &receipt.terminal {
+            if store.terminal_running(terminal)? {
+                crate::transport::close_notice(terminal, "Shell closed")?;
+            }
+        }
         return Ok(());
     }
 
-    let owner = receipt.owner.ok_or_else(|| {
-        anyhow!(
-            "Shell startup was not acknowledged; execution is unknown. No replacement was started"
-        )
-    })?;
-    if crate::journal::lf_evidence(&store, &owner) == crate::journal::ProcessIdentityEvidence::Dead
-    {
-        crate::transport::shell_history(&owner)?;
-        anyhow::bail!(
-            "Shell ended. Create a new shell explicitly; its commands will not be replayed"
-        );
+    ensure!(
+        receipt.started,
+        "Shell startup was not acknowledged; execution is unknown. No replacement was started"
+    );
+    // A shell an earlier build's owner ran is not viewed again.
+    let running = match &receipt.terminal {
+        Some(terminal) => store.terminal_running(terminal)?,
+        None => false,
+    };
+    match receipt.terminal {
+        Some(terminal) if running => crate::transport::attach(&terminal, None, None, None),
+        terminal => {
+            if let Some(terminal) = &terminal {
+                crate::transport::shell_history(terminal)?;
+            }
+            anyhow::bail!(
+                "Shell ended. Create a new shell explicitly; its commands will not be replayed"
+            )
+        }
     }
-    crate::transport::attach(&owner, None, None, None)
 }
 
 /// Desktop-supplied startup code and its relative UTF-8 resources. Carried as JSON
@@ -152,51 +162,4 @@ fn shell_command(id: &str, initial: &[String], bootstrap: Option<&str>) -> Resul
     ];
     argv.extend_from_slice(initial);
     Ok(argv)
-}
-
-/// Run inside the viewer observation's transaction, including brief return/leave.
-pub(crate) fn cancel_retirement(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<()> {
-    conn.execute(
-        "UPDATE desktop_shells SET close_requested=0 WHERE task_id=?1 AND close_requested=2",
-        [task.as_str()],
-    )?;
-    Ok(())
-}
-
-/// None is an ordinary Session owner; false keeps a Desktop shell alive.
-pub(crate) fn close_allowed(
-    store: &SqliteStore,
-    owner: &LfProcessId,
-    input_queued: bool,
-) -> Result<Option<bool>> {
-    let Some(close) = store.shell_close_request(owner)? else {
-        return Ok(None);
-    };
-    let requested = match close {
-        1 => true,
-        2 => crate::ops::task::retirement::owner_retiring(store, owner)?,
-        _ => false,
-    };
-    Ok(Some(
-        requested
-            && !input_queued
-            && (!store.shell_holds_work(owner)? || store.owner_retention(owner)?.is_none()),
-    ))
-}
-
-/// Whether work inside shell `owner` could receive typed input. An idle shell
-/// clears any draft it recorded earlier; an unreadable store keeps recording.
-pub(crate) fn holds_input(owner: &LfProcessId) -> bool {
-    let holds = crate::journal::process_ledger().and_then(|store| {
-        let holds = store.shell_holds_work(owner)?;
-        if !holds {
-            store.clear_owner_input(owner)?;
-        }
-        Ok(holds)
-    });
-    holds
-        .inspect_err(
-            |error| tracing::warn!(%error, %owner, "cannot judge shell work; retaining input"),
-        )
-        .unwrap_or(true)
 }

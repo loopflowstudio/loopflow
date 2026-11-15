@@ -14,6 +14,7 @@ import os
 import platform
 import shutil
 import subprocess
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -44,6 +45,7 @@ class BundleSpec:
     tools: tuple[Path, ...]
     info_plist: Path
     resources: tuple[Path, ...]
+    launch_agents: Path
 
     @property
     def contents_dir(self) -> Path:
@@ -73,9 +75,8 @@ def default_bundle_spec(root: Path = ROOT) -> BundleSpec:
         swift_build_dir=swift_release,
         tools=(cargo_release / "lf",),
         info_plist=swift / "LoopflowMac" / "Info.plist",
-        resources=(
-            swift / "LoopflowMac" / "AppIcon.icns",
-        ),
+        resources=(swift / "LoopflowMac" / "AppIcon.icns",),
+        launch_agents=swift / "LaunchAgents",
     )
 
 
@@ -271,6 +272,13 @@ def _install_loopflow(spec: BundleSpec, version: str) -> None:
     stamp_bundle_version(installed_plist, version, read_source_revision(ROOT))
     for resource in spec.resources:
         shutil.copy(resource, spec.resources_dir / resource.name)
+    for bundle in spec.swift_build_dir.glob("*.bundle"):
+        shutil.copytree(bundle, spec.resources_dir / bundle.name)
+    shutil.copytree(spec.launch_agents, spec.contents_dir / "Library/LaunchAgents")
+    _run_or_raise(
+        [sys.executable, str(ROOT / "scripts/third_party.py"), "package", str(spec.resources_dir)],
+        "notices",
+    )
     (spec.contents_dir / "PkgInfo").write_text("APPL????")
 
     _verify_bundle_layout(spec)
@@ -349,9 +357,14 @@ def _verify_bundle_layout(spec: BundleSpec) -> None:
         if current_arch not in archs:
             problems.append(f"{path} built for {', '.join(archs)}, not {current_arch}")
 
-    for path in [spec.contents_dir / spec.info_plist.name] + [
-        spec.resources_dir / r.name for r in spec.resources
-    ]:
+    for path in (
+        [spec.contents_dir / spec.info_plist.name]
+        + [spec.resources_dir / r.name for r in spec.resources]
+        + [
+            spec.contents_dir / "Library/LaunchAgents" / agent.name
+            for agent in spec.launch_agents.glob("*.plist")
+        ]
+    ):
         if not path.exists():
             problems.append(f"missing resource: {path}")
 

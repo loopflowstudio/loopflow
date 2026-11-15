@@ -142,16 +142,16 @@ const RUNNING: &str = "lf-binaries";
 
 /// Name live processes still running a binary the install has moved past.
 fn check_running_binaries() -> Check {
-    let inventory = match super::rollover::inventory() {
+    let inventory = match super::binaries::inventory() {
         Ok(inventory) => inventory,
         Err(error) => {
             return Check::warn(RUNNING, format!("cannot list live lf processes: {error:#}"))
         }
     };
-    match super::rollover::superseded_summary(&inventory) {
+    match super::binaries::superseded_summary(&inventory) {
         Some(summary) => Check::warn(
             RUNNING,
-            format!("{summary}. `lf monitor rollover` moves the resumable ones"),
+            format!("{summary}. Quit a conversation's agent and `lf resume` it to move it"),
         ),
         None => {
             let count = inventory
@@ -162,7 +162,7 @@ fn check_running_binaries() -> Check {
             let selected = inventory
                 .binaries
                 .first()
-                .map(super::rollover::RunningBinary::describe)
+                .map(super::binaries::RunningBinary::describe)
                 .unwrap_or_else(|| "the selected lf".into());
             Check::ok(
                 RUNNING,

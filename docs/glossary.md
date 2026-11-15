@@ -18,13 +18,14 @@ first, then the engineering words it borrows.
 | **Planning** | A Wave's plan: its Tasks, KRs and targets. `lf wave plan` reads it; `lf plan list` reads every Wave's. |
 | **KR** | Key result. A result you can check, stated before the work starts. |
 | **Memory** | A text file, `MEMORY.md`, where a Wave writes down what it learned. |
-| **LfSession**, **Session** | One continuable agent conversation you work in interactively, with identity, feedback and native history. |
-| **Run** | One continuable agent conversation that runs headless. A Session and a Run are the same kind of conversation record. |
+| **LfSession**, **Session** | One continuable agent conversation, interactive or headless, with identity, feedback and native history. |
+| **Headless Session** | A Session that runs without an interactive conversation view, such as `lf -b implement` or a Graph step. |
 | **Available** | A conversation you can work with now: it asked a question, handed its turn back, or went quiet with no tool call outstanding. Availability needs no pending question or review, and owes nothing; a Task's checks or dependencies neither add nor remove it. |
 | **LfProcess**, **Process** | One actual lf process: durable `id`, optional Unix `pid`, causal parent and observed command outcome. |
-| **AgentProcess** | The provider's OS process Loopflow started for a Session; it keeps running when another lf process attaches. |
+| **AgentProcess** | The provider's OS process Loopflow started for a Session. An `lf <skill>` run's is the foreground program of your terminal; a Task, Wave or repository conversation's is kept by a holder and keeps running when its views close. |
 | **Machine** | One OS user’s Loopflow authority in one data directory, used as an execution destination; two users on one host have separate identities. |
-| **Server** | The client access process on a Machine; it connects Desktop to Work and existing Sessions, independently of the app window. |
+| **Server** | The client access process on a Machine; it connects Desktop to Work and existing Sessions, independently of the app window, and starts Task and Wave conversations in a holder. |
+| **Holder** | The process beside the server that keeps the terminals and agents of Task and Wave conversations. One per build; an install never restarts it. |
 | **Installation** | The selected Loopflow build and its registration, updated with `lf install`, including the client server. |
 | **Data directory** | Local Loopflow state in `~/.lf` by default; explicit `LF_HOME` selects a disposable experiment. |
 | **Steer** | A message you send to work that is already running, to change its direction. |

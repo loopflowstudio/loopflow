@@ -8,6 +8,7 @@
 import Foundation
 import Testing
 @testable import Loopflow
+@testable import LoopflowMac
 
 @Suite("Wave origin resolution")
 struct WaveOriginTests {

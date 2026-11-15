@@ -79,6 +79,14 @@ fn at(directory: &Path, command: &[&str]) -> Vec<String> {
 #[serde(tag = "kind", deny_unknown_fields)]
 // Exhaustive on purpose: the equivalence test matches every variant.
 pub enum Read {
+    /// The CLI's retained process or Session history, as display text.
+    #[serde(rename = "process.history")]
+    #[schemars(extend("x-result" = generator.subschema_for::<String>()))]
+    ProcessHistory { id: String },
+    /// Look up a creation without starting or retrying it. Null confirms absence.
+    #[serde(rename = "creation.get")]
+    #[schemars(extend("x-result" = generator.subschema_for::<Option<crate::store::sqlite::creation::CreationReceipt>>()))]
+    CreationGet { request_id: String },
     /// `lf process list`: live Loopflow call trees.
     #[serde(rename = "process.list")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::top::ActivitySnapshot>()))]
@@ -87,7 +95,12 @@ pub enum Read {
     #[serde(rename = "desktop.view.list")]
     #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::work::selection::ViewPlan>>()))]
     DesktopViewList { directory: PathBuf },
-    /// `lf --cwd <directory> session list`, with `--interactive all`
+    /// `lf desktop view list --all [--expression <expression>]`: one selection
+    /// across the portfolio repositories, as the phone lists open Tasks.
+    #[serde(rename = "view.select")]
+    #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::work::selection::ViewPlan>>()))]
+    ViewSelect { expression: Option<String> },
+    /// `lf --cwd <directory> session list`, with `--headless`
     /// when `headless` Sessions are shown too: every row, or with a `limit`
     /// one page (`--page --limit <limit> [--after <after>]`). Only the whole
     /// list has a subscription.
@@ -98,7 +111,26 @@ pub enum Read {
         headless: bool,
         after: Option<String>,
         limit: Option<u32>,
+        /// Only the Sessions of this Task, as `--task <task>` filters them.
+        task: Option<String>,
     },
+    /// `lf plan board`: compact Task rows for a board.
+    #[serde(rename = "plan.board")]
+    #[schemars(extend("x-result" = generator.subschema_for::<super::screens::PlanBoard>()))]
+    PlanBoard {
+        directory: PathBuf,
+        wave: Option<String>,
+        task: Option<String>,
+        all: bool,
+    },
+    /// `lf task detail <issue>`: one Task and its supporting detail.
+    #[serde(rename = "task.detail")]
+    #[schemars(extend("x-result" = generator.subschema_for::<super::screens::TaskDetail>()))]
+    TaskDetail { directory: PathBuf, issue: String },
+    /// `lf session card <id>`: a passive reading of one recorded Session.
+    #[serde(rename = "session.card")]
+    #[schemars(extend("x-result" = generator.subschema_for::<super::screens::SessionCard>()))]
+    SessionCard { id: String },
     /// `lf --cwd <directory> task show <issue>`: the Task pane.
     #[serde(rename = "task.get")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::waves::DesktopTaskPane>()))]
@@ -305,7 +337,7 @@ pub enum Read {
         target: Option<String>,
         cached: bool,
     },
-    /// `lf --cwd <directory> account next [--repo <repo>] [--default]
+    /// `lf --cwd <directory> account next [-a <harness>:<model>] [--repo <repo>] [--default]
     /// --json`: how the repository selects an account for each provider.
     #[serde(rename = "account.next")]
     #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::lf::commands::profile::NextLaunch>>()))]
@@ -313,6 +345,8 @@ pub enum Read {
         directory: PathBuf,
         repo: Option<String>,
         default: bool,
+        #[serde(deserialize_with = "Option::deserialize")]
+        agent: Option<String>,
     },
     /// `lf --cwd <directory> list [<path>…] --json`: the commands, skills,
     /// graphs and Waves under `path`.
@@ -351,15 +385,23 @@ impl Read {
     /// command takes it. Its subscription is this argv with `--subscribe`.
     pub fn argv(&self) -> Vec<String> {
         match self {
+            Self::ProcessHistory { id } => words(&["session", "history", "show", id]),
+            Self::CreationGet { request_id } => words(&["server", "receipt", request_id, "--json"]),
             Self::ProcessList => words(&["process", "list", "--json"]),
             Self::DesktopViewList { directory } => {
                 at(directory, &["desktop", "view", "list", "--json"])
+            }
+            Self::ViewSelect { expression } => {
+                let mut argv = words(&["desktop", "view", "list", "--all", "--json"]);
+                argv.extend(optional("--expression", expression.as_ref()));
+                argv
             }
             Self::SessionList {
                 directory,
                 headless,
                 after,
                 limit,
+                task,
             } => {
                 let mut argv = at(directory, &["session", "list"]);
                 argv.extend(words(session_flags(*headless)));
@@ -370,6 +412,26 @@ impl Read {
                 } else {
                     argv.extend(words(&["--limit", "0"]));
                 }
+                argv.extend(optional("--task", task.as_ref()));
+                argv
+            }
+            Self::TaskDetail { directory, issue } => {
+                at(directory, &["task", "detail", issue, "--json"])
+            }
+            Self::SessionCard { id } => words(&["session", "card", id, "--json"]),
+            Self::PlanBoard {
+                directory,
+                wave,
+                task,
+                all,
+            } => {
+                let mut argv = at(directory, &["plan", "board"]);
+                argv.extend(wave.clone());
+                argv.extend(optional("--task", task.as_ref()));
+                if *all {
+                    argv.push("--all".into());
+                }
+                argv.push("--json".into());
                 argv
             }
             Self::TaskGet { directory, issue } => at(directory, &["task", "show", issue, "--json"]),
@@ -534,8 +596,12 @@ impl Read {
                 directory,
                 repo,
                 default,
+                agent,
             } => {
                 let mut argv = at(directory, &["account", "next"]);
+                if let Some(agent) = agent {
+                    argv.extend(words(&["--agent", agent]));
+                }
                 if let Some(repo) = repo {
                     argv.extend(words(&["--repo", repo]));
                 }
@@ -599,9 +665,36 @@ impl Read {
     /// A command that prints bare text (`config repo --path`) is a string.
     pub fn read(&self) -> anyhow::Result<serde_json::Value> {
         match self {
+            Self::ProcessHistory { id } => value(&super::history::render(
+                id,
+                false,
+                None,
+                super::session_history::SessionView::Summary,
+            )?),
+            Self::CreationGet { request_id } => {
+                value(&crate::engine::creation::lookup(request_id)?)
+            }
+            Self::PlanBoard {
+                directory,
+                wave,
+                task,
+                all,
+            } => value(&super::screens::board(
+                directory,
+                wave.as_deref(),
+                task.as_deref(),
+                *all,
+            )?),
+            Self::TaskDetail { directory, issue } => {
+                value(&super::screens::task_detail(directory, issue)?)
+            }
+            Self::SessionCard { id } => value(&super::screens::session_card(id)?),
             Self::ProcessList => value(&super::top::load_snapshot()?),
             Self::DesktopViewList { directory } => {
                 value(&super::desktop::read_plans(None, directory)?)
+            }
+            Self::ViewSelect { expression } => {
+                value(&super::desktop::read_all_view_plans(expression.as_deref())?)
             }
             Self::SessionList {
                 directory,
@@ -743,7 +836,13 @@ impl Read {
                 wave,
                 task,
                 all,
-            } => super::waves::show_json(directory, wave.as_deref(), task.as_deref(), *all, false),
+            } => value(&super::waves::show_snapshot(
+                directory,
+                wave.as_deref(),
+                task.as_deref(),
+                *all,
+                false,
+            )?),
             Self::RepoPlan { directory } => value(&super::plan::read_status(directory)?),
             Self::WorkResolve { directory, url } => value(&super::open::url_links(directory, url)?),
             // The command prints the path alone.
@@ -788,10 +887,12 @@ impl Read {
                 directory,
                 repo,
                 default,
+                agent,
             } => value(&crate::engine::account::next(
                 directory,
                 repo.as_deref(),
                 *default,
+                agent.as_deref(),
             )?),
             Self::SkillList { directory, path } => {
                 value(&crate::engine::skill::list(directory, path)?)
@@ -809,7 +910,7 @@ impl Read {
 
     /// Serve this read's subscription inside this process, as `lf <argv> --subscribe`
     /// prints it, keeping only `select`'s dotted paths of each body. `wake` is called from any thread when a
-    /// [`Subscription::pull`] may find a frame; dropping the subscription ends
+    /// [`Subscription::pull`] may find a reading or occurrences; dropping the subscription ends
     /// it. A read whose command takes no `--subscribe` is an error.
     pub fn subscribe(
         self,
@@ -821,14 +922,29 @@ impl Read {
             paths.extend(self.ending_paths().iter().map(|path| path.to_string()));
             paths
         });
+        let events = matches!(
+            self,
+            Self::TaskGet { .. }
+                | Self::TaskWait { .. }
+                | Self::PlanList { .. }
+                | Self::DesktopViewList { .. }
+        );
         let transport = Transport::Pull {
             wake: Box::new(wake),
             select,
+            events,
         };
         let subscription = match self {
             Self::ProcessList => super::top::subscribe_ps(transport),
             Self::DesktopViewList { directory } => {
                 super::desktop::subscribe_plans(None, directory, transport)
+            }
+            Self::DesktopViewGet {
+                directory,
+                expression,
+            } => super::desktop::subscribe_view_plan(directory, expression, transport),
+            Self::ViewSelect { expression } => {
+                super::desktop::subscribe_all_view_plans(expression, transport)
             }
             Self::SessionList {
                 ref directory,
@@ -891,7 +1007,7 @@ impl Read {
 
 fn session_flags(headless: bool) -> &'static [&'static str] {
     if headless {
-        &["--interactive", "all"]
+        &["--headless"]
     } else {
         &[]
     }
@@ -925,6 +1041,21 @@ mod tests {
         let read = |json: &str| serde_json::from_str::<Read>(json).unwrap().argv();
         assert_eq!(
             read(
+                r#"{"kind":"account.next","directory":"/r","repo":null,"default":true,"agent":"claude:fable"}"#
+            ),
+            [
+                "--cwd",
+                "/r",
+                "account",
+                "next",
+                "--agent",
+                "claude:fable",
+                "--default",
+                "--json"
+            ]
+        );
+        assert_eq!(
+            read(
                 r#"{"kind":"session.history","since":"7d","limit":50,"wave":null,"project":"p","task":null}"#
             ),
             [
@@ -948,8 +1079,7 @@ mod tests {
                 "/r",
                 "session",
                 "list",
-                "--interactive",
-                "all",
+                "--headless",
                 "--json",
                 "--limit",
                 "0"
@@ -992,11 +1122,53 @@ mod tests {
             headless: false,
             after: None,
             limit: None,
+            task: None,
         };
         let filter = read.session_filter(home.path()).unwrap();
         let sessions = store.session_summaries(&filter, 0).unwrap();
         assert_eq!(sessions.len(), 101);
         assert!(sessions.iter().any(|session| session.id == "session-100"));
+    }
+
+    #[test]
+    fn served_session_lists_include_headless_but_never_completed() {
+        let home = tempfile::tempdir().unwrap();
+        let store =
+            crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("store.db"))
+                .unwrap();
+        for id in ["interactive", "headless", "closed", "closed-headless"] {
+            store.test_session(id, &crate::session_record::new_artifact_key());
+        }
+        store.conn.lock().unwrap().execute_batch(
+            "UPDATE agent_sessions SET interactive=0 WHERE id IN ('headless','closed-headless');
+             UPDATE agent_sessions SET completed_at=2 WHERE id IN ('closed','closed-headless');"
+        ).unwrap();
+        for limit in [None, Some(100)] {
+            for headless in [false, true] {
+                let read = Read::SessionList {
+                    directory: home.path().into(),
+                    headless,
+                    after: None,
+                    limit,
+                    task: None,
+                };
+                let filter = read.session_filter(home.path()).unwrap();
+                let sessions = store.session_summaries(&filter, 0).unwrap();
+                let mut ids = sessions
+                    .iter()
+                    .map(|row| row.id.as_str())
+                    .collect::<Vec<_>>();
+                ids.sort_unstable();
+                assert_eq!(
+                    ids,
+                    if headless {
+                        vec!["headless", "interactive"]
+                    } else {
+                        vec!["interactive"]
+                    }
+                );
+            }
+        }
     }
 
     #[test]

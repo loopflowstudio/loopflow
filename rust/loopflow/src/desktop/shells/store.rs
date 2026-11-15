@@ -1,15 +1,20 @@
-//! Desktop shell identity survives the viewer; Processes own execution evidence.
+//! Desktop shell identity survives the viewer; its held terminal owns execution.
+//! A shell an earlier build started names its `lf session serve` owner instead;
+//! that owner ends itself on Close and is never viewed again.
 use rusqlite::{params, OptionalExtension};
 
 use crate::durable::TaskId;
-use crate::id::LfProcessId;
+use crate::id::{LfProcessId, TerminalId};
 use crate::store::sqlite::SqliteStore;
 use crate::store::{StoreError, StoreResult};
 
 #[derive(Debug, Clone)]
 pub(crate) struct DesktopShell {
     pub checkout: String,
-    pub owner: Option<LfProcessId>,
+    /// The terminal that runs the shell; none until its start is acknowledged.
+    pub terminal: Option<TerminalId>,
+    /// Its start was acknowledged, by a terminal or an earlier build's owner.
+    pub started: bool,
 }
 
 impl SqliteStore {
@@ -17,12 +22,14 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
-                "SELECT checkout,owner FROM desktop_shells WHERE id=?1",
+                "SELECT checkout,terminal_id,terminal_id IS NOT NULL OR owner IS NOT NULL
+                 FROM desktop_shells WHERE id=?1",
                 [id],
                 |row| {
                     Ok(DesktopShell {
                         checkout: row.get(0)?,
-                        owner: row.get(1)?,
+                        terminal: row.get(1)?,
+                        started: row.get(2)?,
                     })
                 },
             )
@@ -36,16 +43,22 @@ impl SqliteStore {
         id: &str,
         task: &TaskId,
         checkout: &str,
+        launcher: Option<&LfProcessId>,
     ) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.execute("INSERT INTO desktop_shells(id,task_id,checkout,created_at) VALUES(?1,?2,?3,unixepoch()) ON CONFLICT(id) DO NOTHING", params![id,task.as_str(),checkout])? == 1)
+        Ok(conn.execute(
+            "INSERT INTO desktop_shells(id,task_id,checkout,launcher_lf_process_id,created_at)
+             VALUES(?1,?2,?3,?4,unixepoch()) ON CONFLICT(id) DO NOTHING",
+            params![id, task.as_str(), checkout, launcher],
+        )? == 1)
     }
 
-    pub(crate) fn bind_desktop_shell(&self, id: &str, owner: &LfProcessId) -> StoreResult<()> {
+    pub(crate) fn bind_desktop_shell(&self, id: &str, terminal: &TerminalId) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         if conn.execute(
-            "UPDATE desktop_shells SET owner=?2,jobs_settled=0 WHERE id=?1 AND owner IS NULL AND close_requested=0",
-            params![id, owner],
+            "UPDATE desktop_shells SET terminal_id=?2 WHERE id=?1
+             AND terminal_id IS NULL AND owner IS NULL AND jobs_settled=0",
+            params![id, terminal],
         )? != 1
         {
             return Err(StoreError::InvalidData(
@@ -55,42 +68,42 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub(crate) fn shell_close_request(&self, owner: &LfProcessId) -> StoreResult<Option<i64>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn
-            .query_row(
-                "SELECT close_requested FROM desktop_shells WHERE owner=?1",
-                [owner],
-                |r| r.get(0),
-            )
-            .optional()?)
+    /// Whether `terminal` runs a Desktop shell.
+    pub(crate) fn is_shell_terminal(&self, terminal: &TerminalId) -> StoreResult<bool> {
+        Ok(self.conn.lock().expect("store mutex poisoned").query_row(
+            "SELECT EXISTS(SELECT 1 FROM desktop_shells WHERE terminal_id=?1)",
+            [terminal],
+            |r| r.get(0),
+        )?)
     }
 
-    /// A shell may have hosted earlier conversations. Only their still-live
-    /// providers, or a Graph running underneath it, hold current requested work.
-    pub(crate) fn shell_holds_work(&self, owner: &LfProcessId) -> StoreResult<bool> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.query_row("WITH RECURSIVE ancestors(id) AS (
-            SELECT p.parent_lf_process_id FROM graph_processes g JOIN processes p ON p.id=g.lf_process_id WHERE p.completed_at IS NULL
-            UNION SELECT p.parent_lf_process_id FROM processes p JOIN ancestors a ON p.id=a.id)
-            SELECT ?1 IN (SELECT id FROM ancestors WHERE id IS NOT NULL)
-            OR EXISTS(SELECT 1 FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id
-                WHERE s.transport_lf_process_id=?1 AND s.completed_at IS NULL AND p.completed_at IS NULL)", [owner], |r| r.get(0))?)
-    }
-
-    pub(crate) fn settle_shell_jobs(&self, owner: &LfProcessId) -> StoreResult<()> {
+    /// The shell's terminal ended and nothing it started is left running.
+    pub(crate) fn settle_shell_jobs(&self, terminal: &TerminalId) -> StoreResult<()> {
         self.conn.lock().expect("store mutex poisoned").execute(
-            "UPDATE desktop_shells SET jobs_settled=1 WHERE owner=?1",
-            [owner],
+            "UPDATE desktop_shells SET jobs_settled=1 WHERE terminal_id=?1",
+            [terminal],
         )?;
         Ok(())
     }
 
+    pub(crate) fn settle_unstarted_task_shells(&self, task: &TaskId) -> StoreResult<()> {
+        self.conn.lock().expect("store mutex poisoned").execute(
+            "UPDATE desktop_shells SET jobs_settled=1
+             WHERE task_id=?1 AND owner IS NULL AND terminal_id IS NULL",
+            [task.as_str()],
+        )?;
+        Ok(())
+    }
+
+    /// Record Close. An earlier build's owner polls this; a held shell is
+    /// ended by its caller.
     pub(crate) fn close_desktop_shell(&self, id: &str) -> StoreResult<()> {
-        self.conn
-            .lock()
-            .expect("store mutex poisoned")
-            .execute("UPDATE desktop_shells SET close_requested=1,jobs_settled=CASE WHEN owner IS NULL THEN 1 ELSE jobs_settled END WHERE id=?1", [id])?;
+        self.conn.lock().expect("store mutex poisoned").execute(
+            "UPDATE desktop_shells SET close_requested=1,
+            jobs_settled=CASE WHEN owner IS NULL AND terminal_id IS NULL THEN 1 ELSE jobs_settled END
+            WHERE id=?1",
+            [id],
+        )?;
         Ok(())
     }
 }
@@ -103,28 +116,28 @@ pub(crate) fn jobs_settled(store: &SqliteStore, task: &TaskId) -> StoreResult<bo
     )?)
 }
 
-pub(crate) fn owners(store: &SqliteStore, task: &TaskId) -> StoreResult<Vec<LfProcessId>> {
+/// The terminal of each of the Task's started shells, with the `lf` that
+/// created it.
+pub(crate) fn hosts(
+    store: &SqliteStore,
+    task: &TaskId,
+) -> StoreResult<Vec<(TerminalId, Option<LfProcessId>)>> {
     let conn = store.conn.lock().expect("store mutex poisoned");
-    let mut query =
-        conn.prepare("SELECT owner FROM desktop_shells WHERE task_id=?1 AND owner IS NOT NULL")?;
+    let mut query = conn.prepare(
+        "SELECT terminal_id,launcher_lf_process_id FROM desktop_shells
+         WHERE task_id=?1 AND terminal_id IS NOT NULL",
+    )?;
     let rows = query
-        .query_map([task.as_str()], |r| r.get(0))?
+        .query_map([task.as_str()], |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<rusqlite::Result<_>>()?;
     Ok(rows)
-}
-
-pub(crate) fn request_retirement(store: &SqliteStore, task: &TaskId) -> StoreResult<()> {
-    store.conn.lock().expect("store mutex poisoned").execute(
-        "UPDATE desktop_shells SET close_requested=2,jobs_settled=CASE WHEN owner IS NULL THEN 1 ELSE jobs_settled END WHERE task_id=?1 AND close_requested=0",
-        [task.as_str()],
-    )?;
-    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use crate::durable::TaskId;
-    use crate::store::sqlite::{SqliteStore, ViewerHold};
+    use crate::id::TerminalId;
+    use crate::store::sqlite::SqliteStore;
 
     #[test]
     fn desktop_shell_creation_is_once_even_after_lost_acknowledgement_or_exit() {
@@ -132,48 +145,38 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
         let repo = store.ensure_repository("/repo").unwrap();
         let task = TaskId::new();
-        store.conn.lock().unwrap().execute(
-            "INSERT INTO tasks(id,repository_id,issue_identifier,created_at,worktree,branch) VALUES(?1,?2,'SHELL-1',1,'/repo.task','task')",
-            rusqlite::params![task.as_str(),repo.as_str()],
-        ).unwrap();
+        store.conn.lock().unwrap().execute_batch(&format!(
+            "INSERT INTO tasks(id,repository_id,issue_identifier,created_at) VALUES('{task}','{repo}','SHELL-1',1);
+             INSERT INTO task_checkouts(task_id,worktree,branch) VALUES('{task}','/repo.task','task');",
+            task = task.as_str(),
+            repo = repo.as_str(),
+        )).unwrap();
         assert!(store
-            .create_desktop_shell("shell", &task, "/repo.task")
+            .create_desktop_shell("shell", &task, "/repo.task", None)
             .unwrap());
         assert!(!store
-            .create_desktop_shell("shell", &task, "/repo.task")
+            .create_desktop_shell("shell", &task, "/repo.task", None)
             .unwrap());
-        assert!(store
-            .desktop_shell("shell")
-            .unwrap()
-            .unwrap()
-            .owner
-            .is_none());
-        let owner = store.test_lf_process();
-        store.bind_desktop_shell("shell", &owner).unwrap();
-        assert!(store.bind_desktop_shell("shell", &owner).is_err());
-        assert_eq!(store.shell_close_request(&owner).unwrap(), Some(0));
-        // Desktop shell ownership adds no checkout hold; the Task Session supplies it.
-        store
-            .record_owner_viewer_hold(&owner, Some(ViewerHold::Viewed(100)))
-            .unwrap();
-        assert!(store.task_viewer_holds(&task).unwrap().is_empty());
-        store.record_owner_viewer_hold(&owner, None).unwrap();
+        assert!(!store.desktop_shell("shell").unwrap().unwrap().started);
+        let terminal = TerminalId::new();
+        store.create_terminal(&terminal, "build").unwrap();
+        store.bind_desktop_shell("shell", &terminal).unwrap();
+        assert!(store.bind_desktop_shell("shell", &terminal).is_err());
+        assert!(store.is_shell_terminal(&terminal).unwrap());
         store.close_desktop_shell("shell").unwrap();
-        assert_eq!(store.shell_close_request(&owner).unwrap(), Some(1));
-        assert!(!store
-            .create_desktop_shell("shell", &task, "/repo.task")
-            .unwrap());
         assert_eq!(
-            store.desktop_shell("shell").unwrap().unwrap().owner,
-            Some(owner.clone())
+            store.desktop_shell("shell").unwrap().unwrap().terminal,
+            Some(terminal.clone())
         );
-        store.settle_shell_jobs(&owner).unwrap();
+        // Closing a running shell settles nothing until its terminal ends.
+        assert!(!crate::desktop::shells::jobs_settled(&store, &task).unwrap());
+        store.settle_shell_jobs(&terminal).unwrap();
         assert!(store
-            .create_desktop_shell("unacknowledged", &task, "/repo.task")
+            .create_desktop_shell("unacknowledged", &task, "/repo.task", None)
             .unwrap());
         store.close_desktop_shell("unacknowledged").unwrap();
         assert!(store
-            .bind_desktop_shell("unacknowledged", &store.test_lf_process())
+            .bind_desktop_shell("unacknowledged", &TerminalId::new())
             .is_err());
         assert!(crate::desktop::shells::jobs_settled(&store, &task).unwrap());
     }

@@ -250,9 +250,18 @@ async fn rejected_project_snapshot_preserves_durable_project_facts() {
         .seed_inventory(snapshot.clone(), None)
         .await
         .unwrap();
-    let retained = fixture.store.list_projects(Some(wave.id())).await.unwrap();
-    snapshot.snapshot.projects[0].name = "Conflicting name".into();
+    // Linear can rename at the same `updatedAt`; the later read wins.
+    snapshot.snapshot.projects[0].name = "Renamed in Linear".into();
     snapshot.synced_at = 2;
+    fixture
+        .store
+        .seed_inventory(snapshot.clone(), None)
+        .await
+        .unwrap();
+    let retained = fixture.store.list_projects(Some(wave.id())).await.unwrap();
+    assert_eq!(retained[0].name, "Renamed in Linear");
+    snapshot.snapshot.projects.clear();
+    snapshot.synced_at = 3;
     assert!(fixture.store.seed_inventory(snapshot, None).await.is_err());
     assert_eq!(
         fixture.store.list_projects(Some(wave.id())).await.unwrap(),
@@ -654,13 +663,30 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
                     .title,
                 confirmed.item.name
             );
-            let mut conflicting = confirmed.clone();
-            conflicting.item.name = "Contradiction at the same revision".into();
-            assert!(fixture
+            // Linear can change a field without moving `updatedAt`: at one
+            // revision an older read is ignored and a later read wins.
+            let mut stale = confirmed.clone();
+            stale.item.name = "Older read at the same revision".into();
+            stale.observed_at -= 1;
+            fixture
                 .store
-                .seed_issue(&scope, "linear", conflicting, None, None)
+                .seed_issue(&scope, "linear", stale, None, None)
                 .await
-                .is_err());
+                .unwrap();
+            assert_eq!(
+                refresh_task_input(&repo, "FIX-1", LinearRefresh::Never)
+                    .await
+                    .unwrap(),
+                confirmed
+            );
+            confirmed.item.name = "Edited without a new revision".into();
+            confirmed.item.description = "Description Linear rewrote".into();
+            confirmed.observed_at += 1;
+            fixture
+                .store
+                .seed_issue(&scope, "linear", confirmed.clone(), None, None)
+                .await
+                .unwrap();
             assert_eq!(
                 refresh_task_input(&repo, "FIX-1", LinearRefresh::Never)
                     .await
@@ -926,7 +952,7 @@ async fn removal_during_absent_lookup_preserves_confirmed_evidence() {
 }
 
 #[tokio::test]
-async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unresolved() {
+async fn project_revisions_order_shared_facts_and_an_initiative_move_stays_unresolved() {
     let _lock = crate::journal::test_env_lock();
     let _restore = PlanningEnvironment::isolate();
     let fixture = Fixture::new().await;
@@ -996,7 +1022,7 @@ async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unr
                 .await
                 .unwrap_err()
                 .to_string()
-                .contains("omitted"));
+                .contains("missing from its Initiative"));
             assert_eq!(
                 fixture
                     .store

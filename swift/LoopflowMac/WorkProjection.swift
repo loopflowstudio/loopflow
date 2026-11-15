@@ -256,7 +256,11 @@ final class WorkNavigation {
     var waveRatios: [Board: WaveViewRatios] = [:]
     var boardSections: [Board: WaveBoardSection] = [:]
     var showsSlotHints = false
-    var sidebarFilter: SidebarFilter = .working
+    var sidebarFilter: SidebarFilter = .working {
+        willSet {
+            if newValue != sidebarFilter { Perf.begin(Perf.hierarchyInteraction, "filter", id: "outline") }
+        }
+    }
     var sidebarFocusRequested = false
     enum Content { case overview, details, terminals }
     enum Palette: Equatable {
@@ -278,9 +282,12 @@ final class WorkNavigation {
     }
     var palette: Palette? {
         didSet {
+            if oldValue != palette { paletteGeneration &+= 1 }
             if oldValue == nil, palette != nil { restorePaletteFocus = true }
         }
     }
+    /// A dismissed and reopened sheet is a different presentation, even at the same Work.
+    @ObservationIgnored private(set) var paletteGeneration = 0
     var restorePaletteFocus = true
     var recentDestinations: [WorkPaletteRow] = []
     /// Source revisions isolate disclosure from changed definitions and repositories.

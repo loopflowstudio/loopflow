@@ -20,6 +20,21 @@ Each row is one Session's recorded input: input, output and cache-read tokens,
 cost, and how many of its provider streams finished (`FINAL`). `GAPS` counts the
 places the record is incomplete. The window defaults to the last 30 days.
 
+New usage rows hold one turn's tokens and model from the provider's transcript.
+Turn-end hooks ask the Machine server to read and record ended turns; the
+hooks themselves open no store. At provider exit, the launching process reads
+the whole transcript, records usage still missing and fills in unrecorded
+completions. This exit read needs no server and also covers bare headless runs,
+which have no turn-end hook. Recording is best-effort: a missed turn-end read
+can be caught at the next turn end or exit. Raw conversations lf never launched
+get no usage or completion rows.
+
+Claude and Codex usage rows carry tokens without cost. Pi and OpenCode include
+the turn's reported cost. Claude's live completion keeps `total_cost_usd`, a
+running process total; it is not a per-turn cost. A bare run in a Task's
+checkout counts toward that Task. Runs outside Task and Wave checkouts also
+record rows today.
+
 Find where the tokens went:
 
 ```bash
@@ -61,8 +76,22 @@ Session's raw input events, including which account it actually ran on.
 `--instructions` explains which instructions were included and which were left out.
 
 Conversation text stays with its provider: `session history show` reads it from Claude,
-Codex or Pi transcript files or `opencode session export`, and lf stores none of
-it. When a transcript is gone, it prints the recorded turns (time, status, final
+Codex or Pi transcript files or OpenCode's own store, and lf stores none of
+it. Each turn, from what woke the agent until it handed back, prints one line
+and then what was asked and done in it:
+
+```text
+── 2026-11-10 16:25 UTC · ended 2026-11-10 16:27 UTC · claude-opus-5-5 · 41.2k in (38.0k cached) · 1.1k out
+
+you: Explain the build
+  · Bash {"command":"ls"}
+
+It builds with cargo.
+```
+
+`--json` gives each turn its `id`, `state`, `started_at`, `ended_at`, `model`,
+`usage` and `items`, where an item is a `request` or something the `agent` did.
+When a transcript is gone, it prints the recorded turns (time, status, final
 answer) and why: Claude removes conversations idle longer than
 `cleanupPeriodDays` (30 days unless set in its `settings.json`); Codex, OpenCode
 and Pi keep everything. Raise `cleanupPeriodDays` to keep more Claude history.

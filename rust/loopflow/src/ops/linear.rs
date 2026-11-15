@@ -146,7 +146,7 @@ pub(crate) fn resolve_wave(wave: Option<&str>) -> OpsResult<String> {
         .ok_or_else(|| OpsError::Message("cannot determine wave; pass --wave <name>".to_string()))
 }
 
-pub(super) fn read_initiative(repo: &Path, wave: &str) -> Option<String> {
+pub(crate) fn read_initiative(repo: &Path, wave: &str) -> Option<String> {
     read_wave_config(repo, wave)?
         .linear?
         .initiative
@@ -978,7 +978,7 @@ pub(crate) async fn acquire_task(
     if evidence.state != PlanningState::Available {
         return Err(OpsError::Message(read.refresh_error.unwrap_or_else(|| {
             format!(
-                "Task {issue:?} planning is {:?}; refresh planning",
+                "Task {issue:?} planning is {:?}; run `lf task sync {issue}`",
                 evidence.state
             )
         })));
@@ -1016,7 +1016,7 @@ pub(crate) async fn acquire_task(
         .map_err(|error| OpsError::Message(error.to_string()))?;
     if acquisition.state != PlanningState::Available {
         return Err(OpsError::Message(format!(
-            "Task {issue} has invalid retained ownership; refresh planning"
+            "Task {issue} has invalid retained ownership; run `lf task sync {issue}`"
         )));
     }
     Ok(task)

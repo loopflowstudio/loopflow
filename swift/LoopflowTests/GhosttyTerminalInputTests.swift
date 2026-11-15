@@ -4,6 +4,14 @@ import Foundation
 import SwiftUI
 import Testing
 #if canImport(GhosttyKit)
+import GhosttyKit
+#endif
+@testable import LoopflowMac
+@testable import Loopflow
+
+#if canImport(GhosttyKit)
+@Suite("Retained terminal mounts", .requiresDisplay, .serialized)
+struct GhosttyTerminalMountTests {
     @Test("An off-window representable cannot steal a displayed terminal")
     @MainActor
     func offWindowTerminalMount() async throws {
@@ -93,13 +101,8 @@ import Testing
         #expect(terminal.isDescendant(of: newMount))
         #expect(terminal.surface == surface)
     }
+}
 
-import GhosttyKit
-#endif
-@testable import LoopflowMac
-@testable import Loopflow
-
-#if canImport(GhosttyKit)
 /// Shell block behavior that needs no display, so it runs headless.
 @Suite("Embedded terminal shell blocks")
 struct GhosttyShellBlockTests {
@@ -367,7 +370,7 @@ struct GhosttyTerminalInputTests {
                 "id": id, "run_id": id, "interactive": true, "work": NSNull(), "title": id,
                 "workspace": ["machine_id": fixtureMachineId, "worktree": NSTemporaryDirectory(), "task_id": NSNull(), "unavailable": NSNull()],
                 "detail": "test", "cwd": NSTemporaryDirectory(), "state": "active",
-                "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(state: "active"), "blocked": false, "title_source": "generated", "task_primary": false, "graph_membership": ["kind": "independent"], "task_ids": [], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids": [pane], "open_argv": ["unused"],
+                "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(state: "active"), "blocked": false, "title_source": "generated", "task_primary": false, "graph_membership": ["kind": "independent"], "task_ids": [], "agent_process_id": "44444444-4444-4444-8444-444444444444", "turn": NSNull(), "raw": false, "terminal_ids": [pane], "open_argv": ["unused"],
             ])
             records.append(try JSONDecoder().decode(SessionRecord.self, from: data))
         }

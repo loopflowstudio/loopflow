@@ -1,4 +1,10 @@
-//! Causal command provenance never grants process or Graph control authority.
+//! Process records describe OS lifetimes; runtime resources hold exact attachment authority.
+
+mod runtime;
+pub use runtime::LfProcessRuntime;
+pub(crate) use runtime::{
+    finish_session_attachment, register_session_attachment_interrupt, resume_session_agent_process,
+};
 
 use serde::{Deserialize, Serialize};
 

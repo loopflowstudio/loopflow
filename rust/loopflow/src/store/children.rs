@@ -13,6 +13,7 @@ use time::OffsetDateTime;
 use super::{run_planning_write, run_sqlite, Store, StoreResult};
 
 impl Store {
+    #[allow(clippy::too_many_arguments)] // These effects share the promotion transaction.
     pub(crate) async fn promote_task(
         &self,
         task_id: &TaskId,
@@ -21,6 +22,7 @@ impl Store {
         session: Option<crate::session::LfSession>,
         destination: Option<std::path::PathBuf>,
         acquisition: Option<Arc<super::PlanningLocks>>,
+        receipt: Option<super::sqlite::creation::CreationIdentity>,
     ) -> StoreResult<Task> {
         let task_id = task_id.clone();
         run_planning_write(&self.sqlite, acquisition, move |store| {
@@ -30,6 +32,7 @@ impl Store {
                 placement.as_ref(),
                 session.as_ref(),
                 destination.as_deref(),
+                receipt.as_ref(),
             )
         })
         .await
@@ -129,11 +132,17 @@ impl Store {
         .await
     }
 
-    pub async fn stack_task_placement(&self, task: &Task, parent: &TaskPrId) -> StoreResult<()> {
+    pub async fn stack_task_placement(
+        &self,
+        task: &Task,
+        parent: &TaskPrId,
+        base_commit: &str,
+    ) -> StoreResult<()> {
         let task = task.clone();
         let parent = parent.clone();
+        let base_commit = base_commit.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.stack_task_placement(&task, &parent)
+            store.stack_task_placement(&task, &parent, &base_commit)
         })
         .await
     }
@@ -285,10 +294,11 @@ impl Store {
         task_id: &TaskId,
         observation: crate::linear::LinearIssueObservation,
         observed_at: OffsetDateTime,
+        planning_connected: bool,
     ) -> StoreResult<LinearObservationOutcome> {
         let task_id = task_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.apply_linear_observation(&task_id, &observation, observed_at)
+            store.apply_linear_observation(&task_id, &observation, observed_at, planning_connected)
         })
         .await
     }

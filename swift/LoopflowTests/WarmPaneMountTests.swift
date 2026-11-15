@@ -58,7 +58,7 @@ private func warmSession(id: String, argv: [String]) throws -> SessionRecord {
         "state": "closed", "availability": NSNull(), "ready_summary": NSNull(), "work_path": "warm",
         "actions": [["kind": "open", "label": "Start conversation", "help": "Start the conversation", "unavailable_reason": NSNull()]],
         "blocked": false, "title_source": "generated", "task_primary": true, "graph_membership": ["kind": "independent"],
-        "task_ids": ["task-\(id)"], "agent_process_id": NSNull(), "terminal_ids": [String](),
+        "task_ids": ["task-\(id)"], "agent_process_id": NSNull(), "turn": NSNull(), "raw": false, "terminal_ids": [String](),
         "open_argv": argv,
     ]
     return try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: wire))

@@ -3,7 +3,6 @@ pub mod claude;
 mod claude_decode;
 pub(crate) mod claude_trust;
 #[cfg(unix)]
-pub(crate) mod claude_updates;
 pub mod codex;
 #[cfg(unix)]
 pub mod codex_connection;
@@ -245,8 +244,8 @@ pub enum ApprovalPolicy {
 #[async_trait]
 pub trait Harness: Send + Sync {
     /// The invocation owner receives replacement attachment snapshots when a
-    /// provider must respawn within the same capture.
-    fn set_capture(&mut self, _capture: Option<crate::agent::AgentCapture>) {}
+    /// provider must respawn within the same lf invocation.
+    fn set_runtime(&mut self, _runtime: Option<crate::process::LfProcessRuntime>) {}
     async fn start(&mut self, config: &AgentConfig) -> Result<()>;
     /// Start the next provider Turn from durable seed input.
     async fn send_input(&mut self, content: &str) -> Result<()>;
@@ -292,7 +291,7 @@ pub trait Harness: Send + Sync {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum HarnessKind {
     Codex,
     Claude,
@@ -317,6 +316,15 @@ impl HarnessKind {
             Self::Claude => "claude",
             Self::OpenCode => "opencode",
             Self::Pi => "pi",
+        }
+    }
+
+    /// The provider whose home keeps this harness's transcripts and accounts.
+    pub(crate) fn provider(self) -> Option<crate::provider_auth::Provider> {
+        match self {
+            Self::Claude => Some(crate::provider_auth::Provider::Claude),
+            Self::Codex => Some(crate::provider_auth::Provider::Codex),
+            Self::OpenCode | Self::Pi => None,
         }
     }
 

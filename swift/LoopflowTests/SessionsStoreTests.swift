@@ -1,6 +1,7 @@
 #if os(macOS)
 import Foundation
 import Testing
+import os
 import ViewInspector
 @testable import Loopflow
 @testable import LoopflowMac
@@ -121,12 +122,31 @@ struct SessionsStoreTests {
         #expect(item(store, "main")?.agentOverride == nil)
     }
 
-    @Test("Reset restarts the same Session with a fresh launch")
-    func resetRestartsSameSession() async throws {
+    @Test("A Task workspace reopens its Session by id with the Task beside it, so it resumes managed")
+    func taskWorkspaceReopenNamesTheTask() async throws {
         let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { args, _ in
-            guard args == ["session", "new", "main", "--prepare", "--json"] else {
+            guard args == ["session", "resume", "--reveal-existing", "main", "--task", "task_1", "--prepare", "--json"] else {
                 throw RegistryQueryError("unexpected argv: \(args)")
             }
+            return session(id: "main", state: "closed")
+        }, work: .task(id: "task_1"))
+        let original = try #require(records([session(id: "main", state: "active")]).first)
+        store.reconcile([original])
+        store.adoptPreparation(original)
+        store.recordPaneLive("main")
+        await store.refresh("main")
+        #expect(item(store, "main")?.state == .prepared)
+    }
+
+    @Test("Reset restarts the same Session with a fresh launch")
+    func resetRestartsSameSession() async throws {
+        let submitted = OSAllocatedUnfairLock<String?>(initialState: nil)
+        let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { args, _ in
+            guard args.count == 7, Array(args.prefix(4)) == ["session", "new", "main", "--request-id"],
+                  Array(args.suffix(2)) == ["--prepare", "--json"] else {
+                throw RegistryQueryError("unexpected argv: \(args)")
+            }
+            submitted.withLock { $0 = args[4] }
             return session(id: "main", state: "closed", primary: true)
         })
         store.reconcile(try records([session(id: "main", state: "active", primary: true), session(id: "other", state: "available")]))
@@ -137,6 +157,9 @@ struct SessionsStoreTests {
         #expect(item(store, "main")?.launchId != previous.launchId)
         #expect(item(store, "main")?.launchArguments == ["lf", "session", "resume", "main"])
         #expect(item(store, "other")?.state == .pending)
+        let requestID = try #require(submitted.withLock { $0 })
+        #expect(CreationRecovery.shared.requests(for: .session("main")).contains(requestID))
+        await CreationRecovery.shared.presented([requestID])
     }
 
     @Test("Reset leaves the Session live while preparing and keeps updates when it fails", arguments: [false, true])
@@ -834,7 +857,7 @@ private func session(id: String, state: String, primary: Bool = false) -> String
       "ready_summary": \(state == "available" ? "\"Ready for review\"" : "null"),
       "work_path": "product / Desktop / LOO-291",
       "actions": \(sessionActionFixtureJSON(state: wire)),
-      "blocked": false, "title_source": "generated", "task_primary": \(primary), "graph_membership": {"kind": "independent"}, "task_ids": ["task-\(id)"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids": [],
+      "blocked": false, "title_source": "generated", "task_primary": \(primary), "graph_membership": {"kind": "independent"}, "task_ids": ["task-\(id)"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "turn":null,"raw":false,"terminal_ids": [],
       "open_argv": ["lf", "session", "resume", "\(id)"]
     }
     """

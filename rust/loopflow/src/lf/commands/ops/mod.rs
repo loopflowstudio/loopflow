@@ -777,24 +777,46 @@ pub fn sync_planning(
     Ok(())
 }
 
+/// What `lf wave sync` refreshed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PlanningRefresh {
+    /// Git planning: the repository's whole plan.
+    Repository,
+    /// One Wave, from its Linear Initiative.
+    Wave(String),
+    /// A Wave with no Initiative has nothing to exchange; its local planning stands.
+    Unconnected(String),
+}
+
+impl PlanningRefresh {
+    pub fn wave(&self) -> Option<&str> {
+        match self {
+            Self::Repository => None,
+            Self::Wave(wave) | Self::Unconnected(wave) => Some(wave),
+        }
+    }
+}
+
 /// Refresh shared planning before `wave status --sync` reads it: the Wave from
 /// Linear, or the repository's Git planning ref, whose exchange is per repository.
-/// Returns the Wave a Linear refresh resolved.
-pub fn refresh_status(directory: &std::path::Path, wave: Option<&str>) -> Result<Option<String>> {
+pub fn refresh_status(directory: &std::path::Path, wave: Option<&str>) -> Result<PlanningRefresh> {
     let repo = crate::repo::working_directory_in(directory)?;
     if crate::lf::commands::plan::plans_through_git(&repo)? {
         crate::lf::commands::plan::refresh(&repo)?;
-        return Ok(None);
+        return Ok(PlanningRefresh::Repository);
     }
     let wave =
         planning_wave(&repo, wave)?.ok_or_else(|| anyhow::anyhow!("Select a Wave to refresh"))?;
+    if crate::ops::linear::read_initiative(&repo, &wave).is_none() {
+        return Ok(PlanningRefresh::Unconnected(wave));
+    }
     // The Team delta brings changes and comments in and pending saves go out,
     // so a save left by an outage is delivered on the next refresh.
     if let Err(error) = crate::ops::planning_sync::refresh_directory(&repo) {
         tracing::debug!(%error, "planning delivery pending before refresh");
     }
     tokio::runtime::Runtime::new()?.block_on(crate::ops::linear::refresh_wave(&repo, &wave))?;
-    Ok(Some(wave))
+    Ok(PlanningRefresh::Wave(wave))
 }
 
 pub fn reteam(repo: &std::path::Path, apply: bool, json: bool) -> Result<()> {
@@ -1744,6 +1766,7 @@ fn task_ownership() -> Result<WorktreeOwnership> {
             let tasks = runtime
                 .block_on(store.list_tasks(None))
                 .map_err(|error| anyhow!("cannot verify Task ownership before pruning: {error}"))?;
+            let local = store.sqlite.local_machine()?.id;
             for task in tasks {
                 let work = runtime
                     .block_on(store.work_for_child(&crate::child::ChildRef::Task(task.id.clone())))
@@ -1760,8 +1783,19 @@ fn task_ownership() -> Result<WorktreeOwnership> {
                     .map_err(|error| anyhow!("cannot read Task PRs: {error}"))?;
                 named.push((task.branch, open));
                 named.extend(prs.into_iter().map(|pr| (pr.branch, open)));
+                // A move pushed the branch before handing the Task off.
+                let elsewhere = if open {
+                    let owned = store.sqlite.task_ownership(&task.id)?;
+                    owned.owner_elsewhere(&local).map(|machine| machine.name())
+                } else {
+                    None
+                };
                 if let Some(worktree) = task.worktree {
-                    if open {
+                    if let Some(machine) = elsewhere {
+                        ownership
+                            .departed_checkouts
+                            .insert(worktree, (task.identifier, machine));
+                    } else if open {
                         ownership
                             .unfinished_checkouts
                             .insert(worktree, Some(task.identifier));
@@ -2031,7 +2065,7 @@ fn process_skill_agent(
         &crate::agent::system_prompt_with_structured_replies(&prepared.config),
         &prepared.config.task_prompt,
     );
-    let capture = crate::session_record::CaptureHandle::begin_with_context(
+    let capture = crate::session_record::SessionRecorder::begin_with_context(
         crate::session_record::SessionCaptureSpec {
             harness: provider,
             model,
@@ -2048,13 +2082,14 @@ fn process_skill_agent(
         Some(crate::session_record::AgentProcessRequest::from_prepared(
             &prepared.config,
         )?),
-    )?;
+    )
+    .map(crate::process::LfProcessRuntime::new)?;
 
     let launch = prepared.config;
     let process = ProcessConfig {
         auto: true,
         stream: true,
-        capture: Some(capture.clone().into()),
+        runtime: Some(capture.clone()),
         ..Default::default()
     };
 

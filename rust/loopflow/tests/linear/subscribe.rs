@@ -592,6 +592,119 @@ fn an_offline_comment_reaches_the_open_task_status() {
     assert_eq!(thread(&reopened, 1), saved);
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn task_view_keeps_workflow_checkout_and_conversations_after_live_updates() {
+    use std::fs::File;
+    use std::os::fd::FromRawFd;
+
+    struct Viewer(Child);
+    impl Drop for Viewer {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    let home = Machine::new();
+    home.linear_repository();
+    home.plan(1);
+    let checkout = home.start(1);
+    let task = home.store.task_by_issue("FIX-1").unwrap().unwrap();
+    home.store
+        .take_up_task_graph(
+            &task.id,
+            &crate::task_graph::CapturedGraph {
+                name: "feature".into(),
+                steps: vec![],
+            },
+        )
+        .unwrap();
+    let session = home
+        .store
+        .test_session("task-view", &crate::session_record::new_artifact_key());
+    home.store
+        .bind_session(session.id.as_str(), session.captured, &task.id)
+        .unwrap();
+    home.store.test_graph(
+        "debug",
+        checkout.to_str().unwrap(),
+        &[("repair", Some("succeeded"))],
+        Some("succeeded"),
+    );
+
+    let (mut master, mut slave) = (-1, -1);
+    let mut size = libc::winsize {
+        ws_row: 80,
+        ws_col: 160,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
+    // SAFETY: valid output pointers and initialized size; defaults for name and termios.
+    assert_eq!(
+        unsafe {
+            libc::openpty(
+                &mut master,
+                &mut slave,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                &mut size,
+            )
+        },
+        0
+    );
+    // SAFETY: openpty returned two fresh, independently owned descriptors.
+    let (master, slave) = unsafe { (File::from_raw_fd(master), File::from_raw_fd(slave)) };
+    let _viewer = Viewer(
+        lf(home.path(), &["task", "view", "FIX-1"])
+            .current_dir(home.repo())
+            .stdin(slave.try_clone().unwrap())
+            .stdout(slave)
+            .spawn()
+            .unwrap(),
+    );
+    let (sender, screens) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut screen = String::new();
+        for line in BufReader::new(master).lines() {
+            let Ok(line) = line else { break };
+            screen.push_str(&line);
+            screen.push('\n');
+            if line.contains("q close") && sender.send(std::mem::take(&mut screen)).is_err() {
+                break;
+            }
+        }
+    });
+    let check = |screen: &str| {
+        assert!(screen.contains("Task: idle"), "{screen}");
+        assert!(screen.contains(checkout.to_str().unwrap()), "{screen}");
+        assert!(screen.contains("Workflow: feature · start"), "{screen}");
+        assert!(screen.contains("lf resume task-view"), "{screen}");
+        assert!(screen.contains("debug · completed"), "{screen}");
+        assert!(screen.contains("repair · succeeded"), "{screen}");
+        assert!(!screen.contains("unknown"), "{screen}");
+        assert!(!screen.contains("No workflow taken up"), "{screen}");
+    };
+    check(&screens.recv_timeout(Duration::from_secs(30)).unwrap());
+    home.store
+        .rename_session(
+            session.id.as_str(),
+            "Updated conversation",
+            crate::session::TitleSource::Human,
+        )
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let screen = screens
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .unwrap();
+        check(&screen);
+        if screen.contains("Updated conversation") {
+            break;
+        }
+    }
+}
+
 #[test]
 fn peer_planning_receipts_reach_an_open_watch() {
     use loopflow::planning_git::PlanningDestination;

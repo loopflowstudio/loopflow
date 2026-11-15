@@ -7,7 +7,7 @@ struct ServerProtocolTests {
         .deletingLastPathComponent().deletingLastPathComponent()
 
     private func fixture(_ name: String) throws -> Data {
-        try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/server/\(name).json"))
+        try Data(contentsOf: root.appendingPathComponent("rust/loopflow/tests/fixtures/dto/server/\(name).json"))
     }
 
     /// What `lf server describe --json` prints; a Rust test holds it to the wire types.
@@ -46,21 +46,31 @@ struct ServerProtocolTests {
     }
 
     private func message(_ name: String) throws -> ServerMessage {
-        try JSONDecoder().decode(ServerMessage.self, from: fixture(name))
+        try ServerMessage(line: fixture(name))
+    }
+
+    /// An answer with its payload decoded, as the caller who asked would.
+    private enum Answer { case response(String, String, JSONValue), reading(String, String, JSONValue) }
+    private func answer(_ name: String) throws -> Answer? {
+        switch try message(name) {
+        case .response(let id, let trace, let result): .response(id, trace, try result.decode(JSONValue.self))
+        case .reading(let id, let checkpoint, let frame): .reading(id, checkpoint, try frame.decode(JSONValue.self))
+        default: nil
+        }
     }
 
     @Test func helloAndWelcomeNegotiateTheRevision() throws {
-        let hello = ServerClientMessage.hello(ServerHello(revision: 2, minRevision: 2, client: ServerClientIdentity(
+        let hello = ServerClientMessage.hello(ServerHello(revision: ServerProtocol.revision, minRevision: ServerProtocol.minRevision, client: ServerClientIdentity(
             kind: "desktop", platform: "macos", name: "Loopflow", version: "0.15.1")))
         #expect(try encoded(hello) == value("hello"))
         guard case .welcome(let welcome) = try message("welcome") else { Issue.record("Missing welcome"); return }
         #expect(welcome.clientID == "6f1c2d3e-4b5a-4c6d-8e7f-0a1b2c3d4e5f")
-        #expect(welcome.revision == 2)
-        #expect(welcome.serverRevision == 2)
-        #expect(welcome.minRevision == 2)
+        #expect(welcome.revision == ServerProtocol.revision)
+        #expect(welcome.serverRevision == ServerProtocol.revision)
+        #expect(welcome.minRevision == ServerProtocol.minRevision)
         #expect(welcome.instance == "service-incarnation")
         #expect(welcome.executableSHA256.count == 64)
-        #expect(welcome.limits.maxMessage == 33554432)
+        #expect(welcome.limits.maxMessage == 1_048_576)
         #expect(welcome.limits.maxConnections == 64)
         guard case .object(let machine) = welcome.machine else { Issue.record("Missing Machine"); return }
         #expect(machine["label"] == .string("studio"))
@@ -69,8 +79,8 @@ struct ServerProtocolTests {
     @Test func readinessProbesWithoutHello() throws {
         #expect(try encoded(.status) == value("status_request"))
         guard case .status(let status) = try message("status") else { Issue.record("Missing status"); return }
-        #expect(status.revision == 2)
-        #expect(status.minRevision == 2)
+        #expect(status.revision == ServerProtocol.revision)
+        #expect(status.minRevision == ServerProtocol.minRevision)
         #expect(status.instance == "server-1")
         #expect(status.executableSHA256 == String(repeating: "a", count: 64))
         #expect(status.clients.map(\.id) == ["6f1c2d3e-4b5a-4c6d-8e7f-0a1b2c3d4e5f"])
@@ -91,10 +101,11 @@ struct ServerProtocolTests {
 
     @Test func subscriptionsCarryTheirRequestId() throws {
         let request = ServerClientMessage.subscribe(id: "tasks-1", operation:
-            .planList(directory: "/", wave: nil, task: nil, all: true), select: ["tasks.items.task.identifier", "tasks.items.task.title", "tasks.items.section"])
+            .planList(directory: "/", wave: nil, task: nil, all: true), select: ["tasks.items.task.identifier", "tasks.items.task.title", "tasks.items.section"], resume: "fixture-checkpoint")
         #expect(try encoded(request) == value("subscribe"))
-        guard case .reading(let id, let frame) = try message("reading") else { Issue.record("Missing reading"); return }
+        guard case .reading(let id, let checkpoint, let frame) = try answer("reading") else { Issue.record("Missing reading"); return }
         #expect(id == "tasks-1")
+        #expect(checkpoint == "fixture-checkpoint")
         guard case .object(let fields) = frame else { Issue.record("Missing subscription frame"); return }
         #expect(fields["body"] == .null)
         #expect(fields["unavailable"] == .string("repository is unavailable"))
@@ -102,26 +113,79 @@ struct ServerProtocolTests {
         #expect(try encoded(.cancel(id: "tasks-1")) == value("cancel"))
     }
 
-    @Test func commandTraceAndExistingOwnerShareRustFixtures() throws {
-        guard case .response(let id, let trace, .object(let renamed)) = try message("response") else {
+    @Test func commandTraceAndHeldTerminalShareRustFixtures() throws {
+        guard case .response(let id, let trace, .object(let renamed)) = try answer("response") else {
             Issue.record("Missing response"); return
         }
         #expect(id == "rename-1")
         #expect(trace == "85c31c1e-850c-4821-878d-55527b6dba46")
         #expect(renamed["title"] == .string("Served name"))
-        guard case .response(_, _, .object(let issued)) = try message("attached"),
-              case .string(let process)? = issued["owner_lf_process_id"], case .string(let ticket)? = issued["ticket"] else {
+        let terminal = "7c1d9a40-e5b2-4f6a-8d3e-2b1c0f9a8e7d"
+        guard case .response(_, _, .object(let issued)) = try answer("attached"),
+              case .string(let attached)? = issued["terminal_id"], case .string(let ticket)? = issued["ticket"] else {
             Issue.record("Missing ticket"); return
         }
-        #expect(process == trace)
+        #expect(attached == terminal)
         #expect(issued["expires_in_ms"] == .integer(60000))
         let attach = ServerClientMessage.request(id: "terminal-1", operation: .sessionAttach(
-            session: "session_5e55105e000040008000000000000001", owner: trace), select: nil)
+            session: "session_5e55105e000040008000000000000001"), select: nil)
         #expect(try encoded(attach) == self.value("attach"))
         // The bridge presents the ticket on a connection of its own.
         #expect(try encoded(.attach(ticket: ticket)) == value("attach_ticket"))
-        guard case .bridged(let owner) = try message("bridged") else { Issue.record("Missing bridge"); return }
-        #expect(owner == trace)
+        // A held terminal outlives server restarts and is named by its terminal.
+        guard case .bridged(let held) = try message("bridged") else { Issue.record("Missing bridge"); return }
+        #expect(held == terminal)
+        let start = ServerClientMessage.request(id: "start-1", operation: .sessionStart(
+            session: "session_5e55105e000040008000000000000001", request: "0b9c1f0e-6d1c-4a43-9f0e-2f6c8f0f5a11",
+            argv: ["/usr/local/bin/lf", "session", "resume", "session_5e55105e000040008000000000000001"], cwd: "/Users/me/src/app",
+            env: [("PATH", "/usr/bin:/bin"), ("HOME", "/Users/me")], rows: 24, cols: 80, placement: "desktop-shell"), select: nil)
+        #expect(try encoded(start) == value("session_start"))
+    }
+
+    @Test func ticketsAdmitTerminalAndBulkConnections() throws {
+        guard case .response("terminal-1", _, let result) = try answer("ticket_reply"),
+              case .string(let ticket) = result["ticket"] else {
+            Issue.record("Missing ticket"); return
+        }
+        #expect(ticket == "f06b5872-b113-47e5-be82-4320e33d7a3d")
+        #expect(try encoded(.attach(ticket: ticket)) == value("ticket"))
+        #expect(try encoded(.request(id: "save-1", operation: .requestUpload(bytes: 2_097_152), select: nil)) == value("upload"))
+        guard case .bulk(let id, let bulkTicket, let bytes) = try message("bulk") else { Issue.record("Missing bulk"); return }
+        #expect(id == "file-1")
+        #expect(bulkTicket == ticket)
+        #expect(bytes == 2_097_152)
+        guard case .admitted = try message("admitted") else { Issue.record("Missing admitted"); return }
+    }
+
+    @Test func mobileOperationsUseTheSharedFixtures() throws {
+        let task = ServedWrite.taskCreate(directory: "/repo", requestID: "00000000-0000-4000-8000-000000000001", title: nil, request: "Fix the retry test", wave: nil, graph: nil, session: nil, run: true)
+        #expect(try encoded(.request(id: "create-1", operation: .command(task), select: nil)) == value("task_create"))
+        #expect(try encoded(.request(id: "sessions-1", operation: .read(.sessionList(
+            directory: "/repo", headless: false, after: nil, limit: 100, task: "task_00000000000000000000000000000001")), select: nil)) == value("session_page"))
+        #expect(try encoded(.request(id: "continue-1", operation: .sessionContinue(
+            session: "session_5e55105e000040008000000000000001", request: "3f2a7c1e-9b4d-4e8a-a1c6-5d0e7f9b2c34",
+            rows: 40, cols: 60), select: nil)) == value("session_continue"))
+        #expect(try encoded(.subscribe(id: "tasks-1", operation: .viewSelect(expression: "kind:task state:open"), select: nil, resume: nil)) == value("view_select"))
+    }
+
+    @Test func hookBoundarySharesTheRustServerContract() throws {
+        let boundary = ServerClientMessage.request(id: "stop", operation: .sessionBoundary(
+            moment: "stop", delivery: "/Users/maya/.lf/context-deliveries/0b9f2c1e.json",
+            adapter: .object(["session": .string("session_5e55105e000040008000000000000001"),
+                              "agent_process_id": .string("85c31c1e-850c-4821-878d-55527b6dba46"),
+                              "capability": .string("4b0e1f2a-9c3d-4e5f-8a6b-7c8d9e0f1a2b")]),
+            callback: .object(["hook_event_name": .string("Stop"), "session_id": .string("5f1c0d2e-native"),
+                               "prompt_id": .string("p-12")]),
+            gap: .object(["first": .integer(1794358000), "last": .integer(1794358020)]),
+            printed: ["54dc6432-26f1-43fe-ad9d-20b7e91bad69"],
+            inbox: .string("/Users/maya/.claude/sessions/4242.9c1d.key")), select: nil)
+        #expect(try encoded(boundary) == value("session_boundary"))
+        guard case .response(_, _, .object(let answer)) = try answer("session_boundary_answer") else {
+            Issue.record("Missing boundary answer"); return
+        }
+        #expect(answer["steers"] == .null)
+        #expect(answer["update"] == .null)
+        #expect(answer["waiting"] == .bool(false))
     }
 
     @Test func primarySessionSelectionUsesTheSharedViewPlanRead() throws {
@@ -158,14 +222,13 @@ struct ServerProtocolTests {
 
     @Test func sessionAdoptionSharesTheRustWriteContract() throws {
         let request = ServerClientMessage.request(id: "adopt-1", operation: .command(
-            .taskCreate(directory: "/repo", id: "session_5e55105e000040008000000000000001",
-                             title: "Keep the conversation")), select: nil)
+            .taskCreate(directory: "/repo", requestID: "fixture-creation", title: "Keep the conversation", request: nil, wave: nil, graph: nil, session: "session_5e55105e000040008000000000000001", run: false)), select: nil)
         #expect(try encoded(request) == value("task_from_session"))
     }
 
     @Test func coreLoopWritesShareTheRustWriteContract() throws {
         let writes: [(String, String, ServedWrite)] = [
-            ("task_run", "run-1", .taskRun(directory: "/repo", issue: "LOO-1", from: "implement", agent: "claude", approve: false)),
+            ("task_run", "run-1", .taskRun(directory: "/repo", issue: "LOO-1", graph: nil, from: "implement", agent: "claude", approve: false)),
             ("task_ship", "ship-1", .taskShip(directory: "/repo", issue: "LOO-1")),
             ("task_hold", "hold-1", .taskHold(directory: "/repo", issue: "LOO-1")),
             ("task_steer", "steer-1", .taskSteer(directory: "/repo", issue: "LOO-1", message: "Keep the API small")),
@@ -173,6 +236,12 @@ struct ServerProtocolTests {
             ("task_interrupt", "interrupt-1", .taskInterrupt(directory: "/repo", issue: "LOO-1")),
             ("session_steer", "steer-2", .sessionSteer(directory: "/repo", session: nil, wave: "product",
                                                        message: "Ship the smallest slice first")),
+            ("session_status", "status-1", .sessionStatus(
+                directory: "/", id: "session_5e55105e000040008000000000000001", terminal: "pane-1",
+                agentProcess: "5e55105e-0000-4000-8000-000000000007", stream: "5e55105e-0000-4000-8000-000000000008",
+                sequence: 1, records: ProgramStatusRecords(seen: true, records: [
+                    ProgramStatusReport(state: .blocked, id: nil, kind: .question, progress: nil, app: nil,
+                                        title: nil, msg: "Proceed?")]))),
             ("wave_plan_bind", "bind-1", .wavePlanBind(directory: "/repo", wave: "product",
                                                                project: "5e55105e-0000-4000-8000-000000000042")),
             ("wave_plan_connect", "connect-1", .wavePlanConnect(directory: "/repo", wave: "product", all: false,
@@ -217,40 +286,42 @@ struct ServerProtocolTests {
                                                                reviewers: ["alice", "org/platform"])),
         ]
         for (name, id, write) in writes {
-            #expect(try encoded(.request(id: id, operation: .command(write), select: nil)) == value(name), "\(name)")
+            do {
+                #expect(try encoded(.request(id: id, operation: .command(write), select: nil)) == value(name), "\(name)")
+            } catch { Issue.record("\(name): \(error)") }
         }
-        #expect(ServedWrite.taskRun(directory: "/repo", issue: "LOO-1", from: nil, agent: nil, approve: true).argv
+        #expect(ServedWrite.taskRun(directory: "/repo", issue: "LOO-1", graph: nil, from: nil, agent: nil, approve: true).argv
             == ["--batch", "task", "run", "LOO-1", "--json"])
-        guard case .response(_, _, .object(let running)) = try message("task_running") else {
+        guard case .response(_, _, .object(let running)) = try answer("task_running") else {
             Issue.record("Missing task.run result"); return
         }
         #expect(running["state"] == .string("running"))
         #expect(running["graph_process"] == .string("85c31c1e-850c-4821-878d-55527b6dba46"))
-        guard case .response(_, _, .object(let shipping)) = try message("task_shipping") else {
+        guard case .response(_, _, .object(let shipping)) = try answer("task_shipping") else {
             Issue.record("Missing task.ship result"); return
         }
         #expect(shipping["state"] == .string("shipping"))
-        guard case .response(_, _, .object(let held)) = try message("task_held") else {
+        guard case .response(_, _, .object(let held)) = try answer("task_held") else {
             Issue.record("Missing task.hold result"); return
         }
         #expect(held["stopped"] == .bool(true))
-        guard case .response(_, _, .object(let steered)) = try message("session_steered") else {
+        guard case .response(_, _, .object(let steered)) = try answer("session_steered") else {
             Issue.record("Missing session.steer result"); return
         }
         #expect(steered["text"] == .string("Ship the smallest slice first"))
-        guard case .response(_, _, .array(let connected)) = try message("wave_plan_connected") else {
+        guard case .response(_, _, .array(let connected)) = try answer("wave_plan_connected") else {
             Issue.record("Missing wave.plan.connect result"); return
         }
         #expect(connected.count == 1)
-        guard case .response(_, _, .object(let reteamed)) = try message("wave_plan_reteamed") else {
+        guard case .response(_, _, .object(let reteamed)) = try answer("wave_plan_reteamed") else {
             Issue.record("Missing wave.plan.reteam result"); return
         }
         #expect(reteamed["applied"] == .bool(false))
-        guard case .response(_, _, .object(let launched)) = try message("launched") else {
+        guard case .response(_, _, .object(let launched)) = try answer("launched") else {
             Issue.record("Missing detached result"); return
         }
         #expect(launched["operation"] == .string("repo.release"))
-        guard case .response(_, _, .object(let planned)) = try message("checkout_sync_planned") else {
+        guard case .response(_, _, .object(let planned)) = try answer("checkout_sync_planned") else {
             Issue.record("Missing checkout.sync plan"); return
         }
         #expect(planned["state"] == .string("planned"))
@@ -260,11 +331,11 @@ struct ServerProtocolTests {
         #expect(ServedWrite.prLand(directory: "/repo", waitAndFix: true, strict: false, local: false, worktree: nil,
                                    message: nil, title: "Serve the pr namespace", body: nil, agent: nil).argv
             == ["pr", "land", "--wait-and-fix", "--title", "Serve the pr namespace", "--json"])
-        guard case .response(_, _, .object(let published)) = try message("pr_published") else {
+        guard case .response(_, _, .object(let published)) = try answer("pr_published") else {
             Issue.record("Missing pr.publish result"); return
         }
         #expect(published["created"] == .bool(false))
-        guard case .response(_, _, .object(let checks)) = try message("pr_checks_report") else {
+        guard case .response(_, _, .object(let checks)) = try answer("pr_checks_report") else {
             Issue.record("Missing pr.checks result"); return
         }
         #expect(checks["state"] == .string("pending"))
@@ -279,7 +350,7 @@ struct ServerProtocolTests {
             == ["--batch", "graph", "code"])
         let list = ServerClientMessage.request(id: "list-1", operation: .read(.skillList(directory: "/repo", path: [])), select: nil)
         #expect(try encoded(list) == value("skill_list"))
-        guard case .response(_, _, .array(let entries)) = try message("skill_entries") else {
+        guard case .response(_, _, .array(let entries)) = try answer("skill_entries") else {
             Issue.record("Missing skill.list result"); return
         }
         #expect(entries.count == 2)
@@ -289,20 +360,28 @@ struct ServerProtocolTests {
         #expect(try encoded(accounts) == value("account_list"))
         let route = ServerClientMessage.request(id: "route-1",
                                                 operation: .read(.accountNext(directory: "/repo", repo: nil,
-                                                                               default: false)), select: nil)
+                                                                               default: false, agent: nil)), select: nil)
         #expect(try encoded(route) == value("account_next_request"))
-        guard case .response(_, _, .object(let report)) = try message("account_report") else {
+        let fable = ServedRead.accountNext(directory: "/repo", repo: nil, default: false, agent: "claude:fable")
+        #expect(fable.argv == ["account", "next", "--agent", "claude:fable", "--json"])
+        let fableRoute = ServerClientMessage.request(id: "fable-route", operation: .read(fable), select: nil)
+        guard case .object(let request) = try encoded(fableRoute),
+              case .object(let operation) = request["operation"] else {
+            Issue.record("Missing account.next operation"); return
+        }
+        #expect(operation["agent"] == .string("claude:fable"))
+        guard case .response(_, _, .object(let report)) = try answer("account_report") else {
             Issue.record("Missing account.list result"); return
         }
         #expect(report["browser"] == .null)
-        guard case .response(_, _, .object(let redeemed)) = try message("account_redeemed") else {
+        guard case .response(_, _, .object(let redeemed)) = try answer("account_redeemed") else {
             Issue.record("Missing account.redeem_reset result"); return
         }
         #expect(redeemed["after"] == .null)
     }
 
     @Test func aWaitEndsAfterTheReadingThatReachedIt() throws {
-        let wait = ServerClientMessage.subscribe(id: "wait-1", operation: .taskWait(issue: "LOO-1", until: "submitted"), select: nil)
+        let wait = ServerClientMessage.subscribe(id: "wait-1", operation: .taskWait(issue: "LOO-1", until: "submitted"), select: nil, resume: nil)
         #expect(try encoded(wait) == value("task_wait"))
         guard case .ended(let id) = try message("ended") else { Issue.record("Missing ended"); return }
         #expect(id == "wait-1")
@@ -349,23 +428,49 @@ struct ServerProtocolTests {
             #expect(groups[1] == name, "\(kind) must be named \(name) in Swift")
             #expect(described[kind] == fields, "\(kind): `lf server describe --json` has \(described[kind].map { $0.sorted() } ?? []), Swift encodes \(fields.sorted())")
         }
+        let events = try arms("SubscriptionEvent", tag: "kind", of: schema)
         for groups in try matches(#""([a-z]+(?:\.[a-z_]+)+)""#, in: protocolSource) {
             let kind = try #require(groups[1])
-            #expect(described[kind] != nil, "\(kind) is not in `lf server describe --json`")
+            #expect(described[kind] != nil || events[kind] != nil, "\(kind) is not in `lf server describe --json`")
         }
+    }
+
+    @Test func typedEventsCarryTheirPayloadAndUnknownKindsStayLocal() throws {
+        guard case .event(let id, let seq, .taskShipped(let task, _, let number, _, _)) = try message("event_shipped") else {
+            Issue.record("Missing ship event"); return
+        }
+        #expect(id == "task" && seq == 1 && number == 42)
+        #expect(task == "task_11111111111111111111111111111111")
+        guard case .event(_, _, .taskSteer(_, let steer, let comment)) = try message("event_steer") else {
+            Issue.record("Missing steer event"); return
+        }
+        #expect(steer.text == "Keep the examples.")
+        #expect(comment?.body == "Keep the examples.")
+        guard case .event(_, _, .graphStepFinished(_, _, let step)) = try message("event_step_finished") else {
+            Issue.record("Missing step event"); return
+        }
+        #expect(step.label == "implement" && step.outcome == "succeeded")
+        let unknown = Data(#"{"type":"event","id":"task","seq":2,"event":{"kind":"future.occurrence","extra":true}}"#.utf8)
+        guard case .event(let unknownID, 2, .unknown(let kind)) = try ServerMessage(line: unknown) else {
+            Issue.record("Unknown event closed the connection"); return
+        }
+        #expect(unknownID == "task" && kind == "future.occurrence")
     }
 
     /// A fixture the mirror neither encodes nor decodes is one it can drift from.
     @Test func everyFixtureIsMirrored() throws {
         let client = try arms("ClientMessage", tag: "type", of: schema())
         let tests = try source("swift/LoopflowTests/ServerProtocolTests.swift")
-        let directory = root.appendingPathComponent("tests/fixtures/dto/server")
+        let directory = root.appendingPathComponent("rust/loopflow/tests/fixtures/dto/server")
         for url in try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) {
             let name = url.deletingPathExtension().lastPathComponent
             let object = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
             let type = try #require(object["type"] as? String)
+            // Mobile setup is exposed to Desktop by the CLI; Swift has no encoder for it.
+            if ["mobile_status_request", "configure_remote"].contains(name) { continue }
             if client[type] == Set(object.keys).subtracting(["type"]) {
-                #expect(tests.contains("\"\(name)\""), "No test here encodes the client fixture \(name)")
+                let encodedHere = tests.contains("\"\(name)\"")
+                #expect(encodedHere, "No test here encodes the client fixture \(name)")
             } else {
                 #expect(throws: Never.self, "\(name)") { try message(name) }
             }
@@ -374,13 +479,16 @@ struct ServerProtocolTests {
 
     @Test func missingRequiredFieldsDoNotBecomeDefaults() {
         #expect(throws: (any Error).self) {
-            try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"reading","id":"x"}"#.utf8))
+            try ServerMessage(line: Data(#"{"type":"reading","id":"x"}"#.utf8))
         }
         #expect(throws: (any Error).self) {
-            try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"welcome","revision":2}"#.utf8))
+            try ServerMessage(line: Data(#"{"type":"welcome","revision":5}"#.utf8))
         }
         #expect(throws: (any Error).self) {
-            try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"response","id":"x","result":{"kind":"bootstrap"}}"#.utf8))
+            try ServerMessage(line: Data(#"{"type":"response","id":"x","result":{"kind":"bootstrap"}}"#.utf8))
+        }
+        #expect(throws: (any Error).self) {
+            try ServerMessage(line: Data(#"{"type":"bridged"}"#.utf8))
         }
     }
 }

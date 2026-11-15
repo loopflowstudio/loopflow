@@ -19,8 +19,8 @@ mod definitions;
 pub mod files;
 pub mod keys;
 pub mod migrate;
-pub(crate) mod observation;
 pub(crate) mod placement;
+pub(crate) mod reader;
 pub mod remote;
 pub mod settings;
 
@@ -32,6 +32,25 @@ pub const USER_NAME_ENV: &str = "LF_USER_NAME";
 #[serde(deny_unknown_fields)]
 pub struct UserConfig {
     pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum CodexServiceTier {
+    #[serde(alias = "standard")]
+    Default,
+    #[serde(alias = "fast")]
+    Priority,
+}
+
+impl CodexServiceTier {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Priority => "priority",
+        }
+    }
 }
 
 /// Resolve a display name from personal Loopflow configuration or Git's
@@ -217,46 +236,11 @@ pub struct SessionConfig {
     /// Machine-local terminal application used to present detached sessions.
     #[serde(default)]
     pub terminal: Option<String>,
-    /// How long a Session keeps its agent running after its last viewer leaves.
-    #[serde(default)]
-    pub end_detached_after: DetachedLimit,
-}
-
-/// How long a Session nobody views and nothing uses stays resident before its
-/// agent ends: `2m`, `30m`, `24h`, or `off`. `lf resume` reopens it.
-#[derive(schemars::JsonSchema, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
-pub enum DetachedLimit {
-    Off,
-    After(std::time::Duration),
-}
-
-impl Default for DetachedLimit {
-    fn default() -> Self {
-        Self::After(std::time::Duration::from_secs(2 * 60))
-    }
-}
-
-impl TryFrom<String> for DetachedLimit {
-    type Error = String;
-
-    fn try_from(value: String) -> Result<Self, String> {
-        if value.trim() == "off" {
-            return Ok(Self::Off);
-        }
-        parse_duration(&value)
-            .map(Self::After)
-            .map_err(|error| format!("end_detached_after: {error}; or use off"))
-    }
-}
-
-impl From<DetachedLimit> for String {
-    fn from(limit: DetachedLimit) -> Self {
-        match limit {
-            DetachedLimit::Off => "off".into(),
-            DetachedLimit::After(duration) => format!("{}s", duration.as_secs()),
-        }
-    }
+    // Remove in task_c118380f31f14d07ba28669499efa395 after LOO-823 ships:
+    // released lf still reads this shared config key. It no longer has an effect.
+    #[serde(default, rename = "end_detached_after", skip_serializing)]
+    #[schemars(skip)]
+    _end_detached_after: Option<String>,
 }
 
 /// Parse `30`, `10s`, `5m`, `1h` or `2d`; a bare number is seconds.
@@ -502,8 +486,8 @@ pub struct LogConfig {
 }
 
 impl Config {
-    /// Resolve authored preferences, or the sole installed harness. A
-    /// `default_agent` list (`claude,codex`) selects its first entry.
+    /// Resolve authored preferences, or the sole installed harness: an `agent`
+    /// choice, else the first of [`Config::agent_order`].
     ///
     /// # Errors
     /// Returns `AgentSelection` when no preference resolves and installation is ambiguous or absent.
@@ -511,31 +495,43 @@ impl Config {
         select_agent(
             self.agent
                 .as_deref()
-                .or_else(|| self.default_agent.as_deref().map(first_agent)),
+                .or(self.default_agent.as_deref())
+                .or_else(|| self.agents.first().map(String::as_str)),
         )
     }
 
-    /// The agents a headless step may fall through to when every account for
-    /// its own is held back: the rest of the `default_agent` list, in order.
-    /// An explicit `agent` choice has none; it is followed within itself.
-    pub fn fallback_agents(&self) -> Vec<String> {
-        match (&self.agent, &self.default_agent) {
-            (None, Some(list)) => agent_list(list).skip(1).map(str::to_owned).collect(),
-            _ => Vec::new(),
+    /// What Loopflow tries, in order: an `agent` choice alone, else
+    /// `default_agent` followed by the rest of `agents`. A `default_agent`
+    /// the list lacks is added in front for this context only. Entries are
+    /// `harness[:model]` as written; a bare harness is its own entry.
+    pub fn agent_order(&self) -> Vec<String> {
+        if let Some(agent) = &self.agent {
+            return vec![agent.clone()];
         }
+        self.default_agent
+            .iter()
+            .chain(
+                self.agents
+                    .iter()
+                    .filter(|entry| Some(*entry) != self.default_agent.as_ref()),
+            )
+            .cloned()
+            .collect()
+    }
+
+    /// The agents a headless step may move to when a usage limit refuses its
+    /// own: the rest of [`Config::agent_order`]. An `agent` choice has none.
+    pub fn fallback_agents(&self) -> Vec<String> {
+        self.agent_order().into_iter().skip(1).collect()
     }
 }
 
-/// The entries of an ordered agent preference, `harness[:model]` each.
-pub fn agent_list(value: &str) -> impl Iterator<Item = &str> {
+/// The entries of a comma-separated agent list, such as `claude,codex`.
+pub(crate) fn agent_list(value: &str) -> impl Iterator<Item = &str> {
     value
         .split(',')
         .map(str::trim)
         .filter(|agent| !agent.is_empty())
-}
-
-fn first_agent(value: &str) -> &str {
-    agent_list(value).next().unwrap_or(value)
 }
 
 /// Parse agent string like 'claude:opus' into (harness, model).
@@ -549,7 +545,7 @@ pub fn parse_agent(agent: &str) -> (String, Option<String>) {
 
 /// Load YAML file, returning None if not present or empty.
 fn load_yaml_file(path: &Path) -> Result<Option<serde_yaml_ng::Value>, LoadError> {
-    let content = match observation::read_to_string(path) {
+    let content = match crate::observe::read_to_string(path) {
         Ok(content) => content,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error.into()),
@@ -557,9 +553,7 @@ fn load_yaml_file(path: &Path) -> Result<Option<serde_yaml_ng::Value>, LoadError
     if content.trim().is_empty() {
         return Ok(None);
     }
-    let mut value: serde_yaml_ng::Value = serde_yaml_ng::from_str(&content).map_err(|e| {
-        LoadError::InvalidGraph(format!("YAML parse error in {}: {}", path.display(), e))
-    })?;
+    let mut value = serde_yaml_ng::Value::Mapping(reader::parse(&content, path));
     keys::fold(&mut value);
     normalize_context(&mut value);
     Ok(Some(value))
@@ -671,7 +665,7 @@ pub fn config_layers(
     config_layers_with(repo_root, wave, &PersonalSettings::read(repo_root, wave))
 }
 
-fn config_layers_with(
+pub(crate) fn config_layers_with(
     repo_root: Option<&Path>,
     wave: Option<&str>,
     personal_values: &PersonalSettings,
@@ -790,12 +784,6 @@ fn personal_file_layers(
     let mut layers = Vec::new();
     let path = global_config_path();
     if let Some(value) = load_yaml_file(&path)? {
-        if value.get("repos").is_some() {
-            return Err(LoadError::InvalidGraph(format!(
-                "{}: repos entries need migration to lf.config.local.yaml; run `lf config migrate`",
-                path.display()
-            )));
-        }
         layers.push(ConfigDeclarations {
             source: ConfigSource::Personal,
             scope: settings::SettingScope::Global,
@@ -805,8 +793,6 @@ fn personal_file_layers(
     }
     if let Some(repo) = repo_root {
         let path = files::private_path(repo)
-            .map_err(|error| LoadError::InvalidGraph(error.to_string()))?;
-        files::diagnose_private_file(&path)
             .map_err(|error| LoadError::InvalidGraph(error.to_string()))?;
         if let Some(mut value) = load_yaml_file(&path)? {
             let waves = private_wave_layers(repo, wave, &path, &value)?;
@@ -864,9 +850,16 @@ fn global_config_path() -> PathBuf {
 /// Linear Team bindings use this path; personal transport defaults do not assign
 /// a repository to a Team.
 pub fn load_repo_config(repo_root: &Path) -> Result<Option<Config>, LoadError> {
-    let Some(value) = load_yaml_file(&repo_root.join(".lf/config.yaml"))? else {
+    let path = repo_root.join(".lf/config.yaml");
+    let Some(mut value) = load_yaml_file(&path)? else {
         return Ok(None);
     };
+    settings::filter_file_preferences(
+        &mut value,
+        &path,
+        ConfigSource::Repository,
+        settings::SettingScope::Repository,
+    );
     serde_yaml_ng::from_value(value)
         .map(Some)
         .map_err(|error| LoadError::InvalidGraph(format!("Config validation error: {error}")))
@@ -880,7 +873,7 @@ pub fn load_config_or_default(repo_root: Option<&Path>) -> Config {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn private_wave_reads_allow_missing_identity_but_report_invalid_authored_config() {
+    fn private_wave_reads_skip_malformed_entries_but_validate_authored_identity() {
         let repo = tempfile::tempdir().unwrap();
         let path = repo.path().join("lf.config.local.yaml");
         let document = serde_yaml_ng::from_str("waves: {}\n").unwrap();
@@ -892,6 +885,12 @@ mod tests {
         let wave = repo.path().join(".lf/wave/broken");
         std::fs::create_dir_all(&wave).unwrap();
         std::fs::write(wave.join("config.yaml"), "id: [invalid\n").unwrap();
+        assert!(
+            super::private_wave_layers(repo.path(), Some("broken"), &path, &document)
+                .unwrap()
+                .is_empty()
+        );
+        std::fs::write(wave.join("config.yaml"), "id: invalid\n").unwrap();
         assert!(super::private_wave_layers(repo.path(), Some("broken"), &path, &document).is_err());
     }
 
@@ -1046,6 +1045,36 @@ chrome: true
     }
 
     #[test]
+    fn default_agent_leads_the_agents_order_and_a_choice_pins_one() {
+        let order = |yaml: &str| {
+            let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
+            (config.agent().unwrap().to_owned(), config.agent_order())
+        };
+        assert_eq!(
+            order("agents: [claude:opus, codex, claude:fable]"),
+            (
+                "claude:opus".into(),
+                vec!["claude:opus".into(), "codex".into(), "claude:fable".into()]
+            )
+        );
+        // An entry the list has moves up; one it lacks is added in front.
+        assert_eq!(
+            order("agents: [claude:opus, codex, claude:fable]\ndefault_agent: claude:fable").1,
+            ["claude:fable", "claude:opus", "codex"]
+        );
+        assert_eq!(
+            order("agents: [claude, codex]\ndefault_agent: codex:sol").1,
+            ["codex:sol", "claude", "codex"]
+        );
+        assert_eq!(order("default_agent: claude").1, ["claude"]);
+        let pinned: Config =
+            serde_yaml_ng::from_str("agents: [claude, codex]\ndefault_agent: codex\nagent: pi")
+                .unwrap();
+        assert_eq!(pinned.agent_order(), ["pi"]);
+        assert!(pinned.fallback_agents().is_empty());
+    }
+
+    #[test]
     fn config_from_yaml_supported_harnesses() {
         let yaml = r#"
 supported_harnesses:
@@ -1107,33 +1136,17 @@ session:
     }
 
     #[test]
-    fn detached_sessions_end_after_two_minutes_unless_configured() {
-        use super::DetachedLimit;
-        use std::time::Duration;
-        let parse = |yaml: &str| serde_yaml_ng::from_str::<Config>(yaml).map(|c| c.session);
-        assert_eq!(
-            parse("agent: claude").unwrap().end_detached_after,
-            DetachedLimit::After(Duration::from_secs(120))
-        );
-        assert_eq!(
-            parse("session: {end_detached_after: 90m}")
+    fn obsolete_detached_limit_is_readable_but_not_written() {
+        for value in ["2m", "off"] {
+            let config: super::SessionConfig = serde_yaml_ng::from_str(&format!(
+                "terminal: Ghostty\nend_detached_after: {value}\n"
+            ))
+            .unwrap();
+            assert_eq!(config.terminal.as_deref(), Some("Ghostty"));
+            assert!(!serde_yaml_ng::to_string(&config)
                 .unwrap()
-                .end_detached_after,
-            DetachedLimit::After(Duration::from_secs(5_400))
-        );
-        assert_eq!(
-            parse("session: {end_detached_after: 2d}")
-                .unwrap()
-                .end_detached_after,
-            DetachedLimit::After(Duration::from_secs(172_800))
-        );
-        assert_eq!(
-            parse("session: {end_detached_after: off}")
-                .unwrap()
-                .end_detached_after,
-            DetachedLimit::Off
-        );
-        assert!(parse("session: {end_detached_after: soon}").is_err());
+                .contains("end_detached_after"));
+        }
     }
 
     #[test]
@@ -1219,7 +1232,7 @@ release:
     // ==========================================================================
 
     #[test]
-    fn skill_settings_merge_per_skill_and_a_wave_layer_rejects_repository_keys() {
+    fn skill_settings_merge_per_skill_and_a_wave_layer_ignores_repository_keys() {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let home = tempfile::tempdir().unwrap();
         let _home =
@@ -1253,26 +1266,35 @@ release:
                 .unwrap(),
             "claude"
         );
-        std::fs::write(&wave, "workflow: code\n").unwrap();
+        std::fs::write(&wave, "workflow: review\n").unwrap();
         assert_eq!(
             load_wave_config(Some(repo.path()), Some("infra"))
                 .unwrap()
                 .unwrap()
                 .graph
                 .as_deref(),
-            Some("code")
+            Some("review")
         );
-        for invalid in ["planning: {provider: git}\n", "agnet: claude\n"] {
-            std::fs::write(&wave, invalid).unwrap();
-            let error = load_wave_config(Some(repo.path()), Some("infra")).unwrap_err();
-            assert!(error.to_string().contains(wave.to_str().unwrap()));
-        }
+        std::fs::write(&wave, "planning: {provider: git}\n").unwrap();
+        assert!(load_wave_config(Some(repo.path()), Some("infra")).is_ok());
+        std::fs::write(&wave, "agnet: claude\n").unwrap();
+        assert_eq!(
+            load_wave_config(Some(repo.path()), Some("infra"))
+                .unwrap()
+                .unwrap()
+                .agent()
+                .unwrap(),
+            "codex"
+        );
         assert!(load_config(Some(repo.path())).is_ok());
         let repo_config = repo.path().join(".lf/config.yaml");
         std::fs::write(&repo_config, "session: {terminal: ghostty}\n").unwrap();
-        let error = load_config(Some(repo.path())).unwrap_err().to_string();
-        assert!(error.contains("does not apply"));
-        assert!(error.contains(repo_config.to_str().unwrap()));
+        assert!(load_config(Some(repo.path()))
+            .unwrap()
+            .unwrap()
+            .session
+            .terminal
+            .is_none());
     }
 
     #[test]

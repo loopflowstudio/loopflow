@@ -108,7 +108,7 @@ impl SkillSource {
 
     pub fn read(&self) -> Result<String, LoadError> {
         match &self.path {
-            Some(path) => Ok(crate::config::observation::read_to_string(path)?),
+            Some(path) => Ok(crate::observe::read_to_string(path)?),
             None => Ok(builtins::get_builtin_skill(&self.name)
                 .expect("embedded catalog entry names a builtin")
                 .to_string()),
@@ -220,8 +220,7 @@ impl SkillCatalog {
         files: bool,
         ancestors: &mut HashSet<PathBuf>,
     ) -> Result<(), LoadError> {
-        crate::config::observation::directory(dir);
-        if !dir.is_dir() {
+        if !crate::observe::is_dir(dir) {
             return Ok(());
         }
         let canonical = fs::canonicalize(dir)?;
@@ -229,15 +228,12 @@ impl SkillCatalog {
             return Ok(());
         }
         let bundle = dir.join("SKILL.md");
-        if dir != root && bundle.is_file() {
+        if dir != root && crate::observe::is_file(&bundle) {
             self.insert(root, bundle, dialect, true)?;
         } else {
-            let mut paths = fs::read_dir(dir)?
-                .map(|entry| entry.map(|entry| entry.path()))
-                .collect::<Result<Vec<_>, _>>()?;
-            paths.sort();
+            let paths = crate::observe::read_dir(dir)?;
             for path in paths {
-                if path.is_dir() {
+                if crate::observe::is_dir(&path) {
                     self.collect(root, &path, dialect, files, ancestors)?;
                 } else if files
                     && path.extension().is_some_and(|extension| extension == "md")
@@ -301,7 +297,7 @@ impl SkillCatalog {
 }
 
 pub(crate) fn is_generated(path: &Path) -> bool {
-    let Ok(content) = crate::config::observation::read_to_string(path) else {
+    let Ok(content) = crate::observe::read_to_string(path) else {
         return false;
     };
     split_frontmatter(&content)

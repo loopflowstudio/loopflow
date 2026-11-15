@@ -15,12 +15,12 @@ commands, unless it is already loaded.
 here. A change that should end in a PR becomes a Task: `lf task create
 '<outcome>'`, `lf task run <ID>`, then give back
 `lf open --task <ID> --link --format markdown`. Check on it with
-`lf task status <ID>`; steer it with `lf comment <ID> '<direction>'`.
+`lf task status <ID>`; steer it with `lf steer <ID> '<direction>'`.
 
 `lf help <command-or-skill>` is the current reference.
 
-Name the Session for its work in two or three words: read `session_id` from
-`LF_AGENT_CALLER` and run `lf session rename <id> '<name>' --suggest`. A name a
+Name the Session for its work in two or three words: take its ID from the lf
+context block and run `lf session rename <id> '<name>' --suggest`. A name a
 person gave is kept. Don't rename branches or worktrees.
 
 Answer in this conversation. Never `lf resume` your own Session. Docs, PRs, Task
@@ -113,10 +113,14 @@ Bring the plan and the implementation into agreement with what the work has taug
    when someone is in the conversation; headless, leave it for demo.
 
 The plan states what will be built and what remains; quotes there show what
-was said about it and may carry the speaker's name. Write down only what can't
+was said about it and may carry the speaker's name. Write down what can't
 be worked out again from the code, git history or a fresh run: what people said,
 word for word, what a run showed at the time, and facts
-from outside the repo. Quality per word, not volume. Leave out session
+from outside the repo. In the active plan, also keep the few facts from docs
+and code that still explain its approach or remaining work, with source paths
+and symbols. Recheck those affected by implementation or upstream changes;
+correct stale findings and remove those that no longer help. Keep unresolved
+conflicts visible. Quality per word, not volume. Leave out session
 instructions and Machine facts; the plan describes the work, it doesn't direct
 its next reader. Keep transcripts separate and historical skill names
 unprefixed. If no plan exists, update the working context, or write the

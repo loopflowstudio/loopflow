@@ -47,7 +47,7 @@ pub(crate) async fn task_execution(
     task: &Task,
 ) -> StoreResult<TaskExecutionSnapshot> {
     let graph = store.sqlite.task_graphs(&task.id)?.pop();
-    let facts = store.sqlite.graph_execution_facts(&graph)?;
+    let facts = store.sqlite.graph_execution_facts(&graph, &[&task.id])?;
     Ok(
         execution_of_latest_graph(&store.sqlite, task, graph.as_ref(), &facts)
             .await?
@@ -65,13 +65,13 @@ pub(crate) async fn execution_of_latest_graph(
 ) -> StoreResult<(TaskExecutionSnapshot, Option<GraphProcessDetail>)> {
     let Some(graph) = graph else {
         return Ok((
-            TaskExecutionSnapshot {
+            open_graph_execution_from_facts(&task.id, facts).unwrap_or(TaskExecutionSnapshot {
                 state: TaskExecutionState::Idle,
                 reason: "No Task Graph has run; independent Sessions may still be active"
                     .to_string(),
                 step: None,
                 captured: None,
-            },
+            }),
             None,
         ));
     };
@@ -121,7 +121,70 @@ pub(crate) async fn execution_of_latest_graph(
             }
         }
     }
+    if matches!(
+        snapshot.state,
+        TaskExecutionState::Idle | TaskExecutionState::Blocked
+    ) {
+        if let Some(open) = open_graph_execution_from_facts(&task.id, facts) {
+            snapshot = open;
+        }
+    }
     Ok((snapshot, Some(graph.detail(entry))))
+}
+
+/// Execution in the Task's work can predate checkout adoption. It prevents
+/// overlapping runs without making that Graph part of the Task's history.
+pub(crate) fn open_graph_execution(
+    sqlite: &SqliteStore,
+    task: &TaskId,
+) -> StoreResult<Option<TaskExecutionSnapshot>> {
+    let facts = sqlite.graph_execution_facts([], &[task])?;
+    Ok(open_graph_execution_from_facts(task, &facts))
+}
+
+fn open_graph_execution_from_facts(
+    task: &TaskId,
+    facts: &GraphExecutionFacts,
+) -> Option<TaskExecutionSnapshot> {
+    for (graph, process) in facts.open_processes.get(task).into_iter().flatten() {
+        let receipt = match facts.receipts.get(&process.id) {
+            Some(path) => crate::journal::read_process_receipt(path),
+            None => Ok(None),
+        };
+        let state = match crate::journal::lf_process_evidence(
+            process,
+            &receipt,
+            crate::journal::process_identity_evidence,
+        ) {
+            ProcessIdentityEvidence::Live => TaskExecutionState::Running,
+            ProcessIdentityEvidence::Unknown => TaskExecutionState::Unknown,
+            ProcessIdentityEvidence::Dead => continue,
+        };
+        return Some(TaskExecutionSnapshot {
+            state,
+            reason: format!("Graph {graph} has live or unresolved execution in the Task's work; inspect `lf history show {graph}` before launching further work"),
+            step: None,
+            captured: None,
+        });
+    }
+    None
+}
+
+/// Ends a recorded limit reason when the step moved to another agent rather
+/// than another account; the agent follows.
+pub(crate) const MOVED_TO: &str = "; continuing on ";
+
+/// Ends a recorded limit reason when a provider refused the step and no
+/// agent it may use was left; what would let it move follows.
+pub(crate) const STOPPED: &str = "; stopped: ";
+
+/// The limit that stopped a step and what would let it move, as one sentence.
+/// The current `lf task run` does not retry such a run automatically.
+pub(crate) fn limit_stop(recovery: &AgentLimitRecovery) -> Option<String> {
+    let (reason, advice) = recovery.reason.rsplit_once(STOPPED)?;
+    // Providers often end their own words with a period.
+    let reason = reason.trim_end_matches('.');
+    Some(format!("{reason}. {advice}"))
 }
 
 /// A step recovering from a limit says so. One that died waiting is where the
@@ -145,8 +208,12 @@ fn apply_limit_recovery(
             );
         }
         (TaskExecutionState::Running, None) => {
-            snapshot.reason =
-                format!("{label} went on under another {provider} account after: {reason}");
+            snapshot.reason = match reason.rsplit_once(MOVED_TO) {
+                Some((reason, agent)) => format!("{label} went on under {agent} after: {reason}"),
+                None => {
+                    format!("{label} went on under another {provider} account after: {reason}")
+                }
+            };
         }
         (TaskExecutionState::Blocked, Some(retry_at)) => {
             snapshot.state = TaskExecutionState::Waiting;
@@ -156,6 +223,12 @@ fn apply_limit_recovery(
             } else {
                 format!("{label} ended while waiting for {provider} capacity until {after}; `lf task run {issue}` starts the run again at it")
             };
+        }
+        (TaskExecutionState::Blocked, None) => {
+            if let Some(stop) = limit_stop(recovery) {
+                snapshot.reason =
+                    format!("{label} stopped after a provider refusal: {stop}; `lf task run {issue}` starts the run again at it");
+            }
         }
         _ => {}
     }
@@ -331,10 +404,41 @@ mod tests {
         assert_eq!(retrying.state, TaskExecutionState::Running);
         assert!(retrying.reason.contains("another claude account"));
 
+        let mut moved = snapshot(TaskExecutionState::Running);
+        let codex = AgentLimitRecovery {
+            provider: "codex".into(),
+            reason: format!(
+                "codex_error: You've hit your usage limit{}claude",
+                super::MOVED_TO
+            ),
+            ..recovery(None)
+        };
+        apply_limit_recovery(&mut moved, &codex, "LOO-1", || true);
+        assert_eq!(
+            moved.reason,
+            "implement went on under claude after: codex_error: You've hit your usage limit"
+        );
+
         // A step that moved accounts and then failed for its own reasons failed.
         let mut failed = snapshot(TaskExecutionState::Blocked);
         apply_limit_recovery(&mut failed, &recovery(None), "LOO-1", || true);
         assert_eq!(failed.state, TaskExecutionState::Blocked);
+
+        // A limit with nowhere to go says what would let the step move.
+        let mut stopped = snapshot(TaskExecutionState::Blocked);
+        let nowhere = AgentLimitRecovery {
+            reason: format!(
+                "codex_error: You've hit your usage limit.{}no `agents` list is set",
+                super::STOPPED
+            ),
+            ..recovery(None)
+        };
+        apply_limit_recovery(&mut stopped, &nowhere, "LOO-1", || true);
+        assert_eq!(stopped.state, TaskExecutionState::Blocked);
+        assert_eq!(
+            stopped.reason,
+            "implement stopped after a provider refusal: codex_error: You've hit your usage limit. no `agents` list is set; `lf task run LOO-1` starts the run again at it"
+        );
 
         let mut ended = snapshot(TaskExecutionState::Blocked);
         apply_limit_recovery(&mut ended, &recovery(Some(1_900_000_000)), "LOO-1", || true);

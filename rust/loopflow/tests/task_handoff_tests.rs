@@ -87,7 +87,11 @@ fn checkout_hands_each_child_its_selected_design_and_preserves_inherited_notes()
     ] {
         let child = register_sibling_task(&parent, identifier, slug, &target.path().join(slug));
         runtime
-            .block_on(parent.store.stack_task_placement(&child, &parent_pr.id))
+            .block_on(
+                parent
+                    .store
+                    .stack_task_placement(&child, &parent_pr.id, &child.base_commit),
+            )
             .unwrap();
         let source = format!("{slug}.md");
         repo.create_file(&format!("scratch/{source}"), content);

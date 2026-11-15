@@ -49,10 +49,9 @@ The Rust phase builds the fixture CLI once and supplies it through
 `LOOPFLOW_TEST_LF`, so test processes run no Cargo build of their own.
 
 On a pull request, CI runs nextest with the `pr` profile (`.config/nextest.toml`):
-a test that runs past 2 minutes fails on that PR and names itself. The merge
-queue and main use `default`, which only reports slow tests. Tests that were
-already slower are listed there with their own allowance; make one fast, then
-delete its entry. Reproduce locally with `cargo nextest run --profile pr`.
+a test that runs past 2 minutes fails on that PR and names itself. Everywhere
+else, local runs included, `default` kills a test at 5 minutes and stops the
+run at 20. Reproduce a PR failure locally with `cargo nextest run --profile pr`.
 
 Fixtures still create their own disposable Homes; a test never alters an
 installed database.
@@ -301,7 +300,9 @@ uv run pytest python/tests/test_loopflow_skill_alignment.py
 
 ## Third-party inventory
 
-After changing `Cargo.lock`, including a release version bump, run
+After changing `Cargo.lock` (including a release version bump),
+`swift/Package.swift`, `swift/Package.resolved`, or the bundled resources tracked
+by `third_party.py`, run
 `uv run python scripts/third_party.py refresh` and
 `uv run pytest python/tests/test_third_party.py`. Release preparation refreshes
 the inventory after bumping versions. Gate must check the resulting release

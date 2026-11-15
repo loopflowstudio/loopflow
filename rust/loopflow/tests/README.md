@@ -30,6 +30,107 @@ CI installs stable on each run. An older local compiler can miss new Clippy
 lints and standard-library deprecations. Put rustup's proxies first on `PATH`
 so Cargo subcommands cannot select an older Homebrew Clippy or rustfmt.
 
+## Decision rows and full-Machine tests
+
+Changing how promotion picks a Session, checkout or Task, how a launch
+resolves its settings, what `task run`/`task checkout` would do, or what
+`--machine` sends where? Run the decision table first. Each family answers in
+one to three seconds:
+
+```bash
+cargo nextest run -p loopflow --lib -E 'test(adoption::tests::)'            # promotion and binding
+cargo nextest run -p loopflow --lib -E 'test(run::launch_policy_tests::)'   # launch and resume settings
+cargo nextest run -p loopflow --lib -E 'test(ops::task::explain::tests::)'  # Task run and checkout previews
+cargo nextest run -p loopflow --lib -E 'test(ssh::dispatch_tests::) | test(task_ownership::tests::)'  # Machine dispatch and ownership
+cargo nextest run -p loopflow --test session_lifecycle_tests -E 'test(promotion_)'
+```
+
+The library filters check every decision as a table row. The last runs the
+few full-Machine tests (seeded store, `lf server run`, stand-in providers,
+spawned `lf`) that prove the decision reaches people through the CLI; the
+tables below name each surface's.
+
+A decision is checked once, as a row. Each row calls the function the CLI
+handler calls (`engine::creation::create`, `ops::human_session::bind`,
+`preview_binding`, `primary::ensure`; `run::build_prompt` and
+`resolve_session_config` for launch settings, with a Clap-parsed `Cli`;
+`ops::task::explain_task_run` and `explain_task_checkout` for previews;
+`navigation::machine_invocation`, `ssh::parse_remote_command` and
+`machine::transport_failure` for dispatch), with the store and checkout the
+CLI would see:
+
+- `LF_HOME` and `LF_BIN` under `test_ambient::EnvGuard`, with
+  `open_ephemeral_store` (it copies the prepared store image);
+- a `loopflow_test_support::TestRepo` with its origin removed, unless the row
+  is about the remote. One `TestRepo` per table; each row gets a fresh linked
+  worktree;
+- Sessions recorded through `session_record::SessionRecorder::begin_at`, the
+  writer a launch uses. Never `INSERT INTO agent_sessions` directly.
+
+Rows assert on results: Task id, primary Session, bound Task, cwd, error text.
+Group rows by decision family so one test stays near 1–3 s. A new case is a
+new row, not a new fixture.
+
+Don't skip planning sync or git fetches with a flag, parameter or variable;
+remove the fixture's origin instead. A row only protects the CLI if the
+handler makes the same call; name that call in the test module's header.
+Whatever the handler resolves before it (selectors, cwd normalization) stays
+with a full-Machine test.
+
+### Full-Machine tests
+
+Each kept test proves one piece of wiring a row can't: a value crossing Clap
+into ops, the owner/PTY/provider argv, a native conversation surviving resume,
+or receipt JSON. Its decision assertions live in the rows. Before cutting one,
+check what wiring it carries here; if a row "covers it", the wiring is what
+goes untested.
+
+Promotion and binding (`session_lifecycle_tests`):
+
+| Test | Wiring it proves |
+|---|---|
+| `promotion_selects_session_in_owned_and_shared_checkouts` | `LF_AGENT_CALLER` reaches creation from `task create --session` inside the conversation; `resume --task` continues the same native conversation in the recorded cwd |
+| `promotion_sets_directory_immediately_and_resumes_same_native_conversation` | binding leaves the live provider's attachment alone; the bound directory reaches the next provider launch, not the running child |
+| `promotion_background_run_does_not_claim_primary` | plain `task create` with a background run's `LF_AGENT_CALLER` files new work and claims neither the checkout nor its Task's conversation |
+| `promotion_explicit_sources_with_run_keep_the_selected_work` | `task create --run` opens through ordinary admission into the adopted checkout |
+
+Launch and resume settings (`session_launch_contract`), one launch and one
+resume per harness:
+
+| Test | Wiring it proves |
+|---|---|
+| `terminal_launch_and_resume_use_current_policy_and_preserve_native_identity` | Claude terminal, Codex native and OpenCode server: settings reach each provider's argv, thread parameters or config through the owner and PTY; `session resume` continues the same native conversation with current settings |
+| `headless_launch_and_graph_keep_current_options` | Claude stream: a headless skill arrives on stream-json stdin; `--yolo --chrome on` reach a Graph step's launch |
+| `codex_headless_start_receives_current_policy_on_the_wire` | Codex headless: model and sandbox reach `thread/start` |
+| `opencode_headless_start_selects_the_model_and_permissions` | OpenCode headless: model, permissions and the context plugin reach the server |
+| `pi_public_headless_skill_delivers_context`, `pi_native_callbacks_retain_identity_final_output_and_usage` | Pi launch and its native callbacks |
+| `previews_do_not_start_a_provider_and_terminal_schema_is_explicitly_unsupported` | `--context` and the handlers' schema refusals start no provider; a refused resume keeps its Session |
+| `task_conversation_preparation_is_passive_and_connect_uses_shared_launch_settings` | `resume --prepare` starts nothing; a Task conversation's first `lf resume` launches with shared settings and the next continues it |
+
+The rest of `session_launch_contract` covers accounts, provider switches,
+OpenCode diagnostics and Machine dispatch.
+
+Task Graph run and its previews (`task_graph_launch_tests` in the library,
+`global_commands`), one Graph run to an interactive step and one to Auto-Ship:
+
+| Test | Wiring it proves |
+|---|---|
+| `a_task_takes_up_its_waves_graph_and_keeps_the_one_it_named` | `task run` captures the Wave's Graph and stops the Task at its interactive step; a later bare run keeps the Graph a Task named |
+| `task_ship_runs_every_remaining_step_standing_in_at_each_interactive_step` | `-b --task … ship --reason` stands in at each interactive step, reaches `end` and completes the Task |
+| `task_run_explain_explicit_and_checkout_inferred_actions_preserve_all_state` | `task run --explain` flags reach the preview; named, checkout and `--task` selections agree, conflicting ones refuse; the store's bytes don't change; launch refuses with the preview's reason |
+| `task_run_explain_reads_unstarted_work_without_preparing_it` | `LF_AS` reaches context resolution; previewing an unstarted Task leaves it without a checkout |
+| `task_checkout_explain_reuses_explicit_and_inferred_work_without_effects` | `task checkout --explain` flags reach the preview; selections agree; Git and store stay unchanged; `task checkout` acts on the same inferred Task |
+
+Machine dispatch, one round trip and one transport failure:
+
+| Test | Wiring it proves |
+|---|---|
+| `machine_dispatch_resolves_destination_policy_and_forwards_launch_and_resume_overrides` (`session_launch_contract`) | `--machine` sends a launch and a resume over SSH to a real `lf`; the destination's settings and checkout decide them, the command line's overrides arrive, and the resume continues the remote's native conversation |
+| `failures_name_the_recovery_without_prompting_or_registering` (`machine_commands`) | SSH's stderr on exit 255 reaches `machine status --json`; `machine add` refuses and registers nothing |
+
+The rest of `machine_commands` covers the registry (add, rename, status,
+install), remote previews, Task moves and routing through the ownership writer.
+
 ## Boundary checks
 
 For migration changes, run `uv run python scripts/check_migrations.py` before
@@ -63,11 +164,11 @@ failed placement, failed shipping and a Graph held at landing.
 
 `session_activity` fixtures that stand for a provider's own facts (open tools,
 pending input, yielded) carry the AgentProcess's `attachment_token`; a row
-without one is a terminal's status observation, which an unviewed owner does
-not read as a turn (`transport_tests::detached_sessions_end_after_their_limit`).
+without one is a terminal's status observation, which an unviewed held terminal
+does not read as a turn (`transport_tests::silent_native_turns_survive_until_settlement`).
 `transport_tests::silent_native_turns_survive_until_settlement` runs native
 prompt/stop callbacks from the generated hook settings, preserves silent work
-past the detached grace and executable removal, then proves ending after stop.
+past completed-Task retirement and executable removal, then proves ending after stop.
 `native_background_watches_survive_until_settlement` covers a yielded reply with
 background work, then scheduled wakeups, and ending only after both settle.
 
@@ -79,9 +180,10 @@ server package. On macOS, run that command directly with `-- --ignored`:
 Apple's sshd sandbox cannot nest inside `test_network.py`'s sandbox, so these
 tests are explicitly ignored in its default suite. Linux runs them normally
 inside network isolation. No system SSH configuration, keys or installed lf are used.
-Twenty cycles exercise the Desktop runtime through Machine routing, abrupt transport loss,
+Two cycles exercise the Desktop runtime through Machine routing, abrupt transport loss,
 reattachment to the same shell, Close and process/PTY/socket settlement;
-a separate case covers failed authentication, stale checkout and shell exit.
+a separate case covers failed authentication. Stale checkout and shell exit
+are covered by local Desktop shell tests.
 These are real SSH protocol checks on one Machine, not a two-Machine or installed
 Desktop demonstration. `ops::task::retirement::tests` covers Session viewer
 holds, bounded disconnected absence, cancellation, unconfirmed job cleanup and
@@ -93,45 +195,31 @@ Local and SSH shell creation carry Desktop's bundled bootstrap bytes through the
 private Desktop runtime, then reattach without replay. The generic local case has no Ghostty
 resources or environment.
 `session_viewers_retain_until_the_last_leaves_and_disconnect_starts_absence`
-records a real owner's hold through leave, reconnect grace and connection loss.
+records a held terminal's hold through leave, reconnect grace and connection loss.
 `viewer_stream_` tests the shared viewer over pipes and heartbeat expiry under
 continuous output, with a healthy passive viewer and resumed stream. The SSH
 prepared-viewer case exercises the returned production launch command, healthy
 idle heartbeats, resize, explicit Leave and unchanged execution after reattach;
 its process inventory rejects an additional remote PTY.
 
-`transport_tests::contended_input_retention_keeps_control_and_delivers_once_after_unlock`
-holds a SQLite writer while typing and returning to the viewer. Control stays
-responsive, no unrecorded bytes reach the provider, and unlocking resumes delivery
-without replay. `transport::input_retry_tests` bounds polling through a failed
-store and verifies recovery through the real descriptor loop.
+`transport_tests::a_locked_store_does_not_delay_input_or_replay_it_on_return`
+holds a SQLite writer while typing and returning to the viewer. Input and control
+keep flowing while the store is locked; returning does not replay input.
 
-`transport_tests::unanswering_superseded_owners_preserve_*` pause superseded
-owners while resuming their Sessions. Drafts, pending requests, turns, Graph
-ancestry/steps and Runs retain the same provider, attachment and capture; no new
-provider launches. A completed Session is unknown, not work: its unanswering owner
-ends and resume continues on one new provider, while an answering one is attached.
-The matching rollover unit test preserves the named retention reasons and permits
-movement after protected work settles.
+`transport_tests::resume_ends_an_earlier_builds_owner_and_continues_held`
+records a Session with an owner transport from an earlier build and a live
+stand-in owner; `lf resume` ends the stand-in by verified pid and birth and the
+Session resumes held.
 
 Upgrade recovery also needs `transport_tests`: retained hooks must settle through
 ContextBlock, exclude subagents and report real delivery errors. Public resume
-must retain drafts, requests, history and Session/Task/capture identity through
-build replacement and viewer return; only provider replacement changes its fence.
-An unanswering protected owner survives failed attachment and completes continued
-turns after transport returns.
-`session_record::runtime::tests::resume_*dead_owners*` covers cross-process recovery:
+must retain live turns, pending requests, history and Session/Task/capture identity
+through server replacement and view return.
+`process::runtime::tests::resume_*dead_owners*` covers cross-process recovery:
 natural helper exit permits continuation, persistent helpers refuse it without
 signals or settlement, and both retain Task/history/steers. These stand-ins use
 candidate wire/schema; released-version, permanently broken transport and
 installed-provider recovery still need separate proof.
-Use published 0.15.1 for the released boundary: its owner speaks newline JSON
-and predates native-input tracking. Prove attachment and retention of an unsent
-draft before allowing its provider to be replaced; an absent input record does
-not establish that an older provider's editor is empty.
-Build that proof with full main history or an explicit `LOOPFLOW_MIGRATION_ORDER`;
-a shallow checkout orders all slugs as drafts and can reject the released store
-before reaching the interaction under test.
 
 Hook command spelling or Clap declaration changes also run
 `cargo test -p loopflow --test integration cli_discovery::`. Its alias contract
@@ -732,11 +820,20 @@ cargo nextest run -p loopflow --lib -E 'test(linear::) | test(ops::linear::) | t
 cargo nextest run -p loopflow --test planning_reconnect_tests --no-fail-fast
 ```
 
+Conversation opening changes run `cargo test -p loopflow --test transport_tests conversation_open_`.
+Keep the stored viewer flag stale after a successful attachment in the duplicate-open
+proof: the transport handshake precedes its asynchronous database update.
+Run `work_open_tests::` on Linux too; its Desktop refusal and retry command are
+not exercised by macOS-only checks.
+
 ### Native Rex proofs
 
 Installed-host tests are `#[ignore]`d and use `support::rex::IsolatedRex`, which
 refuses unqualified CLI requests so a fixture cannot reach your own server. Run
 them one at a time: together they can miss a follower's arrival deadline.
+On macOS, run Rex fixtures directly: `scripts/test_network.py` blocks Rex's
+`/usr/bin/login` launcher before the terminal command executes. These fixtures
+use private homes, an isolated server and stand-in providers.
 
 ```bash
 export LOOPFLOW_TEST_REX="$(command -v rex)"
@@ -768,6 +865,30 @@ evidence.
 
 Launch proofs use provider-written evidence and terminal receipts.
 
+### Leaving nothing running
+
+A holder and detached Work call `setsid`, so they outlive the test's process
+group. A fixture that starts them calls
+`loopflow_test_support::end_recorded_processes` from its `Drop`, as
+`transport_tests`' `Fixture` does; it ends what the fixture's store still
+records as running and waits for exit. The provider stand-in on a held
+terminal ends on hangup.
+
+Detached Work drops every descriptor it inherited except release locks and
+worktree leases, so a test that hands `lf` a pipe can wait for end of input
+once its caller exits.
+
+Check a suite by its binary path, never by name:
+
+```bash
+ps -axo pid,command | grep -F "$PWD/target" | grep -v grep   # nothing from this checkout's builds after the suite exits
+ps -axo pid,command | grep -F /tmp/lf-7501- | grep -v grep   # nothing from transport_tests' fixture homes
+```
+
+Stop only what the fixture started, by the handle or PID it holds. Never
+`pkill` or `killall` by command pattern: other checkouts run the same test
+binaries.
+
 ### Reproducing races without CPU load
 
 Never generate CPU load to reproduce a race: no `yes > /dev/null &`, `stress`,
@@ -794,6 +915,10 @@ changes require `DesktopHeadlessTests` alongside `WaveTests` to verify rendered 
 
 Fixture Machines must set `LF_HOME` explicitly, including when overriding `HOME`.
 Open fixture stores at `$LF_HOME/loopflow.db`; no variable selects another file.
+
+Ordinary fixture setup calls `support::seed_store(home)` before its first `lf`.
+It copies the build's migrated empty database and assigns a fresh local Machine
+identity. Bootstrap and upgrade proofs construct their own starting store.
 
 Every integration test binary except the deliberate real-provider `codex_live_smoke` links
 `rust/loopflow/tests/support`, whose pre-main initializer removes inherited
@@ -848,6 +973,9 @@ For executable-resolution failures, reproduce with the compiled test binary:
 unset `LF_BIN` and `CARGO_BIN_EXE_lf`, and use a PATH containing Git but no `lf`.
 Verify the repair in that same environment. A pass under a developer's installed
 Loopflow can hide the CI failure.
+Include `server::service::tests::continuing_a_session_resumes_exactly_it_and_a_missing_one_is_refused`
+when changing Session continuation requests: constructing a launch request also
+resolves `lf`, even when the test never starts it.
 Include direct provider-harness startup tests in this check: even an expected
 spawn failure first resolves the conversation's `lf`. Pin a fixture executable
 under the environment lock and restore the pin afterward.
@@ -881,6 +1009,13 @@ Run the installation harness for migration changes; its released-source proof
 must retain Wave identity before projecting accepted plans.
 
 ### Shared identity fixtures
+
+Changes to served observation or subscription wake tracking also run
+`session_record::activity::tests::` and `ops::task_execution::tests::`: quiet
+and stale-sample deadlines must advance Task status without new rows.
+Changes to observed definition files or directory traversal also run
+`graph_discovery_tests::` and `skills::catalog::tests::`: builtin definitions
+must remain available when a local catalog path is not a directory.
 
 When changing Session activity or Waiting, run `session_cli_tests` and
 `world_recipes` (its `--watch` cases) together. Direct SQL fixtures must carry both the attachment
@@ -918,20 +1053,20 @@ Retained terminal changes also run Linux Clippy, `transport_tests`,
 the disposable installation proof `declared_agent_can_start_another_tasks_graph`.
 Assert that attachment returns after execution exits, as well as checking its
 output: a spare slave descriptor can keep Linux PTY readers open indefinitely.
-Process ancestry assertions follow the recorded chain through transport owners
-rather than assuming a fixed number of launch processes.
+Process ancestry assertions follow the recorded chain through launchers and
+the holder rather than assuming a fixed number of launch processes.
 Terminal-status isolation assertions match the escaped OSC sequence, not its
 numeric opcode: ordinary paths and random IDs can contain `7501`. Transport
 fixtures include that text in their Home paths to expose false positives.
 Changes to AgentProcess launch-mode recording also run the complete
-`session_record::runtime::tests` module: native refusal and headless cleanup
+`process::runtime::tests` module: native refusal and headless cleanup
 fixtures must declare opposite launch modes, independent of Session defaults.
 
 ## Client API server
 
 The [server boundary](../../../docs/dev/server.md) assigns socket behavior
 to client access; OS registration/replacement belongs to installation. Their
-composed test must continue to prove both with existing execution owners live.
+composed test must continue to prove both with holders and Graph processes live.
 Draft-preservation fixtures observe terminal echo or provider acknowledgement
 before disconnecting a viewer. A socket write alone does not establish delivery;
 reconnection must never replay uncertain input to make such a test pass.
@@ -941,17 +1076,14 @@ cargo test -p loopflow --lib server::
 cargo test -p loopflow --test served_reads
 cargo test -p loopflow --test transport_tests server_status_does_not_install_or_create_work
 cargo test -p loopflow --test transport_tests server_registration_migrates_old_job_and_respects_disabled_choice -- --ignored
-cargo test -p loopflow --test transport_tests server_watches_refresh_work_and_resolve_primary_session
-cargo test -p loopflow --test transport_tests server_preserves_owner_and_graph_across_restart
-cargo test -p loopflow --test transport_tests server_reconnect_
-cargo test -p loopflow --test transport_tests server_failed_setup_retry_only_reconnects_and_preserves_newer_claims
-cargo test -p loopflow --test transport_tests server_move_here_
-cargo test -p loopflow --test transport_tests installed_server_preserves_owner_and_graph_across_replacement -- --ignored
+cargo test -p loopflow --test transport_tests held_session_survives_server_restart
+cargo test -p loopflow --test transport_tests a_held_pane_reads_reconnecting_until_the_next_server_answers
+cargo test -p loopflow --test transport_tests ownership_queues_behind_a_taker_and_tells_the_loser_who_took_it
 ```
 
 The development registration proof uses two isolated launchd labels: disabled
 legacy setup refuses; enabling it lets concurrent readiness requests retire the
-old job and obtain one server while preserving a live owner. The installed socket
+old job and obtain one server while preserving a live holder. The installed socket
 address/lock remain stable so old relays can reconnect while an obsolete server
 executable cannot open a competing listener.
 The bundled registrar harness separately proves SMAppService label migration.
@@ -962,26 +1094,26 @@ changes and authoritative primary-Session selection.
 Separate lifecycle proofs keep the real relay connected through server restart,
 installed replacement and explicit takeover with an editable draft and live Graph.
 Recovery tests cover byte-position continuation, fresh terminal screens, newer
-viewers retaining input/geometry, expired output and owner exit without relaunch.
+viewers retaining input/geometry, expired output and child exit without relaunch.
 Failed-start recovery consumes readiness once, preserves its diagnostic across
 Retry, and observes independent installation repair without replacing newer claims.
 `ServerClientTests` covers the same registration boundary for Work read refresh
 and reopened watches, including failed subprocess and unready status responses.
-Move-here proofs retain the draft/provider/Graph, intercept a real owner's takeover
+Move-here proofs retain the draft/provider/Graph, intercept the server's takeover
 acknowledgement before a newer claim, reject stale actions and cancel a queued
 action on pane closure. Native mailbox tests cover presentation until acknowledgement;
 rendered copy/Find/scroll and the visible action remain interactive demo evidence.
-The opt-in macOS variant creates an isolated signed app bundle, starts the owner
-and Graph from its installed helper, replaces that executable inode with identically
+The opt-in macOS variant creates an isolated signed app bundle, starts a held
+conversation and Graph from its installed helper, replaces that executable inode with identically
 signed bytes, verifies the bundle seal and invokes the production SMAppService
 replacement registrar while
 the draft remains held. A fresh relay acknowledgement must precede submission;
-the exact owner/provider survives and the Graph advances. Cleanup unregisters the
+the holder and provider survive and the Graph advances. Cleanup unregisters the
 unique job and LaunchServices registration. The updater runs as the signed app
 through LaunchServices; no UI or App Management permission changes are needed.
 Run outside the network sandbox. The underlying registrar harness is
 `scripts/test_server_registration.py`; its default mode separately checks
 idempotent registration without Work. Native rendered continuity remains demo.
 Linux supervisor replacement remains a Linux installation check; this service
-starts no Session owners itself, and its unit uses `KillMode=process` so restarting
-it leaves the owners its detached launches started, as `AbandonProcessGroup` does on macOS.
+holds no PTY itself, and its unit uses `KillMode=process` so restarting it leaves
+holders and detached Work running, as `AbandonProcessGroup` does on macOS.

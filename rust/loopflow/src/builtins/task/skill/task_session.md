@@ -47,9 +47,10 @@ provider is closed.
   `--timeout`) waits for a state change without polling.
 - Between turns, the Task's Graphs keep running on their own. Once shipping, its
   ship process lands and repairs it; reading its status restarts one that died.
-- `lf task run <issue>` relaunches and continues the work without approving
-  anything. `lf -b task run` and `lf ship` approve Auto-Ship, which may merge
-  the PR: run them only when asked to ship or land. Stopped shipping stays
-  stopped until `lf ship` is asked for.
+- `lf task run <issue>` relaunches and continues the work. `lf -b task run`,
+  `lf ship` and an `lf task run` with no interactive step left ahead, such as
+  one run from the last, approve Auto-Ship, which may merge the PR: run them
+  only when asked to ship or land. Stopped shipping stays stopped until `lf
+  ship` is asked for.
 - This conversation keeps the instructions it launched with; start a new one
   after an install to get changed guidance.

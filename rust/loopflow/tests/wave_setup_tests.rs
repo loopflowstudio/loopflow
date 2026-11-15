@@ -284,8 +284,9 @@ fn each_wave_runs_its_own_setup_and_the_repository_is_the_default() {
     store.ensure_wave(checkout, "research").unwrap();
     store.ensure_wave(checkout, "plain").unwrap();
     let here = store.local_machine().unwrap().id;
-    store
-        .upsert_provider_account(&loopflow::store::ProviderAccount {
+    loopflow::provider_account::catalog::upsert_provider_account(
+        &store,
+        &loopflow::store::ProviderAccount {
             provider: "codex".into(),
             account_id: ProviderAccountId::parse("work").unwrap(),
             home: None,
@@ -304,8 +305,9 @@ fn each_wave_runs_its_own_setup_and_the_repository_is_the_default() {
             last_selected_at: None,
             created_at: 1,
             updated_at: 1,
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
     drop(store);
     // Machines and account routes are yours: `lf set`, never committed.
     for args in [

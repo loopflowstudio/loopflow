@@ -202,7 +202,7 @@ pub(crate) fn conversation_home(
         return Ok(Some(native_home(provider, None)));
     };
     Ok(store
-        .get_provider_account(provider.as_str(), &account)?
+        .provider_account_row(provider.as_str(), &account)?
         .and_then(|account| account.home))
 }
 

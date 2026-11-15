@@ -262,7 +262,7 @@ text = 'Fable 5 is currently unavailable. Switch to another model.' if failed el
             .unwrap()
             .is_empty());
         let account = store
-            .get_provider_account("claude", &ProviderAccountId::parse("fixture").unwrap())
+            .provider_account_row("claude", &ProviderAccountId::parse("fixture").unwrap())
             .unwrap()
             .unwrap();
         assert_eq!(account.cooldown_until, None);
@@ -434,13 +434,16 @@ fn pre_spawn_account_refusal_falls_through_to_codex() {
         loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
     for name in ["first", "second"] {
         support::register_claude_login(home.path(), name);
-        let mut account = store
-            .get_provider_account("claude", &ProviderAccountId::parse(name).unwrap())
-            .unwrap()
-            .unwrap();
+        let mut account = loopflow::provider_account::catalog::get_provider_account(
+            &store,
+            "claude",
+            &ProviderAccountId::parse(name).unwrap(),
+        )
+        .unwrap()
+        .unwrap();
         account.cooldown_until = Some(time::OffsetDateTime::now_utc().unix_timestamp() + 3_600);
         account.cooldown_reason = Some("rate_limit_reached".into());
-        store.upsert_provider_account(&account).unwrap();
+        loopflow::provider_account::catalog::upsert_provider_account(&store, &account).unwrap();
     }
     let launches = home.path().join("launches");
     let result = run_agent(

@@ -774,7 +774,8 @@ impl Logins {
             Some(crate::profile::EmailAddress::parse(&format!("{name}@example.com")).unwrap()),
         );
         account.cooldown_until = cooldown_until;
-        self.store.sqlite.upsert_provider_account(&account).unwrap();
+        crate::provider_account::catalog::upsert_provider_account(&self.store.sqlite, &account)
+            .unwrap();
         id
     }
 

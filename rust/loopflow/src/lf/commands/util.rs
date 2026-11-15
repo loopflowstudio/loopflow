@@ -235,7 +235,11 @@ pub(crate) fn departure_notice(
             let label = store
                 .session(session)?
                 .and_then(|session| session.provider)
-                .map(|provider| store.get_provider_account(&provider, &account))
+                .map(|provider| {
+                    crate::provider_account::catalog::get_provider_account(
+                        store, &provider, &account,
+                    )
+                })
                 .transpose()?
                 .flatten()
                 .and_then(|account| account.login_email.map(|email| email.to_string()))

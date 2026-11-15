@@ -17,3 +17,7 @@
   observes configuration after the savepoint releases; this avoids a preliminary
   per-Task lookup and keeps connection reads out of SQL locks. Served observations
   retain the request's external revision tracking.
+- Account selection compares its complete candidate-row/limit reading and the
+  provider's newest selection at commit, rather than adding a schema revision.
+  Preferences are observed again on every retry. A current empty choice needs
+  only a savepoint, so it does not take the Machine's write lock.

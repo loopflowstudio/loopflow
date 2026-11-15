@@ -298,8 +298,9 @@ pub fn register_codex_login(home: &Path, name: &str) {
     seed_store(home);
     let store = loopflow::store::sqlite::SqliteStore::new(&home.join("loopflow.db")).unwrap();
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    store
-        .upsert_provider_account(&loopflow::store::ProviderAccount {
+    loopflow::provider_account::catalog::upsert_provider_account(
+        &store,
+        &loopflow::store::ProviderAccount {
             provider: "codex".into(),
             account_id: loopflow::store::ProviderAccountId::parse(name).unwrap(),
             home: Some(account_home),
@@ -318,8 +319,9 @@ pub fn register_codex_login(home: &Path, name: &str) {
             last_selected_at: None,
             created_at: now,
             updated_at: now,
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
 }
 
 /// A launch routes by the process directory: the checkout it runs in, never
@@ -359,8 +361,9 @@ pub fn register_claude_login(home: &Path, name: &str) {
     seed_store(home);
     let store = loopflow::store::sqlite::SqliteStore::new(&home.join("loopflow.db")).unwrap();
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    store
-        .upsert_provider_account(&loopflow::store::ProviderAccount {
+    loopflow::provider_account::catalog::upsert_provider_account(
+        &store,
+        &loopflow::store::ProviderAccount {
             provider: "claude".into(),
             account_id: loopflow::store::ProviderAccountId::parse(name).unwrap(),
             home: Some(account_home),
@@ -382,8 +385,9 @@ pub fn register_claude_login(home: &Path, name: &str) {
             last_selected_at: None,
             created_at: now,
             updated_at: now,
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
 }
 
 pub struct EnvGuard {
@@ -932,8 +936,9 @@ pub fn managed_codex_account(home: &Path) {
     seed_store(home);
     let store = loopflow::store::sqlite::SqliteStore::new(&home.join("loopflow.db")).unwrap();
     let account_id = loopflow::store::ProviderAccountId::parse("fixture").unwrap();
-    store
-        .upsert_provider_account(&loopflow::store::ProviderAccount {
+    loopflow::provider_account::catalog::upsert_provider_account(
+        &store,
+        &loopflow::store::ProviderAccount {
             provider: "codex".into(),
             account_id: account_id.clone(),
             home: Some(account_home),
@@ -954,15 +959,18 @@ pub fn managed_codex_account(home: &Path) {
             last_selected_at: None,
             created_at: 1,
             updated_at: 1,
-        })
-        .unwrap();
-    store
-        .set_provider_route(&loopflow::profile::ProviderRoute {
+        },
+    )
+    .unwrap();
+    loopflow::provider_account::catalog::set_provider_route(
+        &store,
+        &loopflow::profile::ProviderRoute {
             scope: loopflow::profile::RouteScope::Default,
             provider: loopflow::provider_auth::Provider::Codex,
             accounts: vec![account_id],
             created_at: 1,
             updated_at: 1,
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
 }

@@ -1,10 +1,12 @@
 //! Account selection carried across an lf process boundary.
 use crate::provider_account::{account_login, match_account, AccountMatch, ProviderAccountError};
 use crate::provider_auth::Provider;
-use crate::store::{ProviderAccount, ProviderAccountId};
+use crate::store::{
+    ProviderAccount, ProviderAccountId, ProviderAccountSelection, StoreError, StoreResult,
+};
 use base64::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 pub const ACCOUNT_SELECTION_ENV: &str = "LF_ACCOUNT_SELECTION";
 
 /// One `--account claude=work` / `--only-account codex=reserve` token.
@@ -234,6 +236,57 @@ fn resolve_selectors(
         }
     }
     Ok(resolved)
+}
+
+/// Preferences and ranking stay outside SQL; a racing launch or quota observation
+/// causes a fresh decision rather than committing a choice from stale facts.
+pub(crate) fn select(
+    store: &crate::store::sqlite::SqliteStore,
+    provider: Provider,
+    candidates: &[ProviderAccountId],
+    model: Option<&str>,
+) -> StoreResult<Option<ProviderAccountSelection>> {
+    if candidates.is_empty() {
+        return Ok(None);
+    }
+    let home = store.home_dir()?;
+    loop {
+        let reading = store.account_selection_reading(provider, candidates)?;
+        let config = crate::config::placement::global_settings_at(&home)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+        let limits = super::capacity::reconcile_legacy_account_windows(reading.limits.clone());
+        let now = super::now_unix();
+        let accounts: HashMap<_, _> = reading
+            .accounts
+            .iter()
+            .map(|account| (&account.account_id, account))
+            .collect();
+        let mut available = Vec::new();
+        for candidate in candidates {
+            let Some(&account) = accounts.get(candidate) else {
+                continue;
+            };
+            let account = crate::config::placement::account_preferences(&config, account.clone())
+                .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+            if super::account_route_eligible(&account, &limits, model, now) {
+                available.push(account);
+            }
+        }
+        super::order_accounts_by_urgency(&mut available, &limits, model, now);
+        let mut selected = available.into_iter().next();
+        let Some(at) = store.record_account_selection(
+            &reading,
+            selected.as_ref().map(|account| &account.account_id),
+        )?
+        else {
+            continue;
+        };
+        if let Some(account) = selected.as_mut() {
+            account.last_selected_at = Some(at);
+            account.updated_at = at;
+        }
+        return Ok(selected.map(|account| ProviderAccountSelection { account }));
+    }
 }
 
 #[cfg(test)]

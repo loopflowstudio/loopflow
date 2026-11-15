@@ -27,8 +27,9 @@ fn connect_fixture_account(home: &std::path::Path, store: &loopflow::store::sqli
     let credential = serde_json::json!({"claudeAiOauth":{"accessToken":"fixture-only","expiresAt":4102444800000i64}}).to_string();
     fs::write(account_home.join(".credentials.json"), &credential).unwrap();
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    store
-        .upsert_provider_account(&loopflow::store::ProviderAccount {
+    loopflow::provider_account::catalog::upsert_provider_account(
+        store,
+        &loopflow::store::ProviderAccount {
             provider: "claude".into(),
             account_id: loopflow::store::ProviderAccountId::parse("fixture").unwrap(),
             home: Some(account_home),
@@ -52,8 +53,9 @@ fn connect_fixture_account(home: &std::path::Path, store: &loopflow::store::sqli
             last_selected_at: None,
             created_at: now,
             updated_at: now,
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
 }
 
 /// The same launch, with `lf_bin` as the `lf` it runs for its own commands.

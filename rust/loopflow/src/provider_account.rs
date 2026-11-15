@@ -2,6 +2,9 @@
 
 pub mod activation;
 pub(crate) mod capacity;
+#[cfg(test)]
+mod capacity_tests;
+pub mod catalog;
 pub(crate) mod codex_access;
 pub(crate) mod hold;
 pub(crate) mod identity;
@@ -175,7 +178,7 @@ impl LaunchCapacity {
     ) -> crate::store::StoreResult<Self> {
         #[cfg(test)]
         CAPACITY_READS.set(CAPACITY_READS.get() + 1);
-        let accounts = store.list_provider_accounts(None)?;
+        let accounts = catalog::list_provider_accounts(store, None)?;
         let active = [Provider::Claude, Provider::Codex]
             .into_iter()
             .map(|provider| {
@@ -1918,7 +1921,7 @@ pub(crate) async fn nearest_provider_route(
         .chain(repo_id.cloned().map(RouteScope::Repo))
         .chain([RouteScope::Default])
         .collect();
-    let layers = store.sqlite.account_declarations(&scopes)?;
+    let layers = catalog::account_declarations(&store.sqlite, &scopes)?;
     let resolved = crate::config::settings::resolve_layers(&layers, None)
         .map_err(|error| ProviderAccountError::Runtime(error.to_string()))?;
     let Some(setting) = resolved

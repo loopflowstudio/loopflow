@@ -168,13 +168,17 @@ pub(crate) fn write(
 }
 
 pub(crate) fn route_location(
-    conn: &Connection,
+    store: &crate::store::sqlite::SqliteStore,
     scope: &crate::profile::RouteScope,
 ) -> Result<(PathBuf, Vec<String>)> {
     match scope {
-        crate::profile::RouteScope::Default => location(conn, None),
+        crate::profile::RouteScope::Default => Ok((store.home_dir()?.join("config.yaml"), vec![])),
         crate::profile::RouteScope::Wave(id) => {
-            location(conn, Some(&DefaultScope::Wave(id.clone())))
+            let wave = store.get_wave(id)?.context("Wave not found")?;
+            Ok((
+                super::files::private_path(Path::new(wave.repo()))?,
+                vec!["waves".into(), id.to_string()],
+            ))
         }
         crate::profile::RouteScope::Repo(repo) => {
             Ok((super::files::private_path(repo.as_path())?, vec![]))
@@ -182,13 +186,28 @@ pub(crate) fn route_location(
     }
 }
 
+pub(crate) fn write_global(home: &Path, key: &[&str], value: Option<Value>) -> Result<bool> {
+    super::files::edit(
+        &home.join("config.yaml"),
+        key,
+        value,
+        super::keys::Root::General,
+    )
+}
+
 pub(crate) fn global_settings(conn: &Connection) -> Result<super::Config> {
-    let (path, _) = location(conn, None)?;
+    global_settings_at(&home(conn)?)
+}
+
+pub(crate) fn global_settings_at(home: &Path) -> Result<super::Config> {
+    let path = home.join("config.yaml");
+    let mut value = super::files::read(&path)?;
+    super::remote::apply_document(&path, &mut value)?;
     let declarations = [super::ConfigDeclarations {
         source: super::ConfigSource::Personal,
         scope: super::settings::SettingScope::Global,
         path,
-        value: read(conn, None)?,
+        value,
     }];
     Ok(super::settings::resolve_layers(&declarations, None)?.config)
 }
@@ -262,7 +281,7 @@ pub(crate) fn parse_date(value: &str) -> Result<time::Date> {
 }
 
 pub(crate) fn write_account_preferences(
-    conn: &Connection,
+    home: &Path,
     account: &crate::store::ProviderAccount,
 ) -> Result<()> {
     let declaration = AccountDeclaration {
@@ -271,7 +290,7 @@ pub(crate) fn write_account_preferences(
         plan: account.plan.clone(),
         paid_through: account.paid_through.map(|date| date.to_string()),
     };
-    let (path, _) = location(conn, None)?;
+    let path = home.join("config.yaml");
     super::files::update(&path, |document| {
         if let Some(accounts) = document
             .get("accounts")

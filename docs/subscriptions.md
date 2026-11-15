@@ -108,8 +108,9 @@ stored account profile, then performs the same login verification.
 The provider home holds the provider CLI's authentication and session state.
 Loopflow may link shared settings, skills, and plugins from `~/.claude` or
 `~/.codex`; it does not share credential or session files between managed
-identities. The database stores health, routing state, usage observations,
-access-profile bindings, and provider-session pins.
+identities. The database stores health, usage observations, access profiles and
+provider-session pins. Authored login emails, routing preferences and browser
+bindings live in configuration files.
 
 Commands identify an account by its full login email or an unambiguous email
 prefix. The path-safe internal account ID is a storage key, not a user-facing

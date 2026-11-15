@@ -3,9 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::profile::{
-    AccessProfile, AuthBrowserBinding, EmailAddress, ProfileId, ProviderRoute, RouteScope,
-};
+use crate::profile::{AccessProfile, AuthBrowserBinding, EmailAddress, ProfileId, ProviderRoute};
 use crate::provider_auth::Provider;
 use crate::work::wave::{Wave, WaveLocator};
 use loopflow_model::id::{AgentSessionId, WaveId};
@@ -532,7 +530,7 @@ impl Store {
     pub async fn upsert_provider_account(&self, account: &ProviderAccount) -> StoreResult<()> {
         let account = account.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.upsert_provider_account(&account)
+            crate::provider_account::catalog::upsert_provider_account(&store, &account)
         })
         .await
     }
@@ -573,7 +571,7 @@ impl Store {
         let provider = provider.to_string();
         let account_id = account_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.get_provider_account(&provider, &account_id)
+            crate::provider_account::catalog::get_provider_account(&store, &provider, &account_id)
         })
         .await
     }
@@ -584,7 +582,7 @@ impl Store {
     ) -> StoreResult<Vec<ProviderAccount>> {
         let provider = provider.map(str::to_string);
         run_sqlite(&self.sqlite, move |store| {
-            store.list_provider_accounts(provider.as_deref())
+            crate::provider_account::catalog::list_provider_accounts(&store, provider.as_deref())
         })
         .await
     }
@@ -595,7 +593,7 @@ impl Store {
     ) -> StoreResult<()> {
         let account = account.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.update_provider_account_lifecycle(&account)
+            crate::provider_account::catalog::update_provider_account_lifecycle(&store, &account)
         })
         .await
     }
@@ -780,7 +778,12 @@ impl Store {
         let account_id = account_id.cloned();
         let profile_ids = profile_ids.to_vec();
         run_sqlite(&self.sqlite, move |store| {
-            store.set_auth_browser_profiles(provider, account_id.as_ref(), &profile_ids)
+            crate::provider_account::catalog::set_auth_browser_profiles(
+                &store,
+                provider,
+                account_id.as_ref(),
+                &profile_ids,
+            )
         })
         .await
     }
@@ -792,36 +795,19 @@ impl Store {
     ) -> StoreResult<Vec<AuthBrowserBinding>> {
         let account_id = account_id.cloned();
         run_sqlite(&self.sqlite, move |store| {
-            store.list_auth_browser_profiles(provider, account_id.as_ref())
+            crate::provider_account::catalog::list_auth_browser_profiles(
+                &store,
+                provider,
+                account_id.as_ref(),
+            )
         })
         .await
     }
 
     pub async fn set_provider_route(&self, route: &ProviderRoute) -> StoreResult<()> {
         let route = route.clone();
-        run_sqlite(&self.sqlite, move |store| store.set_provider_route(&route)).await
-    }
-
-    pub async fn clear_provider_route(
-        &self,
-        scope: &RouteScope,
-        provider: Provider,
-    ) -> StoreResult<bool> {
-        let scope = scope.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.clear_provider_route(&scope, provider)
-        })
-        .await
-    }
-
-    pub async fn provider_route(
-        &self,
-        scope: &RouteScope,
-        provider: Provider,
-    ) -> StoreResult<Option<ProviderRoute>> {
-        let scope = scope.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.provider_route(&scope, provider)
+            crate::provider_account::catalog::set_provider_route(&store, &route)
         })
         .await
     }
@@ -885,7 +871,12 @@ impl Store {
         let candidates = candidates.to_vec();
         let model = model.map(str::to_owned);
         run_sqlite(&self.sqlite, move |store| {
-            store.select_provider_account(provider, &candidates, model.as_deref())
+            crate::provider_account::selection::select(
+                &store,
+                provider,
+                &candidates,
+                model.as_deref(),
+            )
         })
         .await
     }

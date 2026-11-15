@@ -1,1 +1,0 @@
-Keep interrupted pastes from freezing Session input

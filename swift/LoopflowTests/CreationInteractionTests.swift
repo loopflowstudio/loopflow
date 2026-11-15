@@ -178,6 +178,38 @@ extension ClientWorkQueryTests {
         XCTAssertTrue(server.submissions.isEmpty)
     }
 
+    func testCreationAndCompleteSaveFailuresHaveOnePresentationShapeAndIndependentRetry() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fault = IntentDiskFault()
+        let disk = ClientWorkStore(directory: root, prepareDirectory: { _ in try fault.check() }, machine: { "machine" },
+            read: { _ in "null" }, observe: { _ in ServerWatch(updates: AsyncThrowingStream { _ in }, checkpoint: { _ in }, cancel: {}) },
+            send: { _ in XCTFail("No receipt permits a send") })
+        let owner = WorkInteraction(machine: "machine", store: disk)
+        defer { owner.shutdown() }
+        let creation = owner.createTask(request: "Exact words", directory: "/repo") { _ in }
+        let work = WorkWorkspaceKey(repository: "repo", kind: .task, id: "a")
+        let completion = owner.complete(work, issue: "a", directory: "/repo", selected: nil, visible: [work]) { _ in XCTFail() }
+        await owner.persistPending()
+        XCTAssertEqual(owner.listedOperations.map(\.id), [creation.id, completion])
+        let complete = try XCTUnwrap(owner.operations.first { $0.id == completion })
+        XCTAssertEqual(creation.presentation().messages, complete.presentation().messages)
+        XCTAssertEqual(creation.presentation().actions, [.tryAgain, .edit])
+        XCTAssertEqual(complete.presentation().actions, [.tryAgain])
+        XCTAssertFalse(owner.isCompleting(issue: "a", directory: "/repo"), "An unsaved failure withdraws only its overlay")
+        fault.recover()
+        owner.retry(completion)
+        XCTAssertTrue(owner.isCompleting(issue: "a", directory: "/repo"))
+        await owner.persistPending()
+        XCTAssertTrue(complete.saved)
+        XCTAssertEqual(complete.presentation().actions, [.check])
+        XCTAssertEqual(creation.presentation().actions, [.tryAgain, .edit])
+        let saved = try await disk.pending()
+        XCTAssertEqual(saved.map(\.id), [completion])
+        owner.editCreation(creation.id) { XCTAssertEqual($0.request, "Exact words") }
+        XCTAssertEqual(owner.listedOperations.map(\.id), [completion])
+    }
+
     func testUnsavedCreationCanReturnItsWordsToTheEditorWithoutSending() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -191,15 +223,15 @@ extension ClientWorkQueryTests {
         await owner.persistPending()
         XCTAssertFalse(operation.saved)
         XCTAssertEqual(operation.presentation().actions, [.tryAgain, .edit])
-        XCTAssertTrue(owner.failures.isEmpty, "A creation has one failure presentation")
+        XCTAssertEqual(owner.listedOperations.map(\.id), [operation.id])
         XCTAssertTrue(owner.canEditCreation(operation.id))
-        var edited: CreationOperation?
+        var edited: PendingOperation?
         owner.editCreation(operation.id) { edited = $0 }
         XCTAssertTrue(edited === operation)
         XCTAssertEqual(edited?.request, "Exact unsaved words")
         XCTAssertEqual(edited?.destination, "machine")
         XCTAssertTrue(owner.creations.isEmpty)
-        XCTAssertTrue(owner.failures.isEmpty)
+        XCTAssertTrue(owner.listedOperations.isEmpty)
     }
 
     func testShownFiledResultHidesNormalPreparationAndReappearsIfAdmissionFails() async throws {
@@ -218,12 +250,12 @@ extension ClientWorkQueryTests {
         await waitForCreation(operation) { operation.receipt != nil }
         XCTAssertTrue(operation.presentation().actions.isEmpty, "Normal Graph preparation needs no recovery controls")
         try await owner.presented(.task("created"))
-        XCTAssertTrue(owner.listedCreations.isEmpty)
+        XCTAssertTrue(owner.listedOperations.isEmpty)
         let pending = try await disk.pending()
         XCTAssertFalse(pending.isEmpty, "The domain observer outlives its redundant prompt")
         server.publish(try creationFrame(id: operation.id, delivery: "uncertain", revision: 2, diagnostic: "Admission failed"))
         await waitForCreation(operation) { operation.error != nil }
-        XCTAssertEqual(owner.listedCreations.map(\.id), [operation.id])
+        XCTAssertEqual(owner.listedOperations.map(\.id), [operation.id])
         XCTAssertEqual(operation.presentation().actions, [.check, .inspect])
         XCTAssertTrue(server.submissions.isEmpty)
     }
@@ -242,14 +274,14 @@ extension ClientWorkQueryTests {
         _ = await observations.next()
         server.publish(try creationFrame(id: operation.id, delivery: "finished", session: "original-session"))
         await waitForCreation(operation) { operation.receipt != nil }
-        XCTAssertEqual(owner.listedCreations.count, 1)
+        XCTAssertEqual(owner.listedOperations.count, 1)
         try await owner.presented(.task("created"))
-        XCTAssertTrue(owner.listedCreations.isEmpty)
+        XCTAssertTrue(owner.listedOperations.isEmpty)
         let restarted = WorkInteraction(machine: "machine", store: disk)
         defer { restarted.shutdown() }
         restarted.start()
         await restarted.refreshFromStore()
-        XCTAssertTrue(restarted.listedCreations.isEmpty)
+        XCTAssertTrue(restarted.listedOperations.isEmpty)
         XCTAssertTrue(server.submissions.isEmpty)
     }
 
@@ -275,14 +307,13 @@ extension ClientWorkQueryTests {
         XCTAssertNil(try restarted.state("original"), "Retirement removes the authored payload")
         try restarted.save(record("original"))
         XCTAssertTrue(try restarted.pending().isEmpty, "A surviving source cannot replay the retired identity")
-        try restarted.retainCreationSource(draftID: "new-editor-version", before: Date())
-        XCTAssertFalse(try restarted.draftSubmitted("original-editor-version"), "Rewritten sources release their compact identity")
+
     }
 
 }
 
 @MainActor
-func waitForCreation(_ operation: CreationOperation, until ready: @MainActor () -> Bool) async {
+func waitForCreation(_ operation: PendingOperation, until ready: @MainActor () -> Bool) async {
     while !ready() {
         await withCheckedContinuation { continuation in
             withObservationTracking {

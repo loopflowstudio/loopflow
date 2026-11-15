@@ -19,7 +19,6 @@ final class ClientWorkDatabase {
         var legacySource: JSONValue?
         var retiredAt: Date?
         var imported: Bool?
-        var sourceReleased: Bool?
     }
     private struct RetiredIdentity: Codable {
         let id: String
@@ -93,7 +92,7 @@ final class ClientWorkDatabase {
         try execute("CREATE TABLE IF NOT EXISTS operations (sequence INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, state BLOB NOT NULL)")
         try execute("CREATE UNIQUE INDEX IF NOT EXISTS operations_draft ON operations(json_extract(CAST(state AS TEXT),'$.record.draftID'))")
         try execute("CREATE INDEX IF NOT EXISTS operations_pending ON operations(sequence) WHERE json_extract(CAST(state AS TEXT),'$.retiredAt') IS NULL")
-        try execute("CREATE INDEX IF NOT EXISTS operations_sources ON operations(sequence) WHERE (json_extract(CAST(state AS TEXT),'$.imported')=1 OR json_extract(CAST(state AS TEXT),'$.record.draftID') IS NOT NULL) AND json_extract(CAST(state AS TEXT),'$.sourceReleased') IS NOT 1")
+        try execute("DROP INDEX IF EXISTS operations_sources")
         try execute("CREATE TABLE IF NOT EXISTS retired_operations (id TEXT PRIMARY KEY, state BLOB NOT NULL)")
         try execute("CREATE UNIQUE INDEX IF NOT EXISTS retired_operations_draft ON retired_operations(json_extract(CAST(state AS TEXT),'$.draftID'))")
         // Compact the earlier branch format before any source-file import.
@@ -115,7 +114,6 @@ final class ClientWorkDatabase {
             .sorted { ($0.submittedAt, $0.id) < ($1.submittedAt, $1.id) }
         try importLegacy(records.map { LegacyOperation(record: $0, outcome: nil) })
         for file in files { try FileManager.default.removeItem(at: file) }
-        try releaseSources(requests: records.map(\.id), draftID: nil)
     }
 
     deinit { sqlite3_close(connection) }
@@ -310,50 +308,9 @@ final class ClientWorkDatabase {
         }
         try execute("INSERT OR REPLACE INTO work_requirements(id,state) VALUES(?,?)",
             id: state.record.destination, data: JSONEncoder().encode(requirements))
-        if state.sourceReleased != true && (state.imported == true || state.record.draftID != nil) {
+        if state.imported == true || state.record.draftID != nil {
             try retainIdentity(state)
         } else { try execute("DELETE FROM operations WHERE id=?", id: id) }
-    }
-
-    /// Called after the source rewrite commits. A crash before this call retains
-    /// only a digest; a crash before the rewrite still cannot resurrect work.
-    func releaseSources(requests: [String], draftID: String?) throws {
-        try transaction {
-            var ids = Set(requests)
-            if let draftID {
-                for data in try rows("SELECT state FROM operations WHERE json_extract(CAST(state AS TEXT),'$.record.draftID')=?", id: draftID) {
-                    ids.insert(try JSONDecoder().decode(State.self, from: data).record.id)
-                }
-                try execute("DELETE FROM retired_operations WHERE json_extract(CAST(state AS TEXT),'$.draftID')=?", id: draftID)
-            }
-            for id in ids {
-                if var state = try state(id) {
-                    state.sourceReleased = true
-                    try update(state)
-                }
-                try execute("DELETE FROM retired_operations WHERE id=?", id: id)
-            }
-        }
-    }
-
-    func retainCreationSource(draftID: String?, before: Date) throws {
-        try transaction {
-            // A phone has one editor file. Once it names a new revision, older
-            // editor and imported-file identities have no remaining source.
-            for data in try rows("SELECT state FROM retired_operations") {
-                let identity = try JSONDecoder().decode(RetiredIdentity.self, from: data)
-                if identity.retiredAt <= before && (identity.draftID == nil || identity.draftID != draftID) {
-                    try execute("DELETE FROM retired_operations WHERE id=?", id: identity.id)
-                }
-            }
-            for data in try rows("SELECT state FROM operations WHERE (json_extract(CAST(state AS TEXT),'$.imported')=1 OR json_extract(CAST(state AS TEXT),'$.record.draftID') IS NOT NULL) AND json_extract(CAST(state AS TEXT),'$.sourceReleased') IS NOT 1") {
-                var state = try JSONDecoder().decode(State.self, from: data)
-                let record = state.record
-                guard record.submittedAt <= before, record.draftID == nil || record.draftID != draftID else { continue }
-                state.sourceReleased = true
-                try update(state)
-            }
-        }
     }
 
     func retainQueries(machine: String, keys: Set<String>) throws {

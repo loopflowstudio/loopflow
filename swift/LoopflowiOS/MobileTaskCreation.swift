@@ -14,8 +14,6 @@ protocol MobileTaskCreationClient {
     func creationContext() async throws -> MobileCreationContext
     func importLegacyCreations(_ values: [LegacyOperation]) async throws
     func draftSubmitted(_ id: String, machine: String?) async throws -> Bool
-    func retainCreationSource(draftID: String?, before: Date) async throws
-    func releaseCreationSources(requests: [String], draftID: String?, machine: String?) async throws
 }
 
 /// Editor state only. Submitted commands and outcomes live in ClientWorkStore.
@@ -99,9 +97,6 @@ struct MobileTaskDraftStore {
         var draft = try JSONDecoder().decode(MobileTaskDraft.self, from: source)
         if let submitted = legacy.submission, draft.text == submitted.request { draft.text = "" }
         try save(draft)
-        for (machine, records) in Dictionary(grouping: operations, by: { $0.record.destination }) {
-            try await client.releaseCreationSources(requests: records.map { $0.record.id }, draftID: nil, machine: machine)
-        }
     }
 }
 
@@ -118,7 +113,7 @@ final class MobileTaskCreation: Identifiable {
     private var migrated = false
     private var submitted = false
 
-    init(client: any MobileTaskCreationClient, store: MobileTaskDraftStore = .application, request: CreationOperation? = nil) {
+    init(client: any MobileTaskCreationClient, store: MobileTaskDraftStore = .application, request: PendingOperation? = nil) {
         self.client = client
         self.store = store
         do { draft = try store.load(); savedDraft = draft }
@@ -153,16 +148,7 @@ final class MobileTaskCreation: Identifiable {
         guard migrated, !storageUnavailable, !submitted else { return false }
         do {
             try store.save(draft)
-            let previous = savedDraft
             savedDraft = draft
-            let current = draft
-            let savedAt = Date()
-            Task {
-                if previous.id != current.id, let id = previous.id {
-                    try? await client.releaseCreationSources(requests: [], draftID: id, machine: previous.machineID)
-                }
-                try? await client.retainCreationSource(draftID: current.id, before: savedAt)
-            }
             return true
         }
         catch { self.error = "Couldn’t save your changes on this phone. \(error.localizedDescription)"; return false }
@@ -199,16 +185,17 @@ final class MobileTaskCreation: Identifiable {
     }
 
     /// The caller installs the operation route and closes the editor in this call.
-    func begin(select: (CreationOperation) -> Void) {
+    func begin(select: (PendingOperation) -> Void) {
         guard canCreate else { return }
         let original = draft
         let operation = client.interaction.createTask(request: draft.text, directory: draft.directory, draftID: draft.id, select: select)
         submitted = true
+        draft.text = ""
+        draft.id = UUID().uuidString.lowercased()
         // The editor file remains intact until the outbox commits. Cleanup never
         // overwrites a newer draft and does not depend on the sheet's lifetime.
         let interaction = client.interaction
         let store = store
-        let client = client
         Task {
             await interaction.persistPending()
             guard operation.saved, var current = try? store.load(), current == original else { return }
@@ -216,7 +203,6 @@ final class MobileTaskCreation: Identifiable {
             current.id = UUID().uuidString.lowercased()
             do {
                 try store.save(current)
-                try await client.releaseCreationSources(requests: [operation.id], draftID: original.id, machine: original.machineID)
             } catch { /* The saved command or its compact identity still prevents replay. */ }
         }
     }

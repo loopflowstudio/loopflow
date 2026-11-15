@@ -21,11 +21,11 @@ final class MobileTaskCreationTests: XCTestCase {
         client.interaction = owner
         let operation = owner.createTask(request: "Keep these words", directory: "/repo") { _ in }
         await owner.persistPending()
-        var edited: CreationOperation?
+        var edited: PendingOperation?
         let view = MobileCreationConversation(client: client, operation: operation, theme: .light, onEdit: { edited = $0 })
         try view.inspect().find(button: "Edit request").tap()
         XCTAssertTrue(edited === operation)
-        XCTAssertTrue(owner.failures.isEmpty)
+        XCTAssertEqual(owner.listedOperations.map(\.id), [operation.id])
         fault.recover()
         try view.inspect().find(button: "Try again").tap()
         await owner.persistPending()
@@ -51,7 +51,7 @@ final class MobileTaskCreationTests: XCTestCase {
         await model.prepare()
         model.editText("  Original words\n")
         XCTAssertTrue(model.saveDraft())
-        var selected: CreationOperation?
+        var selected: PendingOperation?
         var editorOpen = true
         let view = MobileNewTaskView(model: model, theme: .light) { operation in
             selected = operation
@@ -60,6 +60,7 @@ final class MobileTaskCreationTests: XCTestCase {
         try view.inspect().find(viewWithAccessibilityIdentifier: "task-create").button().tap()
         XCTAssertFalse(editorOpen)
         XCTAssertEqual(selected?.request, "  Original words\n")
+        XCTAssertNotEqual(model.draft.id, try store.load().id, "Start rotates the in-memory editor before any cleanup write")
         XCTAssertEqual(selected?.directory, "/repo")
         XCTAssertNil(selected?.receipt)
         var entered = hold.entered.makeAsyncIterator()
@@ -166,6 +167,7 @@ final class MobileTaskCreationTests: XCTestCase {
         XCTAssertEqual(restored.draft.text, "")
         XCTAssertNotEqual(restored.draft.id, draft.id)
         XCTAssertEqual(try source.load().text, "")
+        XCTAssertTrue(try database.draftSubmitted(XCTUnwrap(draft.id)), "Editor rewrites never release the submitted revision")
         XCTAssertFalse(restored.canCreate)
         let pending = try await disk.pending()
         XCTAssertTrue(pending.isEmpty)
@@ -264,9 +266,9 @@ final class MobileTaskCreationTests: XCTestCase {
         XCTAssertEqual(recovery?.resultPresented, false)
         let ordinary = TaskWorkspaceView(client: client, task: task, theme: .light, draft: .constant(""))
         try await ordinary.inspect().group().callTask(id: [String]())
-        XCTAssertTrue(owner.listedCreations.isEmpty, "Ordinary Task presentation uses the same acknowledgment")
+        XCTAssertTrue(owner.listedOperations.isEmpty, "Ordinary Task presentation uses the same acknowledgment")
         try await mounted.callTask()
-        XCTAssertTrue(owner.listedCreations.isEmpty, "The production conversation uses the same acknowledgment")
+        XCTAssertTrue(owner.listedOperations.isEmpty, "The production conversation uses the same acknowledgment")
     }
 
     func testConflictingLegacyOutboxRetainsTheCompleteSourceFile() async throws {
@@ -324,12 +326,7 @@ private final class EditorClient: MobileTaskCreationClient {
     var importFailure = false
     var beforeImport: (() throws -> Void)?
     init(interaction: WorkInteraction, disk: ClientWorkStore) { self.interaction = interaction; self.disk = disk }
-    func retainCreationSource(draftID: String?, before: Date) async throws {
-        try await disk.retainCreationSource(draftID: draftID, before: before)
-    }
-    func releaseCreationSources(requests: [String], draftID: String?, machine: String?) async throws {
-        try await disk.releaseCreationSources(requests: requests, draftID: draftID)
-    }
+
     func creationContext() async throws -> MobileCreationContext {
         MobileCreationContext(machineID: "machine", name: "Original Mac", repositories: [PortfolioRepo(path: "/repo", error: nil)])
     }

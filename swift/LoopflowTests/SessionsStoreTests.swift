@@ -161,9 +161,7 @@ struct SessionsStoreTests {
         #expect(item(store, "main")?.launchId != previous.launchId)
         #expect(item(store, "main")?.launchArguments == ["lf", "session", "resume", "main"])
         #expect(item(store, "other")?.state == .pending)
-        let requestID = try #require(submitted.withLock { $0 })
-        #expect(CreationRecovery.shared.requests(for: .session("main")).contains(requestID))
-        await CreationRecovery.shared.presented([requestID])
+        #expect(submitted.withLock { $0 } != nil)
     }
 
     @Test("Reset leaves the Session live while preparing and keeps updates when it fails", arguments: [false, true])

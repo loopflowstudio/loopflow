@@ -106,7 +106,7 @@ public actor ClientWorkStore {
         let requested: Set<String>
         let records: [SubmittedOperation]
         let queries: [String: ClientWorkQuery]
-        let creations: [CreationOperationSnapshot]
+        let operations: [PendingOperationSnapshot]
     }
 
     func retainQueries(machine: String, keys: Set<String>) throws {
@@ -118,13 +118,12 @@ public actor ClientWorkStore {
         var readings: [String: ClientWorkQuery] = [:]
         for (key, read) in queries { readings[key] = try cachedPlans(machine: machine, for: read) }
         let records = try pending().filter { $0.destination == machine }
-        let creations = try records.compactMap { record -> CreationOperationSnapshot? in
-            guard let command = try? JSONDecoder().decode(JSONValue.self, from: record.payload),
-                  command["kind"] == .string("task.create") else { return nil }
-            return try CreationOperationSnapshot(record: record, command: command,
+        let operations = try records.map { record in
+            let command = try JSONDecoder().decode(JSONValue.self, from: record.payload)
+            return try PendingOperationSnapshot(record: record, command: command,
                 receipt: receipt(record.id), recovery: recovery(record.id), legacyOutcome: disk().state(record.id)?.legacyOutcome)
         }
-        return Presentation(revision: publication, requested: Set(queries.keys), records: records, queries: readings, creations: creations)
+        return Presentation(revision: publication, requested: Set(queries.keys), records: records, queries: readings, operations: operations)
     }
 
     @discardableResult
@@ -156,22 +155,6 @@ public actor ClientWorkStore {
     }
 
     public func draftSubmitted(_ id: String) throws -> Bool { try disk().draftSubmitted(id) }
-
-    public func retainCreationSource(draftID: String?, before: Date) throws {
-        try disk().retainCreationSource(draftID: draftID, before: before)
-    }
-
-    public func releaseCreationSources(requests: [String], draftID: String?) throws {
-        try disk().releaseSources(requests: requests, draftID: draftID)
-    }
-
-    public static func releaseCreationSources(requests: [String], draftID: String?, directory: URL,
-        prepareDirectory: @escaping @Sendable (URL) throws -> Void) async throws {
-        try await Task.detached {
-            try ClientWorkDatabase(directory: directory, prepareDirectory: prepareDirectory)
-                .releaseSources(requests: requests, draftID: draftID)
-        }.value
-    }
 
     public func resolveMachine() async throws -> String { try await currentMachine() }
 

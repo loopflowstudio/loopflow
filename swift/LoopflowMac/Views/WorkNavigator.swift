@@ -66,14 +66,8 @@ struct WorkNavigator: View {
                 .compactMap({ $0 }).contains(error) {
                 Text(error).font(Typography.body(11)).foregroundStyle(palette.warning).padding(10)
             }
-            ForEach(model.pendingCreations) { operation in
-                PendingCreationRow(model: model, operation: operation)
-            }
-            ForEach(model.completionFailures) { failure in
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(failure.message).font(Typography.body(11)).foregroundStyle(palette.warning)
-                    Button("Retry Complete") { model.retryCompletion(failure.id) }
-                }.padding(10)
+            ForEach(model.pendingCommands) { operation in
+                PendingCommandRow(model: model, operation: operation)
             }
             // The repository tops the sidebar; a selected Wave moves up under it.
             VStack(alignment: .leading, spacing: 5) {
@@ -926,23 +920,22 @@ struct WorkReadStatus: View {
 }
 
 /// The request retains its recovery controls even after native input is ready.
-struct PendingCreationRow: View {
+struct PendingCommandRow: View {
     let model: WorkModel
-    let operation: CreationOperation
+    let operation: PendingOperation
     @Environment(\.palette) private var palette
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Button { model.selectCreation(operation) } label: {
-                Text(operation.receipt?.task.title ?? operation.request).lineLimit(2)
-            }.buttonStyle(.plain)
+            if operation.isCreation {
+                Button { model.selectCreation(operation) } label: { Text(operation.title).lineLimit(2) }.buttonStyle(.plain)
+            } else { Text(operation.title).lineLimit(2) }
             let presentation = operation.presentation()
-            Text(presentation.status).font(Typography.body(11)).foregroundStyle(palette.textSecondary)
-            CreationRequestActions(presentation: presentation) { action in
+            Text(presentation.messages.isEmpty ? "Request pending…" : presentation.messages.joined(separator: "\n")).font(Typography.body(11)).foregroundStyle(palette.textSecondary)
+            PendingCommandActions(presentation: presentation) { action in
                 switch action {
                 case .edit: model.editCreation(operation.id)
                 case .tryAgain, .check: model.retryCreation(operation.id)
-                case .open: Task { await model.openCreatedTask(operation) }
                 case .inspect: Task { await model.inspectedCreation(operation.id) }
                 }
             }.controlSize(.small)

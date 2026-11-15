@@ -5,18 +5,11 @@ import Observation
 /// commands keep their original destination independently of those leases.
 @MainActor @Observable
 public final class WorkInteraction {
-    public struct Failure: Identifiable {
-        public let record: SubmittedOperation?
-        public let message: String
-        let saved: Bool
-        public let id: String
-        fileprivate let intent: Intent?
-    }
     private struct Lease {
         let key: String
         let receive: ([ProjectedWorkPlan]?) -> Void
     }
-    fileprivate struct Intent {
+    private struct Intent {
         let id: String
         let payload: Data
         let submittedAt: Date
@@ -29,9 +22,10 @@ public final class WorkInteraction {
         let effect: WorkQueryEffect?
         var savedRevision: UInt64?
     }
-    public private(set) var creations: [CreationOperation] = []
+    public private(set) var operations: [PendingOperation] = []
+    public var creations: [PendingOperation] { operations.filter(\.isCreation) }
+    public var listedOperations: [PendingOperation] { operations.filter(\.isListed) }
     public private(set) var machine: String?
-    public private(set) var failures: [Failure] = []
     public private(set) var cacheError: String?
     private var commandPayloads: [Data] = []
     @ObservationIgnored private var saved: [SubmittedOperation] = []
@@ -45,8 +39,6 @@ public final class WorkInteraction {
     @ObservationIgnored private var reads: [String: ServedRead] = [:]
     @ObservationIgnored private var bases: [String: ClientWorkQuery] = [:]
     @ObservationIgnored private var intents: [Intent] = []
-    @ObservationIgnored private var failedDeliveries: Set<String> = []
-    @ObservationIgnored private var failedCreations: [String: Intent] = [:]
     @ObservationIgnored private var revision: UInt64 = 0
     @ObservationIgnored private var changes: Task<Void, Never>?
     @ObservationIgnored private var saving: Task<Void, Never>?
@@ -111,16 +103,16 @@ public final class WorkInteraction {
     /// Freeze and publish the operation before Machine discovery, save or send.
     @discardableResult
     public func createTask(request: String, directory: String, wave: String? = nil, graph: String? = nil, draftID: String? = nil,
-                           select: (CreationOperation) -> Void) -> CreationOperation {
+                           select: (PendingOperation) -> Void) -> PendingOperation {
         let id = UUID().uuidString.lowercased()
         PerfClock.interaction(.taskCreate, .gesture, id: id)
         let command = ServedWrite.taskCreate(directory: directory, requestID: id, title: nil,
             request: request, wave: wave, graph: graph, session: nil, run: true)
         let intent = Intent(id: id, payload: try! JSONEncoder().encode(command), submittedAt: Date(), draftID: draftID,
             destination: machine, effect: nil)
-        let operation = CreationOperation(id: id, request: request, directory: directory, wave: wave,
+        let operation = PendingOperation(id: id, payload: intent.payload, kind: "task.create", request: request, directory: directory, wave: wave,
             graph: graph, submittedAt: intent.submittedAt, destination: machine)
-        creations.append(operation)
+        operations.append(operation)
         intents.append(intent)
         select(operation)
         PerfClock.interaction(.taskCreate, .statePublished, id: id)
@@ -128,8 +120,6 @@ public final class WorkInteraction {
         enqueue(intent)
         return operation
     }
-
-    public var listedCreations: [CreationOperation] { creations.filter(\.isListed) }
 
     public enum Resource: Hashable {
         case task(String), session(String)
@@ -142,7 +132,7 @@ public final class WorkInteraction {
 
     /// Every mounted route acknowledges the same result, including ordinary rows.
     public func presented(_ resource: Resource) async throws {
-        let ids = creations.filter { operation in
+        let ids = operations.filter { operation in
             switch resource {
             case .task(let id): operation.taskID == id
             case .session(let id): operation.sessionID == id
@@ -180,6 +170,8 @@ public final class WorkInteraction {
         let effect = WorkQueryEffect(operationID: id, sequence: 0, directory: directory,
             kind: "task.complete", issue: issue, resolution: nil)
         let intent = Intent(id: id, payload: payload, submittedAt: Date(), draftID: nil, destination: machine, effect: effect)
+        operations.append(PendingOperation(id: id, payload: payload, kind: "task.complete", request: "",
+            directory: directory, wave: nil, graph: nil, submittedAt: intent.submittedAt, destination: machine))
         intents.append(intent)
         publish()
         if selected == work {
@@ -190,6 +182,7 @@ public final class WorkInteraction {
             select(following.first { $0 != work && $0.kind == .task })
         }
         PerfClock.interaction(.taskComplete, .statePublished, id: id)
+        start()
         enqueue(intent)
         return id
     }
@@ -198,35 +191,35 @@ public final class WorkInteraction {
         creations.first { $0.id == id }?.presentation().actions.contains(.edit) == true
     }
 
-    public func editCreation(_ id: String, edit: (CreationOperation) -> Void) {
+    public func editCreation(_ id: String, edit: (PendingOperation) -> Void) {
         guard canEditCreation(id), let operation = creations.first(where: { $0.id == id }) else { return }
-        failedCreations[id] = nil
-        creations.removeAll { $0.id == id }
+        intents.removeAll { $0.id == id }
+        operations.removeAll { $0.id == id }
         edit(operation)
     }
 
     public func retry(_ id: String) {
-        if let operation = creations.first(where: { $0.id == id }) {
-            operation.clearFailure()
-            failedDeliveries.remove(id)
-            if let intent = failedCreations.removeValue(forKey: id) {
-                intents.append(intent)
-                enqueue(intent)
-            } else if let record = saved.first(where: { $0.id == id }) { deliver(record) }
-            return
+        guard let operation = operations.first(where: { $0.id == id }) else { return }
+        operation.clearFailure()
+        if let record = saved.first(where: { $0.id == id }) {
+            // A read-only observer holds the same store recovery lease. Retire
+            // it before a deliberate Check request, without resubmitting blindly.
+            operation.deliveryFailed = true
+            let previous = deliveries[id]
+            previous?.cancel()
+            let attempt = UUID()
+            operation.deliveryAttempt = attempt
+            deliveries[id] = Task { [weak self] in
+                await previous?.value
+                guard let self, !Task.isCancelled, operation.deliveryAttempt == attempt else { return }
+                deliveries[id] = nil
+                operation.deliveryFailed = false
+                deliver(record)
+            }
+        } else if let intent = intents.first(where: { $0.id == id }) {
+            publish()
+            enqueue(intent)
         }
-        guard let failure = failures.first(where: { $0.id == id }) else { return }
-        if failure.saved, let record = failure.record {
-            failures.removeAll { $0.id == id }
-            deliver(record)
-            return
-        }
-        guard let intent = failure.intent else { return }
-        failures.removeAll { $0.id == id }
-        creations.first { $0.id == id }?.clearFailure()
-        intents.append(intent)
-        publish()
-        enqueue(intent)
     }
 
     private func enqueue(_ intent: Intent) {
@@ -246,7 +239,7 @@ public final class WorkInteraction {
                 }
                 guard let record = intent.record else { return }
                 let revision = try await store.save(record)
-                creations.first { $0.id == intent.id }?.markSaved()
+                operations.first { $0.id == intent.id }?.markSaved()
                 guard !Task.isCancelled else { return }
                 if let index = intents.firstIndex(where: { $0.id == intent.id }) {
                     intents[index].savedRevision = revision
@@ -254,13 +247,7 @@ public final class WorkInteraction {
                 await refreshFromStore()
                 deliver(record)
             } catch {
-                intents.removeAll { $0.id == intent.id }
-                if let operation = creations.first(where: { $0.id == intent.id }) {
-                    failedCreations[intent.id] = intent
-                    operation.fail(error.localizedDescription)
-                } else {
-                    failures.append(Failure(record: intent.record, message: error.localizedDescription, saved: false, id: intent.id, intent: intent))
-                }
+                operations.first { $0.id == intent.id }?.fail(error.localizedDescription)
                 publish()
             }
         }
@@ -269,37 +256,45 @@ public final class WorkInteraction {
     private func resumeSaved() async {
         guard machine != nil, let records = try? await store.pending() else { return }
         for record in records where record.destination == machine {
-            guard deliveries[record.id] == nil, !failures.contains(where: { $0.id == record.id }),
-                  !failedDeliveries.contains(record.id),
-                  let command = try? JSONDecoder().decode(JSONValue.self, from: record.payload),
-                  case .object(let fields) = command, (fields["kind"] == .string("task.complete") || fields["kind"] == .string("task.create")) else { continue }
+            guard deliveries[record.id] == nil,
+                  operations.first(where: { $0.id == record.id })?.deliveryFailed != true,
+                  !(await store.isRecovering(record.id)) else { continue }
             deliver(record)
         }
     }
 
     private func deliver(_ record: SubmittedOperation) {
         guard deliveries[record.id] == nil else { return }
+        let attempt = UUID()
+        let operation = operations.first { $0.id == record.id }
+        operation?.deliveryAttempt = attempt
         deliveries[record.id] = Task { [weak self, store] in
-            defer { self?.deliveries[record.id] = nil }
+            defer {
+                if operation?.deliveryAttempt == attempt { self?.deliveries[record.id] = nil }
+            }
             do {
                 _ = try await store.reconcile(record)
                 let command = try? JSONDecoder().decode(JSONValue.self, from: record.payload)
-                PerfClock.interaction(command?["kind"] == .string("task.create") ? .taskCreate : .taskComplete,
-                    .commandReturned, id: record.id)
+                if command?["kind"] == .string("task.create") {
+                    PerfClock.interaction(.taskCreate, .commandReturned, id: record.id)
+                } else if command?["kind"] == .string("task.complete") {
+                    PerfClock.interaction(.taskComplete, .commandReturned, id: record.id)
+                }
                 try await store.observeSaved(record)
             } catch {
                 guard !Task.isCancelled else { return }
-                if let operation = self?.creations.first(where: { $0.id == record.id }) {
-                    self?.failedDeliveries.insert(record.id)
+                if let operation = self?.operations.first(where: { $0.id == record.id }) {
+                    operation.deliveryFailed = true
                     operation.fail(error.localizedDescription)
                 }
-                else { self?.failures.append(Failure(record: record, message: error.localizedDescription, saved: true, id: record.id, intent: nil)) }
             }
         }
     }
 
     private func project(_ base: ClientWorkQuery) -> [ProjectedWorkPlan] {
-        base.applying(intents.compactMap(\.effect)).projection
+        base.applying(intents.filter { intent in
+            operations.first(where: { $0.id == intent.id })?.error == nil
+        }.compactMap(\.effect)).projection
     }
 
     public func isCompleting(issue: String, directory: String) -> Bool {
@@ -312,7 +307,9 @@ public final class WorkInteraction {
     }
 
     private func publish() {
-        commandPayloads = saved.map(\.payload) + intents.filter { intent in !saved.contains(where: { $0.id == intent.id }) }.map(\.payload)
+        commandPayloads = saved.map(\.payload) + intents.filter { intent in
+            !saved.contains(where: { $0.id == intent.id }) && operations.first(where: { $0.id == intent.id })?.error == nil
+        }.map(\.payload)
         for lease in Array(leases.values) { lease.receive(reconciled.contains(lease.key) ? bases[lease.key].map(project) : nil) }
     }
 
@@ -345,19 +342,17 @@ public final class WorkInteraction {
         }
         intents.removeAll { savedIDs.contains($0.id) || $0.savedRevision.map { $0 <= update.revision } == true }
         saved = update.records
-        failedDeliveries.formIntersection(savedIDs)
-        for value in update.creations {
-            let operation: CreationOperation
-            if let existing = creations.first(where: { $0.id == value.record.id }) { operation = existing }
+        for value in update.operations {
+            let operation: PendingOperation
+            if let existing = operations.first(where: { $0.id == value.record.id }) { operation = existing }
             else {
-                operation = CreationOperation(value)
-                creations.append(operation)
+                operation = PendingOperation(value)
+                operations.append(operation)
             }
             operation.receive(value)
         }
-        creations.removeAll { operation in
+        operations.removeAll { operation in
             !savedIDs.contains(operation.id) && !intents.contains(where: { $0.id == operation.id })
-                && failedCreations[operation.id] == nil
         }
         for key in update.requested where reads[key] != nil {
             bases[key] = update.queries[key]

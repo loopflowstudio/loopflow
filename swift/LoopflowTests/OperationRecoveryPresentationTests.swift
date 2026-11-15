@@ -20,14 +20,16 @@ struct OperationRecoveryPresentationTests {
         let record = try await submissions.record(.taskUpdate(directory: "/repo", issue: "LOO-1", notes: "Original edit"),
             requestID: "operation_fixture")
         _ = try await submissions.reconcile(record)
-        let recovery = CreationRecovery(submissions: submissions)
+        let recovery = WorkInteraction(machine: "machine_fixture", store: submissions)
+        defer { recovery.shutdown() }
+        recovery.start()
         var watches = server.observations.makeAsyncIterator()
         _ = await watches.next()
-        await recovery.refresh()
+        await recovery.refreshFromStore()
         _ = await watches.next()
         _ = await watches.next()
-        await recovery.presented([record.id])
-        #expect(recovery.items.first?.text.contains("lost delivery acknowledgment") == true)
+        try await recovery.presented(record.id)
+        #expect(recovery.listedOperations.first?.presentation().messages.joined(separator: "\n").contains("lost delivery acknowledgment") == true)
         #expect(server.watchCount == 1)
 
         let changes = await submissions.changes()
@@ -38,8 +40,8 @@ struct OperationRecoveryPresentationTests {
         for await _ in await submissions.changes() {
             if await !submissions.isRecovering(record.id) { break }
         }
-        await recovery.refresh()
-        #expect(recovery.items.isEmpty)
+        await recovery.refreshFromStore()
+        #expect(recovery.listedOperations.isEmpty)
         #expect(server.watchCount == 0)
         let restarted = client()
         #expect(try await restarted.recovery(record.id) == nil)
@@ -75,17 +77,63 @@ struct OperationRecoveryPresentationTests {
         defer { owner.shutdown() }
         owner.start()
         await owner.refreshFromStore()
-        #expect(owner.listedCreations.count == 1)
+        #expect(owner.listedOperations.count == 1)
         // Acknowledge by the actual bound resource; fixtures own their identity.
         if let id = owner.creations.first?.taskID { try await owner.presented(.task(id)) }
         for await _ in await submissions.changes() {
             if await !submissions.isRecovering(record.id) { break }
         }
         await owner.refreshFromStore()
-        #expect(owner.listedCreations.isEmpty)
+        #expect(owner.listedOperations.isEmpty)
         #expect(try await submissions.pending().isEmpty)
         #expect(server.watchCount == 0)
         #expect(server.submissions.isEmpty)
+    }
+
+    @Test func aMountedSessionAcknowledgesItsSavedCommandWithoutAnotherPresentationMap() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let original = try operationTestFrame()
+        let originalBody = try #require(original.body)
+        var body = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(originalBody)) as? [String: Any])
+        body["kind"] = "session.new"
+        body["revision"] = 2
+        body["commits"] = [["resolution": "committed", "stage": "session.input_replaced", "resources": ["original"],
+            "fence": ["machine": "machine", "epoch": "epoch-a", "schema": ServerProtocol.revision, "revisions": ["sessions": 1]],
+            "result": ["id": "original"], "planning_effect": "none", "planning_changes": []]]
+        let frame = try JSONDecoder().decode(SubscriptionReading<OperationReceipt>.self, from: JSONSerialization.data(withJSONObject: [
+            "answers": NSNull(), "unavailable": NSNull(), "body": body,
+            "stamp": JSONSerialization.jsonObject(with: JSONEncoder().encode(try #require(original.stamp)))]))
+        var candidate = body
+        candidate["validation"] = "candidate"
+        candidate["revision"] = 1
+        let candidateFrame = try JSONDecoder().decode(SubscriptionReading<OperationReceipt>.self, from: JSONSerialization.data(withJSONObject: [
+            "answers": NSNull(), "unavailable": NSNull(), "body": candidate,
+            "stamp": JSONSerialization.jsonObject(with: JSONEncoder().encode(try #require(original.stamp)))]))
+        let server = try OperationServer(frame: candidateFrame)
+        let store = ClientWorkStore(directory: root, machine: { "machine" }, read: { _ in "null" },
+            observe: { server.observe($0) }, send: { _ in Issue.record("A known Session must never be recreated") })
+        let record = try await store.record(.sessionNew(directory: "/repo", requestID: "same", id: "original", agent: nil), requestID: "same")
+        _ = try await store.reconcile(record)
+        let owner = WorkInteraction(machine: "machine", store: store)
+        defer { owner.shutdown() }
+        owner.start()
+        await owner.refreshFromStore()
+        #expect(owner.listedOperations.first?.sessionID == nil)
+        try await owner.presented(.session("original"))
+        #expect(try await store.recovery(record.id)?.resultPresented == false, "A candidate cannot bind presentation to a Session")
+        server.publish(frame)
+        for await _ in await store.changes() {
+            if try await store.receipt(record.id)?.validation == .bound { break }
+        }
+        await owner.refreshFromStore()
+        #expect(owner.listedOperations.map(\.sessionID) == ["original"])
+        #expect(owner.listedOperations.first?.presentation().messages.isEmpty == true)
+        try await owner.presented(.session("another"))
+        #expect(try await store.pending().count == 1)
+        try await owner.presented(.session("original"))
+        #expect(try await store.pending().isEmpty)
+        #expect(owner.listedOperations.isEmpty)
     }
 
     @Test func missingPlanningEvidenceCannotDischargeInspection() async throws {
@@ -116,10 +164,12 @@ struct OperationRecoveryPresentationTests {
         var watches = server.observations.makeAsyncIterator()
         _ = try await submissions.reconcile(record)
         _ = await watches.next()
-        let recovery = CreationRecovery(submissions: submissions)
-        await recovery.refresh()
-        #expect(recovery.items.first?.complete == false)
-        #expect(recovery.items.first?.text.contains("lost delivery acknowledgment") == true)
+        let recovery = WorkInteraction(machine: "machine_fixture", store: submissions)
+        defer { recovery.shutdown() }
+        recovery.start()
+        await recovery.refreshFromStore()
+        #expect(recovery.listedOperations.first?.presentation().actions.contains(.inspect) == true)
+        #expect(recovery.listedOperations.first?.presentation().messages.joined(separator: "\n").contains("lost delivery acknowledgment") == true)
         _ = await watches.next() // saved-result lookup
         _ = await watches.next() // continued observation after returning the result
 
@@ -128,25 +178,25 @@ struct OperationRecoveryPresentationTests {
         for await _ in changes {
             if try await submissions.receipt(record.id)?.revision == newer.body?.revision { break }
         }
-        await recovery.refresh()
-        #expect(recovery.items.first?.complete == false)
-        #expect(recovery.items.first?.text.contains("planning response lost") == true)
-        #expect(recovery.items.first?.text.contains("lost delivery acknowledgment") == false)
+        await recovery.refreshFromStore()
+        #expect(recovery.listedOperations.first?.presentation().actions.contains(.inspect) == true)
+        #expect(recovery.listedOperations.first?.presentation().messages.joined(separator: "\n").contains("planning response lost") == true)
+        #expect(recovery.listedOperations.first?.presentation().messages.joined(separator: "\n").contains("lost delivery acknowledgment") == false)
         #expect(try await submissions.receipt(record.id)?.error == older.body?.error)
         #expect(try await submissions.receipt(record.id)?.result == older.body?.result)
 
         // Retry must release the old read-only observer before looking up the
         // saved command, or its active ownership silently suppresses recovery.
-        await recovery.retry(record.id)
+        recovery.retry(record.id)
         _ = await watches.next()
         _ = await watches.next()
         #expect(server.watchCount == 1)
         #expect(server.submissions.isEmpty)
-        await recovery.presented([record.id])
+        try await recovery.presented(record.id)
         #expect(server.watchCount == 1)
         #expect(try await submissions.recovery(record.id)?.resultPresented == true)
-        #expect(recovery.items.first?.complete == false)
-        #expect(recovery.items.first?.text.contains("planning response lost") == true)
+        #expect(recovery.listedOperations.first?.presentation().actions.contains(.inspect) == true)
+        #expect(recovery.listedOperations.first?.presentation().messages.joined(separator: "\n").contains("planning response lost") == true)
         #expect(try await submissions.pending().first?.payload == record.payload)
     }
 }

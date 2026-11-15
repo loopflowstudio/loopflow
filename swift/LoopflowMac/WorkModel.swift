@@ -155,14 +155,9 @@ final class WorkModel {
 
     var presentationError: String? { interaction?.cacheError }
 
-    var pendingCreations: [CreationOperation] {
-        interaction?.listedCreations ?? []
-    }
-    var completionFailures: [WorkInteraction.Failure] {
-        interaction?.failures ?? []
-    }
+    var pendingCommands: [PendingOperation] { interaction?.listedOperations ?? [] }
 
-    func selectCreation(_ operation: CreationOperation) {
+    func selectCreation(_ operation: PendingOperation) {
         setRepoPath(operation.directory)
         dismissTaskLink()
         taskOpening = nil
@@ -170,7 +165,6 @@ final class WorkModel {
         navigation.selection = nil
         navigation.startingTask = operation
     }
-    func retryCompletion(_ id: String) { interaction?.retry(id) }
 
     @ObservationIgnored private var navigationGeneration = 0
     @ObservationIgnored private var queryGeneration = UUID()
@@ -522,7 +516,7 @@ final class WorkModel {
     }
     var preparingCreation: Bool { navigation.startingTask != nil && taskOpening?.status != .usable }
 
-    func creationPresentationRequests(taskID: String) -> [String] {
+    func presentationRequests(taskID: String) -> [String] {
         interaction?.creations.filter { $0.taskID == taskID }.map(\.id) ?? []
     }
 
@@ -530,8 +524,8 @@ final class WorkModel {
         try? await interaction?.presented(.task(taskID))
     }
 
-    func creationPresentationRequests(sessionID: String) -> [String] {
-        interaction?.creations.filter { $0.sessionID == sessionID }.map(\.id) ?? []
+    func presentationRequests(sessionID: String) -> [String] {
+        interaction?.operations.filter { $0.sessionID == sessionID }.map(\.id) ?? []
     }
 
     func presentedSessionResult(_ sessionID: String) async {
@@ -2732,8 +2726,8 @@ final class WorkModel {
 
     /// Selection publishes the submitted operation before disk or network work.
     @discardableResult
-    func beginTask(request: String, wave: WaveSnapshot?, graph: String?) -> CreationOperation? {
-        guard navigation.startingTask == nil, let repoPath, !repoPath.isEmpty else { return nil }
+    func beginTask(request: String, wave: WaveSnapshot?, graph: String?) -> PendingOperation? {
+        guard let repoPath, !repoPath.isEmpty else { return nil }
         dismissTaskLink()
         taskOpening = nil
         let navigation = navigation
@@ -2761,7 +2755,7 @@ final class WorkModel {
 
     func retryCreation(_ id: String) { interaction?.retry(id) }
 
-    func openCreatedTask(_ operation: CreationOperation) async {
+    func openCreatedTask(_ operation: PendingOperation) async {
         guard navigation.startingTask === operation, let receipt = operation.receipt,
               let session = receipt.sessionId else { return }
         await Perf.$inputTrace.withValue(operation.id) {

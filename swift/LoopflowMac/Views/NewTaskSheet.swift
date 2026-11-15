@@ -58,6 +58,11 @@ struct NewTaskSheet: View {
                     .focused($focused)
                     .accessibilityIdentifier("new-task-request")
                 selector
+                if model.repoPath?.isEmpty != false {
+                    Text("Open a repository to start a Task.")
+                        .foregroundStyle(palette.textSecondary)
+                        .accessibilityIdentifier("new-task-repository-reason")
+                }
                 if let workflow {
                     WorkflowSteps(workflow: workflow).accessibilityIdentifier("new-task-steps")
                 }
@@ -291,7 +296,7 @@ private struct WorkflowChooser: View {
 /// The submitted words remain visible until the real native conversation attaches.
 struct StartingTaskView: View {
     let model: WorkModel
-    let launch: CreationOperation
+    let launch: PendingOperation
     @Environment(\.palette) private var palette
 
     var body: some View {
@@ -302,12 +307,15 @@ struct StartingTaskView: View {
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            let presentation = launch.presentation(openingError: model.taskOpening?.reason)
-            Text(presentation.status).foregroundStyle(palette.textSecondary).textSelection(.enabled)
-            CreationRequestActions(presentation: presentation) { action in
+            let presentation = launch.presentation()
+            if let reason = model.taskOpening?.reason {
+                Text(reason).foregroundStyle(palette.textSecondary)
+                Button("Retry opening") { Task { await model.openCreatedTask(launch) } }
+            }
+            Text(presentation.messages.isEmpty ? "Starting conversation…" : presentation.messages.joined(separator: "\n")).foregroundStyle(palette.textSecondary).textSelection(.enabled)
+            PendingCommandActions(presentation: presentation) { action in
                 switch action {
                 case .edit: model.editCreation(launch.id)
-                case .open: Task { await model.openCreatedTask(launch) }
                 case .tryAgain, .check: model.retryCreation(launch.id)
                 case .inspect: Task { await model.inspectedCreation(launch.id) }
                 }

@@ -514,8 +514,8 @@ final class ClientWorkQueryTests: XCTestCase {
         let id = owner.complete(a, issue: "a", directory: "/repo", selected: a, visible: [a, b]) { selected = $0 }
         XCTAssertEqual(selected, b)
         await owner.persistPending()
-        XCTAssertEqual(owner.failures.map(\.id), [id])
-        XCTAssertNil(owner.failures.first?.record)
+        XCTAssertEqual(owner.listedOperations.filter { $0.error != nil }.map(\.id), [id])
+        XCTAssertNil(owner.operations.first?.destination)
         XCTAssertFalse(owner.isCompleting(issue: "a", directory: "/repo"))
         selected = a
         fault.recover()
@@ -696,7 +696,7 @@ final class ClientWorkQueryTests: XCTestCase {
         await owner.refreshFromStore()
         XCTAssertEqual(owner.cacheError, "Disk unavailable")
         XCTAssertEqual(shown.first?.taskCount, 2)
-        XCTAssertEqual(owner.failures.first?.id, failed)
+        XCTAssertEqual(owner.listedOperations.first?.id, failed)
         XCTAssertEqual(selection?.id, "b")
         fault.recover()
         _ = owner.complete(base.contents[1].work, issue: "b", directory: "/repo", selected: selection,
@@ -704,14 +704,14 @@ final class ClientWorkQueryTests: XCTestCase {
         XCTAssertEqual(shown.first?.projection.visible.map(\.work.id), ["a"])
         await owner.persistPending()
         XCTAssertEqual(shown.first?.taskCount, 1)
-        let retained = try XCTUnwrap(owner.failures.first { $0.id == failed })
-        XCTAssertEqual(retained.record?.destination, "machine")
+        let retained = try XCTUnwrap(owner.operations.first { $0.id == failed })
+        XCTAssertEqual(retained.destination, "machine")
         owner.retry(failed)
         XCTAssertEqual(shown.first?.taskCount, 0)
         await owner.persistPending()
         let saved = try await disk.pending()
         XCTAssertEqual(saved.count, 2)
-        XCTAssertEqual(saved.last?.payload, retained.record?.payload)
+        XCTAssertEqual(saved.last?.payload, retained.payload)
         XCTAssertEqual(selection?.id, "a", "Retry and save failure cannot navigate again")
     }
 

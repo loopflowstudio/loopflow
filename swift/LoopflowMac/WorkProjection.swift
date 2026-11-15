@@ -229,7 +229,7 @@ final class WorkNavigation {
         let graph: String?
     }
     var newTaskDraft: TaskCreationDraft?
-    var startingTask: CreationOperation?
+    var startingTask: PendingOperation?
 
     enum SidebarFilter: String, CaseIterable {
         case working = "Working tasks"

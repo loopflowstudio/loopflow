@@ -4,12 +4,12 @@ import SwiftUI
 struct MobileNewTaskView: View {
     @State private var model: MobileTaskCreation
     let theme: ThemeDefinition
-    let onStart: (CreationOperation) -> Void
+    let onStart: (PendingOperation) -> Void
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @FocusState private var editing: Bool
 
-    init(model: MobileTaskCreation, theme: ThemeDefinition, onStart: @escaping (CreationOperation) -> Void) {
+    init(model: MobileTaskCreation, theme: ThemeDefinition, onStart: @escaping (PendingOperation) -> Void) {
         _model = State(initialValue: model)
         self.theme = theme
         self.onStart = onStart
@@ -142,9 +142,9 @@ struct MobileNewTaskView: View {
 /// Fetching or attaching its content never changes a later route.
 struct MobileCreationConversation: View {
     let client: RemoteMobileClient
-    let operation: CreationOperation
+    let operation: PendingOperation
     let theme: ThemeDefinition
-    let onEdit: (CreationOperation) -> Void
+    let onEdit: (PendingOperation) -> Void
     @State private var reply = ""
 
     var body: some View {
@@ -155,7 +155,7 @@ struct MobileCreationConversation: View {
                         title: operation.receipt?.task.title ?? "New Task", theme: theme, draft: $reply)
                         .id(session)
                         .task { try? await client.interaction.presented(.session(session)) }
-                    if operation.presentation().status != "Starting conversation…" {
+                    if !operation.presentation().messages.isEmpty || !operation.presentation().actions.isEmpty {
                         recoveryControls.padding()
                     }
                 }
@@ -178,13 +178,12 @@ struct MobileCreationConversation: View {
             if operation.destination != client.savedMachine.machineID {
                 Text("Reconnect the original Machine to open this request")
             }
-            Text(presentation.status)
-            CreationRequestActions(presentation: presentation) { action in
+            Text(presentation.messages.isEmpty ? "Starting conversation…" : presentation.messages.joined(separator: "\n"))
+            PendingCommandActions(presentation: presentation) { action in
                 switch action {
                 case .edit: onEdit(operation)
                 case .tryAgain, .check: client.interaction.retry(operation.id)
                 case .inspect: Task { try? await client.interaction.presented(operation.id) }
-                case .open: break
                 }
             }
         }

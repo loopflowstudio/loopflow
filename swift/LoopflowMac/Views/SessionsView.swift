@@ -1392,7 +1392,6 @@ final class SessionsStore {
         guard let current = _index(id) else { throw RegistryQueryError("Session is unavailable.") }
         if let terminal = localTerminal(for: previous.record) { surfaces.release(terminal) }
         sessions[current].record = restarted
-        CreationRecovery.shared.awaitingPresentation(requestID, of: .session(restarted.id))
         sessions[current].launchId = UUID()
         sessions[current].state = .prepared
         startTerminal(id)
@@ -1720,7 +1719,6 @@ struct SessionsContentView: View {
                     // The main pane alone: the sidebar stays put when a Task opens.
                     mainPaneHeader
                     mainPane
-                    CreationRecoveryView()
                 }
             }
         }
@@ -1908,7 +1906,7 @@ struct SessionsContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipShape(PaneGeometry.workspaceShape)
         .accessibilityIdentifier("work-workspace-\(key.id)")
-        .task(id: active && task != nil && navigation.startingTask == nil ? model.creationPresentationRequests(taskID: key.id) : []) {
+        .task(id: active && task != nil && navigation.startingTask == nil ? model.presentationRequests(taskID: key.id) : []) {
             if active && task != nil && navigation.startingTask == nil { await model.presentedTaskResult(key.id) }
         }
         .task(id: active && !model.preparingCreation ? navigation.startingTask?.id : nil) {

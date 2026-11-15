@@ -2,11 +2,13 @@ import Foundation
 import Observation
 import SwiftUI
 
-/// A submitted conversation has an operation identity before it has a Task or
-/// Session. Native attachment and route selection belong to each host.
+/// One submitted command, before and after saving. Selection and native
+/// attachment stay with their hosts.
 @MainActor @Observable
-public final class CreationOperation: Identifiable {
+public final class PendingOperation: Identifiable {
     public let id: String
+    public let payload: Data
+    public let kind: String
     public let request: String
     public let directory: String
     public let wave: String?
@@ -20,6 +22,12 @@ public final class CreationOperation: Identifiable {
     public private(set) var evidence: OperationReceipt?
     public private(set) var legacyOutcome: JSONValue?
     public var sessionID: String? {
+        if kind == "session.new", evidence?.validation == .bound {
+            let result = evidence?.result ?? evidence?.commits.last(where: {
+                $0.stage == "session.input_replaced" && $0.resolution == .committed
+            })?.result
+            if case .string(let id) = result?["id"] { return id }
+        }
         if let session = receipt?.sessionId { return session }
         if case .string(let id) = legacyOutcome?["receipt"]["session_id"] { return id }
         return nil
@@ -31,11 +39,11 @@ public final class CreationOperation: Identifiable {
     }
 
     public enum Action: String, Identifiable, Sendable {
-        case tryAgain = "Try again", edit = "Edit request", check = "Check request", inspect = "Inspect", open = "Retry opening"
+        case tryAgain = "Try again", edit = "Edit request", check = "Check request", inspect = "Inspect"
         public var id: String { rawValue }
     }
     public struct Presentation {
-        public let status: String
+        public let messages: [String]
         public let actions: [Action]
         public let evidence: String?
     }
@@ -49,29 +57,57 @@ public final class CreationOperation: Identifiable {
         }
         return recovery?.needsInspection == true
     }
-    public var isListed: Bool { recovery?.resultPresented != true || needsInspection }
+    public var isCreation: Bool { kind == "task.create" }
+    public var title: String {
+        if isCreation { return receipt?.task.title ?? request }
+        let command = try? JSONDecoder().decode(JSONValue.self, from: payload)
+        let noun: String
+        switch kind {
+        case "task.complete": noun = "Complete Task"
+        case "task.update": noun = "Update Task"
+        case "task.move": noun = "Move Task"
+        case "task.reopen": noun = "Reopen Task"
+        case "session.new": noun = "New Session"
+        default: noun = "Request"
+        }
+        if case .string(let issue) = command?["issue"] { return "\(noun) · \(issue)" }
+        return noun
+    }
+    public var isListed: Bool {
+        if needsInspection { return true }
+        if OperationDeclaration(kind: kind)?.requiresPresentation == true { return recovery?.resultPresented != true }
+        return evidence?.delivery != .finished
+    }
+    // Delivery is paused after a failed attempt until Check request deliberately
+    // restarts it. A store publication alone must not make a retry loop.
+    var deliveryFailed = false
+    var deliveryAttempt: UUID?
 
     /// Native readiness stays with the attachment owner; both hosts use the same
     /// recovery vocabulary for the submitted command.
-    public func presentation(openingError: String? = nil) -> Presentation {
+    public func presentation() -> Presentation {
         var actions: [Action] = []
-        if !saved, error != nil { actions += [.tryAgain, .edit] }
-        if saved, receipt == nil || needsInspection { actions.append(.check) }
-        if sessionID != nil, openingError != nil { actions.append(.open) }
+        if !saved, error != nil {
+            actions.append(.tryAgain)
+            if isCreation { actions.append(.edit) }
+        }
+        if saved, evidence == nil || needsInspection { actions.append(.check) }
         let evidence = evidence.flatMap { try? JSONEncoder().encode($0) }
             ?? legacyOutcome.flatMap { try? JSONEncoder().encode($0) }
         if evidence != nil, needsInspection { actions.append(.inspect) }
-        var messages = [openingError, error].compactMap { $0 }
+        var messages = [error].compactMap { $0 }
         if saved, needsInspection, self.evidence?.delivery == .finished || self.evidence?.delivery == .uncertain {
             messages += recovery?.messages ?? []
         }
         var seen = Set<String>()
         messages = messages.filter { seen.insert($0).inserted }
-        return Presentation(status: messages.isEmpty ? "Starting conversation…" : messages.joined(separator: "\n"),
+        return Presentation(messages: messages,
             actions: actions, evidence: evidence.map { String(decoding: $0, as: UTF8.self) })
     }
 
-    init(id: String, request: String, directory: String, wave: String?, graph: String?, submittedAt: Date, destination: String?) {
+    init(id: String, payload: Data, kind: String, request: String, directory: String, wave: String?, graph: String?, submittedAt: Date, destination: String?) {
+        self.payload = payload
+        self.kind = kind
         self.destination = destination
         self.id = id
         self.request = request
@@ -81,15 +117,15 @@ public final class CreationOperation: Identifiable {
         self.submittedAt = submittedAt
     }
 
-    convenience init(_ value: CreationOperationSnapshot) {
-        self.init(id: value.record.id, request: value.request, directory: value.directory,
+    convenience init(_ value: PendingOperationSnapshot) {
+        self.init(id: value.record.id, payload: value.record.payload, kind: value.kind, request: value.request, directory: value.directory,
             wave: value.wave, graph: value.graph, submittedAt: value.record.submittedAt, destination: value.record.destination)
         receive(value)
     }
 
     func markSaved() { saved = true }
 
-    func receive(_ value: CreationOperationSnapshot) {
+    func receive(_ value: PendingOperationSnapshot) {
         saved = true
         destination = value.record.destination
         receipt = value.result
@@ -106,12 +142,12 @@ public final class CreationOperation: Identifiable {
 
 /// Recovery controls stay available beside a live conversation as well as its
 /// pending row. Hosts supply only their native opening and editor actions.
-public struct CreationRequestActions: View {
-    public let presentation: CreationOperation.Presentation
-    public let perform: (CreationOperation.Action) -> Void
+public struct PendingCommandActions: View {
+    public let presentation: PendingOperation.Presentation
+    public let perform: (PendingOperation.Action) -> Void
     @State private var inspecting = false
 
-    public init(presentation: CreationOperation.Presentation, perform: @escaping (CreationOperation.Action) -> Void) {
+    public init(presentation: PendingOperation.Presentation, perform: @escaping (PendingOperation.Action) -> Void) {
         self.presentation = presentation
         self.perform = perform
     }
@@ -139,8 +175,9 @@ public struct CreationRequestActions: View {
     }
 }
 
-struct CreationOperationSnapshot: Sendable {
+struct PendingOperationSnapshot: Sendable {
     let record: SubmittedOperation
+    let kind: String
     let request: String
     let directory: String
     let wave: String?
@@ -154,10 +191,14 @@ struct CreationOperationSnapshot: Sendable {
     init(record: SubmittedOperation, command: JSONValue, receipt: OperationReceipt?, recovery: OperationRecovery?, legacyOutcome: JSONValue?) throws {
         self.legacyOutcome = legacyOutcome
         self.record = record
-        guard case .string(let directory) = command["directory"] else {
-            throw RegistryQueryError("The saved creation has no repository; its original request is retained")
+        guard case .string(let kind) = command["kind"] else {
+            throw RegistryQueryError("The saved command has no kind; its original request is retained")
         }
-        self.directory = directory
+        self.kind = kind
+        if case .string(let directory) = command["directory"] { self.directory = directory }
+        else if kind == "task.create" {
+            throw RegistryQueryError("The saved creation has no repository; its original request is retained")
+        } else { self.directory = "" }
         if case .string(let text) = command["request"] { request = text }
         else if case .string(let title) = command["title"] { request = title }
         else { request = "" }
@@ -167,7 +208,7 @@ struct CreationOperationSnapshot: Sendable {
         self.recovery = recovery
         let result = receipt?.result ?? receipt?.commits.last(where: { $0.stage == "task.filed" && $0.resolution == .committed })?.result
         // A candidate cannot replace the outcome of the original command.
-        if receipt?.validation == .bound, let result, result != .null {
+        if kind == "task.create", receipt?.validation == .bound, let result, result != .null {
             do {
                 let parsed = try JSONDecoder().decode(TaskCreateReceipt.self, from: JSONEncoder().encode(result))
                 self.result = parsed

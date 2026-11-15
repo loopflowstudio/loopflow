@@ -70,24 +70,24 @@
 - Retired imported/editor-linked creations keep only request/draft identities,
   a canonical command digest and retirement time in the same SQLite owner, outside
   indexed pending reads. Legacy files use their modification date as submission
-  time. Internal migration choices; release on source rewrite is built but the
-  next cut deletes it (last bullet).
+  time. Source rewrites keep that compact identity; there is no release lifecycle.
+  This headless engineering choice trades roughly 200 bytes per phone-created Task
+  for deleting cross-file coordination; it is not a recorded preference.
 
 - Creation action labels, headless reversible choice from the 2026-11-15
   concept-review: one vocabulary on both hosts, replacing Desktop "Retry
   recovery" and phone "Check status" for the same call. Built: **Try again**
   (never saved), **Edit request**, **Check request** (saved, outcome unknown),
-  **Retry opening** (Session recorded, attachment failed). Copy only; nobody has
+  **Inspect** (receipt needs attention). Reopening belongs to attachment. Copy only; nobody has
   stated a preference. Request rows currently sit above the Task list on both
   hosts; their position has not been discussed.
 
 - Phone reopen label, noticed in the 2026-11-15 headless concept review: the
   creation cut changed the phone Session's disconnected card from "Reconnect" to
-  "Retry opening" for every Session by reusing the creation action's label. Next
+  "Retry opening" for every Session by reusing the creation action's label. The current
   cut restores "Reconnect" there (existing copy) and keeps Desktop's "Retry
   opening". Whether both hosts should use one word, and which, is undiscussed.
 
-- Retired source identities, headless reversible choice from the same review:
-  keep the compact row (IDs, digest, time; no words) instead of releasing it when
-  the editor file is rewritten. Trades about 200 bytes per phone-created Task for
-  deleting the cross-file release path. Not a recorded preference.
+- The portfolio's Waves status strip retains its prior non-creation scope and
+  renders the shared pending-command row. Creation destinations and their editors
+  live in repository windows; the Task navigator and phone feed list all kinds.

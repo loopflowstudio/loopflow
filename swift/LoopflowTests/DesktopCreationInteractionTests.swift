@@ -22,8 +22,8 @@ extension ClientWorkQueryTests {
         await owner.persistPending()
         let view = StartingTaskView(model: model, launch: operation)
         _ = try view.inspect().find(button: "Edit request")
-        XCTAssertEqual(model.pendingCreations.count, 1)
-        XCTAssertTrue(model.completionFailures.isEmpty)
+        XCTAssertEqual(model.pendingCommands.count, 1)
+        XCTAssertEqual(model.pendingCommands.map(\.id), [operation.id])
         fault.recover()
         try view.inspect().find(button: "Try again").tap()
         await owner.persistPending()
@@ -52,7 +52,7 @@ extension ClientWorkQueryTests {
         defer { restarted.shutdown(); server.finish() }
         restarted.start()
         await restarted.refreshFromStore()
-        let restored = try XCTUnwrap(restarted.listedCreations.first)
+        let restored = try XCTUnwrap(restarted.listedOperations.first)
         let fixture = try WorkTestFixture.load()
         let model = WorkModel(query: fixture.query, repoPath: "/repo")
         model.useInteractionForTesting(restarted)
@@ -74,6 +74,7 @@ extension ClientWorkQueryTests {
         XCTAssertNil(model.beginTask(request: "Keep these words", wave: nil, graph: nil))
         XCTAssertEqual(model.navigation.newTaskDraft?.request, "Keep these words")
         XCTAssertNil(model.navigation.startingTask)
+        _ = try NewTaskSheet(model: model).inspect().find(text: "Open a repository to start a Task.")
     }
 
     func testDesktopStartSelectsOperationBeforeHeldSaveAndLateFilingLeavesBSelected() async throws {
@@ -120,9 +121,9 @@ extension ClientWorkQueryTests {
         await waitForCreation(operation) { operation.receipt?.sessionId != nil }
         XCTAssertEqual(model.selection, .task(id: "issue-review"))
         XCTAssertTrue(server.submissions.isEmpty)
-        XCTAssertEqual(model.pendingCreations.count, 1)
+        XCTAssertEqual(model.pendingCommands.count, 1)
         await model.presentedTaskResult("created")
-        XCTAssertTrue(model.pendingCreations.isEmpty)
+        XCTAssertTrue(model.pendingCommands.isEmpty)
         XCTAssertEqual(model.selection, .task(id: "issue-review"))
     }
 }

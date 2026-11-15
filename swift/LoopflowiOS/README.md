@@ -38,7 +38,8 @@ Task row, clears the redundant request row; unresolved recovery stays visible.
 After a local save failure, **Try again** retries the same ID and **Edit request**
 returns the words to the editor. Once saved, **Check request** recovers the original
 result and **Inspect** shows its receipt when recovery needs attention.
-**Retry opening** reopens the same Session after attachment fails.
+**Reconnect** reopens the same Session after attachment fails. Each pending command
+has one row with the same recovery controls.
 
 The shared SQLite outbox saves the original request
 before `operation.submit` admits it. Receipt subscriptions observe preparation;
@@ -49,8 +50,8 @@ including exact words, request IDs and saved outcomes. Matching outbox records k
 their receipt and send history. Conflicting or unreadable files remain intact;
 missing historical receipts require inspection rather than another submission.
 Unsent editor text remains a draft. Retired requests keep only a command digest
-and source identity while a surviving editor file could submit again; a rewritten
-source releases that identity.
+and source identity, so a surviving editor file cannot submit again. They retain
+no authored words or receipts.
 
 The Task feed restores confirmed query bases from that same SQLite store. Older
 replies cannot replace newer saved bases; a retired command leaves a required

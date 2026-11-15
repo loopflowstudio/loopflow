@@ -61,7 +61,7 @@ struct SessionView: View {
         case .notRunning:
             card("The Session is saved, but not running.", action: "Start it") { Task { await link.start() } }
         case .disconnected(let reason):
-            card(reason, action: CreationOperation.Action.open.rawValue) { Task { await link.open() } }
+            card(reason, action: "Reconnect") { Task { await link.open() } }
         }
     }
 

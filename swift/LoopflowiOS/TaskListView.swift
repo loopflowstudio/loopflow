@@ -135,7 +135,7 @@ struct TaskListView: View {
         var work: WorkWorkspaceKey? { if case .work(let key) = self { key } else { nil } }
     }
     @State private var path: [Destination] = []
-    @State private var selectedOperation: CreationOperation?
+    @State private var selectedOperation: PendingOperation?
     @State private var retained: [WorkWorkspaceKey: WorkViewPlan.Content] = [:]
     /// The repository shown, by durable ID; empty shows every repository.
     @AppStorage("repository") private var repository = ""
@@ -185,19 +185,25 @@ struct TaskListView: View {
     var body: some View {
         NavigationStack(path: $path) {
             List {
-                ForEach(client.interaction.listedCreations) { operation in
-                    Button { selectedOperation = operation; path = [.operation(operation.id)] } label: {
-                        VStack(alignment: .leading) {
-                            Text(operation.request).lineLimit(2)
-                            Text(operation.presentation().status).font(Typography.caption(13))
-                        }
-                    }
-                }
-                ForEach(client.interaction.failures) { failure in
+                ForEach(client.interaction.listedOperations) { operation in
                     VStack(alignment: .leading) {
-                        Text(failure.message)
-                        Button("Retry Complete") { client.interaction.retry(failure.id) }
-                    }
+                        if operation.isCreation {
+                            Button { selectedOperation = operation; path = [.operation(operation.id)] } label: {
+                                Text(operation.title).lineLimit(2)
+                            }
+                        } else { Text(operation.title) }
+                        let presentation = operation.presentation()
+                        Text(presentation.messages.isEmpty ? "Request pending…" : presentation.messages.joined(separator: "\n"))
+                            .font(Typography.caption(13))
+                        PendingCommandActions(presentation: presentation) { action in
+                            switch action {
+                            case .edit:
+                                client.interaction.editCreation(operation.id) { creation = MobileTaskCreation(client: client, request: $0) }
+                            case .tryAgain, .check: client.interaction.retry(operation.id)
+                            case .inspect: Task { try? await client.interaction.presented(operation.id) }
+                            }
+                        }
+                    }.buttonStyle(.borderless)
                 }
                 if let error = feed.error ?? client.interaction.cacheError {
                     VStack(alignment: .leading, spacing: 8) {

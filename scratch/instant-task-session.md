@@ -1,6 +1,6 @@
 # LOO-906: immediate interactions across Desktop and mobile
 
-Realigned 2026-11-15 at code `72bb1d06d4` on origin/main `9cafc410ee`
+Implementation updated 2026-11-15 after creation cut `72bb1d06d4` on origin/main `9cafc410ee`
 (unchanged). Supersedes the Desktop-only delivery
 boundary. No shipping or merge decision is recorded. Placement remains this Task;
 no Wave is selected.
@@ -86,302 +86,68 @@ flowchart LR
     Native[Retained Session and surface owners] --> Views
 ```
 
-## Proposed contracts
+## State, ordering and reconciliation contracts
 
-Shared implementation belongs in `swift/Loopflow`, used by both app targets.
-One `ClientWorkStore` per connected Machine/account in each app process; all
-Desktop windows share it. Windows and mobile routes own selection and drafts.
-Devices share semantics, not an in-memory instance or credentials. A shared
-`InteractionModel` implementation holds per-window/route selection, disclosure
-and generation; purely local actions never enter the server outbox.
+Detailed contracts and counterexamples before the presentation cut remain at
+`737b50adba26689bb27e67839d9ab9b90564bf50:scratch/instant-task-session.md`
+under Proposed contracts through Opening another query. Live requirements:
 
-- `OperationID`: client UUID, durable across reconnect/restart. Separate from
-  transport request IDs and Task/Session identities. New destinations initially
-  refer to an operation; server receipts bind real entity IDs without fake DTOs.
-- `PendingOperation`: immutable typed command, Machine, original scope, local
-  sequence, resource lanes, dependencies, projection effect and delivery state.
-  Saving, queued, sent/uncertain, accepted, committed and rejected describe real
-  different facts; they are not separate screens. Execution/attachment readiness
-  belongs to existing Session/Graph owners.
-- `ReadingStamp`: Machine, store epoch, query/scope and schema identity, complete
-  coverage, domain revision vector. Frames carry the stamp from the same pinned
-  snapshot as their contents. External observations retain their own freshness;
-  they cannot certify a SQLite commit. Epoch changes force reconciliation.
-- `OperationReceipt`: ID, payload fingerprint, authoritative disposition/result,
-  affected resources and commit fence. The domain writer records that fence and
-  committed result in the transaction that changes displayed facts; reading the
-  global counter after a slow command returns is insufficient. Multi-stage commands
-  publish stage-specific commits, not a guessed final fence. A receipt may report
-  accepted but still settling. Rejection is definitive only when its effect did not commit; partial
-  external effects are retained as uncertain/recoverable, never called rolled back.
-- `ProjectedWork`: confirmed records/query membership plus ordered local effects
-  and pending/error annotations. It is presentation data, not a modified wire DTO.
-  Disk stores the confirmed cache and outbox atomically; Keychain/credentials stay
-  outside it and retained payloads keep existing device-protection policies.
+- Shared Swift owns each Machine's confirmed cache, ordered immutable commands,
+  receipt recovery and projected membership. Hosts own selection, drafts and
+  native readiness. Windows share an owner; devices share semantics. Save before
+  send; publish intent before disk or discovery. Never fabricate entity DTOs.
+- Keep IDs, original Machine/scope, sequence, resource lanes and dependencies.
+  Conflicting commands serialize; independent resources proceed concurrently.
+  Dependent commands await actual IDs. Unknown delivery blocks conflicting sends
+  until domain recovery establishes ordering. Undo after send is another command.
+- Persist cache, effects and outbox in one SQLite transaction owner. Released
+  files retain exact IDs, words, outcomes and unknown send history through import.
+  Recover sent work by original ID on its original Machine. Missing/unavailable
+  lookup or a replaced epoch never authorizes replay. Admission precedes Git,
+  planning, provider and domain waits; worker recovery requires domain permission.
+- Stamped readings cover the same pinned snapshot as their bodies: Machine,
+  epoch, schema, query identity/completeness and domain revisions. Reject departed
+  epochs and older revisions; checkpoint IDs and arrival order establish nothing.
+  Historical restoration still needs an epoch-reset mechanism.
+- Each semantic stage records its result and fence in the domain transaction.
+  `task.completion_requested` confirms intent; only `task.completed` confirms
+  removal. `task.filed` binds Task/Session without proving admission or input.
+  Provider/filesystem/planning readiness cannot borrow a SQLite fence.
+- Apply an ordered effect independently to each affected query until its complete
+  reading covers the confirming stage's fence. A covering count cannot discharge
+  a held list; a fresh query cannot subtract twice while another remains behind.
+  Partial pages, unrelated domains, native mounts and command return don't
+  establish incorporation. Query identity/plan changes invalidate prior coverage.
+- Three independent obligations retain a command: domain recovery, remaining
+  query coverage and an unseen creation result. Mount or Inspect acknowledges
+  presentation only. Retirement transfers lagging effects into bounded retained
+  bases, or invalidates closed bases under persisted scoped floors. Reopen, another
+  window or another filter must reconcile pending effects before its first cached
+  frame. Later queries require a covering base even after command retirement.
+- Definite refusal removes only effects proved uncommitted. Partial success keeps
+  committed facts and inspection for unresolved stages. Supersession belongs in
+  existing typed stage resolutions, identifying the withdrawn request and its
+  replacement fence. A covering replacement reading restores membership without
+  navigation; a late settler cannot complete a withdrawn request. Never borrow a
+  newer completion's outcome. No generic error or missing stage proves rollback.
+- Normalize display facts with domain provenance across queries. Unknown or
+  incomparable freshness remains labeled/stale rather than replacing known facts.
+  Complete filtered absence removes membership, never entity/native lifetime.
+  Declarative membership supplies scopes, paths, ordering, counts and dependencies;
+  use a portable core if client projection cannot express all queries.
+- Every mutation declares effect stages, dependencies and recovery policy in an
+  exhaustive registry. Value changes project values; membership changes project
+  every known list; execution projects intent only. Retain file-base conflicts,
+  existing control ownership and no offline terminal-byte queue.
 
-Core API shape:
-
-```swift
-@MainActor func begin(_ command: WorkCommand, from origin: InteractionOrigin) -> OperationID
-func receive(_ reading: StampedWorkReading)
-func receive(_ receipt: OperationReceipt)
-func projection(for query: WorkQuery) -> ProjectedWork
-@MainActor func select(_ destination: WorkDestination) // local state, no I/O
-@MainActor func setExpanded(_ wave: WaveID, _ expanded: Bool) // local disclosure
-func recover(_ id: OperationID) async
-```
-
-`begin` publishes locally before its first await; persistence completes before
-send. Save failure removes only that effect and retains editable words. The
-outbox, receipt handling and projection update use one serialized reducer and one
-transactional disk owner. Draft debounce remains independent. On restart, load
-saved layers before displaying cached queries, then look up each sent operation on
-its original Machine. Only definitely unsent or domain-authorized continuations
-send; an unavailable lookup never means absence. Offline queueing is explicit and
-limited to typed durable commands; controls requiring a live owner remain paused.
-
-Generalize the current creation receipt owner rather than adding another server
-ledger. Preserve all saved creation payloads, IDs and outcomes in one finished
-additive migration. The physical table name may remain `creation_receipts` during
-released-binary coexistence; there is one logical receipt store and no dual write.
-Every UI command uses a typed operation envelope and durable lookup. CLI output
-and domain execution remain their existing owners. Transport admission is a new
-operation-envelope acknowledgment; it does not weaken the existing Task creation
-receipt's Graph-admitted milestone. New envelope/stamp fields require a negotiated
-protocol revision, shared DTO fixtures and coordinated app/helper deployment.
-
-The server records admission before dispatch and returns its operation identity
-without waiting for planning, Git or provider readiness. Reuse the existing
-bounded effect execution; preserve jobs across client disconnection. A server
-restart resumes only domain-proven continuations. A recorded dispatch whose effect
-cannot be established becomes uncertain; there is no generic replay of arbitrary
-writes. Creation's Continue/Inspect rules and completion's durable request become
-domain recovery handlers under this one receipt owner. Operation observation
-gets a change revision/notification; recovery is not a five-second UI poll.
-
-## Ordering, reconciliation and query coverage
-
-Project layers in local sequence order. Commands touching the same entity serialize
-dispatch; multi-entity commands acquire a deterministic set of resource lanes.
-Different resources can proceed concurrently. A dependent command waits for real
-IDs; independent operations do not wait for a whole-repository refresh.
-
-For Complete A followed by Reopen B: both intent changes appear immediately; A's
-success or rejection removes/rebases only A, leaving B. Uncertain A blocks B's
-conflicting dispatch until recovery establishes ordering. Once sent, commands are
-immutable; Undo is a new command, not deletion of a possibly executed request.
-Other devices' changes enter as newer authoritative facts and are rebased below
-remaining local intent. Server revisions/preconditions resolve concurrent edits;
-field conflicts retain drafts and show the current value.
-
-A response cannot retire projection layers merely because it arrived last. For
-each affected query, retain the effect until that query's complete stamped reading
-dominates the receipt's commit fence. Unrelated parts, cached frames, query changes,
-missing entities in partial pages and a fresh native surface cannot acknowledge it.
-After all affected cached queries converge, drop the layer; retain failed or
-uncertain durable requests until resolved. Closed queries are invalidated and
-must reload beyond their fence before their cached base can be shown unoverlaid.
-
-Keep the durable operation's lifetime separate from where its effect still
-applies. Once a query incorporates a committed operation, stop applying that
-operation to that query, even while another query remains behind its fence.
-Retaining the operation for recovery must not subtract a completed Task twice
-from a fresh count. Track incorporation per affected query; retire the durable
-operation only after its remaining coverage obligations are discharged.
-
-Normalized records also need provenance across queries. Accept confirmed database
-facts only when the incoming stamp covers the domains those facts depend on and
-does not regress their stored revisions within the same Machine/epoch/schema.
-Generate those dependencies with the membership vocabulary; never order facts by
-arrival, checkpoint ID or query hash. Merge independently stamped fact groups;
-when freshness cannot be ordered, retain the known value as stale and request a
-covering reading rather than choosing a winner. External observations keep their
-own freshness. Missing membership in a complete filtered query removes that
-membership, not the normalized entity or its retained workspace. A partial or
-unavailable result establishes neither removal nor incorporation.
-
-Changing epoch invalidates comparison with the old confirmed cache and fences.
-Bind incoming frames to the active connection/store generation so a delayed old
-frame cannot switch the cache back. Keep submitted operations, their original
-identity and pending presentation while recovering receipts on the original
-Machine. An old fence cannot acknowledge the replacement base, and epoch reset
-is never permission to resend uncertain work.
-Historical-backup restoration must establish a new epoch before serving cached
-clients; the reset mechanism remains implementation work.
-
-Normalize Task/Session/Wave identity across lists, detail pages, boards, searches
-and counts. Cut `WorkViewPlan` membership over to a server-produced declarative
-selection/group/sort plan over display facts, evaluated by the shared client
-projection owner. Generate its vocabulary from Rust and enforce cross-language
-fixtures; do not write a second ad hoc Task status resolver in Swift. An unloaded
-page keeps explicit unknown membership plus a pending result, rather than a
-fabricated row or count. Do not remove
-an overlay merely because another client has changed a different domain revision.
-Every `ServedWrite` and UI configuration mutation must declare affected entities,
-queries and projection policy in an exhaustive registry: editable-value change,
-membership change, or immediate pending execution with no predicted execution fact.
-
-### Effect acknowledgment follows the domain stage
-
-Next implement direction from concept-review: the operation is the durable request;
-its projected effects have separate acknowledgment obligations. Delivery, domain
-commit, query incorporation and native readiness are independent facts, not phases
-of one screen. Keep the existing receipt owner and stage results; do not add a
-second lifecycle ledger to make them appear linear.
-
-The exhaustive command registry must map each projected effect to its confirming
-semantic stage and fact domains, affected query dependencies, and recovery policy.
-A stage fence can discharge only the effects that stage establishes. For Complete,
-`task.completion_requested` confirms pending intent, not completed membership. Only
-`task.completed` plus a covering reading can replace the optimistic removal with
-confirmed membership. A read that covers the request stage while settlement is held
-must not restore the row or retire its removal. For Start, `task.filed` can bind
-Task/Session identity without proving Graph admission, attachment or input readiness.
-An operation can therefore have incorporated effects and unresolved effects at once.
-
-For each effect/query obligation, apply the overlay until a complete covering read
-incorporates the confirming stage; then use the newer confirmed facts for that
-query. Keep unresolved effects and their recovery annotations. Query incorporation
-and cache replacement persist atomically with the outbox so restart cannot apply a
-count delta twice or reveal a pending row between loading base and layers. No-op
-success must provide a domain-established current result/fence or a covering
-confirmation read; neither a missing stage nor `finished` alone acknowledges it.
-
-A definite refusal removes only effects proved not to have committed. If one stage
-committed and a later stage fails, retain its confirmed facts, reconcile those
-queries and recover the remaining effect in place. Absence of commits is not proof
-of refusal: a filesystem/provider effect can happen before receipt recording.
-External facts need their own confirmation contract, never a fabricated SQLite
-fence. Keep unavailable and uncertain outcomes inspectable with the saved command;
-recovery never reselects a destination or generically resends a dispatched command.
-
-Counterexamples required before both-client cutover:
-
-- Complete saves its request, then settlement is held. A fresh list covers only
-  the request fence: the row remains projected out. Settlement refusal restores it
-  from the latest base only when the domain establishes no completion effect.
-- Settlement commits, then planning sync or command output fails. The Task stays
-  completed, even after restart, while the remaining failure stays visible.
-- One count covers settlement while another list is held; restart between their
-  replies. Each query incorporates the removal once, independently of delivery.
-- A Task is filed while Graph admission or native attachment fails. Keep its exact
-  Task/Session and submitted words; Retry opening never creates another Task.
-- A successful no-op or external mutation returns without a new SQLite stage.
-  Resolve its stated confirmation obligation; never retire all effects merely
-  because command output succeeded.
-
-### Superseding an intent must resolve its effect
-
-Next implement direction: a domain request can end without producing its intended
-effect. Record that resolution in the existing receipt owner, separately from
-command delivery and from successful commits. In particular, withdrawing a saved
-completion request must not leave its optimistic removal and resource lane pending
-forever. This follows the existing newer-facts/rebase contract; it introduces no
-new product choice or cancellation control.
-
-Concrete recovery: Complete A hides its row and selects B. While settlement is
-held, Reopen from another client or the CLI withdraws A's exact saved request.
-The withdrawing domain transaction records supersession for that request's
-subscribers, with its replacement-fact fence. A covering read restores A from
-the latest base; B stays selected. A late settler cannot complete the withdrawn
-request. If completion committed before Reopen, retain that original commit and
-result instead; the newer covering facts show Reopen. Neither path repeats Complete
-or borrows a later completion's result.
-
-Extend the effect/stage registry and Rust/Swift receipt contract with typed domain
-resolutions for committed, definitely refused and superseded effects, alongside
-pending/uncertain recovery. Keep them in the one receipt owner. A generic error,
-missing request, current Task status or `delivery=finished` is insufficient to
-infer a resolution. Every writer that withdraws or replaces a domain request must
-record it in the same transaction, including CLI and periodic writers. Historical
-rows without that record stay inspectable unless domain recovery can establish
-the exact outcome. Extend the single draft migration and cross-language fixtures.
-
-Persist each effect's resolution and per-query incorporation with the confirmed
-cache. Supersession does not immediately expose a stale base: keep the pending
-projection until a covering replacement reading (or an authoritative replacement
-fact in the same transaction) can rebase it. Release conflicting dispatch only
-when domain recovery establishes the relevant prior writer can no longer mutate
-that resource; retained query coverage alone must not hold the execution lane.
-Outstanding external stages keep their own recovery and ordering obligations.
-Refusal or supersession never erases an earlier commit or declares provider,
-planning or cleanup work rolled back. A recovered Task result with a retained
-error must still expose the unresolved stage's recovery action on both clients.
-
-Before projection cutover, hold settlement across withdrawal, restart and reordered
-receipt/list/count replies. Race settlement against Reopen in both transaction
-orders, and withdraw an old request before completing a newer one. Assert eventual
-row/count convergence, unchanged later selection, no duplicate dispatch and no
-permanent lane blockage once that domain obligation resolves. These extend the existing success and uncertainty cases. Server withdrawal and
-restart cases now record supersession; client projection and navigation checks
-remain open.
-
-### Seeing a result does not incorporate its effects
-
-Next implement direction: replace presentation-driven deletion with a presentation
-acknowledgment in the same durable operation record. A mounted Task/Session or
-Inspect result can acknowledge that its saved result was shown. It cannot confirm
-query membership, release a resource lane, establish native input readiness or
-resolve domain uncertainty. No new receipt ledger or user-facing phase is needed.
-
-Keep three independent retention obligations: unresolved domain recovery,
-unincorporated effect/query coverage, and an unpresented creation result. Retire
-the saved command only when all applicable obligations are discharged. Persist
-the presentation acknowledgment alongside the operation; query incorporation,
-cache replacement and resulting retirement remain one transaction. A closed query
-can discharge coverage through persisted invalidation and its required reload
-fence, never by silently treating its old cache as current. Queries already
-incorporated stop applying the effect even while the operation remains retained.
-
-For Start, show the exact admitted conversation immediately. Once its result is
-shown, remove the redundant recovery prompt, while retaining the command and
-remaining effects internally until covering facts arrive. Closing that window or
-restarting cannot lose the pending list/count obligations. Conversely, converged
-queries do not discard an unseen recoverable creation result. Attachment failure
-still offers Retry opening for the same Session; viewing an Inspect receipt does
-not settle that failure, hide its recovery action or authorize another creation.
-An epoch change invalidates
-old fact comparisons without undoing the local fact that a result was shown;
-that acknowledgment cannot certify the replacement database.
-
-Required counterexamples: mount a finished creation while another window's list
-and count are held, then restart; inspect only receipt text without a stamped Work
-reading; converge all queries before any result mounts; show a partially committed
-creation whose attachment failed; replace the epoch between presentation and
-incorporation. Each retains exactly its outstanding obligations, with no duplicate
-count delta, replay, recovery prompt or navigation change. Cover both clients.
-
-### Opening another query must preserve pending intent
-
-Next implement direction: affected-query coverage is a dependency rule, not a
-fixed list of the views open when `begin` runs. Opening another window, changing a
-filter or returning to a cached query must evaluate the same ordered effects
-before exposing its first cached frame. Derive applicability from the command's
-resource/fact dependencies and the declarative query plan. Persist the plan's
-identity/version with cached membership; a changed plan cannot reuse an old
-incorporation acknowledgment. Unknown membership stays unknown as specified above.
-
-Concrete interaction: Complete A hides it in Working, then open Dashboard while
-its older cached count still includes A. Apply the same removal there. If that
-count instead comes from a covering settlement reading, do not subtract again.
-If Reopen superseded the request, retain the pending projection only until a
-replacement reading covers that resolution. None of these reads changes selection.
-
-Make operation retirement finite without requiring every possible future query
-to be opened. In the cache/outbox transaction, either incorporate each affected
-stored query or invalidate its base with its required confirmation fence. Opening
-an invalidated query cannot expose that stale base as current. Queries created
-later evaluate retained effects; after operation retirement they must use a base
-that satisfies the persisted invalidation requirement or fetch a covering reading.
-Keep such requirements with cache provenance, not an immortal saved command.
-An epoch change still requires original-Machine recovery; invalidation is never
-permission to replay uncertain work.
-
-Before cutover, open a second window/query after Complete, close every affected
-view, restart, then reopen from disk. Reorder a covering count and lagging list;
-change filter/plan identity while replies are held. Assert one removal per query,
-no stale row flash, no lost effect and eventual operation retirement without
-opening every view. Cover Desktop and mobile through the same reducer.
+Acceptance retains held settlement, definite refusal, commit followed by failed
+planning/output, reordered list/count and restart, supersession in either race
+order, withdrawing old then completing new, unseen/seen creation with lagging
+queries, Inspect without a Work reading, epoch replacement, new queries/windows
+and changed filters after Complete, closed-query restart and eventual retirement.
+Each checks one effect per query, unchanged later navigation, no replay or permanent
+lane blockage. Missing correlation stays inspectable. Both clients use the same
+reducer; two-client closed-query convergence remains open.
 
 ## Local navigation, disclosure and retained content
 
@@ -455,14 +221,14 @@ existing bounded input owners: no offline keystroke queue or automatic resend.
 
 Already removed: the list at `908e317e4f:scratch/instant-task-session.md`, plus
 creation in `CreationRecovery`, its Task presentation map, host request filters
-and the phone query-before-opening path. `LegacyTaskDraft` reads released files
+and the phone query-before-opening path. The pending-command cut also removes
+`CreationOperation`, `WorkInteraction.Failure`, the failure collections,
+`WorkModel.completionFailures`, Retry Complete rows, creation-owned reopening,
+retired-source release APIs/index and the rest of `CreationRecovery`. `LegacyTaskDraft` reads released files
 only; SQLite commits precede rewrites.
 
 Still remove, with their consumers:
 
-- `WorkInteraction.Failure`/`failures`, `failedCreations`, `failedDeliveries`,
-  `WorkModel.completionFailures`, both "Retry Complete" rows, `CreationOperation.Action.open`,
-  the retired-source release path and the rest of `CreationRecovery` (next direction).
 - Desktop `TaskRunDraft.phase`, `abandoningTaskIDs`, other mutation refresh
   barriers and rename/bind replacement bookkeeping.
 - View-owned mobile `SessionLink` teardown on ordinary Task switching; keep
@@ -565,22 +331,21 @@ remains unexercised.
 
 Built at `5ccc4563bd`; direction and acceptance at
 `6e944e73b5a:scratch/instant-task-session.md`, summarized under Current
-implementation cut. The iOS README still names **Retry opening** (item 3).
+implementation cut. The phone attachment now names **Reconnect**.
 
 ### A submitted conversation is one thing on both hosts
 
 2026-11-15 creation presentation cut. The inspected predecessor map and complete
 acceptance direction are at `908e317e4f3605766b6dc67c0a4be87ce32eb19f:scratch/instant-task-session.md`
-under this heading. Shared `CreationOperation.presentation` now supplies status,
-actions and inspection text. `CreationRequestActions` renders the same controls
+under this heading. Shared `PendingOperation.presentation` now supplies status,
+actions and inspection text. `PendingCommandActions` renders the same controls
 in both conversations and Desktop's pending row, including after native readiness.
-Both hosts list `WorkInteraction.listedCreations`;
+Both hosts list `WorkInteraction.listedOperations`;
 ordinary Task and Session mounts acknowledge by resource. Inspect acknowledges
 only when its receipt sheet mounts. A shown filed result hides normal Graph
 preparation; a later admission failure restores its request row without navigation.
-Creation failures no longer appear
-in the general failure list. `CreationRecovery` retains other command families,
-not Task creation or its presentation map.
+All command families now share the same failure presentation; the later cut
+deletes `CreationRecovery` entirely.
 
 The phone binds `SessionView` directly to the receipt's Session without a Work
 query or fabricated Task DTO. Native attachment owns input and Retry opening;
@@ -589,7 +354,7 @@ requires a repository and keeps the editor words when none is resolved.
 
 Retirement removes authored payloads and receipts. A compact identity in the same
 SQLite owner retains request ID, draft ID, command digest and retirement time.
-As built, source rewrites release it; item 4 below deletes that release. Opening
+Source rewrites no longer release it. Opening
 an older branch-format database compacts its retired payloads before file import.
 An editor cleanup crash must still prevent duplicate creation.
 
@@ -600,86 +365,51 @@ Attachment retry opens the recorded Session. Hold Graph admission after filing;
 restart after uncertain send; retire before editor cleanup. Native display and
 input latency remain demo/benchmark work, separate from these deterministic checks.
 
-### Next implement direction: a pending command is one thing, whatever its kind
+### A pending command is one thing, whatever its kind
 
-Concept review of the creation presentation cut (2026-11-15, headless; no code
-changed). The cut made a submitted conversation one thing across hosts. It left a
-submitted *command* as two things across kinds, and added a lifecycle that can be
-a record. Nothing below is a product choice; nobody has commented on it.
+2026-11-15 presentation cut, current worktree. The full inspected predecessor map
+and counterexamples remain at `737b50adba:scratch/instant-task-session.md` under
+Next implement direction. This is a headless engineering choice, not a recorded
+product preference.
 
-**1. One presentation for every pending command.** Creation renders
-`CreationOperation.presentation()` (status, actions). Complete renders
-`WorkInteraction.Failure` rows with their own "Retry Complete" button on both
-hosts. `WorkInteraction` now holds three failure stores for the same fact:
-`failures`, `failedCreations`, `failedDeliveries`. Disconnected Complete/rename/
-move ("1a", "Waiting for connection") would be a fourth. Build that work as the
-merge instead: one per-operation presentation derived from the saved command, its
-receipt and delivery state; the kind supplies only its noun and whether authored
-words exist. Vocabulary stays as built: **Try again** (never saved), **Edit
-request** (never saved, has words), **Check request** (saved, outcome unknown),
-**Inspect** (receipt needs attention), plus the status "Waiting for connection"
-(saved, unsent, no action required). Delete `Failure`, `failedCreations`,
-`failedDeliveries`, `WorkModel.completionFailures` and both "Retry Complete"
-rows. Desktop `SessionPaneView` currently acknowledges a shown result twice
-(`CreationPresentation(recovery: .shared…)` for `session.new` and the new
-`.task(id: creationRequests)`); `CreationRecovery`'s remaining families move to
-this owner in the same cut, then that file goes.
+`PendingOperation` replaces `CreationOperation` and `WorkInteraction.Failure`.
+The shared owner derives each pending command from its immutable payload, receipt
+and recovery state. Both lists render the same actions: Try again before save,
+Edit request for unsaved creation words, Check request for saved unknown outcomes,
+Inspect for receipt attention. Attention messages are data; hosts word normal
+progress without comparing copy. Failed unsaved completion withdraws only its
+effect, retains the original ID/payload for retry and never navigates again.
+Saved uncertain completion retains its removal through recovery.
 
-Counterexamples to hold: a Complete that failed to save keeps its row hidden
-state consistent with its presentation (Try again re-sends the same ID; giving up
-restores the row from the latest base); a saved Complete with a lost answer shows
-Check request and never restores the row on its own; a creation and a Complete
-failing together show two rows of the same shape, each with its own actions.
+`CreationRecovery`, its presentation map, per-kind failure collections and both
+Retry Complete rows are deleted. Session commands and Task edits observe through
+`WorkInteraction`, including shown-result acknowledgment by resource. Check request
+retires the old observation lease before looking up the saved outcome.
 
-**2. Presentation is data.** The phone decides whether to show recovery controls
-with `presentation().status != "Starting conversation…"`. Carry the attention
-messages separately (empty when nothing is wrong); each host words normal
-progress itself.
+Reopening belongs to native attachment: Desktop retains Retry opening from
+`taskOpening`; the phone restores Reconnect. No command action names opening.
+Desktop's new-Task sheet says Open a repository to start a Task when scope is
+missing; `beginTask` no longer silently refuses because another launch is selected.
 
-**3. Reopening belongs to the attachment owner.** `Action.open` appears only
-when a host passes `openingError` (Desktop does; the phone never does and handles
-it with `break`). Phone `SessionView` borrows `CreationOperation.Action.open.rawValue`
-for its disconnected card, which renamed **Reconnect** to **Retry opening** on
-every ordinary Session, not only created ones. Remove `.open` from the creation
-actions; the Session attachment view on each host owns its reopen control and
-`SessionView` names no creation type. Restore the phone's existing **Reconnect**;
-Desktop keeps **Retry opening** from `taskOpening`. The single word for both is a
-copy question in `questions.md`. READMEs follow the code.
+Retired imported/editor-linked commands retain compact IDs/digest/time permanently;
+no authored words or receipts. `sourceReleased`, its index and all source-release
+APIs/transactions are deleted. Start rotates the editor's in-memory draft revision
+before asynchronous cleanup; a failed file rewrite cannot re-submit the original
+revision. Existing branch-format retired payloads compact on open.
 
-**4. A retired source identity is a record, not a lifecycle.** The built cut
-retains a compact identity (request ID, draft ID, digest, time) and then releases
-it through `sourceReleased`, `releaseSources`, `retainCreationSource(before:)`,
-the `operations_sources` index, two `MobileTaskCreationClient` methods and a
-static that opens another Machine's database. Release coordinates two files by
-wall-clock comparison (`retiredAt <= before`, `submittedAt <= before`) and runs a
-write transaction after every debounced draft save. It reclaims roughly 200 bytes
-per phone-created Task and holds no authored words. Keep the identity row and
-delete the release path: `draftSubmitted` and the digest check in `save` already
-give "a draft revision submits at most once". Check during the cut that Start
-rotates the editor's in-memory draft ID even when the editor file rewrite fails,
-so new words are never refused as "already submitted". This reverses "source
-rewrites release that identity", which was a headless internal choice.
-
-**5. Desktop Start with no repository says so.** `canStart` now disables Start
-silently while the scope chip reads "repository". Show the reason in the sheet.
-`beginTask`'s `startingTask == nil` guard cannot fire from the sheet (opening the
-palette clears `startingTask`); drop it so no path refuses without a word.
-
-Proposed usage text, once built (both READMEs):
-> A change that hasn't finished shows as one row with what happened and what you
-> can do: **Try again**, **Edit request**, **Check request** or **Inspect**.
-> While disconnected it reads **Waiting for connection** and sends itself when the
-> Machine returns.
+Disconnected delivery and Waiting for connection remain implementation work;
+READMEs do not claim that behavior yet. The one presentation above is its owner.
 
 ## Current implementation cut
 
 Start and Complete publish through shared `WorkInteraction` on both hosts. Creation
 freezes ID/payload/scope/time before its synchronous selection callback, saves before
-send and derives `CreationOperation` from the saved command and receipt stages.
+send and derives `PendingOperation` from the saved command and receipt stages.
 Desktop keeps the operation selected through native readiness; iOS replaces its
 editor with an operation route. Neither receipt nor recovery navigates after
-leaving. Attachment Retry uses the recorded Session. A mounted result acknowledges
-presentation without settling independent query/planning obligations. Unsaved
+leaving. Attachment Retry uses the recorded Session. Only a bound Session result can acknowledge presentation by resource. Native
+readiness gates the pending creation mount, not ordinary Session recovery.
+A mounted result acknowledges presentation without settling independent query/planning obligations. Unsaved
 failure retains words for same-ID retry or deliberate editing.
 
 Phone files import each original Machine/ID/command/source/outcome into SQLite,
@@ -697,10 +427,7 @@ including without a network event. Retirement cancels its receipt observer and
 transfers lagging effects or scoped reload floors. The complete prior contracts and
 query checks remain at `6e944e73b5a:scratch/instant-task-session.md`.
 
-Remaining: the five items under "a pending command is one thing" (one presentation
-for every pending command, attention messages as data, reopen owned by attachment
-with the phone's Reconnect restored, keep retired identities without release,
-Desktop no-repository reason); disconnected Complete/rename/move delivery and
+Remaining: disconnected Complete/rename/move delivery and
 Waiting for connection under the recorded 1a direction, built on that one presentation; cross-client closed-query convergence; exhaustive
 effect/dependency declarations and cross-query provenance; other mutation recovery
 and resource lanes; retained mobile `SessionLink`; projected inspection;
@@ -745,12 +472,15 @@ backend-stage baseline exists. Raw files and earlier detail: `8b42a874db`,
 
 Implementation owns a valid benchmark baseline; demo owns native usability.
 
-Earlier checks: `6e944e73b5a:scratch/instant-task-session.md` and
-`d9bf1c21ae:scratch/instant-task-session.md`. Creation checks
+Earlier checks and the 10k client-query observations:
+`737b50adba:scratch/instant-task-session.md` (Creation checks),
+`6e944e73b5a:scratch/instant-task-session.md` and
+`d9bf1c21ae:scratch/instant-task-session.md`. Pending-command checks
 (2026-11-15; inherited `LF_*` cleared):
-- `swift build --build-tests --package-path swift --jobs 4 -Xswiftc -gnone` and `scripts/test_desktop.sh --skip-build --filter 'ClientWorkQueryTests|operationConversationUsesNativeReadiness|OperationRecoveryPresentationTests|SessionControlsTests'`: build and 55 checks passed, including unsaved same-ID retry/edit, no repository, departure, uncertain restart, native attachment retry and recovery beside usable input; gate owns wider suites.
-- `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/MobileTaskCreationTests -only-testing:LoopflowiOSTests/ClientWorkQueryTests`: 45 checks passed, including direct receipt-to-Session opening, ordinary Task mount acknowledgment, same-ID retry, retirement before editor cleanup, and legacy import races; Simulator removed.
-- `scripts/check_swift_multiplatform_boundaries.py`, `git diff --check`: passed. `EXPLAIN QUERY PLAN` on 10,000 synthetic client operations: source cleanup uses `operations_sources`; draft lookup uses `operations_draft` and `retired_operations_draft`. Gate owns archive/documented-command checks. Native latency remains unmeasured.
+- `swift build --build-tests --package-path swift --jobs 4 -Xswiftc -gnone`: passed; gate owns wider suites and the Xcode fallback build.
+- `scripts/test_desktop.sh --skip-build --filter 'ClientWorkQueryTests|OperationRecoveryPresentationTests|operationConversationUsesNativeReadiness'`: 51 checks passed. After the final candidate/attachment repair, its six recovery/native-readiness cases passed again. Covers mixed save failures, same-ID retry, no-repository copy, planning recovery, bound Session acknowledgment and unchanged later selection.
+- `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/MobileTaskCreationTests -only-testing:LoopflowiOSTests/ClientWorkQueryTests`: 46 checks passed on the final shared model, including editor revision rotation, retirement before file cleanup and the shared mixed-failure case. Eight SessionTerminal checks also passed earlier in the cut; disposable Simulators were removed.
+- `uv run python scripts/check_swift_multiplatform_boundaries.py`, `git diff --check`: passed; gate owns archive/documented-command checks. Native latency remains unmeasured.
 
 ## Conversation concept review · 2026-11-15
 

@@ -5,6 +5,26 @@ import Testing
 
 @Suite("Shared Work selection")
 struct WorkSelectionTests {
+    @Test func typedFieldSupportKeepsSQLiteIndependentOfUnavailableActivity() throws {
+        let data = try loadFixtureData("membership_fields.json")
+        let facts = try JSONDecoder().decode([WorkMembershipPlan.Facts].self, from: data)
+        #expect(facts[0].parent.support?.revisions == ["planning": 7])
+        #expect(facts[0].parent.support?.observations == .sqlite)
+        #expect(facts[0].activity.support?.observations == .unavailable)
+        guard case .captured(let evidence) = facts[1].activity.support?.observations else {
+            Issue.record("Empty validated capture must remain distinct from unavailable"); return
+        }
+        #expect(evidence.dependencies.isEmpty)
+        #expect(try JSONDecoder().decode([WorkMembershipPlan.Facts].self, from: JSONEncoder().encode(facts)) == facts)
+        for field in ["parent", "lifecycle", "activity"] {
+            var raw = try #require((JSONSerialization.jsonObject(with: data) as? [[String: Any]])?.first)
+            var value = try #require(raw[field] as? [String: Any])
+            value.removeValue(forKey: "support"); raw[field] = value
+            let selected = try JSONSerialization.data(withJSONObject: raw)
+            #expect(throws: DecodingError.self) { try JSONDecoder().decode(WorkMembershipPlan.Facts.self, from: selected) }
+        }
+    }
+
     @Test func viewPlanRetainsOccurrencesAndMissingPrimaryWithoutExecution() async throws {
         let text = String(decoding: try loadFixtureData("view_plan.json"), as: UTF8.self)
         let query = RegistryQuery { args, cwd in
@@ -96,7 +116,7 @@ func fixtureViewPlan(owner: WorkWorkspaceKey, members: [WorkViewPlan.Content],
     return WorkViewPlan(name: nil, pinned: false, dashboardID: nil, repository: owner.repository, repositoryPath: "/src/fixture",
         selection: WorkSelection(id: owner.id, expression: owner.kind == .repository ? .repository : .wave(owner.id)), savedRevision: nil,
         resolution: WorkSelectionResolution(attention: [], members: refs, unavailable: []),
-        membership: WorkMembershipPlan(domains: [], effects: [:], root: .members(refs), facts: members.map { .init(work: $0.work, name: $0.identifier ?? $0.work.id, states: $0.states, activityKnown: true) }, unavailable: []),
+        membership: WorkMembershipPlan(domains: [], effects: [:], root: .members(refs), facts: members.map { .init(work: $0.work, name: $0.identifier ?? $0.work.id, parent: .init(wave: nil, support: nil), lifecycle: .init(states: $0.states.filter { ![.available, .busy, .blocked].contains($0) }, known: true, support: nil), activity: .init(states: $0.states.filter { [.available, .busy, .blocked].contains($0) }, known: true, support: nil)) }, unavailable: []),
         arrangement: WorkArrangement(order: refs, hidden: [], mode: .auto),
         projection: WorkArrangementProjection(visible: refs, suppressed: []), slots: slots, contents: members)
 }

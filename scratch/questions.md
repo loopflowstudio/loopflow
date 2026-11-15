@@ -3,16 +3,14 @@
 - Headless engineering clarification, 2026-11-15: typed fields carry producer-declared
   support; clients cannot split the invocation's opaque dependency bag. Invalid
   observed activity must not stop incorporation of a separately supported parent
-  or lifecycle value. The next cut keeps field support and answer completeness
-  separate (`instant-task-session.md`, Concept review). No product answer inferred.
+  or lifecycle value. Typed producer support is built; persisted incorporation must
+  keep field support and answer completeness separate (`instant-task-session.md`,
+  Concept review). No product answer inferred.
 
-- Headless engineering choice, 2026-11-15: OS process exit changes activity and
-  ordering with unchanged SQLite revisions, so observed facts get a
-  connection-established cache incarnation, a non-reusing cache clock, captured
-  dependency evidence and persisted last-known values (`instant-task-session.md`,
-  Review direction). Source/capture primitives and required wire evidence are
-  built; per-field persistence and answer separation still precede Move. No
-  product preference is inferred.
+- Headless engineering choice, 2026-11-15: source/capture uses the existing
+  observation cache. Per-field persistence and last-known reconnect coverage still
+  precede Move (`instant-task-session.md`, Review direction). No product
+  preference inferred.
 
 - Jack Heart replied “1a” to the 2026-11-15 conversation review's disconnected-edit
   question: save and project Complete/rename/move locally, show “Waiting for

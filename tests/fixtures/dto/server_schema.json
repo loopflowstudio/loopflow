@@ -3217,6 +3217,88 @@
       ],
       "type": "object"
     },
+    "FieldObservations": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "const": "sqlite",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "evidence": {
+              "$ref": "#/$defs/ObservationEvidence"
+            },
+            "kind": {
+              "const": "captured",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "evidence"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "unavailable",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "FieldSupport": {
+      "description": "Support belongs to this typed value, independently of query completeness.",
+      "properties": {
+        "derivation": {
+          "type": "string"
+        },
+        "epoch": {
+          "type": "string"
+        },
+        "machine": {
+          "type": "string"
+        },
+        "observations": {
+          "$ref": "#/$defs/FieldObservations"
+        },
+        "revisions": {
+          "additionalProperties": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "type": "object"
+        },
+        "schema": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "machine",
+        "epoch",
+        "schema",
+        "derivation",
+        "revisions",
+        "observations"
+      ],
+      "type": "object"
+    },
     "FileDraft": {
       "additionalProperties": false,
       "description": "Recovery data, not permission to overwrite a file. The host compares the base on reopen.",
@@ -4832,18 +4914,17 @@
     },
     "MembershipFacts": {
       "properties": {
-        "activity_known": {
-          "type": "boolean"
+        "activity": {
+          "$ref": "#/$defs/StateFact"
+        },
+        "lifecycle": {
+          "$ref": "#/$defs/StateFact"
         },
         "name": {
           "type": "string"
         },
-        "states": {
-          "items": {
-            "$ref": "#/$defs/SelectionState"
-          },
-          "type": "array",
-          "uniqueItems": true
+        "parent": {
+          "$ref": "#/$defs/ParentFact"
         },
         "work": {
           "$ref": "#/$defs/WorkWorkspaceKey"
@@ -4852,8 +4933,9 @@
       "required": [
         "work",
         "name",
-        "states",
-        "activity_known"
+        "parent",
+        "lifecycle",
+        "activity"
       ],
       "type": "object"
     },
@@ -6535,6 +6617,35 @@
           "type": "object"
         }
       ]
+    },
+    "ParentFact": {
+      "properties": {
+        "support": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FieldSupport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "wave": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WaveId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "wave",
+        "support"
+      ],
+      "type": "object"
     },
     "PeerPlanningStatus": {
       "description": "Local routing and import evidence. Endpoints are deliberately not displayed:\nGit URLs can contain credentials. A checkpoint is not publication evidence.",
@@ -12793,6 +12904,36 @@
         "clear"
       ],
       "type": "string"
+    },
+    "StateFact": {
+      "properties": {
+        "known": {
+          "type": "boolean"
+        },
+        "states": {
+          "items": {
+            "$ref": "#/$defs/SelectionState"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "support": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FieldSupport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "states",
+        "known",
+        "support"
+      ],
+      "type": "object"
     },
     "Status": {
       "properties": {

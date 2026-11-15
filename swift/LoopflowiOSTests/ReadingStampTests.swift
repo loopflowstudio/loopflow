@@ -4,6 +4,27 @@ import Loopflow
 @testable import LoopflowiOS
 
 final class ReadingStampTests: XCTestCase {
+    func testTypedFieldSupportKeepsSQLiteIndependentOfUnavailableActivityOnPhone() throws {
+        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "membership_fields", withExtension: "json"))
+        let data = try Data(contentsOf: url)
+        let facts = try JSONDecoder().decode([WorkMembershipPlan.Facts].self, from: data)
+        XCTAssertEqual(facts[0].parent.support?.revisions, ["planning": 7])
+        XCTAssertEqual(facts[0].parent.support?.observations, .sqlite)
+        XCTAssertEqual(facts[0].activity.support?.observations, .unavailable)
+        guard case .captured(let evidence) = facts[1].activity.support?.observations else {
+            XCTFail("Empty validated capture must remain distinct from unavailable"); return
+        }
+        XCTAssertTrue(evidence.dependencies.isEmpty)
+        XCTAssertEqual(try JSONDecoder().decode([WorkMembershipPlan.Facts].self, from: JSONEncoder().encode(facts)), facts)
+        for field in ["parent", "lifecycle", "activity"] {
+            var raw = try XCTUnwrap((JSONSerialization.jsonObject(with: data) as? [[String: Any]])?.first)
+            var value = try XCTUnwrap(raw[field] as? [String: Any])
+            value.removeValue(forKey: "support"); raw[field] = value
+            XCTAssertThrowsError(try JSONDecoder().decode(WorkMembershipPlan.Facts.self,
+                from: JSONSerialization.data(withJSONObject: raw)))
+        }
+    }
+
     func testCompletionPlanningEvidenceUsesTheSharedStateDeliveryOnPhone() throws {
         let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "operation_state_planning", withExtension: "json", subdirectory: "server"))
         let result = try XCTUnwrap(try RawJSON(Data(contentsOf: url)).fields()["result"])

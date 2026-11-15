@@ -113,6 +113,15 @@ final class ClientWorkDatabase {
         // Old cache stamps cannot acquire evidence from a later connection.
         // Keep exact outbox requests, receipts and reload requirements intact.
         try execute("DELETE FROM work_queries WHERE json_type(CAST(state AS TEXT),'$.stamp.observations') IS NULL")
+        // Combined state bags cannot acquire producer-declared field support.
+        try execute("""
+            DELETE FROM work_queries WHERE EXISTS (
+                SELECT 1 FROM json_each(CAST(work_queries.state AS TEXT),'$.plans') AS plan,
+                    json_each(plan.value,'$.membership.facts') AS fact
+                WHERE json_type(fact.value,'$.parent') IS NOT 'object'
+                    OR json_type(fact.value,'$.lifecycle') IS NOT 'object'
+                    OR json_type(fact.value,'$.activity') IS NOT 'object')
+            """)
         let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "json" }
         let records = try files.map { try JSONDecoder().decode(SubmittedOperation.self, from: Data(contentsOf: $0)) }

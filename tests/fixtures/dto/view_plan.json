@@ -220,11 +220,23 @@
           "kind": "task",
           "id": "task_33333333333333333333333333333333"
         },
-        "states": [
-          "backlog"
-        ],
-        "activity_known": true,
-        "name": "LOO-1"
+        "name": "LOO-1",
+        "parent": {
+          "wave": null,
+          "support": null
+        },
+        "lifecycle": {
+          "states": [
+            "backlog"
+          ],
+          "known": true,
+          "support": null
+        },
+        "activity": {
+          "states": [],
+          "known": true,
+          "support": null
+        }
       }
     ],
     "unavailable": [],

@@ -50,6 +50,8 @@ targets:
       - path: LoopflowTests/CreationInteractionTests.swift
       - path: ../tests/fixtures/dto/view_plan.json
         buildPhase: resources
+      - path: ../tests/fixtures/dto/membership_fields.json
+        buildPhase: resources
       - path: ../rust/loopflow/tests/fixtures/dto/server
         type: folder
         buildPhase: resources

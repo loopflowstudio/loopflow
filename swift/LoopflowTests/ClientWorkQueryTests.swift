@@ -197,7 +197,7 @@ final class ClientWorkQueryTests: XCTestCase {
         if explicit { nodes.append(["kind": "members", "members": [member("a", "retained")]]) }
         var membership = try XCTUnwrap(body["membership"] as? [String: Any])
         membership["root"] = ["kind": "compose", "items": nodes]
-        membership["facts"] = ids.map { ["work": key($0), "name": $0, "states": ["open", "working", "available"], "activity_known": true] as [String: Any] }
+        membership["facts"] = ids.map { ["work": key($0), "name": $0, "parent": ["wave": NSNull(), "support": NSNull()], "lifecycle": ["states": ["open", "working"], "known": true, "support": NSNull()], "activity": ["states": ["available"], "known": true, "support": NSNull()]] as [String: Any] }
         body["membership"] = membership
         let original = try XCTUnwrap((body["contents"] as? [[String: Any]])?.first)
         body["contents"] = ids.map { id in
@@ -377,8 +377,7 @@ final class ClientWorkQueryTests: XCTestCase {
         var body = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(workingPlan(["a", "b"]))) as? [String: Any])
         var membership = try XCTUnwrap(body["membership"] as? [String: Any])
         var facts = try XCTUnwrap(membership["facts"] as? [[String: Any]])
-        facts[1]["activity_known"] = false
-        facts[1]["states"] = ["open", "working"]
+        facts[1]["activity"] = ["states": [], "known": false, "support": NSNull()]
         membership["facts"] = facts
         let members = try XCTUnwrap((body["resolution"] as? [String: Any])?["members"] as? [[String: Any]])
         membership["root"] = ["kind": "state", "state": "available", "members": members]
@@ -901,26 +900,29 @@ final class ClientWorkQueryTests: XCTestCase {
         XCTAssertNil(future)
     }
 
-    func testObservationUpgradeDropsOldBasesAndRetainsSavedCommands() throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
-        let query = ServedRead.viewSelect(expression: "state:working")
-        do {
-            let database = try complete(directory)
-            _ = try database.cache(ClientWorkQuery(stamp: stamp("list", revision: 6), plans: [workingPlan(["a", "b"])]), key: key(query))
+    func testObservationAndFieldUpgradeDropOldBasesAndRetainSavedCommands() throws {
+        for missing in ["$.stamp.observations", "$.plans[0].membership.facts[0].parent",
+                        "$.plans[0].membership.facts[0].lifecycle", "$.plans[0].membership.facts[0].activity"] {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+            let query = ServedRead.viewSelect(expression: "state:working")
+            do {
+                let database = try complete(directory)
+                _ = try database.cache(ClientWorkQuery(stamp: stamp("list", revision: 6), plans: [workingPlan(["a", "b"])]), key: key(query))
+            }
+            do {
+                var connection: OpaquePointer?
+                XCTAssertEqual(sqlite3_open(directory.appendingPathComponent("work.sqlite").path, &connection), SQLITE_OK)
+                defer { sqlite3_close(connection) }
+                XCTAssertEqual(sqlite3_exec(connection,
+                    "UPDATE work_queries SET state=CAST(json_remove(CAST(state AS TEXT),'\(missing)') AS BLOB)",
+                    nil, nil, nil), SQLITE_OK)
+            }
+            let restarted = try ClientWorkDatabase(directory: directory)
+            XCTAssertNil(try restarted.cached(machine: "machine", key: key(query)))
+            XCTAssertEqual(try restarted.pending().map(\.id), ["saved"])
+            XCTAssertEqual(try restarted.state("saved")?.record.destination, "machine")
         }
-        do {
-            var connection: OpaquePointer?
-            XCTAssertEqual(sqlite3_open(directory.appendingPathComponent("work.sqlite").path, &connection), SQLITE_OK)
-            defer { sqlite3_close(connection) }
-            XCTAssertEqual(sqlite3_exec(connection,
-                "UPDATE work_queries SET state=CAST(json_remove(CAST(state AS TEXT),'$.stamp.observations') AS BLOB)",
-                nil, nil, nil), SQLITE_OK)
-        }
-        let restarted = try ClientWorkDatabase(directory: directory)
-        XCTAssertNil(try restarted.cached(machine: "machine", key: key(query)))
-        XCTAssertEqual(try restarted.pending().map(\.id), ["saved"])
-        XCTAssertEqual(try restarted.state("saved")?.record.destination, "machine")
     }
 
     func testLaterSettlementCannotReviveAnInvalidatedBaseWithAnUnrelatedEffect() throws {

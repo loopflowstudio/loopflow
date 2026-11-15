@@ -65,6 +65,7 @@ fn defaults_include_child_waves_and_working_wave_tasks() {
         parent_wave,
         name: String::new(),
         activity_known: false,
+        support: None,
     })
     .collect();
     let wave = node("root", SelectionExpression::Wave { wave: root.clone() })
@@ -118,6 +119,7 @@ fn nested_sources_survive_insertions_and_report_unavailable_queries_and_cycles()
             SelectionState::Working,
         ]),
         activity_known: false,
+        support: None,
     }];
     let query = DashboardId("saved".into());
     let reference = node(
@@ -303,6 +305,7 @@ fn query_work() -> Vec<SelectionWork> {
             name: "Product".into(),
             states: Default::default(),
             activity_known: false,
+            support: None,
         },
         SelectionWork {
             key: key("a", WorkWorkspaceKind::Task),
@@ -310,6 +313,7 @@ fn query_work() -> Vec<SelectionWork> {
             name: "FIX-1".into(),
             states: [SelectionState::Open, SelectionState::Available].into(),
             activity_known: true,
+            support: None,
         },
         SelectionWork {
             key: key("b", WorkWorkspaceKind::Task),
@@ -317,6 +321,7 @@ fn query_work() -> Vec<SelectionWork> {
             name: "FIX-2".into(),
             states: [SelectionState::Backlog].into(),
             activity_known: true,
+            support: None,
         },
     ]
 }
@@ -479,8 +484,9 @@ fn query_selection_plan_wire_roundtrips() {
             key: fact.work.clone(),
             parent_wave: None,
             name: fact.name.clone(),
-            states: fact.states.clone(),
-            activity_known: fact.activity_known,
+            states: fact.states(),
+            activity_known: fact.activity.known,
+            support: None,
         })
         .collect();
     assert_eq!(
@@ -494,11 +500,18 @@ fn query_selection_plan_wire_roundtrips() {
     let effect = &completed.effects["task.complete"];
     assert_eq!(effect.stage, "task.completed");
     for fact in &mut completed.facts {
-        fact.states = fact
+        fact.lifecycle.states = fact
+            .lifecycle
             .states
             .difference(&effect.remove)
             .copied()
             .chain(effect.insert.iter().copied())
+            .collect();
+        fact.activity.states = fact
+            .activity
+            .states
+            .difference(&effect.remove)
+            .copied()
             .collect();
     }
     // Only the explicit occurrence survives, with no stale attention or duplicate.
@@ -520,6 +533,7 @@ fn explicit_membership_program_keeps_only_its_candidates_at_ten_thousand_tasks()
             name: format!("LOO-{index}"),
             states: BTreeSet::from([SelectionState::Working]),
             activity_known: true,
+            support: None,
         })
         .collect();
     let selection = node(
@@ -613,6 +627,7 @@ fn working_tasks_are_the_working_section_and_the_others_have_their_own_queries()
         name: id.into(),
         states: BTreeSet::from([SelectionState::Open, state, section]),
         activity_known: true,
+        support: None,
     })
     .chain([SelectionWork {
         key: key(wave.as_str(), WorkWorkspaceKind::Wave),
@@ -620,6 +635,7 @@ fn working_tasks_are_the_working_section_and_the_others_have_their_own_queries()
         name: "wave".into(),
         states: BTreeSet::new(),
         activity_known: false,
+        support: None,
     }])
     .collect();
     let ids = |selection: Selection| {
@@ -651,4 +667,38 @@ fn working_tasks_are_the_working_section_and_the_others_have_their_own_queries()
         ids(Selection::parse("state:moving", None).unwrap()),
         ["moving"]
     );
+}
+
+#[test]
+fn typed_fields_keep_sqlite_support_when_activity_is_unavailable() {
+    use super::selection::{FieldObservations, MembershipFacts};
+    let fixture = include_str!("../../../../tests/fixtures/dto/membership_fields.json");
+    let fields: Vec<MembershipFacts> = serde_json::from_str(fixture).unwrap();
+    assert_eq!(
+        serde_json::to_value(&fields).unwrap(),
+        serde_json::from_str::<serde_json::Value>(fixture).unwrap()
+    );
+    assert_eq!(
+        fields[0].parent.support.as_ref().unwrap().revisions.len(),
+        1
+    );
+    assert!(matches!(
+        fields[0].parent.support.as_ref().unwrap().observations,
+        FieldObservations::Sqlite
+    ));
+    assert!(matches!(
+        fields[0].activity.support.as_ref().unwrap().observations,
+        FieldObservations::Unavailable
+    ));
+    let FieldObservations::Captured { evidence } =
+        &fields[1].activity.support.as_ref().unwrap().observations
+    else {
+        panic!("validated empty set")
+    };
+    assert!(evidence.dependencies.is_empty());
+    for field in ["parent", "lifecycle", "activity"] {
+        let mut selected = serde_json::to_value(&fields[0]).unwrap();
+        selected[field].as_object_mut().unwrap().remove("support");
+        assert!(serde_json::from_value::<MembershipFacts>(selected).is_err());
+    }
 }

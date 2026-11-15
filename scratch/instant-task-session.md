@@ -3,11 +3,10 @@
 Conversation/Machine-link cut committed at `a2a0a0fb33` on origin/main
 `9cafc410ee`. Unreachable-Machine presentation and Desktop Session rename are
 committed at `35e2835de1`; SQLite fixture teardown at `5231746858`; observation
-source/capture at `86f99e3315`. Next implementation, in order (Concept review:
-fields carry their own support): typed per-field support on the wire, persisted
-normalization and incorporation, derived-answer coverage, then dynamic membership
-with disconnected Move. Supersedes the
-Desktop-only delivery boundary. No shipping or merge decision is recorded. Placement remains this Task;
+source/capture at `86f99e3315`. Typed field support and strict Rust/Swift fixtures
+are built in the working cut. Next: persisted normalization and incorporation,
+derived-answer coverage, then dynamic membership with disconnected Move.
+Supersedes the Desktop-only delivery boundary. No shipping or merge decision is recorded. Placement remains this Task;
 no Wave is selected.
 
 ## Direction
@@ -243,7 +242,8 @@ Still remove, with their consumers:
   (`performTaskAction`) and bind replacement bookkeeping (`replaceSession`,
   `supersedeSessions`).
 - Query-local `WorkQueryEffect.covered`, `ClientWorkDatabase.effectsCover`,
-  `ClientWorkQuery.makeProjection`'s state-only reducer, and dynamic prefiltering
+  `ClientWorkQuery.makeProjection`'s state-only reducer, `WorkMembershipPlan.Facts.states`'s
+  transient union setter, and dynamic prefiltering
   in Rust `Selection::compile_membership` / `compile_filter`, in one replacement
   cut. Keep explicit Work leaves, stable authored occurrence paths, descendant
   scopes, interleaved order, intersections, hidden/suppressed occurrences and
@@ -339,15 +339,9 @@ input readiness and Retry opening for the same Session.
 Built at `6e944e73b5a` (details in that commit's plan); current behavior is under
 Current implementation cut. Two-client closed-query convergence is unexercised.
 
-### Earlier cuts
-
-Start, pending-command presentation, Complete/Abandon recovery, shared Machine
-connection, unreachable-Machine presentation and Desktop Session rename are built.
-Their retained contracts are above. Detailed ownership, deletions and prior checks:
-`9fbc729a63b4eb6286159bcfa04090a68f6a9388:scratch/instant-task-session.md`
-(Prior conversation and pending-command cuts through Unreachable-Machine and
-Session-name cuts). Claim, Wave/Dashboard rename and other mutations remain
-unmigrated; the phone still has no Session rename UI.
+Earlier cut ownership, deletions and checks:
+`9fbc729a63b4eb6286159bcfa04090a68f6a9388:scratch/instant-task-session.md`.
+Claim, Wave/Dashboard rename and other mutations remain unmigrated.
 
 ### Why Move cannot use the current reducer
 
@@ -589,30 +583,10 @@ Acceptance adds these deterministic cases to the retained Move counterexamples:
   last-known or incomplete until covered. Saved request IDs and original-Machine
   recovery survive without resend or later navigation.
 
-Source/capture cut · 2026-11-15: the existing cache now owns an incarnation,
-non-reusing clock and opaque fact identities. One invocation and its inherited
-workers reuse the answer captured with each token; validation synchronizes with
-installation and eviction. `welcome.observations` establishes the source and
-`stamp.observations` carries nullable validated evidence independently of SQLite.
-Changed support participates in publication/resume identity even for an unchanged
-value. Shared connection generations reject obsolete links and unnegotiated
-sources; reconnect requests a reading even when a resume token matches. Saved
-cache evidence decodes on both platforms, but old bases without the required key
-are discarded without changing commands or receipts.
-
-This is the input contract, not completed field incorporation. Typed field input
-sets, normalization, stale/last-known answer presentation and derived dependencies
-still need the planned replacement cut. Query-local incorporation and the
-state-only reducer remain deletion targets, not extension points. Same-SQLite
-Busy/order/count and replaced-process acceptance still needs that consumer cut.
-Native latency remains unmeasured.
-
-Checks for this cut (observe 11, Desktop 7, iOS 6 focused cases, fmt, clippy,
-multiplatform boundaries; exact filters at `86f99e3315:scratch/instant-task-session.md`)
-passed with `LF_*` cleared. Unresolved: in run
-`7bb50caf-46f5-485f-a8ff-d882ea6e5a98` nextest marked
-`server::schema::tests::bare_time_serializes_as_its_described_tuple` LEAK; that
-case launches no children. Gate owns it; no retry was taken as a fix.
+Source/capture cut details and passing filters: `86f99e3315:scratch/instant-task-session.md`.
+Unresolved run `7bb50caf-46f5-485f-a8ff-d882ea6e5a98`: nextest marked
+`server::schema::tests::bare_time_serializes_as_its_described_tuple` LEAK;
+that case launches no children. Gate owns it; no retry was taken as a fix.
 
 ### Concept review: fields carry their own support · 2026-11-15
 
@@ -651,6 +625,20 @@ no new product vocabulary or builtin rule is needed. The three unanswered produc
 choices remain independent of this cut. Native latency is still unmeasured.
 Review outcome: design changed — iterate to implement.
 
+Typed-field cut · 2026-11-15: wire support, scoped capture and strict fixtures
+are built. Activity conservatively declares the repository Session read's consumed
+set; it can be narrowed without changing the contract. The transient union setter
+clears support and remains a deletion target with the state-only reducer. Persisted
+normalization, incorporation, derived-answer coverage and disconnected Move remain
+unbuilt; independent wire values alone do not complete their acceptance.
+
+Checks, `LF_*` cleared:
+- `cargo nextest run -p loopflow --lib -E 'test(fields_validate_only) | test(a_capture_reuses) | test(membership_fields_declare)'`: 3 pass after shared-answer optimization; typed fixture and plan roundtrip also passed unchanged.
+- `cargo nextest run -p loopflow --lib -E 'test(server::schema::tests::) - test(bare_time_serializes_as_its_described_tuple)'`: 7 pass; prior LEAK remains gate work.
+- `scripts/test_desktop.sh --filter 'WorkSelectionTests|testObservationAndFieldUpgrade|testUnknownActivityElsewhere'`: 9 pass; `scripts/test_ios.py` with the typed-field fixture and those two shared query checks: 3 pass.
+- `cargo test -p loopflow --test integration documented_commands::`: 4 pass; `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and multiplatform boundaries pass.
+- `EXPLAIN QUERY PLAN`, 10,000-Task copied fixture: local-Machine index and revision primary key; singleton epoch scan, no Task scan. Native latency remains unmeasured.
+
 ### Open product choices
 
 Unanswered, numbered in `scratch/concept-review.html`: (1) queue Abandon offline
@@ -685,8 +673,7 @@ including without a network event. Retirement cancels its receipt observer and
 transfers lagging effects or scoped reload floors. The complete prior contracts and
 query checks remain at `6e944e73b5a:scratch/instant-task-session.md`.
 
-Remaining: typed per-field observation support, normalized values and reconnect
-coverage in the client SQLite owner; field incorporation and answer coverage,
+Remaining: normalized typed values and reconnect coverage in the client SQLite owner; field incorporation and answer coverage,
 then disconnected Move; effect-policy duplication; cross-client closed-query convergence; exhaustive
 effect/dependency declarations and cross-query provenance; other mutation recovery
 and resource lanes; retained mobile `SessionLink`; projected inspection;

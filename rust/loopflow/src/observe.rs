@@ -175,7 +175,7 @@ type SharedEntry = Arc<Mutex<Entry>>;
 struct Captured {
     entry: SharedEntry,
     token: u64,
-    answer: Answer,
+    answer: Arc<Answer>,
 }
 
 /// The answers and tokens read by one invocation, including bounded workers.
@@ -374,6 +374,7 @@ impl Cache {
             Some(Reading {
                 cache: self.clone(),
                 dependencies: dependencies.clone(),
+                fields: Vec::new(),
             }),
             read,
         );
@@ -388,7 +389,7 @@ impl Cache {
             .expect("observed dependencies")
             .get(&fact)
         {
-            return captured.answer.clone();
+            return captured.answer.as_ref().clone();
         }
         let entry = {
             let entries = self.entries.lock().expect("observation cache");
@@ -401,7 +402,7 @@ impl Cache {
         // Another worker may have installed this invocation's first answer
         // while we observed. Every worker consumes that same captured answer.
         if let Some(captured) = captured.get(&fact) {
-            return captured.answer.clone();
+            return captured.answer.as_ref().clone();
         }
         let mut clock = self.clock.lock().expect("observation clock");
         let mut entries = self.entries.lock().expect("observation cache");
@@ -428,7 +429,7 @@ impl Cache {
             Captured {
                 entry,
                 token: revision,
-                answer: answer.clone(),
+                answer: Arc::new(answer.clone()),
             },
         );
         answer
@@ -439,6 +440,7 @@ impl Cache {
 struct Reading {
     cache: Arc<Cache>,
     dependencies: Dependencies,
+    fields: Vec<Dependencies>,
 }
 thread_local! {
     static READING: RefCell<Option<Reading>> = const { RefCell::new(None) };
@@ -455,6 +457,31 @@ fn scope<T>(reading: Option<Reading>, read: impl FnOnce() -> T) -> T {
     read()
 }
 
+/// A field records consumed inputs without creating another answer cache.
+#[derive(Debug, Clone)]
+pub(crate) struct FieldCapture {
+    cache: Arc<Cache>,
+    dependencies: Dependencies,
+}
+
+impl FieldCapture {
+    pub(crate) fn evidence(&self) -> Option<ObservationEvidence> {
+        self.cache.evidence(&self.dependencies)
+    }
+}
+
+pub(crate) fn field<T>(read: impl FnOnce() -> T) -> (T, Option<FieldCapture>) {
+    let Some(mut reading) = READING.with(|reading| reading.borrow().clone()) else {
+        return (read(), None);
+    };
+    let capture = FieldCapture {
+        cache: reading.cache.clone(),
+        dependencies: Dependencies::default(),
+    };
+    reading.fields.push(capture.dependencies.clone());
+    (scope(Some(reading), read), Some(capture))
+}
+
 pub(crate) fn active() -> bool {
     READING.with(|reading| reading.borrow().is_some())
 }
@@ -467,7 +494,28 @@ pub(crate) fn inherit<T>(read: impl FnOnce() -> T) -> impl FnOnce() -> T {
 fn read(fact: Fact) -> Answer {
     let reading = READING.with(|reading| reading.borrow().clone());
     match reading {
-        Some(reading) => reading.cache.read(fact, &reading.dependencies),
+        Some(reading) => {
+            let answer = reading.cache.read(fact.clone(), &reading.dependencies);
+            if reading.fields.is_empty() {
+                return answer;
+            }
+            let captured = reading
+                .dependencies
+                .0
+                .lock()
+                .expect("observed dependencies")
+                .get(&fact)
+                .expect("read captured its answer")
+                .clone();
+            for field in &reading.fields {
+                field
+                    .0
+                    .lock()
+                    .expect("field dependencies")
+                    .insert(fact.clone(), captured.clone());
+            }
+            answer
+        }
         None => fact.observe(),
     }
 }
@@ -619,6 +667,41 @@ mod tests {
         for source in [Source::Local, Source::Git, Source::Github] {
             cache.refresh(source);
         }
+    }
+
+    #[test]
+    fn fields_validate_only_their_consumed_inputs_and_share_invocation_answers() {
+        let dir = tempfile::tempdir().unwrap();
+        let activity = dir.path().join("activity");
+        let other = dir.path().join("other");
+        std::fs::write(&activity, "busy").unwrap();
+        std::fs::write(&other, "stable").unwrap();
+        let cache = Arc::new(Cache::default());
+        let ((invalid, independent, empty), invocation) = cache.capture(|| {
+            let (_, invalid) = super::field(|| read_to_string(&activity).unwrap());
+            let (_, independent) = super::field(|| {
+                std::thread::scope(|scope| {
+                    scope
+                        .spawn(inherit(|| read_to_string(&other).unwrap()))
+                        .join()
+                        .unwrap()
+                })
+            });
+            let (_, empty) = super::field(|| ());
+            std::fs::write(&activity, "idle").unwrap();
+            refresh(&cache);
+            let (repeated, repeated_capture) = super::field(|| read_to_string(&activity).unwrap());
+            assert_eq!(repeated, "busy", "a field must reuse the invocation answer");
+            assert!(repeated_capture.unwrap().evidence().is_none());
+            (invalid.unwrap(), independent.unwrap(), empty.unwrap())
+        });
+        assert!(cache.evidence(&invocation).is_none());
+        assert!(invalid.evidence().is_none());
+        let supported = independent.evidence().unwrap();
+        assert_eq!(supported.dependencies.len(), 1);
+        assert!(empty.evidence().unwrap().dependencies.is_empty());
+        let (_, bare) = super::field(|| ());
+        assert!(bare.is_none(), "bare reads cannot certify external absence");
     }
 
     #[test]

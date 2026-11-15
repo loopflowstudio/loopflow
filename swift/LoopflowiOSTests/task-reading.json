@@ -270,11 +270,24 @@
             "id": "task_fixture_1"
           },
           "name": "LOO-1",
-          "states": [
-            "open",
-            "available"
-          ],
-          "activity_known": true
+          "parent": {
+            "wave": null,
+            "support": null
+          },
+          "lifecycle": {
+            "states": [
+              "open"
+            ],
+            "known": true,
+            "support": null
+          },
+          "activity": {
+            "states": [
+              "available"
+            ],
+            "known": true,
+            "support": null
+          }
         },
         {
           "work": {
@@ -283,11 +296,24 @@
             "id": "task_fixture_2"
           },
           "name": "LOO-1",
-          "states": [
-            "open",
-            "available"
-          ],
-          "activity_known": true
+          "parent": {
+            "wave": null,
+            "support": null
+          },
+          "lifecycle": {
+            "states": [
+              "open"
+            ],
+            "known": true,
+            "support": null
+          },
+          "activity": {
+            "states": [
+              "available"
+            ],
+            "known": true,
+            "support": null
+          }
         },
         {
           "work": {
@@ -296,11 +322,24 @@
             "id": "task_fixture_3"
           },
           "name": "LOO-1",
-          "states": [
-            "open",
-            "available"
-          ],
-          "activity_known": true
+          "parent": {
+            "wave": null,
+            "support": null
+          },
+          "lifecycle": {
+            "states": [
+              "open"
+            ],
+            "known": true,
+            "support": null
+          },
+          "activity": {
+            "states": [
+              "available"
+            ],
+            "known": true,
+            "support": null
+          }
         }
       ],
       "unavailable": [],

@@ -1,0 +1,135 @@
+[
+  {
+    "work": {
+      "repository": "repo_11111111111111111111111111111111",
+      "kind": "task",
+      "id": "task_33333333333333333333333333333333"
+    },
+    "name": "LOO-1",
+    "parent": {
+      "wave": null,
+      "support": {
+        "machine": "machine_11111111111111111111111111111111",
+        "epoch": "fixture-epoch",
+        "schema": 6,
+        "derivation": "work.parent/1",
+        "revisions": {
+          "planning": 7
+        },
+        "observations": {
+          "kind": "sqlite"
+        }
+      }
+    },
+    "lifecycle": {
+      "states": [
+        "working"
+      ],
+      "known": true,
+      "support": {
+        "machine": "machine_11111111111111111111111111111111",
+        "epoch": "fixture-epoch",
+        "schema": 6,
+        "derivation": "work.lifecycle/1",
+        "revisions": {
+          "planning": 7,
+          "graphs": 7,
+          "processes": 7
+        },
+        "observations": {
+          "kind": "sqlite"
+        }
+      }
+    },
+    "activity": {
+      "states": [
+        "busy"
+      ],
+      "known": true,
+      "support": {
+        "machine": "machine_11111111111111111111111111111111",
+        "epoch": "fixture-epoch",
+        "schema": 6,
+        "derivation": "work.activity/1",
+        "revisions": {
+          "planning": 7,
+          "sessions": 7,
+          "graphs": 7,
+          "processes": 7
+        },
+        "observations": {
+          "kind": "unavailable"
+        }
+      }
+    }
+  },
+  {
+    "work": {
+      "repository": "repo_11111111111111111111111111111111",
+      "kind": "task",
+      "id": "task_33333333333333333333333333333333"
+    },
+    "name": "LOO-1",
+    "parent": {
+      "wave": null,
+      "support": {
+        "machine": "machine_11111111111111111111111111111111",
+        "epoch": "fixture-epoch",
+        "schema": 6,
+        "derivation": "work.parent/1",
+        "revisions": {
+          "planning": 7
+        },
+        "observations": {
+          "kind": "sqlite"
+        }
+      }
+    },
+    "lifecycle": {
+      "states": [
+        "working"
+      ],
+      "known": true,
+      "support": {
+        "machine": "machine_11111111111111111111111111111111",
+        "epoch": "fixture-epoch",
+        "schema": 6,
+        "derivation": "work.lifecycle/1",
+        "revisions": {
+          "planning": 7,
+          "graphs": 7,
+          "processes": 7
+        },
+        "observations": {
+          "kind": "sqlite"
+        }
+      }
+    },
+    "activity": {
+      "states": [
+        "busy"
+      ],
+      "known": true,
+      "support": {
+        "machine": "machine_11111111111111111111111111111111",
+        "epoch": "fixture-epoch",
+        "schema": 6,
+        "derivation": "work.activity/1",
+        "revisions": {
+          "planning": 7,
+          "sessions": 7,
+          "graphs": 7,
+          "processes": 7
+        },
+        "observations": {
+          "kind": "captured",
+          "evidence": {
+            "source": "fixture-observer",
+            "validated_at": 19,
+            "dependencies": []
+          }
+        }
+      }
+    }
+  }
+]

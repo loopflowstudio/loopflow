@@ -8,12 +8,72 @@ use super::{
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
+/// Support belongs to this typed value, independently of query completeness.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct FieldSupport {
+    pub machine: String,
+    pub epoch: String,
+    pub schema: u32,
+    pub derivation: String,
+    pub revisions: BTreeMap<String, i64>,
+    pub observations: FieldObservations,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum FieldObservations {
+    Sqlite,
+    Captured {
+        evidence: crate::observe::ObservationEvidence,
+    },
+    Unavailable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ParentFact {
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub wave: Option<crate::id::WaveId>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub support: Option<FieldSupport>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct StateFact {
+    pub states: BTreeSet<SelectionState>,
+    pub known: bool,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub support: Option<FieldSupport>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct MembershipFacts {
     pub work: WorkWorkspaceKey,
     pub name: String,
-    pub states: BTreeSet<SelectionState>,
-    pub activity_known: bool,
+    pub parent: ParentFact,
+    pub lifecycle: StateFact,
+    pub activity: StateFact,
+}
+
+impl MembershipFacts {
+    fn contains(&self, state: &SelectionState) -> bool {
+        self.lifecycle.states.contains(state) || self.activity.states.contains(state)
+    }
+
+    pub fn states(&self) -> BTreeSet<SelectionState> {
+        self.lifecycle
+            .states
+            .union(&self.activity.states)
+            .copied()
+            .collect()
+    }
+}
+
+/// Support is optional only for pure selection inputs without a store snapshot.
+#[derive(Debug, Clone)]
+pub struct MembershipSupport {
+    pub parent: FieldSupport,
+    pub lifecycle: FieldSupport,
+    pub activity: FieldSupport,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -63,8 +123,8 @@ impl MembershipPlan {
             .iter()
             .filter(|fact| {
                 selected.contains(&fact.work)
-                    && (fact.states.contains(&SelectionState::Available)
-                        || fact.states.contains(&SelectionState::Blocked))
+                    && (fact.contains(&SelectionState::Available)
+                        || fact.contains(&SelectionState::Blocked))
             })
             .map(|fact| fact.work.clone())
             .collect();
@@ -104,10 +164,10 @@ impl MembershipNode {
                         unavailable.push(format!("Work {} facts are unavailable", member.work.id));
                         return false;
                     };
-                    if fact.states.contains(state) {
+                    if fact.contains(state) {
                         return true;
                     }
-                    if !fact.activity_known
+                    if !fact.activity.known
                         && matches!(
                             state,
                             SelectionState::Available
@@ -175,8 +235,36 @@ impl Selection {
                 .map(|item| MembershipFacts {
                     work: item.key.clone(),
                     name: item.name.clone(),
-                    states: item.states.clone(),
-                    activity_known: item.activity_known,
+                    parent: ParentFact {
+                        wave: item.parent_wave.clone(),
+                        support: item.support.as_ref().map(|support| support.parent.clone()),
+                    },
+                    lifecycle: StateFact {
+                        states: item
+                            .states
+                            .iter()
+                            .copied()
+                            .filter(|state| !state.is_activity())
+                            .collect(),
+                        known: true,
+                        support: item
+                            .support
+                            .as_ref()
+                            .map(|support| support.lifecycle.clone()),
+                    },
+                    activity: StateFact {
+                        states: item
+                            .states
+                            .iter()
+                            .copied()
+                            .filter(SelectionState::is_activity)
+                            .collect(),
+                        known: item.activity_known,
+                        support: item
+                            .support
+                            .as_ref()
+                            .map(|support| support.activity.clone()),
+                    },
                 })
                 .collect(),
             unavailable,

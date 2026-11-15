@@ -82,6 +82,7 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
         name: repo.clone(),
         states: BTreeSet::new(),
         activity_known: false,
+        support: None,
     };
     let mut wave_work = Vec::with_capacity(waves.len());
     for wave in &waves {
@@ -91,10 +92,12 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
             name: wave.name().to_string(),
             states: BTreeSet::new(),
             activity_known: false,
+            support: None,
         });
     }
     let tasks = super::children::repository_tasks_in(conn, repository)?;
-    let reading = task_selection_in(conn, repository, &repo)?;
+    let (reading, capture) = crate::observe::field(|| task_selection_in(conn, repository, &repo));
+    let reading = reading?;
     // State, publication and ownership for every Task in a fixed number of
     // statements: a query per Task costs thousands on a large repository.
     let ids: Vec<_> = tasks.iter().map(|task| task.id.clone()).collect();
@@ -131,16 +134,61 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
                 name: task.identifier,
                 states,
                 activity_known,
+                support: None,
             },
         ));
     }
     task_work.sort_by(|left, right| left.0.cmp(&right.0));
     // Tasks precede the already alphabetized Waves, then the repository.
+    let (machine, epoch) = conn.query_row(
+        "SELECT machines.id,client_store_epoch.epoch FROM machines CROSS JOIN client_store_epoch
+         WHERE machines.is_local=1 AND singleton=1",
+        [],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+    )?;
+    let mut query = conn.prepare("SELECT domain,revision FROM store_revisions WHERE domain IN ('planning','sessions','graphs','processes')")?;
+    let revisions: BTreeMap<String, i64> = query
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<Result<_, _>>()?;
+    let support =
+        |derivation: &str, domains: &[&str], observations| crate::work::selection::FieldSupport {
+            machine: machine.clone(),
+            epoch: epoch.clone(),
+            schema: crate::server::wire::REVISION,
+            derivation: derivation.into(),
+            revisions: domains
+                .iter()
+                .map(|domain| (domain.to_string(), revisions[*domain]))
+                .collect(),
+            observations,
+        };
+    use crate::work::selection::{FieldObservations, MembershipSupport};
+    let support = MembershipSupport {
+        parent: support("work.parent/1", &["planning"], FieldObservations::Sqlite),
+        lifecycle: support(
+            "work.lifecycle/1",
+            &["planning", "graphs", "processes"],
+            FieldObservations::Sqlite,
+        ),
+        activity: support(
+            "work.activity/1",
+            &["planning", "sessions", "graphs", "processes"],
+            capture
+                .and_then(|capture| capture.evidence())
+                .map_or(FieldObservations::Unavailable, |evidence| {
+                    FieldObservations::Captured { evidence }
+                }),
+        ),
+    };
     Ok(task_work
         .into_iter()
         .map(|(_, task)| task)
         .chain(wave_work)
         .chain([repository_work])
+        .map(|mut work| {
+            work.support = Some(support.clone());
+            work
+        })
         .collect())
 }
 
@@ -965,6 +1013,37 @@ mod tests {
             .unwrap();
         let repo = RepositoryId::parse("repo_11111111111111111111111111111111").unwrap();
         (dir, store, repo)
+    }
+
+    #[test]
+    fn membership_fields_declare_independent_support_from_the_pinned_snapshot() {
+        use crate::work::selection::FieldObservations;
+        let (_dir, store, repo) = fixture();
+        let cache = std::sync::Arc::new(crate::observe::Cache::default());
+        let (plan, _) = cache.capture(|| store.view_plan(&repo, Some("state:backlog")).unwrap());
+        let fact = &plan.membership.facts[0];
+        let parent = fact.parent.support.as_ref().unwrap();
+        let lifecycle = fact.lifecycle.support.as_ref().unwrap();
+        let activity = fact.activity.support.as_ref().unwrap();
+        assert_eq!(parent.revisions.keys().collect::<Vec<_>>(), ["planning"]);
+        assert_eq!(parent.machine, store.reading_identity().unwrap().0);
+        assert!(matches!(parent.observations, FieldObservations::Sqlite));
+        assert!(matches!(lifecycle.observations, FieldObservations::Sqlite));
+        let FieldObservations::Captured { evidence } = &activity.observations else {
+            panic!("served capture")
+        };
+        assert_eq!(evidence.source, cache.incarnation());
+        assert_ne!(parent.derivation, lifecycle.derivation);
+        let bare = store.view_plan(&repo, Some("state:backlog")).unwrap();
+        assert!(matches!(
+            bare.membership.facts[0]
+                .activity
+                .support
+                .as_ref()
+                .unwrap()
+                .observations,
+            FieldObservations::Unavailable
+        ));
     }
 
     #[test]

@@ -5,7 +5,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 mod membership;
 mod panes;
-pub use membership::{MembershipFacts, MembershipNode, MembershipPlan, MembershipStateEffect};
+pub use membership::{
+    FieldObservations, FieldSupport, MembershipFacts, MembershipNode, MembershipPlan,
+    MembershipStateEffect, MembershipSupport, ParentFact, StateFact,
+};
 mod query;
 pub use panes::{
     BrowserTab, ChangeComparison, FileDraft, FileTab, PaneIntent, PaneKind, PaneTree, ShellTab,
@@ -130,6 +133,12 @@ pub enum SelectionState {
     Done,
 }
 
+impl SelectionState {
+    fn is_activity(&self) -> bool {
+        matches!(self, Self::Available | Self::Busy | Self::Blocked)
+    }
+}
+
 /// The source path contains authored IDs, never array indexes or current focus.
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
@@ -169,6 +178,7 @@ pub struct SelectionWork {
     pub states: BTreeSet<SelectionState>,
     /// An unobservable process is different from a complete read with no current reports.
     pub activity_known: bool,
+    pub support: Option<MembershipSupport>,
 }
 
 fn wave_descendants<'a>(

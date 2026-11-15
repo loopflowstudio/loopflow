@@ -449,6 +449,15 @@ beneath ordered per-query effects, including after command retirement and restar
   the database and survives server restart; a newly initialized database gets
   another epoch. `query` hashes the exact read arguments, JSON selection and
   resolution directory.
+  Work membership facts carry separate `parent`, `lifecycle` and `activity`
+  values. Each value's `support` declares its derivation, Machine, epoch, schema
+  and consumed SQLite revisions. Observation support distinguishes SQL-only,
+  captured (including an empty validated dependency set), and unavailable.
+  Activity capture uses the existing invocation's answers, including inherited
+  workers; unrelated invalid observations do not invalidate SQL-only fields.
+  Current activity support conservatively includes the repository Session read's
+  consumed observations. Field support does not establish query completeness,
+  command settlement or native input readiness.
   Selected fragments have `complete: false`; a failed read has `stamp: null`.
   CLI streams have no served-query identity (`query: null`, `complete: false`).
   A stamp certifies only SQLite facts, never external observations or native

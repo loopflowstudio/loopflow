@@ -3,12 +3,92 @@ import Foundation
 /// A finite program compiled by Rust: identity, scope, occurrence paths and
 /// ordering are already resolved. Only selection-state predicates remain.
 public struct WorkMembershipPlan: Codable, Equatable, Sendable {
+    public struct FieldSupport: Codable, Equatable, Sendable {
+        public enum Observations: Codable, Equatable, Sendable {
+            case sqlite
+            case captured(ReadingStamp.Observations)
+            case unavailable
+            private enum Keys: String, CodingKey { case kind, evidence }
+            private enum Kind: String, Codable { case sqlite, captured, unavailable }
+            public init(from decoder: any Decoder) throws {
+                let fields = try decoder.container(keyedBy: Keys.self)
+                switch try fields.decode(Kind.self, forKey: .kind) {
+                case .sqlite: self = .sqlite
+                case .captured: self = .captured(try fields.decode(ReadingStamp.Observations.self, forKey: .evidence))
+                case .unavailable: self = .unavailable
+                }
+            }
+            public func encode(to encoder: any Encoder) throws {
+                var fields = encoder.container(keyedBy: Keys.self)
+                switch self {
+                case .sqlite: try fields.encode(Kind.sqlite, forKey: .kind)
+                case .captured(let evidence):
+                    try fields.encode(Kind.captured, forKey: .kind)
+                    try fields.encode(evidence, forKey: .evidence)
+                case .unavailable: try fields.encode(Kind.unavailable, forKey: .kind)
+                }
+            }
+        }
+        public let machine: String
+        public let epoch: String
+        public let schema: UInt32
+        public let derivation: String
+        public let revisions: [String: Int64]
+        public let observations: Observations
+    }
+    public struct ParentFact: Codable, Equatable, Sendable {
+        public let wave: String?
+        public let support: FieldSupport?
+        private enum CodingKeys: String, CodingKey { case wave, support }
+        public init(wave: String?, support: FieldSupport?) { self.wave = wave; self.support = support }
+        public init(from decoder: any Decoder) throws {
+            let fields = try decoder.container(keyedBy: CodingKeys.self)
+            wave = try fields.decode(String?.self, forKey: .wave)
+            support = try fields.decode(FieldSupport?.self, forKey: .support)
+        }
+        public func encode(to encoder: any Encoder) throws {
+            var fields = encoder.container(keyedBy: CodingKeys.self)
+            try fields.encode(wave, forKey: .wave)
+            try fields.encode(support, forKey: .support)
+        }
+    }
+    public struct StateFact: Codable, Equatable, Sendable {
+        public var states: [WorkSelectionState]
+        public let known: Bool
+        public let support: FieldSupport?
+        private enum CodingKeys: String, CodingKey { case states, known, support }
+        public init(states: [WorkSelectionState], known: Bool, support: FieldSupport?) {
+            self.states = states; self.known = known; self.support = support
+        }
+        public init(from decoder: any Decoder) throws {
+            let fields = try decoder.container(keyedBy: CodingKeys.self)
+            states = try fields.decode([WorkSelectionState].self, forKey: .states)
+            known = try fields.decode(Bool.self, forKey: .known)
+            support = try fields.decode(FieldSupport?.self, forKey: .support)
+        }
+        public func encode(to encoder: any Encoder) throws {
+            var fields = encoder.container(keyedBy: CodingKeys.self)
+            try fields.encode(states, forKey: .states)
+            try fields.encode(known, forKey: .known)
+            try fields.encode(support, forKey: .support)
+        }
+    }
     public struct Facts: Codable, Equatable, Sendable {
         public let work: WorkWorkspaceKey
         public let name: String
-        public var states: [WorkSelectionState]
-        public let activityKnown: Bool
-        enum CodingKeys: String, CodingKey { case work, name, states, activityKnown = "activity_known" }
+        public let parent: ParentFact
+        public var lifecycle: StateFact
+        public var activity: StateFact
+        public var activityKnown: Bool { activity.known }
+        // The query overlay mutates a copy, never the confirmed fields.
+        public var states: [WorkSelectionState] {
+            get { (lifecycle.states + activity.states).sorted { $0.rawValue < $1.rawValue } }
+            set {
+                let activityStates: Set<WorkSelectionState> = [.available, .busy, .blocked]
+                lifecycle = StateFact(states: newValue.filter { !activityStates.contains($0) }, known: lifecycle.known, support: nil)
+                activity = StateFact(states: newValue.filter { activityStates.contains($0) }, known: activity.known, support: nil)
+            }
+        }
     }
     public indirect enum Node: Codable, Equatable, Sendable {
         case members([WorkMemberRef])

@@ -443,7 +443,10 @@ Checks (2026-11-15; inherited `LF_*` cleared):
 - `cargo nextest run -p loopflow --lib -E 'test(session_rename_receipts_cover_the_name_and_refusal_without_replaying) | test(session_pages_subscribe_with_their_names_provenance_and_cursor)' --test-threads 1`: 2 passed; linker reported a debug `__eh_frame` over 16 MB.
 - `cargo test -p loopflow --test integration documented_commands::`: 4 passed; `cargo clippy --all-targets -- -D warnings`: passed.
 - `check_swift_multiplatform_boundaries.py`, `git diff --check`: passed; `cargo fmt --check` passed. Native latency remains unmeasured; broader/native checks belong to gate/demo.
-- SQLite `EXPLAIN QUERY PLAN` on 10,000 name facts: identity lookup uses the primary-key index; Machine lookup uses `session_names_machine`. This is indexing feedback, not a latency benchmark.
+- SQLite `EXPLAIN QUERY PLAN` on 10,000 name facts: identity lookup uses the primary-key index; Machine lookup uses `session_names_machine`. Twenty in-memory SQL-only samples on the current Machine gave identity P95
+  0.006 ms (1 row) and Machine P95 4.922 ms (10,000 rows). This excludes Swift
+  decoding, disk, publication and native rendering; it is a load diagnostic,
+  not a native latency baseline.
 
 
 ### Continuation correction: state-only candidates cannot project a Move

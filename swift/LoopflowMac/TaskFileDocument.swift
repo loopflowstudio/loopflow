@@ -782,10 +782,8 @@ final class TaskFilesStore {
     private(set) var reviewError: String?
     private(set) var reviewTruncated = false
     private var reviewGeneration = 0
-    /// Changes' place in the whole comparison.
-    var changesPlace = ReviewPlace()
-    /// Files' Diff place in each file, so switching paths and back lands where you were.
-    private var filePlaces: [String: ReviewPlace] = [:]
+    /// Each reader's place, so switching paths or pages and back lands where you were.
+    private var places: [ReviewReader: ReviewPlace] = [:]
     /// The file next/previous crossed into, and from which end its first stop is taken.
     @ObservationIgnored private var entering: (path: String, offset: Int)?
     var reviewLayout = ReviewLayout.unified
@@ -834,18 +832,8 @@ final class TaskFilesStore {
     }
 
     subscript(place reader: ReviewReader) -> ReviewPlace {
-        get {
-            switch reader {
-            case .changes: changesPlace
-            case .file(let path): filePlaces[path] ?? ReviewPlace()
-            }
-        }
-        set {
-            switch reader {
-            case .changes: changesPlace = newValue
-            case .file(let path): filePlaces[path] = newValue
-            }
-        }
+        get { places[reader] ?? ReviewPlace() }
+        set { places[reader] = newValue }
     }
 
     /// The diff a reader shows, once it has been read.
@@ -940,7 +928,7 @@ final class TaskFilesStore {
             if let entry = entering, entry.path == path {
                 entering = nil
                 let stop = parsed.stop(after: nil, offset: entry.offset)
-                filePlaces[path] = ReviewPlace(anchor: stop?.id, current: stop?.id)
+                places[.file(path)] = ReviewPlace(anchor: stop?.id, current: stop?.id)
             }
             changesError = nil
         } catch {

@@ -289,6 +289,46 @@ struct ReviewNotice: View {
 }
 
 /// Unified or side by side; side by side needs a wide pane.
+/// Previous/next change buttons and the position, with `[`/`]` while the pane
+/// has focus. Changes crosses files in its stream; Files' Diff opens the
+/// neighbouring changed file past either end.
+struct ReviewStepper: View {
+    @Bindable var store: TaskFilesStore
+    let reader: TaskFilesStore.ReviewReader
+    let isFocused: Bool
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button { go(-1) } label: { Image(systemName: "chevron.up") }
+                .help("Previous change ([)").accessibilityLabel("Previous change")
+            Button { go(1) } label: { Image(systemName: "chevron.down") }
+                .help("Next change (])").accessibilityLabel("Next change")
+            Text(store.position(reader)).font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
+                .monospacedDigit().accessibilityIdentifier("review-position")
+        }
+        .background {
+            HStack {
+                Button("Next change") { go(1) }.keyboardShortcut("]", modifiers: [])
+                Button("Previous change") { go(-1) }.keyboardShortcut("[", modifiers: [])
+            }
+            .disabled(!isFocused).hidden().accessibilityHidden(true).frame(width: 0, height: 0)
+        }
+    }
+
+    private func go(_ offset: Int) {
+        guard let stop = store.step(offset, in: reader) else { return }
+        withAnimation(.easeOut(duration: 0.15)) { store[place: reader].anchor = stop.id }
+    }
+}
+
+extension TaskFilesStore {
+    /// The reader's scroll anchor, for `scrollPosition(id:)`.
+    func anchor(_ reader: ReviewReader) -> Binding<String?> {
+        Binding(get: { self[place: reader].anchor }, set: { self[place: reader].anchor = $0 })
+    }
+}
+
 struct ReviewLayoutPicker: View {
     @Bindable var store: TaskFilesStore
     let width: CGFloat

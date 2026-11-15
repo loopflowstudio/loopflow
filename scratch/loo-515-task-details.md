@@ -1,7 +1,6 @@
 # LOO-515 · Task details beside the conversation
 
 Research: `scratch/task-details-research.md`.
-The Changes build direction is in "Build direction — November 14" below.
 
 Status: Changes/Brief built November 14 (see Implementation status); October
 sections below are the plan for what remains. Accepted
@@ -37,12 +36,11 @@ Page: `scratch/concept-review.html`. Both findings are built:
   changes`; the branch is GitHub's `baseRefName` once a PR is read, else
   "the Task's base" (see `scratch/questions.md`).
 - **Second pass, built:** both readers step and keep their place.
-  `TaskFilesStore.ReviewReader` is `.changes | .file(path)`; each has a
-  `ReviewPlace` (anchor, current stop): one for Changes, one per path for
-  Files' Diff. `step(_:in:)`, `position(_:)` and `ReviewStream(reader:)` take
-  the reader. In Files' Diff, `]`/`[` and the header arrows step the file's
-  changes; past the last (first) one they open the next (previous) changed
-  file, in `lf task changes` order, in Diff mode on its first (last) change.
+  `ReviewReader` is `.changes | .file(path)`; each has a `ReviewPlace`
+  (anchor, current stop) on `TaskFilesStore`. `ReviewStepper` is the one
+  arrows/position/`]`/`[` control. Past a file's last (first) change, Files'
+  Diff opens the next (previous) changed file, `lf task changes` order, on its
+  first (last) change.
 - **Noted, not this Task:** a `.changes(comparison:)` browser tab and the Files
   tool's Changes page are two representations of one view; merging them
   changes the persisted `WorkBrowserTab` shape, which LOO-497/416 own.
@@ -71,9 +69,7 @@ Remaining:
 - Moves inside mixed change runs; shortcut for Ask (none yet).
 - Demo on a real Task: long brief, no-PR Task, offline `gh`, large patch performance of the LazyVStack stream, a `node_modules`-scale folder.
 
-Compress: `test_desktop.sh --filter 'TaskFilesTests|RegistryQueryTests'` → 54 passed.
-Second pass: `scripts/test_desktop.sh --filter 'TaskFilesTests|ReviewDiffTests'` → 41 passed (incl. `diffSteppingPastAFilesLastChangeOpensTheNextFilesDiff`, `eachReaderKeepsItsPlaceAcrossPathSwitches`).
-One diff reader: `scripts/test_desktop.sh --filter 'TaskFilesTests|ReviewDiffTests|PullRequestTests|ThemeTests'` → 62 passed (incl. `diffModeComparesTheUnsavedDraftInTheReviewStream`).
+Stepping compress: `scripts/test_desktop.sh --filter 'TaskFilesTests|ReviewDiffTests'` → 41 passed.
 Checks: `scripts/test_desktop.sh --filter 'TaskFilesTests|ReviewDiffTests|TaskBriefTests|PullRequestTests|DesktopPaneControlTests|DTOFixtureTests|WorkDestinationTests|DesktopPerformanceFixtureTests|RegistryQueryTests'` → 222 run, then `TaskFilesTests` 33 passed; `ServerProtocolTests` 20 passed. `cargo nextest -p loopflow --lib 'test(server::schema::tests::) | test(lf::commands::read::)'` → 11 passed (schema fixture regenerated). Gate runs clippy, `documented_commands::`, golden.
 
 ## Demo

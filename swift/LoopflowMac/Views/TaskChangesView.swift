@@ -32,7 +32,7 @@ struct TaskChangesView: View {
                 }
                 .scrollTargetLayout()
             }
-            .scrollPosition(id: $store.changesPlace.anchor, anchor: .top)
+            .scrollPosition(id: store.anchor(.changes), anchor: .top)
             .onScrollPhaseChange { _, phase in if phase == .interacting { store.noteInteraction() } }
             .onGeometryChange(for: CGFloat.self, of: \.size.width) { width = $0 }
             if let selection = store.reviewSelection, let review = store.review {
@@ -40,7 +40,6 @@ struct TaskChangesView: View {
             }
         }
         .background(palette.background)
-        .background { shortcuts }
         .accessibilityIdentifier("browser-changes")
         .task(id: "\(store.comparison)|\(task?.reference.workspace?.baseCommit ?? "")") {
             store.observeFiles()
@@ -60,12 +59,7 @@ struct TaskChangesView: View {
 
     private var toolbar: some View {
         HStack(spacing: 8) {
-            Button { go(-1) } label: { Image(systemName: "chevron.up") }
-                .help("Previous change ([)").accessibilityLabel("Previous change")
-            Button { go(1) } label: { Image(systemName: "chevron.down") }
-                .help("Next change (])").accessibilityLabel("Next change")
-            Text(store.position(.changes)).font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
-                .monospacedDigit().accessibilityIdentifier("changes-position")
+            ReviewStepper(store: store, reader: .changes, isFocused: isFocused)
             if let path = store.focusedPath {
                 Text(path).font(Typography.code(10)).lineLimit(1).truncationMode(.head).help(path)
             }
@@ -86,24 +80,11 @@ struct TaskChangesView: View {
         .frame(height: TaskFileChrome.headerHeight)
     }
 
-    private var shortcuts: some View {
-        HStack {
-            Button("Next change") { go(1) }.keyboardShortcut("]", modifiers: [])
-            Button("Previous change") { go(-1) }.keyboardShortcut("[", modifiers: [])
-        }
-        .disabled(!isFocused).hidden().accessibilityHidden(true).frame(width: 0, height: 0)
-    }
-
-    private func go(_ offset: Int) {
-        guard let stop = store.step(offset, in: .changes) else { return }
-        withAnimation(.easeOut(duration: 0.15)) { store.changesPlace.anchor = stop.id }
-    }
-
     private func toggleFocus() {
         if store.focusedPath != nil {
             store.focusedPath = nil
         } else {
-            let current = store.changesPlace.current.flatMap { id in store.review?.stops.first { $0.id == id }?.path }
+            let current = store[place: .changes].current.flatMap { id in store.review?.stops.first { $0.id == id }?.path }
             store.focusedPath = current ?? store.review?.files.first?.path
         }
         store.noteInteraction()
@@ -151,7 +132,7 @@ struct TaskChangesView: View {
 
     private func jump(to path: String) {
         if store.focusedPath != nil { store.focusedPath = path }
-        store.changesPlace = .init(anchor: "file:\(path)", current: store.review?.stops.first { $0.path == path }?.id)
+        store[place: .changes] = .init(anchor: "file:\(path)", current: store.review?.stops.first { $0.path == path }?.id)
         store.noteInteraction()
     }
 

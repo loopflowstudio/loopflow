@@ -886,15 +886,15 @@ struct TaskFilesTests {
         store.step(1, in: .changes)
         store.step(1, in: .changes)
         store.step(1, in: .changes)
-        let changes = store.changesPlace
+        let changes = store[place: .changes]
         store.selectFile("b.swift", mode: .diff)
         await store.loadDiff()
         store.step(1, in: .file("b.swift"))
         store.selectFile("a.swift", mode: .diff)
         await store.loadDiff()
         #expect(store[place: .file("a.swift")] == a)
-        #expect(store.changesPlace == changes)
-        #expect(store.changesPlace.current?.hasPrefix("b.swift") == true)
+        #expect(store[place: .changes] == changes)
+        #expect(store[place: .changes].current?.hasPrefix("b.swift") == true)
         #expect(store[place: .file("b.swift")].current != nil)
     }
 

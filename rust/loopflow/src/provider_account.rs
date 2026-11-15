@@ -1,6 +1,7 @@
 //! Machine-local provider accounts, selection, and launch homes for Claude and Codex.
 
 pub mod activation;
+pub(crate) mod capacity;
 pub(crate) mod codex_access;
 pub(crate) mod hold;
 pub(crate) mod identity;
@@ -189,7 +190,7 @@ impl LaunchCapacity {
             .collect();
         Ok(Self {
             accounts,
-            limits: store.provider_account_limits(None)?,
+            limits: capacity::limits(store, None)?,
             active,
             now: now_unix(),
         })

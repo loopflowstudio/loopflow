@@ -385,9 +385,9 @@ pub(crate) struct LinearComment {
 impl From<&LinearComment> for TaskComment {
     fn from(comment: &LinearComment) -> Self {
         let author =
-            if comment.author_id.is_some() || crate::ops::linear_observe::is_steer(&comment.body) {
+            if comment.author_id.is_some() || crate::work::task::comment::is_steer(&comment.body) {
                 TaskCommentAuthor::Person {
-                    name: crate::ops::linear_observe::comment_requester(
+                    name: crate::work::task::comment::comment_requester(
                         &comment.body,
                         comment.author_name.as_deref(),
                     ),

@@ -576,7 +576,7 @@ fn notion_status_title_body_and_comments_write_back_to_the_page() {
         let thread = runtime.block_on(state.lock()).comments[page["id"].as_str().unwrap()].clone();
         assert_eq!(thread.len(), 1);
         assert_eq!(thread[0]["rich_text"][1]["annotations"]["bold"], true);
-        let comments = fixture.store.sqlite.task_comments(&saved.id).unwrap();
+        let comments = fixture.store.task_comments(&saved.id).unwrap();
         assert_eq!(comments.comments.len(), 1);
         assert!(comments.pending_sync.is_empty());
     });

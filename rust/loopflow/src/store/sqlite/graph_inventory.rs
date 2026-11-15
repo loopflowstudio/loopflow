@@ -10,7 +10,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::durable::{GraphProcessFilter, GraphProcessInventoryEntry, GraphProcessPage};
 use crate::graph::compiled::CompiledGraph;
-use crate::ops::graph_process::{GraphProcess, GraphProcessStep};
+use crate::graph::process::{GraphProcess, GraphProcessStep};
 use crate::session::{GraphProcessSummary, GraphProcessSummaryState};
 use crate::store::{StoreError, StoreResult};
 use loopflow_model::durable::TaskId;

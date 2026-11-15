@@ -1805,7 +1805,7 @@ fn assert_completion_adopts_reopening(during_delivery: bool) {
             before,
             "planning adoption has no execution authority"
         );
-        let sync = fixture.store.sqlite.task_planning_sync(&task.id).unwrap();
+        let sync = fixture.store.task_planning_sync(&task.id).unwrap();
         let retained = sync
             .changes
             .iter()
@@ -3983,7 +3983,7 @@ fn historical_comment_delivery_retains_local_identity_after_linear_readback() {
             .pending_task_comments(&task.id)
             .unwrap()
             .is_empty());
-        let thread = fixture.store.sqlite.task_comments(&task.id).unwrap();
+        let thread = fixture.store.task_comments(&task.id).unwrap();
         assert_eq!(thread.comments.len(), 1);
         assert_eq!(thread.comments[0].id, comment.id);
         assert_eq!(thread.comments[0].body, comment.body);

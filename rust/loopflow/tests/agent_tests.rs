@@ -258,7 +258,7 @@ text = 'Fable 5 is currently unavailable. Switch to another model.' if failed el
         let store =
             loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
         assert!(store
-            .provider_account_limits(Some("claude"))
+            .provider_account_limit_rows(Some("claude"))
             .unwrap()
             .is_empty());
         let account = store

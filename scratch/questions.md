@@ -13,3 +13,7 @@
 - The isolated build option is a leading `--isolated-build` argument to
   `scripts/dev-lf`; ordinary lf arguments pass through after it. A fixed
   checkout-local `target/isolated` is the simpler reusable debugging target.
+- Storage preparation reads repository identity and saved evidence together, then
+  observes configuration after the savepoint releases; this avoids a preliminary
+  per-Task lookup and keeps connection reads out of SQL locks. Served observations
+  retain the request's external revision tracking.

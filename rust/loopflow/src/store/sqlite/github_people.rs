@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use rusqlite::{params, OptionalExtension};
 
 use super::SqliteStore;
-use crate::ops::people::{CachedGithubPerson, GithubPerson};
+use crate::store::people::{CachedGithubPerson, GithubPerson};
 use crate::store::StoreResult;
 
 impl SqliteStore {

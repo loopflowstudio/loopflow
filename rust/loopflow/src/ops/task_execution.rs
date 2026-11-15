@@ -7,8 +7,8 @@ use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 
 use crate::durable::GraphProcessDetail;
+use crate::graph::process::GraphProcess;
 use crate::journal::ProcessIdentityEvidence;
-use crate::ops::graph_process::GraphProcess;
 use crate::process::ProcessEntry;
 use crate::session::GraphProcessSummaryState;
 use crate::session_record::activity::{self, Activity};

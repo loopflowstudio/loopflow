@@ -23,6 +23,26 @@ pub struct TaskDeletion {
     pub base_revision: Option<String>,
 }
 
+/// A receipt read with its owner, before observing provider configuration.
+#[derive(Debug, Clone)]
+pub struct PlanningSyncReceipts {
+    pub repo: String,
+    pub changes: Vec<PlanningSyncChange>,
+}
+
+impl PlanningSyncReceipts {
+    pub fn status(self, connected: bool) -> PlanningSyncStatus {
+        PlanningSyncStatus {
+            connected,
+            changes: self
+                .changes
+                .into_iter()
+                .filter(|change| connected || change.state != PlanningSyncState::Pending)
+                .collect(),
+        }
+    }
+}
+
 /// Read-only delivery evidence. These rows never confer execution authority.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PlanningSyncStatus {

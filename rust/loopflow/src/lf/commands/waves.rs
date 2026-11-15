@@ -408,7 +408,7 @@ async fn project_planning(store: &SharedStore, wave: &Wave) -> Evidence<ProjectS
             .into_iter()
             .map(|project| -> Result<ProjectSummary> {
                 Ok(ProjectSummary {
-                    sync: store.sqlite.project_planning_sync(&project.id)?,
+                    sync: store.project_planning_sync(&project.id)?,
                     current: current.as_deref().is_some_and(|id| {
                         id == project.id.as_str()
                             || project
@@ -1665,6 +1665,7 @@ struct DetailReads<'a> {
     shared: &'a SharedTaskReads,
     selection_readings: HashMap<loopflow_model::durable::RepositoryId, Arc<TaskSelectionReading>>,
     facts: crate::store::sqlite::TaskDetailFacts,
+    planning_connections: HashMap<String, bool>,
     /// Each Task's own Workflow, else its Wave's, repository's or the builtin
     /// default, with that source; a default is resolved once per Wave and repository.
     selections:
@@ -1687,7 +1688,7 @@ struct DetailReads<'a> {
     /// validates every setting, so each distinct configuration resolves once.
     agents: std::sync::Mutex<HashMap<String, Option<String>>>,
     /// Each Task's latest Graph and what its execution reads, asked once.
-    graphs: HashMap<loopflow_model::durable::TaskId, crate::ops::graph_process::GraphProcess>,
+    graphs: HashMap<loopflow_model::durable::TaskId, crate::graph::process::GraphProcess>,
     execution: crate::store::sqlite::GraphExecutionFacts,
 }
 
@@ -1702,6 +1703,12 @@ impl<'a> DetailReads<'a> {
             selection_readings.insert(repository.clone(), shared.selections(store, repository)?);
         }
         let facts = store.sqlite.task_detail_facts(tasks)?;
+        let mut planning_connections = HashMap::new();
+        for receipts in facts.planning_receipts.values() {
+            planning_connections
+                .entry(receipts.repo.clone())
+                .or_insert_with(|| crate::ops::planning_client::connected(&receipts.repo));
+        }
         let graphs = store
             .sqlite
             .latest_task_graphs(&tasks.iter().map(|task| &task.id).collect::<Vec<_>>())?;
@@ -1769,6 +1776,7 @@ impl<'a> DetailReads<'a> {
             shared,
             selection_readings,
             facts,
+            planning_connections,
             selections,
             wave_names,
             personal,
@@ -2011,10 +2019,14 @@ async fn snapshot_task_detail(
         task: task_summary(
             task,
             facts
-                .planning_sync
+                .planning_receipts
                 .get(&task.id)
-                .cloned()
-                .ok_or_else(|| anyhow!("Task {} has no planning sync", task.id))?,
+                .map(|receipts| {
+                    receipts
+                        .clone()
+                        .status(reads.planning_connections[&receipts.repo])
+                })
+                .ok_or_else(|| anyhow!("Task {} has no planning receipts", task.id))?,
             acquisition,
             facts
                 .repository_paths

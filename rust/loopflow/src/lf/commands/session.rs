@@ -82,7 +82,7 @@ pub fn steer(
                     .with_context(unknown)?;
                 let scope = SteerScope::Task { issue, wave };
                 let steer = crate::engine::session::steer(&store, &repo, scope, message).await?;
-                anyhow::Ok((steer, store.sqlite.task_comments(&task.id)?))
+                anyhow::Ok((steer, store.task_comments(&task.id)?))
             })?;
             match json {
                 true => println!("{}", serde_json::to_string(&thread.1)?),

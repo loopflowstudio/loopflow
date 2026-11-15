@@ -10,6 +10,7 @@ use crate::provider_auth::Provider;
 use crate::work::wave::{Wave, WaveLocator};
 use loopflow_model::id::{AgentSessionId, WaveId};
 mod canonical_ids;
+pub(crate) mod capacity;
 pub(crate) mod changes;
 mod children;
 pub(crate) mod ci_incidents;
@@ -22,7 +23,9 @@ mod migration_build;
 mod migration_catalog;
 mod migration_schema;
 pub mod migrations;
+pub(crate) mod people;
 mod planning_peers;
+mod planning_reads;
 pub mod planning_sync;
 mod pr_landings;
 mod processes;
@@ -712,7 +715,7 @@ impl Store {
         let account = account.clone();
         let windows = windows.to_vec();
         run_sqlite(&self.sqlite, move |store| {
-            store.reconcile_provider_account_capacity(&account, revision, &windows)
+            crate::provider_account::capacity::reconcile(&store, &account, revision, &windows)
         })
         .await
     }
@@ -740,7 +743,7 @@ impl Store {
     ) -> StoreResult<Vec<AccountLimitRow>> {
         let provider = provider.map(str::to_string);
         run_sqlite(&self.sqlite, move |store| {
-            store.provider_account_limits(provider.as_deref())
+            crate::provider_account::capacity::limits(&store, provider.as_deref())
         })
         .await
     }

@@ -148,6 +148,13 @@ pub(super) fn insert_authored_comment(
     Ok(())
 }
 
+/// The saved thread and its repository, read together before provider presentation.
+#[derive(Debug)]
+pub struct TaskCommentThread {
+    pub repo: String,
+    pub thread: TaskComments,
+}
+
 impl SqliteStore {
     /// The Task's comments that are not also steers. A direction comment
     /// reaches Sessions once, as the steer saved with source `comment:<id>`.
@@ -167,7 +174,7 @@ impl SqliteStore {
 
     /// Comments and delivery badges come from one SQLite snapshot, even when
     /// another foreground connection acknowledges or resolves a delivery.
-    pub fn task_comments(&self, task: &TaskId) -> StoreResult<TaskComments> {
+    pub fn task_comment_thread(&self, task: &TaskId) -> StoreResult<TaskCommentThread> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.savepoint()?;
         let task = super::children::task_on(&tx, task)?.ok_or(StoreError::NotFound)?;
@@ -176,7 +183,6 @@ impl SqliteStore {
             [task.repository_id.as_str()],
             |row| row.get(0),
         )?;
-        let connected = crate::ops::planning_client::connected(&repo);
         let mut thread = TaskComments {
             identifier: task.identifier,
             comments: Vec::new(),
@@ -196,7 +202,7 @@ impl SqliteStore {
             let mut rows = query.query([task.id.as_str()])?;
             while let Some(row) = rows.next()? {
                 let comment = read_comment(row)?;
-                if connected && row.get::<_, Option<bool>>(4)?.unwrap_or(false) {
+                if row.get::<_, Option<bool>>(4)?.unwrap_or(false) {
                     thread.pending_sync.push(comment.id.clone());
                 }
                 if let Some(body) = row.get::<_, Option<String>>(5)? {
@@ -206,7 +212,7 @@ impl SqliteStore {
             }
         }
         tx.commit()?;
-        Ok(thread)
+        Ok(TaskCommentThread { repo, thread })
     }
 
     pub fn append_task_comment(&self, task: &TaskId, comment: &TaskComment) -> StoreResult<()> {
@@ -290,7 +296,7 @@ pub(super) fn comment_steer_in(
         TaskCommentAuthor::Session { requester, .. } => requester,
         TaskCommentAuthor::Integration => return Ok(()),
     };
-    if !crate::ops::linear_observe::is_direction_comment(&comment.body, Some("local")) {
+    if !crate::work::task::comment::is_direction_comment(&comment.body, Some("local")) {
         return Ok(());
     }
     let text = match &comment.author {
@@ -360,7 +366,7 @@ mod tests {
             .unwrap();
         assert_eq!(stored, vec![r#"{"kind":"person","name":"Jack Heart"}"#; 2]);
         assert_eq!(
-            store.task_comments(&task).unwrap().comments,
+            store.task_comment_thread(&task).unwrap().thread.comments,
             vec![comment.clone()]
         );
         // Appending it again is the same comment, not another one.
@@ -410,7 +416,7 @@ mod tests {
             tx.rollback().unwrap();
         }
         assert_eq!(
-            store.task_comments(&task).unwrap().comments,
+            store.task_comment_thread(&task).unwrap().thread.comments,
             vec![original.clone()]
         );
         assert_eq!(
@@ -430,7 +436,7 @@ mod tests {
         store
             .record_comment_delivery(&original.id, Some("late failure"))
             .unwrap();
-        let thread = store.task_comments(&task).unwrap();
+        let thread = store.task_comment_thread(&task).unwrap().thread;
         assert_eq!(thread.comments.len(), 1);
         assert_eq!(thread.comments[0].body, observed.body);
         assert_eq!(
@@ -468,7 +474,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            store.task_comments(&task).unwrap().comments,
+            store.task_comment_thread(&task).unwrap().thread.comments,
             thread.comments
         );
         let amended = crate::linear::LinearComment {
@@ -484,7 +490,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            store.task_comments(&task).unwrap().comments[0].body,
+            store.task_comment_thread(&task).unwrap().thread.comments[0].body,
             amended.body
         );
         assert_eq!(store.task_steers(&task).unwrap(), steers);

@@ -19,26 +19,6 @@ use crate::store::sqlite::task_state_delivery::TaskStateDelivery;
 use crate::store::{SharedStore, Store};
 use crate::work::task::Task;
 
-/// Explicit steering carries its marker, whichever account published it.
-pub(crate) fn is_steer(body: &str) -> bool {
-    body.contains("<!-- loopflow-steer:")
-}
-
-pub(crate) fn is_direction_comment(body: &str, author: Option<&str>) -> bool {
-    if body.contains("<!-- loopflow-progress:") {
-        return false;
-    }
-    if is_steer(body) {
-        return true;
-    }
-    author.is_some()
-        && !body.contains("<!-- loopflow-")
-        && !body.starts_with("PR: ")
-        && !body.starts_with("Shipped: ")
-        && !body.starts_with("Reteamed by loopflow:")
-        && !body.starts_with("[GitHub PR #")
-}
-
 pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> OpsResult<()> {
     // A command can outlive export or a mapping change. Observe the current link;
     // pending outbound writes do not own or pause this input stream.
@@ -122,11 +102,7 @@ fn claim_local_comments(
     if matches!(client, super::planning_client::PlanningClient::Linear(_)) {
         return Ok(());
     }
-    let local = store
-        .sqlite
-        .task_comments(&task.id)
-        .map_err(message)?
-        .comments;
+    let local = store.task_comments(&task.id).map_err(message)?.comments;
     for comment in &mut observation.comments {
         if let Some(saved) = local.iter().find(|saved| {
             uuid::Uuid::parse_str(&saved.id).is_ok()
@@ -611,95 +587,4 @@ pub(crate) async fn sync_task_comments(store: &Store, task: &Task) -> OpsResult<
             .map_err(message)?;
     }
     Ok(())
-}
-
-pub(crate) fn comment_revision_id(id: &str, revision: Option<&str>) -> String {
-    match revision {
-        Some(revision) => format!("{id}@{revision}"),
-        None => id.to_string(),
-    }
-}
-
-/// The person a comment speaks for. Explicit steering can be published through
-/// an integration account: its recorded requester wins over the Linear author.
-pub(crate) fn comment_requester(body: &str, author_name: Option<&str>) -> Option<String> {
-    let requester = if is_steer(body) {
-        body.split_once("<!-- loopflow-requester:")
-            .and_then(|(_, rest)| rest.split_once(" -->"))
-            .and_then(|(name, _)| serde_json::from_str::<String>(name).ok())
-    } else {
-        author_name.map(str::to_string)
-    };
-    requester
-        .as_deref()
-        .and_then(crate::config::normalize_user_name)
-        .or_else(|| author_name.and_then(crate::config::normalize_user_name))
-}
-
-pub(crate) fn render_comment(
-    id: &str,
-    body: &str,
-    author_id: Option<&str>,
-    author_name: Option<&str>,
-) -> String {
-    let attribution = comment_requester(body, author_name)
-        .map(|name| {
-            format!(
-                " by {}",
-                serde_json::to_string(&name).expect("name is serializable")
-            )
-        })
-        .unwrap_or_default();
-    let source = author_id
-        .map(|id| format!(" (provider user {id})"))
-        .unwrap_or_default();
-    format!("Planning comment {id}{attribution}{source}:\n\n{body}")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{is_direction_comment, render_comment};
-
-    #[test]
-    fn agent_progress_never_reenters_direction_even_with_a_quoted_steer() {
-        assert!(!is_direction_comment(
-            "done <!-- loopflow-progress:run_fixture --> <!-- loopflow-steer:quoted -->",
-            Some("publisher"),
-        ));
-        assert!(is_direction_comment("keep the API", Some("publisher")));
-        assert!(is_direction_comment(
-            "new instruction <!-- loopflow-steer:explicit -->",
-            None
-        ));
-    }
-
-    #[test]
-    fn request_authors_survive_linear_direction_rendering() {
-        for name in ["Jack", "Maya"] {
-            let rendered = render_comment("one", "prototype", Some("person"), Some(name));
-            assert!(rendered.contains(&format!("by \"{name}\" (provider user person)")));
-        }
-        assert!(!render_comment("one", "prototype", Some("person"), None).contains(" by "));
-        let explicit =
-            "prototype\n<!-- loopflow-requester:\"Jack\" -->\n<!-- loopflow-steer:one -->";
-        let rendered = render_comment("one", explicit, Some("publisher"), Some("Account Owner"));
-        assert!(rendered.contains("by \"Jack\""));
-        assert!(!rendered.contains("Account Owner"));
-        let legacy = render_comment(
-            "old",
-            "prototype\n<!-- loopflow-steer:old -->",
-            Some("publisher"),
-            Some("Account Owner"),
-        );
-        assert!(legacy.contains("by \"Account Owner\""));
-    }
-
-    #[test]
-    fn account_identity_does_not_filter_direction() {
-        for author in ["person", "publisher"] {
-            assert!(is_direction_comment("please fix this", Some(author)));
-            assert!(!is_direction_comment("PR: x", Some(author)));
-        }
-        assert!(!is_direction_comment("bot", None));
-    }
 }

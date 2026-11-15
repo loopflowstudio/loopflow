@@ -330,7 +330,7 @@ mod tests {
             store.task(&child).unwrap().unwrap().title,
             "Edited after save"
         );
-        let thread = store.task_comments(&source).unwrap();
+        let thread = store.task_comment_thread(&source).unwrap().thread;
         assert_eq!(thread.comments.len(), 1);
         assert!(thread.comments[0].body.contains(&intent.notes));
         assert_eq!(store.task_events_after(&source, 0).unwrap(), events);
@@ -420,9 +420,19 @@ mod tests {
             store.recover_task_filings("/repo").unwrap();
         }
         assert_eq!(store.list_tasks(None).unwrap().len(), 1);
-        assert_eq!(store.task_comments(&source).unwrap().comments.len(), 1);
-        assert!(store.task_comments(&source).unwrap().comments[0]
-            .body
-            .contains(&intent.issue_id));
+        assert_eq!(
+            store
+                .task_comment_thread(&source)
+                .unwrap()
+                .thread
+                .comments
+                .len(),
+            1
+        );
+        assert!(
+            store.task_comment_thread(&source).unwrap().thread.comments[0]
+                .body
+                .contains(&intent.issue_id)
+        );
     }
 }

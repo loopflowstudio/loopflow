@@ -308,9 +308,6 @@ fn read_saved(
         .project(id)
         .map_err(project_error)?
         .ok_or_else(|| project_error("Project is unavailable"))?;
-    let sync = store
-        .sqlite
-        .project_planning_sync(id)
-        .map_err(project_error)?;
+    let sync = store.project_planning_sync(id).map_err(project_error)?;
     Ok((project, sync))
 }

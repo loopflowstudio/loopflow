@@ -2203,12 +2203,7 @@ pub(crate) async fn registered_task_status(
         .map_err(task_error)?;
     let (overview, graph_processes) = store.sqlite.task_overview(&task.id).map_err(task_error)?;
     let mut result = TaskStatus {
-        sync: Some(
-            store
-                .sqlite
-                .task_planning_sync(&task.id)
-                .map_err(task_error)?,
-        ),
+        sync: Some(store.task_planning_sync(&task.id).map_err(task_error)?),
         project: match &task.project_id {
             Some(id) => store.get_project(id).await.map_err(task_error)?,
             None => None,
@@ -2221,7 +2216,7 @@ pub(crate) async fn registered_task_status(
         ownership: Some(store.sqlite.task_ownership(&task.id).map_err(task_error)?),
         overview: Some(overview),
         graph_processes,
-        comments: Some(store.sqlite.task_comments(&task.id).map_err(task_error)?),
+        comments: Some(store.task_comments(&task.id).map_err(task_error)?),
         task: Some(task),
     };
     result.planning_stale = planning_stale(&result);
@@ -2351,10 +2346,7 @@ pub fn task_sync(issue: &str, retry_updates: bool) -> OpsResult<String> {
             .await
             .map_err(task_error)?
             .ok_or_else(|| task_error("Task is missing"))?;
-        let sync = store
-            .sqlite
-            .task_planning_sync(&saved.id)
-            .map_err(task_error)?;
+        let sync = store.task_planning_sync(&saved.id).map_err(task_error)?;
         let pending = sync.lines();
         if !pending.is_empty() {
             return Ok(format!("{}: {}", saved.identifier, pending.join("\n")));
@@ -2634,10 +2626,7 @@ pub fn task_edit(
         .await;
         Ok(TaskEdit {
             id: edited.id.to_string(),
-            sync: store
-                .sqlite
-                .task_planning_sync(&edited.id)
-                .map_err(task_error)?,
+            sync: store.task_planning_sync(&edited.id).map_err(task_error)?,
         })
     })
 }
@@ -2689,10 +2678,7 @@ pub fn task_move_membership(repo: &Path, issue: &str, wave: Option<&str>) -> Ops
         .await;
         Ok(TaskEdit {
             id: task.id.to_string(),
-            sync: store
-                .sqlite
-                .task_planning_sync(&task.id)
-                .map_err(task_error)?,
+            sync: store.task_planning_sync(&task.id).map_err(task_error)?,
         })
     })
 }
@@ -2982,7 +2968,6 @@ pub(crate) async fn task_comment_async(
         None
     };
     let mut thread = store
-        .sqlite
         .task_comments(&task.id)
         .map_err(|error| OpsError::Message(error.to_string()))?;
     thread.refresh_error = refresh_error;

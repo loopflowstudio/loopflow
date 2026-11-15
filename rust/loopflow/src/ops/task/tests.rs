@@ -1883,7 +1883,6 @@ async fn steering_publication_resolves_empty_participant_from_config_or_git() {
             super::append_task_comment(&fixture.store, &fixture.task, "Keep going", true).unwrap();
         let comments = fixture
             .store
-            .sqlite
             .task_comments(&fixture.task.id)
             .unwrap()
             .comments;
@@ -1899,7 +1898,7 @@ async fn steering_publication_resolves_empty_participant_from_config_or_git() {
             "{body}"
         );
         assert_eq!(
-            crate::ops::linear_observe::comment_requester(body, Some("Publisher")),
+            crate::work::task::comment::comment_requester(body, Some("Publisher")),
             Some(expected.to_string())
         );
     }

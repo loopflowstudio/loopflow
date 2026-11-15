@@ -194,3 +194,5 @@ pub async fn ensure_wave_row(
         .await?
         .ok_or(crate::store::StoreError::NotFound)
 }
+
+pub(crate) mod lifecycle;

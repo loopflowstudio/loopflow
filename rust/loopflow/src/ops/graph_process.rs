@@ -3,8 +3,7 @@
 //! per step it starts. The record is append-only and only the Graph process writes
 //! it. Each step is an ordinary command that knows nothing of its Graph; whether
 //! the Graph or a step is running, finished or failed is read from their Processes.
-use crate::graph::compiled::CompiledGraph;
-use crate::process::LfProcess;
+use crate::graph::process::{GraphProcess, GraphProcessStep};
 use loopflow_model::id::LfProcessId;
 
 /// A step's agent sees which Graph started it: the Graph process's id. Steps of
@@ -30,26 +29,6 @@ pub(crate) fn in_graph() -> bool {
 /// The Task's latest interrupt when its Task run began. Each Graph attempt
 /// compares later interrupts against it; steps never inherit it.
 pub(crate) const TASK_INTERRUPT_CURSOR_ENV: &str = "LF_TASK_INTERRUPT_CURSOR";
-
-/// One step its Graph process started.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct GraphProcessStep {
-    pub process: LfProcess,
-    /// The step's node in the compiled Graph, counted in preorder.
-    pub key: u32,
-    /// Returns taken on each loop edge, per nesting level, outermost first.
-    pub iterations: Vec<Vec<u32>>,
-}
-
-/// One Graph process as it recorded itself.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct GraphProcess {
-    pub process: LfProcess,
-    pub name: String,
-    pub compiled: CompiledGraph,
-    /// Steps in launch order. A repeated or corrected step is another entry.
-    pub steps: Vec<GraphProcessStep>,
-}
 
 impl GraphProcess {
     pub(crate) fn id(&self) -> &LfProcessId {

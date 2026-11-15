@@ -10,17 +10,11 @@ use std::process::Command;
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 
+use crate::store::people::GithubPerson;
 use crate::store::sqlite::SqliteStore;
 
 /// How long GitHub knowing no user for an email stands before it is asked again.
 const MISS_RETRY_SECS: i64 = 24 * 60 * 60;
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct GithubPerson {
-    pub login: String,
-    pub name: Option<String>,
-    pub avatar_url: String,
-}
 
 /// A Task owner: their claim's email and name, and who they are on GitHub.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -28,13 +22,6 @@ pub struct RepoPerson {
     pub email: String,
     pub name: Option<String>,
     pub github: Option<GithubPerson>,
-}
-
-/// A cached answer: `person` is `None` when GitHub knew no user for the email.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct CachedGithubPerson {
-    pub person: Option<GithubPerson>,
-    pub checked_at: i64,
 }
 
 /// Every Task owner in `repo`, and the warnings left by lookups that could not
@@ -164,7 +151,8 @@ fn gh_api<T: serde::de::DeserializeOwned>(repo: &Path, args: &[&str]) -> Result<
 mod tests {
     use std::os::unix::fs::PermissionsExt;
 
-    use super::{github_person, GithubPerson};
+    use super::github_person;
+    use crate::store::people::GithubPerson;
     use crate::store::sqlite::SqliteStore;
 
     #[test]

@@ -152,7 +152,7 @@ fn task_graph_pairs(task_ids: &str) -> String {
 pub(super) fn graphs_of_task(
     conn: &rusqlite::Connection,
     task: &TaskId,
-) -> StoreResult<Vec<crate::ops::graph_process::GraphProcess>> {
+) -> StoreResult<Vec<crate::graph::process::GraphProcess>> {
     super::graph_inventory::graphs_in(
         conn,
         &format!("e.id IN (SELECT graph FROM ({}))", task_graph_pairs("?1")),
@@ -193,7 +193,7 @@ fn completed_graph_steps(
 fn latest_task_graphs(
     conn: &rusqlite::Connection,
     tasks: &[&TaskId],
-) -> StoreResult<HashMap<TaskId, crate::ops::graph_process::GraphProcess>> {
+) -> StoreResult<HashMap<TaskId, crate::graph::process::GraphProcess>> {
     let mut latest = HashMap::new();
     let mut query = conn.prepare(&format!(
         "SELECT task_id, graph FROM ({}) pairs
@@ -647,7 +647,7 @@ pub(super) fn task_open_process_pairs(selector: &str, filter: &str) -> String {
 
 /// One of a Task's Graph processes with its inventory entry.
 type MemberGraph = (
-    crate::ops::graph_process::GraphProcess,
+    crate::graph::process::GraphProcess,
     crate::durable::GraphProcessInventoryEntry,
 );
 
@@ -1193,7 +1193,7 @@ impl SqliteStore {
     pub(crate) fn latest_task_graphs(
         &self,
         tasks: &[&TaskId],
-    ) -> StoreResult<HashMap<TaskId, crate::ops::graph_process::GraphProcess>> {
+    ) -> StoreResult<HashMap<TaskId, crate::graph::process::GraphProcess>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         latest_task_graphs(&conn, tasks)
     }
@@ -1211,7 +1211,7 @@ impl SqliteStore {
     pub(crate) fn task_graphs(
         &self,
         task: &TaskId,
-    ) -> StoreResult<Vec<crate::ops::graph_process::GraphProcess>> {
+    ) -> StoreResult<Vec<crate::graph::process::GraphProcess>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         graphs_of_task(&conn, task)
     }

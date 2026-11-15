@@ -9,7 +9,7 @@ use super::children::{
 };
 use super::SqliteStore;
 use crate::durable::TaskState;
-use crate::store::planning_sync::PlanningSyncStatus;
+use crate::store::planning_sync::PlanningSyncReceipts;
 use crate::store::{StoreError, StoreResult, TaskAcquisition};
 use crate::work::task::{Task, TaskEvent, TaskId, TaskPr, TaskPrId};
 use loopflow_model::durable::{RepositoryId, TaskOwner};
@@ -33,7 +33,7 @@ pub struct TaskDetailFacts {
     pub steps: HashMap<TaskId, String>,
     /// Tasks handed off to Auto-Ship.
     pub shipped: HashSet<TaskId>,
-    pub planning_sync: HashMap<TaskId, PlanningSyncStatus>,
+    pub planning_receipts: HashMap<TaskId, PlanningSyncReceipts>,
     pub repository_paths: HashMap<RepositoryId, String>,
 }
 
@@ -115,7 +115,7 @@ impl SqliteStore {
                  WHERE id IN (SELECT value FROM json_each(?1)) AND shipped_at IS NOT NULL",
                 &json,
             )?,
-            planning_sync: super::planning_sync::task_planning_syncs_in(&snapshot, &ids)?,
+            planning_receipts: super::planning_sync::task_planning_receipts_in(&snapshot, &ids)?,
             repository_paths: repository_paths_in(&snapshot)?,
         };
         snapshot.commit()?;

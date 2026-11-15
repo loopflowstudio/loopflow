@@ -8,6 +8,19 @@ use std::process::Command;
 use loopflow_test_support::TestRepo;
 use serde_json::Value;
 
+fn project_with_sync(
+    store: &crate::store::sqlite::SqliteStore,
+    project: &loopflow_model::durable::ProjectId,
+) -> Value {
+    let application = crate::store::Store {
+        sqlite: store.clone(),
+    };
+    serde_json::json!({
+        "project": store.project(project).unwrap().unwrap(),
+        "sync": application.project_planning_sync(project).unwrap(),
+    })
+}
+
 fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
     let mut command = Command::new(loopflow_test_support::lf_binary());
     for (name, _) in std::env::vars_os() {
@@ -1458,7 +1471,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
         )
         .unwrap();
         fs2::FileExt::lock_exclusive(&writer).unwrap();
-        let saved = serde_json::json!({"project":store.project(&id).unwrap().unwrap(), "sync":store.project_planning_sync(&id).unwrap()});
+        let saved = project_with_sync(&store, &id);
         drop(writer);
         assert_eq!(saved["project"]["id"], id.as_str());
         assert_eq!(
@@ -1479,10 +1492,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             !connected
         );
         if mapped {
-            assert_eq!(
-                serde_json::json!({"project":store.project(&id).unwrap().unwrap(), "sync":store.project_planning_sync(&id).unwrap()}),
-                saved
-            );
+            assert_eq!(project_with_sync(&store, &id), saved);
         }
         assert_eq!(store.project(&shadow.id).unwrap().unwrap(), shadow);
         let changes = store.pending_project_changes(&id).unwrap();
@@ -1521,7 +1531,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
                 18,
             )
             .unwrap();
-            let read = serde_json::json!({"project":store.project(&id).unwrap().unwrap(), "sync":store.project_planning_sync(&id).unwrap()});
+            let read = project_with_sync(&store, &id);
             // The unsent rename is sent last and wins; unsaved fields follow Linear.
             assert_eq!(read["project"]["name"], "Saved");
             assert_eq!(read["project"]["krs"][0]["holds"], true);
@@ -1554,7 +1564,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
                 19,
             )
             .unwrap();
-            let read = serde_json::json!({"project":store.project(&id).unwrap().unwrap(), "sync":store.project_planning_sync(&id).unwrap()});
+            let read = project_with_sync(&store, &id);
             assert_eq!(store.pending_project_changes(&id).unwrap(), pending);
             assert_eq!(read["sync"]["changes"], Value::Array(conflicts.clone()));
         }
@@ -1582,7 +1592,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             String::from_utf8_lossy(&output.stderr).contains("pending planning sync"),
             connected
         );
-        let saved = serde_json::json!({"project":store.project(&id).unwrap().unwrap(), "sync":store.project_planning_sync(&id).unwrap()});
+        let saved = project_with_sync(&store, &id);
         assert_eq!(saved["project"]["krs"], content["krs"]);
         assert_eq!(saved["project"]["id"], id.as_str());
         assert_eq!(
@@ -1598,7 +1608,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
         assert_eq!(saved["project"]["summary"], "");
         assert_eq!(store.pending_project_changes(&id).unwrap().len(), 4);
         lf(repo.path(), home.path(), &args);
-        let repeated = serde_json::json!({"project":store.project(&id).unwrap().unwrap(), "sync":store.project_planning_sync(&id).unwrap()});
+        let repeated = project_with_sync(&store, &id);
         assert_eq!(repeated, saved);
         if mapped {
             let mut incoming = project.clone();
@@ -1612,7 +1622,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
                 20,
             )
             .unwrap();
-            let read = serde_json::json!({"project":store.project(&id).unwrap().unwrap(), "sync":store.project_planning_sync(&id).unwrap()});
+            let read = project_with_sync(&store, &id);
             // The unsent plan is sent after the concurrent provider plan and wins.
             assert_eq!(
                 read["project"]["krs"][0]["text"],
@@ -1869,7 +1879,11 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
         assert_eq!(status["task"]["description"], "");
         assert_eq!(status["task"]["rank"], 0);
         assert_eq!(status["task"]["assignee"], "person-id");
-        let sync = store.task_planning_sync(&second).unwrap();
+        let sync = crate::store::Store {
+            sqlite: store.clone(),
+        }
+        .task_planning_sync(&second)
+        .unwrap();
         assert_eq!(sync.connected, connected);
         assert_eq!(status["sync"], serde_json::to_value(&sync).unwrap());
         assert_eq!(
@@ -1920,7 +1934,11 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
                 .unwrap();
             // Unsent title and assignee saves are sent last and win; status
             // follows Linear.
-            let sync = store.task_planning_sync(&second).unwrap();
+            let sync = crate::store::Store {
+                sqlite: store.clone(),
+            }
+            .task_planning_sync(&second)
+            .unwrap();
             assert!(sync.changes.iter().all(
                 |c| c.state != loopflow::store::planning_sync::PlanningSyncState::AdoptedLinear
             ));

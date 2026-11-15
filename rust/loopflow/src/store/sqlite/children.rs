@@ -978,17 +978,17 @@ impl SqliteStore {
             )? {
                 continue;
             }
-            if !crate::ops::linear_observe::is_direction_comment(
+            if !crate::work::task::comment::is_direction_comment(
                 &comment.body,
                 comment.author_id.as_deref(),
             ) {
                 continue;
             }
-            let comment_id = crate::ops::linear_observe::comment_revision_id(
+            let comment_id = crate::work::task::comment::comment_revision_id(
                 &comment.id,
                 comment.revision.as_deref(),
             );
-            let text = crate::ops::linear_observe::render_comment(
+            let text = crate::work::task::comment::render_comment(
                 &comment.id,
                 &comment.body,
                 comment.author_id.as_deref(),

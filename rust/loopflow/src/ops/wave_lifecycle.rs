@@ -8,7 +8,7 @@ pub(crate) mod recovery;
 
 use std::path::{Path, PathBuf};
 
-use recovery::{Identity, Operation, ProviderChange};
+use crate::work::wave::lifecycle::{Identity, Operation, ProviderChange};
 
 use serde::{Deserialize, Serialize};
 
@@ -505,7 +505,7 @@ pub fn remove(
             applied: false,
             files_done: false,
         };
-        operation.save(&store)?;
+        recovery::save(&operation, &store)?;
         operation
     };
 
@@ -531,7 +531,7 @@ pub fn remove(
     }
 
     operation.planning_done = true;
-    operation.save(&store)?;
+    recovery::save(&operation, &store)?;
 
     for (index, archive) in receipt.initiatives.iter_mut().enumerate() {
         if operation.providers[index].done {
@@ -543,7 +543,7 @@ pub fn remove(
         )) {
             Ok(()) => {
                 operation.providers[index].done = true;
-                operation.save(&store)?;
+                recovery::save(&operation, &store)?;
             }
             Err(error) => archive.error = Some(error.to_string()),
         }
@@ -554,7 +554,7 @@ pub fn remove(
                 reason: "kept until the Linear Initiative is archived".into(),
             }
         } else {
-            operation.finish_files(&store, &main)
+            recovery::finish_files(&mut operation, &store, &main)
         },
     );
     receipt.summary = removal_summary(&receipt);
@@ -1042,7 +1042,7 @@ pub async fn rename(
             applied: false,
             files_done: !moves,
         };
-        operation.save(&store)?;
+        recovery::save(&operation, &store)?;
         operation
     };
     let renamed_now = !operation.planning_done
@@ -1070,9 +1070,9 @@ pub async fn rename(
             .map_err(lifecycle_error)?;
         }
         operation.planning_done = true;
-        operation.save(&store)?;
+        recovery::save(&operation, &store)?;
     }
-    let files = operation.finish_files(&store, &main);
+    let files = recovery::finish_files(&mut operation, &store, &main);
     let initiative = if let Some(provider) = operation.providers.first() {
         let mut result = InitiativeRename {
             initiative: provider.initiative.clone(),
@@ -1089,7 +1089,7 @@ pub async fn rename(
             {
                 Ok(()) => {
                     operation.providers[0].done = true;
-                    operation.save(&store)?;
+                    recovery::save(&operation, &store)?;
                 }
                 Err(error) => result.error = Some(error.to_string()),
             }

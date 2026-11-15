@@ -73,7 +73,7 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
         assert_eq!(outcome.follow_ups_created.len(), expected);
     }
     assert_eq!(
-        store.task_comments(&task.id).unwrap().comments[0].body,
+        store.task_comment_thread(&task.id).unwrap().thread.comments[0].body,
         "please prioritize"
     );
     let steers = store.task_steers(&task.id).unwrap();

@@ -211,7 +211,7 @@ pub fn steer(
                 message,
             )
             .await?;
-            store.sqlite.task_comments(&task.id).map_err(written)
+            store.task_comments(&task.id).map_err(written)
         })
 }
 

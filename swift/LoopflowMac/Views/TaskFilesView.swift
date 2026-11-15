@@ -445,7 +445,7 @@ struct TaskFilesView: View {
             ContentUnavailableView("Select a file", systemImage: "doc.text")
         } else if store.mode == .diff {
             if let review = store.fileReview {
-                TaskFileDiffView(store: store, review: review, addToConversation: addToConversation)
+                TaskFileDiffView(store: store, review: review, isFocused: isFocused, addToConversation: addToConversation)
             } else if let reason = store.changesError {
                 ContentUnavailableView("Comparison unavailable", systemImage: "doc", description: Text(reason))
             } else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
@@ -596,17 +596,32 @@ private struct TaskDocumentView: NSViewRepresentable {
 }
 
 /// Files' Diff mode: one file through the review stream, compared with the
-/// unsaved draft while there is one.
+/// unsaved draft while there is one. Next/previous steps the file's changes,
+/// then opens the next or previous changed file here.
 private struct TaskFileDiffView: View {
     @Bindable var store: TaskFilesStore
     let review: TaskFilesStore.FileReview
+    let isFocused: Bool
     let addToConversation: ((String) -> Void)?
     @Environment(\.palette) private var palette
     @State private var width: CGFloat = 0
 
+    private var reader: TaskFilesStore.ReviewReader { .file(review.path) }
+
+    private var anchor: Binding<String?> {
+        let reader = reader
+        return Binding(get: { store[place: reader].anchor }, set: { store[place: reader].anchor = $0 })
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
+                Button { go(-1) } label: { Image(systemName: "chevron.up") }
+                    .help("Previous change ([)").accessibilityLabel("Previous change")
+                Button { go(1) } label: { Image(systemName: "chevron.down") }
+                    .help("Next change (]); past the last, the next changed file").accessibilityLabel("Next change")
+                Text(store.position(reader)).font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
+                    .monospacedDigit().accessibilityIdentifier("files-diff-position")
                 Text((store.comparisonDescription ?? store.comparison.title) + (review.draft ? " · unsaved draft" : ""))
                     .font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
                     .lineLimit(1).truncationMode(.middle)
@@ -624,15 +639,33 @@ private struct TaskFileDiffView: View {
                     if review.diff.files.isEmpty {
                         ReviewNotice(text: "No changes in \(review.path)")
                     }
-                    ReviewStream(store: store, files: review.diff.files, split: store.readsSplit(width: width))
+                    ReviewStream(store: store, reader: reader, files: review.diff.files, split: store.readsSplit(width: width))
                 }
+                .scrollTargetLayout()
             }
+            .scrollPosition(id: anchor, anchor: .top)
+            .onScrollPhaseChange { _, phase in if phase == .interacting { store.noteInteraction() } }
             .onGeometryChange(for: CGFloat.self, of: \.size.width) { width = $0 }
             .accessibilityIdentifier("files-diff")
             if let selection = store.reviewSelection, review.diff.file(selection.path) != nil {
                 ReviewSelectionBar(store: store, selection: selection, diff: review.diff, addToConversation: addToConversation)
             }
         }
+        .background { shortcuts }
+    }
+
+    private var shortcuts: some View {
+        HStack {
+            Button("Next change") { go(1) }.keyboardShortcut("]", modifiers: [])
+            Button("Previous change") { go(-1) }.keyboardShortcut("[", modifiers: [])
+        }
+        .disabled(!isFocused).hidden().accessibilityHidden(true).frame(width: 0, height: 0)
+    }
+
+    private func go(_ offset: Int) {
+        let reader = reader
+        guard let stop = store.step(offset, in: reader) else { return }
+        withAnimation(.easeOut(duration: 0.15)) { store[place: reader].anchor = stop.id }
     }
 }
 

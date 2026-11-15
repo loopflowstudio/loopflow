@@ -8,6 +8,7 @@ import SwiftUI
 /// moves and line selection are the same in both.
 struct ReviewStream: View {
     @Bindable var store: TaskFilesStore
+    let reader: TaskFilesStore.ReviewReader
     let files: [ReviewFile]
     /// Side by side; callers fall back to unified in a narrow pane.
     let split: Bool
@@ -88,7 +89,7 @@ struct ReviewStream: View {
     }
 
     @ViewBuilder private func currentMark(_ id: String) -> some View {
-        if store.currentStop == id {
+        if store[place: reader].current == id {
             Rectangle().fill(palette.actionInk).frame(width: 3).accessibilityLabel("Current change")
         }
     }
@@ -100,8 +101,7 @@ struct ReviewStream: View {
         return VStack(alignment: .leading, spacing: 0) {
             Button {
                 if move.end == .source {
-                    store.currentStop = move.counterpart
-                    store.reviewAnchor = move.counterpart
+                    store[place: reader] = .init(anchor: move.counterpart, current: move.counterpart)
                 } else if expanded {
                     store.expandedMoves.remove(move.id)
                 } else {

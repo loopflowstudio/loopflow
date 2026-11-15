@@ -36,20 +36,13 @@ Page: `scratch/concept-review.html`. Both findings are built:
   reference read `Compared with <base branch> at <sha> · includes uncommitted
   changes`; the branch is GitHub's `baseRefName` once a PR is read, else
   "the Task's base" (see `scratch/questions.md`).
-- **Second pass (next implement):** sharing the renderer left Files' Diff
-  without the reader's navigation and place. The Build direction says the five
-  priorities "apply throughout", and the Demo's step 5 returns to "the Diff's
-  scroll", so both readers get the same stepping and anchor:
-  - Stops, current stop and reading anchor belong to the reader, not to
-    Changes: `TaskFilesStore` keeps one anchor per reader (Changes' whole
-    comparison; Files' Diff per path) and `step(_:)` takes the diff it moves
-    through. Files' Diff binds `scrollPosition(id:)` like Changes.
-  - In Files' Diff, `]`/`[` and the same toolbar arrows step the file's
-    changes; past the last (first) change they open the next (previous)
-    changed file in Diff mode, so next/previous still crosses files.
-  - Switching paths or Tasks and back lands on the same change in both readers.
-  - Test: `ReviewDiffTests`/`TaskFilesTests` step past a file's last change
-    into the next file's Diff, and a path switch keeps each path's anchor.
+- **Second pass, built:** both readers step and keep their place.
+  `TaskFilesStore.ReviewReader` is `.changes | .file(path)`; each has a
+  `ReviewPlace` (anchor, current stop): one for Changes, one per path for
+  Files' Diff. `step(_:in:)`, `position(_:)` and `ReviewStream(reader:)` take
+  the reader. In Files' Diff, `]`/`[` and the header arrows step the file's
+  changes; past the last (first) one they open the next (previous) changed
+  file, in `lf task changes` order, in Diff mode on its first (last) change.
 - **Noted, not this Task:** a `.changes(comparison:)` browser tab and the Files
   tool's Changes page are two representations of one view; merging them
   changes the persisted `WorkBrowserTab` shape, which LOO-497/416 own.
@@ -76,10 +69,10 @@ Built (one PR, Swift + one Rust routing line):
 Remaining:
 
 - Moves inside mixed change runs; shortcut for Ask (none yet).
-- Files' Diff stepping and anchor (Concept review, second pass).
 - Demo on a real Task: long brief, no-PR Task, offline `gh`, large patch performance of the LazyVStack stream, a `node_modules`-scale folder.
 
 Compress: `test_desktop.sh --filter 'TaskFilesTests|RegistryQueryTests'` → 54 passed.
+Second pass: `scripts/test_desktop.sh --filter 'TaskFilesTests|ReviewDiffTests'` → 41 passed (incl. `diffSteppingPastAFilesLastChangeOpensTheNextFilesDiff`, `eachReaderKeepsItsPlaceAcrossPathSwitches`).
 One diff reader: `scripts/test_desktop.sh --filter 'TaskFilesTests|ReviewDiffTests|PullRequestTests|ThemeTests'` → 62 passed (incl. `diffModeComparesTheUnsavedDraftInTheReviewStream`).
 Checks: `scripts/test_desktop.sh --filter 'TaskFilesTests|ReviewDiffTests|TaskBriefTests|PullRequestTests|DesktopPaneControlTests|DTOFixtureTests|WorkDestinationTests|DesktopPerformanceFixtureTests|RegistryQueryTests'` → 222 run, then `TaskFilesTests` 33 passed; `ServerProtocolTests` 20 passed. `cargo nextest -p loopflow --lib 'test(server::schema::tests::) | test(lf::commands::read::)'` → 11 passed (schema fixture regenerated). Gate runs clippy, `documented_commands::`, golden.
 

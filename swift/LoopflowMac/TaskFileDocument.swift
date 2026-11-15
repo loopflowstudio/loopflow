@@ -286,6 +286,7 @@ final class TaskFilesStore {
     }
 
     func selectFile(_ path: String, mode: Mode) {
+        entering = nil
         page = .files
         selection = path
         self.mode = mode
@@ -781,10 +782,12 @@ final class TaskFilesStore {
     private(set) var reviewError: String?
     private(set) var reviewTruncated = false
     private var reviewGeneration = 0
-    /// The row at the top of the stream when you last read it.
-    var reviewAnchor: String?
-    /// The change next/previous moves from.
-    var currentStop: String?
+    /// Changes' place in the whole comparison.
+    var changesPlace = ReviewPlace()
+    /// Files' Diff place in each file, so switching paths and back lands where you were.
+    private var filePlaces: [String: ReviewPlace] = [:]
+    /// The file next/previous crossed into, and from which end its first stop is taken.
+    @ObservationIgnored private var entering: (path: String, offset: Int)?
     var reviewLayout = ReviewLayout.unified
     /// One file at a time; next/previous still crosses into the next file.
     var focusedPath: String?
@@ -821,15 +824,75 @@ final class TaskFilesStore {
         }
     }
 
-    /// Move to the next or previous change, across files. A focused file
-    /// follows the stop into its file.
+    /// One of the two diff readers: Changes' whole comparison, or Files' Diff of one path.
+    enum ReviewReader: Hashable { case changes, file(String) }
+
+    /// Where you are in a reader: the row at its top and the change next/previous moves from.
+    struct ReviewPlace: Equatable {
+        var anchor: String?
+        var current: String?
+    }
+
+    subscript(place reader: ReviewReader) -> ReviewPlace {
+        get {
+            switch reader {
+            case .changes: changesPlace
+            case .file(let path): filePlaces[path] ?? ReviewPlace()
+            }
+        }
+        set {
+            switch reader {
+            case .changes: changesPlace = newValue
+            case .file(let path): filePlaces[path] = newValue
+            }
+        }
+    }
+
+    /// The diff a reader shows, once it has been read.
+    func diff(_ reader: ReviewReader) -> ReviewDiff? {
+        switch reader {
+        case .changes: review
+        case .file(let path): fileReview?.path == path ? fileReview?.diff : nil
+        }
+    }
+
+    /// "2 of 5" once a change is current; the count before.
+    func position(_ reader: ReviewReader) -> String {
+        guard let diff = diff(reader) else { return "" }
+        let stops = diff.stops
+        guard !stops.isEmpty else { return "No changes" }
+        guard let current = self[place: reader].current, let index = stops.firstIndex(where: { $0.id == current }) else {
+            return stops.count == 1 ? "1 change" : "\(stops.count) changes"
+        }
+        return "\(index + 1) of \(stops.count)"
+    }
+
+    /// Move to the next or previous change in a reader. Changes crosses files
+    /// in one stream, and a focused file follows the stop. Files' Diff past a
+    /// file's last (first) change opens the next (previous) changed file in
+    /// Diff mode, landing on its first (last) change once read; that returns nil.
     @discardableResult
-    func step(_ offset: Int) -> ReviewStop? {
-        guard let review, let stop = review.stop(after: currentStop, offset: offset) else { return nil }
-        currentStop = stop.id
-        if focusedPath != nil { focusedPath = stop.path }
+    func step(_ offset: Int, in reader: ReviewReader) -> ReviewStop? {
         noteInteraction()
-        return stop
+        if let diff = diff(reader), let stop = diff.stop(after: self[place: reader].current, offset: offset) {
+            self[place: reader].current = stop.id
+            if reader == .changes, focusedPath != nil { focusedPath = stop.path }
+            return stop
+        }
+        guard case .file(let path) = reader, let next = changedFile(from: path, offset: offset) else { return nil }
+        selectFile(next, mode: .diff)
+        entering = (next, offset)
+        return nil
+    }
+
+    /// The changed file `offset` away from `path` in `lf task changes` order.
+    private func changedFile(from path: String, offset: Int) -> String? {
+        let paths = changes?.files.map(\.path) ?? []
+        guard let index = paths.firstIndex(of: path) else {
+            return offset > 0 ? paths.first { $0 > path } : paths.last { $0 < path }
+        }
+        let next = index + (offset > 0 ? 1 : -1)
+        return paths.indices.contains(next) ? paths[next] : nil
     }
 
     /// What the stream compares, named as the PR would: its base branch and
@@ -874,6 +937,11 @@ final class TaskFilesStore {
             guard !Task.isCancelled, generation == diffGeneration, selection == path, changes?.baseCommit == base, comparison == target,
                   selectedDocument?.editVersion == version else { return }
             fileReview = FileReview(path: path, baseCommit: base, diff: parsed, truncated: next.truncated, draft: draft != nil)
+            if let entry = entering, entry.path == path {
+                entering = nil
+                let stop = parsed.stop(after: nil, offset: entry.offset)
+                filePlaces[path] = ReviewPlace(anchor: stop?.id, current: stop?.id)
+            }
             changesError = nil
         } catch {
             guard !Task.isCancelled, generation == diffGeneration, selection == path, changes?.baseCommit == base, comparison == target else { return }

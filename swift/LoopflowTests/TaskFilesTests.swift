@@ -818,6 +818,86 @@ struct TaskFilesTests {
         #expect(store.comparisonDescription?.hasPrefix("Compared with the Task's base at aaaaaaaaaa") == true)
     }
 
+    /// A store over two changed files, each with two separate changes.
+    private func twoFileStore() throws -> TaskFilesStore {
+        let fixture = try Data(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("tests/fixtures/dto/task_files.json"))
+        let reply: @Sendable ([String]) throws -> String = { args in
+            let root = try JSONSerialization.jsonObject(with: fixture) as! [String: Any]
+            var value = root[args[1] == "changes" ? "changes" : "diff"] as! [String: Any]
+            if args[1] == "changes" {
+                let file = (value["files"] as! [[String: Any]])[0]
+                value["files"] = ["a.swift", "b.swift"].map { path in
+                    file.merging(["path": path, "old_path": NSNull()]) { $1 }
+                }
+            } else {
+                // No path argument is the whole comparison.
+                let paths = args[3].hasPrefix("--") ? ["a.swift", "b.swift"] : [args[3]]
+                value["patch"] = paths.map { path in
+                    "diff --git a/\(path) b/\(path)\n--- a/\(path)\n+++ b/\(path)\n"
+                        + "@@ -1 +1 @@\n-one\n+uno\n@@ -9 +9 @@\n-nine\n+nueve\n"
+                }.joined()
+            }
+            return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
+        }
+        let store = TaskFilesStore(issue: "TEST-1", cwd: "/fixture", query: RegistryQuery { args, _ in try reply(args) })
+        store.autosave = false
+        return store
+    }
+
+    @Test func diffSteppingPastAFilesLastChangeOpensTheNextFilesDiff() async throws {
+        let store = try twoFileStore()
+        store.selectFile("a.swift", mode: .diff)
+        await store.loadDiff()
+        let stops = try #require(store.diff(.file("a.swift"))).stops
+        #expect(store.step(1, in: .file("a.swift"))?.id == stops[0].id)
+        #expect(store.step(1, in: .file("a.swift"))?.id == stops[1].id)
+        #expect(store.position(.file("a.swift")) == "2 of 2")
+        // Past the last change: the next changed file opens in Diff mode on its first change.
+        #expect(store.step(1, in: .file("a.swift")) == nil)
+        #expect(store.selection == "b.swift")
+        #expect(store.mode == .diff)
+        await store.loadDiff()
+        let first = try #require(store.diff(.file("b.swift"))?.stops.first)
+        #expect(store[place: .file("b.swift")] == .init(anchor: first.id, current: first.id))
+        // Before b's first change, back into a's last.
+        #expect(store.step(-1, in: .file("b.swift")) == nil)
+        #expect(store.selection == "a.swift")
+        await store.loadDiff()
+        #expect(store[place: .file("a.swift")].current == stops[1].id)
+        // Past the last changed file there is nowhere to go.
+        store.selectFile("b.swift", mode: .diff)
+        await store.loadDiff()
+        _ = store.step(1, in: .file("b.swift"))
+        #expect(store.step(1, in: .file("b.swift")) == nil)
+        #expect(store.selection == "b.swift")
+    }
+
+    @Test func eachReaderKeepsItsPlaceAcrossPathSwitches() async throws {
+        let store = try twoFileStore()
+        store.selectFile("a.swift", mode: .diff)
+        await store.loadDiff()
+        store.step(1, in: .file("a.swift"))
+        store[place: .file("a.swift")].anchor = "a.swift#@@ -9 +9 @@"
+        let a = store[place: .file("a.swift")]
+        store.page = .changes
+        await store.loadReview()
+        store.step(1, in: .changes)
+        store.step(1, in: .changes)
+        store.step(1, in: .changes)
+        let changes = store.changesPlace
+        store.selectFile("b.swift", mode: .diff)
+        await store.loadDiff()
+        store.step(1, in: .file("b.swift"))
+        store.selectFile("a.swift", mode: .diff)
+        await store.loadDiff()
+        #expect(store[place: .file("a.swift")] == a)
+        #expect(store.changesPlace == changes)
+        #expect(store.changesPlace.current?.hasPrefix("b.swift") == true)
+        #expect(store[place: .file("b.swift")].current != nil)
+    }
+
     /// A commit in a linked worktree changes no file in the checkout.
     @Test func commitInLinkedWorktreeRereadsTheComparison() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

@@ -1,4 +1,0 @@
-after relaunch: (('c01e4db7-c3b5-47d4-b85b-aa93a0250bbc', 'usable'), 0.3) providers: ['23386']
-tail: 'resumed 573a74c1-3a4b-45da-baae-1a34b47c663e: 4 lines\nstandin-check\nreply 573a74c1-3a4b-45da-baae-1a34b47c663e: standin-check\nm-refresh\nreply 573a74c1-3a4b-45da-baae-1a34b47c663e: m-refresh\nqa-draft2\n'
-send: (0, '')
-draft+marker replies: 1 bare marker replies: 0

@@ -1,4 +1,0 @@
-after relaunch: (('bd202784-9a15-4c6f-b7f5-5e6f41ed81b3', 'usable'), 0.1) providers: ['23386']
-tail: 'term-1\nreply 573a74c1-3a4b-45da-baae-1a34b47c663e: term-1\nterm-2\nreply 573a74c1-3a4b-45da-baae-1a34b47c663e: term-2\nafter-takeback\nreply 573a74c1-3a4b-45da-baae-1a34b47c663e: after-takeback\nqa-draft2\n'
-send: (0, '')
-draft+marker replies: 2 bare marker replies: 0

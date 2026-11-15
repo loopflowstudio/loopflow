@@ -1,6 +1,6 @@
 # LOO-906: immediate interactions across Desktop and mobile
 
-Implementation continues 2026-11-15 from checkpoint `9fdf6ef582` on
+Implementation continues 2026-11-15 from checkpoint `371bb1ef1c` on
 origin/main `9cafc410ee`. Supersedes the Desktop-only delivery
 boundary. No shipping or merge decision is recorded. Placement remains this Task;
 no Wave is selected.
@@ -280,10 +280,6 @@ Counterexamples required before both-client cutover:
   Resolve its stated confirmation obligation; never retire all effects merely
   because command output succeeded.
 
-This refines the cache/overlay and stage-fence design with no
-product choice. Implement domain recovery and effect/stage coverage before
-cutting both clients over; keep the recorded launch counterexamples intact.
-
 ### Superseding an intent must resolve its effect
 
 Next implement direction: a domain request can end without producing its intended
@@ -365,10 +361,8 @@ creation whose attachment failed; replace the epoch between presentation and
 incorporation. Each retains exactly its outstanding obligations, with no duplicate
 count delta, replay, recovery prompt or navigation change. Cover both clients.
 
-This settles an implementation consequence of the existing lossless recovery and
-per-query incorporation contracts. There is no open product choice. Replace the
-interim `presented` deletion and creation-only presentation map as part of the
-shared projection migration, after domain recovery and effect/stage coverage.
+Replace the interim `presented` deletion and creation-only presentation map in
+the shared projection migration, after domain recovery and effect/stage coverage.
 
 ### Opening another query must preserve pending intent
 
@@ -401,9 +395,6 @@ view, restart, then reopen from disk. Reorder a covering count and lagging list;
 change filter/plan identity while replies are held. Assert one removal per query,
 no stale row flash, no lost effect and eventual operation retirement without
 opening every view. Cover Desktop and mobile through the same reducer.
-
-This makes the existing per-query and closed-cache contracts concrete; it adds no
-product choice. Ordering is under Current implementation cut.
 
 ## Local navigation, disclosure and retained content
 
@@ -502,7 +493,6 @@ existing bounded input owners: no offline keystroke queue or automatic resend.
   second-submit recovery. Preserve success, duplicate prevention, failure,
   departure, ownership, layout and first-turn coverage on the shared path.
 
-Keep current branch source edits as a checkpoint, not the final architecture.
 Previous Desktop design: `7030e08a:scratch/instant-task-session.md`.
 
 ## Forbidden outcomes
@@ -576,30 +566,27 @@ separately. Neither that target nor a SQL bottleneck has been measured here.
 
 ## Implement direction
 
-Concept-review outcome (2026-11-15, current workspace on `9fdf6ef582`):
-refine recovery presentation to resolve each effect independently, including
-unavailable evidence. Iterate to implement this alongside live Work incorporation
-before the remaining mutation-family fences and both-client cutover. No open
-product choice. Planning correlation does not complete client reconciliation or
-authorize retiring operations on presentation; native latency remains unmeasured.
+Concept-review outcome (2026-11-15): resolve each effect independently, including
+unavailable evidence, alongside live Work incorporation and before the remaining
+mutation-family fences and both-client cutover. No open product choice.
 
 ### Resolve only the effect that the evidence covers
 
-Next implement direction: derive recovery presentation from the outstanding
-effect obligations in the shared owner. For each applicable effect distinguish
-unresolved, confirmed resolved and unavailable evidence; an effect declared
-inapplicable by the command registry has no obligation. Do not turn a missing
-planning reading into an empty set of unresolved changes. After epoch replacement
-or unavailable lookup, retain the request and an inspection/recovery action.
-An absent reading alone cannot establish that planning is inapplicable.
+Derive recovery presentation from the outstanding effect obligations in the
+shared owner. For each applicable effect distinguish unresolved, confirmed
+resolved and unavailable evidence; an effect the command registry declares
+inapplicable has no obligation. A missing planning reading is not an empty set of
+unresolved changes, and absence alone cannot establish that planning is
+inapplicable. After epoch replacement or unavailable lookup, retain the request
+and an inspection/recovery action.
 
-Planning delivery confirms only the exact correlated planning changes. Delivered
-planning must not suppress attachment, Graph, filesystem or other unresolved
-failures; an unclassified saved diagnostic stays inspectable until its owner
-establishes resolution. Preserve the original result and diagnostic. Use the
-existing effect/stage registry and domain owners, with no additional lifecycle
-ledger or screen. Both clients consume the same derived recovery annotations;
-creation-specific `complete` cannot mean all effects have converged.
+Planning delivery confirms only the exact correlated planning changes. It must
+not suppress attachment, Graph, filesystem or other unresolved failures; an
+unclassified saved diagnostic stays inspectable until its owner establishes
+resolution. Preserve the original result and diagnostic. Use the existing
+effect/stage registry and domain owners, with no additional lifecycle ledger or
+screen. Both clients consume the same derived annotations; creation-specific
+`complete` cannot mean all effects have converged.
 
 Concrete interaction: Start files a Task, then attachment fails while its planning
 delivery finishes. Show the filed conversation and keep Retry opening for that
@@ -608,27 +595,24 @@ Selecting B remains final even when A's result or status arrives later. Restart
 retains the attachment obligation and each lagging list/count obligation. A
 replacement epoch shows unavailable confirmation, never an all-clear result.
 
-Current workspace review found `CreationRecovery.refresh` using
-`planning?.unresolved ?? []` and suppressing the saved operation error whenever
-planning exists with no unresolved change. `ClientWorkStore.presented` still
-deletes the request based on finished/bound delivery. These remain interim paths
-to replace under the existing presentation-acknowledgment contract, not templates
-for the shared recovery model. The live-order test checks a lagging stamp against
-a fence; it does not feed a Work reading through a projection or prove navigation.
+Interim code at `371bb1ef1c` still contradicts this. `CreationRecovery.refresh`
+computes `planning?.unresolved ?? []`, so a missing or epoch-replaced planning
+reading yields `complete` and falls back to the saved error, and a reading with
+no unresolved change hides `operation.error` even when it is not a planning
+failure. `ClientWorkStore.presented` still deletes the request on finished/bound
+delivery. Replace both under the presentation-acknowledgment contract; neither
+is a template. The existing live-order test checks a lagging stamp against a
+fence; it does not feed a Work reading through a projection or prove navigation.
 
-Before cutover, hold planning and attachment independently, resolve either first,
-then remove planning evidence or replace the epoch. Reorder old saved-result,
-current status and actual list/count frames across restart and selection of B.
-Assert that only the covered recovery action disappears, each query applies its
-effect once, unavailable evidence retains Inspect, and no command is replayed or
-later selection changed. Extend production presentation coverage on both targets.
-
-Next verify the live shared owner with a newer planning-status receipt, an older
-saved-result reply and a lagging Work reading delivered in each order, including
-restart. Preserve the original result, current recovery action and per-query
-overlay independently; none of these replies may reselect the Task or replay the
-command. Persisted receipt-order tests already cover older saved replies; they do
-not establish live Work reconciliation or either client's presentation behavior.
+Next acceptance for the shared owner: deliver a newer planning-status receipt, an
+older saved-result reply and a lagging Work list/count reading in each order,
+across restart and a later selection of B; hold planning and attachment
+independently, resolve either first, then remove planning evidence or replace
+the epoch. Assert that the original result, the current recovery action and each
+per-query overlay change independently; only the covered action disappears, each
+query applies its effect once, unavailable evidence keeps Inspect, and no reply
+replays the command or reselects. Persisted receipt-order tests cover older saved
+replies only. Extend production presentation coverage on both targets.
 
 ### Recover the result; observe the remaining work
 
@@ -667,11 +651,8 @@ no longer mutate that resource; an unrelated planning wait must not hold every
 later edit, while a still-live external writer cannot be bypassed by lookup.
 Presentation acknowledgment and cache retirement retain their existing rules.
 
-Server side, `planning_recovery_tracks_the_exact_change_across_newer_edits_and_restart`
-(`store/sqlite/task_content.rs`) holds delivery across a newer edit and restart,
-resolves the old change only, and keeps missing evidence unavailable. Completion
-also covers output loss after successful external delivery. Open items are in
-the remaining list under Current implementation cut.
+Server coverage: `planning_recovery_tracks_the_exact_change_across_newer_edits_and_restart`
+(`store/sqlite/task_content.rs`) and completion output loss after external delivery.
 
 Preserve the launch counterexamples in the shared tests: pre-admission cached
 Task data, a fresh unrelated planning frame, unavailable or missing Task rows,
@@ -679,10 +660,6 @@ current no-Graph results, Graph removal after reconciliation, reconnect, departu
 and return, and native readiness before a current Task result. Attachment failure
 must remain visible beside receipt recovery, and Retry opening must reuse the
 admitted Session without another create.
-
-Desktop still has the per-action `pendingTaskReconciliations` checkpoint path.
-Its launch counterexamples above must survive deletion in the shared projection
-cut. Implementation map: `639411f1b27fbdb1532ac206ceb775a0dc76fde9`.
 
 Proposed usage text for the affected Desktop/mobile docs:
 > Start opens your submitted request immediately. Leave and return while it
@@ -723,45 +700,27 @@ checks are at `aeb4ed3b2b0e7256748fa69bd76f77acff966b98:scratch/instant-task-ses
 The launch checkpoint, presentation-driven retirement and phone sheet/outcome
 presentation remain interim; no shared projection cutover is claimed.
 
-Completion/reopen and Task field/Wave edits recover original results without
-replay. Definite refusal covers content/membership validation; later errors stay
-uncertain. Remote Machine moves, other families and both clients' completion
-presentation remain unfinished.
-
-Stage resolutions stay in `commits`: committed, definitely refused or superseded.
-Completion withdrawal resolves the exact saved request in the withdrawing writer's
-transaction, with replacement coverage rather than a guessed Task. First resolution
-wins even after delivery finishes. Recovery never repeats a superseded request.
-The indexed 10k status-withdrawal lookup replaced a `repository_plans` scan;
-prior detail/checks: `fc50618e31:scratch/instant-task-session.md`.
-
-Task edit/move stages correlate exact Task-field or Project-order delivery IDs.
-Completion settlement now correlates its `task_state_deliveries` ID to every
-receipt for the exact request; Reopen correlates its own state delivery, including
-no-op coverage without inventing a change. `operation.get.planning` reads current
-status with its own snapshot fence. Conflicts record provider disagreement, not
-delivery; only the current decision adopts it. Older attempts remain uncertain
-until their own recovery, despite newer local decisions. Missing
-rows remain unavailable. Saved results/diagnostics never change with that status.
-Receipt revisions and subscription invalidation include planning revisions. Both
-native targets share the DTO and persisted receipt ordering; live action/projection
-migration is unfinished. No new queue, generic retry or migration was introduced.
-
-State delivery recovers older unresolved attempts under its existing Task lock;
-exact acknowledgment/history resolves only that delivery. Unknown history remains
-uncertain, and ordinary acquisition cannot adopt it over newer intent. Details,
-eight focused tests and indexed 10k query results are recorded at
-`9fdf6ef582:scratch/instant-task-session.md`. Client resource lanes remain open.
+Server recovery (detail and checks at `9fdf6ef582:scratch/instant-task-session.md`):
+completion/reopen and Task field/Wave edits return original results without
+replay; definite refusal covers content/membership validation only, later errors
+stay uncertain. Stage resolutions stay in `commits` (committed, refused,
+superseded); completion withdrawal resolves the exact saved request in the
+withdrawing transaction, first resolution wins. Task edit/move, completion
+settlement and Reopen correlate their exact planning delivery IDs;
+`operation.get.planning` reads current status under its own fence, missing rows
+stay unavailable, and saved results never change with it. Older state-delivery
+attempts recover under the existing Task lock. Remote Machine moves, other
+families and client resource lanes remain open.
 
 The shared client now supports read-only receipt observation after returning the
 saved result. Desktop keeps it while the request remains saved. Recovery and live
 observation use one persisted reducer; an older first reply after restart returns
 the newer saved evidence instead of waiting indefinitely. Current planning
 evidence is separate from historical result/error and becomes unavailable on
-epoch replacement. Desktop's recovery message follows that current status and
-Retry waits for its prior observer. Tests cover macOS presentation and the shared
-owner on both targets. Live Work incorporation, per-query overlays and phone
-recovery presentation remain open.
+epoch replacement. Desktop's recovery message reads that status (with the interim gaps under
+Implement direction) and Retry waits for its prior observer. Tests cover macOS
+presentation and the shared owner on both targets. Live Work incorporation,
+per-query overlays and phone recovery presentation remain open.
 
 Remaining, in order: integrate live Work query incorporation and current recovery
 actions with saved-result/planning observation (including reordered replies,

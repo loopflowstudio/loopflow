@@ -1,7 +1,7 @@
 # LOO-906: immediate interactions across Desktop and mobile
 
-Realigned 2026-11-14 after the receipt-cut checkpoint (`d4ecbd8a6b`), synced onto
-origin/main `42b31bc791`; next step is implement. Supersedes the Desktop-only delivery
+Realigned 2026-11-15 after checkpoint `221b9a8a82` on origin/main `42b31bc791`
+(no newer upstream commits); next step is implement. Supersedes the Desktop-only delivery
 boundary. No shipping or merge decision is recorded. Placement remains this Task;
 no Wave is selected.
 
@@ -448,9 +448,10 @@ and their consumers must converge together.
    membership and persistence dependencies before cutting consumers over.
    Completion navigation is specified above.
 2. Extend receipt/commit-stamp contracts and domain recovery; migrate saved data.
-   Done: stamped subscription readings (revision 6), submitted/canonical admission
-   identity, legacy envelope adoption and saved-command dispatch. In progress:
-   domain continuation and all-writer stage fences in `client_operations.sql`.
+   Done server-side: stamped subscription readings (revision 6), Git-free
+   `operation.submit` admission, submitted/canonical identity, legacy envelope
+   adoption and saved-command dispatch. Remaining: client use of that admission,
+   domain continuation and all-writer stage fences.
 3. Build shared transactional client store and projection reducer; cut both
    transports over, including query membership. Delete predecessor owners.
 4. Move selection, disclosure, launch, completion and every mutation family through
@@ -579,11 +580,29 @@ fixtures expose pending/candidate/bound/conflict separately from delivery.
 Transactional stages remain Task filing, completion request/settlement, reopen and
 Session input replacement. Failed output retains committed stages as uncertain.
 Completed command output cannot be overwritten by a late recovery worker.
-All-writer fences, definite-refusal classification and remote/detached/external
-confirmation remain open. The shared transactional cache/outbox, query membership
-and both-client cutover have not started. Existing launch exceptions remain until
-that indivisible migration. Earlier receipt-cut details and the pre-admission Git
-counterexample are at `51d23391e079b096968803e975e95c0d984e6f95:scratch/instant-task-session.md`.
+**Live clients still run Git before admission.** Desktop and mobile Start send
+the `task.create` write (`RegistryQuery.createTask`, also
+`createTaskFromSession`), which reaches
+`engine::creation::create`: `repo::require_repo_root` runs before `claim_creation`,
+so nothing durable exists while Git is held. Only `operation.submit` is Git-free,
+and no production Swift caller sends it (ServerProtocol encodes it for fixtures).
+The fix is the client cut: Start submits the envelope through the shared outbox
+and observes `operation.get`; the served `task.create` write stays the CLI/direct
+path sharing the canonical claim. Until then the immediate-admission
+counterexample holds only for the server fixture.
+
+Remaining, in order: client submission through `operation.submit` with receipt
+ordering/epoch recovery; domain recovery continuations, definite-refusal
+classification and terminal fences for every mutation family (including
+remote/detached and external file/config confirmation; dispatched errors stay
+uncertain; SQLite fences cannot certify filesystem/provider effects); the
+transactional confirmed cache/outbox and normalized query membership; both
+clients' interaction and retained-occurrence migration with the launch checkpoint
+exception and other predecessors deleted; epoch reset on historical restoration;
+held/reordered/crash and native acceptance. `complete` in a read stamp still means
+transport coverage of that query, not external membership or native readiness.
+Earlier receipt-cut details are at
+`51d23391e079b096968803e975e95c0d984e6f95:scratch/instant-task-session.md`.
 
 ### Admission identity and recovery contract
 
@@ -657,24 +676,10 @@ Required counterexamples before dependent work:
    revision update the client; admission never enables input or retires overlays.
 
 These are engineering consequences of immediate admission and lossless recovery,
-not a new product choice. Server admission identity is implemented; client receipt
-ordering/epoch recovery remains part of the shared owner. Remaining: domain
-recovery and all-writer fences, transactional cache/outbox, query membership,
-both-client migration with the launch exception deleted. The launch regression
-cases above remain mandatory.
-
-The new Swift mirror and exact-query fence comparison are shared with iOS; live
-clients still use their existing creation/mutation owners. No client projection
-cutover is claimed. Remaining: domain recovery continuations, definite-refusal
-classification and terminal fences
-for every mutation family (including remote/detached and external file/config
-confirmation). Dispatched errors currently remain uncertain. SQLite fences cannot
-certify filesystem/provider effects. Also remaining: transactional
-confirmed cache/outbox and normalized query membership; both clients' interaction
-and retained-occurrence migration; deletion of launch checkpoint exceptions and
-other predecessors; epoch reset on historical restoration; full held/reordered/
-crash and native acceptance. `complete` in a read stamp still means transport
-coverage of that query, not complete external membership or native readiness.
+not a new product choice. Cases 1–4 have server fixtures; case 1 is not yet true
+for the live client path (above). Case 5 belongs to the shared client owner. The
+Swift receipt mirror and exact-query fence comparison are shared with iOS; no
+client projection cutover is claimed.
 
 Previous 50-Desktop/15-Rust/one-iOS read-contract checks are recoverable at
 `950b83a138e2c3894f58ad260cad4bfd9d3fe839:scratch/instant-task-session.md`.
@@ -767,15 +772,12 @@ Checks:
 - `uv run python scripts/check_migrations.py`: passed; one finished draft migration.
 - `uv run pytest python/tests/test_desktop_performance.py -q -k 'host_load or preflight or sql_profile_time or native_runner or sandbox_paths_do_not_change'`: 5 passed; unchanged since the recorded benchmark-instrumentation cut.
 - `uv run python scripts/check_swift_multiplatform_boundaries.py`: passed.
-- `cargo nextest run -p loopflow --lib --build-jobs 2 -E 'test(store::sqlite::operations::tests::) | test(engine::operation::tests::) | test(server::schema::tests::) | test(server::service::tests::operation_admission_answers_while_git_is_held_and_survives_disconnect)'`: 25 passed. After strengthening the service fixture with a racing CLI creation and adding the diagnostic above, the exact service and 10k-query tests passed again. `cargo fmt --all` passed. Schema equality uses the complete CLI generator.
+- `cargo nextest run -p loopflow --lib --build-jobs 4 -E 'test(store::sqlite::operations::tests::) | test(engine::operation::tests::) | test(server::service::tests::operation_admission_answers_while_git_is_held_and_survives_disconnect)'` at `221b9a8a82`, 2026-11-15: 17 passed, including the checkpoint's legacy-adoption, completed-CLI adoption and held-Git service tests. `engine::operation::tests::admission_saves_exact_content_before_git_and_unavailable_validation_is_recoverable` reported LEAK (a handle outlived the test); not yet investigated. `server::schema::tests::` not rerun since 25 passed before the checkpoint.
 - `swift build --package-path swift --build-tests --jobs 2`: passed. `scripts/test_desktop.sh --skip-build --no-parallel --filter 'ServerProtocolTests|CreationSubmissionTests|WorkModelStreamTests.launchReconciliation|WorkDestinationTests.newTask|WorkDestinationTests.lateCreationReply|WorkDestinationTests.failedAutomatic|WorkNavigationTests.waveClickSelectsBeforeReturningFromTheGesture'`: 44 passed.
 - `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/ReadingStampTests`: 3 passed; app/test targets built and the disposable Simulator was removed.
 - `uv run python scripts/check_architecture.py`: passed, 89/89 SQLite owners.
 
-Earlier stopped Rust builds and SQL-smoke details are at
-`51d23391e079b096968803e975e95c0d984e6f95:scratch/instant-task-session.md`.
-The schema fixture was regenerated with the real CLI; no standalone partial
-schema generator remains in the verification path.
+The schema fixture is generated by the real CLI.
 
 Gate owns wider store/transport/lifecycle, DTO integration, documented-command,
 packaging and clippy checks. Implementation still owns a valid benchmark baseline

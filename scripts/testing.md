@@ -294,8 +294,8 @@ verbatim when compiled code reads them.
 Cache hits can retain another checkout's absolute debug-source paths. Use the
 isolated build above when those paths no longer resolve. The
 [crate rebuild probe](benchmarks/crate-rebuild/README.md) records source paths
-alongside runtime-identity checks. Automatic cross-root reuse still needs a
-source-debugging contract and shared-server root upkeep.
+alongside runtime-identity checks. Use the isolated build for source debugging.
+Automatic cross-root reuse still needs shared-server root upkeep.
 
 Use one machine-wide server for a shared local cache. Root configuration takes
 effect when that server starts; apply root changes when builds are idle. A new

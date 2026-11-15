@@ -33,5 +33,6 @@ root refresh or Machine admission budgets.
 
 The probe retains copies of the rlibs and their source-path strings. A cache hit
 can retain the first checkout's absolute debug-source paths even when runtime
-identity is correct. Inspect these before enabling automatic cross-root reuse;
-a successful cache counter check alone does not settle debugger source lookup.
+identity is correct. A successful cache counter check does not make those
+paths resolvable; debug from `scripts/dev-lf --isolated-build`, which compiles
+in `target/isolated` without the cache.

@@ -565,7 +565,7 @@ remains unexercised.
 
 Built at `5ccc4563bd`; direction and acceptance at
 `6e944e73b5a:scratch/instant-task-session.md`, summarized under Current
-implementation cut. `swift/LoopflowiOS/README.md:41` still names **Retry opening**; item 3 changes it.
+implementation cut. The iOS README still names **Retry opening** (item 3).
 
 ### A submitted conversation is one thing on both hosts
 

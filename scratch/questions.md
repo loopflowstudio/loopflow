@@ -55,3 +55,10 @@
   existing encrypted credentials stays against the Machine home. The alternative
   moves `lf_home_dir` and key acquisition down with storage as "its own files",
   which puts ambient home selection back under the opener that just lost it.
+- A Task's captured Graph and cursor reach SQL as saved JSON text and decode in
+  `store::task_work`; addresses and the display Graph move down as types. The
+  alternative moves `CapturedGraph` down with `ConcreteStep`, `Skill`,
+  occurrence settings and `Command`, so a skill-setting edit rebuilds storage.
+- `resolve_task_id_in` takes the requested canonical address as a value. Text
+  comparison is enough only if every `repository_plans.repo` writer saves the
+  canonical spelling; that check belongs to implement, not to this note.

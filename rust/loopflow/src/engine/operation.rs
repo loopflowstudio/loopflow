@@ -124,6 +124,14 @@ pub(crate) fn execute(store: &SqliteStore, id: &str) -> Result<()> {
                 store.recover_operation_result(id, "session.renamed")?;
                 return Ok(());
             }
+            Write::TaskClaim { .. } => {
+                store.recover_operation_result(id, "task.claimed")?;
+                return Ok(());
+            }
+            Write::TaskUnassign { .. } => {
+                store.recover_operation_result(id, "task.unassigned")?;
+                return Ok(());
+            }
             Write::TaskReopen { .. } => {
                 store.recover_operation_result(id, "task.reopened")?;
                 return Ok(());
@@ -264,6 +272,110 @@ mod tests {
             session: None,
             run: false,
         }
+    }
+
+    #[test]
+    fn ownership_recovery_keeps_original_results_and_never_replays_missing_stages() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home = EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        let repo = loopflow_test_support::TestRepo::new();
+        let path = crate::store::default_db_path();
+        let store = SqliteStore::new(&path).unwrap();
+        let repository_id = store
+            .ensure_repository(repo.path().to_str().unwrap())
+            .unwrap();
+        let task = store
+            .create_task(&crate::work::task::NewTask {
+                id: crate::durable::TaskId::new(),
+                repository_id,
+                project_id: None,
+                title: "Ownership recovery".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        let epoch = store.reading_identity().unwrap().1;
+        let mut original = Vec::new();
+        for (id, claim, changed) in [
+            ("claim", true, true),
+            ("claim-noop", true, false),
+            ("unassign", false, true),
+            ("unassign-noop", false, false),
+            ("later-claim", true, true),
+        ] {
+            let command = if claim {
+                Write::TaskClaim {
+                    directory: repo.path().to_owned(),
+                    issue: task.identifier.clone(),
+                }
+            } else {
+                Write::TaskUnassign {
+                    directory: repo.path().to_owned(),
+                    issue: task.identifier.clone(),
+                }
+            };
+            super::admit(id, &epoch, &command).unwrap();
+            assert!(store.dispatch_operation(id).unwrap());
+            // Dispatch without a stage is uncertain. It must not issue a claim or release.
+            let before = store.task_ownership(&task.id).unwrap();
+            super::execute(&store, id).unwrap();
+            assert_eq!(store.task_ownership(&task.id).unwrap(), before);
+            assert!(store
+                .operation_receipt(id)
+                .unwrap()
+                .unwrap()
+                .commits
+                .is_empty());
+            let entry = crate::journal::request::with_operation(Some(id.into()), || {
+                if claim {
+                    store.claim_task(&task.id)
+                } else {
+                    store.unassign_task(&task.id)
+                }
+            })
+            .unwrap();
+            assert_eq!(entry.is_some(), changed);
+            let receipt = store.operation_receipt(id).unwrap().unwrap();
+            assert_eq!(receipt.commits.len(), 1);
+            let commit = &receipt.commits[0];
+            assert_eq!(
+                commit.stage,
+                if claim {
+                    "task.claimed"
+                } else {
+                    "task.unassigned"
+                }
+            );
+            assert_eq!(commit.resources, [task.id.to_string()]);
+            assert_eq!(
+                commit.fence.revisions["planning"],
+                store.revisions().unwrap().planning
+            );
+            assert_eq!(
+                commit.result,
+                serde_json::to_value(store.task_ownership(&task.id).unwrap()).unwrap()
+            );
+            assert_eq!(!commit.result["owner"].is_null(), claim);
+            original.push((id, commit.result.clone()));
+            store.finish_operation(id, Err("reply lost")).unwrap();
+        }
+        let current = store.task_ownership(&task.id).unwrap();
+        assert_eq!(current.log.len(), 3);
+        drop(store);
+        let store = SqliteStore::new(&path).unwrap();
+        for (id, result) in original {
+            super::execute(&store, id).unwrap();
+            let recovered = store.operation_receipt(id).unwrap().unwrap();
+            assert_eq!(recovered.delivery, OperationDelivery::Finished);
+            assert_eq!(recovered.result, Some(result));
+            super::execute(&store, id).unwrap();
+            assert_eq!(
+                store.operation_receipt(id).unwrap().unwrap().revision,
+                recovered.revision
+            );
+        }
+        assert_eq!(store.task_ownership(&task.id).unwrap(), current);
     }
 
     #[test]

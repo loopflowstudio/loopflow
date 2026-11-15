@@ -6952,7 +6952,8 @@
         "task",
         "project",
         "task_state",
-        "task_creation"
+        "task_creation",
+        "task_comment"
       ],
       "type": "string"
     },

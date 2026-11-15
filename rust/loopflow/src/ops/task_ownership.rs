@@ -58,10 +58,6 @@ pub fn change(repo: &Path, issue: &str, change: OwnershipChange) -> OpsResult<Ta
             }
             OwnershipChange::Unassign => {
                 store.sqlite.unassign_task(&task.id).map_err(message)?;
-                store
-                    .sqlite
-                    .assign_task_owner(&task.id, None)
-                    .map_err(message)?;
             }
         }
         let repository = super::task::repository_for_task(&store, &task)?;

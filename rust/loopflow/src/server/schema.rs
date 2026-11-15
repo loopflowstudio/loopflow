@@ -165,6 +165,11 @@ const RESPONSES: &[(&str, &str, &str)] = &[
         include_str!("../../tests/fixtures/dto/server/operation_creation_planning.json"),
     ),
     (
+        "operation_ownership_planning",
+        "operation.get",
+        include_str!("../../tests/fixtures/dto/server/operation_ownership_planning.json"),
+    ),
+    (
         "operation_state_planning",
         "operation.get",
         include_str!("../../tests/fixtures/dto/server/operation_state_planning.json"),

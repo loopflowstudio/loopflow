@@ -10,7 +10,7 @@ public struct OperationDeclaration {
     enum Kind: String {
         case create = "task.create", newSession = "session.new", complete = "task.complete", reopen = "task.reopen"
         case rename = "session.rename"
-        case update = "task.update", move = "task.move", abandon = "task.abandon", claim = "task.claim"
+        case update = "task.update", move = "task.move", abandon = "task.abandon", claim = "task.claim", unassign = "task.unassign"
     }
 
     var label: String {
@@ -23,6 +23,7 @@ public struct OperationDeclaration {
         case .move: "Move Task"
         case .abandon: "Abandon Task"
         case .claim: "Claim Task"
+        case .unassign: "Unassign Task"
         case .rename: "Rename Session"
         }
     }
@@ -33,7 +34,7 @@ public struct OperationDeclaration {
         switch kind {
         case .create, .newSession: "Starting conversation…"
         case .complete: Self.completionProgress
-        case .reopen, .update, .move, .abandon, .claim, .rename: nil
+        case .reopen, .update, .move, .abandon, .claim, .unassign, .rename: nil
         }
     }
 
@@ -67,6 +68,7 @@ public struct OperationDeclaration {
         case .move: stages = ["task.membership_changed"]
         case .abandon: stages = ["task.abandoned"]
         case .claim: stages = ["task.claimed"]
+        case .unassign: stages = ["task.unassigned"]
         case .rename: stages = ["session.renamed"]
         }
     }

@@ -1,17 +1,8 @@
 # Working assumptions
 
-- Dynamic membership uses the existing query's ordered repository manifest and
-  prepared indexes; explicit-only programs stay small. Normalized fields, real
-  content, incorporation, derived coverage and requests share one SQLite owner.
-  Query-specific acknowledgments replace stamp-only retirement shortcuts. The
-  projected manifest also supplies board lifecycle, Task parent labels and
-  No Wave grouping; planning supplies real content. These are engineering choices,
-  not new product answers. Native latency and full interaction acceptance remain open.
-
-- Receiving-link attribution is local transport metadata on each reading, captured
-  before buffering and checked against the shared Machine owner at ingestion.
-  Live external normalization now uses only that validated link; SQL-only fields
-  remain independent. Field/answer separation and dynamic membership consume this attribution. No product answer inferred.
+- Dynamic membership, query-specific retirement and receiving-link attribution
+  follow the contracts in `instant-task-session.md`; normalized facts, content,
+  incorporation and requests share one SQLite owner. No product answer inferred.
 
 - Jack Heart replied “1a” to the 2026-11-15 conversation review's disconnected-edit
   question: save and project Complete/rename/move locally, show “Waiting for

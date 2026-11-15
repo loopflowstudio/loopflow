@@ -689,6 +689,36 @@ fn planning_reading_in(
             });
             continue;
         }
+        if change.kind == PlanningChangeKind::TaskComment {
+            let row = conn
+                .query_row(
+                    "SELECT d.acknowledged,d.conflicting_comment_json IS NOT NULL,d.error
+                 FROM task_comment_deliveries d JOIN task_comments c ON c.id=d.comment_id
+                 WHERE d.comment_id=?1 AND c.task_id=?2",
+                    params![change.id, change.owner],
+                    |row| {
+                        Ok((
+                            row.get::<_, bool>(0)?,
+                            row.get::<_, bool>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                        ))
+                    },
+                )
+                .optional()?;
+            let (state, error) = match row {
+                None => (PlanningDeliveryState::Unavailable, None),
+                Some((_, true, error)) => (PlanningDeliveryState::Conflict, error),
+                Some((true, _, _)) => (PlanningDeliveryState::Delivered, None),
+                Some((false, _, Some(error))) => (PlanningDeliveryState::Uncertain, Some(error)),
+                Some((false, _, None)) => (PlanningDeliveryState::Pending, None),
+            };
+            changes.push(OperationPlanningChange {
+                change: change.clone(),
+                state,
+                error,
+            });
+            continue;
+        }
         let (table, owner, settled, field) = match change.kind {
             PlanningChangeKind::Task => (
                 "task_changes",
@@ -703,7 +733,9 @@ fn planning_reading_in(
                 " AND field=c.field",
             ),
             PlanningChangeKind::TaskState => ("task_state_deliveries", "task_id", "settled", ""),
-            PlanningChangeKind::TaskCreation => unreachable!("creation handled above"),
+            PlanningChangeKind::TaskCreation | PlanningChangeKind::TaskComment => {
+                unreachable!("creation and comments handled above")
+            }
         };
         let row = conn
             .query_row(
@@ -2135,6 +2167,129 @@ mod tests {
     }
 
     #[test]
+    fn reopening_an_open_task_confirms_a_noop_without_withdrawing_approval() {
+        let (_dir, store) = store();
+        let repo = loopflow_test_support::TestRepo::new();
+        let repository_id = store
+            .ensure_repository(repo.path().to_str().unwrap())
+            .unwrap();
+        let task = store
+            .create_task(&crate::work::task::NewTask {
+                id: crate::durable::TaskId::new(),
+                repository_id,
+                project_id: None,
+                title: "Open approved Task".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET shipped_at=42 WHERE id=?1",
+                [task.id.as_str()],
+            )
+            .unwrap();
+        let before = store.revisions().unwrap();
+        store
+            .admit_operation(
+                &store.reading_identity().unwrap().1,
+                "noop",
+                "task.reopen",
+                "hash",
+                &json!({}),
+            )
+            .unwrap();
+        crate::journal::request::with_operation(Some("noop".into()), || {
+            store.reopen_task(&task.id, None).unwrap();
+        });
+        let receipt = store.operation_receipt("noop").unwrap().unwrap();
+        assert_eq!(receipt.commits.len(), 1);
+        let commit = &receipt.commits[0];
+        assert_eq!(commit.stage, "task.reopened");
+        assert_eq!(commit.resolution, OperationResolution::Committed);
+        assert!(commit.planning_changes.is_empty());
+        assert_eq!(store.revisions().unwrap(), before);
+        let approval: Option<i64> = store
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT shipped_at FROM tasks WHERE id=?1",
+                [task.id.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(approval, Some(42));
+    }
+
+    #[test]
+    fn reopen_refusals_are_durable_without_changing_terminal_facts() {
+        let (_dir, store) = store();
+        let repo = loopflow_test_support::TestRepo::new();
+        let repository_id = store
+            .ensure_repository(repo.path().to_str().unwrap())
+            .unwrap();
+        for (id, deleted) in [("abandoned", false), ("deleted", true)] {
+            let task = store
+                .create_task(&crate::work::task::NewTask {
+                    id: crate::durable::TaskId::new(),
+                    repository_id: repository_id.clone(),
+                    project_id: None,
+                    title: id.into(),
+                    description: String::new(),
+                    due_date: None,
+                })
+                .unwrap();
+            if deleted {
+                store
+                    .conn
+                    .lock()
+                    .unwrap()
+                    .execute(
+                        "UPDATE tasks SET planning_deleted_at='2026-11-15T00:00:00Z' WHERE id=?1",
+                        [task.id.as_str()],
+                    )
+                    .unwrap();
+            } else {
+                store
+                    .abandon(&crate::durable::WorkRef::Task(task.id.clone()), "Canceled")
+                    .unwrap();
+            }
+            let before = serde_json::to_value(store.task(&task.id).unwrap().unwrap()).unwrap();
+            let revision = store.revisions().unwrap();
+            store
+                .admit_operation(
+                    &store.reading_identity().unwrap().1,
+                    id,
+                    "task.reopen",
+                    "hash",
+                    &json!({}),
+                )
+                .unwrap();
+            let error = crate::journal::request::with_operation(Some(id.into()), || {
+                store.reopen_task(&task.id, None)
+            })
+            .unwrap_err();
+            let receipt = store.operation_receipt(id).unwrap().unwrap();
+            assert_eq!(receipt.commits.len(), 1);
+            assert_eq!(receipt.commits[0].stage, "task.reopened");
+            assert_eq!(
+                receipt.commits[0].resolution,
+                OperationResolution::DefinitelyRefused
+            );
+            assert_eq!(receipt.commits[0].result["error"], error.to_string());
+            assert_eq!(store.revisions().unwrap(), revision);
+            assert_eq!(
+                serde_json::to_value(store.task(&task.id).unwrap().unwrap()).unwrap(),
+                before
+            );
+        }
+    }
+
+    #[test]
     fn completion_and_reopen_record_their_own_committed_task_results() {
         let (_dir, store) = store();
         let repo = loopflow_test_support::TestRepo::new();
@@ -2472,6 +2627,47 @@ mod tests {
                     .len(),
                 1
             );
+        }));
+        store
+            .admit_operation(
+                &epoch,
+                "ownership-comment",
+                "task.unassign",
+                "hash",
+                &json!({}),
+            )
+            .unwrap();
+        {
+            let mut conn = store.conn.lock().unwrap();
+            let tx = conn.transaction().unwrap();
+            let comment = crate::work::task::comment::TaskComment {
+                id: uuid::Uuid::new_v4().to_string(),
+                body: "Ownership changed".into(),
+                author: crate::work::task::comment::TaskCommentAuthor::Integration,
+                created_at: None,
+            };
+            super::super::task_comments::insert_authored_comment(&tx, &task.id, &comment).unwrap();
+            super::commit_planning_edit_in(
+                &tx,
+                "ownership-comment",
+                "task.unassigned",
+                task.id.as_str(),
+                vec![crate::store::planning_sync::PlanningChangeRef {
+                    kind: crate::store::planning_sync::PlanningChangeKind::TaskComment,
+                    owner: task.id.to_string(),
+                    id: comment.id,
+                }],
+                &json!({}),
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        }
+        traced.extend(crate::store::query_plans::statements(&store, || {
+            let receipt = store
+                .operation_receipt("ownership-comment")
+                .unwrap()
+                .unwrap();
+            assert_eq!(receipt.planning.unwrap().changes.len(), 1);
         }));
         let conn = store.conn.lock().unwrap();
         for sql in traced {

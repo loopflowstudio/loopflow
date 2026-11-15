@@ -17,6 +17,7 @@ pub enum PlanningChangeKind {
     Project,
     TaskState,
     TaskCreation,
+    TaskComment,
 }
 
 /// A pending field edit and its provider baseline, independent of connection state.

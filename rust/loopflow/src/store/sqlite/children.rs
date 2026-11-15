@@ -553,11 +553,27 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let task = task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
-        require_task_not_deleted(&tx, &task)?;
-        if super::durable::task_state_in(&tx, id)? == TaskState::Abandoned {
-            return Err(StoreError::InvalidAuthority(
-                "An abandoned Task cannot be reopened".into(),
-            ));
+        let permission = require_task_not_deleted(&tx, &task).and_then(|()| {
+            if super::durable::task_state_in(&tx, id)? == TaskState::Abandoned {
+                Err(StoreError::InvalidAuthority(
+                    "An abandoned Task cannot be reopened".into(),
+                ))
+            } else {
+                Ok(())
+            }
+        });
+        if let Err(error) = permission {
+            if matches!(error, StoreError::InvalidAuthority(_)) {
+                super::operations::refuse_current_in(
+                    &tx,
+                    "task.reopened",
+                    &[id.as_str()],
+                    &["planning", "graphs"],
+                    &error,
+                )?;
+                tx.commit()?;
+            }
+            return Err(error);
         }
         let (completed, pending): (bool, Option<i64>) = tx.query_row(
             "SELECT planning_completed,completion_request FROM tasks WHERE id=?1",

@@ -333,23 +333,9 @@ journey/platform, endpoints separate. Unmeasured.
 
 ## Implementation direction (2026-11-15)
 
-### Synchronous intent and effect contracts
-
-The State, ordering and reconciliation contracts above retain the live requirements.
-Earlier handoff and reordered-reading detail:
-`cfebc7f89a6c8c5301518a067f9cc3a2e977ee5a:scratch/instant-task-session.md`
-(Implementation direction).
-
-### Query destinations and leases
-
-Built at `6e944e73b5a`; earlier ownership/checks at `9fbc729a63`. Claim,
+Earlier intent/lease/dynamic contracts: `cfebc7f89a6c:scratch/instant-task-session.md`
+(Implementation direction), `6e944e73b5a`, `9fbc729a63`, `5c958398a6de`.
 Wave/Dashboard rename and other mutations remain unmigrated.
-
-### Dynamic membership replacement
-
-The fixed-candidate counterexample and prior design are retained at
-`5c958398a6de:scratch/instant-task-session.md`. The dynamic predicate, field and
-retirement contracts below remain the acceptance contract.
 
 ### Facts absorb effects; queries prove their answers
 
@@ -361,13 +347,6 @@ Dynamic membership and disconnected Move below. Still binding: equal provenance
 with conflicting values is inconsistent, never last-arrival; a client-derived
 answer is never a Machine `ReadingStamp`; missing program, ancestry or content
 stays incomplete, never an exact empty/count.
-
-Proposed usage text for both READMEs after acceptance:
-> Move a Task to a Wave or No Wave. Cached lists and counts change immediately;
-> its conversation and drafts stay open. While disconnected, the change waits for
-> its original Machine and survives restart. A refusal restores only the refused
-> change, leaving later edits and navigation alone. Incomplete cached destinations
-> remain visibly incomplete until their missing data arrives.
 
 ### Observation and independent ingestion contracts · 2026-11-15
 
@@ -417,11 +396,12 @@ board counts from `RoadmapTask.section`. Boards use the shared ancestry evaluato
 and lifecycle; missing content/ancestry has no exact count; unplaced parents never
 acquire a No Wave label.
 
-### Task action cut requires a model revision · 2026-11-15
+### Task action cut · 2026-11-15
 
-Status: source review found a model counterexample before consumer migration;
-Claim, unassign and local Reopen remain unbuilt and are the next implement cut.
-The earlier cut's Reopen checks cover newer Machine readings, not a local gesture.
+Status: domain results/recovery are built; the vertical client cut is unfinished.
+Local Claim/unassign/Reopen still use their old surfaces. Normalized inputs,
+shared derivation, persistence replacement and both-host actions remain required.
+The earlier Reopen checks cover newer Machine readings, not a local gesture.
 
 The current `MembershipFacts.lifecycle` is a derived result, not sufficient input
 for these transitions:
@@ -436,11 +416,16 @@ for these transitions:
   Its membership fact cannot determine the Claim/Unassign action. `RoadmapTask`
   still reads `runtime.owner` from separate DTO content; projecting a section
   alone would leave that control and the inspector stale after retirement.
-- `claim_task` and `unassign_task` write no operation stage. No-op success also
-  needs a committed result; refusal in `my_claim_in` currently returns before a
-  resolution is recorded. Generic command completion cannot supply those facts.
-  Reopen has a success stage and original-ID recovery, but its abandoned/deleted
-  refusals are not yet recorded as definite semantic refusals.
+- Claim/unassign now record actual ownership and a planning fence, including
+  no-op success. Original-ID recovery returns that result after restart without
+  replaying or replacing a later claim. Definite ownership permission refusals
+  and deleted/abandoned Reopen refusals persist before any domain change.
+  Unassign's assignee clearing moved into this transaction; the old ops write
+  is deleted. Comment delivery has its own `task_comment` correlation; state and
+  assignee edits retain their exact delivery IDs. A pending external ownership
+  comment cannot be mistaken for completed planning delivery. Configuration names
+  are captured before the write lock; historical result labels cannot become
+  SQLite-only field support. No new migration or client projection is claimed.
 
 Next implement direction: normalize the real inputs in the existing
 field/outbox owner, then derive lifecycle/section once. Keep planning disposition
@@ -478,8 +463,7 @@ unassign → Claim and Complete → Reopen → Complete. Both hosts must publish
 held disk/network, retain later selection/drafts/Session, survive offline restart,
 recover the original ID after commit-before-reply, handle no-op success and definite
 refusal, and converge under reordered/two-client readings without stale owner
-controls. The three product choices are unchanged. No production migration or new
-runtime result is claimed by this source review.
+controls. The three product choices are unchanged; native latency is unmeasured.
 
 Proposed usage for both app READMEs, after that vertical exit:
 > **Claim** requests ownership on this Machine; **Unassign** releases ownership
@@ -497,9 +481,11 @@ an actual ownership result and fence; transport return or planning refresh never
 retires the projected owner. Unassign refusal after a newer local Claim removes
 only the refused layer, never restoring an old owner snapshot.
 
-No builtin skill instruction changes are needed: these are app gestures and
-existing Task commands. Keep shipped usage unchanged until the new paths exist.
+These are app gestures and existing Task commands; builtin skills are unchanged.
+Shipped app usage still describes the current paths.
 This direction answers none of the product choices below, and they don't gate it.
+
+Checks: `cargo nextest run -p loopflow --lib --test integration -E 'test(unassigning_another_persons_claim) | test(receipt_reads_and_duplicate_admission) | test(server::schema::tests::every_) | test(server::schema::tests::the_checked_in_schema) | test(dto_fixtures::ownership_planning_evidence) | test(documented_commands::)'` — 12 passed (6a596edb); the other six focused domain rows passed in 5fdbde33. That run's append-only fixture failure was repaired through ingestion, covered by the final run. `scripts/test_desktop.sh --filter ServerProtocolTests` — 28 passed. `cargo clippy --all-targets -- -D warnings`, `cargo package --locked --allow-dirty -p loopflow`, formatting and multiplatform boundaries — passed. Gate owns wider suites/iOS and the recorded LEAK.
 
 ### Open product choices
 
@@ -694,5 +680,3 @@ The 2026-11-15 review and its numbered disconnected-edit option:
 `f2438fb1b49:scratch/instant-task-session.md` (Conversation concept review).
 Jack Heart's “1a” selects saved disconnected Complete/rename/Move on the original
 Machine, keeping IDs across restart and uncertain delivery.
-
-Check: `git diff --check` passes; plan edits only, no build or test ran.

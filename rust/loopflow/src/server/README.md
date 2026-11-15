@@ -257,6 +257,13 @@ command output has already returned. Reopen, replacement PR insertion and a newe
 accepted planning status resolve a withdrawn request as `superseded` in their own
 transaction. Late settlement cannot overwrite that resolution or borrow a newer
 request's completion. Recovery never repeats a superseded request.
+Claim and Unassign record `task.claimed` and `task.unassigned` with the actual
+ownership result in the ownership transaction, including successful no-ops.
+Unassign clears the planning assignee in that transaction. Recovery returns the
+original result without changing a later claim. Ownership permission refusals and
+Reopen of deleted or abandoned Tasks record `definitely_refused` before changing
+facts. Display labels in a saved ownership result are historical command output;
+the planning fence does not certify current configuration labels.
 Completion and reopen recover their original committed Task result after a lost
 reply, even if the Task has since changed. Later failures remain in `error`: the
 recovered Task result does not certify cleanup or planning delivery. Task field
@@ -291,9 +298,9 @@ Each receipt's monotonic `revision` orders updates within its database epoch;
 a held admission reply cannot supersede a newer receipt. Command output is
 separate: `finished` alone cannot retire an optimistic layer or
 certify provider/input readiness. Completion request, completion settlement,
-reopen, field editing, Wave membership, Task filing and Session input replacement
-currently emit stages. Other writers still require their domain commits before
-client projection cutover.
+reopen, Claim, Unassign, field editing, Wave membership, Task filing and Session
+input replacement currently emit stages. Other writers still require their domain
+commits before client projection cutover.
 Receipt changes wake receipt subscriptions without changing Work revisions.
 
 Session rename records `session.renamed` with the actual Session ID, name and
@@ -1259,7 +1266,11 @@ outbox nor offline creation, cross-device submission sync or generic replay.
 Task edits, local Wave moves, completion and reopening save the exact planning
 change identities in `commits[].planning_changes`, alongside the original result
 and commit fence. `kind` distinguishes Task fields (`task`), Project order
-(`project`) and Task state delivery (`task_state`). Completion settlement attaches
+(`project`), Task state delivery (`task_state`) and ownership comments
+(`task_comment`). Ownership stages correlate the exact authored comment; comments
+are pending, uncertain after failed delivery, delivered after acknowledgment, or
+conflicting after a contrary provider observation. A comment never supersedes
+another comment. Completion settlement attaches
 its state delivery to every receipt for that exact completion request, even when
 a periodic writer settles it. Reopen names only its own new delivery. No-op saves
 add no delivery identity. The saved `TaskEdit.sync` is historical; recovering it

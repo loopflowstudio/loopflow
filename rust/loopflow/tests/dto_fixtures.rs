@@ -1404,6 +1404,27 @@ fn opening_receipts_distinguish_focus_from_attachment() {
 }
 
 #[test]
+fn ownership_planning_evidence_keeps_the_original_comment_identity() {
+    use loopflow::store::planning_sync::PlanningChangeKind;
+    use loopflow::store::sqlite::operations::OperationReceipt;
+    let wire: serde_json::Value = serde_json::from_str(include_str!(
+        "fixtures/dto/server/operation_ownership_planning.json"
+    ))
+    .unwrap();
+    let receipt: OperationReceipt = serde_json::from_value(wire["result"].clone()).unwrap();
+    assert_eq!(serde_json::to_value(&receipt).unwrap(), wire["result"]);
+    assert_eq!(receipt.commits[0].stage, "task.unassigned");
+    assert_eq!(
+        receipt.commits[0].planning_changes[0].kind,
+        PlanningChangeKind::TaskComment
+    );
+    assert_eq!(
+        receipt.commits[0].planning_changes[0],
+        receipt.planning.unwrap().changes[0].change
+    );
+}
+
+#[test]
 fn completion_planning_evidence_keeps_the_original_task_and_state_delivery() {
     use loopflow::store::planning_sync::PlanningChangeKind;
     use loopflow::store::sqlite::operations::{OperationReceipt, PlanningDeliveryState};

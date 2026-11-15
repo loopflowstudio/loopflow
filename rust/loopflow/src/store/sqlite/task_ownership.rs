@@ -14,6 +14,7 @@ use crate::durable::{
     ProjectId, RepositoryId, TaskExecutionSource, TaskId, TaskOwner, TaskOwnership,
     TaskOwnershipEntry,
 };
+use crate::store::planning_sync::{PlanningChangeKind, PlanningChangeRef};
 use crate::store::{StoreError, StoreResult};
 use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
 
@@ -258,7 +259,14 @@ fn resolved(
 }
 
 pub(super) fn ownership_in(conn: &Connection, task: &TaskId) -> StoreResult<TaskOwnership> {
-    let names = machine_names_in(conn)?;
+    ownership_with_names_in(conn, task, &machine_names_in(conn)?)
+}
+
+fn ownership_with_names_in(
+    conn: &Connection,
+    task: &TaskId,
+    names: &HashMap<MachineId, String>,
+) -> StoreResult<TaskOwnership> {
     let local = local_machine_in(conn)?;
     let (rows, reading) = reading_in(conn, task)?;
     let log = rows
@@ -269,15 +277,15 @@ pub(super) fn ownership_in(conn: &Connection, task: &TaskId) -> StoreResult<Task
                 entry.machine_id.as_ref(),
                 entry.machine_label.as_deref(),
                 &local,
-                &names,
+                names,
             )
             .label;
             entry
         })
         .collect();
     Ok(TaskOwnership {
-        owner: resolved(reading.owner, &local, &names),
-        superseded_by: resolved(reading.superseded_by, &local, &names),
+        owner: resolved(reading.owner, &local, names),
+        superseded_by: resolved(reading.superseded_by, &local, names),
         log,
     })
 }
@@ -557,6 +565,7 @@ fn move_in(
         target,
         me.planning_connected,
     )
+    .map(|write| write.entry)
 }
 
 /// Published text names only what the entry carries: a public name, else the
@@ -583,6 +592,12 @@ pub(crate) fn marker(entry: &TaskOwnershipEntry) -> StoreResult<String> {
     Ok(format!("{MARKER}{json} -->"))
 }
 
+#[derive(Debug)]
+pub(super) struct OwnershipWrite {
+    entry: TaskOwnershipEntry,
+    planning_changes: Vec<PlanningChangeRef>,
+}
+
 /// Append a local entry and deliver it as a marked Task comment. The comment
 /// travels through the existing Linear delivery and the Git planning journal.
 fn append_in(
@@ -592,7 +607,7 @@ fn append_in(
     person: Person,
     machine: &MachineId,
     planning_connected: bool,
-) -> StoreResult<TaskOwnershipEntry> {
+) -> StoreResult<OwnershipWrite> {
     let local = local_machine_in(conn)?;
     if let Some(id) = &person.id {
         name_person_in(conn, id, person.name.as_deref())?;
@@ -641,18 +656,21 @@ fn append_in(
     }
     .format(&time::format_description::well_known::Rfc3339)
     .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-    super::task_comments::insert_authored_comment(
-        conn,
-        task,
-        &TaskComment {
-            id: uuid::Uuid::new_v4().to_string(),
-            body: format!("{}\n\n{}", describe(&entry), marker(&entry)?),
-            author: TaskCommentAuthor::Integration,
-            created_at: Some(created_at),
-        },
-    )?;
-    // A move keeps the person, so planning's assignee and state stay.
+    let comment = TaskComment {
+        id: uuid::Uuid::new_v4().to_string(),
+        body: format!("{}\n\n{}", describe(&entry), marker(&entry)?),
+        author: TaskCommentAuthor::Integration,
+        created_at: Some(created_at),
+    };
+    super::task_comments::insert_authored_comment(conn, task, &comment)?;
+    let mut changes = Vec::new();
     if planning_connected {
+        changes.push(PlanningChangeRef {
+            kind: PlanningChangeKind::TaskComment,
+            owner: task.to_string(),
+            id: comment.id,
+        });
+        // A move keeps the person, so planning's assignee and state stay.
         match kind {
             OwnershipKind::Claim if *machine == local => {
                 let state: Option<String> = conn.query_row(
@@ -664,17 +682,16 @@ fn append_in(
                     state.as_deref(),
                     None | Some("unstarted" | "backlog" | "triage")
                 ) {
-                    super::task_state_delivery::queue_in(conn, task, "started")?;
+                    changes.push(super::task_state_delivery::queue_in(conn, task, "started")?);
                 }
             }
-            OwnershipKind::Unassign => {
-                super::planning_changes::PlanningChanges::Task(task)
-                    .save(conn, &[crate::work::edit::WorkValue::TaskAssignee(None)])?;
-            }
-            OwnershipKind::Claim => {}
+            OwnershipKind::Unassign | OwnershipKind::Claim => {}
         }
     }
-    Ok(entry)
+    Ok(OwnershipWrite {
+        entry,
+        planning_changes: changes,
+    })
 }
 
 /// Claim for this Machine when the Task is unowned or its owner's Machine is
@@ -683,7 +700,7 @@ pub(super) fn claim_in(
     conn: &Connection,
     task: &TaskId,
     me: &OwnershipFacts,
-) -> StoreResult<Option<TaskOwnershipEntry>> {
+) -> StoreResult<Option<OwnershipWrite>> {
     let local = require_writer_in(conn, task, me)?;
     let (_, reading) = reading_in(conn, task)?;
     let owned_here = reading.superseded_by.is_none()
@@ -696,7 +713,7 @@ pub(super) fn claim_in(
         return Ok(None);
     }
     let key = me.person.key.clone().ok_or_else(|| {
-        StoreError::InvalidData(
+        StoreError::InvalidAuthority(
             "claiming needs your Git user.email, which identifies you to teammates; \
              run `git config --global user.email you@example.com`"
                 .into(),
@@ -854,7 +871,7 @@ pub(super) fn reassert_in(
         &local_machine_in(conn)?,
         planning_connected,
     )
-    .map(Some)
+    .map(|write| Some(write.entry))
 }
 
 /// Move each open Task an ended Machine still owns to this Machine, in its
@@ -928,9 +945,51 @@ impl SqliteStore {
     pub fn claim_task(&self, task: &TaskId) -> StoreResult<Option<TaskOwnershipEntry>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let me = OwnershipFacts::of_task_in(&conn, task)?;
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let mut tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         super::children::task_on(&tx, task)?.ok_or(StoreError::NotFound)?;
-        let entry = claim_in(&tx, task, &me)?;
+        let changed = {
+            let write = tx.savepoint()?;
+            match claim_in(&write, task, &me) {
+                Ok(changed) => {
+                    write.commit()?;
+                    Ok(changed)
+                }
+                Err(error) => Err(error), // Drop rolls back before the refusal is recorded.
+            }
+        };
+        let changed = match changed {
+            Ok(changed) => changed,
+            Err(error @ StoreError::InvalidAuthority(_)) => {
+                super::operations::refuse_current_in(
+                    &tx,
+                    "task.claimed",
+                    &[task.as_str()],
+                    &["planning"],
+                    &error,
+                )?;
+                tx.commit()?;
+                return Err(error);
+            }
+            Err(error) => return Err(error),
+        };
+        let (entry, changes) = changed.map_or_else(
+            || (None, Vec::new()),
+            |write| (Some(write.entry), write.planning_changes),
+        );
+        super::operations::commit_current_in(
+            &tx,
+            "task.claimed",
+            &[task.as_str()],
+            &["planning"],
+            changes,
+            || {
+                Ok(serde_json::to_value(ownership_with_names_in(
+                    &tx,
+                    task,
+                    &me.declared_machines,
+                )?)?)
+            },
+        )?;
         tx.commit()?;
         Ok(entry)
     }
@@ -1005,7 +1064,7 @@ impl SqliteStore {
                 sent.id
             )));
         }
-        let entry = append_in(
+        let write = append_in(
             &tx,
             task,
             OwnershipKind::Claim,
@@ -1018,7 +1077,7 @@ impl SqliteStore {
             [task.as_str()],
         )?;
         tx.commit()?;
-        Ok(entry)
+        Ok(write.entry)
     }
 
     /// Take in an entry another Machine wrote, before planning delivers its
@@ -1035,29 +1094,62 @@ impl SqliteStore {
         Ok(inserted)
     }
 
-    /// End your claim. An unowned Task is already unclaimed and writes nothing.
+    /// End your claim and clear its planning assignee. An unowned Task adds no log entry.
     pub fn unassign_task(&self, task: &TaskId) -> StoreResult<Option<TaskOwnershipEntry>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let me = OwnershipFacts::of_task_in(&conn, task)?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let Some((local, holder)) = my_claim_in(&tx, task, &me)? else {
-            return Ok(None);
+        super::children::task_on(&tx, task)?.ok_or(StoreError::NotFound)?;
+        let claim = match my_claim_in(&tx, task, &me) {
+            Ok(claim) => claim,
+            Err(error @ StoreError::InvalidAuthority(_)) => {
+                super::operations::refuse_current_in(
+                    &tx,
+                    "task.unassigned",
+                    &[task.as_str()],
+                    &["planning"],
+                    &error,
+                )?;
+                tx.commit()?;
+                return Err(error);
+            }
+            Err(error) => return Err(error),
         };
-        let person = Person {
-            name: me.person.name,
-            key: me.person.key.or(holder.person_key),
-            id: me.person.id.or(holder.person_id),
+        let (entry, mut changes) = if let Some((local, holder)) = claim {
+            let person = Person {
+                name: me.person.name,
+                key: me.person.key.or(holder.person_key),
+                id: me.person.id.or(holder.person_id),
+            };
+            let write = append_in(
+                &tx,
+                task,
+                OwnershipKind::Unassign,
+                person,
+                &local,
+                me.planning_connected,
+            )?;
+            (Some(write.entry), write.planning_changes)
+        } else {
+            (None, Vec::new())
         };
-        let entry = append_in(
+        changes.extend(assign_task_owner_in(&tx, task, None)?);
+        super::operations::commit_current_in(
             &tx,
-            task,
-            OwnershipKind::Unassign,
-            person,
-            &local,
-            me.planning_connected,
+            "task.unassigned",
+            &[task.as_str()],
+            &["planning"],
+            changes,
+            || {
+                Ok(serde_json::to_value(ownership_with_names_in(
+                    &tx,
+                    task,
+                    &me.declared_machines,
+                )?)?)
+            },
         )?;
         tx.commit()?;
-        Ok(Some(entry))
+        Ok(entry)
     }
 
     /// Queue the claiming person, or nobody, as Linear assignee unless Linear already shows it.
@@ -1068,22 +1160,31 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current: Option<String> = tx.query_row(
-            "SELECT planning_assignee FROM tasks WHERE id=?1",
-            [task.as_str()],
-            |row| row.get(0),
-        )?;
-        if current.as_deref() != assignee {
-            super::planning_changes::PlanningChanges::Task(task).save(
-                &tx,
-                &[crate::work::edit::WorkValue::TaskAssignee(
-                    assignee.map(str::to_owned),
-                )],
-            )?;
-        }
+        assign_task_owner_in(&tx, task, assignee)?;
         tx.commit()?;
         Ok(())
     }
+}
+
+fn assign_task_owner_in(
+    conn: &Connection,
+    task: &TaskId,
+    assignee: Option<&str>,
+) -> StoreResult<Vec<PlanningChangeRef>> {
+    let current: Option<String> = conn.query_row(
+        "SELECT planning_assignee FROM tasks WHERE id=?1",
+        [task.as_str()],
+        |row| row.get(0),
+    )?;
+    if current.as_deref() == assignee {
+        return Ok(Vec::new());
+    }
+    super::planning_changes::PlanningChanges::Task(task).save(
+        conn,
+        &[crate::work::edit::WorkValue::TaskAssignee(
+            assignee.map(str::to_owned),
+        )],
+    )
 }
 
 #[cfg(test)]
@@ -1348,6 +1449,225 @@ mod tests {
         assert_eq!(ownership.superseded_by, None);
         assert!(store.unassign_task(&task).unwrap().is_some());
         assert!(store.claim_task(&task).unwrap().is_some());
+    }
+
+    #[test]
+    fn ownership_planning_tracks_only_its_own_comment_and_assignee() {
+        use crate::store::planning_sync::PlanningChangeKind;
+        use crate::store::sqlite::operations::PlanningDeliveryState;
+        let (dir, store, task) = store_with_unowned_task();
+        std::fs::create_dir_all(dir.path().join(".lf")).unwrap();
+        std::fs::write(
+            dir.path().join(".lf/config.yaml"),
+            "planning:\n  provider: linear\n  team: team-1\n",
+        )
+        .unwrap();
+        assert!(crate::ops::planning_client::connected(
+            dir.path().to_str().unwrap()
+        ));
+        for (id, claim) in [("claim", true), ("unassign", false)] {
+            store
+                .admit_operation(
+                    &store.reading_identity().unwrap().1,
+                    id,
+                    if claim { "task.claim" } else { "task.unassign" },
+                    "hash",
+                    &serde_json::json!({}),
+                )
+                .unwrap();
+            crate::journal::request::with_operation(Some(id.into()), || {
+                if claim {
+                    store.claim_task(&task)
+                } else {
+                    store.unassign_task(&task)
+                }
+            })
+            .unwrap();
+            let receipt = store.operation_receipt(id).unwrap().unwrap();
+            let commit = &receipt.commits[0];
+            let comment = commit
+                .planning_changes
+                .iter()
+                .find(|change| change.kind == PlanningChangeKind::TaskComment)
+                .unwrap();
+            assert_eq!(comment.owner, task.as_str());
+            let current = receipt.planning.unwrap();
+            assert_eq!(
+                current
+                    .changes
+                    .iter()
+                    .find(|change| change.change == *comment)
+                    .unwrap()
+                    .state,
+                PlanningDeliveryState::Pending
+            );
+            // Lost external delivery stays separate from the committed ownership result.
+            store
+                .record_comment_delivery(&comment.id, Some("reply lost"))
+                .unwrap();
+            let uncertain = store.operation_receipt(id).unwrap().unwrap();
+            assert!(uncertain.revision > receipt.revision);
+            assert_eq!(uncertain.commits, receipt.commits);
+            assert_eq!(
+                uncertain
+                    .planning
+                    .unwrap()
+                    .changes
+                    .iter()
+                    .find(|change| change.change == *comment)
+                    .unwrap()
+                    .state,
+                PlanningDeliveryState::Uncertain
+            );
+            store.record_comment_delivery(&comment.id, None).unwrap();
+            let delivered = store.operation_receipt(id).unwrap().unwrap();
+            assert_eq!(
+                delivered
+                    .planning
+                    .unwrap()
+                    .changes
+                    .iter()
+                    .find(|change| change.change == *comment)
+                    .unwrap()
+                    .state,
+                PlanningDeliveryState::Delivered
+            );
+            if claim {
+                assert!(commit
+                    .planning_changes
+                    .iter()
+                    .any(|change| change.kind == PlanningChangeKind::TaskState));
+                // Unassign must clear this in the same transaction as its ownership stage.
+                store
+                    .assign_task_owner(&task, Some("assignee-fixture"))
+                    .unwrap();
+            } else {
+                assert!(commit
+                    .planning_changes
+                    .iter()
+                    .any(|change| change.kind == PlanningChangeKind::Task));
+                let assignee: Option<String> = store
+                    .conn
+                    .lock()
+                    .unwrap()
+                    .query_row(
+                        "SELECT planning_assignee FROM tasks WHERE id=?1",
+                        [task.as_str()],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(assignee, None);
+            }
+        }
+    }
+
+    #[test]
+    fn ownership_changes_roll_back_when_their_receipt_cannot_be_saved() {
+        let (_dir, store, task) = store_with_unowned_task();
+        for claim in [true, false] {
+            if !claim {
+                store.claim_task(&task).unwrap().unwrap();
+            }
+            let before = store.task_ownership(&task).unwrap();
+            let revisions = store.revisions().unwrap();
+            assert!(
+                crate::journal::request::with_operation(Some("missing".into()), || {
+                    if claim {
+                        store.claim_task(&task)
+                    } else {
+                        store.unassign_task(&task)
+                    }
+                })
+                .is_err()
+            );
+            assert_eq!(store.task_ownership(&task).unwrap(), before);
+            assert_eq!(store.revisions().unwrap(), revisions);
+        }
+    }
+
+    #[test]
+    fn unassigning_another_persons_claim_records_a_definite_refusal() {
+        let (_dir, store, task) = store_with_unowned_task();
+        store.claim_task(&task).unwrap().unwrap();
+        let foreign = TaskOwnershipEntry {
+            id: OwnershipEntryId::new(),
+            task_id: task.clone(),
+            kind: OwnershipKind::Claim,
+            person: Some("Someone else".into()),
+            person_key: Some("someone-else@example.test".into()),
+            person_id: None,
+            machine_id: Some(store.local_machine().unwrap().id),
+            machine_label: None,
+            writer_machine_id: Some(MachineId::new()),
+            at: crate::store::rows::now_unix(),
+        };
+        store
+            .ingest_ownership_marker(&task, &super::marker(&foreign).unwrap())
+            .unwrap();
+        let before = store.task_ownership(&task).unwrap();
+        store
+            .admit_operation(
+                &store.reading_identity().unwrap().1,
+                "refused",
+                "task.unassign",
+                "hash",
+                &serde_json::json!({}),
+            )
+            .unwrap();
+        let error = crate::journal::request::with_operation(Some("refused".into()), || {
+            store.unassign_task(&task)
+        })
+        .unwrap_err();
+        assert!(error.to_string().contains("claim it to take it over"));
+        let receipt = store.operation_receipt("refused").unwrap().unwrap();
+        assert_eq!(receipt.commits.len(), 1);
+        assert_eq!(
+            receipt.commits[0].resolution,
+            crate::store::sqlite::operations::OperationResolution::DefinitelyRefused
+        );
+        assert_eq!(store.task_ownership(&task).unwrap(), before);
+    }
+
+    #[test]
+    fn ownership_refusals_record_no_change_and_keep_the_current_owner() {
+        let (_dir, store, task) = store_with_unowned_task();
+        store.claim_task(&task).unwrap().unwrap();
+        let remote = MachineId::new();
+        store.add_machine(&remote, "ssh://other", "other").unwrap();
+        store.move_claim(&task, &remote).unwrap();
+        let before = store.task_ownership(&task).unwrap();
+        for (id, stage, claim) in [
+            ("claim", "task.claimed", true),
+            ("unassign", "task.unassigned", false),
+        ] {
+            store
+                .admit_operation(
+                    &store.reading_identity().unwrap().1,
+                    id,
+                    if claim { "task.claim" } else { "task.unassign" },
+                    "hash",
+                    &serde_json::json!({}),
+                )
+                .unwrap();
+            assert!(store.dispatch_operation(id).unwrap());
+            let error = crate::journal::request::with_operation(Some(id.into()), || {
+                if claim {
+                    store.claim_task(&task)
+                } else {
+                    store.unassign_task(&task)
+                }
+            })
+            .unwrap_err();
+            let receipt = store.operation_receipt(id).unwrap().unwrap();
+            assert_eq!(receipt.commits.len(), 1);
+            assert_eq!(receipt.commits[0].stage, stage);
+            assert_eq!(
+                receipt.commits[0].resolution,
+                crate::store::sqlite::operations::OperationResolution::DefinitelyRefused
+            );
+            assert_eq!(receipt.commits[0].result["error"], error.to_string());
+            assert_eq!(store.task_ownership(&task).unwrap(), before);
+        }
     }
 
     #[test]

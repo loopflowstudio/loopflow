@@ -1,6 +1,6 @@
 # LOO-906: immediate interactions across Desktop and mobile
 
-Implementation continues 2026-11-15 from checkpoint `fc50618e31` on
+Implementation continues 2026-11-15 from checkpoint `af09704482` on
 origin/main `9cafc410ee`. Supersedes the Desktop-only delivery
 boundary. No shipping or merge decision is recorded. Placement remains this Task;
 no Wave is selected.
@@ -577,8 +577,7 @@ separately. Neither that target nor a SQL bottleneck has been measured here.
 
 ## Implement direction
 
-Concept-review outcome (2026-11-15, checkpoint `fc50618e31` plus current
-state-delivery correlation edits): no further model change or open product
+Concept-review outcome (2026-11-15, checkpoint `af09704482`): no further model change or open product
 choice. The older-attempt recovery gap below is an unfinished part of the
 existing domain-owner contract, not another operation lifecycle. Next implement
 that recovery under the Task-state delivery lock, then finish the remaining
@@ -626,11 +625,9 @@ Presentation acknowledgment and cache retirement retain their existing rules.
 
 Server side, `planning_recovery_tracks_the_exact_change_across_newer_edits_and_restart`
 (`store/sqlite/task_content.rs`) holds delivery across a newer edit and restart,
-resolves the old change only, and keeps missing evidence unavailable. Still open:
-client reordering of saved results, Work and delivery-status readings. Completion
-now covers output loss after successful external delivery; other mutation families
-still need that coverage. Finish mutation-family recovery/fences
-before cache and projection cutover.
+resolves the old change only, and keeps missing evidence unavailable. Completion
+also covers output loss after successful external delivery. Open items are in
+the remaining list under Current implementation cut.
 
 Preserve the launch counterexamples in the shared tests: pre-admission cached
 Task data, a fresh unrelated planning frame, unavailable or missing Task rows,
@@ -717,7 +714,10 @@ Correlation keeps uncertainty visible; it does not authorize that external write
 Definite refusal outside Task content/membership validation, other planning families,
 remote/detached operations and file/config confirmation remain open.
 
-Remaining, in order: remaining mutation-family recovery and fences (remote/detached,
+Remaining, in order: older-attempt state-delivery recovery (above; every lookup
+still selects `max(seq)`); client reordering of saved results against Work and
+delivery-status readings; lost-output coverage for families beyond completion;
+remaining mutation-family recovery and fences (remote/detached,
 external file/config confirmation and other planning-delivery families included); exhaustive effect/stage registry and a
 declarative membership plan over #1947's `selection_states`; transactional confirmed cache and ordered effect/query
 projection; both clients' interaction/retained-occurrence migration and deletion

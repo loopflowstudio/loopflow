@@ -138,6 +138,16 @@ Run the app's bundled `lf` with the world's `env.json` variables and
   `swift` script; both apps answer to one bundle ID. Then end the world's owners
   by PID (check `LF_HOME` in `ps eww`) and boot out the label in its
   `server.plist`.
+- `scripts/loopflow-dev.py install` builds and installs without launching; then
+  `open -n --env …` the bundle yourself to control launch timing. While the
+  screen is locked (`CGSSessionScreenIsLocked`), `screencapture` is black and
+  `-l <window>` fails: sample `lf desktop ls --json` instead. Its `reading`/
+  `reason` are the window's work status and `list` the sidebar rows.
+- To delay or break Work reads, SIGSTOP the private server. Desktop registers
+  it under launchd, so `kill -9` restarts it within seconds; for a sustained
+  outage boot out the `server.plist` label, then `lf server run` to recover.
+  The world's holder outlives both; stop it and its stand-ins by PID
+  (`ps eww` shows `LF_HOME=/private/tmp/…`).
 
 ## Physical iPhone
 

@@ -2,7 +2,8 @@ import Loopflow
 import SwiftUI
 
 struct TaskRowMetadata: View {
-    let task: RoadmapTask
+    let id: String
+    let task: RoadmapTask?
     let status: SessionProgramStatus
     var selected = false
     var slotHint: String?
@@ -28,28 +29,32 @@ struct TaskRowMetadata: View {
 
     var body: some View {
         HStack(spacing: 5) {
-            if let url = task.reference.issueUrl {
-                destination(task.task.identifier, url: url, kind: "task")
-            } else {
-                Text(verbatim: task.task.identifier)
-                    .accessibilityIdentifier("work-task-id-\(task.id)")
+            if let task {
+                if let url = task.reference.issueUrl {
+                    destination(task.task.identifier, url: url, kind: "task")
+                } else {
+                    Text(verbatim: task.task.identifier)
+                        .accessibilityIdentifier("work-task-id-\(id)")
+                }
             }
             if let label = status.label, let tone = status.tone {
                 Text(verbatim: label)
                     .foregroundStyle(tone.ink(in: palette))
                     .help(Text(verbatim: status.help))
-                    .accessibilityIdentifier("work-program-status-\(task.id)")
+                    .accessibilityIdentifier("work-program-status-\(id)")
             } else if case .unavailable = status {
                 Image(systemName: "info.circle")
                     .help(Text(verbatim: status.help))
                     .accessibilityLabel(Text(verbatim: status.help))
-                    .accessibilityIdentifier("work-program-status-unavailable-\(task.id)")
+                    .accessibilityIdentifier("work-program-status-unavailable-\(id)")
             }
-            if let pr = task.pr?.publication?.github {
-                destination("#\(pr.number)", url: pr.url, kind: "pr")
+            if let task {
+                if let pr = task.pr?.publication?.github {
+                    destination("#\(pr.number)", url: pr.url, kind: "pr")
+                }
+                Text(verbatim: ProgramStatusReport.displaySafe(task.runtime?.owner?.summary ?? "Unowned"))
+                    .accessibilityIdentifier("work-owner-\(id)")
             }
-            Text(verbatim: ProgramStatusReport.displaySafe(task.runtime?.owner?.summary ?? "Unowned"))
-                .accessibilityIdentifier("work-owner-\(task.id)")
             Spacer(minLength: 0)
             // Reserve the shortcut glyph's height even when only an age (or nothing) is shown.
             Text("⌘9").hidden().frame(width: 28, alignment: .trailing)
@@ -66,7 +71,7 @@ struct TaskRowMetadata: View {
             .buttonStyle(WorkLinkStyle())
             .help(url.absoluteString)
             .accessibilityLabel("Open \(kind == "pr" ? "PR" : "Task") \(title)")
-            .accessibilityIdentifier("work-\(kind)-link-\(task.id)")
+            .accessibilityIdentifier("work-\(kind)-link-\(id)")
             .fixedSize()
     }
 }

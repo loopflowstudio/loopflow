@@ -329,7 +329,7 @@ struct WorkNavigationTests {
         _ = try navigator.inspect().find(text: "REVIEW")
         _ = try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-wave-repository")
         let first = try navigator.inspect().find(TaskRowMetadata.self) { try $0.actualView().slotHint == "⌘1" }
-        #expect(try first.actualView().task.id == "issue-now")
+        #expect(try first.actualView().id == "issue-now")
     }
 
     @Test("Zooming a Working Tasks tile keeps Working Tasks in the trail, and Back returns to it")

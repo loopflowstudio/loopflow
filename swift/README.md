@@ -14,15 +14,32 @@ With a private `LF_HOME`, an explicit `LF_BIN` selects the CLI instead.
 Repository selectors list only Git main checkouts. Linked worktrees stay visible
 only through the Task Work that owns them.
 
-A returning launch opens on the workspace saved at `<Machine>/desktop-cache/workspace.json`
-and shows **Updating…** until this launch's reads replace it. Saved rows open
+Reopen a repository window: known Task names and identifiers stay readable in
+the sidebar and breadcrumbs while planning loads. A returning launch opens on
+the workspace saved at `<Machine>/desktop-cache/workspace.json` and shows
+**Updating…** until this launch's reads replace it. Saved rows open
 and navigate; Graph process state, Task condition, Session state and every action except
 opening a Session wait for the fresh read. The Portfolio window opens from the
-same saved workspace. A failed refresh keeps what is shown under one
-**Couldn't update** line. Repeated identical Session errors leave the displayed
-reading unchanged; failed per-Wave or truncated replacements keep previously readable planning,
-including its saved copy. A new error or recovery updates it. Delete the file to start from
-**Loading workspace…**.
+same saved workspace. With no known Task name yet, a row says **Loading Task…**
+until its first read answers. The working Task list shows loading until it has
+answered; an empty result then says there are no working Tasks. Newly created
+and reopened Tasks use their locally recorded names while tracker updates are
+pending.
+
+**Last known** describes the reading supplying the displayed name. Other read
+failures remain visible beside **Retry**, combining shared failures into one
+notice. A Task without a description has no summary line.
+If no name is known, the failed row says
+**Task unavailable**. Desktop reconnects automatically; choose **Retry** beside
+the failure to request another read. A successful replacement clears the notice
+and updates the rows, retaining the selected workspace, panes and drafts.
+Repeated identical Session errors leave the displayed reading unchanged; failed
+per-Wave or truncated replacements keep previously readable planning, including
+its saved copy. Delete the cache file to start from **Loading workspace…**.
+
+Opening a named Task can still show its conversation opening or its own failure.
+The conversation is ready when its Session accepts input; the Task name and an
+accepted open request alone do not establish that readiness.
 
 ```sh
 uv run python scripts/benchmarks/desktop-performance/timings.py   # how long your launches took
@@ -822,6 +839,11 @@ subscription per part. All `ServedRead` and `ServedWrite` operations cross the
 same local protocol, including Task files, diffs, Waves, Machine identity,
 Portfolio, saved panes, Task ownership and Graphs. Desktop links no Loopflow Rust
 library; GhosttyKit remains its native renderer.
+
+Ghostty owns terminal frame scheduling. Desktop forces a synchronous draw only
+for a pending key-to-draw measurement, rather than on every display tick.
+Hidden or detached retained surfaces pause rendering while their children and
+terminal history continue; showing them resumes the native renderer.
 
 The [server boundary](../docs/dev/server.md) puts registration and updates under
 installation. First connection obtains the selected helper; later connections

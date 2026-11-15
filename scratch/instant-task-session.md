@@ -1,7 +1,7 @@
 # LOO-906: immediate interactions across Desktop and mobile
 
-Concept review 2026-11-15 of the healthy-change/reconnect cut on origin/main
-`9cafc410ee` (unchanged); rename-first direction is next. Supersedes the
+Healthy-change/reconnect cut built at `c9b86d24f5` and concept-reviewed
+2026-11-15 on origin/main `9cafc410ee`; the rename-first direction is next. Supersedes the
 Desktop-only delivery boundary. No shipping or merge decision is recorded. Placement remains this Task;
 no Wave is selected.
 
@@ -353,7 +353,7 @@ commands keep compact IDs/digest/time; the source-release lifecycle is deleted.
 
 ### Healthy changes and reconnect cut
 
-Built, uncommitted on `57cb8a3a22`; the direction it followed is at
+Built at `c9b86d24f5`; the direction it followed is at
 `57cb8a3a22:scratch/instant-task-session.md` (Next implement direction). Typed
 delivering/waiting/attention status; a routine change being delivered shows only
 its projection. One shared `PendingOperationRow` serves both hosts' lists and
@@ -380,8 +380,7 @@ no code changed. Two product questions are in `questions.md`.
 
 1. **Rename does not wait for Move.** No command edits a Task title:
    `task.update` writes notes. What people rename is a Session (`session.rename`),
-   a Wave or a Dashboard. The correction below folded a Task title edit into the
-   membership rewrite; that edit doesn't exist. A rename projects one name by
+   a Wave or a Dashboard. A rename projects one name by
    identity wherever its Session or Wave is shown, held per reading until that
    reading covers the rename's stage fence, restored alone on refusal. It changes
    no membership. Build it next: declare `session.rename`, then delete Desktop's
@@ -519,8 +518,8 @@ backend-stage baseline exists. Raw files and earlier detail: `8b42a874db`,
 Implementation owns a valid benchmark baseline; demo owns native usability.
 
 Earlier checks: `57cb8a3a22:scratch/instant-task-session.md`; 10k client-query
-observations: `6e944e73b5a:scratch/instant-task-session.md`. Current checks
-(2026-11-15; inherited `LF_*` cleared):
+observations: `6e944e73b5a:scratch/instant-task-session.md`. Checks of the
+healthy-change cut `c9b86d24f5` (2026-11-15; inherited `LF_*` cleared):
 - `swift build --build-tests --package-path swift --jobs 4 -Xswiftc -gnone`: passed; gate owns the Xcode fallback build.
 - `scripts/test_desktop.sh --skip-build --filter 'ClientWorkQueryTests|CreationInteractionTests|OperationRecoveryPresentationTests|receiptWatchWaitsAcrossFailedOpens|otherMachineAndUnavailableReceiptNeverSend|DesktopCreationInteractionTests|WorkDestinationTests'`: 45 XCTest and 76 Swift Testing rows passed; four XCTest rows initially failed (two stale button/row expectations, missing fixture connection events, cached-query restart). The repaired four passed; final transport/store/reconnect selection passed 4 XCTest and 37 Swift Testing rows. Reconnect teardown also closes its initial opening task, and canceled store refreshes cannot restart delivery.
 - `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/ClientWorkQueryTests -only-testing:LoopflowiOSTests/MobileTaskCreationTests`: 49/50 passed; the remaining stale Check request expectation was repaired and its named test passed. Covers both feeds' Abandon, persisted waiting, lost send and reconnect; disposable Simulators removed.

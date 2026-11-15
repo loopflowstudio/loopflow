@@ -768,7 +768,7 @@ struct WorkModelStreamTests {
         var work = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: workURL)) as? [String: Any])
         work["graph"] = NSNull()
         let overview = String(decoding: try JSONSerialization.data(withJSONObject: work), as: UTF8.self)
-        let row = String(decoding: try JSONEncoder().encode(task), as: UTF8.self)
+        let row = try fixture.taskRowJSON(task.id)
         let query = RegistryQuery { args, _ in
             if args.starts(with: ["task", "create"]) {
                 return #"{"task":{"id":"issue-now","identifier":"LOO-1","title":"New Task"},"graph":"code","session_id":null,"milestone":"admitted"}"#
@@ -825,7 +825,7 @@ struct WorkModelStreamTests {
         let graph = work["graph"]
         work["graph"] = noGraph ? NSNull() : graph
         let overview = String(decoding: try JSONSerialization.data(withJSONObject: work), as: UTF8.self)
-        let row = String(decoding: try JSONEncoder().encode(task), as: UTF8.self)
+        let row = try fixture.taskRowJSON(task.id)
         let body = """
         {"overview":\(overview),"row":\(row),"comments":{"identifier":"\(task.task.identifier)",
          "comments":[],"conflicts":{},"pending_sync":[],"refresh_error":null},"graph_processes":[],"execution":null}
@@ -1218,6 +1218,14 @@ private struct WorkTestFixture {
         let line = #"{"answers":\#(answers),"unavailable":null,"body":\#(body)}"#
         return try WorkFrame.decode(part: try #require(WorkPart(rawValue: part)), scope: scope,
                                     sequence: sequence, line: Data(line.utf8))
+    }
+
+    /// The planning row of Task `id`, as `task show` returns it.
+    func taskRowJSON(_ id: String) throws -> String {
+        let root = try #require(JSONSerialization.jsonObject(with: Data(roadmapJSON.utf8)) as? [String: Any])
+        let rows = try #require((root["tasks"] as? [String: Any])?["items"] as? [[String: Any]])
+        let row = try #require(rows.first { ($0["task"] as? [String: Any])?["id"] as? String == id })
+        return String(decoding: try JSONSerialization.data(withJSONObject: row), as: UTF8.self)
     }
 
     /// `completing` settles that Task successfully a minute ago, with no runtime left.

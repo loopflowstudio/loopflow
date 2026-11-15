@@ -1666,6 +1666,22 @@ struct SessionsContentView: View {
         .coordinateSpace(.named(ZoomFromTile.space))
     }
 
+    /// The Task's workflow bar and provider transition; a starting launch owns the pane instead.
+    @ViewBuilder private var mainPaneHeader: some View {
+        if navigation.startingTask == nil, let task = model.breadcrumb?.task?.task {
+            if navigation.pendingTaskReconciliations[task.id] == nil {
+                TaskWorkflowBar(model: model, task: task, work: model.taskWork[task.id])
+            } else if let error = model.taskWork[task.id].errorMessage {
+                Text("Workflow could not be read: \(error)")
+                    .foregroundStyle(palette.warning).padding(12)
+            }
+        }
+        if navigation.startingTask == nil,
+           let transition = model.visibleSessions.first(where: { $0.id == navigation.selectedSessionId })?.transition {
+            ProviderTransitionRow(transition: transition)
+        }
+    }
+
     var body: some View {
         GeometryReader { geometry in
             HStack(spacing: 0) {
@@ -1680,17 +1696,7 @@ struct SessionsContentView: View {
                 }
                 VStack(spacing: 0) {
                     // The main pane alone: the sidebar stays put when a Task opens.
-                    if navigation.startingTask == nil, let task = model.breadcrumb?.task?.task {
-                        if navigation.pendingTaskReconciliations[task.id] == nil {
-                            TaskWorkflowBar(model: model, task: task, work: model.taskWork[task.id])
-                        } else if let error = model.taskWork[task.id].errorMessage {
-                            Text("Workflow could not be read: \(error)")
-                                .foregroundStyle(palette.warning).padding(12)
-                        }
-                    }
-                    if navigation.startingTask == nil, let transition = model.visibleSessions.first(where: { $0.id == navigation.selectedSessionId })?.transition {
-                        ProviderTransitionRow(transition: transition)
-                    }
+                    mainPaneHeader
                     mainPane
                     CreationRecoveryView(excluding: navigation.startingTask?.id)
                 }

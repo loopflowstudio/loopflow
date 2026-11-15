@@ -427,11 +427,19 @@ Task data, a fresh unrelated planning frame, unavailable or missing Task rows,
 current no-Graph results, Graph removal after reconciliation, reconnect, departure
 and return, and native readiness before a current Task result. Attachment failure
 must remain visible beside receipt recovery, and Retry opening must reuse the
-admitted Session without another create. The source checkpoint includes focused
-cases for several of these, including attachment failure with Inspect; their
-presence is not a passing run. Replace the temporary request-scoped checkpoint
-map with operation fences in the shared store rather than extending it to each
-new action.
+admitted Session without another create.
+
+Desktop launch checkpoint as it stands: `createdTaskIDs` is gone.
+`WorkNavigation.pendingTaskReconciliations` keys each admitted Task to its request
+ID and the floor of a `.checkpoint(replay: ["task"])` sent after admission
+(`WorkModel.submitTask`); reopening observation re-floors it. Only a matching
+`.task` row at or beyond that floor clears it (`WorkModel.apply`); one-shot
+transports clear it from `task show` (`reconcileCreatedTask`). After clearing,
+the Task behaves ordinarily, including Graph loss. Focused tests cover
+these counterexamples, as well as attachment failure with Inspect and Retry opening
+reusing the Session. `docs/server.md` and `swift/README.md` describe this behavior.
+This map is still a per-action exception. The shared store's operation fences
+replace it; do not extend it to other actions.
 
 Proposed usage text for the affected Desktop/mobile docs:
 > Start opens your submitted request immediately. Leave and return while it
@@ -451,12 +459,12 @@ client store and cross-platform cut. Completion follows the quoted 1b choice.
 The prior launch-only feedback is retained as regression requirements, rather
 than the final scope. No production code changed in this review.
 
-Checks: `scripts/test_desktop.sh --jobs 4 --no-parallel --filter
-'WorkModelTests.launchReconciliation|WorkDestinationTests.newTaskSelectsTheTaskAndOpensItsConversation'`
-was stopped with SIGTERM/143 after the broader scope replaced the launch-only
-reconciliation target; CLI prerequisite built, Swift build/tests did not finish.
-The retained source checkpoint is unverified in this pass. Prior passing results
-remain historical at the git reference above. `uv run python
-scripts/check_swift_multiplatform_boundaries.py` and `git diff --check` passed.
-The cross-platform rewrite is a draft; no implementation or native sampling of it
-has begun. Gate/CI own the future cross-platform checks, demo owns native timing.
+Checks (Desktop launch checkpoint, 2026-11-14): `scripts/test_desktop.sh --jobs 4
+--no-parallel --filter` over `WorkDestinationTests.newTask`,
+`WorkDestinationTests.lateCreationReply`, `WorkDestinationTests.failedAutomatic`
+and `WorkModelStreamTests.launchReconciliation`: all passed (23 cases). Before
+this run the checkpoint did not compile: `SessionsContentView.body` exceeded the
+type checker (header split into `mainPaneHeader`), and tests encoded the
+Decodable-only `RoadmapTask` (now `WorkTestFixture.taskRowJSON`). The
+cross-platform rewrite has not started; gate/CI own its suites, demo owns native
+timing.

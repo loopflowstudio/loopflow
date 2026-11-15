@@ -169,54 +169,56 @@ reopened local Tasks remain identifiable during tracker delay, and Session acces
 keeps its own truthful readiness. Native timing/render observations remain separate
 from headless test results; missing native observation is reported as unverified.
 
-## Checks and remaining work
+## Built, remaining, checks
 
-### Concept review — November 14
+### Built (branch head, checked against code November 14)
 
-Outcome: iterate to implement. No open product choice. Keep the single derived
-Task presentation, existing cache and refresh owner; refine what its context means.
+Steps 1–5 of the chosen mechanism exist: `WorkModel.taskPresentation` derives
+row/title/breadcrumb identity from current record, scoped list/selection content
+and retained workspace titles; `WorkNavigator.taskRow` no longer renders raw IDs
+or "Summary · Planning unavailable"; list loading/failure feeds `workStatus`;
+Retry uses the model refresh owner; README startup wording updated.
 
-The interaction has three independent facts: the Task's readable identity, the
-reading being recovered, and the conversation's input readiness. Opening a named
-Task keeps its conversation and draft; Retry refreshes readings, not execution.
-A list failure changes membership confidence, not a name supplied by a successful
-roadmap. A roadmap failure does not stale a name supplied by a successful list.
+### Remaining — implement next (from the November 14 concept review)
 
-Next implement direction (proposed, not built):
+Concept review outcome: iterate to implement. No open product choice. Keep the
+single derived presentation, existing cache and refresh owner. Three independent
+facts: the Task's readable identity, the reading being recovered, and the
+conversation's input readiness. Retry refreshes readings, not execution. A list
+failure changes membership confidence, not a name supplied by a successful
+roadmap; a roadmap failure does not stale a name supplied by a successful list.
 
-- Carry the chosen identity source's freshness through `taskPresentation` instead
-  of reducing roadmap, list and selection failures to one `failed` Boolean.
-  Resolve current readable identity before retained identity, keeping the existing
-  preference among current sources. Keep `WorkReading` available until after the
-  display source is chosen; flattening `.value` first loses this distinction.
-  Saved identity says Updating; retained identity after its source fails says
-  Last known. A successful independent source may immediately clear that label
-  while another read's error remains in the workspace notice with Retry.
-- Distinguish absent Task details from a loaded Task with no description.
-  `rowDetail` currently renders Loading planning when a current full Task has an
-  empty description, no live excerpt and no identity context. Omit that preview
-  line once details are loaded. Never use missing prose as a progress signal.
-  Preserve shipping context and genuine Session previews/status independently.
+1. Per-source freshness. `taskPresentation` (`WorkModel.swift`, `let failed =`)
+   ORs roadmap, Task-list and selection-plan errors into one Boolean, so any
+   failure labels every name Last known. Carry the chosen source's freshness
+   instead: resolve current readable identity before retained identity (keeping
+   the current preference order), and keep the `WorkReading` until the source is
+   chosen; flattening `.value` first loses this. Saved identity says Updating;
+   identity whose own source failed says Last known; another read's error stays
+   in the workspace notice with Retry.
+2. Absent vs empty details. `WorkNavigator.rowDetail` shows "Loading planning…"
+   when `context == nil` and there is no summary or live excerpt — including a
+   loaded Task (`found != nil`) whose description is empty. Omit the preview line
+   once details are loaded; show Loading planning only while details are pending.
+   The same condition hides `shipping` whenever `context != nil` and there is no
+   summary; shipping context must show independently of identity context.
+3. README: replace "A failed planning or Task-list refresh keeps known names
+   visible as Last known" (`swift/README.md`) with: "Last known describes the
+   reading supplying the displayed name. Other read failures remain visible
+   beside Retry. A Task without a description has no summary line."
 
-Counterexamples for focused checks: a current roadmap name with a failed list;
-a fresh list name with a failed roadmap; failed retained list content alongside a
-current selection-plan name; a loaded Task with an empty description; and a
-title-only list member whose details really are still pending. In each recovery,
-only the successfully replaced source clears its error. Saved names and membership
-must still yield to a complete current removal. Repository/Machine scoping,
-late-reply fences, panes, drafts and input readiness remain required.
+Focused counterexamples for `TaskPlanningReadabilityTests`: current roadmap name
+with a failed list; fresh list name with a failed roadmap; failed retained list
+content beside a current selection-plan name; a loaded Task with an empty
+description; a title-only list member whose details are still pending; a shipping
+Task with no description during Updating. In each recovery only the replaced
+source clears its error. Complete removal still wins over saved names/membership;
+repository/Machine scoping, late-reply fences, panes, drafts and input readiness
+still hold. No DTO, schema, persistence, transport or skill change.
 
-No DTO, schema, persistence or transport change follows. This is presentation
-derived from existing readings, without a new Task lifecycle or polling loop.
-No skill instruction needs changing. Proposed README clarification after repair:
-“Last known describes the reading supplying the displayed name. Other read
-failures remain visible beside Retry. A Task without a description has no summary
-line.” Keep the broader recovery and native-demo checks below.
+The walkthrough is `scratch/concept-review.html`.
 
-Next show the same named row through independent list/roadmap failure and recovery,
-then a loaded description-free Task. The walkthrough is
-`scratch/concept-review.html`. This review ran no new app or test checks; the
-results below belong to the earlier implementation run.
+### Check results (earlier implementation run; not rerun since)
 
 - `swift build --build-tests --package-path swift` — passed, including the app
   and all test consumers of optional Task metadata.

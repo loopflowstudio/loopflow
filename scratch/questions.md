@@ -51,3 +51,7 @@
   editor), which needs the caller threaded through every planning write.
 - Acquisition modules under `store/` keep their paths until the storage
   measurement picks the next cut; renaming them now changes no rebuild closure.
+- The token key reaches storage as a lazy source supplied at open; the check for
+  existing encrypted credentials stays against the Machine home. The alternative
+  moves `lf_home_dir` and key acquisition down with storage as "its own files",
+  which puts ambient home selection back under the opener that just lost it.

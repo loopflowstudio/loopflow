@@ -397,6 +397,7 @@ impl Hosted {
                                     *hint_due |= viewer.from.is_none();
                                     if viewer.token != *control {
                                         if let Some(token) = &*control {
+                                            pending_input.finish_paste();
                                             replaced.push((token.clone(), moved));
                                         }
                                     }
@@ -405,6 +406,7 @@ impl Hosted {
                                     viewer.token = Some(token);
                                 } else {
                                     if viewer.token.is_some() && viewer.token == *control {
+                                        pending_input.finish_paste();
                                         *control = None;
                                     }
                                     viewer.token = None;
@@ -559,13 +561,7 @@ impl Hosted {
                 }
             }
         }
-        let detached = !self
-            .viewers
-            .iter()
-            .any(|v| v.token.is_some() && v.token == self.control);
-        if detached {
-            self.control = None;
-        }
+        self.release_lost_control();
         // A controlling view still catching up throws away what its terminal
         // answers; the retained screen answers live queries meanwhile.
         let answering = !self
@@ -619,6 +615,7 @@ impl Hosted {
         place_events(&self.output, &mut self.viewers, self.announced);
         // Output written before the execution detached reaches its viewers first.
         if self.detach {
+            self.pending_input.finish_paste();
             self.control = None;
             end_viewers(&mut self.viewers, Event::Detached);
             // The execution's own control connections outlive its viewers.
@@ -776,8 +773,9 @@ impl Hosted {
             .viewers
             .iter()
             .any(|viewer| viewer.token.is_some() && viewer.token == self.control)
+            && self.control.take().is_some()
         {
-            self.control = None;
+            self.pending_input.finish_paste();
         }
     }
 

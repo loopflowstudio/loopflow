@@ -91,7 +91,8 @@ pub(crate) struct Start {
 /// The revision of what follows the entrance's answer: the viewer protocol
 /// and the child's control requests. The first exchange itself never changes,
 /// so either side of an install reads the other's revision.
-pub(crate) const REVISION: u32 = 1;
+// Reconnecting relays must restore the paste framing a lost claim closes.
+pub(crate) const REVISION: u32 = 2;
 
 /// Where connections to held terminals enter the server.
 pub(crate) fn entrance() -> Result<PathBuf> {

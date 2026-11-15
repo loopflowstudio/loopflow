@@ -16,6 +16,7 @@ use crate::id::TerminalId;
 
 const SESSION: &str = "session_5e55105e000040008000000000000001";
 const MODES: &[u8] = b"\x1b[?2004h\x1b[?1h\x1b[>5u";
+const PASTE: &[u8] = b"\x1b[200~a\x1db\nc\x1b[201~";
 
 #[test]
 fn snapshot_preview_fixture() {
@@ -165,6 +166,38 @@ fn snapshot_preview_fixture() {
         socket
             .write_all(&wire::frame(Tag::Out, b"\x1b]777;live-ready\x07"))
             .unwrap();
+        if case == "paste_detach" {
+            socket
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut forwarded = Vec::new();
+            let mut prefix_sent = false;
+            while forwarded.len() < PASTE.len() {
+                let mut bytes = [0; 4096];
+                let n = socket.read(&mut bytes).unwrap();
+                assert_ne!(n, 0, "paste detached the viewer");
+                decoder.extend(&bytes[..n]);
+                while let Some((tag, payload)) = decoder.next().unwrap() {
+                    if tag == Tag::Input {
+                        forwarded.extend(payload);
+                    }
+                }
+                if forwarded.len() >= 7 && !prefix_sent {
+                    socket
+                        .write_all(&wire::frame(
+                            Tag::Out,
+                            b"\x1b]777;paste-prefix-forwarded\x07",
+                        ))
+                        .unwrap();
+                    prefix_sent = true;
+                }
+            }
+            assert_eq!(forwarded, PASTE);
+            std::fs::write(home.join("forwarded"), forwarded).unwrap();
+            socket
+                .write_all(&wire::frame(Tag::Out, b"\x1b]777;paste-forwarded\x07"))
+                .unwrap();
+        }
         let mut input = Vec::new();
         socket.read_to_end(&mut input).unwrap();
         decoder.extend(&input);
@@ -332,6 +365,7 @@ fn preview_case(case: &str) -> (tempfile::TempDir, Vec<u8>) {
     let mut cancelled = false;
     let mut inspected = false;
     let mut typed = false;
+    let mut paste_tail = false;
     let status = loop {
         assert!(
             Instant::now() < deadline,
@@ -386,9 +420,33 @@ fn preview_case(case: &str) -> (tempfile::TempDir, Vec<u8>) {
             assert_eq!(display.foreground(0, 0), theme);
             assert_eq!(display.foreground(1, 0), theme);
             master
-                .write_all(if resumes { b"done\n" } else { &[0x1d] })
+                .write_all(if case == "paste_detach" {
+                    &PASTE[..7]
+                } else if resumes {
+                    b"done\n"
+                } else {
+                    &[0x1d]
+                })
                 .unwrap();
             inspected = true;
+        }
+        if case == "paste_detach"
+            && !paste_tail
+            && output
+                .windows(b"paste-prefix-forwarded".len())
+                .any(|w| w == b"paste-prefix-forwarded")
+        {
+            master.write_all(&PASTE[7..]).unwrap();
+            paste_tail = true;
+        }
+        if case == "paste_detach"
+            && !typed
+            && output
+                .windows(b"paste-forwarded".len())
+                .any(|w| w == b"paste-forwarded")
+        {
+            master.write_all(&[0x1d]).unwrap();
+            typed = true;
         }
         if let Some(status) = child.0.try_wait().unwrap() {
             // Drain cleanup written immediately before the child exited.
@@ -501,4 +559,10 @@ fn snapshot_preview_keeps_typing_until_initial_attachment_is_acknowledged() {
         std::fs::read(home.path().join("forwarded")).unwrap(),
         b"typed while opening\n"
     );
+}
+
+#[test]
+fn a_pasted_detach_key_reaches_the_provider_without_detaching_the_view() {
+    let (home, _) = preview_case("paste_detach");
+    assert_eq!(std::fs::read(home.path().join("forwarded")).unwrap(), PASTE);
 }

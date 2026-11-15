@@ -1,46 +1,40 @@
 <!doctype html>
 <html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LOO-906 · A submitted conversation is one thing on both hosts</title>
+<title>LOO-906 · A rename is a name</title>
 <style>
-:root{color-scheme:light dark;--bg:#faf8f4;--fg:#292924;--muted:#67665e;--line:#cdc9bd;--accent:#365d49;--new:#e4efe6}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.45 system-ui,sans-serif}main{max-width:800px;margin:auto;padding:26px 22px}header,small{font-size:12px;color:var(--muted)}h1{font:600 29px/1.15 system-ui;margin:20px 0 12px}h2{font-size:18px;margin:24px 0 8px}p{margin:10px 0}table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;vertical-align:top;border-bottom:1px solid var(--line);padding:8px 6px}td.new{background:var(--new)}blockquote{margin:14px 0;padding:4px 14px;border-left:3px solid var(--accent)}code{font-size:12px;overflow-wrap:anywhere}li{margin:9px 0}details{margin-top:16px}@media(prefers-color-scheme:dark){:root{--bg:#20221f;--fg:#ecece4;--muted:#b5b5a8;--line:#4c5046;--accent:#a5ccb0;--new:#2c382f}}@media(max-width:540px){main{padding:20px 12px}table{font-size:12px}th,td{padding:6px 3px}h1{font-size:25px}}
+:root{color-scheme:light dark;--bg:#faf8f4;--fg:#292924;--muted:#67665e;--line:#cdc9bd;--accent:#365d49;--new:#e4efe6}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.45 system-ui,sans-serif}main{max-width:800px;margin:auto;padding:26px 22px}header,small{font-size:12px;color:var(--muted)}h1{font:600 29px/1.15 system-ui;margin:20px 0 12px}h2{font-size:18px;margin:24px 0 8px}p{margin:10px 0}table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;vertical-align:top;border-bottom:1px solid var(--line);padding:8px 6px}td.new{background:var(--new)}blockquote{margin:14px 0;padding:4px 14px;border-left:3px solid var(--accent)}pre{border:1px solid var(--line);padding:10px 12px;font-size:13px;overflow-x:auto;white-space:pre-wrap}code{font-size:12px;overflow-wrap:anywhere}li{margin:9px 0}@media(prefers-color-scheme:dark){:root{--bg:#20221f;--fg:#ecece4;--muted:#b5b5a8;--line:#4c5046;--accent:#a5ccb0;--new:#2c382f}}@media(max-width:540px){main{padding:20px 12px}table{font-size:12px}th,td{padding:6px 3px}h1{font-size:25px}}
 </style><main>
-<header>LOO-906 · concept-review (headless, in the Graph) · 2026-11-15<br>Built from: scratch/instant-task-session.md; scratch/questions.md; the uncommitted creation cut on 6e944e73b5 — swift/Loopflow/Services/{CreationOperation,WorkInteraction,ClientWorkStore,ClientWorkDatabase}.swift; swift/LoopflowMac/{WorkModel,CreationRecovery}.swift and Views/{NewTaskSheet,WorkNavigator,SessionsView}.swift; swift/LoopflowiOS/{MobileTaskCreation,MobileNewTaskView,TaskListView}.swift.</header>
-<h1>Start now opens the conversation at once. Each host still decides what that conversation means.</h1>
-<p>No decision is needed to continue. The review sends the work back to implement with the direction below. Two copy questions at the end are optional.</p>
-<p><strong>Built in this cut:</strong> Start publishes the operation and its words before disk or network on both hosts, saves before sending, keeps a later selection when the receipt arrives, and imports released phone files with their IDs and outcomes.</p>
-<p><strong>Biggest mismatch:</strong> the shared store owns the request, but Desktop and the phone each work out which requests to list, what counts as having seen the result, and which button to offer. They disagree.</p>
+<header>LOO-906 · concept-review (headless, in the Graph) · 2026-11-15<br>Built from: scratch/instant-task-session.md; scratch/questions.md; the uncommitted healthy-change/reconnect cut on 57cb8a3a22 — swift/Loopflow/Services/{PendingOperation,OperationDeclaration,WorkInteraction,ClientWorkStore,ClientWorkQuery,ServerLink,RegistryQuery}.swift; swift/LoopflowMac/{WorkModel}.swift and Views/{NewTaskSheet,TaskWorkView,WorkNavigator}.swift; swift/LoopflowiOS/{TaskListView,TaskWorkspaceView,MobileNewTaskView}.swift; rust/loopflow/src/work/selection/membership.rs. Read, not run.</header>
+<h1>Two questions about changes made while disconnected. Work continues on the built behavior either way.</h1>
+<p><strong>Built in this cut:</strong> Complete and Abandon show only their result while delivering. A disconnected change shows one row, “Waiting for connection”, and sends itself on reconnect. Both hosts render one shared request row.</p>
+<p><strong>Biggest mismatch:</strong> the plan parked “rename” behind a rewrite of list membership, because a renamed Task title must show in every list. No command renames a Task. <code>task.update</code> writes notes. The renames the apps offer are Session, Wave and Dashboard, and a name changes no list.</p>
 
-<h2>The same request, on each host today</h2>
-<table><thead><tr><th></th><th>Desktop</th><th>Phone</th><th>Proposed, both</th></tr></thead><tbody>
-<tr><td>Listed after its conversation was opened</td><td>No, unless it needs inspection</td><td>Yes, as “Saved request”, until the command retires</td><td class="new">No, unless it needs inspection</td></tr>
-<tr><td>Open the filed Task from its ordinary row</td><td>Counts as seen; request row goes</td><td>Does not count; request row stays</td><td class="new">Counts, from any route</td></tr>
-<tr><td>Button for <code>interaction.retry(id)</code></td><td>“Retry recovery”, beside an error</td><td>“Check status”, always</td><td class="new">“Try again” before save; “Check request” after</td></tr>
-<tr><td>Row text while all is well</td><td colspan="2">“Saving request…” / “Saved request”</td><td class="new">The words; a line only when something needs you</td></tr>
-<tr><td>Receipt bound, Work query lagging</td><td>Reads the Task directly, then opens (lagging case not run)</td><td>“The filed Task is not available yet” + tap Retry opening</td><td class="new">Conversation opens</td></tr>
-<tr><td>A failed creation appears</td><td>Sidebar row and a CreationRecovery item</td><td>Once</td><td class="new">Once</td></tr>
+<h2>Rename, before and proposed</h2>
+<table><thead><tr><th></th><th>Plan before this review</th><th>Proposed</th></tr></thead><tbody>
+<tr><td>What “rename” is</td><td>A Task title edit</td><td class="new">A Session name (<code>session.rename</code>); Wave when it has a served write</td></tr>
+<tr><td>What it waits for</td><td>Membership programs that keep authored scopes and predicates</td><td class="new">Nothing. One name, projected by identity</td></tr>
+<tr><td>Refusal</td><td>Restore field and membership</td><td class="new">Restore that name</td></tr>
+<tr><td>Move</td><td colspan="2">Still needs the membership change: a destination Wave that never listed the Task cannot show it</td></tr>
 </tbody></table>
 
-<h2>One interaction, including recovery</h2>
-<blockquote><strong>Proposed:</strong> Start A → editor closes, A’s words are selected. Go to B. A files; its Task appears in the list beside the request row. Open A from either row → its conversation, and the request row is gone, also after restart. If the save had failed instead: <em>Try again</em> sends the same request, <em>Edit request</em> returns the words. If the reply was lost: <em>Check request</em> looks up the original on its Machine. If the Session exists but did not attach: <em>Retry opening</em>. None of these moves you off B.</blockquote>
+<h2>The starting conversation on Desktop</h2>
+<pre>As built                              Proposed
+Fix the flaky login test              Fix the flaky login test
+Fix the flaky login test              Starting conversation…
+Delivering request…</pre>
+<p>The shared row brings its list title into the conversation, and one status word now covers delivery and the provider starting. Lists supply the title; each kind supplies its own progress words.</p>
 
 <h2>Actions → concept → API</h2>
 <table><thead><tr><th>Action</th><th>Concept</th><th>API</th></tr></thead><tbody>
-<tr><td>Start</td><td>Submitted conversation, identified by its operation</td><td><code>WorkInteraction.createTask(… select:)</code> — built</td></tr>
-<tr><td>See it in the list; act on it</td><td>Its one derived state: status line + applicable actions</td><td class="new"><code>CreationOperation</code> state, derived in the shared owner — proposed; today each view reads <code>failures</code>, <code>receipt</code>, <code>legacyOutcome</code></td></tr>
-<tr><td>Open the result</td><td>The result was shown</td><td class="new">acknowledge by Task/Session resource on <code>WorkInteraction</code> — proposed; replaces <code>pendingCreations</code>’ filter and creation in <code>CreationRecovery</code></td></tr>
-<tr><td>Type</td><td>Native Session readiness</td><td>Existing native owners — unchanged</td></tr>
+<tr><td>Rename a conversation</td><td>A name, shown wherever that Session is listed</td><td class="new"><code>OperationDeclaration</code> gains <code>session.rename</code>; Desktop’s <code>SessionRenameDraft</code> stale-read guard goes — proposed</td></tr>
+<tr><td>Lose the network with three changes held</td><td>The Machine is unreachable: one fact</td><td class="new">one reachability fact per Machine link; operations derive Waiting from it — proposed. Built: a flag and a backoff loop per receipt watch</td></tr>
+<tr><td>Abandon</td><td>Leave the list, like Complete</td><td><code>WorkInteraction.abandon</code> — built. <span>Phone confirmation — proposed; Desktop already asks</span></td></tr>
 </tbody></table>
 
-<details><summary>Three smaller findings</summary>
-<p><strong>Made-up repository.</strong> Desktop <code>beginTask</code> freezes <code>repoPath ?? "/"</code> into a command that can never be edited. Proposed: Start needs a resolved repository; otherwise the editor keeps the words.</p>
-<p><strong>Retired phone requests keep their words.</strong> Every phone creation stays in the outbox table with its full text after retirement, to stop a surviving editor file from submitting again. Proposed: keep the identity and a digest, drop the text, and drop the row once its source can no longer resurrect it.</p>
-<p><strong>Still unexercised on Desktop’s production path:</strong> attachment failure and Retry opening for a creation, restart after an uncertain send, held Graph admission after filing. Two clients converging on one closed query, the wider mutation cutover and a native latency baseline also remain open.</p>
-</details>
-
-<h2>Questions (optional; work continues on the proposed answer)</h2>
+<h2>Questions</h2>
 <ol>
-<li><strong>Button names.</strong><br>1a — “Try again”, “Edit request”, “Check request”, “Retry opening” (proposed).<br>1b — other words; say which.</li>
-<li><strong>Where an unopened request sits.</strong><br>2a — above the Task list, as built on both hosts.<br>2b — inside the section where its Task will land.</li>
+<li><strong>Abandon while disconnected.</strong> It closes PRs and removes branches. Your “1a” answer named Complete, rename and move.<br>1a — Save it and send on reconnect, like Complete (built).<br>1b — Abandon needs a reachable Machine; say so and keep the Task.</li>
+<li><strong>Taking back a change that is waiting for connection.</strong> Today the row offers nothing, so a mistaken offline Complete or Abandon will be sent.<br>2a — No action (built). Reopen afterwards.<br>2b — <em>Cancel</em> on a change that was never sent; it removes the request and puts the Task back.</li>
 </ol>
 <small>Earlier answers stand: Jack Heart replied “1b for the question (or show noting)” on completion navigation and “1a” on disconnected routine edits. No shipping or merge decision is requested.</small>
 </main></html>

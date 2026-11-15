@@ -1,8 +1,8 @@
 # LOO-906: immediate interactions across Desktop and mobile
 
-Implementation updated 2026-11-15 after pending-operation cut `e010cda519` on
-origin/main `9cafc410ee` (unchanged). Supersedes the Desktop-only delivery
-boundary. No shipping or merge decision is recorded. Placement remains this Task;
+Concept review 2026-11-15 of the healthy-change/reconnect cut on origin/main
+`9cafc410ee` (unchanged); rename-first direction is next. Supersedes the
+Desktop-only delivery boundary. No shipping or merge decision is recorded. Placement remains this Task;
 no Wave is selected.
 
 ## Direction
@@ -50,7 +50,7 @@ Restoring workspace, Not started/Start, and Conversation change unconfirmed.
 
 Start and Complete now use shared SwiftUI/Observation interaction and outbox
 owners on both clients. Other mutations still disagree about when an interaction
-happened. Desktop `TaskRunDraft` and `abandoningTaskIDs`, plus mobile view-owned
+happened. Desktop `TaskRunDraft`, plus mobile view-owned
 `SessionLink`, remain replacement targets (see the delete list). Revision-6 subscriptions now provide exact-query snapshot stamps;
 server operation admission covers all typed writes, while live client outbox
 migration still specializes creation. Native Session/Graph owners retain readiness.
@@ -229,7 +229,7 @@ only; SQLite commits precede rewrites.
 
 Still remove, with their consumers:
 
-- Desktop `TaskRunDraft.phase`, `abandoningTaskIDs`, other mutation refresh
+- Desktop `TaskRunDraft.phase`, other mutation refresh
   barriers and rename/bind replacement bookkeeping.
 - View-owned mobile `SessionLink` teardown on ordinary Task switching; keep
   explicit Close, background policy and memory-pressure eviction.
@@ -351,54 +351,104 @@ again, Edit request, Check request and Inspect from one presentation. Reopening
 belongs to native attachment (Desktop Retry opening, phone Reconnect). Retired
 commands keep compact IDs/digest/time; the source-release lifecycle is deleted.
 
-### Next implement direction: a healthy change shows nothing extra
+### Healthy changes and reconnect cut
 
-Headless concept review of `e010cda519`, 2026-11-15. Engineering direction drawn
-from the quoted words above; the three copy/layout assumptions are in
-`questions.md`. No code changed in the review.
+Built, uncommitted on `57cb8a3a22`; the direction it followed is at
+`57cb8a3a22:scratch/instant-task-session.md` (Next implement direction). Typed
+delivering/waiting/attention status; a routine change being delivered shows only
+its projection. One shared `PendingOperationRow` serves both hosts' lists and
+conversations and owns actions and Inspect acknowledgment. `OperationDeclaration`
+owns kind, label and stages; targets decode once; Complete uses a keyed lookup.
+Complete and Abandon share removal and origin-only next selection; Desktop's
+`abandoningTaskIDs`, its second next-row rule and its timer test are deleted. The
+phone gains Abandon. Abandonment records its planning change and `task.abandoned`
+fence in the decision transaction, including repeats and refusal; cleanup stays
+separate.
 
-Read in the code: `PendingOperation.isListed` lists every non-creation operation
-until `delivery == .finished`. A healthy Complete therefore removes the Task row
-and adds "Complete Task · LOO-12 / Request pending…" above the list on both hosts
-until settlement returns: a new intermediate state for the gesture that should
-show none. A failed send sets `deliveryFailed` and waits for a manual Check
-request, which contradicts 1a's send on reconnect. Neither has a failing test.
+Receipt subscriptions reconnect, including failed first opens. Waiting shows no
+error or action and keeps the saved effect. Reconnect reads the original ID before
+any admission; send loss reads that outcome. Backoff opens connections only; a
+store publication never retries an operation. The stamped reading, not a live
+identity read, checks the original Machine before a send. Protocol and Machine
+identity errors are attention, not waiting. Claim has a label and `task.claimed`
+stage; its writer and projection are unmigrated.
 
-1. `PendingOperation.status` is typed: delivering, waiting for connection, needs
-   attention (with its messages). It replaces `Presentation.messages` and the host
-   fallback strings ("Request pending…" and "Starting conversation…", twice each).
-   A row is listed while waiting or needing attention; a creation also until its
-   result is shown. A routine change being delivered shows only its projection:
-   the row is gone, the value changed, open details say Completing….
-2. An unreachable Machine is a status, never an error: no action offered, effect
-   retained, delivery resumes on the connection event through the same `reconcile`
-   by original ID. No timer and no retry on store publication. Attention needs an
-   answer from the Machine or an unknown outcome after a send.
-3. One name: operation in code (the wire says `operation.submit`), "request" in
-   copy. Rename `PendingCommandActions`/`PendingCommandRow`, `pendingCommands`,
-   and `WorkModel.retryCreation`/`inspectedCreation`, which serve every kind.
-4. One shared row view (title, status, actions) serves both lists and both
-   conversations. It takes `WorkInteraction` and an edit callback; the four host
-   action switches and the Inspect acknowledgment move into it.
-5. `OperationDeclaration` owns each kind's facts: a kind enum, label, stages,
-   whether a result must be shown, target issue and projected effect. Decode the
-   target once. `isCompleting` JSON-decodes every pending payload per Task row
-   render; under 1a that set grows while disconnected. Make it a keyed lookup.
-6. Leaving a list is one interaction. Complete and Abandon share removal and next
-   selection in `WorkInteraction`; delete `abandoningTaskIDs` and Desktop's second
-   next-row rule. Declare `task.abandon` and `task.claim`.
+### Next implement direction: a rename is a name
 
-Acceptance, held replies on both hosts: Complete shows no request row while
-delivering; disconnect shows the row as Waiting for connection with no action;
-reconnect delivers once without a gesture; restart while waiting keeps it; a
-refusal becomes attention and restores membership; Abandon selects like Complete.
-`swift/README.md` ("Each pending command has one row") stops saying so, and docs
-claim disconnected delivery only once built. Realign corrected the phone README's
-deleted **Retry Complete** to **Check request**.
+Headless concept review of that cut, 2026-11-15. Read in the code, nothing run;
+no code changed. Two product questions are in `questions.md`.
+
+1. **Rename does not wait for Move.** No command edits a Task title:
+   `task.update` writes notes. What people rename is a Session (`session.rename`),
+   a Wave or a Dashboard. The correction below folded a Task title edit into the
+   membership rewrite; that edit doesn't exist. A rename projects one name by
+   identity wherever its Session or Wave is shown, held per reading until that
+   reading covers the rename's stage fence, restored alone on refusal. It changes
+   no membership. Build it next: declare `session.rename`, then delete Desktop's
+   `SessionRenameDraft` stale-read guard. First check where each host reads Session
+   names; if that reading is outside the shared owner, moving it in is the work.
+   Wave rename joins when it has a served write. Move keeps the correction below.
+2. **A conversation shows its request once.** The shared row prints its title
+   under the words in Desktop's `StartingTaskView` and again in the phone's
+   recovery controls. Lists supply the title; a conversation renders status and
+   actions only. One view, not two.
+3. **Progress wording belongs to the kind.** The creation conversation now says
+   "Delivering request…" for the whole workspace and provider preparation, and
+   `swift/README.md` documents it; delivery ended long before. The declaration
+   supplies in-progress words: creation and new Session keep "Starting
+   conversation…". A list row being delivered shows no status line.
+4. **Connection belongs to the Machine.** Waiting is a flag on each receipt
+   watch, each with its own backoff loop, and the phone feed's "Couldn’t update
+   Tasks" card reports the same outage separately. One reachability fact per
+   Machine link, published by the link's owner: every saved unresolved operation
+   for that Machine derives Waiting from it and resumes on its one reconnect.
+   Receipt watches stop owning backoff. Rows per change stay as built.
+5. **Abandon asks first on both hosts.** Desktop confirms "Abandon LOO-12?"; the
+   phone's new menu item fires on one tap, and the command closes PRs and removes
+   branches. Same confirmation on the phone.
+6. The plan's `effects` map already declares which kinds change membership;
+   `OperationDeclaration.changesMembership` repeats it. Keep the plan's.
+
+Acceptance: rename a Session offline on each host; the name shows everywhere it
+is listed, survives restart, delivers once on reconnect, and a refusal restores
+only that name. The starting conversation shows the words once with "Starting
+conversation…". Three held changes and one outage open one reconnect loop.
+
+### Continuation correction: state-only candidates cannot project a Move
+
+2026-11-15, implementation finding. `compile_membership` filters Wave descendants
+before emitting fixed `Members`/`State.members` leaves; `MembershipFacts` carries
+states, not parent Wave. `ClientWorkQuery.makeProjection` only changes states of
+facts already present. A cached destination Wave that omitted Task A cannot
+acquire A when A moves there while disconnected, and its Task DTO is absent too.
+A per-view insertion or a fabricated Task would contradict the shared owner.
+Removal remains valid.
+
+Draft revised cut for Move: dynamic scopes/filters retain their authored paths
+and predicates over shared, provenance-stamped Task facts (parent Wave included),
+with candidate coverage and actual cached content for arrivals. Explicit authored
+Work leaves keep their fixed identities. Projection updates the shared facts,
+evaluates source and destination queries/counts, and retains each query's
+coverage until its stage fence is incorporated. Incomplete candidate/content
+coverage stays unavailable rather than inventing an empty destination or a DTO.
+Field provenance rejects stale cross-query values; arrival order is no authority.
+Use the portable-core option if shared Swift cannot evaluate the program.
+
+Delete in that cut: prefiltered dynamic `State.members`/`Members` programs from
+`compile_membership`/`compile_filter` and their Swift dynamic-node evaluation.
+Preserve explicit Work leaves, authored occurrence paths, duplicate winners,
+order/hidden state, partial-read semantics and the Complete/Abandon tests. No
+special Move branch in the candidate-only reducer.
+
+Acceptance before migrating callers: hold source and destination Wave readings
+with A absent from the destination; move offline; verify source removal,
+destination insertion and counts in two windows and both clients; restart with
+both queries closed; reject reordered older values and restore only the refused
+membership without changing later navigation. The broader one-PR scope remains.
 
 ## Current implementation cut
 
-Start and Complete publish through shared `WorkInteraction` on both hosts. Creation
+Start, Complete and Abandon publish through shared `WorkInteraction` on both hosts. Creation
 freezes ID/payload/scope/time before its synchronous selection callback, saves before
 send and derives `PendingOperation` from the saved command and receipt stages.
 Desktop keeps the operation selected through native readiness; iOS replaces its
@@ -423,7 +473,7 @@ including without a network event. Retirement cancels its receipt observer and
 transfers lagging effects or scoped reload floors. The complete prior contracts and
 query checks remain at `6e944e73b5a:scratch/instant-task-session.md`.
 
-Remaining: the next implement direction above, then disconnected rename/move
+Remaining: the rename-first direction above, then disconnected Move
 under the recorded 1a direction; cross-client closed-query convergence; exhaustive
 effect/dependency declarations and cross-query provenance; other mutation recovery
 and resource lanes; retained mobile `SessionLink`; projected inspection;
@@ -468,14 +518,14 @@ backend-stage baseline exists. Raw files and earlier detail: `8b42a874db`,
 
 Implementation owns a valid benchmark baseline; demo owns native usability.
 
-Earlier checks and the 10k client-query observations:
-`737b50adba:scratch/instant-task-session.md` (Creation checks),
-`6e944e73b5a:scratch/instant-task-session.md` and
-`d9bf1c21ae:scratch/instant-task-session.md`. Pending-command checks
+Earlier checks: `57cb8a3a22:scratch/instant-task-session.md`; 10k client-query
+observations: `6e944e73b5a:scratch/instant-task-session.md`. Current checks
 (2026-11-15; inherited `LF_*` cleared):
-- `swift build --build-tests --package-path swift --jobs 4 -Xswiftc -gnone`: passed; gate owns wider suites and the Xcode fallback build.
-- `scripts/test_desktop.sh --skip-build --filter 'ClientWorkQueryTests|OperationRecoveryPresentationTests|operationConversationUsesNativeReadiness'`: 51 checks passed. After the final candidate/attachment repair, its six recovery/native-readiness cases passed again. Covers mixed save failures, same-ID retry, no-repository copy, planning recovery, bound Session acknowledgment and unchanged later selection.
-- `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/MobileTaskCreationTests -only-testing:LoopflowiOSTests/ClientWorkQueryTests`: 46 checks passed on the final shared model, including editor revision rotation, retirement before file cleanup and the shared mixed-failure case. Eight SessionTerminal checks also passed earlier in the cut; disposable Simulators were removed.
+- `swift build --build-tests --package-path swift --jobs 4 -Xswiftc -gnone`: passed; gate owns the Xcode fallback build.
+- `scripts/test_desktop.sh --skip-build --filter 'ClientWorkQueryTests|CreationInteractionTests|OperationRecoveryPresentationTests|receiptWatchWaitsAcrossFailedOpens|otherMachineAndUnavailableReceiptNeverSend|DesktopCreationInteractionTests|WorkDestinationTests'`: 45 XCTest and 76 Swift Testing rows passed; four XCTest rows initially failed (two stale button/row expectations, missing fixture connection events, cached-query restart). The repaired four passed; final transport/store/reconnect selection passed 4 XCTest and 37 Swift Testing rows. Reconnect teardown also closes its initial opening task, and canceled store refreshes cannot restart delivery.
+- `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/ClientWorkQueryTests -only-testing:LoopflowiOSTests/MobileTaskCreationTests`: 49/50 passed; the remaining stale Check request expectation was repaired and its named test passed. Covers both feeds' Abandon, persisted waiting, lost send and reconnect; disposable Simulators removed.
+- `cargo test -p loopflow --lib abandonment_receipts_keep_the_same_canceled_delivery_on_repeat`: passed; `state_attempt_recovery_is_keyed_at_ten_thousand_tasks`: passed, including the cancellation lookup. `query_selection_plan_wire_roundtrips` passed after correcting fixture enum ordering. The 10k whole check took 0.53 s; this is not a per-query latency measurement.
+- `cargo clippy --all-targets -- -D warnings`: passed.
 - `uv run python scripts/check_swift_multiplatform_boundaries.py`, `git diff --check`: passed; gate owns archive/documented-command checks. Native latency remains unmeasured.
 
 ## Conversation concept review · 2026-11-15

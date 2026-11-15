@@ -96,10 +96,26 @@
   `e010cda519`; nobody has stated a preference on any of the three:
   - A routine change being delivered normally (Complete, rename, move) shows no
     request row, only its projected result. Read from “completing a task should
-    make it disappear immediately” and “a lot of intermediate states”; the built
-    cut lists a “Complete Task · LOO-12” row until settlement.
+    make it disappear immediately” and “a lot of intermediate states”; the prior
+    cut listed a “Complete Task · LOO-12” row until settlement. The current cut
+    suppresses that row while delivering.
   - Waiting for connection shows one row per held change, reusing the existing
     row. One summary line (“3 changes waiting for connection”) is the undiscussed
     alternative.
   - Abandon takes Complete's next-Task rule (next in list order, wrapping, else
-    empty). Desktop Abandon today picks next, then previous, then the Wave.
+    empty). The prior Desktop Abandon picked next, then previous, then the Wave; the
+    current cut uses the shared next-Task rule.
+
+- Open product questions from the 2026-11-15 headless concept review of the
+  healthy-change/reconnect cut. Nobody has answered either; the built behavior
+  stands meanwhile. They are numbered in `scratch/concept-review.html`.
+  - Abandon while disconnected. The cut saves Abandon like Complete and delivers
+    it on reconnect, however much later. The "1a" option named Complete, rename
+    and move; Abandon closes PRs and removes branches. Alternative: Abandon needs
+    a reachable Machine and says so.
+  - A change waiting for connection has no way back. Its row offers no action,
+    so a mistaken Complete or Abandon made offline will be sent. A change never
+    sent could offer Cancel, removing the saved request and its projection; one
+    already sent could not.
+- Headless reading of "rename" in the 1a answer: the renames the apps offer
+  (Session, Wave, Dashboard). No command edits a Task title.

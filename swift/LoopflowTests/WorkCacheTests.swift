@@ -764,6 +764,9 @@ struct WorkCacheTests {
 
         #expect(returning.selection == .wave(id: "wave-1"))
         #expect(returning.navigation.content == .details)
+        // The held list answered the old scope; this one-shot transport reads the Wave's list only when asked.
+        #expect(returning.workStatus == .loading)
+        await returning.refresh()
         #expect(returning.workStatus == .current)
         #expect(WorkCache(directory: directory).load()?.repositories[Self.repo]?.selection == .wave(id: "wave-1"))
     }
@@ -1068,6 +1071,9 @@ private actor Source {
         switch command.first {
         case "plan" where command.dropFirst().first == "list": return roadmap
         case "session" where command.dropFirst().first == "list": return sessions
+        case "desktop" where command.dropFirst().prefix(2) == ["view", "show"]:
+            return String(decoding: try JSONEncoder().encode(fixtureViewPlan(
+                owner: .init(repository: "repo", kind: .repository, id: "repo"), members: [])), as: UTF8.self)
         case "wave": return "[]"
         case "session" where command.dropFirst().first == "history": return #"{"truncated":false,"items":[]}"#
         default: throw RegistryQueryError("unexpected command")

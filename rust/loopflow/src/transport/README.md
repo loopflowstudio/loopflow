@@ -349,7 +349,8 @@ without replacing input or geometry. Choose **Move here** in the read-only
 pane's connection row to edit the same running Session; input stays paused
 until the server acknowledges, and a lost reply never repeats that takeover.
 Eight attempts with capped backoff lead to **Session unavailable** and a native
-**Retry connection** action. Only a child exit means ended. Closing the
+**Retry connection** action. A final Close frame ends recovery and disables input;
+its reason explains replacement, completion or retirement. Bare EOF remains unknown. Closing the
 surface cancels recovery. Ordinary explicit Open remains separate.
 
 The native surface listens on a private Unix socket and passes its path through
@@ -435,6 +436,7 @@ at most 64 KiB; a payload over 4 MiB is a protocol error.
 | `0x03` out | server → view | PTY output |
 | `0x05` position | server → view | the PTY position the stream stands at, u64 BE |
 | `0x06` aside | server → view | lf's reports and events; not PTY bytes |
+| `0x07` close | server → view | final JSON `{reason: replaced\|finished\|retired}`; not PTY bytes |
 | `0x11` request | view → server | JSON with `id` and `kind` |
 | `0x12` input | view → server | keystrokes from the connection holding input control |
 

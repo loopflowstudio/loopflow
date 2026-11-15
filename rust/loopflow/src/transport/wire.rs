@@ -34,6 +34,8 @@ pub(super) enum Tag {
     /// Bytes for the viewer's terminal that are not the PTY's output: lf's
     /// reports and events. Never counted as a position.
     Aside = 0x06,
+    /// Final JSON close reason, outside the counted terminal stream.
+    Close = 0x07,
     /// JSON carrying an `id`.
     Request = 0x11,
     /// Keystrokes from the controlling connection.
@@ -58,6 +60,7 @@ impl Tag {
             0x04 => Self::Err,
             0x05 => Self::Position,
             0x06 => Self::Aside,
+            0x07 => Self::Close,
             0x11 => Self::Request,
             0x12 => Self::Input,
             _ => return None,
@@ -130,6 +133,24 @@ impl Decoder {
 
 // ---------------------------------------------------------------------------
 // Requests and replies
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum CloseReason {
+    /// The terminal attachment moved to a replacement. Reattach by Session.
+    Replaced,
+    /// Execution finished. Stop automatic reattachment.
+    Finished,
+    /// Cleanup ended this terminal. Deliberate resume remains available.
+    Retired,
+}
+
+/// The last frame before an orderly terminal disconnect. No stream offset or
+/// control claim transfers to a replacement terminal.
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub(crate) struct Close {
+    pub reason: CloseReason,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

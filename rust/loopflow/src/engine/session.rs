@@ -65,24 +65,20 @@ pub async fn steer(
                 ));
             }
             // The comment's transaction derives the Task's steer from the entry.
-            let thread =
-                crate::ops::task::task_comment_async(directory, wave, issue, Some(message), true)
-                    .await
-                    .map_err(written)?;
-            let comment = thread.comments.last().ok_or_else(|| {
-                Error::new(
-                    ErrorCode::OutcomeUnknown,
-                    format!("the thread of {issue} does not show the saved entry"),
-                )
-            })?;
+            let (store, task) = crate::ops::task::resolve_saved_task(directory, wave, issue)
+                .await
+                .map_err(written)?;
+            let comment = crate::ops::task::append_task_comment_async(&store, &task, message, true)
+                .await
+                .map_err(written)?;
             store
                 .sqlite
-                .steer_by_source(&format!("comment:{}", comment.id), "local")
+                .steer_by_source(&format!("comment:{comment}"), "local")
                 .map_err(written)?
                 .ok_or_else(|| {
                     Error::new(
                         ErrorCode::OutcomeUnknown,
-                        format!("comment {} of {issue} derived no steer", comment.id),
+                        format!("comment {comment} of {issue} derived no steer"),
                     )
                 })
         }

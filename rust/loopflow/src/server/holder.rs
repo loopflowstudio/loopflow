@@ -22,6 +22,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use fs2::FileExt;
 
+use crate::transport::input::Paste;
 use wire::{Answer, Exit, Gap, Held, Request, Start, Tag};
 
 fn json(tag: Tag, value: &impl serde::Serialize, into: &mut VecDeque<u8>) {
@@ -129,6 +130,7 @@ struct Terminal {
     /// The PTY's modes before the child ran.
     cooked: Option<libc::termios>,
     input: VecDeque<u8>,
+    input_paste: Paste,
     exit: Option<Exit>,
 }
 
@@ -386,6 +388,9 @@ pub fn serve(place: &Place, build: &str, ready: impl FnOnce()) -> Result<Served>
                 connection.read();
             }
             holder.advance(connection);
+            if connection.closed {
+                holder.close_input(connection);
+            }
         }
         for terminal in holder.terminals.values_mut() {
             terminal.forward_input();
@@ -394,7 +399,12 @@ pub fn serve(place: &Place, build: &str, ready: impl FnOnce()) -> Result<Served>
             holder.feed(connection);
             connection.flush();
         }
-        connections.retain(|connection| !connection.closed);
+        connections.retain_mut(|connection| {
+            if connection.closed {
+                holder.close_input(connection);
+            }
+            !connection.closed
+        });
         // A reader still on its way to an exit keeps the holder too.
         let running = holder
             .terminals
@@ -420,6 +430,15 @@ fn terminal_fd(terminal: &Terminal) -> RawFd {
 }
 
 impl Holder<'_> {
+    fn close_input(&mut self, connection: &mut Connection) {
+        if let Mode::Writer { terminal } = &connection.mode {
+            if let Some(held) = self.terminals.get_mut(terminal) {
+                held.input.extend(held.input_paste.finish());
+            }
+            connection.mode = Mode::Requests;
+        }
+    }
+
     /// Act on what a connection has sent.
     fn advance(&mut self, connection: &mut Connection) {
         loop {
@@ -438,6 +457,7 @@ impl Holder<'_> {
                         connection.closed = true;
                         return;
                     };
+                    held.input_paste.observe(&connection.received);
                     held.input.extend(connection.received.drain(..));
                     return;
                 }
@@ -630,6 +650,7 @@ impl Holder<'_> {
                 modes: VecDeque::from([(0, false)]),
                 cooked,
                 input: VecDeque::new(),
+                input_paste: Paste::default(),
                 exit: None,
             },
         );

@@ -236,6 +236,56 @@ fn input_and_size_reach_the_child() {
 }
 
 #[test]
+fn a_lost_writer_finishes_its_paste_without_submitting_it() {
+    let fixture = holder();
+    Client::connect(&fixture.place)
+        .unwrap()
+        .start(shell(
+            "paste",
+            "paste",
+            "stty raw -echo; printf '\\r\\nready\\r\\n'; dd bs=1 count=9 2>/dev/null | od -An -tx1; printf '\\r\\nprefix\\r\\n'; dd bs=1 count=6 2>/dev/null | od -An -tx1; printf '\\r\\nclosed\\r\\n'; read line; printf '\\r\\nreply:%s\\r\\n' \"$line\"",
+        ))
+        .unwrap();
+    let mut output = Client::connect(&fixture.place)
+        .unwrap()
+        .read("paste", 0)
+        .unwrap();
+    output
+        .socket
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let mut seen = Vec::new();
+    let wait_for = |output: &mut super::client::Output, seen: &mut Vec<u8>, text: &str| {
+        while !String::from_utf8_lossy(seen).contains(text) {
+            if let Frame::Out(bytes) = output.frame().unwrap() {
+                seen.extend(bytes);
+            }
+        }
+    };
+    wait_for(&mut output, &mut seen, "ready");
+    let mut input = Client::connect(&fixture.place)
+        .unwrap()
+        .write("paste")
+        .unwrap();
+    input.write_all(b"\x1b[200~abc").unwrap();
+    wait_for(&mut output, &mut seen, "prefix");
+    drop(input);
+    wait_for(&mut output, &mut seen, "closed");
+    assert!(String::from_utf8_lossy(&seen)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .contains("1b 5b 32 30 31 7e"));
+    let mut input = Client::connect(&fixture.place)
+        .unwrap()
+        .write("paste")
+        .unwrap();
+    input.write_all(b"next\n").unwrap();
+    wait_for(&mut output, &mut seen, "reply:next");
+    while !matches!(output.frame().unwrap(), Frame::Exit(_)) {}
+}
+
+#[test]
 fn output_is_marked_with_the_line_discipline_it_was_written_under() {
     let fixture = holder();
     let mut client = Client::connect(&fixture.place).unwrap();

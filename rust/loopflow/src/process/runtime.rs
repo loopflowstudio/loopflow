@@ -633,7 +633,7 @@ mod tests {
         let _ambient = crate::test_ambient::EnvGuard::new();
         let (home, store, detached) = resume_fixture();
         let task = store
-            .create_task(&crate::work::task::NewTask {
+            .create_task(&crate::store::work::task::NewTask {
                 id: loopflow_model::durable::TaskId::new(),
                 repository_id: crate::repository::location::ensure_repository(
                     &store,

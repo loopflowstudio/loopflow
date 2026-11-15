@@ -12,6 +12,7 @@ pub(crate) mod admission;
 mod canonical_ids;
 pub(crate) mod capacity;
 pub(crate) mod changes;
+pub mod child;
 mod children;
 pub(crate) mod ci_incidents;
 pub mod contention;
@@ -29,6 +30,10 @@ mod migration_runner;
 mod migration_schema;
 pub mod migrations;
 pub(crate) mod opening;
+pub mod planning_exchange;
+pub mod pr_landing;
+pub mod rental;
+pub mod work;
 pub use opening::open_sqlite;
 pub mod ownership;
 mod peer_records;
@@ -55,6 +60,7 @@ pub mod sqlite;
 pub(crate) mod steer_markers;
 pub mod task_work;
 mod token_crypto;
+pub(crate) mod token_key;
 mod write_holds;
 
 pub use error::{StoreError, StoreResult};
@@ -207,21 +213,6 @@ pub(crate) fn canonicalize_with_missing_tail(path: &Path) -> Result<PathBuf, std
 
 pub fn storage_config_from_env() -> Result<StorageConfig, std::io::Error> {
     Ok(StorageConfig::sqlite(database_path_from_env()?))
-}
-
-/// The Wave's planning lock, retained by every queued writer using this
-/// acquisition and released when the last one drops it.
-#[derive(Debug, Clone)]
-pub struct PlanningLocks {
-    _wave: Arc<std::fs::File>,
-}
-
-impl PlanningLocks {
-    pub(crate) fn new(wave: std::fs::File) -> Self {
-        Self {
-            _wave: Arc::new(wave),
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -857,7 +848,7 @@ pub(crate) async fn open_read_only_store(cfg: &StorageConfig) -> StoreResult<Sto
     let StorageConfig::Sqlite { path } = cfg;
     drop(crate::store::open_sqlite(path)?);
     Ok(Store {
-        sqlite: sqlite::SqliteStore::open_read_only(path)?,
+        sqlite: sqlite::SqliteStore::open_read_only(path, crate::store::token_key::encryption_key)?,
     })
 }
 
@@ -884,7 +875,8 @@ pub(crate) fn read_existing_registry() -> StoreResult<Option<Store>> {
     {
         return Ok(None);
     }
-    let sqlite = sqlite::SqliteStore::open_read_only(&path)?;
+    let sqlite =
+        sqlite::SqliteStore::open_read_only(&path, crate::store::token_key::encryption_key)?;
     if sqlite.applied_schema_version()?.is_none() {
         return Ok(None);
     }
@@ -910,15 +902,15 @@ mod tests {
         may_apply_migrations, read_nonterminal_task_worktrees, CredentialState, ProviderAccount,
         ProviderAccountId, RoutingState, StorageConfig,
     };
-    use crate::child::ChildRef;
     use crate::profile::EmailAddress;
+    use crate::store::child::ChildRef;
     use crate::store::linear_records::{LinearIssueId, LinearProjectId};
-    use crate::test_linear_input::{InventoryFixture, SeedLinear};
-    use crate::work::project::{Project, ProjectId};
-    use crate::work::task::{
+    use crate::store::work::project::{Project, ProjectId};
+    use crate::store::work::task::{
         CiIncident, GithubPr, LinearWritebackState, PrPhase, PrPresentation, PrPublication, Task,
         TaskEventKind, TaskId, TaskPr, TaskPrId,
     };
+    use crate::test_linear_input::{InventoryFixture, SeedLinear};
     use crate::work::wave::Wave;
     use loopflow_model::durable::{Author, WorkRef};
     use loopflow_model::id::WaveId;
@@ -1075,7 +1067,7 @@ mod tests {
             due_date: None,
             state: None,
             completed_at: None,
-            observation: crate::work::task::Observation::NotRequired,
+            observation: crate::store::work::task::Observation::NotRequired,
         }
     }
 
@@ -1123,7 +1115,7 @@ mod tests {
             id: ProjectId::new(),
 
             summary: String::new(),
-            status: crate::work::project::ProjectStatus::Started,
+            status: crate::store::work::project::ProjectStatus::Started,
             linear_id: Some(LinearProjectId::new("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3").unwrap()),
             slug: "developer-efficiency".to_string(),
             name: "Developer Efficiency".to_string(),
@@ -1264,7 +1256,7 @@ mod tests {
             select_project(&store, &project);
             let task = make_task(&store, &wave, &project);
             let mut snapshot = task_planning_snapshot(&wave, &project, &task);
-            snapshot.snapshot.projects[0].krs = vec![crate::work::project::ProjectKR {
+            snapshot.snapshot.projects[0].krs = vec![crate::store::work::project::ProjectKR {
                 text: "Work remains readable".into(),
                 holds: false,
             }];
@@ -1400,7 +1392,7 @@ mod tests {
             let mut snapshot = task_planning_snapshot(&wave, &project, &task);
             snapshot.synced_at = 17;
             store.seed_inventory(snapshot.clone(), None).await.unwrap();
-            let krs = vec![crate::work::project::ProjectKR {
+            let krs = vec![crate::store::work::project::ProjectKR {
                 text: "Saved plan survives an outage".into(),
                 holds: false,
             }];
@@ -1428,15 +1420,15 @@ mod tests {
             }
             for (status, readiness) in [
                 (
-                    crate::work::project::ProjectStatus::Started,
+                    crate::store::work::project::ProjectStatus::Started,
                     crate::store::sqlite::ProjectReadinessState::Ready,
                 ),
                 (
-                    crate::work::project::ProjectStatus::Paused,
+                    crate::store::work::project::ProjectStatus::Paused,
                     crate::store::sqlite::ProjectReadinessState::Inactive,
                 ),
                 (
-                    crate::work::project::ProjectStatus::Completed,
+                    crate::store::work::project::ProjectStatus::Completed,
                     crate::store::sqlite::ProjectReadinessState::Terminal,
                 ),
             ] {
@@ -1456,7 +1448,7 @@ mod tests {
                 assert_eq!(observed.observed_at, Some(17));
                 assert_eq!(
                     crate::ops::project::current_project(&store, &wave).is_err(),
-                    status == crate::work::project::ProjectStatus::Completed
+                    status == crate::store::work::project::ProjectStatus::Completed
                 );
             }
         }
@@ -1654,7 +1646,7 @@ mod tests {
                 .unwrap();
                 store
                     .sqlite
-                    .create_task(&crate::work::task::NewTask {
+                    .create_task(&crate::store::work::task::NewTask {
                         repository_id: crate::repository::location::ensure_repository(
                             &store.sqlite,
                             directory.path().canonicalize().unwrap().to_str().unwrap(),
@@ -2198,7 +2190,7 @@ mod tests {
         let mut confirmed = snapshot.snapshot.projects[0].clone();
         confirmed.name = "Ordinary work".into();
         confirmed.slug = "ordinary-work".into();
-        confirmed.krs.push(crate::work::project::ProjectKR {
+        confirmed.krs.push(crate::store::work::project::ProjectKR {
             text: "Preserve the authored proof".into(),
             holds: false,
         });
@@ -2811,7 +2803,7 @@ mod tests {
 
         let mut snapshot = task_planning_snapshot(&wave, &project, &task);
         let mut observed = snapshot.snapshot.projects.remove(0);
-        observed.status = crate::work::project::ProjectStatus::Completed;
+        observed.status = crate::store::work::project::ProjectStatus::Completed;
         crate::linear::acceptance::accept_linear_project_in(
             &store.sqlite,
             wave.id(),
@@ -2869,18 +2861,18 @@ mod tests {
             }),
             merge: None,
         });
-        pr.ci_observation = Some(crate::work::task::CiObservation {
+        pr.ci_observation = Some(crate::store::work::task::CiObservation {
             head_sha: "sha-abc".to_string(),
-            state: crate::work::task::CiState::Failing,
-            failing_checks: vec![crate::work::task::CiCheck {
+            state: crate::store::work::task::CiState::Failing,
+            failing_checks: vec![crate::store::work::task::CiCheck {
                 name: "build".to_string(),
                 url: Some("https://ci/build".to_string()),
             }],
             observed_at: OffsetDateTime::now_utc(),
         });
-        pr.github_observation = Some(crate::work::task::GithubObservation {
+        pr.github_observation = Some(crate::store::work::task::GithubObservation {
             checked_at: OffsetDateTime::now_utc(),
-            result: crate::work::task::GithubObservationResult::Degraded {
+            result: crate::store::work::task::GithubObservationResult::Degraded {
                 reason: "GitHub API rate limit exhausted".to_string(),
             },
         });
@@ -2891,7 +2883,7 @@ mod tests {
         assert_eq!(read.head_sha(), Some("sha-abc"));
         assert_eq!(read.presentation().unwrap().title, "Ship the proof");
         let ci = read.fresh_ci().expect("reading matches the current head");
-        assert_eq!(ci.state, crate::work::task::CiState::Failing);
+        assert_eq!(ci.state, crate::store::work::task::CiState::Failing);
         assert_eq!(ci.failing_checks[0].name, "build");
         assert_eq!(read.github_observation, pr.github_observation);
     }

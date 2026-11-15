@@ -60,8 +60,8 @@ pub(crate) struct SessionCaptureSpec {
 /// is an ordinary command, and its Graph is read from the Graph process record.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionGraphStep {
-    pub task_id: Option<crate::work::task::TaskId>,
-    pub task_pr_id: Option<crate::work::task::TaskPrId>,
+    pub task_id: Option<crate::store::work::task::TaskId>,
+    pub task_pr_id: Option<crate::store::work::task::TaskPrId>,
     pub invocation_id: String,
     #[serde(rename = "flow")] // Existing capture manifests remain replayable.
     pub graph: String,
@@ -349,7 +349,7 @@ pub struct SessionHistory {
     pub captured: Option<i64>,
     pub artifact_key: Option<String>,
     pub caller_artifact_key: Option<String>,
-    pub task_pr_id: Option<crate::work::task::TaskPrId>,
+    pub task_pr_id: Option<crate::store::work::task::TaskPrId>,
     pub repo: Option<String>,
     pub worktree: Option<String>,
     pub task_id: Option<loopflow_model::durable::TaskId>,
@@ -953,8 +953,11 @@ pub(crate) fn resolve_manifest(
         }
     }
     let database = database_in(lf_home).map_err(std::io::Error::other)?;
-    let store = crate::store::sqlite::SqliteStore::open_processes_read_only(&database)
-        .map_err(std::io::Error::other)?;
+    let store = crate::store::sqlite::SqliteStore::open_processes_read_only(
+        &database,
+        crate::store::token_key::encryption_key,
+    )
+    .map_err(std::io::Error::other)?;
     let artifact = store
         .resolve_history_input(selector)
         .map_err(|error| match error {
@@ -980,6 +983,7 @@ pub(crate) fn read_provider_session(dir: &Path) -> std::io::Result<Option<Provid
     let input = input_id_from_dir(dir)?;
     crate::store::sqlite::SqliteStore::open_processes_read_only(
         &row_database(dir).map_err(std::io::Error::other)?,
+        crate::store::token_key::encryption_key,
     )
     .and_then(|store| store.input_provider_session(&input))
     .map_err(std::io::Error::other)
@@ -1679,7 +1683,10 @@ fn resolve_capture(key: &str) -> StoreResult<(PathBuf, crate::session::LfSession
     let home = crate::store::lf_home_dir();
     let dir = record_dir(&home, key)
         .ok_or_else(|| record_error(std::io::Error::other("invalid capture key")))?;
-    let store = crate::store::sqlite::SqliteStore::open_processes_read_only(&database_in(&home)?)?;
+    let store = crate::store::sqlite::SqliteStore::open_processes_read_only(
+        &database_in(&home)?,
+        crate::store::token_key::encryption_key,
+    )?;
     let owner = store.session_for_artifact(key)?.ok_or_else(|| {
         record_error(std::io::Error::other(
             "capture does not belong to a recorded Session in this Machine",

@@ -175,6 +175,7 @@ fn configure_write_connection(
 #[derive(Debug, Clone)]
 pub struct SqliteStore {
     pub(crate) conn: Arc<Mutex<Connection>>,
+    pub(crate) token_key: token_crypto::TokenKeySource,
 }
 
 fn waves_in(conn: &Connection, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
@@ -375,7 +376,10 @@ pub(crate) fn read_task_worktree_ownership(path: &Path) -> StoreResult<Vec<TaskW
     rows.map(|row| row.map_err(StoreError::from)).collect()
 }
 
-fn migrate_plaintext_provider_tokens(conn: &mut Connection) -> StoreResult<()> {
+fn migrate_plaintext_provider_tokens(
+    conn: &mut Connection,
+    token_key: token_crypto::TokenKeySource,
+) -> StoreResult<()> {
     let mut scan = conn.prepare(
         "SELECT provider, access_token, refresh_token
          FROM provider_tokens
@@ -401,13 +405,14 @@ fn migrate_plaintext_provider_tokens(conn: &mut Connection) -> StoreResult<()> {
 
     let tx = conn.transaction()?;
     for (provider, access_token, refresh_token) in pending {
-        let encrypted_access = token_crypto::encrypt_token(&access_token).map_err(|error| {
-            StoreError::InvalidData(format!(
-                "failed to encrypt existing access token for provider '{provider}': {error}"
-            ))
-        })?;
-        let encrypted_refresh =
-            token_crypto::encrypt_optional(refresh_token.as_deref()).map_err(|error| {
+        let encrypted_access =
+            token_crypto::encrypt_token(&access_token, token_key).map_err(|error| {
+                StoreError::InvalidData(format!(
+                    "failed to encrypt existing access token for provider '{provider}': {error}"
+                ))
+            })?;
+        let encrypted_refresh = token_crypto::encrypt_optional(refresh_token.as_deref(), token_key)
+            .map_err(|error| {
                 StoreError::InvalidData(format!(
                     "failed to encrypt existing refresh token for provider '{provider}': {error}"
                 ))
@@ -451,7 +456,10 @@ fn read_token_row(row: &rusqlite::Row) -> rusqlite::Result<TokenRow> {
     ))
 }
 
-fn decrypt_token_row(row: TokenRow) -> StoreResult<super::ProviderToken> {
+fn decrypt_token_row(
+    row: TokenRow,
+    token_key: token_crypto::TokenKeySource,
+) -> StoreResult<super::ProviderToken> {
     let (
         provider,
         access_token,
@@ -463,15 +471,15 @@ fn decrypt_token_row(row: TokenRow) -> StoreResult<super::ProviderToken> {
         ct,
         encrypted,
     ) = row;
-    let access_token =
-        token_crypto::decrypt_if_needed(&access_token, encrypted).map_err(|error| {
+    let access_token = token_crypto::decrypt_if_needed(&access_token, encrypted, token_key)
+        .map_err(|error| {
             StoreError::InvalidData(format!(
                 "failed to decrypt access token for provider '{provider}': {error}"
             ))
         })?;
     let refresh_token = refresh_token
         .as_deref()
-        .map(|token| token_crypto::decrypt_if_needed(token, encrypted))
+        .map(|token| token_crypto::decrypt_if_needed(token, encrypted, token_key))
         .transpose()
         .map_err(|error| {
             StoreError::InvalidData(format!(
@@ -601,6 +609,7 @@ impl SqliteStore {
         path: &Path,
         build: &super::migration_runner::MigrationBuild,
         observers: &super::migration_runner::MigrationObservers<'_>,
+        token_key: token_crypto::TokenKeySource,
     ) -> StoreResult<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|error| {
@@ -615,6 +624,7 @@ impl SqliteStore {
         super::migration_runner::apply_sqlite(build, &conn, observers)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
+            token_key,
         })
     }
 
@@ -626,6 +636,7 @@ impl SqliteStore {
         busy: Duration,
         build: &super::migration_runner::MigrationBuild,
         observers: &super::migration_runner::MigrationObservers<'_>,
+        token_key: token_crypto::TokenKeySource,
     ) -> StoreResult<Self> {
         let existing_database = std::fs::metadata(path).is_ok_and(|metadata| metadata.len() > 0);
         if !may_apply_migrations && !existing_database {
@@ -680,19 +691,23 @@ impl SqliteStore {
             super::migration_runner::apply_sqlite(build, &conn, observers)?;
         }
         if may_apply_migrations {
-            migrate_plaintext_provider_tokens(&mut conn)?;
+            migrate_plaintext_provider_tokens(&mut conn, token_key)?;
         }
 
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
+            token_key,
         })
     }
 
     /// Open only the Process rows without schema or token writes.
     /// Observability commands use this when a source build may be older than
     /// the machine's release-owned database.
-    pub(crate) fn open_processes_read_only(path: &Path) -> StoreResult<Self> {
-        let store = Self::open_read_only(path)?;
+    pub(crate) fn open_processes_read_only(
+        path: &Path,
+        token_key: token_crypto::TokenKeySource,
+    ) -> StoreResult<Self> {
+        let store = Self::open_read_only(path, token_key)?;
         {
             let conn = store.conn.lock().expect("store mutex poisoned");
             validate_process_schema(&conn)?;
@@ -701,7 +716,11 @@ impl SqliteStore {
     }
 
     /// Append process evidence to an existing compatible store, never initialize it.
-    pub(crate) fn open_existing_processes(path: &Path, wait: Duration) -> StoreResult<Self> {
+    pub(crate) fn open_existing_processes(
+        path: &Path,
+        wait: Duration,
+        token_key: token_crypto::TokenKeySource,
+    ) -> StoreResult<Self> {
         let conn = Connection::open_with_flags(
             path,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -716,10 +735,14 @@ impl SqliteStore {
         )?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
+            token_key,
         })
     }
 
-    pub(crate) fn open_read_only(path: &Path) -> StoreResult<Self> {
+    pub(crate) fn open_read_only(
+        path: &Path,
+        token_key: token_crypto::TokenKeySource,
+    ) -> StoreResult<Self> {
         let conn = Connection::open_with_flags(
             path,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -728,6 +751,7 @@ impl SqliteStore {
         conn.execute_batch("PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;")?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
+            token_key,
         })
     }
 
@@ -828,15 +852,15 @@ impl SqliteStore {
             .optional()?;
         let saved = parent.is_some();
         let edits = if saved {
-            vec![crate::work::edit::WorkValue::WaveParent(
+            vec![crate::store::work::edit::WorkValue::WaveParent(
                 parent
                     .flatten()
                     .or_else(|| wave.parent_wave_id().map(ToString::to_string)),
             )]
         } else {
             vec![
-                crate::work::edit::WorkValue::WaveName(wave.name().into()),
-                crate::work::edit::WorkValue::WaveParent(
+                crate::store::work::edit::WorkValue::WaveName(wave.name().into()),
+                crate::store::work::edit::WorkValue::WaveParent(
                     wave.parent_wave_id().map(ToString::to_string),
                 ),
             ]
@@ -844,7 +868,7 @@ impl SqliteStore {
         planning_write::create(
             &tx,
             wave.repo(),
-            &crate::work::edit::WorkEdit::for_target(wave.id().as_str(), &edits),
+            &crate::store::work::edit::WorkEdit::for_target(wave.id().as_str(), &edits),
         )?;
         if !saved {
             tx.execute("UPDATE waves SET created_at=?2,retired_at=?3,superseded_by_wave_id=?4,retirement_reason=?5 WHERE id=?1",params![wave.id(),created_at,wave.retired_at().map(|at|at.unix_timestamp()),wave.superseded_by_wave_id(),wave.retirement_reason()])?;
@@ -971,25 +995,27 @@ impl SqliteStore {
             .query_row(params![provider], read_token_row)
             .optional()?;
 
-        row.map(decrypt_token_row).transpose()
+        row.map(|row| decrypt_token_row(row, self.token_key))
+            .transpose()
     }
 
     pub fn upsert_provider_token(&self, token: &super::ProviderToken) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let encrypted_access =
-            token_crypto::encrypt_token(&token.access_token).map_err(|error| {
+        let encrypted_access = token_crypto::encrypt_token(&token.access_token, self.token_key)
+            .map_err(|error| {
                 StoreError::InvalidData(format!(
                     "failed to encrypt access token for provider '{}': {error}",
                     token.provider
                 ))
             })?;
-        let encrypted_refresh = token_crypto::encrypt_optional(token.refresh_token.as_deref())
-            .map_err(|error| {
-                StoreError::InvalidData(format!(
-                    "failed to encrypt refresh token for provider '{}': {error}",
-                    token.provider
-                ))
-            })?;
+        let encrypted_refresh =
+            token_crypto::encrypt_optional(token.refresh_token.as_deref(), self.token_key)
+                .map_err(|error| {
+                    StoreError::InvalidData(format!(
+                        "failed to encrypt refresh token for provider '{}': {error}",
+                        token.provider
+                    ))
+                })?;
         conn.execute(
             "INSERT INTO provider_tokens (provider, access_token, refresh_token, oauth_client_id, expires_at, login, updated_at, credential_type, encrypted)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1)
@@ -1023,10 +1049,11 @@ impl SqliteStore {
         deadline: std::time::Instant,
     ) -> StoreResult<super::ProviderTokenReplacement> {
         let expired = || StoreError::InvalidData("credential replacement deadline elapsed".into());
-        let access = token_crypto::encrypt_token(&replacement.access_token)
+        let access = token_crypto::encrypt_token(&replacement.access_token, self.token_key)
             .map_err(|_| StoreError::InvalidData("credential encryption failed".into()))?;
-        let refresh = token_crypto::encrypt_optional(replacement.refresh_token.as_deref())
-            .map_err(|_| StoreError::InvalidData("credential encryption failed".into()))?;
+        let refresh =
+            token_crypto::encrypt_optional(replacement.refresh_token.as_deref(), self.token_key)
+                .map_err(|_| StoreError::InvalidData("credential encryption failed".into()))?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let previous: u32 = conn.pragma_query_value(None, "busy_timeout", |row| row.get(0))?;
         let remaining = deadline
@@ -1042,7 +1069,7 @@ impl SqliteStore {
                 "SELECT provider, access_token, refresh_token, oauth_client_id, expires_at, login, updated_at, credential_type, encrypted
                  FROM provider_tokens WHERE provider = ?1",
                 params![expected.provider], read_token_row,
-            ).optional()?.map(decrypt_token_row).transpose()?;
+            ).optional()?.map(|row| decrypt_token_row(row, self.token_key)).transpose()?;
             let Some(current) = row else {
                 return Ok(ProviderTokenReplacement::Missing);
             };
@@ -1089,7 +1116,7 @@ impl SqliteStore {
         let rows = stmt.query_map([], read_token_row)?;
         let mut tokens = Vec::new();
         for row in rows {
-            tokens.push(decrypt_token_row(row?)?);
+            tokens.push(decrypt_token_row(row?, self.token_key)?);
         }
         Ok(tokens)
     }
@@ -1764,11 +1791,13 @@ impl SqliteStore {
             )?;
             planning_write::local(
                 &tx,
-                &crate::work::edit::WorkEdit::for_target(
+                &crate::store::work::edit::WorkEdit::for_target(
                     update.wave_id.as_str(),
                     &[
-                        crate::work::edit::WorkValue::WaveName(name.into()),
-                        crate::work::edit::WorkValue::WaveParent(parent.map(|p| p.to_string())),
+                        crate::store::work::edit::WorkValue::WaveName(name.into()),
+                        crate::store::work::edit::WorkValue::WaveParent(
+                            parent.map(|p| p.to_string()),
+                        ),
                     ],
                 ),
             )?;
@@ -2026,6 +2055,7 @@ mod frontier_tests {
         conn.execute_batch(&view).unwrap();
         conn.execute_batch("PRAGMA query_only = ON").unwrap();
         let store = SqliteStore {
+            token_key: crate::store::token_key::encryption_key,
             conn: std::sync::Arc::new(std::sync::Mutex::new(conn)),
         };
         let identities = store.work_identities().unwrap();

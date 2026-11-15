@@ -465,7 +465,7 @@ fn query_selection_rejects_bad_syntax_and_ambiguous_refs_without_guessing() {
 
 #[test]
 fn query_selection_plan_wire_roundtrips() {
-    let fixture = include_str!("../../../../tests/fixtures/dto/view_plan.json");
+    let fixture = include_str!("../../../../../tests/fixtures/dto/view_plan.json");
     let plan: super::selection::ViewPlan = serde_json::from_str(fixture).unwrap();
     assert_eq!(
         serde_json::to_value(&plan).unwrap(),
@@ -477,7 +477,7 @@ fn query_selection_plan_wire_roundtrips() {
 
 #[test]
 fn dashboard_wire_keeps_identity_separate_from_its_query() {
-    let fixture = include_str!("../../../../tests/fixtures/dto/dashboard.json");
+    let fixture = include_str!("../../../../../tests/fixtures/dto/dashboard.json");
     let dashboard: super::selection::Dashboard = serde_json::from_str(fixture).unwrap();
     assert_eq!(dashboard.id.0, "picked");
     assert_ne!(dashboard.id.0, dashboard.selection.id.0);
@@ -515,7 +515,7 @@ fn auto_order_follows_the_query_until_touched_then_arrivals_append() {
 
 #[test]
 fn selection_portable_panes_round_trip_all_content_and_recovery() {
-    let fixture = include_str!("../../../../tests/fixtures/dto/pane_layout.json");
+    let fixture = include_str!("../../../../../tests/fixtures/dto/pane_layout.json");
     let layout: super::selection::WorkPaneLayout = serde_json::from_str(fixture).unwrap();
     layout.validate().unwrap();
     assert_eq!(

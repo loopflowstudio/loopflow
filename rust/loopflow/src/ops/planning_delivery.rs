@@ -8,8 +8,8 @@ use serde_json::{json, Value};
 
 use crate::store::planning_sync::{PlanningChange, TaskDeletion};
 use crate::store::sqlite::planning_changes::PlanningChanges;
+use crate::store::work::edit::WorkValue;
 use crate::store::Store;
-use crate::work::edit::WorkValue;
 use loopflow_model::durable::WorkRef;
 
 use super::planning_client::PlanningClient;

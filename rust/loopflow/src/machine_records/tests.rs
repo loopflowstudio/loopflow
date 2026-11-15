@@ -4,7 +4,7 @@ use rusqlite::params;
 
 use super::{copies_home, export, import, CopyCounts};
 use crate::store::sqlite::SqliteStore;
-use crate::work::task::NewTask;
+use crate::store::work::task::NewTask;
 use loopflow_model::durable::{MachineId, TaskId};
 
 const TASK: &str = "task_abcd1234400080000000000000000001";

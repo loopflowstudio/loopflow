@@ -203,7 +203,7 @@ async fn deliver(store: &Store, repo: &Path, work: &WorkRef, force: bool) -> Ops
             input["statusId"] = client
                 .linear()?
                 .project_field_input(
-                    &crate::work::edit::WorkValue::ProjectStatus(
+                    &crate::store::work::edit::WorkValue::ProjectStatus(
                         export.project_status().map_err(message)?,
                     ),
                     "",

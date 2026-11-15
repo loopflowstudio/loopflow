@@ -2286,7 +2286,7 @@ mod metadata_tests {
         let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let session = store.test_session("moving", &crate::session_record::new_artifact_key());
         let wave = loopflow_model::id::WaveId::new();
-        let project = crate::work::project::ProjectId::new();
+        let project = crate::store::work::project::ProjectId::new();
         let task = loopflow_model::durable::TaskId::new();
         {
             let conn = store.conn.lock().unwrap();
@@ -2689,7 +2689,7 @@ mod metadata_tests {
         let [task, other] = [0, 1].map(|_| {
             let id = loopflow_model::durable::TaskId::new();
             store
-                .create_task(&crate::work::task::NewTask {
+                .create_task(&crate::store::work::task::NewTask {
                     repository_id: repository.clone(),
                     id: id.clone(),
                     project_id: None,

@@ -2498,7 +2498,7 @@ mod tests {
     #[test]
     fn typed_events_share_connection_order_survive_selection_and_stop_on_cancel() {
         with_empty_home(async {
-            use crate::work::task::TaskId;
+            use crate::store::work::task::TaskId;
             use loopflow_model::durable::{Author, WorkRef};
             let path = crate::store::database_path_from_env().unwrap();
             let store = crate::store::opening::open_ephemeral(&path).unwrap();
@@ -2747,7 +2747,7 @@ mod tests {
             let repo = loopflow_test_support::TestRepo::new();
             let task = loopflow_model::durable::TaskId::new();
             store
-                .create_task(&crate::work::task::NewTask {
+                .create_task(&crate::store::work::task::NewTask {
                     repository_id: crate::repository::location::ensure_repository(
                         &store,
                         repo.path().to_str().unwrap(),
@@ -3117,10 +3117,10 @@ mod tests {
         store: &crate::store::sqlite::SqliteStore,
         repo: &loopflow_test_support::TestRepo,
         title: &str,
-    ) -> crate::work::task::Task {
+    ) -> crate::store::work::task::Task {
         let path = repo.path().canonicalize().unwrap();
         let task = store
-            .create_task(&crate::work::task::NewTask {
+            .create_task(&crate::store::work::task::NewTask {
                 repository_id: crate::repository::location::ensure_repository(
                     store,
                     path.to_str().unwrap(),

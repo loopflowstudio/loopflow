@@ -129,7 +129,7 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             if label.trim().is_empty() {
                 return Err(anyhow!("label must be nonempty"));
             }
-            let ownership = crate::rental::Ownership {
+            let ownership = crate::store::rental::Ownership {
                 pool: pool.clone(),
                 cost_usd: cost_usd.unwrap_or_default(),
                 expires_at: expires_at

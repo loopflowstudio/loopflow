@@ -23,9 +23,9 @@ use sha2::Digest as _;
 
 use crate::ops::context::{ContextExplanation, ContextFact};
 use crate::session::PrimaryScope;
+use crate::store::work::selection::WorkWorkspaceKind;
 use crate::store::Store;
 use crate::work::link::{WorkTarget, WorkUrl};
-use crate::work::selection::WorkWorkspaceKind;
 
 pub(crate) const DESKTOP_BUNDLE: &str = "com.loopflow.mac";
 const HOST_TIMEOUT: Duration = Duration::from_secs(2);
@@ -158,7 +158,7 @@ struct Resolved {
     label: String,
     repository_path: PathBuf,
     repository_id: Option<String>,
-    task: Option<crate::work::task::Task>,
+    task: Option<crate::store::work::task::Task>,
     wave: Option<String>,
     /// An exact Session: explicit, or an available secondary conversation.
     session: Option<String>,

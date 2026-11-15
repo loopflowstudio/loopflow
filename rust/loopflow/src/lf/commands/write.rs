@@ -116,14 +116,14 @@ writes! {
 
     /// `lf task complete <issue>`.
     #[serde(rename = "task.complete")]
-    TaskComplete { directory: PathBuf, issue: String } => crate::work::task::Task;
+    TaskComplete { directory: PathBuf, issue: String } => crate::store::work::task::Task;
     { issue, .. } => {
         crate::ops::task::task_complete(&task_repo(issue)?, issue, None)?
     },
 
     /// `lf task reopen <issue>`.
     #[serde(rename = "task.reopen")]
-    TaskReopen { directory: PathBuf, issue: String } => crate::work::task::Task;
+    TaskReopen { directory: PathBuf, issue: String } => crate::store::work::task::Task;
     { issue, .. } => crate::ops::task::task_reopen(issue, None)?,
 
     /// `lf task edit <issue> --notes=<notes>`.
@@ -447,7 +447,7 @@ writes! {
         directory: PathBuf,
         wave: String,
         project: String,
-    } => crate::work::project::Project;
+    } => crate::store::work::project::Project;
     { wave, project, .. } => {
         crate::engine::wave::planning_bind(directory, wave, project)?
     },
@@ -931,7 +931,7 @@ writes! {
         id: String,
         expression: String,
         revision: Option<i64>,
-    } => crate::work::selection::Dashboard;
+    } => crate::store::work::selection::Dashboard;
     {
         id,
         expression,
@@ -954,7 +954,7 @@ writes! {
         directory: PathBuf,
         id: String,
         revision: i64,
-    } => crate::work::selection::Dashboard;
+    } => crate::store::work::selection::Dashboard;
     { id, revision, .. } => super::desktop::save_dashboard(
         None,
         directory,
@@ -971,7 +971,7 @@ writes! {
         directory: PathBuf,
         id: String,
         revision: i64,
-    } => crate::work::selection::Dashboard;
+    } => crate::store::work::selection::Dashboard;
     { id, revision, .. } => super::desktop::save_dashboard(
         None,
         directory,
@@ -989,7 +989,7 @@ writes! {
         id: String,
         name: String,
         revision: i64,
-    } => crate::work::selection::Dashboard;
+    } => crate::store::work::selection::Dashboard;
     {
         id, name, revision, ..
     } => super::desktop::save_dashboard(
@@ -1043,7 +1043,7 @@ writes! {
         id: String,
         revision: i64,
         slots: String,
-    } => crate::work::selection::Dashboard;
+    } => crate::store::work::selection::Dashboard;
     {
         id,
         revision,
@@ -1088,7 +1088,7 @@ writes! {
         directory: PathBuf,
         work: String,
         layout: String,
-    } => crate::work::selection::WorkPaneLayout;
+    } => crate::store::work::selection::WorkPaneLayout;
     { work, layout, .. } => {
         super::desktop::save_layout(None, directory, work, &mut layout.as_bytes())?
     },

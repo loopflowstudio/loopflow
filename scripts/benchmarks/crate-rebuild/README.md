@@ -16,8 +16,10 @@ upstream revision is `ca81ec2a2566efc623692741440d99c710268841`.
 
 The full comparison clones the committed baseline and candidate into disposable
 copies. It runs serial cold A, fresh-target warm B, and a real shipping-message
-edit in B, with one Cargo job unless selected otherwise. Both revisions retain
-their own profiles and dependencies; inspect differences before attributing a
+edit in B, then a Task-record error-message edit on top of it. The Task edit
+follows its source across crate moves; each receipt names the edited file. Each
+case measures only its latest edit, with one Cargo job unless selected otherwise.
+Both revisions retain their own profiles and dependencies; inspect differences before attributing a
 timing change to crate layout. It needs the source repository's `origin/main`
 for migration ordering. Network fetches remain possible on cold builds.
 

@@ -3,8 +3,8 @@ use crate::durable::{OwningMachineSource, TaskExecutionRoute, TaskExecutionSourc
 use crate::store::sqlite::scope_defaults::TaskScope;
 use crate::store::sqlite::task_ownership::{label_owner, OwnershipFacts, Person};
 use crate::store::sqlite::SqliteStore;
+use crate::store::work::task::{NewTask, Task, TaskPr};
 use crate::store::{StoreError, StoreResult};
-use crate::work::task::{NewTask, Task, TaskPr};
 use loopflow_model::durable::{MachineId, MachineSetting, TaskId, TaskOwnershipEntry};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -238,9 +238,9 @@ pub(crate) fn held_planning(
 
 pub fn set_rental_state(
     store: &SqliteStore,
-    id: &crate::rental::RentalId,
-    state: crate::rental::RentalState,
-) -> StoreResult<(crate::rental::Rental, Vec<TaskId>)> {
+    id: &crate::store::rental::RentalId,
+    state: crate::store::rental::RentalState,
+) -> StoreResult<(crate::store::rental::Rental, Vec<TaskId>)> {
     loop {
         let rental = store.rental(id)?;
         let prepared = match (&rental.machine_id, state.is_live()) {
@@ -300,7 +300,7 @@ pub(crate) fn apply_linear_observation(
     observation: &crate::store::linear_records::LinearIssueObservation,
     observed_at: time::OffsetDateTime,
     planning_connected: bool,
-) -> StoreResult<crate::work::task::LinearObservationOutcome> {
+) -> StoreResult<crate::store::work::task::LinearObservationOutcome> {
     let mut names = machine_names(store)?;
     names.insert(
         crate::store::machines::local_machine(store)?.id,

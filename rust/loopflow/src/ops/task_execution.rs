@@ -13,8 +13,8 @@ use crate::process::ProcessEntry;
 use crate::session::GraphProcessSummaryState;
 use crate::session_record::activity::{self, Activity};
 use crate::store::sqlite::{entry_of, AgentLimitRecovery, GraphExecutionFacts, SqliteStore};
+use crate::store::work::task::Task;
 use crate::store::{SharedStore, StoreResult};
-use crate::work::task::Task;
 use loopflow_model::durable::TaskId;
 
 use super::error::{OpsError, OpsResult};

@@ -1,7 +1,7 @@
 //! One saved Task thread and its delivery evidence, with or without Linear.
 
 use super::planning_write;
-use crate::work::edit::WorkValue as Edit;
+use crate::store::work::edit::WorkValue as Edit;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
 use crate::store::{StoreError, StoreResult};
@@ -114,11 +114,11 @@ fn write_comment(conn: &Connection, task: &TaskId, comment: &TaskComment) -> Sto
     planning_write::create(
         conn,
         "",
-        &crate::work::edit::WorkEdit::for_target(
+        &crate::store::work::edit::WorkEdit::for_target(
             &comment.id,
             &[
                 Edit::CommentTask(task.to_string()),
-                Edit::CommentContent(crate::work::edit::CommentContent {
+                Edit::CommentContent(crate::store::work::edit::CommentContent {
                     body: comment.body.clone(),
                     author: comment.author.stored(),
                     created_at: comment.created_at.clone(),

@@ -1,5 +1,5 @@
 //! Personal capacity declarations acquired before synchronous rental commands.
-use crate::rental::{OnDemand, Ownership, Pool, Rental, Usd};
+use crate::store::rental::{OnDemand, Ownership, Pool, Rental, Usd};
 use crate::store::sqlite::SqliteStore;
 use crate::store::{StoreError, StoreResult};
 use loopflow_model::durable::MachineId;

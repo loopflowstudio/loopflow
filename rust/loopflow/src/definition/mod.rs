@@ -90,7 +90,7 @@ mod tests {
             serde_json::json!({
                 "kind": "graph",
                 "token": {
-                    "task_id": crate::work::task::TaskId::new(),
+                    "task_id": crate::store::work::task::TaskId::new(),
                     "invocation_id": "legacy",
                     "graph": "legacy",
                     "node_id": "review",

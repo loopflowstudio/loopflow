@@ -12,11 +12,11 @@ use serde_json::{json, Value};
 
 use crate::linear::{LinearIssueId, LinearProjectId};
 use crate::ops::linear::{LinearRefresh, LinearTestContext, LINEAR_TEST_CONTEXT};
-use crate::store::{open_ephemeral_store, CredentialType, ProviderToken, StorageConfig};
-use crate::work::project::{Project, ProjectId};
-use crate::work::task::{
+use crate::store::work::project::{Project, ProjectId};
+use crate::store::work::task::{
     GithubPr, LinearWritebackState, Observation, PrPublication, Task, TaskId, TaskPr, TaskPrId,
 };
+use crate::store::{open_ephemeral_store, CredentialType, ProviderToken, StorageConfig};
 use crate::work::wave::Wave;
 use loopflow_model::id::WaveId;
 
@@ -325,7 +325,7 @@ fn fixture(
         summary: String::new(),
         slug: "chapter".into(),
         name: "Chapter".into(),
-        status: crate::work::project::ProjectStatus::Started,
+        status: crate::store::work::project::ProjectStatus::Started,
         description: String::new(),
         krs: Vec::new(),
         metric_targets: Vec::new(),

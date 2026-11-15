@@ -101,7 +101,10 @@ pub(crate) async fn ensure_task(
 /// Start a newly checked-out Task's conversation beside its Graph, so `lf
 /// resume` reattaches instead of creating it. Best-effort: a failure is logged
 /// and `lf resume` creates the conversation as before.
-pub(crate) async fn start_task_conversation(store: &SharedStore, task: &crate::work::task::Task) {
+pub(crate) async fn start_task_conversation(
+    store: &SharedStore,
+    task: &crate::store::work::task::Task,
+) {
     let (phase, subject) = match start_in_background(store, task).await {
         Ok(Some(session)) => ("background_start", session),
         Ok(None) => ("background_skip", task.identifier.clone()),
@@ -115,7 +118,7 @@ pub(crate) async fn start_task_conversation(store: &SharedStore, task: &crate::w
 
 async fn start_in_background(
     store: &SharedStore,
-    task: &crate::work::task::Task,
+    task: &crate::store::work::task::Task,
 ) -> Result<Option<String>> {
     let worktree = task.worktree()?.clone();
     let wave = match &task.wave_id {

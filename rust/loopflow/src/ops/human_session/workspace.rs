@@ -5,8 +5,8 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::store::sqlite::TaskCheckout;
+use crate::store::work::task::TaskId;
 use crate::store::SharedStore;
-use crate::work::task::TaskId;
 use loopflow_model::durable::{MachineId, WorkRef};
 
 use super::SessionRecord;
@@ -145,7 +145,7 @@ pub(super) async fn associate(
 mod tests {
     use super::WorkspaceResolver;
     use crate::store::sqlite::TaskCheckout;
-    use crate::work::task::TaskId;
+    use crate::store::work::task::TaskId;
     use loopflow_model::durable::{MachineId, WorkRef};
 
     #[tokio::test]

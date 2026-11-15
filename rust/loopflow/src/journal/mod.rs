@@ -370,7 +370,11 @@ pub fn observe_process(command: &[String]) {
         if !path.exists() {
             return Ok(());
         }
-        let ledger = SqliteStore::open_existing_processes(&path, wait)?;
+        let ledger = SqliteStore::open_existing_processes(
+            &path,
+            wait,
+            crate::store::token_key::encryption_key,
+        )?;
         let directory = std::env::current_dir()?;
         let fields = LfEventFields {
             command: Some(command.to_vec()),
@@ -1078,7 +1082,15 @@ fn parent_is_recorded(parent: &LfProcessId, ledger: Option<&SqliteStore>) -> boo
     };
     match ledger
         .cloned()
-        .map_or_else(|| SqliteStore::open_processes_read_only(&path), Ok)
+        .map_or_else(
+            || {
+                SqliteStore::open_processes_read_only(
+                    &path,
+                    crate::store::token_key::encryption_key,
+                )
+            },
+            Ok,
+        )
         .and_then(|store| store.process_is_recorded(parent.as_str()))
     {
         Ok(recorded) => recorded,
@@ -1488,8 +1500,11 @@ pub(crate) fn prune_process_receipts_at(
     if pids.is_empty() {
         return Ok(0);
     }
-    let store = SqliteStore::open_processes_read_only(&lf_home.join("loopflow.db"))
-        .map_err(std::io::Error::other)?;
+    let store = SqliteStore::open_processes_read_only(
+        &lf_home.join("loopflow.db"),
+        crate::store::token_key::encryption_key,
+    )
+    .map_err(std::io::Error::other)?;
     let mut removed = 0;
     for (path, receipt) in read_process_receipt_files_at(lf_home)? {
         if !pids.contains(&receipt.pid)

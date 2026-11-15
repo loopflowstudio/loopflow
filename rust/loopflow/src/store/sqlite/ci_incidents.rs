@@ -4,10 +4,10 @@
 use rusqlite::{params, types::Type, OptionalExtension};
 use time::OffsetDateTime;
 
-use crate::pr_landing::PrLandingId;
-use crate::store::ci_incidents::CiIncidentReportRow;
+use crate::store::pr_landing::PrLandingId;
+use crate::store::records::CiIncidentReportRow;
+use crate::store::work::task::{CiIncident, TaskId, TaskPrId};
 use crate::store::{StoreError, StoreResult};
-use crate::work::task::{CiIncident, TaskId, TaskPrId};
 use loopflow_model::id::LfProcessId;
 
 fn timestamp(value: OffsetDateTime) -> i64 {

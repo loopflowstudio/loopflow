@@ -2,13 +2,13 @@
 //! Project provider effects retain before/after lists to recognize partial progress.
 
 use super::planning_write;
-use crate::work::edit::WorkValue as Edit;
+use crate::store::work::edit::WorkValue as Edit;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use crate::store::work::task::Task;
 use crate::store::StoreResult;
-use crate::work::task::Task;
 use loopflow_model::durable::ProjectId;
 
 use super::SqliteStore;
@@ -332,7 +332,7 @@ fn apply_order(
         if member {
             planning_write::local(
                 conn,
-                &crate::work::edit::WorkEdit::for_target(id, &[Edit::TaskRank(rank as u32)]),
+                &crate::store::work::edit::WorkEdit::for_target(id, &[Edit::TaskRank(rank as u32)]),
             )?;
         }
     }

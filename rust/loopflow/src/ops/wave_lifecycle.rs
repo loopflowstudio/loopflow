@@ -13,8 +13,8 @@ use crate::work::wave::lifecycle::{Identity, Operation, ProviderChange};
 use serde::{Deserialize, Serialize};
 
 use crate::ops::{OpsError, OpsResult};
+use crate::store::work::project::Project;
 use crate::store::Store;
-use crate::work::project::Project;
 use crate::work::wave::{Wave, WaveLocator};
 use loopflow_model::id::WaveId;
 

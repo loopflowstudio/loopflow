@@ -1,8 +1,8 @@
 use super::{invalid, SqliteStore};
-use crate::store::{StoreError, StoreResult};
-use crate::work::selection::{
+use crate::store::work::selection::{
     PaneIntent, PaneTree, WorkPaneLayout, WorkWorkspaceKey, WorkWorkspaceKind,
 };
+use crate::store::{StoreError, StoreResult};
 use loopflow_model::durable::RepositoryId;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 

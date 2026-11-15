@@ -12,6 +12,23 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 
 
+def _edit_task_record(tree: Path) -> Path:
+    sources = [
+        path
+        for path in (tree / "rust").glob("*/src/**/task/mod.rs")
+        if "pub enum TaskDataError" in path.read_text()
+    ]
+    if len(sources) != 1:
+        raise RuntimeError("cannot locate the Task record edit anchor")
+    source = sources[0]
+    text = source.read_text()
+    old = '#[error("invalid Task: {0}")]'
+    if text.count(old) != 1:
+        raise RuntimeError("Task record message anchor changed")
+    source.write_text(text.replace(old, '#[error("invalid Task: {0} (rebuild probe)")]'))
+    return source
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base", required=True)
@@ -95,7 +112,11 @@ def main() -> None:
                     ("cold_a", trees[0]),
                     ("warm_b", trees[1]),
                     ("shipping_b", trees[1]),
+                    ("task_record_b", trees[1]),
                 ):
+                    edited_source = None
+                    if case == "task_record_b":
+                        edited_source = _edit_task_record(tree)
                     if case == "shipping_b":
                         # A real string-value change in shipping logic, not a touched comment.
                         sources = [
@@ -107,6 +128,7 @@ def main() -> None:
                         if len(sources) != 1:
                             raise RuntimeError("cannot locate the shipping edit anchor")
                         source = sources[0]
+                        edited_source = source
                         old = '"no Task exists for {issue:?}"'
                         text = source.read_text()
                         if text.count(old) != 1:
@@ -157,6 +179,9 @@ def main() -> None:
                         "exit_code": result.returncode,
                         "wall_seconds": round(time.monotonic() - start, 3),
                         "jobs": args.jobs,
+                        "edited_source": (
+                            str(edited_source.relative_to(tree)) if edited_source else None
+                        ),
                         "nonfresh_artifacts": sorted(
                             {
                                 item["target"]["name"]

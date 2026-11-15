@@ -14,7 +14,7 @@ use time::OffsetDateTime;
 use crate::lf::{OndemandCommand, PoolCommand};
 use crate::machine_records::CopyCounts;
 use crate::rental::sandbox::Sandboxes;
-use crate::rental::{
+use crate::store::rental::{
     self, GiveBack, Hardware, Holdings, OnDemand, Pool, PoolMachine, Provider, Rental, RentalState,
     Resolution, Usd,
 };
@@ -1193,7 +1193,9 @@ mod tests {
     use super::{checkout_script, end_rental, read_holdings, reconcile, refresh, Ended};
     use crate::machine_records::CopyCounts;
     use crate::rental::sandbox::Sandboxes;
-    use crate::rental::{Hardware, OnDemand, Provider, Rental, RentalState, Usd, BOOT_SECONDS};
+    use crate::store::rental::{
+        Hardware, OnDemand, Provider, Rental, RentalState, Usd, BOOT_SECONDS,
+    };
     use crate::store::sqlite::SqliteStore;
     use loopflow_model::durable::MachineId;
 

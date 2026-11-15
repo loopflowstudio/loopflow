@@ -2059,7 +2059,10 @@ pub(crate) fn resolve_recorded_provider_account_blocking(
                 lf_home.join("loopflow.db")
             };
             let catalog = Arc::new(crate::store::Store {
-                sqlite: crate::store::sqlite::SqliteStore::open_read_only(&catalog)?,
+                sqlite: crate::store::sqlite::SqliteStore::open_read_only(
+                    &catalog,
+                    crate::store::token_key::encryption_key,
+                )?,
             });
             let route = ProviderAccountRoute {
                 provider,
@@ -2113,7 +2116,10 @@ pub(crate) fn read_account_store() -> Result<Option<SharedStore>, ProviderAccoun
     match path.try_exists() {
         Ok(false) => Ok(None),
         Ok(true) => Ok(Some(Arc::new(crate::store::Store {
-            sqlite: crate::store::sqlite::SqliteStore::open_read_only(&path)?,
+            sqlite: crate::store::sqlite::SqliteStore::open_read_only(
+                &path,
+                crate::store::token_key::encryption_key,
+            )?,
         }))),
         Err(error) => Err(ProviderAccountError::Filesystem(error.to_string())),
     }

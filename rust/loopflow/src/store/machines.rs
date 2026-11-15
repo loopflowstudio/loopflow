@@ -142,14 +142,14 @@ pub fn remove_machine(store: &SqliteStore, label: &str) -> StoreResult<()> {
 pub fn pool_machines(
     store: &SqliteStore,
     name: &str,
-) -> StoreResult<Vec<crate::rental::PoolMachine>> {
+) -> StoreResult<Vec<crate::store::rental::PoolMachine>> {
     let saved = store.saved_pool_machines(name)?;
     let config = config(store)?;
     saved
         .into_iter()
         .map(|(machine, ownership, tasks)| {
             let id = machine.id.clone();
-            Ok(crate::rental::PoolMachine {
+            Ok(crate::store::rental::PoolMachine {
                 machine: present(Some(machine), &id, &config)?.ok_or(StoreError::NotFound)?,
                 ownership,
                 tasks,

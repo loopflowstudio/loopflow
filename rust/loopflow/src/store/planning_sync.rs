@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PlanningChange {
     pub id: String,
-    pub value: crate::work::edit::WorkValue,
+    pub value: crate::store::work::edit::WorkValue,
     pub base: Option<PlanningBaseline>,
 }
 
@@ -14,7 +14,7 @@ pub struct PlanningChange {
 pub struct PlanningBaseline {
     pub revision: Option<String>,
     /// None retains an explicitly null membership claim; no baseline means omission.
-    pub value: Option<crate::work::edit::WorkValue>,
+    pub value: Option<crate::store::work::edit::WorkValue>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

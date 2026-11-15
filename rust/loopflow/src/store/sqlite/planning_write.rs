@@ -1,9 +1,9 @@
 //! The planning write boundary shared by local operations and imports.
 //! Callers own their transaction and local delivery evidence; this writer changes
 //! only planning columns and captures local mutations in that same transaction.
-use crate::planning_exchange::PlanningMutation;
+use crate::store::planning_exchange::PlanningMutation;
+use crate::store::work::edit::{CommentContent, Disposition, WorkEdit, WorkValue};
 use crate::store::{StoreError, StoreResult};
-use crate::work::edit::{CommentContent, Disposition, WorkEdit, WorkValue};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -562,9 +562,9 @@ mod tests {
     use super::{create, local};
     use crate::planning_git::PlanningDestination;
     use crate::store::sqlite::SqliteStore;
-    use crate::work::edit::{WorkEdit, WorkValue, WorkValue as Edit};
-    use crate::work::task::NewTask;
-    use crate::work::task::TaskUpdate;
+    use crate::store::work::edit::{WorkEdit, WorkValue, WorkValue as Edit};
+    use crate::store::work::task::NewTask;
+    use crate::store::work::task::TaskUpdate;
     use crate::work::wave::Wave;
     use loopflow_model::comment::{TaskComment, TaskCommentAuthor};
     use loopflow_model::durable::{ProjectId, TaskId};
@@ -580,7 +580,7 @@ mod tests {
             create(
                 &tx,
                 "/repo",
-                &crate::work::edit::WorkEdit::for_target(
+                &crate::store::work::edit::WorkEdit::for_target(
                     project.as_str(),
                     &[
                         Edit::ProjectWave(wave.id().to_string()),
@@ -592,7 +592,7 @@ mod tests {
             .unwrap();
             local(
                 &tx,
-                &crate::work::edit::WorkEdit::for_target(
+                &crate::store::work::edit::WorkEdit::for_target(
                     wave.id().as_str(),
                     &[Edit::WaveProject(Some(project.to_string()))],
                 ),
@@ -816,7 +816,7 @@ mod tests {
         // These strings would be interpreted as Markdown by the retired storage path.
         saved.description = "Authored purpose\nworkflow: literal prose".into();
 
-        saved.krs = vec![crate::work::project::ProjectKR {
+        saved.krs = vec![crate::store::work::project::ProjectKR {
             text: "First line\n## Not a section\n- [ ] not another KR".into(),
             holds: true,
         }];
@@ -842,7 +842,7 @@ mod tests {
             let conn = a.conn.lock().unwrap();
             local(
                 &conn,
-                &crate::work::edit::WorkEdit::for_target(
+                &crate::store::work::edit::WorkEdit::for_target(
                     project.as_ref().unwrap().as_str(),
                     &[
                         Edit::ProjectTeams(vec!["team-1".into(), "team-2".into()]),
@@ -1093,7 +1093,7 @@ mod tests {
 
     #[test]
     fn rejected_selection_retains_history_without_becoming_an_observed_parent() {
-        use crate::planning_exchange::PlanningMutation;
+        use crate::store::planning_exchange::PlanningMutation;
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         let task = plan(&store);
@@ -1178,7 +1178,7 @@ mod tests {
         let tx = conn.transaction().unwrap();
         local(
             &tx,
-            &crate::work::edit::WorkEdit::for_target(
+            &crate::store::work::edit::WorkEdit::for_target(
                 wave.as_ref().unwrap().as_str(),
                 &[Edit::WaveName("Local edit".into())],
             ),

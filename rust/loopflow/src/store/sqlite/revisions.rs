@@ -173,7 +173,11 @@ mod tests {
         let (dir, writer) = store();
         writer.test_session("first", &crate::session_record::new_artifact_key());
         writer.test_session("second", &crate::session_record::new_artifact_key());
-        let reader = SqliteStore::open_read_only(&dir.path().join("db")).unwrap();
+        let reader = SqliteStore::open_read_only(
+            &dir.path().join("db"),
+            crate::store::token_key::encryption_key,
+        )
+        .unwrap();
         let snapshot = reader.read_snapshot().unwrap();
         let before = reader.revisions().unwrap();
         assert_eq!(

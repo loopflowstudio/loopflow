@@ -4,12 +4,12 @@ use super::sessions::{SessionProjection, SessionProjectionInputs};
 use super::SqliteStore;
 use crate::durable::{TaskSection, TaskState};
 
-use crate::store::{StoreError, StoreResult};
-use crate::work::selection::{
+use crate::store::work::selection::{
     Arrangement, Dashboard, DashboardId, DashboardReading, Selection, SelectionExpression,
     SelectionId, SelectionResolution, SelectionState, SelectionWork, SlotLayout, WorkWorkspaceKey,
     WorkWorkspaceKind,
 };
+use crate::store::{StoreError, StoreResult};
 use loopflow_model::durable::RepositoryId;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -336,8 +336,8 @@ fn plan_in(
     saved: Option<&Dashboard>,
     queries: &BTreeMap<DashboardId, Selection>,
     work: &[SelectionWork],
-) -> StoreResult<crate::work::selection::ViewPlan> {
-    use crate::work::selection::{PaneIntent, ViewContent, ViewLocation, ViewPlan};
+) -> StoreResult<crate::store::work::selection::ViewPlan> {
+    use crate::store::work::selection::{PaneIntent, ViewContent, ViewLocation, ViewPlan};
     let resolution = selection
         .resolve(repository.as_str(), work, queries)
         .map_err(StoreError::from)?;
@@ -453,7 +453,7 @@ fn plan_selection_in(
     repository: &RepositoryId,
     selection: Selection,
     projection: &SessionProjection,
-) -> StoreResult<crate::work::selection::ViewPlan> {
+) -> StoreResult<crate::store::work::selection::ViewPlan> {
     let catalog = catalog_in(conn, repository)?;
     let work = work_in(conn, repository, projection)?;
     let saved = selection
@@ -493,7 +493,7 @@ impl SqliteStore {
         selection: Selection,
         inputs: &SessionProjectionInputs,
         projection: &SessionProjection,
-    ) -> StoreResult<Option<crate::work::selection::ViewPlan>> {
+    ) -> StoreResult<Option<crate::store::work::selection::ViewPlan>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let Some(snapshot) = inputs.pin(&mut conn)? else {
             return Ok(None);
@@ -512,7 +512,7 @@ impl SqliteStore {
         repos: &[String],
         inputs: &SessionProjectionInputs,
         projection: &SessionProjection,
-    ) -> StoreResult<Option<Vec<crate::work::selection::ViewPlan>>> {
+    ) -> StoreResult<Option<Vec<crate::store::work::selection::ViewPlan>>> {
         let selection = match source {
             Some(source) => Selection::parse(source, None).map_err(StoreError::from)?,
             None => repository_default(),
@@ -554,7 +554,7 @@ impl SqliteStore {
         repository: &RepositoryId,
         inputs: &SessionProjectionInputs,
         projection: &SessionProjection,
-    ) -> StoreResult<Option<Vec<crate::work::selection::ViewPlan>>> {
+    ) -> StoreResult<Option<Vec<crate::store::work::selection::ViewPlan>>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let Some(snapshot) = inputs.pin(&mut conn)? else {
             return Ok(None);
@@ -578,11 +578,11 @@ impl SqliteStore {
                 &snapshot,
                 repository,
                 Selection {
-                    id: crate::work::selection::SelectionId(format!(
+                    id: crate::store::work::selection::SelectionId(format!(
                         "{WAVE_DEFAULT_PREFIX}{}",
                         wave.key.id
                     )),
-                    expression: crate::work::selection::SelectionExpression::Wave {
+                    expression: crate::store::work::selection::SelectionExpression::Wave {
                         wave: loopflow_model::id::WaveId::parse(&wave.key.id).map_err(invalid)?,
                     },
                 },

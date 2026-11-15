@@ -189,8 +189,8 @@ mod tests {
     use crate::store::planning_sync::PlanningSyncState;
     use crate::store::query_plans::{growing_scans, statements};
     use crate::store::sqlite::SqliteStore;
+    use crate::store::work::task::{NewTask, Task};
     use crate::store::Store;
-    use crate::work::task::{NewTask, Task};
     use loopflow_model::durable::TaskId;
     use loopflow_test_support::TestRepo;
 

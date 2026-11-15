@@ -4,7 +4,7 @@
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use time::OffsetDateTime;
 
-use crate::rental::{
+use crate::store::rental::{
     self, Hardware, OnDemand, Ownership, Provider, Rental, RentalId, RentalState, Usd,
 };
 use crate::store::rows::now_unix;

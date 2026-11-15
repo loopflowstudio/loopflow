@@ -267,7 +267,7 @@ fn land_in(repo: &Path, options: &LandOptions, progress: &impl Progress) -> anyh
     let (checkout, _) = crate::ops::land::resolve_repos(repo, options.worktree.as_deref())?;
     if !options.local {
         if let Some((task, pr, state)) = crate::ops::task::reconcile_checkout_pr(&checkout)? {
-            let unchanged = pr.phase() == crate::work::task::PrPhase::Merged
+            let unchanged = pr.phase() == crate::store::work::task::PrPhase::Merged
                 && crate::git::git_stdout(
                     &checkout,
                     &["status", "--porcelain", "--", ".", ":(exclude)scratch"],

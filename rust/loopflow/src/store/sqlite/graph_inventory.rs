@@ -984,7 +984,7 @@ mod tests {
         assert!(
             events.iter().any(|event| matches!(
                 &event.kind,
-                crate::work::task::TaskEventKind::GraphFinished { graph, .. } if graph == "pursue"
+                crate::store::work::task::TaskEventKind::GraphFinished { graph, .. } if graph == "pursue"
             )),
             "{events:?}"
         );

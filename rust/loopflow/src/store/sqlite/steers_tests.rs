@@ -730,7 +730,7 @@ fn migration_preserves_released_event_copies_and_planning_receipts() {
         .collect::<rusqlite::Result<Vec<_>>>()
         .unwrap();
     for event in events {
-        serde_json::from_str::<crate::work::project::ProjectEventKind>(&event).unwrap();
+        serde_json::from_str::<crate::store::work::project::ProjectEventKind>(&event).unwrap();
     }
 }
 

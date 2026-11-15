@@ -8,7 +8,7 @@ use serde_yaml_ng::Value;
 use super::{Config, ConfigDeclarations, ConfigSource};
 use crate::error::LoadError;
 use crate::graph::Skill;
-use crate::work::selection::{WorkWorkspaceKey, WorkWorkspaceKind};
+use crate::store::work::selection::{WorkWorkspaceKey, WorkWorkspaceKind};
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema,
@@ -278,7 +278,7 @@ pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadErr
         }
         if !template.hours.is_finite()
             || template.hours <= 0.0
-            || template.hours > crate::rental::MAX_HOURS
+            || template.hours > crate::store::rental::MAX_HOURS
         {
             return Err(invalid("rental hours must be positive and at most 24"));
         }

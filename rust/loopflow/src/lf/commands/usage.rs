@@ -68,6 +68,7 @@ pub fn context_report(runs: &[SessionHistory]) -> Result<crate::context_usage::C
     } else {
         let store = crate::store::sqlite::SqliteStore::open_processes_read_only(
             &crate::store::database_path_from_env()?,
+            crate::store::token_key::encryption_key,
         )?;
         runs.iter()
             .rev()

@@ -28,11 +28,11 @@ use crate::lf::output::Colors;
 use crate::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
 use crate::session_record::SessionHistory;
 use crate::store::sqlite::selections::{task_selection_states, TaskSelectionReading};
-use crate::store::{open_existing_store, SharedStore};
-use crate::work::project::Project;
-use crate::work::task::{
+use crate::store::work::project::Project;
+use crate::store::work::task::{
     CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase, Task, TaskPr,
 };
+use crate::store::{open_existing_store, SharedStore};
 use crate::work::wave::metrics::{
     MetricContractIssueDto, MetricEvidenceDto, MetricFreshnessDto, MetricPortfolioDto,
     MetricReadingDto, MetricStage, MetricUnknownCauseDto, Threshold,
@@ -393,9 +393,9 @@ pub struct ProjectSummary {
     pub linear_id: Option<String>,
     pub slug: String,
     pub name: String,
-    pub status: crate::work::project::ProjectStatus,
+    pub status: crate::store::work::project::ProjectStatus,
     pub metric_targets: Vec<crate::work::wave::metrics::MetricTarget>,
-    pub krs: Vec<crate::work::project::ProjectKR>,
+    pub krs: Vec<crate::store::work::project::ProjectKR>,
 }
 
 async fn project_planning(store: &SharedStore, wave: &Wave) -> Evidence<ProjectSummary> {
@@ -481,7 +481,7 @@ pub struct RoadmapTask {
     /// Effective lifecycle, including planning withdrawal of never-started work.
     pub lifecycle: TaskState,
     /// The same lifecycle, section and conversation activity states as selections.
-    pub selection_states: BTreeSet<crate::work::selection::SelectionState>,
+    pub selection_states: BTreeSet<crate::store::work::selection::SelectionState>,
     pub runtime: Option<TaskRuntimeSnapshot>,
     pub next_move: NextMove,
     pub condition: TaskConditionSnapshot,
@@ -3115,7 +3115,7 @@ mod tests {
     use crate::durable::{TaskSection, TaskState};
     use crate::ops::task_actions::TaskActionEvidence;
     use crate::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
-    use crate::work::task::{CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase};
+    use crate::store::work::task::{CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase};
     use crate::work::wave::metrics::{
         MetricEvidenceDto, MetricFreshnessDto, MetricIdentity, MetricPortfolioDto,
         MetricReadingDto, MetricStage, MetricUnknownCauseDto, Threshold,
@@ -3125,7 +3125,7 @@ mod tests {
 
     #[tokio::test]
     async fn task_concepts_share_lifecycle_activity_membership_and_order() {
-        use crate::work::selection::{Selection, SelectionState};
+        use crate::store::work::selection::{Selection, SelectionState};
         use loopflow_model::durable::{RepositoryId, TaskId};
         let directory = tempfile::tempdir().unwrap();
         let database = directory.path().join("registry.db");
@@ -3714,7 +3714,8 @@ mod tests {
                 successor.id = "next".into();
                 successor.slug = "next".into();
                 successor.name = "Next chapter".into();
-                stale.snapshot.projects[0].status = crate::work::project::ProjectStatus::Completed;
+                stale.snapshot.projects[0].status =
+                    crate::store::work::project::ProjectStatus::Completed;
                 stale.snapshot.projects[0].revision = Some("2026-09-30T00:00:01Z".into());
                 stale.snapshot.projects.push(successor);
                 for item in &mut stale.snapshot.items {
@@ -3794,7 +3795,7 @@ mod tests {
         assert_eq!(items[0].krs[0].text, "Edited proof");
         assert_eq!(
             items[0].status,
-            crate::work::project::ProjectStatus::Started
+            crate::store::work::project::ProjectStatus::Started
         );
         let unreadable = crate::test_linear_input::InventoryFixture {
             wave_id: wave.id().clone(),
@@ -3828,7 +3829,7 @@ mod tests {
         assert_eq!(items[0].krs[0].text, "Edited proof");
         assert_eq!(
             items[0].status,
-            crate::work::project::ProjectStatus::Started
+            crate::store::work::project::ProjectStatus::Started
         );
         let missing =
             crate::ops::metrics::wave_metric_portfolio(&store, &wave, OffsetDateTime::now_utc())
@@ -3865,7 +3866,7 @@ mod tests {
             slug: name.into(),
             summary: String::new(),
             revision: None,
-            status: crate::work::project::ProjectStatus::Started,
+            status: crate::store::work::project::ProjectStatus::Started,
             metric_targets: Vec::new(),
             krs: Vec::new(),
             initiative_ids: vec!["initiative".into()],
@@ -4537,7 +4538,7 @@ mod tests {
         let ci = CiObservation {
             head_sha: "head".to_string(),
             state: CiState::Failing,
-            failing_checks: vec![crate::work::task::CiCheck {
+            failing_checks: vec![crate::store::work::task::CiCheck {
                 name: "scratch-clear".to_string(),
                 url: None,
             }],
@@ -4587,7 +4588,11 @@ mod tests {
         conn.execute_batch("DROP TABLE task_ship_events").unwrap();
         let frontier = crate::store::migrations::latest_applied_version_sqlite(&conn).unwrap();
         let store: crate::store::SharedStore = Arc::new(crate::store::Store {
-            sqlite: crate::store::sqlite::SqliteStore::open_read_only(&database).unwrap(),
+            sqlite: crate::store::sqlite::SqliteStore::open_read_only(
+                &database,
+                crate::store::token_key::encryption_key,
+            )
+            .unwrap(),
         });
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let roadmap = runtime

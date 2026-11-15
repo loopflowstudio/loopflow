@@ -3,11 +3,11 @@
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
     #[error(transparent)]
-    Selection(#[from] crate::work::selection::SelectionError),
+    Selection(#[from] crate::store::work::selection::SelectionError),
     #[error(transparent)]
     Planning(#[from] crate::store::linear_records::LinearBindingError),
     #[error(transparent)]
-    TaskData(#[from] crate::work::task::TaskDataError),
+    TaskData(#[from] crate::store::work::task::TaskDataError),
     #[error("sqlite error: {0}")]
     Sqlite(#[from] rusqlite::Error),
     #[error("serialization error: {0}")]

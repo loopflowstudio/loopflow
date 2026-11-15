@@ -21,7 +21,7 @@ use super::{
     OpenHost, OpenReceipt, OpenReport, OpenStatus, Resolved, WorkspaceArgs,
 };
 use crate::store::sqlite::SqliteStore;
-use crate::work::selection::{
+use crate::store::work::selection::{
     Selection, SelectionExpression, SelectionFilter, SelectionId, SelectionState, SplitAxis,
     TaskLayoutTemplate, ViewContent, ViewPlan, WorkWorkspaceKey, WorkWorkspaceKind,
 };
@@ -1161,7 +1161,7 @@ fn arrive_remote(
 mod tests {
     use super::{settle_remote, started, Candidate, Placement};
     use crate::lf::commands::open::{OpenHost, OpenReceipt, OpenReport, OpenStatus};
-    use crate::work::selection::{
+    use crate::store::work::selection::{
         SelectionState, ViewContent, WorkWorkspaceKey, WorkWorkspaceKind,
     };
 

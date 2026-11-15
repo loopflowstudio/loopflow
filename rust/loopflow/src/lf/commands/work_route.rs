@@ -740,7 +740,7 @@ mod tests {
     use super::{launch_task, repository_path, resolve, resolve_task, without_placement};
     use crate::lf::Cli;
 
-    use crate::work::task::NewTask;
+    use crate::store::work::task::NewTask;
     use clap::Parser;
     use loopflow_model::durable::{RepositoryId, TaskId};
 

@@ -1,9 +1,9 @@
 //! Task context and live input for the ordinary skill command.
-use crate::child::ChildRef;
 use crate::harness::Harness;
+use crate::store::child::ChildRef;
+use crate::store::work::project::Project;
+use crate::store::work::task::Task;
 use crate::store::SharedStore;
-use crate::work::project::Project;
-use crate::work::task::Task;
 use anyhow::{anyhow, Result};
 use loopflow_model::durable::WorkRef;
 use std::io::{BufRead, IsTerminal};
@@ -166,7 +166,7 @@ async fn handle_attachment(
 pub(crate) fn task_seed(
     task: &Task,
     project: Option<&Project>,
-    pr: Option<&crate::work::task::TaskPr>,
+    pr: Option<&crate::store::work::task::TaskPr>,
     wave_name: Option<&str>,
 ) -> String {
     let context = crate::ops::render_task_context(task, project, pr, wave_name);

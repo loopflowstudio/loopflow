@@ -9,8 +9,8 @@ use anyhow::{anyhow, bail, Context, Result};
 
 use crate::ops::human_session::moves::{self, Move};
 use crate::session::LfSession;
+use crate::store::work::task::Task;
 use crate::store::SharedStore;
-use crate::work::task::Task;
 use loopflow_model::durable::{Machine, MachineId, RepositoryId, TaskOwnership};
 
 /// `lf --machine M resume <session>`: move the Session, if this Machine knows

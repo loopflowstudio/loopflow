@@ -12,10 +12,10 @@ use crate::durable::TaskState;
 use crate::journal::ProcessIdentityEvidence;
 use crate::ops::error::OpsResult;
 use crate::ops::pr::PrReadFreshness;
-use crate::pr_landing::{PrLanding, PrLandingState};
+use crate::store::pr_landing::{PrLanding, PrLandingState};
 use crate::store::sqlite::TaskShipping;
+use crate::store::work::task::{PrPhase, Task};
 use crate::task_graph::{TaskGraph, TaskGraphPosition, END};
-use crate::work::task::{PrPhase, Task};
 use loopflow_model::id::LfProcessId;
 
 use super::{block_on_task, task_error, task_store, SharedStore, TaskRunSelection};
@@ -210,7 +210,7 @@ pub(crate) fn shipping_snapshot(
 /// Read a Task's shipping from the store: its handoff, its ship process and its landing.
 pub(crate) fn read_shipping(
     sqlite: &crate::store::sqlite::SqliteStore,
-    task: &crate::work::task::TaskId,
+    task: &crate::store::work::task::TaskId,
     graph: Option<&TaskGraph>,
     status: TaskState,
 ) -> crate::store::StoreResult<Option<ShippingSnapshot>> {
@@ -545,7 +545,7 @@ fn next_step(graph: &TaskGraph, issue: &str) -> OpsResult<ShipStep> {
 }
 
 /// A ship step completed, so a later failure restarts after the shortest wait.
-pub fn ship_progressed(task: &crate::work::task::TaskId) -> OpsResult<()> {
+pub fn ship_progressed(task: &crate::store::work::task::TaskId) -> OpsResult<()> {
     block_on_task(async {
         let store = task_store().await?;
         store.sqlite.reset_ship_restarts(task).map_err(task_error)
@@ -638,7 +638,7 @@ mod tests {
     use super::{next_step, shipping_snapshot, ShipStep, ShippingState};
     use crate::durable::TaskState;
     use crate::journal::ProcessIdentityEvidence;
-    use crate::pr_landing::{NewPrLanding, PrLanding, PrLandingState};
+    use crate::store::pr_landing::{NewPrLanding, PrLanding, PrLandingState};
     use crate::store::sqlite::TaskShipping;
     use crate::task_graph::{CapturedGraph, TaskGraph, TaskGraphPosition};
     use loopflow_model::id::LfProcessId;

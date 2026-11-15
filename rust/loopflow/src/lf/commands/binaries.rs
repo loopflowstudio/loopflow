@@ -111,7 +111,13 @@ pub fn inventory() -> Result<BinaryInventory> {
         .inspect_err(|error| tracing::warn!(%error, "the lf a launch runs now is unknown"))
         .ok();
     let processes = if database.exists() {
-        live_lf_processes(&SqliteStore::open_processes_read_only(&database)?, now)?
+        live_lf_processes(
+            &SqliteStore::open_processes_read_only(
+                &database,
+                crate::store::token_key::encryption_key,
+            )?,
+            now,
+        )?
     } else {
         Vec::new()
     };

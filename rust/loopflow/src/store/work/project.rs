@@ -5,8 +5,8 @@
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::linear::{LinearBindingError, LinearProjectId};
-use crate::work::task::{TaskEventKind, TaskId};
+use crate::store::linear_records::{LinearBindingError, LinearProjectId};
+use crate::store::work::task::{TaskEventKind, TaskId};
 pub use loopflow_model::durable::ProjectId;
 use loopflow_model::id::WaveId;
 
@@ -70,7 +70,7 @@ pub struct Project {
 pub enum ProjectEventKind {
     Started,
     BodyHandedOff {
-        handoff: crate::child::ChildBodyHandoff,
+        handoff: crate::store::child::ChildBodyHandoff,
     },
     TaskObserved {
         task_id: TaskId,

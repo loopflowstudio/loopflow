@@ -1,7 +1,7 @@
 //! Field receipts share one protocol; each object's table retains its foreign key.
 
 use super::planning_write;
-use crate::work::edit::WorkValue as Edit;
+use crate::store::work::edit::WorkValue as Edit;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use super::SqliteStore;
@@ -147,7 +147,7 @@ impl SqliteStore {
                 )?;
                 planning_write::local(
                     &tx,
-                    &crate::work::edit::WorkEdit::for_target(
+                    &crate::store::work::edit::WorkEdit::for_target(
                         id.as_str(),
                         &[Edit::TaskDeletedAt(None)],
                     ),
@@ -231,7 +231,7 @@ impl<'a> PlanningChanges<'a> {
         }
         planning_write::local(
             conn,
-            &crate::work::edit::WorkEdit::for_target(self.owner().1, edits),
+            &crate::store::work::edit::WorkEdit::for_target(self.owner().1, edits),
         )?;
         Ok(())
     }
@@ -521,7 +521,7 @@ mod tests {
     use crate::store::migrations::{
         apply_before_migration, migration_section_sql, upgrade_from_migration,
     };
-    use crate::work::edit::WorkValue;
+    use crate::store::work::edit::WorkValue;
     use loopflow_model::durable::TaskId;
 
     #[test]

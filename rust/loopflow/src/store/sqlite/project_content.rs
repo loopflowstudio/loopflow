@@ -1,11 +1,11 @@
 //! Project content saves in one transaction in every repository.
 
-use crate::work::edit::WorkValue as Edit;
+use crate::store::work::edit::WorkValue as Edit;
 use rusqlite::TransactionBehavior;
 
 use crate::store::planning_sync::PlanningChange;
+use crate::store::work::project::ProjectKR;
 use crate::store::{StoreError, StoreResult};
-use crate::work::project::ProjectKR;
 use crate::work::wave::metrics::MetricTarget;
 use loopflow_model::durable::ProjectId;
 

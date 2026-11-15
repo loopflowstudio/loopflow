@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 
 use super::children::{insert_task_event_in, task_events_after_in};
 use super::SqliteStore;
+use crate::store::work::task::{TaskEventKind, TaskId};
 use crate::store::{StoreError, StoreResult};
-use crate::work::task::{TaskEventKind, TaskId};
 use loopflow_model::comment::{TaskComment, TaskCommentAuthor};
 
 // Private decoding of immutable old events, never part of the Work model or DTOs.
@@ -223,7 +223,7 @@ fn recover_filing_in(conn: &Connection, intent: &RetainedFiling) -> StoreResult<
     )?;
     let task = super::children::create_task_in(
         conn,
-        &crate::work::task::NewTask {
+        &crate::store::work::task::NewTask {
             id,
             repository_id: super::repositories::repository_id_in(
                 conn,
@@ -250,7 +250,7 @@ fn recover_filing_in(conn: &Connection, intent: &RetainedFiling) -> StoreResult<
 mod tests {
     use super::{RetainedFiling, SqliteStore};
     use crate::store::sqlite::planning_changes::PlanningChanges;
-    use crate::work::task::TaskEventKind;
+    use crate::store::work::task::TaskEventKind;
     use crate::work::wave::Wave;
     use loopflow_model::durable::{ProjectId, TaskId};
     use loopflow_model::id::WaveId;

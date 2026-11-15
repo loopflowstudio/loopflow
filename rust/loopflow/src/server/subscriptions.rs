@@ -670,7 +670,7 @@ mod tests {
     async fn events_survive_coalescing_or_end_a_lagging_consumer() {
         use super::{Events, Latest, Pending, Retained};
         use crate::server::wire::SubscriptionEvent;
-        use crate::work::task::{TaskId, TaskPrId};
+        use crate::store::work::task::{TaskId, TaskPrId};
         use std::sync::Mutex;
 
         for count in [2, 17] {
@@ -1244,7 +1244,7 @@ mod tests {
                 assert!(first.initial().await["unavailable"].is_string());
                 let repo = loopflow_test_support::TestRepo::new();
                 store
-                    .create_task(&crate::work::task::NewTask {
+                    .create_task(&crate::store::work::task::NewTask {
                         repository_id: crate::repository::location::ensure_repository(
                             &store,
                             repo.path().to_str().unwrap(),

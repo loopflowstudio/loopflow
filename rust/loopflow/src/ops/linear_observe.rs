@@ -16,8 +16,8 @@ use time::OffsetDateTime;
 use super::{OpsError, OpsResult};
 use crate::linear::StateHistory;
 use crate::store::sqlite::task_state_delivery::TaskStateDelivery;
+use crate::store::work::task::Task;
 use crate::store::{SharedStore, Store};
-use crate::work::task::Task;
 
 pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> OpsResult<()> {
     // A command can outlive export or a mapping change. Observe the current link;

@@ -1,6 +1,6 @@
 //! Retained planning import status and journals.
 
-use crate::planning_exchange::PlanningMutation;
+use crate::store::planning_exchange::PlanningMutation;
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]

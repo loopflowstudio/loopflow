@@ -5,8 +5,8 @@ use std::path::Path;
 use crate::repository::CanonicalRepo;
 use crate::store::sqlite::wave_definitions::WaveBootstrapRow;
 use crate::store::sqlite::SqliteStore;
+use crate::store::work::project::Project;
 use crate::store::{StoreError, StoreResult};
-use crate::work::project::Project;
 use loopflow_model::id::WaveId;
 
 fn invalid(error: impl std::fmt::Display) -> StoreError {
@@ -320,9 +320,9 @@ mod tests {
             let conn = store.conn.lock().unwrap();
             crate::store::sqlite::planning_write::local(
                 &conn,
-                &crate::work::edit::WorkEdit::for_target(
+                &crate::store::work::edit::WorkEdit::for_target(
                     renamed.as_str(),
-                    &[crate::work::edit::WorkValue::WaveName("prod".into())],
+                    &[crate::store::work::edit::WorkValue::WaveName("prod".into())],
                 ),
             )
             .unwrap();

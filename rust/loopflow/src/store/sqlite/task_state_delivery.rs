@@ -1,7 +1,7 @@
 //! Delivery evidence for local Task decisions; never another lifecycle owner.
 
 use super::planning_write;
-use crate::work::edit::WorkValue as Edit;
+use crate::store::work::edit::WorkValue as Edit;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::store::linear_records::StateHistory;
@@ -40,9 +40,9 @@ pub(super) fn queue_in(conn: &Connection, task: &TaskId, target: &str) -> StoreR
         .map_err(|error| StoreError::InvalidData(error.to_string()))?;
     planning_write::local(
         conn,
-        &crate::work::edit::WorkEdit::for_target(
+        &crate::store::work::edit::WorkEdit::for_target(
             task.as_str(),
-            &[Edit::Disposition(crate::work::edit::Disposition {
+            &[Edit::Disposition(crate::store::work::edit::Disposition {
                 planning_state: Some(target.into()),
                 planning_completed: i64::from(target == "completed"),
                 planning_completed_at: completed_at,
@@ -66,7 +66,7 @@ pub(crate) fn reconcile_in(
     conn: &Connection,
     task: &TaskId,
     observed_revision: Option<&str>,
-    observed: &crate::work::edit::Disposition,
+    observed: &crate::store::work::edit::Disposition,
     evidence: &str,
     history: StateHistory,
 ) -> StoreResult<bool> {
@@ -124,7 +124,7 @@ pub(crate) fn reconcile_in(
     )?;
     planning_write::local(
         conn,
-        &crate::work::edit::WorkEdit::for_target(
+        &crate::store::work::edit::WorkEdit::for_target(
             task.as_str(),
             &[Edit::Disposition(observed.clone())],
         ),
@@ -133,7 +133,7 @@ pub(crate) fn reconcile_in(
         "UPDATE tasks SET planning_provider_revision=?2 WHERE id=?1",
         params![task.as_str(), observed_revision],
     )?;
-    super::children::insert_task_event_in(conn, task, &crate::work::task::TaskEventKind::Progress {
+    super::children::insert_task_event_in(conn, task, &crate::store::work::task::TaskEventKind::Progress {
         summary: format!("Adopted Linear state {state}; local intention {target} remains in delivery {id}. Local Workflow unchanged."),
     })?;
     Ok(false)
@@ -143,7 +143,7 @@ impl SqliteStore {
     pub(crate) fn pending_planning_tasks(
         &self,
         repo: &str,
-    ) -> StoreResult<Vec<crate::work::task::Task>> {
+    ) -> StoreResult<Vec<crate::store::work::task::Task>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare("SELECT t.id FROM tasks t JOIN repository_plans w ON w.id=t.repository_id
             WHERE w.repo=?1 AND t.external_issue_id IS NOT NULL AND (EXISTS(

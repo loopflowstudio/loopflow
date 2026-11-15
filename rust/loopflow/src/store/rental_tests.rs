@@ -247,7 +247,7 @@ fn a_pool_refuses_when_off_empty_or_busy_and_names_why() {
     );
 }
 
-pub(super) fn rented(by_hand: bool) -> Rental {
+fn rented(by_hand: bool) -> Rental {
     let id = RentalId::new();
     Rental {
         provider_name: Rental::provider_name_for(&id),

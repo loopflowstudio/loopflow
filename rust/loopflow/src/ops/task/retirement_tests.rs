@@ -8,8 +8,8 @@ use rusqlite::params;
 
 use super::{advance, now, sweep};
 use crate::store::sqlite::ViewerHold;
+use crate::store::work::task::Task;
 use crate::store::{SharedStore, StorageConfig};
-use crate::work::task::Task;
 use loopflow_model::durable::TaskId;
 use loopflow_model::id::{LfProcessId, TerminalId};
 

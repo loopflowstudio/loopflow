@@ -1,8 +1,8 @@
 use time::OffsetDateTime;
 
 use super::SqliteStore;
-use crate::rental::{Hardware, OnDemand, Ownership, Provider, RentalState, Usd};
-use crate::work::task::{LinearWritebackState, Observation, Task};
+use crate::store::rental::{Hardware, OnDemand, Ownership, Provider, RentalState, Usd};
+use crate::store::work::task::{LinearWritebackState, Observation, Task};
 use loopflow_model::durable::{MachineId, OwnershipKind, TaskId};
 
 fn store() -> (tempfile::TempDir, SqliteStore) {

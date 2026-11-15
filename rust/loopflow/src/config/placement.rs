@@ -261,18 +261,18 @@ pub struct PoolDeclaration {
 #[derive(schemars::JsonSchema, Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct OnDemandDeclaration {
-    pub provider: crate::rental::Provider,
-    pub hardware: crate::rental::Hardware,
+    pub provider: crate::store::rental::Provider,
+    pub hardware: crate::store::rental::Hardware,
     pub max_machines: u32,
-    pub max_usd_per_hour: crate::rental::Usd,
+    pub max_usd_per_hour: crate::store::rental::Usd,
     pub hours: f64,
 }
 
 impl Default for OnDemandDeclaration {
     fn default() -> Self {
         Self {
-            provider: crate::rental::Provider::Daytona,
-            hardware: crate::rental::Hardware {
+            provider: crate::store::rental::Provider::Daytona,
+            hardware: crate::store::rental::Hardware {
                 vcpus: 2,
                 memory_gb: 4,
                 disk_gb: 20,
@@ -280,8 +280,8 @@ impl Default for OnDemandDeclaration {
                 spot: false,
             },
             max_machines: 0,
-            max_usd_per_hour: crate::rental::Usd::ZERO,
-            hours: crate::rental::DEFAULT_HOURS,
+            max_usd_per_hour: crate::store::rental::Usd::ZERO,
+            hours: crate::store::rental::DEFAULT_HOURS,
         }
     }
 }

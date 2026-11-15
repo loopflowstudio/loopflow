@@ -530,8 +530,10 @@ fn append_in(
                 }
             }
             OwnershipKind::Unassign => {
-                super::planning_changes::PlanningChanges::Task(task)
-                    .save(conn, &[crate::work::edit::WorkValue::TaskAssignee(None)])?;
+                super::planning_changes::PlanningChanges::Task(task).save(
+                    conn,
+                    &[crate::store::work::edit::WorkValue::TaskAssignee(None)],
+                )?;
             }
             OwnershipKind::Claim => {}
         }
@@ -690,7 +692,7 @@ fn notify_superseded_in(
     super::children::insert_task_event_in(
         conn,
         task,
-        &crate::work::task::TaskEventKind::Steer { steer_id: steer.id },
+        &crate::store::work::task::TaskEventKind::Steer { steer_id: steer.id },
     )?;
     Ok(())
 }
@@ -1029,7 +1031,7 @@ impl SqliteStore {
         if current.as_deref() != assignee {
             super::planning_changes::PlanningChanges::Task(task).save(
                 &tx,
-                &[crate::work::edit::WorkValue::TaskAssignee(
+                &[crate::store::work::edit::WorkValue::TaskAssignee(
                     assignee.map(str::to_owned),
                 )],
             )?;
@@ -1047,7 +1049,7 @@ mod tests {
     use crate::store::ownership::local_label;
     use crate::store::sqlite::task_moves::MoveStage;
     use crate::store::sqlite::SqliteStore;
-    use crate::work::task::NewTask;
+    use crate::store::work::task::NewTask;
     use loopflow_model::comment::{TaskComment, TaskCommentAuthor};
     use loopflow_model::durable::{
         MachineId, MachineRef, OwnershipEntryId, OwnershipKind, RepositoryId, TaskId, TaskOwner,

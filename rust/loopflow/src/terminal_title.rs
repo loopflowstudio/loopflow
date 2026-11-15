@@ -279,8 +279,10 @@ impl TerminalTitle {
 
     fn viewing(held: &loopflow_model::id::TerminalId) -> Option<Self> {
         let load = || -> anyhow::Result<Option<Self>> {
-            let store =
-                SqliteStore::open_processes_read_only(&crate::store::database_path_from_env()?)?;
+            let store = SqliteStore::open_processes_read_only(
+                &crate::store::database_path_from_env()?,
+                crate::store::token_key::encryption_key,
+            )?;
             let Some(id) = store.terminal_session(held)? else {
                 return Ok(None);
             };
@@ -298,8 +300,10 @@ impl TerminalTitle {
     }
 
     fn load(input: &str) -> anyhow::Result<Option<Self>> {
-        let store =
-            SqliteStore::open_processes_read_only(&crate::store::database_path_from_env()?)?;
+        let store = SqliteStore::open_processes_read_only(
+            &crate::store::database_path_from_env()?,
+            crate::store::token_key::encryption_key,
+        )?;
         let Some(session) = store.session_for_artifact(input)? else {
             return Ok(None);
         };
@@ -423,7 +427,10 @@ impl TitleReader {
             while let Ok(request) = requested.recv() {
                 let mut read = || -> anyhow::Result<Option<String>> {
                     if store.is_none() {
-                        store = Some(SqliteStore::open_processes_read_only(&path)?);
+                        store = Some(SqliteStore::open_processes_read_only(
+                            &path,
+                            crate::store::token_key::encryption_key,
+                        )?);
                     }
                     output_title(store.as_ref().expect("opened above"), &request.held)
                 };

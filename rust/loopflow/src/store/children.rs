@@ -2,8 +2,8 @@
 
 use std::sync::Arc;
 
-use crate::work::project::{Project, ProjectEvent, ProjectEventKind, ProjectId};
-use crate::work::task::{
+use crate::store::work::project::{Project, ProjectEvent, ProjectEventKind, ProjectId};
+use crate::store::work::task::{
     LinearObservationOutcome, Task, TaskEvent, TaskEventKind, TaskId, TaskLinearObservation,
     TaskPr, TaskPrId,
 };
@@ -17,7 +17,7 @@ impl Store {
     pub(crate) async fn promote_task(
         &self,
         task_id: &TaskId,
-        creation: Option<crate::work::task::NewTask>,
+        creation: Option<crate::store::work::task::NewTask>,
         placement: Option<(std::path::PathBuf, TaskPr)>,
         session: Option<crate::session::LfSession>,
         destination: Option<std::path::PathBuf>,
@@ -43,7 +43,7 @@ impl Store {
         &self,
         id: &TaskId,
         expected_revision: u64,
-        patch: &crate::work::task::TaskUpdate,
+        patch: &crate::store::work::task::TaskUpdate,
     ) -> StoreResult<Task> {
         let id = id.clone();
         let patch = patch.clone();
@@ -175,7 +175,7 @@ impl Store {
     pub(crate) async fn record_task_pr_repair_incident(
         &self,
         pr_id: &TaskPrId,
-        kind: crate::work::task::TaskPrRepairKind,
+        kind: crate::store::work::task::TaskPrRepairKind,
         occurred_at: OffsetDateTime,
     ) -> StoreResult<bool> {
         let pr_id = pr_id.clone();
@@ -243,7 +243,7 @@ impl Store {
     pub async fn latest_project_failure(
         &self,
         project_id: &ProjectId,
-    ) -> StoreResult<Option<crate::work::project::HistoricalFailure>> {
+    ) -> StoreResult<Option<crate::store::work::project::HistoricalFailure>> {
         let project_id = project_id.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.latest_project_failure(&project_id)

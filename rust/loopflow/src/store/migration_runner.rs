@@ -366,7 +366,7 @@ pub(crate) fn validate_persisted_json(conn: &rusqlite::Connection) -> StoreResul
         [],
         |row| row.get::<_, bool>(0),
     )? {
-        validate_json_column::<crate::work::task::LinearWritebackState>(
+        validate_json_column::<crate::store::work::task::LinearWritebackState>(
             conn,
             "tasks",
             "id",
@@ -376,29 +376,30 @@ pub(crate) fn validate_persisted_json(conn: &rusqlite::Connection) -> StoreResul
         Vec::new()
     };
     if has_dashboards {
-        failures.extend(validate_json_column::<crate::work::selection::Selection>(
+        failures.extend(validate_json_column::<
+            crate::store::work::selection::Selection,
+        >(
             conn,
             "dashboard_arrangements",
             "dashboard_id",
             "selection_json",
         )?);
-        failures.extend(validate_json_column::<crate::work::selection::Arrangement>(
+        failures.extend(validate_json_column::<
+            crate::store::work::selection::Arrangement,
+        >(
             conn,
             "dashboard_arrangements",
             "dashboard_id",
             "arrangement_json",
         )?);
         failures.extend(validate_json_column::<
-            crate::work::selection::WorkPaneLayout,
+            crate::store::work::selection::WorkPaneLayout,
         >(
             conn, "work_pane_layouts", "work_id", "layout_json"
         )?);
-        failures.extend(validate_json_column::<crate::work::selection::SlotLayout>(
-            conn,
-            "dashboards",
-            "id",
-            "slots_json",
-        )?);
+        failures.extend(validate_json_column::<
+            crate::store::work::selection::SlotLayout,
+        >(conn, "dashboards", "id", "slots_json")?);
         failures.extend(validate_json_column::<Vec<String>>(
             conn,
             "task_orders",
@@ -411,37 +412,24 @@ pub(crate) fn validate_persisted_json(conn: &rusqlite::Connection) -> StoreResul
         [],
         |row| row.get::<_, bool>(0),
     )? {
-        failures.extend(
-            validate_json_column::<Vec<crate::work::project::ProjectKR>>(
-                conn, "projects", "id", "krs",
-            )?,
-        );
+        failures.extend(validate_json_column::<
+            Vec<crate::store::work::project::ProjectKR>,
+        >(conn, "projects", "id", "krs")?);
         failures.extend(validate_json_column::<
             Vec<crate::work::wave::metrics::MetricTarget>,
         >(conn, "projects", "id", "metric_targets")?);
     }
-    failures.extend(validate_json_column::<crate::work::task::CiObservation>(
-        conn,
-        "task_prs",
-        "id",
-        "ci_observation",
-    )?);
-    failures.extend(
-        validate_json_column::<crate::work::task::GithubObservation>(
-            conn,
-            "task_prs",
-            "id",
-            "github_observation",
-        )?,
-    );
-    failures.extend(validate_json_column::<crate::work::task::TaskEventKind>(
-        conn,
-        "task_events",
-        "id",
-        "kind_json",
-    )?);
     failures.extend(validate_json_column::<
-        crate::work::project::ProjectEventKind,
+        crate::store::work::task::CiObservation,
+    >(conn, "task_prs", "id", "ci_observation")?);
+    failures.extend(validate_json_column::<
+        crate::store::work::task::GithubObservation,
+    >(conn, "task_prs", "id", "github_observation")?);
+    failures.extend(validate_json_column::<
+        crate::store::work::task::TaskEventKind,
+    >(conn, "task_events", "id", "kind_json")?);
+    failures.extend(validate_json_column::<
+        crate::store::work::project::ProjectEventKind,
     >(conn, "project_events", "id", "kind_json")?);
     failures.extend(validate_json_column::<Vec<String>>(
         conn,
@@ -807,7 +795,7 @@ pub(crate) fn convert_released_data(conn: &rusqlite::Connection, sql: &str) -> S
             ))
         })? {
             let (value, base, conflict) = row?;
-            serde_json::from_str::<crate::work::edit::WorkValue>(&value)?.validate()?;
+            serde_json::from_str::<crate::store::work::edit::WorkValue>(&value)?.validate()?;
             for retained in [base, conflict].into_iter().flatten() {
                 let baseline: super::planning_sync::PlanningBaseline =
                     serde_json::from_str(&retained)?;
@@ -835,8 +823,9 @@ fn convert_project_content(conn: &rusqlite::Connection) -> StoreResult<()> {
         })?
         .collect::<Result<Vec<_>, _>>()?;
     for (id, body) in rows {
-        let document = crate::linear::project_document::parse_project_document(&body)
-            .map_err(|error| StoreError::InvalidData(format!("Project {id}: {error}")))?;
+        let document =
+            crate::store::linear_records::project_document::parse_project_document(&body)
+                .map_err(|error| StoreError::InvalidData(format!("Project {id}: {error}")))?;
         conn.execute(
             "UPDATE projects SET description=?2,krs=?3,metric_targets=?4 WHERE id=?1",
             rusqlite::params![
@@ -1997,7 +1986,7 @@ mod tests {
             expected[index] = serde_json::from_str(expected[index].as_str().unwrap()).unwrap();
         }
         assert_eq!(actual, expected);
-        conn.execute("INSERT INTO project_changes(id,project_id,value_json) VALUES('prose-proof','project-proof',?1)", [serde_json::to_string(&crate::work::edit::WorkValue::ProjectDescription(Some("Purpose".into()))).unwrap()]).unwrap();
+        conn.execute("INSERT INTO project_changes(id,project_id,value_json) VALUES('prose-proof','project-proof',?1)", [serde_json::to_string(&crate::store::work::edit::WorkValue::ProjectDescription(Some("Purpose".into()))).unwrap()]).unwrap();
         assert_eq!(
             conn.query_row(
                 "SELECT seq FROM project_changes WHERE id='prose-proof'",
@@ -4203,7 +4192,9 @@ mod tests {
         use crate::ops::pr_landing::{
             reconcile_pr_landing, LandingIo, LandingObservation, ObservePr,
         };
-        use crate::pr_landing::{LandingPlacement, LandingSupervisor, PrLandingId, PrLandingState};
+        use crate::store::pr_landing::{
+            LandingPlacement, LandingSupervisor, PrLandingId, PrLandingState,
+        };
 
         use time::OffsetDateTime;
 
@@ -6059,7 +6050,7 @@ mod tests {
         ))
         .unwrap();
         let project = &mut snapshot.projects[0];
-        project.krs = vec![crate::work::project::ProjectKR {
+        project.krs = vec![crate::store::work::project::ProjectKR {
             text: "Saved planning survives".into(),
             holds: true,
         }];
@@ -6142,7 +6133,8 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        let content = crate::linear::project_document::parse_project_document(&text).unwrap();
+        let content =
+            crate::store::linear_records::project_document::parse_project_document(&text).unwrap();
         assert_eq!(content.krs, project.krs);
         assert_eq!(content.metric_targets, project.metric_targets);
         conn.execute("INSERT INTO task_changes(id,task_id,field,value_json) VALUES('membership','task_fields','project_id','\"project_fields\"')", []).unwrap();
@@ -6423,7 +6415,7 @@ mod tests {
             .unwrap();
         assert!(matches!(
             reopen.pm_writeback,
-            crate::work::task::LinearWritebackState::Current
+            crate::store::work::task::LinearWritebackState::Current
         ));
     }
 

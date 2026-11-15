@@ -62,3 +62,31 @@ pub(crate) enum TaskPrMergeEvidenceOutcome {
     Conflict { accepted_at: i64 },
     SchemaUnavailable,
 }
+
+/// The Wave's planning lock, retained by every queued writer using this
+/// acquisition and released when the last one drops it.
+#[derive(Debug, Clone)]
+pub struct PlanningLocks {
+    _wave: std::sync::Arc<std::fs::File>,
+}
+
+impl PlanningLocks {
+    pub(crate) fn new(wave: std::fs::File) -> Self {
+        Self {
+            _wave: std::sync::Arc::new(wave),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CiIncidentReportRow {
+    pub incident: crate::store::work::task::CiIncident,
+    pub wave: Option<String>,
+    pub task: Option<String>,
+    pub task_started_at: Option<time::OffsetDateTime>,
+    pub task_status: Option<String>,
+    pub human_assisted: bool,
+}
+
+/// The serde representation of a bare time::OffsetDateTime.
+pub(crate) type TimeTuple = (i32, u16, u8, u8, u8, u32, i8, i8, i8);

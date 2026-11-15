@@ -8,7 +8,7 @@ use std::process::Command;
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 
-use crate::work::selection::SplitAxis;
+use crate::store::work::selection::SplitAxis;
 
 /// The app bundles its CLI without adding it to PATH.
 const BUNDLED: &str = "/Applications/cmux.app/Contents/Resources/bin/cmux";
@@ -242,7 +242,7 @@ mod tests {
             r"cd '/repo/it'\''s' && 'lf' 'task' 'a b'"
         );
         let split = split(
-            crate::work::selection::SplitAxis::Vertical,
+            crate::store::work::selection::SplitAxis::Vertical,
             0.6,
             pane.clone(),
             pane,

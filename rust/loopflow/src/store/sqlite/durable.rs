@@ -2,12 +2,12 @@ use crate::steer::Steer;
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use time::OffsetDateTime;
 
-use crate::child::ChildRef;
 use crate::durable::{AbandonReceipt, TaskState};
+use crate::store::child::ChildRef;
 use crate::store::rows::now_unix;
+use crate::store::work::project::ProjectEventKind;
+use crate::store::work::task::TaskEventKind;
 use crate::store::{StoreError, StoreResult};
-use crate::work::project::ProjectEventKind;
-use crate::work::task::TaskEventKind;
 use loopflow_model::durable::{
     Author, MachineId, ProjectId, TaskId, ToolResponseId, ToolResponseReceipt, ToolResponseWrite,
     WorkRef, WorkStatus,
@@ -612,8 +612,8 @@ mod durable_store_tests {
     use crate::store::sqlite::SqliteStore;
     use loopflow_model::id::WaveId;
 
-    use crate::work::project::Project;
-    use crate::work::task::{LinearWritebackState, Task, TaskEventKind, TaskPr, TaskPrId};
+    use crate::store::work::project::Project;
+    use crate::store::work::task::{LinearWritebackState, Task, TaskEventKind, TaskPr, TaskPrId};
 
     fn unpublished_conversation(
         task_id: Option<TaskId>,
@@ -668,7 +668,7 @@ mod durable_store_tests {
             id: project_id.clone(),
 
             summary: String::new(),
-            status: crate::work::project::ProjectStatus::Started,
+            status: crate::store::work::project::ProjectStatus::Started,
             linear_id: Some(LinearProjectId::new("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3").unwrap()),
             slug: "probe".to_string(),
             name: "Probe".to_string(),
@@ -716,7 +716,7 @@ mod durable_store_tests {
             due_date: None,
             state: None,
             completed_at: None,
-            observation: crate::work::task::Observation::NotRequired,
+            observation: crate::store::work::task::Observation::NotRequired,
         };
         let pr = TaskPr {
             id: TaskPrId::new(),

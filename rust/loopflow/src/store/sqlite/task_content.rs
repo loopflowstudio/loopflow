@@ -1,14 +1,14 @@
 //! Task fields and their delivery evidence commit together, before provider I/O.
 
 use super::planning_write;
-use crate::work::edit::WorkValue as Edit;
+use crate::store::work::edit::WorkValue as Edit;
 use rusqlite::TransactionBehavior;
 
 use crate::store::planning_sync::PlanningChange;
 use crate::store::rows::now_unix;
+use crate::store::work::task::Task;
+use crate::store::work::task::TaskUpdate;
 use crate::store::{StoreError, StoreResult};
-use crate::work::task::Task;
-use crate::work::task::TaskUpdate;
 use loopflow_model::durable::{ProjectId, TaskId};
 
 use super::planning_changes::PlanningChanges;
@@ -30,7 +30,7 @@ impl SqliteStore {
         } else {
             planning_write::local(
                 &tx,
-                &crate::work::edit::WorkEdit::for_target(
+                &crate::store::work::edit::WorkEdit::for_target(
                     id.as_str(),
                     &[Edit::TaskDeletedAt(Some(now_unix()))],
                 ),
@@ -187,7 +187,7 @@ fn validate_move(
 mod tests {
     use crate::session_record::new_artifact_key;
 
-    use crate::work::task::{NewTask, TaskUpdate};
+    use crate::store::work::task::{NewTask, TaskUpdate};
     use loopflow_model::durable::TaskId;
 
     #[test]

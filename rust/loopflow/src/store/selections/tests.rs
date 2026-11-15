@@ -2,7 +2,7 @@ use crate::process::attachment;
 use crate::store::selections;
 
 use crate::store::sqlite::SqliteStore;
-use crate::work::selection::{
+use crate::store::work::selection::{
     Arrangement, ArrangementMode, DashboardId, Selection, SelectionExpression, SelectionId,
     WorkWorkspaceKind,
 };
@@ -356,7 +356,7 @@ fn a_wave_scoped_reading_skips_repositories_without_that_wave() {
 
 #[test]
 fn wave_default_plan_uses_three_slot_strip() {
-    use crate::work::selection::{SlotLayout, SlotNode, SplitAxis};
+    use crate::store::work::selection::{SlotLayout, SlotNode, SplitAxis};
     let (_dir, store, repo) = fixture();
     let plans = selections::selection_plans(&store, &repo).unwrap();
     let wave = plans
@@ -381,7 +381,7 @@ fn wave_default_plan_uses_three_slot_strip() {
 
 #[test]
 fn resizing_two_slots_reweights_only_the_split_between_them() {
-    use crate::work::selection::{SlotLayout, SlotNode};
+    use crate::store::work::selection::{SlotLayout, SlotNode};
     let golden = SlotLayout::golden();
     // Slots 1 and 2 share the inner top split; the bottom band and slot 0 keep theirs.
     let resized = golden.resized(1, 2, 0.75).unwrap();
@@ -416,7 +416,7 @@ fn resizing_two_slots_reweights_only_the_split_between_them() {
 
 #[test]
 fn dashboard_slots_round_trip_survive_query_edits_and_reject_invalid_layouts() {
-    use crate::work::selection::{SlotLayout, SlotNode, SplitAxis};
+    use crate::store::work::selection::{SlotLayout, SlotNode, SplitAxis};
     let (_dir, store, repo) = fixture();
     assert_eq!(
         selections::view_plan(&store, &repo, Some("state:open"))
@@ -552,8 +552,8 @@ fn dashboards_leave_repository_and_wave_defaults_unchanged() {
 
 #[test]
 fn selection_pane_ownership_is_repository_scoped_for_every_work_kind() {
+    use crate::store::work::selection::{WorkPaneLayout, WorkWorkspaceKey};
     use crate::store::StoreError;
-    use crate::work::selection::{WorkPaneLayout, WorkWorkspaceKey};
     let (_dir, store, repo) = fixture();
     let other = crate::repository::location::ensure_repository(&store, "/other").unwrap();
     for (kind, id) in [
@@ -650,8 +650,8 @@ fn selection_pane_ownership_is_repository_scoped_for_every_work_kind() {
     }
 }
 
-fn designated_tree(kind: &WorkWorkspaceKind) -> crate::work::selection::PaneTree {
-    use crate::work::selection::{PaneIntent, PaneTree, SplitAxis};
+fn designated_tree(kind: &WorkWorkspaceKind) -> crate::store::work::selection::PaneTree {
+    use crate::store::work::selection::{PaneIntent, PaneTree, SplitAxis};
     let pane = |id: &str, content| PaneTree::Pane {
         id: id.into(),
         content,
@@ -696,7 +696,7 @@ fn designated_tree(kind: &WorkWorkspaceKind) -> crate::work::selection::PaneTree
 
 #[test]
 fn selection_designated_panes_restore_and_invalid_writes_are_atomic() {
-    use crate::work::selection::{BrowserTab, PaneIntent, PaneTree, WorkPaneLayout};
+    use crate::store::work::selection::{BrowserTab, PaneIntent, PaneTree, WorkPaneLayout};
     let (dir, store, repo) = fixture();
     let mut layout: WorkPaneLayout = serde_json::from_str(include_str!(
         "../../../../../tests/fixtures/dto/pane_layout.json"
@@ -726,7 +726,11 @@ fn selection_designated_panes_restore_and_invalid_writes_are_atomic() {
         tree => tree,
     };
     let saved = store.save_pane_layout(&layout).unwrap();
-    let reader = SqliteStore::open_read_only(&dir.path().join("db")).unwrap();
+    let reader = SqliteStore::open_read_only(
+        &dir.path().join("db"),
+        crate::store::token_key::encryption_key,
+    )
+    .unwrap();
     assert_eq!(
         reader.pane_layout(&saved.work).unwrap(),
         Some(saved.clone())
@@ -754,7 +758,7 @@ fn selection_designated_panes_restore_and_invalid_writes_are_atomic() {
     // A fourth pane, a missing pane, a stale tab selection and a non-web page are rejected.
     let mut invalid = saved.clone();
     invalid.tree = PaneTree::Split {
-        axis: crate::work::selection::SplitAxis::Vertical,
+        axis: crate::store::work::selection::SplitAxis::Vertical,
         ratio: 0.5,
         first: Box::new(invalid.tree),
         second: Box::new(PaneTree::Pane {
@@ -809,7 +813,7 @@ fn selection_designated_panes_restore_and_invalid_writes_are_atomic() {
 
 #[test]
 fn selection_panes_restore_drafts_and_reject_stale_or_foreign_intent() {
-    use crate::work::selection::{
+    use crate::store::work::selection::{
         BrowserTab, FileDraft, PaneIntent, PaneTree, ViewLocation, WorkPaneLayout, WorkWorkspaceKey,
     };
     let (dir, store, repo) = fixture();
@@ -835,7 +839,7 @@ fn selection_panes_restore_drafts_and_reject_stale_or_foreign_intent() {
                         *place = Some(location.clone());
                         *tabs = vec![BrowserTab::Files {
                             id: "files".into(),
-                            tabs: vec![crate::work::selection::FileTab {
+                            tabs: vec![crate::store::work::selection::FileTab {
                                 id: "file-1".into(),
                                 path: "src/lib.rs".into(),
                             }],
@@ -908,7 +912,11 @@ fn selection_panes_restore_drafts_and_reject_stale_or_foreign_intent() {
     )
     .unwrap();
     let revisions = store.revisions().unwrap();
-    let reader = SqliteStore::open_read_only(&dir.path().join("db")).unwrap();
+    let reader = SqliteStore::open_read_only(
+        &dir.path().join("db"),
+        crate::store::token_key::encryption_key,
+    )
+    .unwrap();
     let first = selections::view_plan(&reader, &repo, Some("query:first")).unwrap();
     let second = selections::view_plan(&reader, &repo, Some("query:second")).unwrap();
     assert!(first.projection.visible.is_empty());
@@ -1263,6 +1271,7 @@ fn released_work_upgrades_to_saved_intent_without_rewriting_work() {
     .unwrap();
     drop(conn);
     let store = SqliteStore {
+        token_key: crate::store::token_key::encryption_key,
         conn: std::sync::Arc::new(std::sync::Mutex::new(
             rusqlite::Connection::open(&path).unwrap(),
         )),
@@ -1281,7 +1290,8 @@ fn released_work_upgrades_to_saved_intent_without_rewriting_work() {
         &Arrangement::automatic(&result.members).to_edit(),
     )
     .unwrap();
-    let reader = SqliteStore::open_read_only(&path).unwrap();
+    let reader =
+        SqliteStore::open_read_only(&path, crate::store::token_key::encryption_key).unwrap();
     assert_eq!(
         selections::read_dashboard(&reader, &repo, &id)
             .unwrap()
@@ -1322,7 +1332,11 @@ fn saved_selections_upgrade_reload_and_edit_atomically_without_execution() {
         selections::save_dashboard(&store, &repo, &id, None, &selection, &arrangement.to_edit())
             .unwrap();
     // A second connection reads real lfdb bytes, without opening a native surface.
-    let reader = SqliteStore::open_read_only(&_dir.path().join("db")).unwrap();
+    let reader = SqliteStore::open_read_only(
+        &_dir.path().join("db"),
+        crate::store::token_key::encryption_key,
+    )
+    .unwrap();
     let loaded = selections::read_dashboard(&reader, &repo, &id)
         .unwrap()
         .unwrap();

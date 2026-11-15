@@ -528,9 +528,9 @@ pub(super) fn unship_in(
     if shipping.is_some() {
         super::planning_write::local(
             conn,
-            &crate::work::edit::WorkEdit::for_target(
+            &crate::store::work::edit::WorkEdit::for_target(
                 task.as_str(),
-                &[crate::work::edit::WorkValue::TaskShippedAt(None)],
+                &[crate::store::work::edit::WorkValue::TaskShippedAt(None)],
             ),
         )?;
     }
@@ -566,15 +566,17 @@ fn ship_in(
     if !shipping {
         super::planning_write::local(
             tx,
-            &crate::work::edit::WorkEdit::for_target(
+            &crate::store::work::edit::WorkEdit::for_target(
                 task.as_str(),
-                &[crate::work::edit::WorkValue::TaskShippedAt(Some(now))],
+                &[crate::store::work::edit::WorkValue::TaskShippedAt(Some(
+                    now,
+                ))],
             ),
         )?;
         super::children::insert_task_event_in(
             tx,
             task,
-            &crate::work::task::TaskEventKind::Progress {
+            &crate::store::work::task::TaskEventKind::Progress {
                 summary: format!("Shipping: {note}"),
             },
         )?;
@@ -1062,7 +1064,7 @@ impl SqliteStore {
         super::children::insert_task_event_in(
             &tx,
             task,
-            &crate::work::task::TaskEventKind::Progress {
+            &crate::store::work::task::TaskEventKind::Progress {
                 summary: format!("Stopped shipping: {note}"),
             },
         )?;
@@ -1146,9 +1148,9 @@ impl SqliteStore {
         if shipping_in(&tx, task)?.is_none() {
             super::planning_write::local(
                 &tx,
-                &crate::work::edit::WorkEdit::for_target(
+                &crate::store::work::edit::WorkEdit::for_target(
                     task.as_str(),
-                    &[crate::work::edit::WorkValue::TaskShippedAt(Some(
+                    &[crate::store::work::edit::WorkValue::TaskShippedAt(Some(
                         approval.at,
                     ))],
                 ),
@@ -1554,7 +1556,7 @@ mod tests {
         let path = dir.path().join("db");
         let store = crate::store::opening::open_ephemeral(&path).unwrap();
         let task = store
-            .create_task(&crate::work::task::NewTask {
+            .create_task(&crate::store::work::task::NewTask {
                 id: TaskId::new(),
                 repository_id: crate::repository::location::ensure_repository(
                     &store,
@@ -1625,7 +1627,7 @@ mod tests {
             )
             .unwrap();
         store
-            .create_task(&crate::work::task::NewTask {
+            .create_task(&crate::store::work::task::NewTask {
                 repository_id: crate::repository::location::ensure_repository(&store, "/repo")
                     .unwrap(),
                 id: task.clone(),
@@ -1852,7 +1854,7 @@ mod tests {
         let task = TaskId::new();
         let by = LfProcessId::new();
         store
-            .create_task(&crate::work::task::NewTask {
+            .create_task(&crate::store::work::task::NewTask {
                 repository_id: crate::repository::location::ensure_repository(&store, "/repo")
                     .unwrap(),
                 id: task.clone(),
@@ -2583,7 +2585,7 @@ mod tests {
         let open = |dir: &tempfile::TempDir| {
             let store = crate::store::opening::open_ephemeral(&dir.path().join("db")).unwrap();
             store
-                .create_task(&crate::work::task::NewTask {
+                .create_task(&crate::store::work::task::NewTask {
                     id: id.clone(),
                     repository_id: crate::repository::location::ensure_repository(
                         &store, "/moving",
@@ -2623,7 +2625,7 @@ mod tests {
         let store = crate::store::opening::open_ephemeral(&dir.path().join("db")).unwrap();
         let id = TaskId::new();
         store
-            .create_task(&crate::work::task::NewTask {
+            .create_task(&crate::store::work::task::NewTask {
                 id: id.clone(),
                 repository_id: crate::repository::location::ensure_repository(&store, "/shipping")
                     .unwrap(),

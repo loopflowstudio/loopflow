@@ -11,9 +11,9 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::linear::{LinearBindingError, LinearIssueId};
-use crate::pr_landing::PrLandingId;
-use crate::work::project::ProjectId;
+use crate::store::linear_records::{LinearBindingError, LinearIssueId};
+use crate::store::pr_landing::PrLandingId;
+use crate::store::work::project::ProjectId;
 pub use loopflow_model::durable::TaskId;
 use loopflow_model::id::prefixed_uuid_id;
 use loopflow_model::id::WaveId;
@@ -94,7 +94,7 @@ pub struct CiObservation {
     pub head_sha: String,
     pub state: CiState,
     pub failing_checks: Vec<CiCheck>,
-    #[schemars(with = "crate::server::schema::TimeTuple")]
+    #[schemars(with = "crate::store::TimeTuple")]
     pub observed_at: OffsetDateTime,
 }
 
@@ -134,7 +134,7 @@ pub struct CiIncident {
 /// processes without making GitHub the source of truth.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GithubObservation {
-    #[schemars(with = "crate::server::schema::TimeTuple")]
+    #[schemars(with = "crate::store::TimeTuple")]
     pub checked_at: OffsetDateTime,
     pub result: GithubObservationResult,
 }
@@ -226,7 +226,7 @@ impl FromStr for PrMergeMode {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PrMergeRequest {
     pub mode: PrMergeMode,
-    #[schemars(with = "crate::server::schema::TimeTuple")]
+    #[schemars(with = "crate::store::TimeTuple")]
     pub requested_at: OffsetDateTime,
     pub head_sha: String,
 }
@@ -240,7 +240,7 @@ pub struct PrPresentation {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PrPublication {
-    #[schemars(with = "crate::server::schema::TimeTuple")]
+    #[schemars(with = "crate::store::TimeTuple")]
     pub requested_at: OffsetDateTime,
     pub presentation: Option<PrPresentation>,
     pub github: Option<GithubPr>,
@@ -262,7 +262,7 @@ pub struct TaskPr {
     pub parent_pr_id: Option<TaskPrId>,
     pub publication: Option<PrPublication>,
     pub merge_commit: Option<String>,
-    #[schemars(with = "Option<crate::server::schema::TimeTuple>")]
+    #[schemars(with = "Option<crate::store::TimeTuple>")]
     pub abandoned_at: Option<OffsetDateTime>,
     /// The most recent required-check reading for this PR's open head. `None`
     /// until the head has been observed; ignored once the head moves past
@@ -284,9 +284,9 @@ pub struct TaskPr {
     /// string when it degraded. The GitHub publication still succeeded — this only
     /// records that the Linear side is behind, and is cleared on the next success.
     pub linear_link_error: Option<String>,
-    #[schemars(with = "crate::server::schema::TimeTuple")]
+    #[schemars(with = "crate::store::TimeTuple")]
     pub created_at: OffsetDateTime,
-    #[schemars(with = "crate::server::schema::TimeTuple")]
+    #[schemars(with = "crate::store::TimeTuple")]
     pub updated_at: OffsetDateTime,
 }
 
@@ -479,21 +479,21 @@ pub enum Observation {
     NotRequired,
     /// GitHub answered during this reconcile.
     Fresh {
-        #[schemars(with = "crate::server::schema::TimeTuple")]
+        #[schemars(with = "crate::store::TimeTuple")]
         observed_at: OffsetDateTime,
     },
     /// A recent successful reading was reused without spending another request.
     Cached {
-        #[schemars(with = "crate::server::schema::TimeTuple")]
+        #[schemars(with = "crate::store::TimeTuple")]
         observed_at: OffsetDateTime,
     },
     /// A bounded read failed. The reason and retry boundary are durable, so
     /// later local controls reuse the cached state without hammering GitHub.
     Degraded {
         reason: String,
-        #[schemars(with = "crate::server::schema::TimeTuple")]
+        #[schemars(with = "crate::store::TimeTuple")]
         cached_as_of: OffsetDateTime,
-        #[schemars(with = "crate::server::schema::TimeTuple")]
+        #[schemars(with = "crate::store::TimeTuple")]
         retry_at: OffsetDateTime,
     },
 }
@@ -617,7 +617,7 @@ pub enum TaskEventKind {
     },
     Started,
     BodyHandedOff {
-        handoff: crate::child::ChildBodyHandoff,
+        handoff: crate::store::child::ChildBodyHandoff,
     },
     Progress {
         summary: String,
@@ -704,7 +704,7 @@ pub struct TaskEvent {
     pub id: i64,
     pub task_id: TaskId,
     pub kind: TaskEventKind,
-    #[schemars(with = "crate::server::schema::TimeTuple")]
+    #[schemars(with = "crate::store::TimeTuple")]
     pub created_at: OffsetDateTime,
 }
 
@@ -744,7 +744,7 @@ mod tests {
         GithubPr, LinearWritebackOperation, LinearWritebackState, PrPhase, PrPublication, Task,
         TaskEventKind, TaskId, TaskPr, TaskPrId,
     };
-    use crate::linear::LinearIssueId;
+    use crate::store::linear_records::LinearIssueId;
 
     #[test]
     fn events_recorded_before_the_graph_rename_still_read() {
@@ -770,7 +770,7 @@ mod tests {
 
             pm_writeback: LinearWritebackState::Current,
             wave_id: Some(loopflow_model::id::WaveId::new()),
-            project_id: Some(crate::work::project::ProjectId::new()),
+            project_id: Some(crate::store::work::project::ProjectId::new()),
             worktree: Some("/tmp/task".into()),
             workspace_slug: "ship-it".to_string(),
             branch: "jack/ship-it".to_string(),
@@ -783,7 +783,7 @@ mod tests {
             due_date: None,
             state: None,
             completed_at: None,
-            observation: crate::work::task::Observation::NotRequired,
+            observation: crate::store::work::task::Observation::NotRequired,
         }
     }
 

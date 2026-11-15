@@ -1,12 +1,9 @@
 //! Durable tracked Work, independent of any autonomous controller.
 
-pub mod edit;
+pub use crate::store::work::edit;
 pub mod link;
 pub mod link_receiver;
-pub mod project;
-pub mod selection;
-pub mod task;
+pub use crate::store::work::project;
+pub use crate::store::work::selection;
+pub use crate::store::work::task;
 pub mod wave;
-
-#[cfg(test)]
-mod selection_tests;

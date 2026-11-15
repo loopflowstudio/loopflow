@@ -370,7 +370,7 @@ fn print_snapshot(snapshot: &WorkActivitySnapshot) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::work::task::TaskId;
+    use crate::store::work::task::TaskId;
 
     #[test]
     fn work_activity_fixture_round_trips() {

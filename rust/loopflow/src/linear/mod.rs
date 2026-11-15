@@ -82,6 +82,12 @@ pub enum LinearError {
     Message(String),
 }
 
+impl From<crate::store::linear_records::ProjectDocumentError> for LinearError {
+    fn from(error: crate::store::linear_records::ProjectDocumentError) -> Self {
+        Self::Message(error.0)
+    }
+}
+
 pub type LinearResult<T> = Result<T, LinearError>;
 
 #[cfg(test)]
@@ -965,7 +971,7 @@ impl LinearClient {
 
     async fn project_status_id(
         &self,
-        status: crate::work::project::ProjectStatus,
+        status: crate::store::work::project::ProjectStatus,
     ) -> LinearResult<String> {
         let team = self.require_team_id()?;
         self.project_statuses()
@@ -1431,10 +1437,10 @@ impl LinearClient {
 
     pub(crate) async fn project_field_input(
         &self,
-        value: &crate::work::edit::WorkValue,
+        value: &crate::store::work::edit::WorkValue,
         content: &str,
     ) -> LinearResult<Value> {
-        use crate::work::edit::WorkValue;
+        use crate::store::work::edit::WorkValue;
         match value {
             WorkValue::ProjectName(value) => Ok(json!({"name": value})),
             WorkValue::ProjectSummary(value) => Ok(json!({"description": value})),
@@ -1585,17 +1591,17 @@ impl LinearClient {
             && node.archived_at.is_none()
             && matches!(
                 node.status.type_,
-                crate::work::project::ProjectStatus::Backlog
-                    | crate::work::project::ProjectStatus::Planned
+                crate::store::work::project::ProjectStatus::Backlog
+                    | crate::store::work::project::ProjectStatus::Planned
             );
         if promote {
-            node.status.type_ = crate::work::project::ProjectStatus::Started;
+            node.status.type_ = crate::store::work::project::ProjectStatus::Started;
         }
         let mut project = node.into_observation()?;
         crate::linear::validate_project_ownership("adoption", initiative, Some(team), &project)?;
         if apply && promote {
             let input = json!({
-                "statusId": self.project_status_id(crate::work::project::ProjectStatus::Started).await?
+                "statusId": self.project_status_id(crate::store::work::project::ProjectStatus::Started).await?
             });
             let response: Value = self
                 .graphql(
@@ -2327,7 +2333,7 @@ struct TeamCreatePayload {
 #[derive(Deserialize)]
 struct ProjectStatusNode {
     #[serde(rename = "type")]
-    type_: crate::work::project::ProjectStatus,
+    type_: crate::store::work::project::ProjectStatus,
 }
 
 #[derive(Deserialize)]
@@ -2335,7 +2341,7 @@ struct ProjectStatusChoice {
     #[serde(deserialize_with = "loopflow_model::id::deserialize_uuid")]
     id: String,
     #[serde(rename = "type")]
-    type_: crate::work::project::ProjectStatus,
+    type_: crate::store::work::project::ProjectStatus,
     position: f64,
     #[serde(rename = "teamId")]
     team_id: Option<String>,
@@ -2375,18 +2381,19 @@ struct ProjectNode {
 // Replace only the selected planning field, retaining unrelated provider prose.
 fn patch_project_field(
     content: &str,
-    value: &crate::work::edit::WorkValue,
+    value: &crate::store::work::edit::WorkValue,
 ) -> LinearResult<String> {
-    use crate::work::edit::WorkValue;
+    use crate::store::work::edit::WorkValue;
     use project_document::ProjectField::{Krs, Targets};
     let document = parse_project_document(content)?;
     let (owner, replacement) = match value {
         WorkValue::ProjectDescription(Some(description)) => {
-            return document.replace_description(description)
+            return Ok(document.replace_description(description)?)
         }
         WorkValue::Krs(krs) => (Krs, project_document::render_krs(krs)),
         WorkValue::MetricTargets(targets) => {
-            crate::work::project::validate_metric_targets(targets).map_err(LinearError::Message)?;
+            crate::store::work::project::validate_metric_targets(targets)
+                .map_err(LinearError::Message)?;
             (Targets, project_document::render_metric_targets(targets))
         }
         _ => {
@@ -2414,9 +2421,9 @@ impl ProjectNode {
             // Older rotation archived its predecessor without changing status.
             // Retain that history without presenting it as a current plan.
             status: if self.archived_at.is_some()
-                && self.status.type_ != crate::work::project::ProjectStatus::Canceled
+                && self.status.type_ != crate::store::work::project::ProjectStatus::Canceled
             {
-                crate::work::project::ProjectStatus::Completed
+                crate::store::work::project::ProjectStatus::Completed
             } else {
                 self.status.type_
             },
@@ -2587,7 +2594,7 @@ fn first_meaningful_paragraph(description: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use crate::work::edit::WorkValue;
+    use crate::store::work::edit::WorkValue;
     #[tokio::test]
     async fn project_markdown_prose_replacement_preserves_managed_fields() {
         let client =
@@ -2674,7 +2681,7 @@ mod tests {
         let source = "## Metric targets\n[]\n## KRs\nPreamble.\n- [ ] Existing proof\n";
         let after = super::patch_project_field(
             source,
-            &WorkValue::Krs(vec![crate::work::project::ProjectKR {
+            &WorkValue::Krs(vec![crate::store::work::project::ProjectKR {
                 text: "New proof".into(),
                 holds: true,
             }]),
@@ -2755,7 +2762,10 @@ mod tests {
         assert_eq!(adopted.id, "project-1");
         assert_eq!(adopted.name, "Summer work — customer requests");
         assert_eq!(adopted.krs[0].text, "Preserve this proof");
-        assert_eq!(adopted.status, crate::work::project::ProjectStatus::Started);
+        assert_eq!(
+            adopted.status,
+            crate::store::work::project::ProjectStatus::Started
+        );
         assert_eq!(requests.lock().await.len(), 1);
     }
 
@@ -3178,7 +3188,7 @@ mod tests {
             let client = LinearClient::with_base_url("fixture".into(), Some(team.into()), base_url);
             assert_eq!(
                 client
-                    .project_status_id(crate::work::project::ProjectStatus::Completed)
+                    .project_status_id(crate::store::work::project::ProjectStatus::Completed)
                     .await
                     .unwrap(),
                 preferred
@@ -3203,7 +3213,7 @@ mod tests {
             let client =
                 LinearClient::with_base_url("fixture".into(), Some("selected".into()), base_url);
             let error = client
-                .project_status_id(crate::work::project::ProjectStatus::Completed)
+                .project_status_id(crate::store::work::project::ProjectStatus::Completed)
                 .await
                 .unwrap_err();
             assert!(error.to_string().contains("cursor"));

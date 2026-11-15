@@ -789,7 +789,7 @@ mod tests {
     #[test]
     fn quiet_deadline_repages_sessions_and_task_selections_without_a_write() {
         use crate::session::SessionFilter;
-        use crate::work::selection::Selection;
+        use crate::store::work::selection::Selection;
         let (_home, store, repo) = session_projection_fixture(std::process::id());
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
         let filter = SessionFilter {
@@ -833,7 +833,7 @@ mod tests {
     #[test]
     fn process_death_invalidates_session_pages_and_task_selections_without_a_write() {
         use crate::session::SessionFilter;
-        use crate::work::selection::Selection;
+        use crate::store::work::selection::Selection;
         struct Child(std::process::Child);
         impl Drop for Child {
             fn drop(&mut self) {

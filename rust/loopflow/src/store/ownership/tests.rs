@@ -1,7 +1,7 @@
 use super::{acquire, claim_task, held_planning, task_execution_route, task_ownership};
 use crate::store::placement::{set_machine_default, wave_owning_machine};
 use crate::store::sqlite::SqliteStore;
-use crate::work::task::NewTask;
+use crate::store::work::task::NewTask;
 use loopflow_model::durable::{DefaultScope, MachineId, MachineSetting, TaskId};
 use loopflow_test_support::TestRepo;
 use rusqlite::params;
@@ -206,7 +206,7 @@ fn hand_back_rejects_a_changed_repository_with_the_same_held_set() {
     crate::store::machines::add_machine(&store, &remote, "mini", "mini").unwrap();
     claim_task(&store, &task.id).unwrap();
     super::move_claim(&store, &task.id, &remote).unwrap();
-    use crate::rental::{Hardware, OnDemand, Provider, RentalState, Usd};
+    use crate::store::rental::{Hardware, OnDemand, Provider, RentalState, Usd};
     crate::store::rentals::add_ondemand(
         &store,
         &OnDemand {

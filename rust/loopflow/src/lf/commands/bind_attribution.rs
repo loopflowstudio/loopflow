@@ -101,7 +101,10 @@ fn read() -> Result<(Vec<Step>, Vec<SessionBind>)> {
     if !database.exists() {
         return Ok((Vec::new(), Vec::new()));
     }
-    let store = crate::store::sqlite::SqliteStore::open_processes_read_only(&database)?;
+    let store = crate::store::sqlite::SqliteStore::open_processes_read_only(
+        &database,
+        crate::store::token_key::encryption_key,
+    )?;
     let steps = store
         .conversation_history(None, None, None, None, 0, false)?
         .iter()

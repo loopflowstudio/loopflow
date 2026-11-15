@@ -74,7 +74,7 @@ enum Credential {
 /// rental refreshed at prepare must not outlive it, or Linear stops working
 /// there; raising `rental::MAX_HOURS` past it needs another way to renew.
 const LINEAR_ACCESS_HOURS: f64 = 24.0;
-const _: () = assert!(crate::rental::MAX_HOURS <= LINEAR_ACCESS_HOURS);
+const _: () = assert!(crate::store::rental::MAX_HOURS <= LINEAR_ACCESS_HOURS);
 
 /// A rental's Claude access token counts as current until this close to its
 /// expiry; then a connect, by hand or before a launch, sends the next one. A
@@ -1818,7 +1818,7 @@ esac
 
     /// A Machine at `route` under a live rental.
     fn live_rental(store: &SharedStore, route: &str) -> loopflow_model::durable::Machine {
-        use crate::rental::{Hardware, OnDemand, Provider, Usd};
+        use crate::store::rental::{Hardware, OnDemand, Provider, Usd};
         let usd = |text| Usd::parse(text).unwrap();
         crate::store::rentals::add_ondemand(
             &store.sqlite,

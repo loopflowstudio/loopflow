@@ -9,9 +9,9 @@ use serde_json::json;
 use super::{mark_issue_updated, seed_provider_task, with_planning_task, PlanningState};
 use crate::ops::linear::refresh_wave;
 use crate::ops::linear::test_fixture::Fixture;
+use crate::store::work::task::Task;
+use crate::store::work::task::TaskUpdate;
 use crate::store::Store;
-use crate::work::task::Task;
-use crate::work::task::TaskUpdate;
 use loopflow_model::durable::WorkRef;
 
 fn saved_order(fixture: &Fixture, task: &Task) -> (String, serde_json::Value) {

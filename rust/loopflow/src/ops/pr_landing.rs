@@ -11,13 +11,13 @@ use time::OffsetDateTime;
 
 use crate::config::load_config_or_default;
 use crate::git::current_branch;
-use crate::pr_landing::{
+use crate::store::pr_landing::{
     LandingPlacement, LandingSupervisor, NewPrLanding, PrLanding, PrLandingState,
     SUPERVISOR_STALE_AFTER,
 };
 use crate::store::sqlite::ci_incidents::RepairAttempt;
+use crate::store::work::task::{CiCheck, CiIncident};
 use crate::store::{open_store, storage_config_from_env, SharedStore};
-use crate::work::task::{CiCheck, CiIncident};
 
 use super::error::{OpsError, OpsResult};
 use super::land::LandOptions;
@@ -1303,7 +1303,7 @@ pub fn wait_for_merge(repo: &Path, options: &LandOptions, pr: &PrInfo) -> OpsRes
 /// only unassigning the Task holds its repair. No elapsed time ends the wait.
 async fn wait_for_landing(
     store: &SharedStore,
-    id: &crate::pr_landing::PrLandingId,
+    id: &crate::store::pr_landing::PrLandingId,
 ) -> OpsResult<()> {
     let io = LandingIo::github(Some(ci_fix(None)));
     #[cfg(test)]
@@ -1351,7 +1351,7 @@ tokio::task_local! {
 #[cfg(test)]
 pub(super) async fn wait_with_io(
     store: &SharedStore,
-    id: &crate::pr_landing::PrLandingId,
+    id: &crate::store::pr_landing::PrLandingId,
     io: LandingIo,
 ) -> OpsResult<()> {
     LANDING_IO.scope(io, wait_for_landing(store, id)).await
@@ -1418,7 +1418,7 @@ async fn reconcile_repository_async(
 async fn repository_tasks(
     store: &SharedStore,
     repo: &crate::repository::RepoId,
-) -> OpsResult<Vec<crate::work::task::Task>> {
+) -> OpsResult<Vec<crate::store::work::task::Task>> {
     let mut tasks = Vec::new();
     for task in store.list_tasks(None).await.map_err(repair_error)? {
         let task_repo = super::task::repository_for_task(store, &task)?;
@@ -1448,9 +1448,11 @@ mod tests {
         ManualRemoval, MergeGateReading, MergeRequest, MergeRequestRemoval, PrInfo,
         PrMergeObservation,
     };
-    use crate::pr_landing::{NewPrLanding, PrLanding, PrLandingState};
+    use crate::store::pr_landing::{NewPrLanding, PrLanding, PrLandingState};
+    use crate::store::work::task::{
+        CiCheck, LinearWritebackState, Observation, Task, TaskPr, TaskPrId,
+    };
     use crate::store::{SharedStore, StorageConfig};
-    use crate::work::task::{CiCheck, LinearWritebackState, Observation, Task, TaskPr, TaskPrId};
     use loopflow_model::durable::TaskId;
     use std::path::{Path, PathBuf};
 
@@ -1768,7 +1770,7 @@ mod tests {
     #[tokio::test]
     async fn landing_wait_missing_record_is_a_failure_not_a_hold() {
         let (_directory, store, _) = fixture().await;
-        let missing = crate::pr_landing::PrLandingId::from_raw("missing");
+        let missing = crate::store::pr_landing::PrLandingId::from_raw("missing");
         let result = wait_for_landing(&store, &missing).await;
         assert!(matches!(result, Err(OpsError::Message(reason)) if reason.contains("disappeared")));
     }

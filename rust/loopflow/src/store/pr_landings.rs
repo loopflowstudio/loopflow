@@ -2,7 +2,7 @@
 
 use time::OffsetDateTime;
 
-use crate::pr_landing::{LandingSupervisor, PrLanding, PrLandingId};
+use crate::store::pr_landing::{LandingSupervisor, PrLanding, PrLandingId};
 
 use super::{run_sqlite, Store, StoreResult};
 

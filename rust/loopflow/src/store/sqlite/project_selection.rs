@@ -1,11 +1,11 @@
 //! Current Project selection has one owner: the Wave row. YAML is import evidence only.
-use crate::work::edit::WorkValue as Edit;
+use crate::store::work::edit::WorkValue as Edit;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use super::planning_write;
 use super::SqliteStore;
+use crate::store::work::project::Project;
 use crate::store::{PlanningLocks, StoreError, StoreResult};
-use crate::work::project::Project;
 use loopflow_model::durable::ProjectId;
 use loopflow_model::id::WaveId;
 
@@ -61,7 +61,7 @@ fn bind_in(conn: &Connection, wave: &WaveId, project: &str) -> StoreResult<Proje
     }
     planning_write::local(
         conn,
-        &crate::work::edit::WorkEdit::for_target(
+        &crate::store::work::edit::WorkEdit::for_target(
             wave.as_str(),
             &[Edit::WaveProject(Some(id.to_string()))],
         ),
@@ -83,7 +83,7 @@ fn write_in(
     let id = resolve_project_id(conn, wave, project)?;
     planning_write::local(
         conn,
-        &crate::work::edit::WorkEdit::for_target(
+        &crate::store::work::edit::WorkEdit::for_target(
             wave.as_str(),
             &[Edit::WaveProject(Some(id.to_string()))],
         ),
@@ -176,13 +176,15 @@ impl SqliteStore {
                 planning_write::create(
                     &tx,
                     "",
-                    &crate::work::edit::WorkEdit::for_target(
+                    &crate::store::work::edit::WorkEdit::for_target(
                         id.as_str(),
                         &[
                             Edit::ProjectWave(wave.to_string()),
                             Edit::ProjectSlug(Some(name.into())),
                             Edit::ProjectName(Some(name.into())),
-                            Edit::ProjectStatus(crate::work::project::ProjectStatus::Started),
+                            Edit::ProjectStatus(
+                                crate::store::work::project::ProjectStatus::Started,
+                            ),
                         ],
                     ),
                 )?;
@@ -197,9 +199,9 @@ impl SqliteStore {
         let project = super::children::project_in(&tx, &id)?;
         if !matches!(
             project.status,
-            crate::work::project::ProjectStatus::Backlog
-                | crate::work::project::ProjectStatus::Planned
-                | crate::work::project::ProjectStatus::Started
+            crate::store::work::project::ProjectStatus::Backlog
+                | crate::store::work::project::ProjectStatus::Planned
+                | crate::store::work::project::ProjectStatus::Started
         ) {
             return Err(StoreError::InvalidAuthority(
                 "terminal or paused Project history cannot be activated".into(),
@@ -208,14 +210,14 @@ impl SqliteStore {
         super::planning_changes::PlanningChanges::Project(&id).record(
             &tx,
             &Edit::ProjectStatus(project.status),
-            &Edit::ProjectStatus(crate::work::project::ProjectStatus::Started),
+            &Edit::ProjectStatus(crate::store::work::project::ProjectStatus::Started),
         )?;
         planning_write::local(
             &tx,
-            &crate::work::edit::WorkEdit::for_target(
+            &crate::store::work::edit::WorkEdit::for_target(
                 id.as_str(),
                 &[Edit::ProjectStatus(
-                    crate::work::project::ProjectStatus::Started,
+                    crate::store::work::project::ProjectStatus::Started,
                 )],
             ),
         )?;

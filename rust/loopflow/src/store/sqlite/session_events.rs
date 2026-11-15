@@ -1054,7 +1054,7 @@ mod tests {
             store.test_session("conversation", &crate::session_record::new_artifact_key());
         let process = loopflow_model::id::LfProcessId::new();
         let wave = loopflow_model::id::WaveId::new();
-        let project = crate::work::project::ProjectId::new();
+        let project = crate::store::work::project::ProjectId::new();
         let task = loopflow_model::durable::TaskId::new();
         {
             let conn = store.conn.lock().unwrap();
@@ -1238,7 +1238,7 @@ mod tests {
                 .first_provider_attempt_at,
             None
         );
-        let pr = crate::work::task::TaskPrId::new();
+        let pr = crate::store::work::task::TaskPrId::new();
         let manifest = json!({"schema_version":1,"artifact_key":input,
             "created_at":"1970-01-01T00:00:01Z","harness":"codex","surface":"headless",
             "cwd":"/fixture","subjects":[],"host":"fixture",
@@ -1742,8 +1742,8 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let wave = loopflow_model::id::WaveId::new();
-        let project = crate::work::project::ProjectId::new();
-        let task = crate::work::task::TaskId::new();
+        let project = crate::store::work::project::ProjectId::new();
+        let task = crate::store::work::task::TaskId::new();
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(

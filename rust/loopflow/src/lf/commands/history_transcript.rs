@@ -29,7 +29,10 @@ fn read_only_store() -> Result<Option<SqliteStore>> {
     if !database.exists() {
         return Ok(None);
     }
-    Ok(Some(SqliteStore::open_processes_read_only(&database)?))
+    Ok(Some(SqliteStore::open_processes_read_only(
+        &database,
+        crate::store::token_key::encryption_key,
+    )?))
 }
 
 /// A Unix time as `YYYY-MM-DD HH:MM UTC`.

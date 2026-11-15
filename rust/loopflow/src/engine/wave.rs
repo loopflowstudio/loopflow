@@ -8,7 +8,7 @@ use std::path::Path;
 use super::{Error, ErrorCode, Result};
 use crate::ops::linear::{LinearInitResult, LinearReteamResult};
 use crate::ops::Progress;
-use crate::work::project::Project;
+use crate::store::work::project::Project;
 
 /// `wave.plan.bind`: bind the existing tracker Project `project` as the
 /// Wave's shared current selection, as `lf wave plan bind <wave>

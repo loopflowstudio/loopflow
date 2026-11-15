@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::ops::context::{ContextExplanation, ContextFact};
 use crate::ops::run::WorkSelection;
+use crate::store::work::task::TaskUpdate;
 use crate::store::SharedStore;
-use crate::work::task::TaskUpdate;
 
 #[derive(Debug)]
 pub enum TaskPlanningRequest<'a> {
@@ -289,7 +289,7 @@ async fn read_saved_task(
     cwd: &Path,
     wave: Option<&str>,
     resolution: &ContextExplanation,
-) -> anyhow::Result<crate::work::task::Task> {
+) -> anyhow::Result<crate::store::work::task::Task> {
     let id = match &resolution.task {
         ContextFact::Bound { value, .. } => loopflow_model::durable::TaskId::parse(value)?,
         ContextFact::Unavailable { reason } => {

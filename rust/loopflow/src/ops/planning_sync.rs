@@ -10,8 +10,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::planning_exchange::PlanningSnapshot;
 use crate::planning_git::{PlanningGit, PlanningPublication, PlanningRevision};
+use crate::store::planning_exchange::PlanningSnapshot;
 use crate::store::{open_store, sqlite::SqliteStore, StorageConfig, Store};
 
 use super::{OpsError, OpsResult};
@@ -26,7 +26,7 @@ pub(crate) async fn find_task(
     store: &Store,
     repo: &str,
     selector: &str,
-) -> OpsResult<Option<crate::work::task::Task>> {
+) -> OpsResult<Option<crate::store::work::task::Task>> {
     let read = || {
         store
             .sqlite

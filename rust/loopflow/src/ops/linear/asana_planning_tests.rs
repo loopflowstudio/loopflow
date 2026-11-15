@@ -341,7 +341,7 @@ fn asana_status_title_and_comments_write_back_to_the_mirrored_task() {
             repo,
             saved.id.as_str(),
             None,
-            crate::work::task::TaskUpdate {
+            crate::store::work::task::TaskUpdate {
                 title: Some("Write back, renamed".into()),
                 ..Default::default()
             },

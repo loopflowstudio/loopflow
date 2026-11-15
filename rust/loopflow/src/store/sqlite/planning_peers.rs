@@ -3,12 +3,12 @@ use super::{
     planning_write::{self, WriteOrigin},
     SqliteStore,
 };
-use crate::planning_exchange::{PlanningMutation, PlanningSnapshot};
 use crate::planning_git::PlanningDestination;
+use crate::store::planning_exchange::{PlanningMutation, PlanningSnapshot};
+use crate::store::work::edit::WorkValue;
 use crate::store::{
     PeerPlanningStatus, PeerProjectionConflict, PlanningJournal, StoreError, StoreResult,
 };
-use crate::work::edit::WorkValue;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -775,11 +775,11 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::PeerImport;
-    use crate::planning_exchange::{PlanningMutation, PlanningSnapshot};
     use crate::planning_git::PlanningDestination;
+    use crate::store::planning_exchange::{PlanningMutation, PlanningSnapshot};
     use crate::store::query_plans::{assert_no_empty_writes, growing_scans, statements};
     use crate::store::sqlite::{planning_write, SqliteStore};
-    use crate::work::edit::{WorkEdit, WorkValue};
+    use crate::store::work::edit::{WorkEdit, WorkValue};
     use crate::work::wave::Wave;
     use loopflow_model::id::WaveId;
 

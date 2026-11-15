@@ -1,6 +1,6 @@
 //! Linear observations stay adapter-internal; ingestion preserves ordered direction.
 use crate::linear::{LinearComment, LinearIssueObservation};
-use crate::work::task::NewTask;
+use crate::store::work::task::NewTask;
 use loopflow_model::durable::TaskId;
 use time::OffsetDateTime;
 

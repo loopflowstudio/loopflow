@@ -3088,7 +3088,7 @@ pub enum MachineCommand {
         pool: Option<String>,
         /// What it cost you, committed when added
         #[arg(long, value_name = "USD")]
-        cost_usd: Option<crate::rental::Usd>,
+        cost_usd: Option<crate::store::rental::Usd>,
         /// After this RFC 3339 time it takes no new work
         #[arg(long, value_name = "RFC3339")]
         expires_at: Option<String>,
@@ -3153,7 +3153,7 @@ pub enum OndemandCommand {
     Add {
         name: String,
         #[arg(long, value_enum)]
-        provider: crate::rental::Provider,
+        provider: crate::store::rental::Provider,
         #[arg(long)]
         vcpus: u32,
         #[arg(long)]
@@ -3170,14 +3170,14 @@ pub enum OndemandCommand {
         #[arg(long)]
         spot: bool,
         /// Hard deadline for each machine it rents, at most 24
-        #[arg(long, default_value_t = crate::rental::DEFAULT_HOURS)]
+        #[arg(long, default_value_t = crate::store::rental::DEFAULT_HOURS)]
         hours: f64,
         /// Machines rented at once
         #[arg(long)]
         max: u32,
         /// Above this hourly price nothing is rented
         #[arg(long, value_name = "USD")]
-        max_usd_per_hour: crate::rental::Usd,
+        max_usd_per_hour: crate::store::rental::Usd,
     },
     /// Templates, budgets and the machines each has rented
     List {
@@ -3193,7 +3193,7 @@ pub enum OndemandCommand {
         hours: Option<f64>,
         /// Spend at most this much on it
         #[arg(long, value_name = "USD")]
-        max_usd: Option<crate::rental::Usd>,
+        max_usd: Option<crate::store::rental::Usd>,
         #[arg(long)]
         json: bool,
     },

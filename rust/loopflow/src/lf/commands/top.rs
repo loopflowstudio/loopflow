@@ -257,8 +257,10 @@ impl ActivityReader {
                 if !path.exists() {
                     return Ok(ActivitySnapshot { nodes: Vec::new() });
                 }
-                self.store
-                    .insert(SqliteStore::open_processes_read_only(&path)?)
+                self.store.insert(SqliteStore::open_processes_read_only(
+                    &path,
+                    crate::store::token_key::encryption_key,
+                )?)
             }
         };
         // Rows change only with the revision, read before them; liveness is

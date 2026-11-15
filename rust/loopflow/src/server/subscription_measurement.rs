@@ -73,7 +73,7 @@ fn seed(home: &Path, pid: u32) {
         crate::repository::location::ensure_repository(&store, repo.to_str().unwrap()).unwrap();
     for i in 0..64 {
         store
-            .create_task(&crate::work::task::NewTask {
+            .create_task(&crate::store::work::task::NewTask {
                 repository_id: repository_id.clone(),
                 id: TaskId::new(),
                 project_id: None,

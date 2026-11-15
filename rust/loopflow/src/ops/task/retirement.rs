@@ -5,11 +5,11 @@ use std::path::Path;
 
 use super::{block_on_task, task_error, task_store};
 use crate::ops::{NullProgress, OpsError, OpsResult};
+use crate::store::work::task::Task;
 use crate::store::{
     sqlite::{SqliteStore, TaskRetirement, ViewerHold},
     SharedStore,
 };
-use crate::work::task::Task;
 use fs2::FileExt;
 use loopflow_model::durable::{TaskId, WorkStatus};
 use loopflow_model::id::TerminalId;

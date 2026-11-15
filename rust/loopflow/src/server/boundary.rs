@@ -326,7 +326,7 @@ mod tests {
         assert_eq!(identity.task, None);
 
         let task = store
-            .create_task(&crate::work::task::NewTask {
+            .create_task(&crate::store::work::task::NewTask {
                 repository_id: crate::repository::location::ensure_repository(&store, "/repo")
                     .unwrap(),
                 due_date: None,

@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
-use crate::work::task::{CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase};
+use crate::store::work::task::{CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase};
 use loopflow_model::durable::WorkStatus;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -165,7 +165,7 @@ mod tests {
 
     use super::{derive_task_actions, TaskAction, TaskActionEvidence};
     use crate::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
-    use crate::work::task::{CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase};
+    use crate::store::work::task::{CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase};
     use loopflow_model::durable::WorkStatus;
 
     fn evidence<'a>(phase: PrPhase, ci: Option<&'a CiObservation>) -> TaskActionEvidence<'a> {
@@ -329,7 +329,7 @@ mod tests {
         let ci = CiObservation {
             head_sha: "head".to_string(),
             state: CiState::Failing,
-            failing_checks: vec![crate::work::task::CiCheck {
+            failing_checks: vec![crate::store::work::task::CiCheck {
                 name: "scratch-clear".to_string(),
                 url: None,
             }],

@@ -2,11 +2,11 @@
 use crate::store::session_projection::Reading;
 use crate::store::sqlite::selections::{repository_default, TaskSelectionReading};
 use crate::store::sqlite::SqliteStore;
-use crate::store::{StoreError, StoreResult};
-use crate::work::selection::{
+use crate::store::work::selection::{
     move_into_place, Arrangement, ArrangementEdit, ArrangementMode, Dashboard, DashboardId,
     DashboardReading, Selection, SelectionResolution, ViewPlan, WorkWorkspaceKey,
 };
+use crate::store::{StoreError, StoreResult};
 use loopflow_model::durable::RepositoryId;
 fn invalid(error: impl std::fmt::Display) -> StoreError {
     StoreError::InvalidData(error.to_string())
@@ -121,7 +121,7 @@ pub(crate) fn view_plan(
     store: &SqliteStore,
     repository: &RepositoryId,
     source: Option<&str>,
-) -> StoreResult<crate::work::selection::ViewPlan> {
+) -> StoreResult<crate::store::work::selection::ViewPlan> {
     let selection = match source {
         Some(source) => Selection::parse(source, None).map_err(StoreError::from)?,
         None => repository_default(),
@@ -150,7 +150,7 @@ pub(crate) fn edit_dashboard(
         .map_err(StoreError::from)?;
     if previous.is_none() {
         // Identical text in separately authored queries still names separate sources.
-        selection.id = crate::work::selection::SelectionId(format!("query:{}", id.0));
+        selection.id = crate::store::work::selection::SelectionId(format!("query:{}", id.0));
     }
     let recovered = store.dashboard_arrangement(repository, id, &selection.expression_key())?;
     let mut arrangement = if let Some((authored, arrangement)) = recovered {
@@ -196,9 +196,9 @@ pub(crate) fn reorder_dashboard(
 }
 
 fn prepare_plan(plan: &mut ViewPlan) {
-    use crate::work::selection::PaneIntent;
+    use crate::store::work::selection::PaneIntent;
     for content in plan.contents.iter_mut().filter(|content| {
-        content.work.kind == crate::work::selection::WorkWorkspaceKind::Task
+        content.work.kind == crate::store::work::selection::WorkWorkspaceKind::Task
             && content.identifier.is_some()
     }) {
         if let Some(PaneIntent::Session {

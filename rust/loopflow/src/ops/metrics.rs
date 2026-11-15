@@ -369,8 +369,8 @@ mod tests {
     use tempfile::tempdir;
     use time::Duration;
 
+    use crate::store::work::project::ProjectKR;
     use crate::store::StorageConfig;
-    use crate::work::project::ProjectKR;
     use crate::work::wave::metrics::{
         load_metric_contract, MetricEvidenceDto, MetricObservation, MetricStage,
     };
@@ -389,7 +389,7 @@ mod tests {
             summary: String::new(),
 
             metric_targets: Vec::new(),
-            status: crate::work::project::ProjectStatus::Started,
+            status: crate::store::work::project::ProjectStatus::Started,
             krs: vec![ProjectKR {
                 text: "Proof holds for one week".to_string(),
                 holds: false,

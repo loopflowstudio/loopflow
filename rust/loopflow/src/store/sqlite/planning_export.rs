@@ -6,8 +6,8 @@ use serde_json::{json, Value};
 use super::planning_changes::PlanningChanges;
 use super::SqliteStore;
 use crate::store::planning_sync::PlanningBaseline;
+use crate::store::work::edit::WorkValue;
 use crate::store::{StoreError, StoreResult};
-use crate::work::edit::WorkValue;
 use loopflow_model::durable::{ProjectId, TaskId, WorkRef};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -244,7 +244,7 @@ pub(crate) fn attach_in(
     project: bool,
     external: &str,
     revision: Option<&str>,
-    observed: &[crate::work::edit::WorkValue],
+    observed: &[crate::store::work::edit::WorkValue],
 ) -> StoreResult<()> {
     let (kind, table, key, mapping, join) = if project {
         (
@@ -309,11 +309,14 @@ pub(crate) fn attach_in(
             params![id,json!({"revision":revision,"value":false}).to_string()])?;
     }
     let edit = if project {
-        crate::work::edit::WorkValue::ProjectLinearId(Some(export.id.clone()))
+        crate::store::work::edit::WorkValue::ProjectLinearId(Some(export.id.clone()))
     } else {
-        crate::work::edit::WorkValue::TaskLinearId(Some(export.id.clone()))
+        crate::store::work::edit::WorkValue::TaskLinearId(Some(export.id.clone()))
     };
-    super::planning_write::local(conn, &crate::work::edit::WorkEdit::for_target(&id, &[edit]))?;
+    super::planning_write::local(
+        conn,
+        &crate::store::work::edit::WorkEdit::for_target(&id, &[edit]),
+    )?;
     conn.execute(
         &format!("UPDATE {table} SET export_error=NULL WHERE {key}=?1"),
         [id],
@@ -363,7 +366,7 @@ pub(super) fn retain_filing_export_in(
 
 // Only creation fields can seed delivery baselines. Never persist the whole Task:
 // checkout, Workflow and execution fields are not part of the external effect.
-fn task_creation_baseline(task: &crate::work::task::Task) -> Vec<WorkValue> {
+fn task_creation_baseline(task: &crate::store::work::task::Task) -> Vec<WorkValue> {
     vec![
         WorkValue::TaskTitle(Some(task.title.clone())),
         WorkValue::TaskDescription(Some(task.description.clone())),
@@ -374,7 +377,7 @@ fn task_creation_baseline(task: &crate::work::task::Task) -> Vec<WorkValue> {
 }
 
 impl PlanningExport {
-    pub(crate) fn project_status(&self) -> StoreResult<crate::work::project::ProjectStatus> {
+    pub(crate) fn project_status(&self) -> StoreResult<crate::store::work::project::ProjectStatus> {
         self.baseline
             .iter()
             .find_map(|value| match value {
@@ -435,7 +438,7 @@ mod tests {
     };
     use crate::store::sqlite::planning_changes::PlanningChanges;
     use crate::store::sqlite::task_history::RetainedFiling;
-    use crate::work::edit::WorkValue;
+    use crate::store::work::edit::WorkValue;
     use loopflow_model::durable::{ProjectId, TaskId};
 
     #[test]

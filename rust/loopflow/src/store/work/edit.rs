@@ -84,7 +84,7 @@ work_values! {
     (ProjectName, "project_name", Option<String>),
     (ProjectSummary, "project_summary", String),
     (ProjectDescription, "project_description", Option<String>),
-    (ProjectStatus, "project_status", crate::work::project::ProjectStatus),
+    (ProjectStatus, "project_status", crate::store::work::project::ProjectStatus),
     (ProjectRank, "project_rank", u32),
     (ProjectInitiatives, "project_initiatives", Vec<String>),
     (ProjectTeams, "project_teams", Vec<String>),
@@ -110,7 +110,7 @@ work_values! {
     (HistoricalProjectWorkflow, "workflow", String),
     // Released peers recorded the Wave default here; it lives in the Wave config.yaml.
     (HistoricalWaveWorkflow, "wave_workflow", Option<String>),
-    (Krs, "krs", Vec<crate::work::project::ProjectKR>),
+    (Krs, "krs", Vec<crate::store::work::project::ProjectKR>),
     (MetricTargets, "metric_targets", Vec<crate::work::wave::metrics::MetricTarget>),
     (Disposition, "disposition", Disposition),
     (CommentContent, "comment_content", CommentContent),
@@ -159,9 +159,8 @@ impl WorkValue {
             Self::Disposition(v) if !matches!(v.planning_completed, 0 | 1) => {
                 return Err(StoreError::InvalidData("invalid completion value".into()))
             }
-            Self::MetricTargets(v) => {
-                crate::work::project::validate_metric_targets(v).map_err(StoreError::InvalidData)?
-            }
+            Self::MetricTargets(v) => crate::store::work::project::validate_metric_targets(v)
+                .map_err(StoreError::InvalidData)?,
             _ => {}
         }
         Ok(())

@@ -1,7 +1,7 @@
 mod canonical_tests {
     use crate::linear::LinearIssueId;
-    use crate::pr_landing::PrLandingId;
-    use crate::work::task::TaskPrId;
+    use crate::store::pr_landing::PrLandingId;
+    use crate::store::work::task::TaskPrId;
     use loopflow_model::durable::{MachineId, ProjectId, TaskId};
     use loopflow_model::id::{
         AgentProcessId, AgentSessionId, AttachmentToken, LfSessionId, TaskSelector, WaveId,

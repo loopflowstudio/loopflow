@@ -6,7 +6,7 @@ use serde_json::Value;
 
 use crate::server::wire::SubscriptionEvent;
 use crate::store::sqlite::SqliteStore;
-use crate::work::task::{TaskEventKind, TaskId};
+use crate::store::work::task::{TaskEventKind, TaskId};
 use loopflow_model::id::LfProcessId;
 
 const MAX_EVENTS: usize = 256;
@@ -151,7 +151,7 @@ mod tests {
     use super::Observer;
     use crate::server::wire::SubscriptionEvent;
     use crate::store::sqlite::SqliteStore;
-    use crate::work::task::{TaskEventKind, TaskId, TaskPrId};
+    use crate::store::work::task::{TaskEventKind, TaskId, TaskPrId};
     use loopflow_model::durable::{Author, WorkRef};
     use serde_json::json;
 

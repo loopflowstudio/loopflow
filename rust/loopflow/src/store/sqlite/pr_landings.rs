@@ -5,11 +5,11 @@ use std::path::PathBuf;
 use rusqlite::{params, types::Type, OptionalExtension, TransactionBehavior};
 use time::OffsetDateTime;
 
-use crate::pr_landing::{
+use crate::store::pr_landing::{
     LandingPlacement, LandingSupervisor, PrLanding, PrLandingId, PrLandingState,
 };
+use crate::store::work::task::TaskId;
 use crate::store::{StoreError, StoreResult};
-use crate::work::task::TaskId;
 
 fn timestamp(value: OffsetDateTime) -> i64 {
     value.unix_timestamp()
@@ -36,7 +36,7 @@ fn map_landing(row: &rusqlite::Row<'_>) -> rusqlite::Result<PrLanding> {
         Some(value) => {
             return Err(invalid_column(
                 13,
-                crate::pr_landing::PrLandingDataError::InvalidInvariant(format!(
+                crate::store::pr_landing::PrLandingDataError::InvalidInvariant(format!(
                     "invalid stored landing placement: {value}"
                 )),
             ))
@@ -393,11 +393,11 @@ mod tests {
 
     use time::OffsetDateTime;
 
-    use crate::pr_landing::{
+    use crate::store::pr_landing::{
         LandingPlacement, LandingSupervisor, NewPrLanding, PrLanding, PrLandingState,
     };
     use crate::store::sqlite::SqliteStore;
-    use crate::work::task::TaskId;
+    use crate::store::work::task::TaskId;
 
     fn landing(now: OffsetDateTime) -> PrLanding {
         PrLanding::new(

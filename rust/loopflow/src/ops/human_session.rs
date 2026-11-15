@@ -23,8 +23,8 @@ use crate::provider_account::LaunchCapacity;
 use crate::session::{LfSession, WorkSource};
 use crate::session_record::SessionTitleSource;
 use crate::store::sqlite::SqliteStore;
+use crate::store::work::task::Task;
 use crate::store::SharedStore;
-use crate::work::task::Task;
 use loopflow_model::durable::WorkRef;
 
 pub(crate) mod conversation_log;

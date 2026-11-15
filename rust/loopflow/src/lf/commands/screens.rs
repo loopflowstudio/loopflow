@@ -11,7 +11,7 @@ use super::waves::{
 };
 use crate::durable::{GraphProcessDetail, TaskSection, TaskState};
 use crate::ops::human_session::{SessionRecord, SessionState};
-use crate::work::task::{CiCheck, CiState};
+use crate::store::work::task::{CiCheck, CiState};
 use loopflow_model::comment::TaskComments;
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]

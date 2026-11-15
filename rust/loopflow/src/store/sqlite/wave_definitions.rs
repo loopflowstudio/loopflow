@@ -2,8 +2,8 @@
 
 use super::repositories::RepositoryRegistration;
 use super::{planning_write, SqliteStore};
+use crate::store::work::edit::WorkValue as Edit;
 use crate::store::StoreResult;
-use crate::work::edit::WorkValue as Edit;
 use crate::work::wave::{Wave, WaveLocator};
 use loopflow_model::durable::RepositoryId;
 use loopflow_model::id::WaveId;
@@ -97,7 +97,7 @@ impl SqliteStore {
             planning_write::create(
                 &tx,
                 repo,
-                &crate::work::edit::WorkEdit::for_target(
+                &crate::store::work::edit::WorkEdit::for_target(
                     wave.id.as_str(),
                     &[
                         Edit::WaveName(wave.name.clone()),
@@ -128,7 +128,7 @@ impl SqliteStore {
             }
             planning_write::local(
                 &tx,
-                &crate::work::edit::WorkEdit::for_target(
+                &crate::store::work::edit::WorkEdit::for_target(
                     wave.as_str(),
                     &[Edit::WaveRetired(Some(at))],
                 ),

@@ -457,7 +457,7 @@ mod tests {
         let repository = crate::repository::location::ensure_repository(&store, repo).unwrap();
         let new_task = |title: &str| {
             store
-                .create_task(&crate::work::task::NewTask {
+                .create_task(&crate::store::work::task::NewTask {
                     repository_id: repository.clone(),
                     id: TaskId::new(),
                     project_id: Some(project.id.clone()),
@@ -553,7 +553,7 @@ mod tests {
         let wave = DefaultScope::Wave(project.wave_id.clone());
         let repository = crate::repository::location::ensure_repository(&store, repo).unwrap();
         let task = store
-            .create_task(&crate::work::task::NewTask {
+            .create_task(&crate::store::work::task::NewTask {
                 repository_id: repository.clone(),
                 id: TaskId::new(),
                 project_id: Some(project.id.clone()),

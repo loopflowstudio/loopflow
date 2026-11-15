@@ -22,9 +22,9 @@ use crate::ops::task::{
     explain_task_checkout, explain_task_run, TaskCheckoutBehavior, TaskCheckoutExplanation,
     TaskProcessOptions, TaskRunAction, TaskRunExplanation,
 };
+use crate::store::work::task::Task;
 use crate::store::SharedStore;
 use crate::task_graph::CapturedGraph;
-use crate::work::task::Task;
 
 const GRAPHS: [(&str, &str); 5] = [
     ("proof", "- cmd: task sync --plan\n"),
@@ -108,7 +108,7 @@ impl Table {
     /// A Task with no checkout yet, as `lf task create` files it.
     fn unplaced(&self) -> Task {
         let mut task = self.task.clone();
-        task.id = crate::work::task::TaskId::new();
+        task.id = crate::store::work::task::TaskId::new();
         task.identifier = "INF-124".into();
         task.linear_id = None;
         task.worktree = None;

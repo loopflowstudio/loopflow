@@ -1,6 +1,6 @@
 //! Retained provider planning records and their pure syntax.
 use super::{StoreError, StoreResult};
-use crate::work::project::{ProjectKR, ProjectStatus};
+use crate::store::work::project::{ProjectKR, ProjectStatus};
 use crate::work::wave::metrics::MetricTarget;
 use loopflow_model::comment::{TaskComment, TaskCommentAuthor};
 use serde::{Deserialize, Serialize};
@@ -249,3 +249,9 @@ pub(crate) fn render_krs(krs: &[ProjectKR]) -> String {
     }
     content
 }
+
+pub(crate) mod project_document;
+
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+pub(crate) struct ProjectDocumentError(pub String);

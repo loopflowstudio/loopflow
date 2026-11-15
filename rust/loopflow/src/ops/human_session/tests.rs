@@ -271,8 +271,8 @@ use std::ffi::OsString;
 use super::human_session_argv;
 use crate::lf::commands::write::SessionOpenIntent;
 use crate::session::LfSession;
+use crate::store::work::task::TaskId;
 use crate::store::{open_ephemeral_store, SharedStore, StorageConfig};
-use crate::work::task::TaskId;
 
 pub(crate) struct SessionHome {
     home: tempfile::TempDir,
@@ -522,7 +522,7 @@ async fn session_work_labels_follow_stable_ancestry_without_a_roadmap() {
         directory.path().display().to_string(),
     );
     store.create_wave(&wave).await.unwrap();
-    let session = |task_id: Option<crate::work::task::TaskId>| LfSession {
+    let session = |task_id: Option<crate::store::work::task::TaskId>| LfSession {
         captured: None,
         caller_artifact_key: None,
         id: "conversation".into(),
@@ -563,7 +563,7 @@ async fn session_work_labels_follow_stable_ancestry_without_a_roadmap() {
         super::session_work_path(&store, &unbound).await.unwrap(),
         None
     );
-    let missing = crate::work::task::TaskId::new();
+    let missing = crate::store::work::task::TaskId::new();
     assert_eq!(
         super::session_work_path(&store, &session(Some(missing.clone())))
             .await
@@ -995,7 +995,7 @@ async fn task_detail_reads_capacity_once_for_all_sessions() {
     let task = logins
         .store
         .sqlite
-        .create_task(&crate::work::task::NewTask {
+        .create_task(&crate::store::work::task::NewTask {
             repository_id: crate::repository::location::ensure_repository(
                 &logins.store.sqlite,
                 repo.path().to_str().unwrap(),
@@ -1801,7 +1801,7 @@ async fn a_held_task_conversation_without_a_view_offers_attach() {
     let created = logins
         .store
         .sqlite
-        .create_task(&crate::work::task::NewTask {
+        .create_task(&crate::store::work::task::NewTask {
             repository_id: crate::repository::location::ensure_repository(
                 &logins.store.sqlite,
                 "/fixture",
@@ -1870,7 +1870,7 @@ impl ListFilters {
         let store = home.store().await;
         let repo = loopflow_test_support::TestRepo::new();
         let wave = loopflow_model::id::WaveId::new();
-        let project = crate::work::project::ProjectId::new();
+        let project = crate::store::work::project::ProjectId::new();
         let task = loopflow_model::durable::TaskId::new();
         let db = rusqlite::Connection::open(home.home.path().join("loopflow.db")).unwrap();
         db.execute(

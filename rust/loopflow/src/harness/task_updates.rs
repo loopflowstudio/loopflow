@@ -384,7 +384,7 @@ mod tests {
         let session = store.test_session("reader", &crate::session_record::new_artifact_key());
         let task = TaskId::new();
         store
-            .create_task(&crate::work::task::NewTask {
+            .create_task(&crate::store::work::task::NewTask {
                 repository_id: crate::repository::location::ensure_repository(
                     &store,
                     "/task-updates",

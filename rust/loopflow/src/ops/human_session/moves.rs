@@ -26,9 +26,9 @@ use crate::session::{LfSession, PrimaryScope, TitleSource, WorkSource};
 use crate::store::sqlite::task_moves::{MoveInFlight, MoveStage};
 use crate::store::sqlite::task_work::{ShipApproval, TaskGraphRecord};
 use crate::store::sqlite::SqliteStore;
+use crate::store::work::task::Task;
 use crate::store::SharedStore;
 use crate::transcript::{Located, Source};
-use crate::work::task::Task;
 use loopflow_model::durable::{MachineId, RepositoryId, TaskId, TaskOwnershipEntry, WorkRef};
 use loopflow_model::id::{AgentSessionId, LfSessionId, WaveId};
 

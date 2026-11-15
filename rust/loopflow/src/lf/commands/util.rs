@@ -149,7 +149,10 @@ pub(crate) fn resume_session_with_env(
 
 pub(crate) fn require_provider_session_process(dir: &Path) -> Result<()> {
     let input = crate::session_record::input_id_from_dir(dir)?;
-    let store = SqliteStore::open_processes_read_only(&crate::store::database_path_from_env()?)?;
+    let store = SqliteStore::open_processes_read_only(
+        &crate::store::database_path_from_env()?,
+        crate::store::token_key::encryption_key,
+    )?;
     let session = store
         .session_for_artifact(&input)?
         .ok_or_else(|| anyhow!("Input {input} is not recorded on this Machine"))?;
@@ -1237,7 +1240,7 @@ mod tests {
         let repo = home.path().canonicalize().unwrap();
         let repo = repo.to_str().unwrap();
         let task = store
-            .create_task(&crate::work::task::NewTask {
+            .create_task(&crate::store::work::task::NewTask {
                 repository_id: crate::repository::location::ensure_repository(&store, repo)
                     .unwrap(),
                 due_date: None,

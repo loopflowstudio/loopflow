@@ -10,8 +10,8 @@ use super::children::{
 use super::SqliteStore;
 use crate::durable::TaskState;
 use crate::store::planning_sync::PlanningSyncReceipts;
+use crate::store::work::task::{Task, TaskEvent, TaskId, TaskPr, TaskPrId};
 use crate::store::{StoreError, StoreResult, TaskAcquisition};
-use crate::work::task::{Task, TaskEvent, TaskId, TaskPr, TaskPrId};
 use loopflow_model::durable::{RepositoryId, TaskOwner};
 
 /// Durable facts about a set of Tasks, read in one snapshot.

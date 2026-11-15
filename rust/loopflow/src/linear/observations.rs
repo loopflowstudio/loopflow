@@ -1,8 +1,8 @@
 //! Retained Linear acquisition evidence, independent of accepted Work and delivery.
 pub(crate) use crate::store::linear_records::revision_nanos;
 use crate::store::sqlite::{planning_write, SqliteStore};
+use crate::store::work::edit::WorkValue as Edit;
 use crate::store::{PlanningState, StoreError, StoreResult};
-use crate::work::edit::WorkValue as Edit;
 use loopflow_model::id::WaveId;
 use rusqlite::{params, OptionalExtension};
 
@@ -33,7 +33,7 @@ impl SqliteStore {
             for id in ids {
                 planning_write::local(
                     &tx,
-                    &crate::work::edit::WorkEdit::for_target(
+                    &crate::store::work::edit::WorkEdit::for_target(
                         &id,
                         &[Edit::TaskDeletedAt(Some(crate::store::rows::now_unix()))],
                     ),

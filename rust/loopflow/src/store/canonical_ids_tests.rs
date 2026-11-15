@@ -124,7 +124,11 @@ fn canonical_ids_retained_fence_serializes_stale_waiter_after_identity_change() 
         .recv_timeout(std::time::Duration::from_secs(5))
         .unwrap();
     let waiter = caller.unwrap().join().unwrap();
-    let store = SqliteStore::open_processes_read_only(&home.path().join("loopflow.db")).unwrap();
+    let store = SqliteStore::open_processes_read_only(
+        &home.path().join("loopflow.db"),
+        crate::store::token_key::encryption_key,
+    )
+    .unwrap();
     assert!(store.session_attachment(SESSION).unwrap().is_none());
     let stale_insert = conn.execute(
         "INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd) VALUES(?1,'stale','human',1,0,'/repo')", [SESSION]
@@ -207,7 +211,11 @@ fn canonical_ids_retained_receipt_and_trace_locator_survive_identity_change() {
         Ok(())
     })
     .unwrap();
-    let store = SqliteStore::open_processes_read_only(&home.path().join("loopflow.db")).unwrap();
+    let store = SqliteStore::open_processes_read_only(
+        &home.path().join("loopflow.db"),
+        crate::store::token_key::encryption_key,
+    )
+    .unwrap();
     let id = LfProcessId::parse(&PROCESS.to_ascii_lowercase()).unwrap();
     let record = store.lf_process(&id).unwrap().unwrap();
     let retained_path = attachment::process_receipt_path(&store, &id)
@@ -347,7 +355,9 @@ fn canonical_ids_canonical_live_claim_does_not_defer_upgrade() {
     )
     .unwrap();
     let store = home.path().join("loopflow.db");
-    let reader = SqliteStore::open_processes_read_only(&store).unwrap();
+    let reader =
+        SqliteStore::open_processes_read_only(&store, crate::store::token_key::encryption_key)
+            .unwrap();
     let original_claim = reader.session_attachment(&session).unwrap().unwrap();
     let fence = session_fence_file(&store, &SESSION.to_ascii_lowercase()).unwrap();
     FileExt::lock_shared(&fence).unwrap();
@@ -362,7 +372,9 @@ fn canonical_ids_canonical_live_claim_does_not_defer_upgrade() {
         .unwrap()
         .try_lock_exclusive()
         .is_err());
-    let store = SqliteStore::open_processes_read_only(&store).unwrap();
+    let store =
+        SqliteStore::open_processes_read_only(&store, crate::store::token_key::encryption_key)
+            .unwrap();
     let claim = store.session_attachment(&session).unwrap().unwrap();
     assert_eq!(claim, original_claim);
     assert_eq!(claim.token.as_str(), token);
@@ -792,18 +804,21 @@ fn canonical_ids_released_work_upgrades_without_replacing_history() {
             Ok((r.get(0)?, r.get(1)?, r.get(2)?))
         })
         .unwrap();
-    let mutations: std::collections::BTreeMap<String, crate::planning_exchange::PlanningMutation> =
-        conn.prepare("SELECT id,mutation FROM planning_peer_changes ORDER BY id")
-            .unwrap()
-            .query_map([], |r| {
-                Ok((
-                    r.get(0)?,
-                    serde_json::from_str(&r.get::<_, String>(1)?).unwrap(),
-                ))
-            })
-            .unwrap()
-            .collect::<Result<_, _>>()
-            .unwrap();
+    let mutations: std::collections::BTreeMap<
+        String,
+        crate::store::planning_exchange::PlanningMutation,
+    > = conn
+        .prepare("SELECT id,mutation FROM planning_peer_changes ORDER BY id")
+        .unwrap()
+        .query_map([], |r| {
+            Ok((
+                r.get(0)?,
+                serde_json::from_str(&r.get::<_, String>(1)?).unwrap(),
+            ))
+        })
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
     apply_sqlite(&conn).unwrap();
     apply_pending_migrations(&conn);
     assert_eq!(
@@ -867,23 +882,30 @@ fn canonical_ids_released_work_upgrades_without_replacing_history() {
         serde_json::from_str::<serde_json::Value>(&event).unwrap()["steer_id"],
         "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
     );
-    let migrated: std::collections::BTreeMap<String, crate::planning_exchange::PlanningMutation> =
-        conn.prepare("SELECT id,mutation FROM planning_peer_changes ORDER BY id")
-            .unwrap()
-            .query_map([], |r| {
-                Ok((
-                    r.get(0)?,
-                    serde_json::from_str(&r.get::<_, String>(1)?).unwrap(),
-                ))
-            })
-            .unwrap()
-            .collect::<Result<_, _>>()
-            .unwrap();
-    let saved = crate::planning_exchange::PlanningSnapshot { changes: migrated };
-    let original = crate::planning_exchange::PlanningSnapshot { changes: mutations };
+    let migrated: std::collections::BTreeMap<
+        String,
+        crate::store::planning_exchange::PlanningMutation,
+    > = conn
+        .prepare("SELECT id,mutation FROM planning_peer_changes ORDER BY id")
+        .unwrap()
+        .query_map([], |r| {
+            Ok((
+                r.get(0)?,
+                serde_json::from_str(&r.get::<_, String>(1)?).unwrap(),
+            ))
+        })
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    let saved = crate::store::planning_exchange::PlanningSnapshot { changes: migrated };
+    let original = crate::store::planning_exchange::PlanningSnapshot { changes: mutations };
     assert_eq!(saved.merge(&original).unwrap(), saved);
     assert_eq!(saved.merge(&original).unwrap().changes.len(), 2);
-    let store = SqliteStore::open_processes_read_only(&home.path().join("loopflow.db")).unwrap();
+    let store = SqliteStore::open_processes_read_only(
+        &home.path().join("loopflow.db"),
+        crate::store::token_key::encryption_key,
+    )
+    .unwrap();
     for selector in [
         "TASK_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         "lOo-506",

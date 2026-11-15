@@ -536,7 +536,7 @@ mod tests {
         let (_home, store, _task, _viewer) = fixture();
         let task = TaskId::new();
         store
-            .create_task(&crate::work::task::NewTask {
+            .create_task(&crate::store::work::task::NewTask {
                 id: task.clone(),
                 repository_id: crate::repository::location::ensure_repository(&store, "/repo")
                     .unwrap(),
@@ -701,7 +701,7 @@ mod tests {
             crate::repository::location::ensure_repository(&store, repo.to_str().unwrap()).unwrap();
         let traced = statements(&store, || {
             store
-                .create_task(&crate::work::task::NewTask {
+                .create_task(&crate::store::work::task::NewTask {
                     repository_id,
                     id: TaskId::from_raw("task_abcdef10000000000000000000000001"),
                     project_id: None,

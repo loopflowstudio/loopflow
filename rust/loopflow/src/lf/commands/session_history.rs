@@ -34,7 +34,10 @@ pub(crate) fn collect_history(
     if !database.exists() {
         return Ok(Vec::new());
     }
-    let store = crate::store::sqlite::SqliteStore::open_processes_read_only(&database)?;
+    let store = crate::store::sqlite::SqliteStore::open_processes_read_only(
+        &database,
+        crate::store::token_key::encryption_key,
+    )?;
     Ok(store.conversation_history(
         filter.wave,
         filter.project,
@@ -66,7 +69,10 @@ pub(crate) fn render(selector: &str, view: SessionView, json: bool) -> Result<St
     let mut output = String::new();
     let home = crate::store::lf_home_dir();
     let database = crate::store::database_path_from_env()?;
-    let store = crate::store::sqlite::SqliteStore::open_processes_read_only(&database)?;
+    let store = crate::store::sqlite::SqliteStore::open_processes_read_only(
+        &database,
+        crate::store::token_key::encryption_key,
+    )?;
     let snapshot = store
         .input_history(selector)
         .map_err(|error| anyhow!("Session capture unavailable: {error}"))?;

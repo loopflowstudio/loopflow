@@ -2,7 +2,7 @@
 
 use super::planning_write;
 
-use crate::work::edit::WorkValue as Edit;
+use crate::store::work::edit::WorkValue as Edit;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -19,14 +19,14 @@ use time::OffsetDateTime;
 use crate::durable::TaskState;
 use crate::store::linear_records::{LinearIssueId, LinearProjectId};
 use crate::store::rows::now_unix;
-use crate::store::{PlanningState, StoreError, StoreResult};
-use crate::work::project::{Project, ProjectEvent, ProjectEventKind, ProjectId};
-use crate::work::task::NewTask;
-use crate::work::task::{
+use crate::store::work::project::{Project, ProjectEvent, ProjectEventKind, ProjectId};
+use crate::store::work::task::NewTask;
+use crate::store::work::task::{
     CiObservation, GithubObservation, GithubPr, LinearObservationOutcome, LinearWritebackState,
     PrMergeRequest, PrPhase, PrPresentation, PrPublication, Task, TaskEvent, TaskEventKind, TaskId,
     TaskLinearObservation, TaskPr, TaskPrId, TaskPrRepairKind,
 };
+use crate::store::{PlanningState, StoreError, StoreResult};
 use loopflow_model::durable::{Author, RepositoryId};
 use loopflow_model::id::WaveId;
 
@@ -132,7 +132,7 @@ pub(super) fn create_task_in(conn: &Connection, input: &NewTask) -> StoreResult<
         due_date: input.due_date.clone(),
         state: Some("unstarted".into()),
         completed_at: None,
-        observation: crate::work::task::Observation::NotRequired,
+        observation: crate::store::work::task::Observation::NotRequired,
     };
     validate_task(&task)?;
     insert_task_row(conn, &task)?;
@@ -170,9 +170,9 @@ fn record_task_branch_in(
     }
     super::planning_write::local(
         tx,
-        &crate::work::edit::WorkEdit::for_target(
+        &crate::store::work::edit::WorkEdit::for_target(
             task.as_str(),
-            &[crate::work::edit::WorkValue::TaskBranch(Some(
+            &[crate::store::work::edit::WorkValue::TaskBranch(Some(
                 branch.into(),
             ))],
         ),
@@ -1184,7 +1184,7 @@ impl SqliteStore {
         planning_write::create(
             &transaction,
             "",
-            &crate::work::edit::WorkEdit::for_target(
+            &crate::store::work::edit::WorkEdit::for_target(
                 project.id.as_str(),
                 &[
                     Edit::ProjectWave(project.wave_id.to_string()),
@@ -1336,7 +1336,7 @@ impl SqliteStore {
     pub fn latest_project_failure(
         &self,
         project_id: &ProjectId,
-    ) -> StoreResult<Option<crate::work::project::HistoricalFailure>> {
+    ) -> StoreResult<Option<crate::store::work::project::HistoricalFailure>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let event = conn
             .query_row(
@@ -1350,7 +1350,7 @@ impl SqliteStore {
             .optional()?;
         Ok(event
             .as_ref()
-            .and_then(crate::work::project::HistoricalFailure::from_event))
+            .and_then(crate::store::work::project::HistoricalFailure::from_event))
     }
 }
 
@@ -1562,7 +1562,7 @@ fn insert_task_row(conn: &Connection, task: &Task) -> StoreResult<()> {
     planning_write::create(
         conn,
         &repo,
-        &crate::work::edit::WorkEdit::for_target(
+        &crate::store::work::edit::WorkEdit::for_target(
             task.id.as_str(),
             &[
                 Edit::TaskProject(task.project_id.as_ref().map(ToString::to_string)),
@@ -1573,7 +1573,7 @@ fn insert_task_row(conn: &Connection, task: &Task) -> StoreResult<()> {
                 Edit::TaskRank(task.rank),
                 Edit::TaskAssignee(task.assignee.clone()),
                 Edit::TaskDueDate(task.due_date.clone()),
-                Edit::Disposition(crate::work::edit::Disposition {
+                Edit::Disposition(crate::store::work::edit::Disposition {
                     planning_state: task.state.clone(),
                     planning_completed: i64::from(task.state.as_deref() == Some("completed")),
                     planning_completed_at: task.completed_at.clone(),
@@ -2137,7 +2137,7 @@ fn settle_task_pr_merged_in(
             .unwrap_or_else(OffsetDateTime::now_utc);
         let observation = GithubObservation {
             checked_at,
-            result: crate::work::task::GithubObservationResult::Partial {
+            result: crate::store::work::task::GithubObservationResult::Partial {
                 reason: format!(
                     "GitHub merged_at conflicts with first accepted value {accepted_at}"
                 ),
@@ -2244,7 +2244,7 @@ fn map_task_columns(
         completed_at: row.get(20)?,
         // Runtime freshness is derived when reconciliation decides whether the
         // durable GitHub observation can be reused.
-        observation: crate::work::task::Observation::NotRequired,
+        observation: crate::store::work::task::Observation::NotRequired,
     })
 }
 
@@ -2627,8 +2627,8 @@ mod local_planning_tests {
     use rusqlite::OptionalExtension;
 
     use crate::store::sqlite::SqliteStore;
-    use crate::work::task::NewTask;
-    use crate::work::task::TaskUpdate;
+    use crate::store::work::task::NewTask;
+    use crate::store::work::task::TaskUpdate;
     use loopflow_model::durable::{ProjectId, RepositoryId, TaskId};
     use loopflow_model::id::WaveId;
 
@@ -2724,7 +2724,7 @@ mod local_planning_tests {
         use crate::process::{AgentCaller, AGENT_CALLER_ENV};
         use crate::session::TitleSource;
         use crate::store::sqlite::SessionCaller;
-        use crate::work::edit::{WorkEdit, WorkValue};
+        use crate::store::work::edit::{WorkEdit, WorkValue};
 
         let ledger = crate::journal::TestLedgerGuard::new();
         let _ambient = crate::test_ambient::EnvGuard::new();
@@ -2817,7 +2817,7 @@ mod local_planning_tests {
     #[test]
     fn task_labels_and_generated_names_follow_local_identity_and_linear_mapping() {
         use crate::session::{SessionFilter, TitleSource, WorkSource};
-        use crate::work::edit::{WorkEdit, WorkValue};
+        use crate::store::work::edit::{WorkEdit, WorkValue};
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         let task = store
@@ -3038,7 +3038,7 @@ mod local_planning_tests {
     fn canonical_task_fields_survive_restart_and_peer_import() {
         use super::super::planning_write;
         use crate::planning_git::PlanningDestination;
-        use crate::work::edit::{Disposition, WorkValue};
+        use crate::store::work::edit::{Disposition, WorkValue};
 
         let source = tempfile::tempdir().unwrap();
         let target = tempfile::tempdir().unwrap();
@@ -3060,7 +3060,7 @@ mod local_planning_tests {
             let tx = conn.unchecked_transaction().unwrap();
             planning_write::local(
                 &tx,
-                &crate::work::edit::WorkEdit::for_target(
+                &crate::store::work::edit::WorkEdit::for_target(
                     task.id.as_str(),
                     &[
                         WorkValue::TaskRank(7),
@@ -3140,7 +3140,7 @@ mod local_planning_tests {
         let event = store
             .append_project_event(
                 &id,
-                &crate::work::project::ProjectEventKind::IterationCompleted {
+                &crate::store::work::project::ProjectEventKind::IterationCompleted {
                     iteration: 7,
                     summary: "Retained historical judgment".into(),
                 },
@@ -3485,6 +3485,7 @@ mod local_planning_tests {
             )
             .unwrap();
         let store = SqliteStore {
+            token_key: crate::store::token_key::encryption_key,
             conn: Arc::new(Mutex::new(conn)),
         };
         let observation: crate::test_linear_input::IssueFixture =

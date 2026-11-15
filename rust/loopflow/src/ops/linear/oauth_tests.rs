@@ -18,8 +18,8 @@ use crate::linear::test_server::{self, json_response, QueuedResponse};
 use crate::linear::LinearProjectId;
 use crate::ops::error::OpsResult;
 use crate::provider_auth::{PmRefreshError, Provider, PM_REFRESH_CONFIG, PM_REFRESH_URL};
+use crate::store::work::project::{Project, ProjectId};
 use crate::store::{open_ephemeral_store, ProviderToken, StorageConfig};
-use crate::work::project::{Project, ProjectId};
 use crate::work::wave::Wave;
 
 impl Fixture {
@@ -110,7 +110,7 @@ async fn pm_read_linear_oauth_recovers() {
         id: ProjectId::new(),
 
         summary: String::new(),
-        status: crate::work::project::ProjectStatus::Started,
+        status: crate::store::work::project::ProjectStatus::Started,
         linear_id: Some(LinearProjectId::new("project-1").unwrap()),
         slug: "reliability".into(),
         name: "Reliability".into(),
@@ -128,7 +128,7 @@ async fn pm_read_linear_oauth_recovers() {
         .store
         .append_project_event(
             &project.id,
-            &crate::work::project::ProjectEventKind::Steer {
+            &crate::store::work::project::ProjectEventKind::Steer {
                 steer_id: loopflow_model::id::SteerId::new(),
             },
         )
@@ -183,7 +183,7 @@ async fn pm_read_linear_oauth_recovers() {
     assert_eq!(refreshed.linear_id, project.linear_id);
     assert_eq!(
         refreshed.status,
-        crate::work::project::ProjectStatus::Started
+        crate::store::work::project::ProjectStatus::Started
     );
 
     assert!(refreshed.krs.iter().any(|kr| kr.text == "Fresh proof"));

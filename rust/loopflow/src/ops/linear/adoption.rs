@@ -4,8 +4,8 @@ use std::path::Path;
 
 use crate::linear::LinearProject;
 use crate::ops::{OpsError, OpsResult};
+use crate::store::work::project::ProjectStatus;
 use crate::store::Store;
-use crate::work::project::ProjectStatus;
 use crate::work::wave::WaveLocator;
 
 use super::{project_is_foreign, LinearRepository};

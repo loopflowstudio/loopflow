@@ -14,8 +14,8 @@ use crate::engine::creation::{self, TaskCreation};
 use crate::ops::human_session::tests::SessionHome;
 use crate::session::{LfSession, SessionWork, WorkSource};
 use crate::session_record::{SessionCaptureSpec, SessionGraphMembership, SessionRecorder};
+use crate::store::work::task::{Task, TaskId};
 use crate::store::SharedStore;
-use crate::work::task::{Task, TaskId};
 use loopflow_model::id::LfSessionId;
 
 struct Table {

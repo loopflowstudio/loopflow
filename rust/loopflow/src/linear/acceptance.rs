@@ -8,8 +8,8 @@ use crate::store::sqlite::{self, SqliteStore};
 use crate::store::sqlite::{
     planning_changes, planning_export, planning_write, task_state_delivery,
 };
+use crate::store::work::edit::{Disposition, WorkValue as Edit};
 use crate::store::{run_planning_write, PlanningLocks, Store, StoreError, StoreResult};
-use crate::work::edit::{Disposition, WorkValue as Edit};
 use loopflow_model::durable::ProjectId;
 use loopflow_model::id::WaveId;
 use rusqlite::{named_params, params, Connection, OptionalExtension, Transaction};
@@ -535,7 +535,7 @@ pub(crate) fn observe_task_state(
         &tx,
         &delivery.task_id,
         observed.revision.as_deref(),
-        &crate::work::edit::Disposition {
+        &crate::store::work::edit::Disposition {
             planning_state: observed.state.clone(),
             planning_completed: i64::from(observed.completed),
             planning_completed_at: observed.completed_at.clone(),
@@ -697,7 +697,7 @@ fn project_accepted_planning(
         planning_write::create(
             tx,
             repo,
-            &crate::work::edit::WorkEdit::for_target(id.as_str(), &edits),
+            &crate::store::work::edit::WorkEdit::for_target(id.as_str(), &edits),
         )?;
         tx.execute("UPDATE projects SET pm_snapshot_synced_at=?2,planning_provider_revision=?3 WHERE id=?1",params![id.as_str(),observed_at,revision])?;
     }
@@ -831,7 +831,7 @@ fn project_accepted_planning(
         planning_write::create(
             tx,
             repo,
-            &crate::work::edit::WorkEdit::for_target(id.as_str(), &edits),
+            &crate::store::work::edit::WorkEdit::for_target(id.as_str(), &edits),
         )?;
         tx.execute(
             "UPDATE tasks SET planning_provider_revision=?2,pm_snapshot_synced_at=?3 WHERE id=?1",
@@ -970,8 +970,8 @@ mod tests {
     #[test]
     fn task_admission_reads_released_evidence_without_reconstructing_provider_content() {
         use crate::store::migrations::{apply_before_migration, upgrade_from_migration};
-        use crate::work::project::ProjectId;
-        use crate::work::task::TaskId;
+        use crate::store::work::project::ProjectId;
+        use crate::store::work::task::TaskId;
         use std::sync::{Arc, Mutex};
 
         let cases = [
@@ -1023,6 +1023,7 @@ mod tests {
                 .unwrap();
             upgrade_from_migration(&conn, "planning_peers");
             let store = SqliteStore {
+                token_key: crate::store::token_key::encryption_key,
                 conn: Arc::new(Mutex::new(conn)),
             };
             let saved = store.task(&task).unwrap().unwrap();

@@ -215,7 +215,7 @@ pub(super) fn move_in_flight_in(
 mod tests {
     use super::MoveStage;
 
-    use crate::work::task::NewTask;
+    use crate::store::work::task::NewTask;
     use loopflow_model::durable::{MachineId, TaskId};
 
     #[test]

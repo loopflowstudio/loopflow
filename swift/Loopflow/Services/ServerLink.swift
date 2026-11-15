@@ -397,7 +397,7 @@ extension RegistryQuery {
 }
 
 public enum ServerSubscriptionUpdate: Sendable {
-    case reading(RawJSON)
+    case reading(ReceivedReading)
     case event(SubscriptionEvent)
 }
 
@@ -531,7 +531,13 @@ final class ServerSubscription: @unchecked Sendable {
                    let evidence = stamp.observations, evidence.source != link.welcome.observations {
                     throw RegistryQueryError("Reading came from an unnegotiated observation source")
                 }
-                guard try deliver(.reading(frame)) else { return false }
+                let attribution: ReceivingLink?
+                if case .string(let machine) = link.welcome.machine["id"] {
+                    attribution = ReceivingLink(machine: machine, source: link.welcome.observations,
+                        generation: link.generation)
+                } else { attribution = nil }
+                let received = ReceivedReading(frame.bytes, link: attribution)
+                guard try deliver(.reading(received)) else { return false }
                 resumeToken = checkpoint
                 eventBaseline = true
                 if let pending, try frame.fields()["answers"]?.decode(UInt64?.self) == pending {
@@ -580,5 +586,28 @@ final class ServerSubscription: @unchecked Sendable {
         guard first else { return }
         if let link { Task { [id] in await link.unsubscribe(id) } }
         finishStream(error)
+    }
+}
+
+/// Local attribution captured before buffering, never reconstructed from a watch.
+public struct ReceivingLink: Equatable, Sendable {
+    public let machine: String
+    public let source: String
+    public let generation: UUID
+}
+
+/// Unchanged subscription bytes and the link that received them. CLI and cache
+/// inputs carry no negotiated link and cannot revalidate external fields.
+public struct ReceivedReading: Equatable, Sendable {
+    public let bytes: Data
+    public let link: ReceivingLink?
+
+    public init(_ bytes: Data, link: ReceivingLink? = nil) {
+        self.bytes = bytes
+        self.link = link
+    }
+
+    public func decode<T: Decodable>(_ type: T.Type = T.self) throws -> T {
+        try JSONDecoder().decode(type, from: bytes)
     }
 }

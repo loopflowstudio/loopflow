@@ -329,7 +329,7 @@ struct DashboardWorkspaceTests {
             "revisions": ["planning": 1, "sessions": 1, "graphs": 1, "processes": 1, "usage": 1]]))
         try await owner.receive([plan], stamp: stamp, for: read)
         let query = RegistryQuery(subscribeRead: { _, _ in
-            let (lines, continuation) = AsyncThrowingStream<Data, any Error>.makeStream()
+            let (lines, continuation) = AsyncThrowingStream<ReceivedReading, any Error>.makeStream()
             return LineSubscription(lines: lines, send: { _ in }, cancel: { continuation.finish() })
         }) { args, _ in
             if args.starts(with: ["desktop", "layout"]) { return "null" }

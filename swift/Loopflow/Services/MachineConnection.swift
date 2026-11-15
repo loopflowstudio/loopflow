@@ -36,6 +36,10 @@ public actor MachineConnection {
     }
     nonisolated var observationConnection: ObservationConnection? { state.observationConnection }
 
+    nonisolated func validate(_ received: ReceivingLink?, machine: String) -> ObservationConnection? {
+        state.validate(received, machine: machine)
+    }
+
     public nonisolated var isWaiting: Bool { state.isWaiting }
     public nonisolated func changes() -> AsyncStream<Void> { state.changes() }
 
@@ -116,6 +120,13 @@ private final class ConnectionState: @unchecked Sendable {
             return MachineConnection.ObservationConnection(source: source, generation: generation)
         }
     }
+    func validate(_ received: ReceivingLink?, machine: String) -> MachineConnection.ObservationConnection? {
+        lock.withLock {
+            guard let received, received.machine == machine, self.machine == machine,
+                  received.generation == generation, received.source == source else { return nil }
+            return MachineConnection.ObservationConnection(source: received.source, generation: received.generation)
+        }
+    }
     func isCurrent(_ link: ServerLink) -> Bool { lock.withLock { generation == link.generation } }
     func beginOpening() -> UUID {
         lock.withLock {
@@ -129,6 +140,7 @@ private final class ConnectionState: @unchecked Sendable {
     func connected(_ link: ServerLink, attempt: UUID) -> Bool {
         lock.withLock {
             guard self.attempt == attempt else { return false }
+            if case .string(let machine) = link.welcome.machine["id"] { self.machine = machine }
             generation = link.generation
             source = link.welcome.observations
             waiting = false

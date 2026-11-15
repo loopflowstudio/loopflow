@@ -35,7 +35,7 @@ func mobileTasks(_ plan: ProjectedWorkPlan) throws -> [WorkViewPlan.Content] {
 final class RemoteTaskObservation {
     let readings: AsyncThrowingStream<Result<Void, RegistryQueryError>, any Error>
     private let continuation: AsyncThrowingStream<Result<Void, RegistryQueryError>, any Error>.Continuation
-    private let watch: ServerWatch<RawJSON>
+    private let watch: ServerWatch<ReceivedReading>
     private let connection: MachineConnection
     private var reader: Task<Void, Never>?
     private var connectionChanges: Task<Void, Never>?
@@ -45,7 +45,7 @@ final class RemoteTaskObservation {
 
     init(query: ServedRead, interaction: WorkInteraction, connection: MachineConnection) {
         self.connection = connection
-        watch = ServerLink.subscribe(query, reconnect: true, connection: connection) { update -> RawJSON? in
+        watch = ServerLink.subscribe(query, reconnect: true, connection: connection) { update -> ReceivedReading? in
             guard case .reading(let frame) = update else { return nil }
             return frame
         }
@@ -72,7 +72,7 @@ final class RemoteTaskObservation {
                     let reading: Result<Void, RegistryQueryError>
                     if let reason = envelope.unavailable { reading = .failure(RegistryQueryError(reason)) }
                     else if let plans = envelope.body, let stamp = envelope.stamp {
-                        try await interaction.receive(plans, stamp: stamp, for: query)
+                        try await interaction.receive(plans, stamp: stamp, for: query, receivingLink: frame.link)
                         reading = .success(())
                     } else { throw RegistryQueryError("Task reading is missing its stamped contents") }
                     guard !self.closed else { return }

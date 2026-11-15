@@ -171,9 +171,9 @@ public final class WorkInteraction {
         reconciled.formIntersection(retained)
     }
 
-    public func receive(_ plans: [WorkViewPlan], stamp: ReadingStamp, for read: ServedRead) async throws {
+    public func receive(_ plans: [WorkViewPlan], stamp: ReadingStamp, for read: ServedRead, receivingLink: ReceivingLink? = nil) async throws {
         guard stamp.machine == machine else { throw RegistryQueryError("Work belongs to another Machine") }
-        _ = try await store.receivePlans(plans, stamp: stamp, for: read)
+        _ = try await store.receivePlans(plans, stamp: stamp, for: read, receivingLink: receivingLink)
         await refreshFromStore()
     }
 

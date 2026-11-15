@@ -214,11 +214,10 @@ public actor ClientWorkStore {
 
     /// Independently supported fields join before exact-query replacement. A
     /// partial answer can update a parent without certifying filtered absence.
-    public func receivePlans(_ plans: [WorkViewPlan], stamp: ReadingStamp, for read: ServedRead) throws -> ClientWorkQuery? {
-        // These callers carry wire stamps but no receiving-link attribution.
-        // A buffered pre-reconnect reading cannot borrow the current link's
-        // generation to revalidate external facts. SQL-only fields still join.
-        let result = try disk().cache(ClientWorkQuery(stamp: stamp, plans: plans), key: queryKey(read))
+    public func receivePlans(_ plans: [WorkViewPlan], stamp: ReadingStamp, for read: ServedRead,
+                             receivingLink: ReceivingLink? = nil) throws -> ClientWorkQuery? {
+        let observation = connection?.validate(receivingLink, machine: stamp.machine)
+        let result = try disk().cache(ClientWorkQuery(stamp: stamp, plans: plans), key: queryKey(read), observation: observation)
         changed()
         return result
     }

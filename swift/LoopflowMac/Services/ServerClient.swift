@@ -22,7 +22,7 @@ enum ServerClient {
     static func reading(_ query: ServedRead, location: ServerLocation = .shared) async throws -> RawJSON {
         let watch = ServerLink.subscribe(query, connection: location.connection) { update -> RawJSON? in
             guard case .reading(let frame) = update else { return nil }
-            return frame
+            return RawJSON(frame.bytes)
         }
         defer { watch.cancel() }
         return try await withThrowingTaskGroup(of: RawJSON.self) { group in
@@ -75,9 +75,9 @@ enum ServerClient {
     /// A subscription on the location's connection; `send` carries checkpoints,
     /// `cancel` ends it. After a reading, connection loss resumes the same stream.
     static func subscribe(_ query: ServedRead, location: ServerLocation = .shared) -> LineSubscription {
-        let watch = ServerLink.subscribe(query, connection: location.connection) { update -> Data? in
+        let watch = ServerLink.subscribe(query, connection: location.connection) { update -> ReceivedReading? in
             guard case .reading(let frame) = update else { return nil }
-            return Data(frame.bytes)
+            return frame
         }
         return LineSubscription(lines: watch.updates, send: checkpoints(watch), cancel: watch.cancel)
     }

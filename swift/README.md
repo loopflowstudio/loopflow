@@ -1184,6 +1184,13 @@ Desktop's live Task lists and Dashboards and the phone's Task feed persist compl
 stamped query bodies in the shared SQLite store. The phone restores those bases
 through the same freshness and invalidation rules; its separate query files are
 no longer read or written. Departed epochs and query ordering survive restart.
+Each subscription reading retains its receiving Machine link through buffering
+and decoding. Independently supported parent and lifecycle facts join before
+query replacement; external activity joins only while that receiving link is
+current. Disconnect and reconnect leave earlier activity last-known until a
+current-link capture revalidates it, even when the server retains its observation
+source. Queued old readings cannot borrow the new link or revoke its capture.
+Field facts, query writes and local revalidation proof commit or roll back together.
 A query from a replacement epoch also invalidates outstanding receipt evidence
 for that Machine; recovery never replays an uncertain command. Rust compiles a
 finite membership program over selection states, preserving scope, source paths

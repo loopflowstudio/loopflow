@@ -34,11 +34,11 @@ struct WorkObservationTransportTests {
         let subscription = ServerClient.subscribe(.allPlans, location: server.location())
         var lines = subscription.lines.makeAsyncIterator()
         let first = try #require(try await lines.next())
-        let frame = try #require(try JSONSerialization.jsonObject(with: first) as? [String: Any])
+        let frame = try #require(try JSONSerialization.jsonObject(with: first.bytes) as? [String: Any])
         #expect(frame.keys.contains("body"))
         subscription.send(Data(#"{"id":7}"#.utf8 + [10]))
         let answered = try #require(try await lines.next())
-        #expect((try JSONSerialization.jsonObject(with: answered) as? [String: Any])?["answers"] as? Int == 7)
+        #expect((try JSONSerialization.jsonObject(with: answered.bytes) as? [String: Any])?["answers"] as? Int == 7)
         await subscription.cancel()
         await server.stop()
         #expect(try await lines.next() == nil)
@@ -73,6 +73,23 @@ struct WorkObservationTransportTests {
         #expect(try await frames.next()?.answers == 2)
         #expect(subscriptions.launched.contains(.taskGet(directory: "/src/loopflow", issue: "LOO-1")))
         #expect(subscriptions.launched.filter { $0 == .allPlans }.count == 1)
+        await observation.cancel()
+    }
+
+    @Test("Reused scope answers retain the original receiving link")
+    func scopeReplayRetainsReceivingLink() async throws {
+        let subscriptions = FakeSubscriptions()
+        let observation = try WorkSubscriptions.observe(launch: subscriptions.launch)
+        defer { Task { await observation.cancel() } }
+        var frames = observation.frames.makeAsyncIterator()
+        let link = ReceivingLink(machine: "machine", source: "observer", generation: UUID())
+        subscriptions.send(.allPlans, #"{"answers":null,"stamp":null,"unavailable":"gone","body":null}"#, link: link)
+        let original = try #require(try await frames.next())
+        #expect(original.receivingLink == link)
+        observation.request(.scope(id: 2, WorkScope(repo: "/repo", headless: false, task: nil, activity: nil, taskListWave: nil)))
+        let reused = try #require(try await frames.next())
+        #expect(reused.answers == 2)
+        #expect(reused.receivingLink == link)
         await observation.cancel()
     }
 
@@ -168,11 +185,11 @@ struct WorkObservationTransportTests {
 /// Subscriptions with no reader: a test sends each line a subscription would.
 private final class FakeSubscriptions: @unchecked Sendable {
     private let lock = NSLock()
-    private var subscriptions: [(read: ServedRead, lines: AsyncThrowingStream<Data, any Error>.Continuation, sent: [String])] = []
+    private var subscriptions: [(read: ServedRead, lines: AsyncThrowingStream<ReceivedReading, any Error>.Continuation, sent: [String])] = []
 
     var launch: WorkSubscriptions.Launch {
         { [self] read in
-            let (lines, continuation) = AsyncThrowingStream<Data, any Error>.makeStream()
+            let (lines, continuation) = AsyncThrowingStream<ReceivedReading, any Error>.makeStream()
             let index = lock.withLock { subscriptions.append((read, continuation, [])); return subscriptions.count - 1 }
             return LineSubscription(lines: lines, send: { [self] line in
                 lock.withLock { subscriptions[index].sent.append(String(decoding: line, as: UTF8.self)
@@ -187,8 +204,8 @@ private final class FakeSubscriptions: @unchecked Sendable {
         lock.withLock { subscriptions.first { $0.read == read }?.sent ?? [] }
     }
 
-    func send(_ read: ServedRead, _ line: String) {
-        _ = lock.withLock { subscriptions.first { $0.read == read }?.lines.yield(Data(line.utf8)) }
+    func send(_ read: ServedRead, _ line: String, link: ReceivingLink? = nil) {
+        _ = lock.withLock { subscriptions.first { $0.read == read }?.lines.yield(ReceivedReading(Data(line.utf8), link: link)) }
     }
 
     func end(_ read: ServedRead) {

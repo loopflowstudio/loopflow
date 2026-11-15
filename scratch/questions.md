@@ -1,21 +1,16 @@
 # Working assumptions
 
-- Headless engineering finding, 2026-11-15: buffered subscription readings can
-  outlive their receiving connection, including a reconnect to the same source.
-  Never borrow the ambient connection generation at SQLite ingestion. SQL-only
-  normalization is built; live external normalization and the dependent
-  incorporation/projection cut await receiving-link attribution through existing
-  transports. Headless review refinement: attribution travels with each reading,
-  before buffering; the current Machine owner validates it at ingestion. A
-  subscription identity cannot stand in for a link across reconnect. Revised
-  prerequisite and counterexample are in the design's
-  Persisted normalization and receiving-link gap section. No product answer inferred.
+- Headless concept review, 2026-11-15: incorporation binds to resource/field/stage
+  and survives later loss of answer coverage; disconnect publishes dependent
+  coverage loss without needing a new body. This refines the existing design,
+  not a product preference. The three unanswered product choices below remain
+  open for loop-or-next; provisional behavior is not an answer.
 
-- Field/answer separation and source/capture decisions remain in the design's
-  Concept review and Review direction sections. Independent SQL-only support
-  normalizes before query replacement; invalid activity cannot settle delivery
-  or discard a supported parent. Observation capture stays in the existing cache.
-  No product preference inferred.
+- Receiving-link attribution is local transport metadata on each reading, captured
+  before buffering and checked against the shared Machine owner at ingestion.
+  Live external normalization now uses only that validated link; SQL-only fields
+  remain independent. Field/answer separation and the remaining incorporation,
+  dynamic membership and Move cut are in the design. No product answer inferred.
 
 - Jack Heart replied “1a” to the 2026-11-15 conversation review's disconnected-edit
   question: save and project Complete/rename/move locally, show “Waiting for

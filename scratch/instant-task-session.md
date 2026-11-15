@@ -2,9 +2,9 @@
 
 Built on origin/main `9cafc410ee`: conversation/Machine link `a2a0a0fb33`,
 unreachable Machine and Desktop rename `35e2835de1`, fixture teardown `5231746858`,
-observation source `86f99e3315`, typed field support `f9a8da8ae9`. SQL-only
-normalization is now persisted; receiving-link attribution precedes external
-normalization, field-effect incorporation and derived-answer coverage, then dynamic
+observation source `86f99e3315`, typed field support `f9a8da8ae9`. SQL-only and attributed external
+normalization are now persisted; field-effect incorporation and derived-answer
+coverage precede dynamic
 membership with disconnected Move. No shipping or merge decision; no Wave selected.
 
 ## Direction
@@ -234,9 +234,6 @@ retired-source release APIs/index and the rest of `CreationRecovery`. `LegacyTas
 only; SQLite commits precede rewrites.
 
 Still remove, with their consumers:
-
-- `ServerClient.subscribe`'s `RawJSON`→`Data` erasure and attribution-less
-  `LineSubscription.lines` payload (replacement: Persisted normalization section).
 
 - Desktop `TaskRunDraft.phase`, other mutation refresh barriers
   (`performTaskAction`) and bind replacement bookkeeping (`replaceSession`,
@@ -610,60 +607,66 @@ invalid activity. Facts and exact query writes commit or roll back together;
 unsupported fields cannot acquire provenance from an older cache. No predecessor
 membership reducer was extended or removed in this prerequisite.
 
-**Dependent cut stopped at a transport counterexample.**
-`ServerSubscription.disconnected` deliberately keeps queued readings across
-reconnect. `RemoteTaskObservation` and Desktop's Dashboard decode them after
-asynchronous suspension; `ServerClient.subscribe` strips `RawJSON` to `Data`.
-A reading queued on generation A can reach SQLite after generation B welcomes
-the same observation source. Sampling `MachineConnection.observationConnection`
-at ingestion would falsely revalidate A as B. Source equality does not fix it.
-Production ingestion therefore currently normalizes only SQL-only fields; it
-never borrows the ambient connection to normalize captured activity. Existing
-query rendering remains unchanged, and external normalized values are unbuilt
-in live consumers. Direct owner tests supply an explicit receiving connection.
+**Receiving-link attribution is built.** `ReceivedReading` retains unchanged
+bytes plus Machine, observation source and link generation. `ServerSubscription`
+constructs it before buffering; Desktop subscriptions, Work frames/checkpoint
+reuse, Dashboard and phone detached decoding retain it through SQLite ingestion.
+CLI/cache inputs and welcomes without a Machine ID remain unattributed without
+discarding their baseline. The shared Machine owner compares the received link
+with its active one. Disconnect/reconnect makes earlier proof
+last-known even when the source is unchanged; a reading never elects a source.
+Departed/unattributed activity cannot replace or revoke a current capture, while
+its supported SQL-only parent/lifecycle facts remain eligible. Transaction
+rollback restores the previously committed in-memory proof with the SQL facts.
 
-**Next prerequisite: attribution belongs to the reading, not the
-subscription.** Then derived-answer dependencies, field-targeted effects
-(`WorkFieldFact.covers(_:CommitFence)` exists, test-only caller) and dynamic
-membership/Move with the predecessor deletion cut. Carry one local envelope containing unchanged bytes and the
-receiving link's Machine, generation and negotiated observation source. Construct
-it at `ServerSubscription.receive`, before yielding to a buffered stream. Preserve
-it through `ServerClient.subscribe`, `LineSubscription`, `WorkFrame`, Dashboard
-and phone detached decoding, and into `ClientWorkStore.receivePlans`. A watch
-spans multiple links; neither its identity nor its current link can supply the
-envelope after delivery. CLI/cache inputs have no negotiated attribution. This is
-local transport metadata, not a wire DTO change or another persistent ledger.
+The motivating queued-A → reconnect-B counterexample and earlier checks remain at
+`9183e2bba798785e6a480c29ec11012fed796ed5:scratch/instant-task-session.md`
+(Persisted normalization and receiving-link gap). Local generations never become
+wire DTOs, Machine revisions or a persistent ledger.
 
-At ingestion, compare the envelope to the existing Machine connection's active
-link; passing the received generation to the database without this comparison
-would merely bless an old link. Keep the received generation with any external
-revalidation proof, so a disconnect during/after ingestion immediately makes that
-proof last-known. Never stamp it with a freshly sampled generation. Commit and
-rollback must also govern that proof; a failed query write cannot leave activity
-revalidated in memory. Parent/lifecycle joins remain independently eligible under
-their own Machine/epoch/schema and field support checks. Do not discard a queued
-baseline solely to suppress external revalidation: preserve resume/checkpoint and
-event ordering, exact-query inputs and scope cancellation.
+Next: field-targeted effects (`WorkFieldFact.covers(_:CommitFence)` exists,
+test-only caller), derived-answer dependencies and dynamic membership/Move with
+the predecessor deletion cut. Original exact-query inputs remain unchanged;
+resume/checkpoint/event ordering and scope cancellation stay on the existing path.
+Native latency remains unmeasured; gate owns the prior nextest LEAK.
 
-Normal path: B's attributed capture establishes external coverage. Failure:
-queue A, disconnect, welcome B with the same source, then finish decoding A;
-A cannot establish B's coverage or revoke a newer B capture. Recovery: consume
-B's complete capture and repair only dependent answers, without another Move,
-send or navigation. Exercise both delivery orders, a disconnect held across
-decoding/ingestion, and two windows sharing the Machine owner on both hosts.
-Keep the existing independent-field, restart and source-replacement cases.
+Checks: `scripts/test_desktop.sh --filter 'ClientWorkQueryTests/testField|ServerClientTests|WorkObservationTransportTests'` passes 8 XCTest and 29 Swift Testing cases; final two-window reconnect case also passes alone. `scripts/test_ios.py -only-testing:LoopflowiOSTests/ClientWorkQueryTests/testFieldBufferedReadingsCannotBorrowReconnectedLinkInEitherOrder -only-testing:LoopflowiOSTests/ClientWorkQueryTests/testFieldAndQueryWritesRollbackTogetherAndFieldLookupIsKeyedAtTenThousandRows` passes 2 cases. `check_swift_multiplatform_boundaries.py` passes. Gate owns broader suites.
 
-Checks: focused `ClientWorkQueryTests/testField*` via `scripts/test_desktop.sh --filter`
-and `scripts/test_ios.py -only-testing`: 7 cases per host (including protocol upgrade);
-`check_swift_multiplatform_boundaries.py` passes. 10k-row `EXPLAIN`: primary-key
-lookup. Gate owns wider suites and the prior LEAK; native latency is unmeasured.
+### Concept review: incorporation survives stale answers · 2026-11-15
+
+Review of `9183e2bba7` plus the receiving-link workspace changes. The transport
+prerequisite is built; it does not yet change query projection. Next implement
+binds each effect to its exact resource, field and semantic stage in the existing
+declaration. A coincidentally newer revision on another field cannot absorb it.
+Persist incorporation with normalized facts and receipt state in the same SQLite
+transaction; do not infer delivery from incorporation. Conflicting or incomparable
+support cannot establish new incorporation. Once established, stale activity,
+conflict, eviction or query closure cannot reactivate the old effect: retain its
+incorporation or make the affected base unavailable under its reload floor.
+
+Derived answers record their consumed fields, candidate/content coverage and
+program identity separately. Disconnect invalidates dependent live coverage and
+publishes that change to leased queries even if no new query body arrives; it
+does not undo incorporated parent/lifecycle effects. Reconnect alone cannot repair
+those answers. A current-link capture repairs only the answers it supports.
+Replace stamp-only incorporation, arbitrary revision shortcuts and the state-only
+projection with dynamic membership and disconnected Move; no parallel reducer.
+
+Show next: Complete commits, another query supplies newer Reopen, then a held
+Working query arrives; the Task stays visible. Repeat with Move A→B then confirmed
+C, stale activity, two windows, close/retire/restart and reconnect with no new
+body. Unknown delivery still recovers the original ID; neither coverage loss nor
+repair sends a command or changes later selection. Proposed Move usage above is
+unchanged; no new product vocabulary or builtin instructions.
 
 ### Open product choices
 
 Unanswered, numbered in `scratch/concept-review.html`: (1) queue Abandon offline
 or require a reachable Machine; (2) Cancel before first send or none; (3) phone
 shows Task titles or shows/renames Session names. Built provisional behavior is
-in `questions.md`. None blocks this work; (3) decides whether phone rename exists.
+in `questions.md`. These do not prevent the engineering cut above, but remain
+open product choices for this concept-review's Blocked outcome; (3) decides
+whether phone rename exists. No answer is inferred in a headless run.
 
 ## Current implementation cut
 
@@ -692,7 +695,7 @@ including without a network event. Retirement cancels its receipt observer and
 transfers lagging effects or scoped reload floors. The complete prior contracts and
 query checks remain at `6e944e73b5a:scratch/instant-task-session.md`.
 
-Remaining: receiving-link attribution and live external normalization; field-effect incorporation and derived-answer coverage,
+Remaining: field-effect incorporation and derived-answer coverage,
 then disconnected Move; effect-policy duplication; cross-client closed-query convergence; exhaustive
 effect/dependency declarations and cross-query provenance; other mutation recovery
 and resource lanes; retained mobile `SessionLink`; projected inspection;

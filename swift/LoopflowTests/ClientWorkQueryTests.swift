@@ -349,6 +349,88 @@ final class ClientWorkQueryTests: XCTestCase {
         XCTAssertFalse(try XCTUnwrap(fields).activityCurrent)
     }
 
+    func testFieldBufferedReadingsCannotBorrowReconnectedLinkInEitherOrder() async throws {
+        for (freshFirst, unavailable) in [(false, false), (true, false), (true, true)] {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+            let oldStamp = fieldStamp(planning: 8)
+            let freshStamp = fieldStamp(planning: 7)
+            let oldPlan = try fieldPlan(oldStamp, wave: "c", clock: unavailable ? nil : 30, source: "fixture-observer")
+            let freshPlan = try fieldPlan(freshStamp, activity: [], clock: 20, source: "fixture-observer")
+            func carrier(_ plan: WorkViewPlan, _ stamp: ReadingStamp) throws -> FieldReadingCarrier {
+                let body = try JSONSerialization.jsonObject(with: JSONEncoder().encode([plan]))
+                let stamp = try JSONSerialization.jsonObject(with: JSONEncoder().encode(stamp))
+                return FieldReadingCarrier(frame: try JSONSerialization.data(withJSONObject: ["body": body, "stamp": stamp, "answers": NSNull(), "unavailable": NSNull()]))
+            }
+            let first = try carrier(oldPlan, oldStamp)
+            let second = try carrier(freshPlan, freshStamp)
+            let links = FieldReadingLinks([first, second])
+            let connection = MachineConnection {
+                let carrier = await links.next()
+                return try await ServerLink.open(ServerEndpoint(
+                    client: .init(kind: "test", platform: "test", name: "test", version: "test"),
+                    control: { carrier }, ticketed: { carrier }))
+            }
+            let read = ServedRead.viewSelect(expression: "state:working")
+            let watch = ServerLink.subscribe(read, reconnect: true, connection: connection) { update -> ReceivedReading? in
+                guard case .reading(let frame) = update else { return nil }
+                return frame
+            }
+            addTeardownBlock { watch.cancel(); await first.close(); await second.close() }
+            let disk = ClientWorkStore(directory: directory, connection: connection, machine: { "machine" }, read: { _ in "null" },
+                observe: { _ in ServerWatch(updates: AsyncThrowingStream { $0.finish() }, checkpoint: { _ in }, cancel: {}) },
+                send: { _ in XCTFail("Read reconciliation cannot send") })
+            addTeardownBlock { await disk.close() }
+            var frames = watch.updates.makeAsyncIterator()
+            let oldValue = try await frames.next()
+            let old = try XCTUnwrap(oldValue)
+            // Hold decoding across disconnect and a new welcome from the SAME source.
+            await first.close()
+            let freshValue = try await frames.next()
+            let fresh = try XCTUnwrap(freshValue)
+            XCTAssertEqual(old.link?.source, fresh.link?.source)
+            XCTAssertNotEqual(old.link?.generation, fresh.link?.generation)
+            XCTAssertNil(connection.validate(old.link, machine: "machine"))
+            XCTAssertNotNil(connection.validate(fresh.link, machine: "machine"))
+            XCTAssertNil(connection.validate(fresh.link, machine: "other-machine"))
+            let otherRead = ServedRead.viewSelect(expression: "state:busy")
+            let otherWindow = ServerLink.subscribe(otherRead, connection: connection) { update -> ReceivedReading? in
+                guard case .reading(let frame) = update else { return nil }
+                return frame
+            }
+            addTeardownBlock { otherWindow.cancel() }
+            var otherFrames = otherWindow.updates.makeAsyncIterator()
+            let otherValue = try await otherFrames.next()
+            let other = try XCTUnwrap(otherValue)
+            XCTAssertEqual(other.link, fresh.link, "Windows share the Machine's active link")
+            for reading in freshFirst ? [fresh, old] : [old, fresh] {
+                let decoded = try await Task.detached {
+                    try reading.decode(SubscriptionReading<[WorkViewPlan]>.self)
+                }.value
+                _ = try await disk.receivePlans(try XCTUnwrap(decoded.body), stamp: try XCTUnwrap(decoded.stamp),
+                    for: read, receivingLink: reading.link)
+            }
+            let otherEnvelope = try other.decode(SubscriptionReading<[WorkViewPlan]>.self)
+            _ = try await disk.receivePlans(try XCTUnwrap(otherEnvelope.body), stamp: try XCTUnwrap(otherEnvelope.stamp),
+                for: otherRead, receivingLink: other.link)
+            let work = try XCTUnwrap(oldPlan.membership.facts.first?.work)
+            let fieldValue = try await disk.fieldReading(machine: "machine", work: work)
+            let fields = try XCTUnwrap(fieldValue)
+            XCTAssertEqual(fields.facts.parent?.value, "c", "A queued reading still contributes its newer SQL-only parent")
+            XCTAssertTrue(fields.parentCurrent)
+            XCTAssertEqual(fields.facts.activity?.value.states, [], "Even a higher old-link clock cannot replace the current capture")
+            XCTAssertTrue(fields.activityCurrent)
+            let active = try await connection.link()
+            watch.cancel()
+            otherWindow.cancel()
+            await active.close()
+            let offlineValue = try await disk.fieldReading(machine: "machine", work: work)
+            XCTAssertFalse(try XCTUnwrap(offlineValue).activityCurrent)
+            XCTAssertTrue(try XCTUnwrap(offlineValue).parentCurrent)
+            await disk.close()
+        }
+    }
+
     func testFieldOrderingRejectsStaleCrossedAndEqualConflictingEvidence() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
@@ -455,13 +537,16 @@ final class ClientWorkQueryTests: XCTestCase {
         XCTAssertEqual(sqlite3_open(directory.appendingPathComponent("work.sqlite").path, &sqlite), SQLITE_OK)
         defer { sqlite3_close(sqlite) }
         XCTAssertEqual(sqlite3_exec(sqlite, "CREATE TRIGGER reject_query BEFORE INSERT ON work_queries BEGIN SELECT RAISE(ABORT,'disk failure'); END", nil, nil, nil), SQLITE_OK)
+        let failedConnection = MachineConnection.ObservationConnection(source: "observer", generation: UUID())
         let newer = fieldStamp(planning: 8)
         XCTAssertThrowsError(try database.cache(ClientWorkQuery(stamp: newer,
-            plans: [fieldPlan(newer, wave: "b", clock: 20)]), key: "failed", observation: connection))
+            plans: [fieldPlan(newer, wave: "b", clock: 20)]), key: "failed", observation: failedConnection))
+        XCTAssertFalse(try XCTUnwrap(database.fieldReading(machine: "machine", work: work,
+            observation: failedConnection)).activityCurrent, "A failed query cannot validate the reconnected link")
         let fields = try XCTUnwrap(database.fieldReading(machine: "machine", work: work, observation: connection))
         XCTAssertEqual(fields.facts.parent?.value, "a")
         XCTAssertTrue(fields.parentCurrent)
-        XCTAssertFalse(fields.activityCurrent, "A rolled back transaction cannot leave a revalidation proof")
+        XCTAssertTrue(fields.activityCurrent, "Rollback retains only the previously committed revalidation proof")
         XCTAssertNil(try database.cached(machine: "machine", key: "failed"))
         XCTAssertEqual(sqlite3_exec(sqlite, "WITH RECURSIVE ids(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM ids WHERE n<10000) INSERT INTO work_fields(id,state) SELECT 'fixture-'||n,'{}' FROM ids", nil, nil, nil), SQLITE_OK)
         var statement: OpaquePointer?
@@ -1432,4 +1517,44 @@ private actor CompletionCarrier: ServerCarrier {
         return await withCheckedContinuation { waiting = $0 }
     }
     func close() { closed = true; waiting?.resume(returning: nil); waiting = nil }
+}
+
+/// A real subscription transport with deterministic held/reconnected readings.
+private actor FieldReadingCarrier: ServerCarrier {
+    private let frame: Data
+    private var welcomed = false
+    private var queue: [Data] = []
+    private var waiting: CheckedContinuation<Data?, Never>?
+    private var closed = false
+
+    init(frame: Data) { self.frame = frame }
+
+    func send(_ message: Data) throws {
+        let fields = try RawJSON(message).fields()
+        guard fields["type"]?.string == "subscribe", let id = fields["id"] else { return }
+        let response = Data("{\"type\":\"response\",\"id\":\(id.printed.debugDescription),\"trace_id\":\"test\",\"result\":null}".utf8)
+        let reading = Data("{\"type\":\"reading\",\"id\":\(id.printed.debugDescription),\"checkpoint\":\"baseline\",\"frame\":\(String(decoding: frame, as: UTF8.self))}".utf8)
+        for data in [response, reading] {
+            if let waiting { self.waiting = nil; waiting.resume(returning: data) }
+            else { queue.append(data) }
+        }
+    }
+
+    func receive() async -> Data? {
+        if !welcomed {
+            welcomed = true
+            return Data(#"{"type":"welcome","observations":"fixture-observer","client_id":"fixture","revision":6,"server_revision":6,"min_revision":6,"instance":"fixture","build":"test","executable_sha256":"hash","machine":{"id":"machine"},"limits":{"max_message":1048576,"max_connections":64,"max_open":256,"max_retained_bytes":67108864}}"#.utf8)
+        }
+        if !queue.isEmpty { return queue.removeFirst() }
+        if closed { return nil }
+        return await withCheckedContinuation { waiting = $0 }
+    }
+
+    func close() { closed = true; waiting?.resume(returning: nil); waiting = nil }
+}
+
+private actor FieldReadingLinks {
+    private var links: [FieldReadingCarrier]
+    init(_ links: [FieldReadingCarrier]) { self.links = links }
+    func next() -> FieldReadingCarrier { links.removeFirst() }
 }

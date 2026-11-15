@@ -237,14 +237,14 @@ final class WorkModel {
                 defer { Task { await subscription.cancel() } }
                 for try await line in subscription.lines {
                     let envelope = try await Task.detached {
-                        try JSONDecoder().decode(SubscriptionReading<WorkViewPlan>.self, from: line)
+                        try JSONDecoder().decode(SubscriptionReading<WorkViewPlan>.self, from: line.bytes)
                     }.value
                     guard !Task.isCancelled else { return }
                     if let reason = envelope.unavailable { throw RegistryQueryError(reason) }
                     guard let plan = envelope.body, let stamp = envelope.stamp else {
                         throw RegistryQueryError("Work reading is missing its stamped contents")
                     }
-                    try await interaction.receive([plan], stamp: stamp, for: read)
+                    try await interaction.receive([plan], stamp: stamp, for: read, receivingLink: line.link)
                     if self.queryGeneration == generation, !Task.isCancelled {
                         self.dashboardError = nil
                         if let plans = self.queryPlans.value { self.queryPlans = .available(plans) }
@@ -1912,7 +1912,7 @@ final class WorkModel {
                 do {
                     guard stamp.machine == observingMachineId, scope == workScope else { return }
                     mountQueries(scope, machine: stamp.machine)
-                    try await interaction?.receive(body, stamp: stamp, for: read)
+                    try await interaction?.receive(body, stamp: stamp, for: read, receivingLink: frame.receivingLink)
                 } catch {
                     guard scope == sentScope, machine == workMachine else { return }
                     selectionPlans = .unavailable(lastGood: nil, reason: error.localizedDescription)
@@ -1927,7 +1927,7 @@ final class WorkModel {
                 do {
                     guard stamp.machine == observingMachineId, scope == workScope else { return }
                     mountQueries(scope, machine: stamp.machine)
-                    try await interaction?.receive([body], stamp: stamp, for: read)
+                    try await interaction?.receive([body], stamp: stamp, for: read, receivingLink: frame.receivingLink)
                 } catch {
                     guard scope == sentScope, machine == workMachine else { return }
                     taskListGeneration &+= 1

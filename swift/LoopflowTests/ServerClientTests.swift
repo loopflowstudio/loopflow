@@ -202,7 +202,7 @@ struct ServerClientTests {
             return true
         }
         let connection = MachineConnection { try await ServerLink.open(.unix(path: peer.location.path())) }
-        let watch = ServerLink.subscribe(.allPlans, connection: connection) { update -> RawJSON? in
+        let watch = ServerLink.subscribe(.allPlans, connection: connection) { update -> ReceivedReading? in
             guard case .reading(let frame) = update else { return nil }
             return frame
         }
@@ -243,7 +243,7 @@ struct ServerClientTests {
             if attempts.increment() <= 2 { throw ServerConnectionUnavailable(RegistryQueryError("Offline")) }
             return try await ServerLink.open(.unix(path: peer.location.path()))
         }
-        let watch = ServerLink.subscribe(.operationGet(requestID: "original"), reconnect: true, connection: connection) { update -> RawJSON? in
+        let watch = ServerLink.subscribe(.operationGet(requestID: "original"), reconnect: true, connection: connection) { update -> ReceivedReading? in
             guard case .reading(let frame) = update else { return nil }
             return frame
         }
@@ -253,7 +253,7 @@ struct ServerClientTests {
         #expect(connection.isWaiting)
         var frames = watch.updates.makeAsyncIterator()
         let frame = try #require(try await frames.next())
-        #expect(try frame.fields()["body"]?.decode(String.self) == "reconnected")
+        #expect(try RawJSON(frame.bytes).fields()["body"]?.decode(String.self) == "reconnected")
         #expect(attempts.get() == 4)
         #expect(!connection.isWaiting)
     }
@@ -278,7 +278,7 @@ struct ServerClientTests {
             return true
         }
         let watches = (0..<3).map { index in
-            ServerLink.subscribe(.operationGet(requestID: "held-\(index)"), reconnect: true, connection: connection) { update -> RawJSON? in
+            ServerLink.subscribe(.operationGet(requestID: "held-\(index)"), reconnect: true, connection: connection) { update -> ReceivedReading? in
                 guard case .reading(let frame) = update else { return nil }
                 return frame
             }
@@ -292,7 +292,7 @@ struct ServerClientTests {
         for watch in watches.dropFirst() {
             var frames = watch.updates.makeAsyncIterator()
             let frame = try #require(try await frames.next())
-            #expect(try frame.fields()["body"]?.decode(String.self) == "recovered")
+            #expect(try RawJSON(frame.bytes).fields()["body"]?.decode(String.self) == "recovered")
             #expect(!connection.isWaiting)
         }
         #expect(attempts.get() == 2)
@@ -316,7 +316,7 @@ struct ServerClientTests {
         var frames = subscription.lines.makeAsyncIterator()
         defer { Task { await subscription.cancel() } }
         let baseline = try #require(try await frames.next())
-        #expect(String(decoding: baseline, as: UTF8.self).contains("baseline"))
+        #expect(String(decoding: baseline.bytes, as: UTF8.self).contains("baseline"))
         let resumed = Mutex(false)
         peer.serve { message, respond in
             switch message["type"] as? String {
@@ -338,7 +338,7 @@ struct ServerClientTests {
         // Only the newest confirmation needs replay; it answers every earlier request.
         for id in 1...100 { subscription.send(Data("{\"id\":\(id)}".utf8)) }
         let confirmed = try #require(try await frames.next())
-        let value = try JSONSerialization.jsonObject(with: confirmed) as! [String: Any]
+        let value = try JSONSerialization.jsonObject(with: confirmed.bytes) as! [String: Any]
         #expect(value["body"] as? String == "confirmed")
         #expect(value["answers"] as? Int == 100)
         await subscription.cancel()
@@ -378,15 +378,15 @@ struct ServerClientTests {
         try #require(resumed.get())
         var frames = subscription.lines.makeAsyncIterator()
         let baseline = try #require(try await frames.next())
-        let value = try JSONSerialization.jsonObject(with: baseline) as! [String: Any]
+        let value = try JSONSerialization.jsonObject(with: baseline.bytes) as! [String: Any]
         #expect(value["body"] as? String == "baseline")
         #expect(value["answers"] is NSNull)
         let revalidated = try #require(try await frames.next())
-        let current = try JSONSerialization.jsonObject(with: revalidated) as! [String: Any]
+        let current = try JSONSerialization.jsonObject(with: revalidated.bytes) as! [String: Any]
         #expect(current["answers"] as? Int == 0)
         subscription.send(Data(#"{"id":1}"#.utf8))
         let confirmed = try #require(try await frames.next())
-        let confirmation = try JSONSerialization.jsonObject(with: confirmed) as! [String: Any]
+        let confirmation = try JSONSerialization.jsonObject(with: confirmed.bytes) as! [String: Any]
         #expect(confirmation["body"] as? String == "baseline")
         #expect(confirmation["answers"] as? Int == 1)
         await subscription.cancel()
@@ -427,10 +427,10 @@ struct ServerClientTests {
                     try? peer.admit("baseline") { connection in
                         guard release.wait(timeout: .now() + 10) == .success else { return }
                         try connection.write(["type": "reading", "id": id, "checkpoint": "first",
-                                              "frame": "first"])
+                                              "frame": ["answers": NSNull(), "stamp": NSNull(), "unavailable": NSNull(), "body": "first"]])
                     }
                 }
-                respond(["type": "reading", "id": id, "checkpoint": "second", "frame": "second"])
+                respond(["type": "reading", "id": id, "checkpoint": "second", "frame": ["answers": NSNull(), "stamp": NSNull(), "unavailable": NSNull(), "body": "second"]])
                 respond(["type": "ended", "id": id])
             case "request":
                 respond(["type": "response", "id": id, "trace_id": "trace", "result": "independent"])
@@ -446,8 +446,8 @@ struct ServerClientTests {
         var frames = subscription.lines.makeAsyncIterator()
         let first = try await frames.next()
         let second = try await frames.next()
-        #expect(first.map { String(decoding: $0, as: UTF8.self) } == "\"first\"")
-        #expect(second.map { String(decoding: $0, as: UTF8.self) } == "\"second\"")
+        #expect(try first?.decode(SubscriptionReading<String>.self).body == "first")
+        #expect(try second?.decode(SubscriptionReading<String>.self).body == "second")
         #expect(try await frames.next() == nil)
     }
 
@@ -517,7 +517,7 @@ struct ServerClientTests {
         }
         subscription.send(Data(#"{"id":1}"#.utf8))
         guard case .reading(let frame) = try await updates.next() else { Issue.record("Missing reconnect baseline"); return }
-        #expect(try frame.fields()["body"]?.string == "fresh")
+        #expect(try RawJSON(frame.bytes).fields()["body"]?.string == "fresh")
         await subscription.cancel()
     }
 
@@ -590,10 +590,10 @@ struct ServerClientTests {
         let subscription = ServerClient.subscribe(.allPlans, location: peer.location)
         var frames = subscription.lines.makeAsyncIterator()
         let first = try #require(try await frames.next())
-        #expect((try JSONSerialization.jsonObject(with: first) as? [String: Any])?["answers"] as? Int == 1)
+        #expect((try JSONSerialization.jsonObject(with: first.bytes) as? [String: Any])?["answers"] as? Int == 1)
         subscription.send(Data(#"{"id":4}"#.utf8 + [10]))
         let last = try #require(try await frames.next())
-        #expect((try JSONSerialization.jsonObject(with: last) as? [String: Any])?["unavailable"] as? String == "gone")
+        #expect((try JSONSerialization.jsonObject(with: last.bytes) as? [String: Any])?["unavailable"] as? String == "gone")
         do {
             _ = try await frames.next()
             Issue.record("An ended subscription kept its stream open")
@@ -685,7 +685,7 @@ struct ServerClientTests {
             do {
                 var frames = subscription.lines.makeAsyncIterator()
                 let first = try #require(try await frames.next())
-                #expect(String(decoding: first, as: UTF8.self).contains("Recovered Work"))
+                #expect(String(decoding: first.bytes, as: UTF8.self).contains("Recovered Work"))
             } catch {
                 await subscription.cancel()
                 throw error

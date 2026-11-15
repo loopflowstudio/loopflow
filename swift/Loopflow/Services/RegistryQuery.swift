@@ -985,7 +985,7 @@ public struct RegistryQuery: Sendable {
             query.observeRead = { args, cwd in
                 try await validate()
                 let subscription = try await observeRead(args, cwd)
-                let lines = AsyncThrowingStream<Data, any Error> { continuation in
+                let lines = AsyncThrowingStream<ReceivedReading, any Error> { continuation in
                     let reader = Task {
                         do {
                             for try await line in subscription.lines {

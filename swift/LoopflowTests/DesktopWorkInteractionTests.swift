@@ -103,7 +103,7 @@ extension ClientWorkQueryTests {
         var entered = hold.entered.makeAsyncIterator()
         _ = await entered.next()
         let query = RegistryQuery(subscribeRead: { _, _ in
-            let (lines, continuation) = AsyncThrowingStream<Data, any Error>.makeStream()
+            let (lines, continuation) = AsyncThrowingStream<ReceivedReading, any Error>.makeStream()
             return LineSubscription(lines: lines, send: { _ in }, cancel: { continuation.finish() })
         }) { _, _ in throw RegistryQueryError("No one-shot query publication") }
         let model = WorkModel(query: query, repoPath: "/src/loopflow")
@@ -152,10 +152,10 @@ extension ClientWorkQueryTests {
         _ = try complete(directory)
         await owner.refreshFromStore()
         let dashboard = String(decoding: try loadFixtureData("dashboard.json"), as: UTF8.self)
-        let (connections, connecting) = AsyncStream<AsyncThrowingStream<Data, any Error>.Continuation>.makeStream()
+        let (connections, connecting) = AsyncStream<AsyncThrowingStream<ReceivedReading, any Error>.Continuation>.makeStream()
         var connectionsIterator = connections.makeAsyncIterator()
         let query = RegistryQuery(write: { _ in dashboard }, subscribeRead: { _, _ in
-            let (lines, continuation) = AsyncThrowingStream<Data, any Error>.makeStream()
+            let (lines, continuation) = AsyncThrowingStream<ReceivedReading, any Error>.makeStream()
             connecting.yield(continuation)
             return LineSubscription(lines: lines, send: { _ in }, cancel: { continuation.finish() })
         }) { _, _ in throw RegistryQueryError("No unstamped refresh") }
@@ -199,7 +199,7 @@ extension ClientWorkQueryTests {
         let data = try JSONSerialization.data(withJSONObject: ["answers": NSNull(), "unavailable": NSNull(),
             "body": JSONSerialization.jsonObject(with: JSONEncoder().encode(plan)),
             "stamp": JSONSerialization.jsonObject(with: JSONEncoder().encode(stamp("query", revision: 7)))])
-        second.yield(data)
+        second.yield(ReceivedReading(data))
         await fulfillment(of: [refreshed], timeout: 10)
         XCTAssertEqual(model.selectedViewPlan?.taskCount, 1)
         XCTAssertEqual(model.navigation.destination, destination)
@@ -227,7 +227,7 @@ extension ClientWorkQueryTests {
             _ = await released.next()
             return dashboard
         }, subscribeRead: { _, _ in
-            let (lines, continuation) = AsyncThrowingStream<Data, any Error>.makeStream()
+            let (lines, continuation) = AsyncThrowingStream<ReceivedReading, any Error>.makeStream()
             return LineSubscription(lines: lines, send: { _ in }, cancel: { continuation.finish() })
         }) { _, _ in throw RegistryQueryError("No unstamped read") }
         let owner = WorkInteraction(machine: "machine", store: store(directory))

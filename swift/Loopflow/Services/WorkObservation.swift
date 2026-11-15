@@ -165,6 +165,7 @@ public struct WorkFrame: Sendable {
     public let sequence: Int
     public let answers: Int?
     public let stamp: ReadingStamp?
+    public let receivingLink: ReceivingLink?
     public let unavailable: String?
     public let content: Content
     /// Wire text of the parts a saved workspace keeps, exactly as a one-shot
@@ -179,10 +180,11 @@ public struct WorkFrame: Sendable {
         public let sessionPage: String?
     }
 
-    public init(sequence: Int, answers: Int?, unavailable: String?, content: Content, wire: Wire?, stamp: ReadingStamp? = nil) {
+    public init(sequence: Int, answers: Int?, unavailable: String?, content: Content, wire: Wire?, stamp: ReadingStamp? = nil, receivingLink: ReceivingLink? = nil) {
         self.sequence = sequence
         self.answers = answers
         self.stamp = stamp
+        self.receivingLink = receivingLink
         self.unavailable = unavailable
         self.content = content
         self.wire = wire
@@ -190,7 +192,7 @@ public struct WorkFrame: Sendable {
 
     /// The same reading answering a later request.
     func answering(_ answers: Int, sequence: Int) -> WorkFrame {
-        WorkFrame(sequence: sequence, answers: answers, unavailable: unavailable, content: content, wire: wire, stamp: stamp)
+        WorkFrame(sequence: sequence, answers: answers, unavailable: unavailable, content: content, wire: wire, stamp: stamp, receivingLink: receivingLink)
     }
 
     public struct TaskStatusReading: Decodable, Sendable {
@@ -211,7 +213,7 @@ public struct WorkFrame: Sendable {
     }
 
     /// Decode one line of `part`'s subscription, read for `scope`.
-    public static func decode(part: WorkPart, scope: WorkScope, sequence: Int, line: Data) throws -> WorkFrame {
+    public static func decode(part: WorkPart, scope: WorkScope, sequence: Int, line: Data, receivingLink: ReceivingLink? = nil) throws -> WorkFrame {
         func envelope<Body: Decodable>(_: Body.Type) throws -> SubscriptionReading<Body> {
             try JSONDecoder().decode(SubscriptionReading<Body>.self, from: line)
         }
@@ -224,7 +226,7 @@ public struct WorkFrame: Sendable {
                 return result
             }
             return WorkFrame(sequence: sequence, answers: answers, unavailable: envelope.unavailable ?? unavailable,
-                      content: content, wire: wire, stamp: envelope.stamp)
+                      content: content, wire: wire, stamp: envelope.stamp, receivingLink: receivingLink)
         }
         func text(_ value: Any?) -> String? {
             guard let value, let data = try? JSONSerialization.data(withJSONObject: value) else { return nil }
@@ -291,13 +293,13 @@ private func zip<A, B>(_ a: A?, _ b: B?) -> (A, B)? {
 
 /// One served subscription speaking `lf <read> --json --subscribe`'s newline-delimited JSON.
 public struct LineSubscription: Sendable {
-    public let lines: AsyncThrowingStream<Data, any Error>
+    public let lines: AsyncThrowingStream<ReceivedReading, any Error>
     /// Queue one newline-terminated request line.
     public let send: @Sendable (Data) -> Void
     /// Returns only after the subscription has ended.
     public let cancel: @Sendable () async -> Void
 
-    public init(lines: AsyncThrowingStream<Data, any Error>, send: @escaping @Sendable (Data) -> Void,
+    public init(lines: AsyncThrowingStream<ReceivedReading, any Error>, send: @escaping @Sendable (Data) -> Void,
                 cancel: @escaping @Sendable () async -> Void) {
         self.lines = lines
         self.send = send
@@ -403,12 +405,12 @@ public final class WorkSubscriptions: @unchecked Sendable {
         settleCheckpoints()
     }
 
-    private func receive(_ part: WorkPart, _ generation: Int, line: Data) {
+    private func receive(_ part: WorkPart, _ generation: Int, line: ReceivedReading) {
         lock.withLock {
             guard !finished, var current = running[part], current.generation == generation else { return }
             do {
                 sequence += 1
-                let decoded = try WorkFrame.decode(part: part, scope: scope, sequence: sequence, line: line)
+                let decoded = try WorkFrame.decode(part: part, scope: scope, sequence: sequence, line: line.bytes, receivingLink: line.link)
                 let frame = decoded.answering(max(decoded.answers ?? 0, current.floor), sequence: sequence)
                 current.last = frame
                 running[part] = current

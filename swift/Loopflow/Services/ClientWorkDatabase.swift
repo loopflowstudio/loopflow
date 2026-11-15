@@ -496,6 +496,10 @@ final class ClientWorkDatabase {
     private func join<Value>(_ value: Value, support: WorkMembershipPlan.FieldSupport?,
                              previous: WorkFieldFact<Value>?, stamp: ReadingStamp,
                              observation: MachineConnection.ObservationConnection?, key: String) -> WorkFieldFact<Value>? {
+        // Unattributed or departed-link input cannot revoke a current external
+        // capture, including when the old producer reported it unavailable.
+        if observation == nil, let previous, case .captured = previous.support.observations,
+           support?.observations != .sqlite { return previous }
         if let support {
             guard support.belongs(to: stamp) else { return previous }
             if case .captured(let evidence) = support.observations,
@@ -649,6 +653,7 @@ final class ClientWorkDatabase {
     }
 
     private func transaction<T>(_ body: () throws -> T) throws -> T {
+        let previousConnections = fieldConnections
         try execute("BEGIN IMMEDIATE")
         do {
             let result = try body()
@@ -656,7 +661,7 @@ final class ClientWorkDatabase {
             return result
         } catch {
             try? execute("ROLLBACK")
-            fieldConnections.removeAll()
+            fieldConnections = previousConnections
             throw error
         }
     }

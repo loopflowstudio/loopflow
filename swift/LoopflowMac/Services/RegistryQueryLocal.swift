@@ -43,10 +43,10 @@ enum RegistryQueryLocal {
             let process = LocalWaveAgentLauncher.queryProcess([configuration.helper] + args)
             process.environment = configuration.environment
             if let cwd { process.currentDirectoryURL = URL(fileURLWithPath: cwd) }
-            let reader = try LocalLineObservation<Data>.start(
+            let reader = try LocalLineObservation<ReceivedReading>.start(
                 name: "Task history", process: process, frameLimit: 32 * 1024 * 1024, silence: nil,
                 configurationChanged: { try ReaderLaunchConfiguration.current() != configuration },
-                decode: { $0 })
+                decode: { ReceivedReading($0) })
             return LineSubscription(lines: reader.frames, send: reader.send, cancel: reader.cancel)
         }.value
     }, subscribeWork: {

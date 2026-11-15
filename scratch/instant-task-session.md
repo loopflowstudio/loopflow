@@ -1,7 +1,7 @@
 # LOO-906: immediate interactions across Desktop and mobile
 
-Implementation continues 2026-11-15 from checkpoint `a5fb642205`, merged with
-origin/main `9cafc410ee`. Supersedes the Desktop-only delivery
+Implementation continues 2026-11-15 from checkpoint `9d25b68752` on
+origin/main `9cafc410ee` (no newer upstream). Supersedes the Desktop-only delivery
 boundary. No shipping or merge decision is recorded. Placement remains this Task;
 no Wave is selected.
 
@@ -57,8 +57,7 @@ still disagree about when an interaction happened. Desktop `WorkModel`/
 delete list). Revision-6 subscriptions now provide exact-query snapshot stamps;
 server operation admission covers all typed writes, while live client outbox
 migration still specializes creation. Native Session/Graph owners retain readiness.
-The detailed predecessor map is at
-`bb936ac371143106c3ef7569a0366214cfdcfada:scratch/instant-task-session.md`.
+Predecessor map: `bb936ac371`.
 
 Completion already saves a domain request, checks execution/PR conditions, settles
 state, syncs planning and schedules retirement. Creation already prepares its
@@ -66,8 +65,8 @@ primary Session and Graph. Those waits are not a measured SQL/latency diagnosis.
 
 ## Established designs and dependency choices
 
-Research sources and the architecture comparison remain at
-`8b42a874db6d925382c2e113c172c840496c6ea0:scratch/instant-task-session.md`.
+Research sources, the architecture and mutable-replica comparisons remain at
+`8b42a874db6d925382c2e113c172c840496c6ea0` and `bb936ac371` (`scratch/instant-task-session.md`).
 Apollo/TanStack supply operation-layer and rebase precedents; neither supplies
 LF domain recovery. Apollo iOS would require GraphQL migration. Observation stays
 as the native rendering model; SwiftData, Sharing and TCA do not establish causal
@@ -86,8 +85,6 @@ rollback, durable uncertain-outcome recovery and predictable navigation. The tes
 below must demonstrate these properties; framework branding or a new placeholder
 is not a substitute.
 
-The mutable-replica comparison is retained at
-`bb936ac371143106c3ef7569a0366214cfdcfada:scratch/instant-task-session.md`.
 The cache/overlay owner must project every affected query, including Dashboard
 membership and counts. If declarative membership cannot cover them, move the pure
 projection into a shared portable core before client migration.
@@ -412,9 +409,7 @@ no stale row flash, no lost effect and eventual operation retirement without
 opening every view. Cover Desktop and mobile through the same reducer.
 
 This makes the existing per-query and closed-cache contracts concrete; it adds no
-product choice. The interrupted supersession implementation is retained. Finish
-mutation-family recovery and stage policies first, then implement this rule with
-transactional cache/membership projection before migrating either client's views.
+product choice. Ordering is under Current implementation cut.
 
 ## Local navigation, disclosure and retained content
 
@@ -548,11 +543,8 @@ and their consumers must converge together.
 5. Measure actual latency and remove demonstrated backend waits independently of
    presentation; run the full acceptance matrix and native demo.
 
-Slice 3 now has the shared SQLite outbox and receipt owner; its confirmed cache,
-projection and query membership remain unfinished. Slice 4's full migration has
-not started. Slice 5 now includes instrumentation and benchmark
-coverage/preflight work before native demo. The Desktop launch checkpoint and synchronous Wave
-selection are interim; slice 3 deletes the launch exception.
+Slice status and order are under Current implementation cut; slice 4 has not
+started, and slice 3 deletes the interim launch exception.
 
 Headless acceptance uses deterministic held/reordered replies, not timing sleeps:
 shared reducer tests cover overlapping success/failure, stale reads, partial pages,
@@ -590,11 +582,6 @@ report highlight, cached content, input-ready and server-stage distributions
 separately. Neither that target nor a SQL bottleneck has been measured here.
 
 ## Implement direction
-
-Cache plus overlays is a headless engineering choice, not a recorded product
-preference (see `questions.md`). Prove one membership vocabulary across Rust and
-both clients before migration. Extend the existing system SQLite3 owner with the
-confirmed cache and incorporation records; no GRDB adoption is planned.
 
 Preserve the launch counterexamples in the shared tests: pre-admission cached
 Task data, a fresh unrelated planning frame, unavailable or missing Task rows,
@@ -654,8 +641,6 @@ checks are at `aeb4ed3b2b0e7256748fa69bd76f77acff966b98:scratch/instant-task-ses
 The launch checkpoint, presentation-driven retirement and phone sheet/outcome
 presentation remain interim; no shared projection cutover is claimed.
 
-Exact-request settlement and continuation details are retained at
-`bb936ac371143106c3ef7569a0366214cfdcfada:scratch/instant-task-session.md`.
 Completion/reopen recover their saved committed result without reissuing intent;
 subsequent errors remain visible rather than certifying cleanup/planning delivery.
 Other mutation families and both clients' completion presentation remain unfinished.
@@ -811,9 +796,8 @@ projection measurement now includes 10,000 Tasks/Sessions, preserves each sample
 with an atomic checkpoint outside the interval and refuses to overwrite an old
 result. The rebuilt diagnostic ran; the quiet-host baseline remains missing. Native display/input benchmarks remain unmeasured.
 
-Benchmark observations and raw-file locations are preserved at
-`8b42a874db6d925382c2e113c172c840496c6ea0:scratch/instant-task-session.md`.
-Both hosts failed load preflight on 2026-11-14; the mini also runs macOS 15.5
+Benchmark observations and raw files: `8b42a874db`; earlier checks: `bb936ac371`
+(both `scratch/instant-task-session.md`). Both hosts failed load preflight on 2026-11-14; the mini also runs macOS 15.5
 against Desktop's macOS 26 target. The rebuilt debug 10k constructor warm P95
 was 235.92 ms on the rejected host; it is diagnostic, not a regression baseline
 or native/SQL attribution. No gesture, native paint/input or full backend-stage
@@ -824,8 +808,6 @@ all 20 receipt SQL statements used keyed indexes without table scans.
 The corrected benchmark invocation puts its output variable inside the network
 boundary; the first invocation skipped when that boundary cleared `LF_*`.
 
-Earlier check observations and raw-file references remain at
-`bb936ac371143106c3ef7569a0366214cfdcfada:scratch/instant-task-session.md`.
 The earlier admission LEAK has no established cause; none appeared in this cut.
 
 Current checks (inherited `LF_*` cleared; logs under `/tmp/loo906-supersession-*`):

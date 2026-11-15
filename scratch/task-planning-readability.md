@@ -202,45 +202,24 @@ The review's three defects are fixed in `WorkModel.taskPresentation` and
 (`WorkModelTests.swift`). No cache or read owner was added, and no product
 choice is open.
 
-The workspace's interrupted correction carries the supplying record's context
-through the shared lookup and retains the subscription in `WorkReading`.
-`currentSubscriptionName` covers a fresh subscription while the roadmap has no
-last-good row, in both arrival orders and through independent failure and
-unchanged-row recovery. Retained selection-only evidence says Updating rather
-than inheriting an unrelated roadmap error.
+Each record source carries its own reading's context. `WorkModel.taskRecords`
+returns every record naming the Task in authority order (roadmap, Task
+subscription, retained selection), each with its own freshness; `taskEvidence`
+(and so `task(id:)` metadata/actions) takes the first, unchanged. 
+`taskPresentation` weighs every record, then scoped Task-list and selection-plan
+content, and picks the first current name before any retained one. A healthy
+Task subscription therefore names the Task while a retained roadmap row says
+Last known or a saved roadmap says Updating; a healthy roadmap still wins when
+it supplies the name. Retained selection-only evidence says Updating rather than
+inheriting an unrelated roadmap error.
 
-### Next implement direction — retained roadmap versus current subscription
-
-The same source-freshness rule must apply when both record sources contain the
-Task. Source inspection on November 14 found a counterexample not covered by
-`currentSubscriptionName`: publish a named roadmap row, fail planning while
-retaining it, then receive a healthy Task subscription for that same Task.
-`taskEvidence` returns the retained roadmap row before examining the subscription;
-`taskPresentation` therefore still shows Last known (and can keep an older name).
-The existing test starts without a roadmap row, so it cannot catch this case.
-This is a source-traced counterexample, not a recorded failing test run.
-
-For display identity, consider eligible roadmap and subscription rows separately
-before choosing current over retained evidence. Keep the existing order among
-current sources: roadmap, Task subscription, scoped Task list, selection plan;
-then fall back to retained identity. Each candidate carries its own reading's
-context. Keep `task(id:)` metadata/action lookup behavior, scope fences and ID
-mapping intact; name freshness must not change runtime or legal-action authority.
-No additional cache, DTO, persistence or subscription is needed.
-
-Extend the counterexample with a last-good roadmap row and a differently named
-fresh subscription, for planning and runtime Work keys and both arrival orders.
-The row/title/breadcrumb must use the current subscription name without Last known,
-while the planning failure remains visible. If the subscription then fails too,
-retain readable identity with Last known; an identical successful row restores
-current identity. A healthy roadmap still wins when it supplies the name. A saved
-roadmap awaiting refresh must likewise not mask a current subscribed name.
-
-No open product choice: these transitions follow the existing source-freshness
-rule. Outcome for loop-or-next: design changed; iterate to implement this
-remaining candidate-selection repair. Then run the focused tests. The broader
-gate and native demo/review remain later obligations. `scratch/concept-review.html`
-shows this direction as proposed, separately from the built correction.
+Counterexample tests: `currentSubscriptionName` (no roadmap row) and
+`subscriptionOutranksRetainedRoadmap` (differently named last-good roadmap row,
+both arrival orders, planning and runtime Work keys, Task failure → Last known,
+identical row → current, healthy roadmap → its name). When both record readings
+fail, the roadmap's older name shows as Last known; readable, not necessarily
+the newest. No cache, DTO, persistence or subscription was added; no product
+choice is open.
 
 ### Check results
 

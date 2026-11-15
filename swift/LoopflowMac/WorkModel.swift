@@ -2191,13 +2191,10 @@ final class WorkModel {
     }
 
     func taskPresentation(id: String, repository: String? = nil) -> TaskPresentation {
-        let evidence = taskEvidence(id: id)
-        let record = evidence?.task
-        let workID = record?.runtime?.workId ?? record?.id ?? id
-        var candidates: [TaskPresentation] = []
-        if let record {
-            candidates.append(TaskPresentation(title: record.task.name, identifier: record.task.identifier,
-                                               context: evidence?.context))
+        let records = taskRecords(id: id)
+        let workID = records.first.map { $0.task.runtime?.workId ?? $0.task.id } ?? id
+        var candidates = records.map {
+            TaskPresentation(title: $0.task.task.name, identifier: $0.task.task.identifier, context: $0.context)
         }
         let listSource: WorkReading<[WorkViewPlan]> = switch taskListReading {
         case .loading: .loading
@@ -2862,20 +2859,30 @@ final class WorkModel {
         return (evidence.wave, evidence.task)
     }
 
-    private func taskEvidence(id: String) -> (wave: WaveRoadmap?, task: RoadmapTask, context: String?)? {
+    private typealias TaskRecord = (wave: WaveRoadmap?, task: RoadmapTask, context: String?)
+
+    /// Metadata and actions use the first record; display identity weighs each by its own reading.
+    private func taskEvidence(id: String) -> TaskRecord? {
+        taskRecords(id: id).first
+    }
+
+    /// Every record naming the Task, in authority order (roadmap, subscription, retained selection),
+    /// each with its own reading's freshness.
+    private func taskRecords(id: String) -> [TaskRecord] {
+        var records: [TaskRecord] = []
         if let current = currentTask(id: id) {
             let context: String? = roadmap.errorMessage != nil ? "Last known" : showsSavedPlanning ? "Updating…" : nil
-            return (current.wave, current.task, context)
+            records.append((current.wave, current.task, context))
         }
         if let row = subscribedTaskRow.value, row.id == id || row.runtime?.workId == id,
            repoPath.map({ repoIdentity(row.task.repo) == repoIdentity($0) }) ?? true {
-            return (row.task.waveId.flatMap { taskIndex.waves[$0] }, row,
-                    subscribedTaskRow.errorMessage != nil ? "Last known" : nil)
+            records.append((row.task.waveId.flatMap { taskIndex.waves[$0] }, row,
+                            subscribedTaskRow.errorMessage != nil ? "Last known" : nil))
         }
         if let retained = navigation.selectedTaskEvidence, retained.task.id == id || retained.task.runtime?.workId == id {
-            return (retained.wave, retained.task, "Updating…")
+            records.append((retained.wave, retained.task, "Updating…"))
         }
-        return nil
+        return records
     }
 
     func waveId(for work: WorkReference) -> String? {

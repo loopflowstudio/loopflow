@@ -1326,6 +1326,60 @@ struct TaskPlanningReadabilityTests {
         await keeping.value
     }
 
+    @Test("A fresh Task subscription outranks a retained roadmap row", arguments: [false, true])
+    func subscriptionOutranksRetainedRoadmap(roadmapFailsFirst: Bool) async throws {
+        let fixture = try WorkTestFixture.load()
+        let feed = WorkFeed()
+        let model = WorkModel(query: fixture.streaming(feed), repoPath: "/src/loopflow")
+        let record = try #require(fixture.roadmap.tasks.items.first { $0.id == "issue-now" })
+        let fixtures = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto")
+        let work = try JSONDecoder().decode(TaskOverview.self, from: Data(contentsOf: fixtures.appendingPathComponent("task_work.json")))
+        let comments = try JSONDecoder().decode(TaskComments.self, from: Data(#"{"identifier":"W2-144","comments":[],"conflicts":{},"pending_sync":[],"refresh_error":null}"#.utf8))
+        let body = WorkFrame.TaskPart(task: record.task.identifier, row: record, work: work,
+                                      graphProcesses: [], comments: comments, execution: nil)
+        let keeping = Task { await model.keepWorkCurrent() }
+        defer { keeping.cancel() }
+        try await feed.opened(1)
+        let scope = try await feed.request(1)
+        let ids = [record.id, record.runtime?.workId].compactMap { $0 }
+        func shows(_ title: String, _ context: String?) -> Bool {
+            ids.allSatisfy { model.taskPresentation(id: $0).title == title && model.taskPresentation(id: $0).context == context }
+        }
+        await feed.send(try fixture.planningFrame(sequence: 1, answers: scope.id, renaming: "Older roadmap name"))
+        try await eventually { shows("Older roadmap name", nil) }
+        func failRoadmap() async throws {
+            await feed.send(WorkFrame(sequence: 2, answers: scope.id, unavailable: "Planning offline",
+                                      content: .planning(nil), wire: nil))
+            try await eventually { model.roadmap.errorMessage == "Planning offline" }
+        }
+        func publishTask(_ sequence: Int) async {
+            await feed.send(WorkFrame(sequence: sequence, answers: scope.id, unavailable: nil,
+                                      content: .task(body), wire: nil))
+        }
+        if roadmapFailsFirst { try await failRoadmap() }
+        await publishTask(1)
+        if !roadmapFailsFirst { try await failRoadmap() }
+        try await eventually { shows(record.task.name, nil) }
+        let row = WorkTaskIdentity(presentation: model.taskPresentation(id: record.id))
+        #expect(try row.inspect().find(text: record.task.name).string() == record.task.name)
+        #expect(throws: (any Error).self) { try row.inspect().find(text: "Last known") }
+        #expect(model.workStatus.message?.contains("Planning offline") == true)
+        // Both readings failed: identity stays readable and says so.
+        await feed.send(WorkFrame(sequence: 2, answers: scope.id, unavailable: "Task offline",
+                                  content: .task(nil), wire: nil))
+        try await eventually { model.taskPresentation(id: record.id).context == "Last known" }
+        #expect(model.taskPresentation(id: record.id).title != record.id)
+        // An identical row restores current identity; a healthy roadmap then supplies the name.
+        await publishTask(3)
+        try await eventually { shows(record.task.name, nil) }
+        await feed.send(try fixture.planningFrame(sequence: 3, answers: scope.id, renaming: "Recovered roadmap name"))
+        try await eventually { shows("Recovered roadmap name", nil) }
+        #expect(model.workStatus.message?.contains("Planning offline") != true)
+        keeping.cancel()
+        await keeping.value
+    }
+
     @Test("A current selection name precedes failed retained list content")
     func currentSelectionName() throws {
         let fixture = try WorkTestFixture.load()

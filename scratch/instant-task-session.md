@@ -1,8 +1,10 @@
 # LOO-906: immediate interactions across Desktop and mobile
 
 Conversation/Machine-link cut committed at `a2a0a0fb33` on origin/main
-`9cafc410ee`. The current pass fixes unreachable-Machine presentation and adds
-Desktop Session rename. Move returns to design at local projection provenance. Supersedes the
+`9cafc410ee`. Unreachable-Machine presentation and Desktop Session rename are
+committed at `35e2835de1`. The next implementation replaces query-local effect
+incorporation with field incorporation plus derived-query coverage before Move
+migrates. Supersedes the
 Desktop-only delivery boundary. No shipping or merge decision is recorded. Placement remains this Task;
 no Wave is selected.
 
@@ -114,8 +116,9 @@ under Proposed contracts through Opening another query. Live requirements:
   `task.completion_requested` confirms intent; only `task.completed` confirms
   removal. `task.filed` binds Task/Session without proving admission or input.
   Provider/filesystem/planning readiness cannot borrow a SQLite fence.
-- Apply an ordered effect independently to each affected query until its complete
-  reading covers the confirming stage's fence. A covering count cannot discharge
+- In the current query-local implementation, apply an ordered effect independently
+  until its complete reading covers the confirming stage's fence. The next cut
+  replaces that criterion with the field/answer distinction below. A covering count cannot discharge
   a held list; a fresh query cannot subtract twice while another remains behind.
   Partial pages, unrelated domains, native mounts and command return don't
   establish incorporation. Query identity/plan changes invalidate prior coverage.
@@ -502,6 +505,121 @@ with A absent from the destination; move offline; verify source removal,
 destination insertion and counts in two windows and both clients; restart with
 both queries closed; reject reordered older values and restore only the refused
 membership without changing later navigation. The broader one-PR scope remains.
+
+### Next implement direction: facts absorb effects; queries prove their answers
+
+Headless concept review, 2026-11-15, against `5d0187746f`. Proposed, unbuilt.
+The correction above becomes two contracts rather than one larger query stamp:
+
+1. **Field incorporation.** Each confirmed value identifies its Machine, epoch,
+   schema, entity, field and supporting domain revisions. A committed effect stops
+   writing a field when a value for that same field covers its semantic stage's
+   fence. A later value wins even when it differs from the command's intended
+   value: Complete followed by Reopen must show Reopen. Missing or incomparable
+   provenance cannot absorb an effect. Unknown delivery retains intent until the
+   original receipt resolves it; an unrelated newer fact cannot settle delivery.
+2. **Answer coverage.** A locally evaluated query records its program/definition
+   revision, candidate coverage, and the field/content dependencies actually
+   consumed. This is a client-derived answer, never a Machine `ReadingStamp`.
+   Missing content may make the destination incomplete without reactivating an
+   absorbed parent-Wave effect. A newer parent value cannot establish fresh
+   lifecycle/activity, content, query definitions or candidate coverage.
+
+Keep the original exact-query stamp and body immutable. Cross-query normalization
+joins only values carrying comparable provenance, not whole DTOs by arrival time.
+Do not manufacture a coherent server snapshot by taking vector maxima from
+unrelated readings. Equal provenance with conflicting values is inconsistent;
+retain the known value and require reconciliation rather than picking the last
+arrival. Normalized facts, stage results, incorporation and saved command state
+join transactionally in the existing SQLite owner. The name-field owner is a
+precedent for ownership, not permission to use a sessions fence for Task fields.
+
+**Dynamic membership.** Rust compiles authored scope and filter predicates, with
+stable occurrence paths, instead of prefiltering their identities. Explicit Work
+leaves remain fixed. Both clients evaluate the same finite typed program over
+shared facts; canonical lifecycle/effect rules stay in one declaration, not a
+second Swift derivation of Task state. Preserve descendant-Wave semantics,
+interleaved/shared order, intersections, duplicate winners, hidden occurrences,
+unknown activity and partial reads. If the finite program cannot express these,
+use the portable core before changing consumers.
+
+Headless engineering choice: start with a compact repository candidate manifest
+(identity, parent relationships and membership predicates, not every Task's full
+content) to support dynamic arrivals. Its completeness is scoped to its captured
+revision. Individual fact replies cannot advance that universe or prove absence;
+replacement manifests or complete deltas need deletion evidence too. Cache real
+content separately by identity and provenance. For a known Task moved from A to B,
+both programs can consume its projected parent and cached content even when B's
+last result omitted it. A missing program, ancestor relationship or content stays
+explicitly incomplete; never show a fabricated Task or an exact empty/count.
+Index affected fields/scopes so a gesture does not scan/decode the repository on
+the main actor. Measure the 10k manifest and fan-out when implementing.
+
+**Move and recovery.** The gesture freezes original Machine, Task, destination
+Wave identity (or No Wave), sequence and request ID, then publishes parent intent
+to all affected queries/counts before disk. Keep native workspace, drafts and later
+navigation. Save before send; serialize conflicting Task edits through the earlier
+domain outcome. The domain still resolves the Wave's current Project and validates
+membership; do not freeze a guessed Project or retarget another Machine. Record
+the actual resulting parent/Project value, semantic disposition and fence with
+`task.membership_changed` in its owning transaction, including definite refusal.
+Commit followed by planning-sync failure retains the move. Recover an uncertain
+send by original ID. No receipt stage or send history means no blind retry.
+
+**Retirement and migration.** Query completeness and command delivery remain
+separate obligations. Absorbed field effects cannot return after close/restart.
+Retirement retains the necessary normalized facts and derived coverage, or marks
+an evicted/old base unavailable under scoped reload floors. Do not retain full
+commands forever merely because content is missing. Older query-local caches lack
+this proof: invalidate their derived membership, retain exact commands/receipts
+and recover their original IDs. Never relabel old cache data as new coverage.
+Delete `WorkQueryEffect.covered`'s stamp-only decision and
+`ClientWorkDatabase.effectsCover`'s arbitrary revision shortcut with their callers;
+replace the current state-only reducer and prefiltered dynamic nodes together.
+Preserve exact-query stamped refresh as an authoritative input.
+
+Required counterexamples before caller migration:
+- Held Working query → Complete commits → another query supplies Reopen's newer
+  state → old query reevaluates: Task is visible; Complete never re-hides it.
+- Move A→B commits → newer parent C arrives from another query: held A/B queries
+  cannot reapply A→B. A stale B reply cannot replace C; an incomparable one cannot
+  silently select a winner.
+- Fresh parent, missing content or unknown activity: old move stays incorporated,
+  but the dependent answer/count stays incomplete. A covering count cannot release
+  a held list's independent coverage.
+- Destination omitted the moved Task; two windows and both clients update source,
+  destination and counts from real cached content before disk. Repeat with No Wave,
+  descendant Waves, repeated authored occurrences and a changed saved definition.
+- Close both queries, retire, restart offline: reconstruct the same projection or
+  show unavailable under a persisted floor. Lost reply, refusal, newer local move,
+  commit-then-sync-failure and epoch change neither replay nor steal selection.
+
+Proposed usage text for both READMEs after acceptance:
+> Move a Task to a Wave or No Wave. Cached lists and counts change immediately;
+> its conversation and drafts stay open. While disconnected, the change waits for
+> its original Machine and survives restart. A refusal restores only the refused
+> change, leaving later edits and navigation alone. Incomplete cached destinations
+> remain visibly incomplete until their missing data arrives.
+
+No builtin skill needs a new interaction rule; its existing save/recover semantics
+remain. Keep shipped README claims limited to built behavior until this cut passes.
+First repair the recorded iOS SQLite fixture teardown by awaiting its owners and
+closing readers/connections before removing temporary directories. No sleeps or
+retries. Native latency remains unmeasured and does not gate this pass.
+
+### Open product choices carried into loop-or-next
+
+The disconnected-edit answer named Complete, rename and move. It does not settle
+Abandon, canceling a never-sent change, or phone Session naming. These remain real
+product choices, not engineering defaults; the built provisional behavior is
+described in `scratch/questions.md`. The regenerated review page retains their
+numbering: (1) queue destructive Abandon offline or require a reachable Machine;
+(2) offer Cancel before first send or leave no cancellation action; (3) keep Task
+titles on the phone or show/rename Session names. Their consequences are destructive
+work delivered later, recovery from a mistaken offline action, and the identity a
+phone conversation presents. Nobody has answered them. For this headless
+concept-review, report **Blocked** with those questions to loop-or-next; this
+does not erase the implementation direction above or restart execution.
 
 ## Current implementation cut
 

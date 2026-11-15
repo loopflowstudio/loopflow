@@ -1,5 +1,14 @@
 # Working assumptions
 
+- Headless concept review, 2026-11-15: Move's next cut separates per-field
+  incorporation from derived-query completeness. Proposed starting coverage is a
+  compact repository candidate manifest plus separately cached real content;
+  this is an engineering choice, not a product preference. Exact-query Machine
+  stamps remain unchanged. Implementation direction and counterexamples are in
+  `instant-task-session.md`. No code changed in this review. The three unanswered
+  product questions below remain open; concept-review reports them to
+  loop-or-next rather than silently resolving them.
+
 - Jack Heart replied “1a” to the 2026-11-15 conversation review's disconnected-edit
   question: save and project Complete/rename/move locally, show “Waiting for
   connection,” and deliver on reconnect to the original Machine. Retain across

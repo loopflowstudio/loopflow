@@ -1,41 +1,47 @@
 <!doctype html>
-<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LOO-906 · An unreachable Machine says so once</title>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LOO-906 · Moving Work without replaying old intent</title>
 <style>
-:root{color-scheme:light dark;--bg:#faf8f4;--fg:#292924;--muted:#67665e;--line:#cdc9bd;--accent:#365d49;--new:#e4efe6}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.45 system-ui,sans-serif}main{max-width:800px;margin:auto;padding:26px 22px}header,small{font-size:12px;color:var(--muted)}h1{font:600 29px/1.15 system-ui;margin:20px 0 12px}h2{font-size:18px;margin:24px 0 8px}p{margin:10px 0}table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;vertical-align:top;border-bottom:1px solid var(--line);padding:8px 6px}td.new{background:var(--new)}pre{border:1px solid var(--line);padding:10px 12px;font-size:13px;overflow-x:auto;white-space:pre-wrap}code{font-size:12px;overflow-wrap:anywhere}li{margin:9px 0}@media(prefers-color-scheme:dark){:root{--bg:#20221f;--fg:#ecece4;--muted:#b5b5a8;--line:#4c5046;--accent:#a5ccb0;--new:#2c382f}}@media(max-width:540px){main{padding:20px 12px}table{font-size:12px}th,td{padding:6px 3px}h1{font-size:25px}}
-</style><main>
-<header>LOO-906 · concept-review (headless, in the Graph) · 2026-11-15<br>Built from: scratch/instant-task-session.md; scratch/questions.md; the uncommitted conversation/Machine-link cut on 9967d166e4 — swift/Loopflow/Services/{MachineConnection,ServerLink,ClientWorkStore,PendingOperation,OperationDeclaration}.swift; swift/LoopflowMac/Services/ServerClient.swift and Views/{NewTaskSheet,TaskWorkView}.swift; swift/LoopflowiOS/{RemoteMobileClient,RemoteTaskObservation,TaskListView,TaskWorkspaceView,MobileNewTaskView}.swift; both READMEs. Read, not run.</header>
-<h1>Three questions, none blocking. The next pass repairs what the phone shows when its Machine is unreachable.</h1>
-<p><strong>Built in this cut:</strong> one connection and one reconnect loop per Machine, shared by reads, the Task feed and held changes. The starting conversation shows its words once beside “Starting conversation…”. Phone Abandon asks first.</p>
-<p><strong>Biggest mismatch:</strong> the phone feed now waits through an outage silently. The “Couldn’t update Tasks” card was the only place a person learned the Machine was unreachable; with no change held, nothing says it now.</p>
+:root{color-scheme:light dark;--bg:#faf8f4;--fg:#292924;--muted:#67665e;--line:#cdc9bd;--proposal:#e4efe6}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.45 system-ui,sans-serif}main{max-width:800px;margin:auto;padding:26px 22px}header,small{font-size:12px;color:var(--muted)}h1{font-size:28px;line-height:1.15;margin:20px 0 12px}h2{font-size:18px;margin:24px 0 8px}p{margin:10px 0}table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;vertical-align:top;border-bottom:1px solid var(--line);padding:8px 6px}pre{background:var(--proposal);padding:12px;font-size:13px;white-space:pre-wrap}code{font-size:12px;overflow-wrap:anywhere}li{margin:12px 0}@media(prefers-color-scheme:dark){:root{--bg:#20221f;--fg:#ecece4;--muted:#b5b5a8;--line:#4c5046;--proposal:#2c382f}}@media(max-width:540px){main{padding:20px 12px}table{font-size:12px}th,td{padding:6px 3px}h1{font-size:24px}}
+</style>
+<main>
+<header>LOO-906 · concept-review · 2026-11-15 · headless Graph step<br>
+Sources: scratch/{instant-task-session,questions,desktop-reactivity-feedback}.md;
+HEAD 5d0187746f; WorkMembership.swift, ClientWorkQuery.swift,
+ClientWorkDatabase.swift, OperationDeclaration.swift, WorkModel.swift;
+Rust selection/{membership,query}.rs and ops/task.rs; both client READMEs.
+Source review; no new runtime measurements.</header>
+<h1>Three product choices remain open. Move first needs a clearer incorporation model.</h1>
+<p><strong>Built:</strong> the phone now says “Waiting for connection” once and ends offline refresh. Desktop Session rename publishes before save and survives restart. Those repairs are committed at <code>35e2835de1</code>.</p>
+<p><strong>Biggest mismatch:</strong> a query’s old snapshot and the newer facts it can consume are different things. Using the old query stamp to decide whether to apply intent can hide a reopened Task or move it back to an earlier Wave.</p>
+<pre>Held query:      Task in A
+Local move:     A → B, committed
+Another query:  newer parent C
 
-<h2>Phone, Machine unreachable</h2>
-<pre>As built                               Proposed
-First launch:  spinner, indefinitely   Waiting for connection
-Saved feed:    Tasks, no word          Waiting for connection
-                                       LOO-12 …
-Pull refresh:  spins until reconnect   returns at once
-Three held:    Complete Task · LOO-12  Waiting for connection
-               Waiting for connection  Complete Task · LOO-12
-               Complete Task · LOO-14  Complete Task · LOO-14
-               Waiting for connection  Abandon Task · LOO-9
-               …</pre>
-<p>Wrong-Machine and protocol failures keep the existing card and its Try again.</p>
-
-<h2>Actions → concept → API</h2>
-<table><thead><tr><th>Action</th><th>Concept</th><th>API</th></tr></thead><tbody>
-<tr><td>Open the phone with the Machine down</td><td>The Machine is unreachable: one fact, shown once</td><td class="new">Feed reads <code>MachineConnection.isWaiting</code> — proposed. Built: the fact exists; the feed ignores it</td></tr>
-<tr><td>Hold a change offline</td><td>Waiting belongs to the Machine, not to a watch</td><td class="new"><code>ClientWorkStore</code> subscribes to its Machine once; <code>ServerWatch.connections</code>/<code>isWaiting</code> go — proposed. Built: read per receipt watch, so a change with no live watch shows nothing</td></tr>
-<tr><td>Open a failed or unsaved change offline</td><td>Attention outranks waiting</td><td class="new">Try again and Inspect stay available — proposed. Built: waiting returns first and hides them</td></tr>
-<tr><td>Complete a Task</td><td>One phrase per kind</td><td class="new">Both Task views read “Completing…” from <code>OperationDeclaration</code>; six unseen strings and “Delivering request…” go — proposed</td></tr>
-<tr><td>Rename a conversation offline</td><td>A Session name</td><td class="new">Desktop only; the phone has no Session names — proposed, next after the above</td></tr>
+Current model:  cannot project Move; adding it to the old
+                overlay rule risks putting the Task back in B
+Proposed:       keep parent C; never replay the absorbed A → B
+                missing content still means an incomplete answer</pre>
+<h2>Actions → concepts → APIs</h2>
+<table>
+<thead><tr><th>Action</th><th>Before · built</th><th>After · proposed</th></tr></thead>
+<tbody>
+<tr><td>Move offline</td><td>Desktop waits in <code>performTaskAction</code>; destination candidates omit arrivals</td><td>Shared intent changes parent facts; dynamic programs update lists/counts from real cached content before disk</td></tr>
+<tr><td>Receive later state</td><td><code>WorkQueryEffect.covered</code> checks the exact-query stamp</td><td>Same-field provenance absorbs the committed effect; a later Reopen or Move wins</td></tr>
+<tr><td>Open destination</td><td>Fixed candidates and query-local content</td><td>Definition + candidate coverage + consumed facts/content determine completeness; no invented DTO or exact count</td></tr>
+<tr><td>Restart / reconnect</td><td>Saved IDs and original-Machine recovery already exist</td><td>Persist facts and coverage in that SQLite owner; retire or invalidate old bases, recover <code>task.membership_changed</code> by original ID</td></tr>
 </tbody></table>
-
-<h2>Questions</h2>
+<p><strong>Proposed usage:</strong> Move to a Wave or No Wave. Cached lists update immediately; the conversation and drafts stay open. Offline changes wait for their original Machine. Refusal restores only the refused change and leaves later edits and navigation alone.</p>
+<p>Field incorporation and answer completeness are separate. Fresh parent data cannot prove fresh activity or content. Client-derived answers never become Machine <code>ReadingStamp</code>s. Complete → Reopen, A → B → C, partial content, and closed-query restart must pass on both clients before Move migrates.</p>
+<h2>Questions for the next conversation</h2>
+<p>No answer is inferred here. These retain the previous page’s numbering. Under the headless concept-review rule, open product choices return <strong>Blocked</strong> to loop-or-next; the proposed engineering direction is recorded in the working design.</p>
 <ol>
-<li><strong>Abandon while disconnected.</strong> It closes PRs and removes branches. Your “1a” answer named Complete, rename and move.<br>1a — Save it and send on reconnect, like Complete (built).<br>1b — Abandon needs a reachable Machine; say so and keep the Task.</li>
-<li><strong>Taking back a change that is waiting for connection.</strong> The row offers nothing, so a mistaken offline Complete or Abandon will be sent.<br>2a — No action (built). Reopen afterwards.<br>2b — <em>Cancel</em> on a change that was never sent; it removes the request and puts the Task back.</li>
-<li><strong>Session names on the phone.</strong> The phone titles a conversation with its Task and has no rename.<br>3a — Leave it; offline rename is Desktop’s (proposed).<br>3b — The phone shows Session names and offers rename too.</li>
+<li><strong>Abandon while disconnected.</strong> It closes PRs and removes branches; the recorded “1a” named Complete, rename and move.<br>1a — Save Abandon and deliver on reconnect (built provisionally).<br>1b — Require a reachable Machine and keep the Task until then.</li>
+<li><strong>Take back a change before it was sent.</strong> A mistaken offline removal currently has no cancellation action.<br>2a — Keep that behavior; Reopen afterwards.<br>2b — Offer Cancel only before first send, removing the request and its projection.</li>
+<li><strong>Conversation names on the phone.</strong><br>3a — Keep Task titles and Desktop-only Session rename (built).<br>3b — Show Session names and offer rename on the phone too.</li>
 </ol>
-<small>Earlier answers stand: Jack Heart replied “1b for the question (or show noting)” on completion navigation and “1a” on disconnected routine edits. No shipping or merge decision is requested.</small>
-</main></html>
+<small>Earlier quoted answers remain in the design. Native latency is unmeasured and does not gate this pass. No code, Task creation, publication or merge in this review.</small>
+</main>
+</html>

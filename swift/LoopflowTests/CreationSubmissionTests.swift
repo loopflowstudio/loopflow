@@ -6,6 +6,36 @@ import ViewInspector
 @testable import LoopflowMac
 
 struct CreationSubmissionTests {
+    @MainActor @Test(arguments: [ColorScheme.light, .dark])
+    func interruptedResetCanBeDismissedWithoutSendingItAgain(scheme: ColorScheme) async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let server = Server()
+        await server.unknown("reset")
+        let client = CreationSubmissions(directory: root, machine: { "machine" },
+            lookup: { await server.lookup($0) }, send: { try await server.send($0) })
+        try await client.save(SubmittedCreation(requestID: "reset", destination: "machine",
+            payload: Data(#"{"kind":"session.new","directory":"/projects/manabot"}"#.utf8),
+            version: ServerProtocol.revision, submittedAt: Date()))
+        let recovery = CreationRecovery(submissions: client)
+        await recovery.refresh()
+        let item = try #require(recovery.items.first)
+        let resource = try #require(item.resource)
+        #expect(resource.repositoryName == "manabot")
+        #expect(!item.complete)
+        let (dismissed, acknowledge) = AsyncStream<Void>.makeStream()
+        let inspector = RecoveredCreationInspector(resource: resource, complete: false, presented: {
+            await recovery.presented([item.id])
+            acknowledge.yield(())
+        })
+        try inspector.environment(\.colorScheme, scheme).inspect().find(button: "Dismiss notice").tap()
+        for await _ in dismissed { break }
+        await recovery.refresh()
+        #expect(recovery.items.isEmpty)
+        #expect(try await client.pending().isEmpty)
+        #expect(await server.submissions == 0)
+    }
+
     private actor Server {
         private var receipts: [String: String] = [:]
         private(set) var creations = 0

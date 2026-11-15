@@ -19,11 +19,62 @@ private struct FilesFixture: Decodable {
 @Suite("TaskFiles", .serialized)
 @MainActor
 struct TaskFilesTests {
-    private func fixture() throws -> FilesFixture {
+    @Test func initialFilesReadSurvivesItsMountedViewCancellation() async throws {
+        let answer = try changesJSON()
+        let (started, begin) = AsyncStream<Void>.makeStream()
+        let (release, finish) = AsyncStream<Void>.makeStream()
+        let store = TaskFilesStore(issue: "TEST-1", cwd: "/checkout", query: RegistryQuery { _, _ in
+            begin.yield(())
+            for await _ in release { break }
+            try Task.checkCancellation()
+            return answer
+        })
+        let mounted = Task { await store.refreshChanges() }
+        for await _ in started { break }
+        mounted.cancel()
+        finish.finish()
+        await mounted.value
+        #expect(store.changes != nil)
+        #expect(store.selection == store.changes?.scratch.first)
+        #expect(store.changesError == nil)
+        #expect(!store.isRefreshingChanges)
+    }
+
+    @Test(arguments: [ColorScheme.light, .dark])
+    func failedInitialReadCanBeRetriedFromTheNavigator(scheme: ColorScheme) async throws {
+        let answer = try changesJSON()
+        let reads = OSAllocatedUnfairLock(initialState: 0)
+        let store = TaskFilesStore(issue: "TEST-1", cwd: "/checkout", query: RegistryQuery { _, _ in
+            let count = reads.withLock { $0 += 1; return $0 }
+            if count == 1 { throw RegistryQueryError("Files unavailable") }
+            return answer
+        })
+        store.navigator = .pinned
+        await store.refreshChanges()
+        #expect(store.changesError == "Files unavailable")
+        #expect(!store.isRefreshingChanges)
+        let view = TaskFilesView(store: store, prURL: nil, checkoutBase: nil)
+        try view.environment(\.colorScheme, scheme).inspect().find(button: "Retry").tap()
+        try await eventually { store.changes != nil }
+        #expect(store.changesError == nil)
+        #expect(!store.isRefreshingChanges)
+    }
+
+    private func fixtureData() throws -> Data {
         let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("tests/fixtures/dto/task_files.json")
-        return try JSONDecoder().decode(FilesFixture.self, from: Data(contentsOf: url))
+        return try Data(contentsOf: url)
+    }
+
+    private func fixture() throws -> FilesFixture {
+        try JSONDecoder().decode(FilesFixture.self, from: fixtureData())
+    }
+
+    private func changesJSON() throws -> String {
+        let fields = try #require(JSONSerialization.jsonObject(with: fixtureData()) as? [String: Any])
+        let changes = try #require(fields["changes"])
+        return String(decoding: try JSONSerialization.data(withJSONObject: changes), as: UTF8.self)
     }
 
     private func snapshot(_ text: String, revision: String? = nil) -> TaskFileSnapshot {

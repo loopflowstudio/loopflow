@@ -831,8 +831,10 @@ receipts after restart and continues only absent or safely resumable submissions
 The server derives `complete`, `continue` or `inspect`; Desktop does not infer
 continuation from milestones. `CreationPresentation` retires a submission when
 its Task or Session view mounts, including promotion. Cold recovery's Show result
-uses the same completion owner after displaying the resource; Inspect retains
-unconfirmed launches or conversation changes. Failed removal repeats lookup and
+uses the same completion owner after displaying the resource. Recovery notices
+name their repository. Inspect retains unconfirmed launches or conversation
+changes until Dismiss notice acknowledges them; dismissal never retries or
+undoes the request. Failed removal repeats lookup and
 presentation. No local milestone ledger is stored.
 An earlier New Task reply leaves later navigation and a newer New Task sheet
 alone. Its result stays registered for recovery until presented; only the

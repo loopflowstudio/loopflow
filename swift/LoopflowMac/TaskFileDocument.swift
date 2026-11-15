@@ -444,6 +444,7 @@ final class TaskFilesStore {
     private(set) var patchLines: [TaskPatchLine] = []
     private(set) var error: String?
     private var refreshGeneration = 0
+    @ObservationIgnored private var initialRefresh: (id: UUID, comparison: ChangeComparison, task: Task<Void, Never>)?
     private var fileGeneration = 0
     private var diffGeneration = 0
     private var savedPreference = true
@@ -655,13 +656,32 @@ final class TaskFilesStore {
     }
 
     func refreshChanges() async {
+        // The retained Files store owns its first read. Switching panes can
+        // cancel a mounted view while another view still needs that result.
+        if changes == nil {
+            if let initialRefresh, initialRefresh.comparison == comparison {
+                await initialRefresh.task.value
+                return
+            }
+            let id = UUID()
+            let target = comparison
+            let task = Task { await self.readChanges(target) }
+            initialRefresh = (id, target, task)
+            await task.value
+            if initialRefresh?.id == id { initialRefresh = nil }
+        } else {
+            await readChanges(comparison)
+        }
+    }
+
+    private func readChanges(_ target: ChangeComparison) async {
         refreshGeneration += 1
         let generation = refreshGeneration
         isRefreshingChanges = true
         defer { if generation == refreshGeneration { isRefreshingChanges = false } }
         do {
-            let changes = try await query.taskChanges(issue: issue, base: comparison.base, head: comparison.head)
-            guard !Task.isCancelled, generation == refreshGeneration else { return }
+            let changes = try await query.taskChanges(issue: issue, base: target.base, head: target.head)
+            guard !Task.isCancelled, generation == refreshGeneration, target == comparison else { return }
             self.changes = changes
             if selection == nil, let first = changes.scratch.first ?? changes.files.first?.path {
                 selection = first
@@ -669,7 +689,7 @@ final class TaskFilesStore {
             }
             changesError = nil
         } catch {
-            guard !Task.isCancelled, generation == refreshGeneration else { return }
+            guard !Task.isCancelled, generation == refreshGeneration, target == comparison else { return }
             changes = nil
             diff = nil
             changesError = error.localizedDescription

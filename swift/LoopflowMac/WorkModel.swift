@@ -2134,10 +2134,9 @@ final class WorkModel {
         }
     }
 
-    /// Saved rows are display-only until the independent list answers, including an empty answer.
+    /// Planning rows bridge the first list read, including when planning refreshes before the list.
     private var sidebarTaskRows: [(id: String, states: [WorkSelectionState])] {
         if let taskList { return taskRows(taskList) }
-        guard showsSavedPlanning else { return [] }
         return visibleTasks.compactMap { task in
             if case .wave(let wave) = navigation.sidebarScope, task.task.waveId != wave { return nil }
             guard !abandoningTaskIDs.contains(task.id) else { return nil }

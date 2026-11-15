@@ -1469,15 +1469,16 @@ struct TaskPlanningReadabilityTests {
         #expect(try navigator.inspect().find(text: "No working Tasks in this list").string() == "No working Tasks in this list")
     }
 
-    @Test("A saved name remains updating while Sessions load, and a fresh list can rename it")
-    func savedIdentity() throws {
+    @Test("Saved rows survive a roadmap refresh until the independent list answers")
+    func savedIdentity() async throws {
         let fixture = try WorkTestFixture.load()
+        let feed = WorkFeed()
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
         let cache = WorkCache(directory: directory)
         cache.saveRoadmap(try savedRoadmap(fixture))
         cache.flush()
-        let model = WorkModel(query: fixture.query, repoPath: "/src/loopflow", cache: cache)
+        let model = WorkModel(query: fixture.streaming(feed), repoPath: "/src/loopflow", cache: cache)
         #expect(model.workStatus == .updating)
         let expected = model.visibleTasks.filter { $0.section == .working }.map(\.id)
         #expect(!expected.isEmpty)
@@ -1485,14 +1486,24 @@ struct TaskPlanningReadabilityTests {
         let record = try #require(model.task(id: "issue-now")?.task)
         #expect(model.taskPresentation(id: record.id).title == record.task.name)
         #expect(model.taskPresentation(id: record.id).context == "Updating…")
+        let keeping = Task { await model.keepWorkCurrent() }
+        defer { keeping.cancel() }
+        try await feed.opened(1)
+        let scope = try await feed.request(1)
+        await feed.send(try fixture.frame("planning", sequence: 1, answers: scope.id, body: savedRoadmap(fixture)))
+        try await eventually { !model.showsSavedPlanning }
+        #expect(model.taskListReading.isLoading)
+        #expect(model.sidebarTaskIDs == expected, "fresh planning must not hide rows before the list answers")
         let content = WorkViewPlan.Content(paneRevision: nil, face: nil,
             work: .init(repository: "repo", kind: .task, id: record.runtime?.workId ?? record.id),
             title: "Fresh local name", states: [.working], identifier: record.task.identifier,
             primarySession: nil, location: nil, argv: nil, unavailable: [])
         model.applyTaskList(fixtureViewPlan(owner: key, members: [content]), wave: nil, reason: "")
-        #expect(model.taskPresentation(id: record.id).title == "Fresh local name")
+        #expect(model.taskPresentation(id: record.id).title == record.task.name, "current roadmap identity keeps priority")
         model.applyTaskList(fixtureViewPlan(owner: key, members: []), wave: nil, reason: "")
         #expect(model.sidebarTaskIDs.isEmpty, "a fresh empty list supersedes saved membership")
+        keeping.cancel()
+        await keeping.value
     }
 
     @Test("Two repository windows restore their own names from one Machine cache")

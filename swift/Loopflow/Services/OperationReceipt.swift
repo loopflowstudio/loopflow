@@ -44,7 +44,12 @@ public struct OperationReceipt: Codable, Equatable, Sendable {
     }
     public let requestID: String
     public let kind: String
-    public let fingerprint: String
+    public enum Validation: String, Codable, Sendable {
+        case unbound, pending, candidate, bound, conflict
+    }
+    public let fingerprint: String?
+    public let submittedFingerprint: String?
+    public let validation: Validation
     public let delivery: Delivery
     public let revision: Int64
     public let result: JSONValue?
@@ -54,7 +59,8 @@ public struct OperationReceipt: Codable, Equatable, Sendable {
     public let updatedAt: Int64
 
     private enum CodingKeys: String, CodingKey {
-        case requestID = "request_id", kind, fingerprint, delivery, revision, result, error, commits
+        case requestID = "request_id", kind, fingerprint, validation, delivery, revision, result, error, commits
+        case submittedFingerprint = "submitted_fingerprint"
         case createdAt = "created_at", updatedAt = "updated_at"
     }
 
@@ -62,7 +68,9 @@ public struct OperationReceipt: Codable, Equatable, Sendable {
         let fields = try decoder.container(keyedBy: CodingKeys.self)
         requestID = try fields.decode(String.self, forKey: .requestID)
         kind = try fields.decode(String.self, forKey: .kind)
-        fingerprint = try fields.decode(String.self, forKey: .fingerprint)
+        fingerprint = try fields.decode(String?.self, forKey: .fingerprint)
+        submittedFingerprint = try fields.decode(String?.self, forKey: .submittedFingerprint)
+        validation = try fields.decode(Validation.self, forKey: .validation)
         delivery = try fields.decode(Delivery.self, forKey: .delivery)
         revision = try fields.decode(Int64.self, forKey: .revision)
         result = try fields.decode(JSONValue?.self, forKey: .result)
@@ -77,6 +85,8 @@ public struct OperationReceipt: Codable, Equatable, Sendable {
         try fields.encode(requestID, forKey: .requestID)
         try fields.encode(kind, forKey: .kind)
         try fields.encode(fingerprint, forKey: .fingerprint)
+        try fields.encode(submittedFingerprint, forKey: .submittedFingerprint)
+        try fields.encode(validation, forKey: .validation)
         try fields.encode(delivery, forKey: .delivery)
         try fields.encode(revision, forKey: .revision)
         try fields.encode(result, forKey: .result)

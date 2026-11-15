@@ -140,6 +140,21 @@ const RESPONSES: &[(&str, &str, &str)] = &[
         include_str!("../../tests/fixtures/dto/server/operation_admitted.json"),
     ),
     (
+        "operation_pending",
+        "operation.get",
+        include_str!("../../tests/fixtures/dto/server/operation_pending.json"),
+    ),
+    (
+        "operation_candidate",
+        "operation.get",
+        include_str!("../../tests/fixtures/dto/server/operation_candidate.json"),
+    ),
+    (
+        "operation_conflict",
+        "operation.get",
+        include_str!("../../tests/fixtures/dto/server/operation_conflict.json"),
+    ),
+    (
         "operation_receipt",
         "operation.get",
         include_str!("../../tests/fixtures/dto/server/operation_receipt.json"),

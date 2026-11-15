@@ -7,12 +7,37 @@ INSERT INTO client_store_epoch VALUES (1, lower(hex(randomblob(16))));
 
 -- One receipt owner for creation milestones and durable native commands. Old
 -- creation rows retain their payload fingerprints, results and recovery rules.
-ALTER TABLE creation_receipts ADD COLUMN command TEXT;
-ALTER TABLE creation_receipts ADD COLUMN delivery_state TEXT NOT NULL DEFAULT 'untracked'
-    CHECK (delivery_state IN ('untracked','queued','dispatched','finished','uncertain'));
-ALTER TABLE creation_receipts ADD COLUMN command_error TEXT;
-ALTER TABLE creation_receipts ADD COLUMN commits TEXT NOT NULL DEFAULT '[]';
-ALTER TABLE creation_receipts ADD COLUMN receipt_revision INTEGER NOT NULL DEFAULT 0;
+-- Keep every released column and value; canonical identity may now be unresolved.
+ALTER TABLE creation_receipts RENAME TO prior_creation_receipts;
+CREATE TABLE creation_receipts (
+    request_id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    fingerprint TEXT,
+    run INTEGER NOT NULL,
+    task_id TEXT,
+    session_id TEXT,
+    artifact_key TEXT,
+    milestone TEXT NOT NULL,
+    result TEXT,
+    launch TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    command TEXT,
+    submitted_fingerprint TEXT,
+    validation TEXT NOT NULL DEFAULT 'unbound'
+        CHECK (validation IN ('unbound','pending','candidate','bound','conflict')),
+    candidate_generation INTEGER NOT NULL DEFAULT 0,
+    delivery_state TEXT NOT NULL DEFAULT 'untracked'
+        CHECK (delivery_state IN ('untracked','queued','dispatched','finished','uncertain')),
+    command_error TEXT,
+    commits TEXT NOT NULL DEFAULT '[]',
+    receipt_revision INTEGER NOT NULL DEFAULT 0
+);
+INSERT INTO creation_receipts(request_id,kind,fingerprint,run,task_id,session_id,
+    artifact_key,milestone,result,launch,created_at,updated_at)
+SELECT request_id,kind,fingerprint,run,task_id,session_id,
+    artifact_key,milestone,result,launch,created_at,updated_at FROM prior_creation_receipts;
+DROP TABLE prior_creation_receipts;
 CREATE TEMP TABLE client_operation_prior_revisions AS SELECT * FROM store_revisions;
 DROP TABLE store_revisions;
 CREATE TABLE store_revisions (

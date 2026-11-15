@@ -6003,7 +6003,10 @@
           ]
         },
         "fingerprint": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "kind": {
           "type": "string"
@@ -6017,15 +6020,26 @@
           "format": "int64",
           "type": "integer"
         },
+        "submitted_fingerprint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "updated_at": {
           "format": "int64",
           "type": "integer"
+        },
+        "validation": {
+          "$ref": "#/$defs/OperationValidation"
         }
       },
       "required": [
         "request_id",
         "kind",
         "fingerprint",
+        "submitted_fingerprint",
+        "validation",
         "delivery",
         "revision",
         "result",
@@ -6035,6 +6049,17 @@
         "updated_at"
       ],
       "type": "object"
+    },
+    "OperationValidation": {
+      "description": "A pending legacy candidate is reserved, but has no permission to execute.",
+      "enum": [
+        "unbound",
+        "pending",
+        "candidate",
+        "bound",
+        "conflict"
+      ],
+      "type": "string"
     },
     "OwnershipKind": {
       "oneOf": [
@@ -7717,34 +7742,18 @@
             ]
           },
           "x-result-example": {
-            "commits": [
-              {
-                "fence": {
-                  "epoch": "ab0123456789ab0123456789ab01234567",
-                  "machine": "machine_fixture",
-                  "revisions": {
-                    "planning": 7
-                  },
-                  "schema": 6
-                },
-                "resources": [
-                  "task_fixture"
-                ],
-                "result": {
-                  "request": 42
-                },
-                "stage": "task.completion_requested"
-              }
-            ],
+            "commits": [],
             "created_at": 1,
-            "delivery": "uncertain",
-            "error": "Task requires a verified merge",
-            "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "kind": "task.complete",
+            "delivery": "queued",
+            "error": null,
+            "fingerprint": null,
+            "kind": "task.create",
             "request_id": "operation_fixture",
             "result": null,
-            "revision": 3,
-            "updated_at": 2
+            "revision": 0,
+            "submitted_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "updated_at": 1,
+            "validation": "pending"
           }
         },
         {
@@ -10568,12 +10577,14 @@
             "created_at": 1,
             "delivery": "queued",
             "error": null,
-            "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "fingerprint": null,
             "kind": "task.complete",
             "request_id": "operation_fixture",
             "result": null,
             "revision": 0,
-            "updated_at": 1
+            "submitted_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "updated_at": 1,
+            "validation": "bound"
           }
         },
         {

@@ -5,7 +5,7 @@
   "result": {
     "request_id": "operation_fixture",
     "kind": "task.complete",
-    "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "fingerprint": null,
     "delivery": "uncertain",
     "result": null,
     "error": "Task requires a verified merge",
@@ -30,6 +30,8 @@
     ],
     "created_at": 1,
     "updated_at": 2,
-    "revision": 3
+    "revision": 3,
+    "submitted_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "validation": "bound"
   }
 }

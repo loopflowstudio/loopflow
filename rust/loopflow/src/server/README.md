@@ -206,19 +206,30 @@ observations do not share that transaction.
 ### Durable command admission
 
 `operation.submit {request_id, command}` accepts any typed `Write` and returns
-its durable `OperationReceipt` before domain execution. Creation admission still
-resolves its Git repository to preserve canonical existing fingerprints; removing
-that pre-admission wait is unfinished. Planning, checkout creation and provider
-startup run in the admitted worker.
+its durable `OperationReceipt` before Git discovery, planning, creation locks or
+provider startup. Admission saves a versioned submitted-content identity and exact
+typed command. The worker resolves the canonical creation `fingerprint` separately;
+it remains null until established. `submitted_fingerprint` identifies the saved
+content, excluding the request ID and incidental JSON key order.
 `operation.get {request_id}` reads or subscribes to that same receipt. Null means
 confirmed absence; an unavailable read says nothing about whether it ran.
 The command and its ID are immutable. Reusing the ID with different content is
 `conflict`. Creations use their existing request ID and receipt row.
 
+Validation is `pending` for a new creation, `candidate` while adopting a released
+receipt, `bound` after validation, `conflict` for incompatible content, or `unbound`
+for a released receipt without an envelope. A candidate reserves one spelling;
+equivalent root, subdirectory and symlink spellings can bind the canonical identity.
+A wrong candidate releases its reservation without changing the saved creation
+result. An unavailable repository keeps validation pending. Reservation generations
+prevent held validation from changing a newer candidate. Once bound, submitted
+content is immutable, including its path spelling.
+
 Delivery is `queued`, `dispatched`, `finished` or `uncertain`; historical creation
 rows without an envelope are `untracked`. A duplicate reads the same outcome and
-never dispatches a sent command again. Server exit after dispatch leaves the
-operation for domain inspection. There is no generic retry of uncertain effects.
+never generically dispatches a sent command again. Adopted creations consult their
+existing Complete/Continue/Inspect recovery rules; only a domain-proven continuation
+can resume after dispatch. Server exit leaves other operations for domain inspection. There is no generic retry of uncertain effects.
 
 `commits` contains semantic stages with resource IDs, an authoritative result and
 Machine/epoch/schema/domain revision fences written in the domain transaction.

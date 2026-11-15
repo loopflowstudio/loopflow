@@ -36,51 +36,22 @@ pub(crate) fn admit(id: &str, command: &Write) -> Result<(SqliteStore, Operation
     let kind = payload["kind"]
         .as_str()
         .context("a typed command has a kind")?;
-    // Creations already have a domain fingerprint and recovery contract. Keep
-    // that identity when admitting their envelope, including released receipts.
-    let fingerprint = match command {
-        Write::TaskCreate {
-            directory,
-            request_id,
-            title,
-            request,
-            wave,
-            graph,
-            session,
-            run,
-        } => {
-            require_creation_id(id, request_id)?;
-            let input = super::creation::TaskCreation {
-                directory: crate::repo::require_repo_root(directory, "task create")?,
-                title: title.clone(),
-                request: request.clone(),
-                wave: wave.clone(),
-                graph: graph.clone(),
-                session: session.clone(),
-                worktree: None,
-                run: *run,
-                agent: None,
-                approve: false,
-            };
-            super::creation::identity("task.create", id, &input, *run)?.fingerprint
+    match command {
+        Write::TaskCreate { request_id, .. } | Write::SessionNew { request_id, .. } => {
+            require_creation_id(id, request_id)?
         }
-        Write::SessionNew {
-            request_id,
-            id: session,
-            agent,
-            ..
-        } => {
-            require_creation_id(id, request_id)?;
-            super::creation::identity(
-                "session.new",
-                id,
-                &serde_json::json!({"id":session,"agent":agent}),
-                false,
-            )?
-            .fingerprint
-        }
-        _ => hex::encode(Sha256::digest(serde_json::to_vec(&payload)?)),
-    };
+        _ => {}
+    }
+    // Typed values and sorted object keys give submitted content a stable v1
+    // identity. Repository resolution belongs to validation, after admission.
+    let mut content = payload.clone();
+    content
+        .as_object_mut()
+        .context("a typed command is an object")?
+        .remove("request_id");
+    let fingerprint = hex::encode(Sha256::digest(serde_json::to_vec(
+        &serde_json::json!({"version":1,"command":content}),
+    )?));
     let path = crate::store::database_path_from_env()?;
     anyhow::ensure!(path.exists(), "Machine registry is unavailable");
     let store = SqliteStore::new(&path)?;
@@ -108,11 +79,47 @@ fn require_creation_id(id: &str, creation: &str) -> Result<()> {
 
 /// A claimed command never takes the generic path twice. A panic or process
 /// exit leaves `dispatched`, whose effect must be established by its domain.
-pub(crate) fn execute(store: &SqliteStore, id: &str, command: &Write) -> Result<()> {
+pub(crate) fn execute(store: &SqliteStore, id: &str) -> Result<()> {
     let span = tracing::info_span!("operation_dispatch", operation_id = id);
     let _entered = span.enter();
-    if !store.dispatch_operation(id)? {
+    let Some(saved) = store.submitted_command(id)? else {
         return Ok(());
+    };
+    let command: Write = serde_json::from_value(saved.command)?;
+    if matches!(
+        saved.validation,
+        crate::store::sqlite::operations::OperationValidation::Pending
+            | crate::store::sqlite::operations::OperationValidation::Candidate
+    ) {
+        let identity = match creation_identity(id, &command) {
+            Ok(identity) => identity,
+            Err(error) => {
+                // Unavailable repository discovery is retryable validation, never
+                // a content mismatch and never permission to replace the envelope.
+                store.record_validation_error(id, saved.generation, &format!("{error:#}"))?;
+                return Ok(());
+            }
+        };
+        if !store.validate_operation(id, saved.generation, &identity)? {
+            return Ok(());
+        }
+    }
+    if !store.dispatch_operation(id)? {
+        // Only the existing domain receipt can authorize continuation after a
+        // dispatch. Generic commands and creations without domain facts stay held.
+        if !matches!(
+            saved.delivery,
+            crate::store::sqlite::operations::OperationDelivery::Dispatched
+                | crate::store::sqlite::operations::OperationDelivery::Uncertain
+        ) {
+            return Ok(());
+        }
+        let Some(creation) = store.creation_receipt(id)? else {
+            return Ok(());
+        };
+        if creation.disposition == crate::store::sqlite::operations::RecoveryDisposition::Inspect {
+            return Ok(());
+        }
     }
     let output: Result<serde_json::Value> =
         crate::journal::request::with_operation(Some(id.to_owned()), || {
@@ -120,9 +127,152 @@ pub(crate) fn execute(store: &SqliteStore, id: &str, command: &Write) -> Result<
         });
     match output {
         Ok(value) => store.finish_operation(id, Ok(&value))?,
-        // A command can fail after committing a stage or an external side effect.
-        // Keep all commits and the error; never call this a rolled-back command.
         Err(error) => store.finish_operation(id, Err(&format!("{error:#}")))?,
     }
     Ok(())
+}
+
+fn creation_identity(
+    id: &str,
+    command: &Write,
+) -> Result<crate::store::sqlite::operations::CreationIdentity> {
+    match command {
+        Write::TaskCreate {
+            directory,
+            title,
+            request,
+            wave,
+            graph,
+            session,
+            run,
+            ..
+        } => {
+            let input = super::creation::TaskCreation {
+                directory: crate::repo::require_repo_root(directory, "task create")?,
+                title: title.clone(),
+                request: request.clone(),
+                wave: wave.clone(),
+                graph: graph.clone(),
+                session: session.clone(),
+                worktree: None,
+                run: *run,
+                agent: None,
+                approve: false,
+            };
+            super::creation::identity("task.create", id, &input, *run)
+        }
+        Write::SessionNew {
+            id: session, agent, ..
+        } => super::creation::identity(
+            "session.new",
+            id,
+            &serde_json::json!({"id":session,"agent":agent}),
+            false,
+        ),
+        _ => anyhow::bail!("only creations require domain identity validation"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::os::unix::fs::PermissionsExt;
+
+    use crate::lf::commands::graph::EnvVarGuard;
+    use crate::lf::commands::write::Write;
+    use crate::store::sqlite::operations::{OperationDelivery, OperationValidation};
+    use crate::store::sqlite::SqliteStore;
+
+    fn command(directory: std::path::PathBuf, id: &str) -> Write {
+        Write::TaskCreate {
+            directory,
+            request_id: id.into(),
+            title: Some("Submitted title".into()),
+            request: None,
+            wave: None,
+            graph: None,
+            session: None,
+            run: false,
+        }
+    }
+
+    #[test]
+    fn admission_saves_exact_content_before_git_and_unavailable_validation_is_recoverable() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home = EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        let path = crate::store::default_db_path();
+        let store = SqliteStore::new(&path).unwrap();
+        let bin = home.path().join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        let marker = home.path().join("git-invoked");
+        let git = bin.join("git");
+        std::fs::write(
+            &git,
+            format!("#!/bin/sh\n: > '{}'\nexit 1\n", marker.display()),
+        )
+        .unwrap();
+        std::fs::set_permissions(&git, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let _path = EnvVarGuard::set("PATH", bin.to_str().unwrap());
+        let submitted = command(home.path().to_path_buf(), "new");
+        let (_, receipt) = super::admit("new", &submitted).unwrap();
+        assert!(!marker.exists(), "admission must not invoke Git");
+        assert_eq!(receipt.validation, OperationValidation::Pending);
+        assert_eq!(receipt.fingerprint, None);
+        assert!(store.creation_receipt("new").unwrap().is_none());
+        super::execute(&store, "new").unwrap();
+        assert!(marker.exists());
+        let pending = store.operation_receipt("new").unwrap().unwrap();
+        assert_eq!(pending.delivery, OperationDelivery::Queued);
+        assert_eq!(pending.validation, OperationValidation::Pending);
+        assert!(pending.error.is_some());
+        assert!(pending.commits.is_empty());
+        drop(store);
+        let (reopened, duplicate) = super::admit("new", &submitted).unwrap();
+        assert_eq!(duplicate.revision, pending.revision);
+        assert_eq!(
+            reopened.submitted_command("new").unwrap().unwrap().command,
+            serde_json::to_value(submitted).unwrap()
+        );
+        // IDs are excluded from content identity, but not from saved commands.
+        let (_, another) =
+            super::admit("other", &command(home.path().to_path_buf(), "other")).unwrap();
+        assert_eq!(another.submitted_fingerprint, receipt.submitted_fingerprint);
+    }
+
+    #[test]
+    fn equivalent_creation_paths_validate_against_one_released_canonical_identity() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let repo = loopflow_test_support::TestRepo::new();
+        let subdirectory = repo.path().join("nested");
+        std::fs::create_dir(&subdirectory).unwrap();
+        let link = tempfile::tempdir().unwrap();
+        let symlink = link.path().join("repository");
+        std::os::unix::fs::symlink(repo.path(), &symlink).unwrap();
+        let canonical =
+            super::creation_identity("old", &command(repo.path().to_path_buf(), "old")).unwrap();
+        for directory in [repo.path().to_path_buf(), subdirectory, symlink] {
+            let home = tempfile::tempdir().unwrap();
+            let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+            store.check_creation(&canonical).unwrap();
+            let change = command(directory, "old");
+            store
+                .admit_operation(
+                    "old",
+                    "task.create",
+                    "submitted",
+                    &serde_json::to_value(&change).unwrap(),
+                )
+                .unwrap();
+            let saved = store.submitted_command("old").unwrap().unwrap();
+            let resolved = super::creation_identity("old", &change).unwrap();
+            assert_eq!(resolved.fingerprint, canonical.fingerprint);
+            assert!(store
+                .validate_operation("old", saved.generation, &resolved)
+                .unwrap());
+            assert_eq!(
+                store.operation_receipt("old").unwrap().unwrap().fingerprint,
+                Some(canonical.fingerprint.clone())
+            );
+        }
+    }
 }

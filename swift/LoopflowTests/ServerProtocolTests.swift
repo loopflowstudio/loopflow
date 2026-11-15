@@ -14,16 +14,33 @@ struct ServerProtocolTests {
         let change = ServedWrite.taskComplete(directory: "/repo", issue: "LOO-1")
         #expect(try encoded(.request(id: "admit", operation: .operationSubmit(requestID: "operation_fixture", command: change), select: nil)) == value("operation_submit"))
         #expect(try encoded(.request(id: "receipt", operation: .read(.operationGet(requestID: "operation_fixture")), select: nil)) == value("operation_get"))
-        for name in ["operation_admitted", "operation_receipt"] {
+        for name in ["operation_admitted", "operation_receipt", "operation_pending", "operation_candidate", "operation_conflict"] {
             guard case .response(_, _, let result) = try message(name) else { Issue.record("Expected receipt"); return }
             let receipt = try result.decode(OperationReceipt.self)
             #expect(receipt.requestID == "operation_fixture")
             #expect(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(receipt)) == result.decode(JSONValue.self))
-            for key in ["request_id", "kind", "fingerprint", "delivery", "revision", "result", "error", "commits", "created_at", "updated_at"] {
+            for key in ["request_id", "kind", "fingerprint", "submitted_fingerprint", "validation", "delivery", "revision", "result", "error", "commits", "created_at", "updated_at"] {
                 var missing = try #require(JSONSerialization.jsonObject(with: result.bytes) as? [String: Any])
                 missing.removeValue(forKey: key)
                 #expect(throws: DecodingError.self) { try JSONDecoder().decode(OperationReceipt.self, from: JSONSerialization.data(withJSONObject: missing)) }
             }
+        }
+    }
+
+    @Test func creationAdmissionIsSeparateFromCanonicalValidation() throws {
+        let states: [(String, OperationReceipt.Validation, OperationReceipt.Delivery)] = [
+            ("operation_pending", .pending, .queued),
+            ("operation_candidate", .candidate, .untracked),
+            ("operation_conflict", .conflict, .untracked),
+        ]
+        for (name, validation, delivery) in states {
+            guard case .response(_, _, let result) = try message(name) else { Issue.record("Expected receipt"); return }
+            let receipt = try result.decode(OperationReceipt.self)
+            #expect(receipt.validation == validation)
+            #expect(receipt.delivery == delivery)
+            #expect(receipt.submittedFingerprint != nil)
+            #expect((receipt.fingerprint == nil) == (validation == .pending))
+            #expect(receipt.commits.isEmpty)
         }
     }
 

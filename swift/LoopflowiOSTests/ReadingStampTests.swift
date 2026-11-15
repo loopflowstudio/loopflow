@@ -9,9 +9,24 @@ final class ReadingStampTests: XCTestCase {
         let result = try XCTUnwrap(try RawJSON(Data(contentsOf: url)).fields()["result"])
         let receipt = try result.decode(OperationReceipt.self)
         XCTAssertEqual(receipt.delivery, .uncertain)
+        XCTAssertEqual(receipt.validation, .bound)
+        XCTAssertNil(receipt.fingerprint)
+        XCTAssertNotNil(receipt.submittedFingerprint)
         XCTAssertEqual(receipt.commits.first?.fence.revisions["planning"], 7)
         XCTAssertNil(receipt.result)
         XCTAssertNotNil(receipt.error)
+    }
+
+    func testAdmissionAndCandidateValidationStayDistinctOnPhone() throws {
+        for (name, state) in [("operation_pending", OperationReceipt.Validation.pending), ("operation_candidate", .candidate), ("operation_conflict", .conflict)] {
+            let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: name, withExtension: "json", subdirectory: "server"))
+            let result = try XCTUnwrap(try RawJSON(Data(contentsOf: url)).fields()["result"])
+            let receipt = try result.decode(OperationReceipt.self)
+            XCTAssertEqual(receipt.validation, state)
+            XCTAssertEqual(receipt.fingerprint == nil, state == .pending)
+            XCTAssertNotNil(receipt.submittedFingerprint)
+            XCTAssertTrue(receipt.commits.isEmpty)
+        }
     }
 
     func testStampedFrameUsesTheSharedDecoderOnPhone() throws {

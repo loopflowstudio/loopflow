@@ -1310,7 +1310,7 @@ async fn operate(
                     tokio::task::spawn_blocking(move || {
                         let _held = reservation;
                         let result = crate::journal::request::run(&trace,&target, || {
-                            crate::engine::operation::execute(&store,&request_id,&command)
+                            crate::engine::operation::execute(&store,&request_id)
                         });
                         if let Err(error) = result {
                             tracing::error!(%error,"operation execution recording failed; inspect its receipt");
@@ -1752,7 +1752,7 @@ mod tests {
             assert_eq!(final_receipt.commits[0].stage, "task.filed");
             let task = final_receipt.result.as_ref().unwrap()["task"]["id"].clone();
             let (reopened, duplicate) = crate::engine::operation::admit(id, &command).unwrap();
-            crate::engine::operation::execute(&reopened, id, &command).unwrap();
+            crate::engine::operation::execute(&reopened, id).unwrap();
             assert_eq!(duplicate.result.as_ref().unwrap()["task"]["id"], task);
             assert_eq!(
                 reopened.operation_receipt(id).unwrap().unwrap().commits,

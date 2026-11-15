@@ -1,0 +1,19 @@
+{
+  "type": "response",
+  "id": "admit",
+  "trace_id": "trace_fixture",
+  "result": {
+    "request_id": "operation_fixture",
+    "kind": "task.create",
+    "fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "delivery": "untracked",
+    "result": null,
+    "error": null,
+    "commits": [],
+    "created_at": 1,
+    "updated_at": 1,
+    "revision": 0,
+    "submitted_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "validation": "candidate"
+  }
+}

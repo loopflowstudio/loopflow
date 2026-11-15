@@ -35,13 +35,36 @@ pub enum OperationDelivery {
     Uncertain,
 }
 
+/// A pending legacy candidate is reserved, but has no permission to execute.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum OperationValidation {
+    Unbound,
+    Pending,
+    Candidate,
+    Bound,
+    Conflict,
+}
+
+#[derive(Debug)]
+pub(crate) struct SubmittedCommand {
+    pub command: serde_json::Value,
+    pub generation: i64,
+    pub validation: OperationValidation,
+    pub delivery: OperationDelivery,
+}
+
 /// Creation recovery and general commands read the same row. Command output
 /// stays separate from the domain results that committed with displayed facts.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OperationReceipt {
     pub request_id: String,
     pub kind: String,
-    pub fingerprint: String,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub fingerprint: Option<String>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub submitted_fingerprint: Option<String>,
+    pub validation: OperationValidation,
     pub delivery: OperationDelivery,
     /// Orders receipt updates within one database epoch, including same-second stages.
     pub revision: i64,
@@ -106,7 +129,7 @@ pub(crate) fn commit_in(
         result: result.clone(),
     };
     if conn.execute(
-        "UPDATE creation_receipts SET commits=json_insert(commits,'$[#]',json(?2)),updated_at=?3 WHERE request_id=?1",
+        "UPDATE creation_receipts SET commits=json_insert(commits,'$[#]',json(?2)),updated_at=?3 WHERE request_id=?1 AND delivery_state<>'finished'",
         params![id,serde_json::to_string(&commit)?,crate::store::rows::now_unix()],
     )? != 1 {
         return Err(StoreError::NotFound);
@@ -134,23 +157,25 @@ impl SqliteStore {
         &self,
         id: &str,
         kind: &str,
-        fingerprint: &str,
+        submitted_fingerprint: &str,
         command: &serde_json::Value,
     ) -> StoreResult<OperationReceipt> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let encoded = serde_json::to_string(command)?;
-        let known = |conn: &Connection| -> StoreResult<Option<(String, String, Option<String>)>> {
+        let encoded = serde_json::to_string(&serde_json::json!({"version":1,"command":command}))?;
+        let known = |conn: &Connection| -> StoreResult<Option<(String, Option<String>)>> {
             Ok(conn
                 .query_row(
-                    "SELECT kind,fingerprint,command FROM creation_receipts WHERE request_id=?1",
+                    "SELECT kind,command FROM creation_receipts WHERE request_id=?1",
                     [id],
-                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                    |row| Ok((row.get(0)?, row.get(1)?)),
                 )
                 .optional()?)
         };
-        if let Some((known_kind, known_fingerprint, known_command)) = known(&conn)? {
+        let duplicate = |conn: &Connection| -> StoreResult<bool> {
+            let Some((known_kind, known_command)) = known(conn)? else {
+                return Ok(false);
+            };
             if known_kind != kind
-                || known_fingerprint != fingerprint
                 || known_command
                     .as_ref()
                     .is_some_and(|value| value != &encoded)
@@ -159,35 +184,106 @@ impl SqliteStore {
                     "operation {id} has different content"
                 )));
             }
-            if known_command.is_some() {
-                return operation_in(&conn, id)?.ok_or(StoreError::NotFound);
-            }
+            Ok(known_command.is_some())
+        };
+        if duplicate(&conn)? {
+            return operation_in(&conn, id)?.ok_or(StoreError::NotFound);
         }
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let existing = known(&tx)?;
-        if let Some((known_kind, known_fingerprint, known_command)) = existing {
-            if known_kind != kind
-                || known_fingerprint != fingerprint
-                || known_command
-                    .as_ref()
-                    .is_some_and(|known| known != &encoded)
-            {
-                return Err(StoreError::Stale(format!(
-                    "operation {id} has different content"
-                )));
-            }
-            // Released creation rows have no command envelope. Their domain
-            // recovery owner decides whether the exact creation may continue.
-            tx.execute("UPDATE creation_receipts SET command=?2,delivery_state='queued' WHERE request_id=?1 AND command IS NULL",
-                params![id,encoded])?;
-        } else {
+        if !duplicate(&tx)? {
             let now = crate::store::rows::now_unix();
-            tx.execute("INSERT INTO creation_receipts(request_id,kind,fingerprint,run,milestone,created_at,updated_at,command,delivery_state)
-                VALUES(?1,?2,?3,0,'queued',?4,?4,?5,'queued')", params![id,kind,fingerprint,now,encoded])?;
+            let validation = if matches!(kind, "task.create" | "session.new") {
+                "pending"
+            } else {
+                "bound"
+            };
+            tx.execute("INSERT INTO creation_receipts(request_id,kind,run,milestone,created_at,updated_at,command,submitted_fingerprint,validation,candidate_generation,delivery_state)
+                VALUES(?1,?2,0,'queued',?3,?3,?4,?5,?6,1,'queued')
+                ON CONFLICT(request_id) DO UPDATE SET command=excluded.command,submitted_fingerprint=excluded.submitted_fingerprint,
+                    validation=CASE WHEN excluded.validation='pending' THEN 'candidate' ELSE excluded.validation END,candidate_generation=creation_receipts.candidate_generation+1,command_error=NULL,updated_at=excluded.updated_at",
+                params![id,kind,now,encoded,submitted_fingerprint,validation])?;
         }
         let receipt = operation_in(&tx, id)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
         Ok(receipt)
+    }
+
+    pub(crate) fn submitted_command(&self, id: &str) -> StoreResult<Option<SubmittedCommand>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        // The command, reservation and status are one SQL snapshot. A separate
+        // status read could pair a replaced candidate with its successor's claim.
+        let row: Option<(String, i64, String, String)> = conn.query_row(
+            "SELECT command,candidate_generation,validation,delivery_state FROM creation_receipts WHERE request_id=?1 AND command IS NOT NULL AND validation<>'conflict'",
+            [id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        ).optional()?;
+        row.map(|(encoded, generation, validation, delivery)| {
+            let envelope: serde_json::Value = serde_json::from_str(&encoded)?;
+            if envelope["version"] != 1 {
+                return Err(StoreError::InvalidData(
+                    "unsupported submitted command version".into(),
+                ));
+            }
+            Ok(SubmittedCommand {
+                command: envelope
+                    .get("command")
+                    .ok_or_else(|| StoreError::InvalidData("submitted command is missing".into()))?
+                    .clone(),
+                generation,
+                validation: serde_json::from_value(serde_json::Value::String(validation))?,
+                delivery: serde_json::from_value(serde_json::Value::String(delivery))?,
+            })
+        })
+        .transpose()
+    }
+
+    /// Resolve canonical identity without changing a saved domain outcome. The
+    /// reservation generation prevents a held validator from binding a successor.
+    pub(crate) fn validate_operation(
+        &self,
+        id: &str,
+        generation: i64,
+        identity: &CreationIdentity,
+    ) -> StoreResult<bool> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let row: Option<(String, Option<String>, String)> = tx.query_row(
+            "SELECT kind,fingerprint,validation FROM creation_receipts WHERE request_id=?1 AND candidate_generation=?2",
+            params![id,generation], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
+        ).optional()?;
+        let Some((kind, canonical, validation)) = row else {
+            return Ok(false);
+        };
+        if validation == "conflict" {
+            return Ok(false);
+        }
+        if kind != identity.kind
+            || canonical
+                .as_ref()
+                .is_some_and(|value| value != &identity.fingerprint)
+        {
+            tx.execute("UPDATE creation_receipts SET command=CASE WHEN validation='candidate' THEN NULL ELSE command END,validation='conflict',command_error='submitted content conflicts with the saved creation identity' WHERE request_id=?1 AND candidate_generation=?2",
+                params![id,generation])?;
+            tx.commit()?;
+            return Ok(false);
+        }
+        if validation != "bound" {
+            tx.execute("UPDATE creation_receipts SET fingerprint=?3,validation='bound',command_error=NULL WHERE request_id=?1 AND candidate_generation=?2",
+                params![id,generation,identity.fingerprint])?;
+        }
+        tx.commit()?;
+        Ok(true)
+    }
+
+    pub(crate) fn record_validation_error(
+        &self,
+        id: &str,
+        generation: i64,
+        error: &str,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute("UPDATE creation_receipts SET command_error=?3 WHERE request_id=?1 AND candidate_generation=?2 AND validation IN ('pending','candidate') AND command_error IS NOT ?3",
+            params![id,generation,error])?;
+        Ok(())
     }
 
     /// Only a definitely unsent command can be claimed. Dispatched/uncertain
@@ -195,7 +291,7 @@ impl SqliteStore {
     pub(crate) fn dispatch_operation(&self, id: &str) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let queued: bool = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM creation_receipts WHERE request_id=?1 AND delivery_state='queued')",
+            "SELECT EXISTS(SELECT 1 FROM creation_receipts WHERE request_id=?1 AND validation='bound' AND (delivery_state='queued' OR (delivery_state='untracked' AND kind IN ('task.create','session.new'))))",
             [id], |row|row.get(0),
         )?;
         if !queued {
@@ -203,7 +299,7 @@ impl SqliteStore {
         }
         Ok(conn.execute(
             "UPDATE creation_receipts SET delivery_state='dispatched',updated_at=?2
-            WHERE request_id=?1 AND delivery_state='queued'",
+            WHERE request_id=?1 AND validation='bound' AND (delivery_state='queued' OR (delivery_state='untracked' AND kind IN ('task.create','session.new')))",
             params![id, crate::store::rows::now_unix()],
         )? == 1)
     }
@@ -219,8 +315,9 @@ impl SqliteStore {
             Err(error) => ("uncertain", None, Some(error)),
         };
         if conn.execute("UPDATE creation_receipts SET delivery_state=?2,result=CASE WHEN ?2='finished' THEN ?3 ELSE result END,command_error=?4,updated_at=?5
-            WHERE request_id=?1 AND delivery_state='dispatched'", params![id,state,output,error,crate::store::rows::now_unix()])? != 1 {
-            return Err(StoreError::Stale(format!("operation {id} is not dispatched")));
+            WHERE request_id=?1 AND delivery_state IN ('dispatched','uncertain')", params![id,state,output,error,crate::store::rows::now_unix()])? != 1 {
+            let finished: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM creation_receipts WHERE request_id=?1 AND delivery_state='finished')", [id], |row| row.get(0))?;
+            if !finished { return Err(StoreError::Stale(format!("operation {id} is not dispatched"))); }
         }
         Ok(())
     }
@@ -232,11 +329,11 @@ impl SqliteStore {
 }
 
 fn operation_in(conn: &Connection, id: &str) -> StoreResult<Option<OperationReceipt>> {
-    let row = conn.query_row("SELECT request_id,kind,fingerprint,delivery_state,CASE WHEN delivery_state='finished' THEN result END,command_error,commits,created_at,updated_at,receipt_revision
+    let row = conn.query_row("SELECT request_id,kind,fingerprint,delivery_state,CASE WHEN delivery_state='finished' THEN result END,command_error,commits,created_at,updated_at,receipt_revision,submitted_fingerprint,validation
         FROM creation_receipts WHERE request_id=?1", [id], |row| Ok((
-            row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,row.get::<_,String>(3)?,
+            row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,Option<String>>(2)?,row.get::<_,String>(3)?,
             row.get::<_,Option<String>>(4)?,row.get::<_,Option<String>>(5)?,row.get::<_,String>(6)?,
-            row.get::<_,i64>(7)?,row.get::<_,i64>(8)?,row.get::<_,i64>(9)?
+            row.get::<_,i64>(7)?,row.get::<_,i64>(8)?,row.get::<_,i64>(9)?,row.get::<_,Option<String>>(10)?,row.get::<_,String>(11)?
         ))).optional()?;
     row.map(
         |(
@@ -250,11 +347,15 @@ fn operation_in(conn: &Connection, id: &str) -> StoreResult<Option<OperationRece
             created_at,
             updated_at,
             revision,
+            submitted_fingerprint,
+            validation,
         )| {
             Ok(OperationReceipt {
                 request_id,
                 kind,
                 fingerprint,
+                submitted_fingerprint,
+                validation: serde_json::from_value(serde_json::Value::String(validation))?,
                 revision,
                 delivery: serde_json::from_value(serde_json::Value::String(delivery))?,
                 result: result.map(|text| serde_json::from_str(&text)).transpose()?,
@@ -383,16 +484,20 @@ impl SqliteStore {
 
     pub(crate) fn check_creation(&self, identity: &CreationIdentity) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let fingerprint: Option<(String, String)> = conn
-            .query_row(
-                "SELECT kind,fingerprint FROM creation_receipts WHERE request_id=?1",
-                [&identity.request_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()?;
-        if fingerprint.is_some_and(|(kind, fingerprint)| {
-            kind != identity.kind || fingerprint != identity.fingerprint
-        }) {
+        let now = crate::store::rows::now_unix();
+        if conn.execute("INSERT INTO creation_receipts(request_id,kind,fingerprint,run,milestone,created_at,updated_at)
+            VALUES(?1,?2,?3,?4,'queued',?5,?5)
+            ON CONFLICT(request_id) DO UPDATE SET fingerprint=excluded.fingerprint
+            WHERE creation_receipts.kind=excluded.kind AND creation_receipts.fingerprint IS NULL",
+            params![identity.request_id,identity.kind,identity.fingerprint,identity.run,now])? == 1 {
+            return Ok(());
+        }
+        let matches: bool = conn.query_row(
+            "SELECT kind=?2 AND fingerprint=?3 FROM creation_receipts WHERE request_id=?1",
+            params![identity.request_id, identity.kind, identity.fingerprint],
+            |row| row.get(0),
+        )?;
+        if !matches {
             return Err(StoreError::Stale(format!(
                 "creation request {} has different content",
                 identity.request_id
@@ -515,6 +620,8 @@ mod tests {
             "request_id",
             "kind",
             "fingerprint",
+            "submitted_fingerprint",
+            "validation",
             "delivery",
             "revision",
             "result",
@@ -530,6 +637,176 @@ mod tests {
                 "{field}"
             );
         }
+    }
+
+    fn identity(id: &str, fingerprint: &str) -> super::CreationIdentity {
+        super::CreationIdentity {
+            request_id: id.into(),
+            kind: "task.create",
+            fingerprint: fingerprint.into(),
+            run: true,
+        }
+    }
+
+    #[test]
+    fn canonical_claim_and_submitted_content_have_independent_immutable_identities() {
+        let (_dir, store) = store();
+        let command = json!({"kind":"task.create","directory":"/spelled/path"});
+        let receipt = store
+            .admit_operation("one", "task.create", "submitted", &command)
+            .unwrap();
+        assert_eq!(receipt.fingerprint, None);
+        assert_eq!(receipt.submitted_fingerprint.as_deref(), Some("submitted"));
+        assert_eq!(receipt.validation, super::OperationValidation::Pending);
+        assert!(!store.dispatch_operation("one").unwrap());
+        let saved = store.submitted_command("one").unwrap().unwrap();
+        // A direct CLI request claims the same canonical identity, atomically.
+        store.check_creation(&identity("one", "canonical")).unwrap();
+        assert!(store.check_creation(&identity("one", "other")).is_err());
+        assert!(store
+            .validate_operation("one", saved.generation, &identity("one", "canonical"))
+            .unwrap());
+        let validated = store.operation_receipt("one").unwrap().unwrap();
+        assert_eq!(validated.fingerprint.as_deref(), Some("canonical"));
+        assert_eq!(
+            validated.submitted_fingerprint,
+            receipt.submitted_fingerprint
+        );
+        assert!(store
+            .admit_operation(
+                "one",
+                "task.create",
+                "another",
+                &json!({"kind":"task.create","directory":"/equivalent"})
+            )
+            .is_err());
+        assert!(store.dispatch_operation("one").unwrap());
+        assert!(!store.dispatch_operation("one").unwrap());
+    }
+
+    #[test]
+    fn wrong_legacy_candidate_releases_only_its_reservation_and_held_validation_cannot_bind_a_successor(
+    ) {
+        let (_dir, store) = store();
+        store.conn.lock().unwrap().execute(r#"INSERT INTO creation_receipts
+            (request_id,kind,fingerprint,run,task_id,milestone,result,launch,created_at,updated_at)
+            VALUES ('old','task.create','canonical',1,'task','admitted','{"task":1}','{"graph":2}',1,2)"#,[]).unwrap();
+        let before = store.creation_receipt("old").unwrap().unwrap();
+        let wrong = store
+            .admit_operation("old", "task.create", "wrong", &json!({"directory":"wrong"}))
+            .unwrap();
+        assert_eq!(wrong.validation, super::OperationValidation::Candidate);
+        assert_eq!(wrong.delivery, OperationDelivery::Untracked);
+        let generation = store.submitted_command("old").unwrap().unwrap().generation;
+        assert!(!store.dispatch_operation("old").unwrap());
+        assert!(store
+            .admit_operation(
+                "old",
+                "task.create",
+                "correct",
+                &json!({"directory":"correct"})
+            )
+            .is_err());
+        assert!(!store
+            .validate_operation("old", generation, &identity("old", "wrong"))
+            .unwrap());
+        let conflict = store.operation_receipt("old").unwrap().unwrap();
+        assert_eq!(conflict.validation, super::OperationValidation::Conflict);
+        let next = store
+            .admit_operation(
+                "old",
+                "task.create",
+                "correct",
+                &json!({"directory":"correct"}),
+            )
+            .unwrap();
+        assert!(next.revision > conflict.revision);
+        // A held success or failure for the first reservation cannot touch the next.
+        assert!(!store
+            .validate_operation("old", generation, &identity("old", "canonical"))
+            .unwrap());
+        store
+            .record_validation_error("old", generation, "old failure")
+            .unwrap();
+        let generation = store.submitted_command("old").unwrap().unwrap().generation;
+        assert!(store
+            .validate_operation("old", generation, &identity("old", "canonical"))
+            .unwrap());
+        let after = store.creation_receipt("old").unwrap().unwrap();
+        assert_eq!(before.result, after.result);
+        assert_eq!(before.launch, after.launch);
+        assert_eq!(before.task_id, after.task_id);
+        assert_eq!(before.milestone, after.milestone);
+        assert_eq!(before.disposition, after.disposition);
+        assert_eq!(before.created_at, after.created_at);
+        let receipt = store.operation_receipt("old").unwrap().unwrap();
+        assert_eq!(receipt.delivery, OperationDelivery::Untracked);
+        assert_eq!(receipt.error, None);
+        assert!(receipt.commits.is_empty());
+    }
+
+    #[test]
+    fn unavailable_candidate_normalization_survives_restart_without_replacement_or_dispatch() {
+        let (dir, store) = store();
+        store.check_creation(&identity("old", "canonical")).unwrap();
+        let command = json!({"directory":"/unavailable"});
+        store
+            .admit_operation("old", "task.create", "submitted", &command)
+            .unwrap();
+        let generation = store.submitted_command("old").unwrap().unwrap().generation;
+        store
+            .record_validation_error("old", generation, "repository unavailable")
+            .unwrap();
+        drop(store);
+        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        let duplicate = store
+            .admit_operation("old", "task.create", "submitted", &command)
+            .unwrap();
+        assert_eq!(duplicate.validation, super::OperationValidation::Candidate);
+        assert_eq!(duplicate.error.as_deref(), Some("repository unavailable"));
+        assert!(!store.dispatch_operation("old").unwrap());
+        let saved = store.submitted_command("old").unwrap().unwrap();
+        assert_eq!(saved.command, command);
+        assert_eq!(saved.generation, generation);
+        assert!(store
+            .validate_operation("old", generation, &identity("old", "canonical"))
+            .unwrap());
+        assert!(store.dispatch_operation("old").unwrap());
+        drop(store);
+        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        assert!(!store.dispatch_operation("old").unwrap());
+    }
+
+    #[test]
+    fn a_new_envelope_stays_immutable_when_a_different_cli_creation_wins_the_domain_claim() {
+        let (_dir, store) = store();
+        let original = json!({"directory":"original"});
+        store
+            .admit_operation("one", "task.create", "submitted", &original)
+            .unwrap();
+        store
+            .check_creation(&identity("one", "cli-winner"))
+            .unwrap();
+        let generation = store.submitted_command("one").unwrap().unwrap().generation;
+        assert!(!store
+            .validate_operation("one", generation, &identity("one", "different"))
+            .unwrap());
+        assert!(store
+            .admit_operation(
+                "one",
+                "task.create",
+                "replacement",
+                &json!({"directory":"replacement"})
+            )
+            .is_err());
+        assert_eq!(
+            store
+                .admit_operation("one", "task.create", "submitted", &original)
+                .unwrap()
+                .validation,
+            super::OperationValidation::Conflict
+        );
+        assert!(!store.dispatch_operation("one").unwrap());
     }
 
     #[test]
@@ -575,7 +852,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&saved).unwrap(),
-            command
+            json!({"version":1,"command":command})
         );
         assert!(store
             .admit_operation("one", "task.complete", "other", &json!({}))
@@ -854,7 +1131,7 @@ mod tests {
             let mut conn = store.conn.lock().unwrap();
             let tx = conn.transaction().unwrap();
             tx.execute("WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<10000)
-                INSERT INTO tasks(id,repository_id,created_at) SELECT 'task_receipt_'||i,?1,1 FROM n",[repository.as_str()]).unwrap();
+                INSERT INTO tasks(id,repository_id,issue_identifier,created_at) SELECT 'task_receipt_'||i,?1,'RECEIPT-'||i,1 FROM n",[repository.as_str()]).unwrap();
             tx.execute("INSERT INTO creation_receipts(request_id,kind,fingerprint,run,task_id,milestone,created_at,updated_at)
                 SELECT 'receipt_'||id,'task.complete','hash',0,id,'queued',1,1 FROM tasks",[]).unwrap();
             tx.commit().unwrap();

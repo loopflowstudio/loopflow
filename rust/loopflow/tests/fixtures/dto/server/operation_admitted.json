@@ -5,13 +5,15 @@
   "result": {
     "request_id": "operation_fixture",
     "kind": "task.complete",
-    "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "fingerprint": null,
     "delivery": "queued",
     "result": null,
     "error": null,
     "commits": [],
     "created_at": 1,
     "updated_at": 1,
-    "revision": 0
+    "revision": 0,
+    "submitted_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "validation": "bound"
   }
 }

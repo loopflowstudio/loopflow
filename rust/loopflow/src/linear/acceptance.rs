@@ -535,17 +535,29 @@ pub(crate) fn observe_task_state(
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     // Retain the provider baseline for the next local save. A response for an
     // older delivery cannot ingest over the current decision.
-    let repo: Option<String> = tx
+    let owner: Option<(String, bool)> = tx
         .query_row(
-            "SELECT w.repo FROM task_state_deliveries d JOIN tasks t ON t.id=d.task_id
+            "SELECT w.repo,d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=t.id)
+         FROM task_state_deliveries d JOIN tasks t ON t.id=d.task_id
          JOIN repository_plans w ON w.id=t.repository_id
-         WHERE d.id=?1 AND d.task_id=?2 AND d.settled=0 AND t.external_issue_id=?3
-         AND d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=t.id)",
+         WHERE d.id=?1 AND d.task_id=?2 AND d.settled=0 AND t.external_issue_id=?3",
             params![delivery.id, delivery.task_id.as_str(), observed.id],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?;
-    let Some(repo) = repo else { return Ok(false) };
+    let Some((repo, current)) = owner else {
+        return Ok(false);
+    };
+    if !current {
+        let pending = sqlite::task_state_delivery::reconcile_attempt_in(
+            &tx,
+            &delivery.id,
+            observed,
+            history,
+        )?;
+        tx.commit()?;
+        return Ok(pending);
+    }
     if !put_item(&tx, &repo, crate::store::rows::now_unix(), observed)? {
         return Ok(false);
     }
@@ -832,7 +844,7 @@ fn project_accepted_planning(
             )?;
             let pending: bool = tx.query_row(
                 "SELECT EXISTS(SELECT 1 FROM task_state_deliveries WHERE task_id=?1 AND settled=0
-                 AND seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=?1))",
+                 AND (attempted=1 OR seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=?1)))",
                 [id.as_str()],
                 |row| row.get(0),
             )?;

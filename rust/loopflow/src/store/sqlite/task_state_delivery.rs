@@ -80,17 +80,27 @@ pub(crate) fn reconcile_in(
     evidence: &str,
     history: StateHistory,
 ) -> StoreResult<bool> {
-    let pending: Option<(TaskStateDelivery, Option<String>)> = conn.query_row(
-        "SELECT d.id,d.task_id,d.target,d.attempted,d.base_revision,d.base_state,t.planning_provider_revision
+    let pending: Option<(TaskStateDelivery, Option<String>, bool, bool)> = conn.query_row(
+        "SELECT d.id,d.task_id,d.target,d.attempted,d.base_revision,d.base_state,t.planning_provider_revision,
+         d.settled,EXISTS(SELECT 1 FROM task_state_deliveries older
+             WHERE older.task_id=d.task_id AND older.seq<d.seq AND older.attempted=1 AND older.settled=0)
          FROM task_state_deliveries d JOIN tasks t ON t.id=d.task_id
-         WHERE d.task_id=?1 AND d.settled=0
+         WHERE d.task_id=?1
          AND d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=?1)",
         [task.as_str()],
-        |row| Ok((read_delivery(row)?, row.get(6)?)),
+        |row| Ok((read_delivery(row)?, row.get(6)?, row.get(7)?, row.get(8)?)),
     ).optional()?;
-    let Some((delivery, revision)) = pending else {
+    let Some((delivery, revision, settled, older_attempt)) = pending else {
         return Ok(false);
     };
+    // Ordinary acquisition cannot resolve an older external writer, and must
+    // not adopt that writer's state over the newer local decision.
+    if older_attempt {
+        return Ok(true);
+    }
+    if settled {
+        return Ok(false);
+    }
     let TaskStateDelivery {
         id,
         target,
@@ -149,6 +159,73 @@ pub(crate) fn reconcile_in(
     Ok(false)
 }
 
+/// Resolve a superseded attempt under the delivery lock without ingesting it.
+/// Its observation becomes the unsent successor's baseline, not its local value.
+pub(crate) fn reconcile_attempt_in(
+    conn: &Connection,
+    id: &str,
+    observed: &crate::linear::LinearIssue,
+    history: StateHistory,
+) -> StoreResult<bool> {
+    let delivery = conn
+        .query_row(
+            "SELECT id,task_id,target,attempted,base_revision,base_state
+         FROM task_state_deliveries WHERE id=?1 AND settled=0 AND attempted=1",
+            [id],
+            read_delivery,
+        )
+        .optional()?;
+    let Some(delivery) = delivery else {
+        return Ok(false);
+    };
+    if crate::linear::observations::revision_nanos(observed.revision.as_deref())?
+        < crate::linear::observations::revision_nanos(delivery.base_revision.as_deref())?
+        || observed.state.is_none()
+    {
+        return Ok(true);
+    }
+    if observed.state.as_deref() == Some(&delivery.target) {
+        conn.execute(
+            "UPDATE task_state_deliveries SET settled=1,error=NULL WHERE id=?1",
+            [id],
+        )?;
+    } else if observed.state == delivery.base_state && history == StateHistory::Unknown {
+        return Ok(true);
+    } else if observed.state == delivery.base_state && history == StateHistory::Unchanged {
+        // Proven noncommit leaves an unsent, superseded decision. It
+        // must never be re-armed as the current delivery.
+        conn.execute(
+            "UPDATE task_state_deliveries SET attempted=0,error=NULL WHERE id=?1",
+            [id],
+        )?;
+    } else {
+        conn.execute(
+            "UPDATE task_state_deliveries SET settled=1,conflict_json=?2,error=NULL WHERE id=?1",
+            params![id, serde_json::to_string(observed)?],
+        )?;
+    }
+    let successor = conn
+        .query_row(
+            "SELECT id,task_id,target,attempted,base_revision,base_state
+         FROM task_state_deliveries WHERE task_id=?1 AND attempted=0 AND settled=0
+         AND seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=?1)",
+            [delivery.task_id.as_str()],
+            read_delivery,
+        )
+        .optional()?;
+    if let Some(successor) = successor {
+        if crate::linear::observations::revision_nanos(observed.revision.as_deref())?
+            >= crate::linear::observations::revision_nanos(successor.base_revision.as_deref())?
+        {
+            conn.execute(
+                "UPDATE task_state_deliveries SET base_revision=?2,base_state=?3 WHERE id=?1",
+                params![successor.id, observed.revision, observed.state],
+            )?;
+        }
+    }
+    Ok(false)
+}
+
 impl SqliteStore {
     pub(crate) fn pending_planning_tasks(
         &self,
@@ -159,7 +236,7 @@ impl SqliteStore {
             WHERE w.repo=?1 AND t.external_issue_id IS NOT NULL AND (EXISTS(
                 SELECT 1 FROM task_state_deliveries d WHERE d.task_id=t.id AND d.settled=0
                 AND d.conflict_json IS NULL
-                AND d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=t.id)) OR EXISTS(
+                AND (d.attempted=1 OR d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=t.id))) OR EXISTS(
                 SELECT 1 FROM task_comments c JOIN task_comment_deliveries d ON d.comment_id=c.id
                 WHERE c.task_id=t.id AND d.acknowledged=0 AND d.conflicting_comment_json IS NULL))")?;
         let ids = query
@@ -181,8 +258,21 @@ impl SqliteStore {
             "SELECT d.id,d.task_id,d.target,d.attempted,d.base_revision,d.base_state
              FROM task_state_deliveries d JOIN tasks t ON t.id=d.task_id
              WHERE d.task_id=?1 AND d.settled=0 AND t.external_issue_id IS NOT NULL
-             AND d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=t.id)",
+             AND (d.attempted=1 OR d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=t.id))
+             ORDER BY d.seq LIMIT 1",
             [task.as_str()],
+            read_delivery,
+        )
+        .optional()
+        .map_err(StoreError::from)
+    }
+
+    pub(crate) fn task_state_delivery(&self, id: &str) -> StoreResult<Option<TaskStateDelivery>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            "SELECT id,task_id,target,attempted,base_revision,base_state
+             FROM task_state_deliveries WHERE id=?1 AND settled=0",
+            [id],
             read_delivery,
         )
         .optional()
@@ -200,7 +290,9 @@ impl SqliteStore {
         Ok(conn.execute(
             "UPDATE task_state_deliveries SET attempted=1
              WHERE id=?1 AND (attempted=0 OR ?3) AND settled=0 AND conflict_json IS NULL
-             AND seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=?2)",
+             AND seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=?2)
+             AND NOT EXISTS(SELECT 1 FROM task_state_deliveries
+                 WHERE task_id=?2 AND id<>?1 AND attempted=1 AND settled=0)",
             params![delivery.id, delivery.task_id.as_str(), retry],
         )? == 1)
     }

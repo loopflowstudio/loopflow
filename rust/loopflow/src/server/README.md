@@ -1224,10 +1224,16 @@ Receipt subscriptions observe planning changes as well as receipt writes. Their
 `revision` orders both within one epoch, so a delayed saved reply cannot replace
 newer delivery status. The saved result and command error remain unchanged;
 current recovery actions use `planning`, never the historical `sync` or error.
-State delivery uses its existing provider observation/history owner; a settled
-conflict means the provider's different state was adopted, not that the requested
-state was delivered. Recovering command output never repeats completion or reopens
-a Task to repair planning delivery.
+State delivery recovers the oldest unresolved attempted write under its existing
+Task delivery lock before sending a newer decision. A held acknowledgment or
+provider observation resolves that exact delivery without replacing the newer
+local state. Proven noncommit supersedes the old attempt; unavailable history
+keeps it uncertain, including across restart and explicit Retry. Resolution moves
+the unsent successor's provider baseline forward so it can deliver its own intent.
+A settled conflict records a different provider state, not successful delivery of
+the requested value. Only the current decision may adopt that state locally.
+Recovering command output never repeats completion or reopens a Task to repair
+planning delivery.
 These reads authorize no generic retry; continuations stay with planning delivery.
 Other mutation families still require their own correlation contracts.
 

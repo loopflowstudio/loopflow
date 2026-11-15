@@ -99,6 +99,8 @@ pub(crate) struct PlanningState {
     fail_completion: bool,
     missing_canceled_state: bool,
     lose_completion: bool,
+    state_arrived: Option<Arc<tokio::sync::Notify>>,
+    state_release: Option<Arc<tokio::sync::Notify>>,
     reopen_during_completion: bool,
     lose_comment: bool,
     comment_moves_issue: bool,
@@ -619,6 +621,12 @@ async fn planning_response(
         }
         let mut confirmed = state.issues[0].clone();
         confirmed["project"] = project;
+        let held = state.state_arrived.take().zip(state.state_release.take());
+        drop(state);
+        if let Some((arrived, release)) = held {
+            arrived.notify_one();
+            release.notified().await;
+        }
         json!({"issueUpdate":{"success":true,"issue":confirmed}})
     } else if query.contains("query IssueAttachments") {
         if state.move_on_attachment_read {
@@ -1492,13 +1500,36 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
             completed.id
         );
         crate::ops::task::task_reopen(task.id.as_str(), Some("New scope")).unwrap();
+        let conn = rusqlite::Connection::open(&fixture.database).unwrap();
+        let reopened_id: String = conn
+            .query_row(
+                "SELECT id FROM task_state_deliveries WHERE task_id=?1 ORDER BY seq DESC LIMIT 1",
+                [task.id.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap();
         let reopened = fixture
             .store
             .sqlite
-            .pending_task_state(&task.id)
+            .task_state_delivery(&reopened_id)
             .unwrap()
             .unwrap();
         assert_ne!(reopened.id, completed.id);
+        assert_eq!(
+            fixture
+                .store
+                .sqlite
+                .pending_task_state(&task.id)
+                .unwrap()
+                .unwrap()
+                .id,
+            completed.id
+        );
+        assert!(!fixture
+            .store
+            .sqlite
+            .attempt_task_state(&reopened, true)
+            .unwrap());
         let mut late = fixture
             .retained_task(repo, task.linear_id.as_ref().unwrap().as_str())
             .item;
@@ -1523,8 +1554,8 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
             Some("unstarted")
         );
         assert_eq!(reopened.target, "unstarted");
-        // A superseded attempt stays uncertain. Neither its readback nor its
-        // failure can settle the newer reopening or invent successful delivery.
+        // The older conflict resolves only that attempt. Its late error cannot
+        // reopen it or settle the newer local decision.
         fixture
             .store
             .sqlite
@@ -1563,7 +1594,7 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(receipt, (false, Some("late failure".into())));
+        assert_eq!(receipt, (true, None));
         assert!(conn
             .query_row(
                 "SELECT attempted FROM task_state_deliveries WHERE id=?1",
@@ -2037,6 +2068,252 @@ fn complete_during_outage(
         .pending_task_state(&task.id)
         .unwrap()
         .unwrap()
+}
+
+#[test]
+fn task_state_held_acknowledgement_resolves_old_attempt_before_sending_reopen() {
+    with_planning_task(|runtime, fixture, repo, task, state| {
+        let original = complete_during_outage(runtime, fixture, repo, task, &state);
+        runtime.block_on(async {
+            let arrived = Arc::new(tokio::sync::Notify::new());
+            let release = Arc::new(tokio::sync::Notify::new());
+            {
+                let mut provider = state.lock().await;
+                provider.state_arrived = Some(arrived.clone());
+                provider.state_release = Some(release.clone());
+            }
+            let delivery = crate::ops::linear_observe::sync_task_state(&fixture.store, task);
+            let reopen = async {
+                arrived.notified().await;
+                fixture.store.sqlite.reopen_task(&task.id, None).unwrap();
+                // Acquisition can see the old effect before its acknowledgment;
+                // it still cannot replace the newer local decision.
+                let mut acquisition =
+                    fixture.retained_task(repo, task.linear_id.as_ref().unwrap().as_str());
+                acquisition.item.state = Some("completed".into());
+                acquisition.item.completed = true;
+                acquisition.item.revision = state.lock().await.issues[0]["updatedAt"]
+                    .as_str()
+                    .map(str::to_owned);
+                crate::linear::acceptance::accept_linear_issue_in(
+                    &fixture.store.sqlite,
+                    repo.to_str().unwrap(),
+                    &acquisition.item,
+                    acquisition.project.as_ref(),
+                    now(),
+                    None,
+                )
+                .unwrap();
+                assert_eq!(
+                    fixture
+                        .store
+                        .sqlite
+                        .task(&task.id)
+                        .unwrap()
+                        .unwrap()
+                        .state
+                        .as_deref(),
+                    Some("unstarted")
+                );
+                // A second caller cannot enter while the original acknowledgment
+                // is held, even with an explicit retry.
+                crate::ops::linear_observe::deliver_task_state(&fixture.store, task, true)
+                    .await
+                    .unwrap();
+                assert_eq!(state.lock().await.completion_writes, 1);
+                assert_eq!(
+                    fixture
+                        .store
+                        .sqlite
+                        .pending_task_state(&task.id)
+                        .unwrap()
+                        .unwrap()
+                        .id,
+                    original.id
+                );
+                release.notify_one();
+            };
+            let (result, ()) = tokio::join!(delivery, reopen);
+            result.unwrap();
+            let next = fixture
+                .store
+                .sqlite
+                .pending_task_state(&task.id)
+                .unwrap()
+                .unwrap();
+            assert_ne!(next.id, original.id);
+            assert_eq!(next.base_state.as_deref(), Some("completed"));
+            assert_eq!(
+                fixture
+                    .store
+                    .sqlite
+                    .task(&task.id)
+                    .unwrap()
+                    .unwrap()
+                    .state
+                    .as_deref(),
+                Some("unstarted")
+            );
+            assert!(fixture
+                .store
+                .sqlite
+                .task_state_delivery(&original.id)
+                .unwrap()
+                .is_none());
+            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+                .await
+                .unwrap();
+            assert!(fixture
+                .store
+                .sqlite
+                .pending_task_state(&task.id)
+                .unwrap()
+                .is_none());
+            let provider = state.lock().await;
+            assert_eq!(provider.completion_writes, 2);
+            assert_eq!(provider.issues[0]["state"]["type"], "unstarted");
+        });
+    });
+}
+
+#[test]
+fn task_state_older_attempt_recovers_lost_success_noncommit_and_unknown_after_restart() {
+    use crate::store::sqlite::operations::PlanningDeliveryState;
+    for outcome in ["lost_success", "noncommit", "unknown", "changed"] {
+        with_planning_task(|runtime, fixture, repo, task, state| {
+            let epoch = fixture.store.sqlite.reading_identity().unwrap().1;
+            fixture
+                .store
+                .sqlite
+                .admit_operation(&epoch, "older-state", "task.complete", "hash", &json!({}))
+                .unwrap();
+            fixture
+                .store
+                .sqlite
+                .dispatch_operation("older-state")
+                .unwrap();
+            let original =
+                crate::journal::request::with_operation(Some("older-state".into()), || {
+                    complete_during_outage(runtime, fixture, repo, task, &state)
+                });
+            runtime.block_on(async {
+                {
+                    let mut provider = state.lock().await;
+                    provider.lose_completion = outcome == "lost_success" || outcome == "changed";
+                    provider.fail_completion = outcome == "noncommit" || outcome == "unknown";
+                }
+                crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+                    .await
+                    .unwrap();
+                fixture.store.sqlite.reopen_task(&task.id, None).unwrap();
+                if outcome == "unknown" || outcome == "changed" {
+                    let mut provider = state.lock().await;
+                    provider.issues[0]["state"] = json!({"type":"unstarted"});
+                    mark_issue_updated(&mut provider.issues[0]);
+                    provider.history_unavailable = outcome == "unknown";
+                }
+            });
+            fixture
+                .store
+                .sqlite
+                .finish_operation("older-state", Err("output lost"))
+                .unwrap();
+            let saved = fixture
+                .store
+                .sqlite
+                .operation_receipt("older-state")
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                saved.planning.as_ref().unwrap().changes[0].state,
+                PlanningDeliveryState::Uncertain
+            );
+            // A fresh store instance has only the saved attempt and provider
+            // history; no in-memory response or generic replay is available.
+            let restarted = crate::store::Store::from_sqlite_for_test(
+                crate::store::sqlite::SqliteStore::open_ephemeral(&fixture.database).unwrap(),
+            );
+            runtime.block_on(async {
+                assert_eq!(
+                    restarted
+                        .sqlite
+                        .pending_task_state(&task.id)
+                        .unwrap()
+                        .unwrap()
+                        .id,
+                    original.id
+                );
+                crate::ops::linear_observe::sync_repository_deliveries(
+                    &restarted,
+                    repo.to_str().unwrap(),
+                )
+                .await
+                .unwrap();
+                let recovered = restarted
+                    .sqlite
+                    .operation_receipt("older-state")
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(recovered.commits, saved.commits);
+                assert_eq!(recovered.error, saved.error);
+                let expected = match outcome {
+                    "lost_success" => PlanningDeliveryState::Delivered,
+                    "noncommit" => PlanningDeliveryState::Superseded,
+                    "changed" => PlanningDeliveryState::Conflict,
+                    _ => PlanningDeliveryState::Uncertain,
+                };
+                assert_eq!(recovered.planning.unwrap().changes[0].state, expected);
+                assert_eq!(
+                    restarted
+                        .sqlite
+                        .task(&task.id)
+                        .unwrap()
+                        .unwrap()
+                        .state
+                        .as_deref(),
+                    Some("unstarted")
+                );
+                if outcome == "unknown" {
+                    // Even Retry cannot replay a superseded uncertain attempt.
+                    crate::ops::linear_observe::deliver_task_state(&restarted, task, true)
+                        .await
+                        .unwrap();
+                    assert_eq!(
+                        restarted
+                            .sqlite
+                            .pending_task_state(&task.id)
+                            .unwrap()
+                            .unwrap()
+                            .id,
+                        original.id
+                    );
+                    assert_eq!(state.lock().await.completion_writes, 0);
+                    state.lock().await.history_unavailable = false;
+                    crate::ops::linear_observe::sync_task_state(&restarted, task)
+                        .await
+                        .unwrap();
+                }
+                crate::ops::linear_observe::sync_task_state(&restarted, task)
+                    .await
+                    .unwrap();
+                assert!(restarted
+                    .sqlite
+                    .pending_task_state(&task.id)
+                    .unwrap()
+                    .is_none());
+                let provider = state.lock().await;
+                assert_eq!(
+                    provider.completion_writes,
+                    if outcome == "lost_success" {
+                        2
+                    } else {
+                        usize::from(outcome == "changed")
+                    }
+                );
+                assert_eq!(provider.issues[0]["state"]["type"], "unstarted");
+            });
+        });
+    }
 }
 
 #[test]

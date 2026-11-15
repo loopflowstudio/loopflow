@@ -699,6 +699,88 @@ mod tests {
     }
 
     #[test]
+    fn state_attempt_recovery_is_keyed_at_ten_thousand_tasks() {
+        let (_home, store, task, _viewer) = fixture();
+        let old = uuid::Uuid::new_v4().to_string();
+        let newer = uuid::Uuid::new_v4().to_string();
+        {
+            let mut conn = store.conn.lock().unwrap();
+            let tx = conn.transaction().unwrap();
+            tx.execute(
+                "WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<10000)
+                 INSERT INTO tasks(id,repository_id,issue_identifier,issue_title,issue_description,workspace_slug,created_at,updated_at)
+                 SELECT 'task_'||printf('%032x',i),repository_id,'STATE-'||i,'State Task','','',1,1
+                 FROM n,tasks WHERE tasks.id=?1",
+                [task.as_str()],
+            )
+            .unwrap();
+            tx.execute(
+                "INSERT INTO task_state_deliveries(id,task_id,target)
+                 SELECT printf('%08x-0000-4000-8000-%012x',rowid,rowid),id,'completed'
+                 FROM tasks WHERE id<>?1",
+                [task.as_str()],
+            )
+            .unwrap();
+            tx.execute(
+                "UPDATE tasks SET external_issue_id='state-issue',issue_title='State Task',
+                 issue_description='',workspace_slug='',updated_at=1 WHERE id=?1",
+                [task.as_str()],
+            )
+            .unwrap();
+            tx.execute("INSERT INTO task_state_deliveries(id,task_id,target,attempted) VALUES(?1,?2,'completed',1)", params![old,task.as_str()]).unwrap();
+            tx.execute("INSERT INTO task_state_deliveries(id,task_id,target,settled) VALUES(?1,?2,'unstarted',1)", params![newer,task.as_str()]).unwrap();
+            tx.commit().unwrap();
+        }
+        let traced = statements(&store, || {
+            // Historical newest-only recovery missed this writer when a newer
+            // decision had already settled. Repository maintenance must find it.
+            assert_eq!(store.pending_planning_tasks("/repo").unwrap().len(), 1);
+            assert_eq!(store.pending_task_state(&task).unwrap().unwrap().id, old);
+            let delivery = store.task_state_delivery(&newer).unwrap();
+            assert!(delivery.is_none());
+            let delivery = store.task_state_delivery(&old).unwrap().unwrap();
+            assert!(!store.attempt_task_state(&delivery, true).unwrap());
+            assert!(crate::store::sqlite::task_state_delivery::reconcile_in(
+                &store.conn.lock().unwrap(),
+                &task,
+                None,
+                &crate::work::edit::Disposition {
+                    planning_state: Some("completed".into()),
+                    planning_completed: 1,
+                    planning_completed_at: None,
+                },
+                "{}",
+                crate::linear::StateHistory::Unknown,
+            )
+            .unwrap());
+        });
+        let scans = growing_scans(&store, &traced);
+        assert!(scans.is_empty(), "{}", scans.join("\n"));
+        let conn = store.conn.lock().unwrap();
+        for sql in traced
+            .iter()
+            .filter(|sql| sql.contains("task_state_deliveries"))
+        {
+            let mut explain = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+            let unbound = vec![rusqlite::types::Null; explain.parameter_count()];
+            let steps = explain
+                .query_map(rusqlite::params_from_iter(unbound), |row| {
+                    row.get::<_, String>(3)
+                })
+                .unwrap();
+            for step in steps {
+                let step = step.unwrap();
+                assert!(
+                    !step.starts_with("SCAN d")
+                        && !step.starts_with("SCAN older")
+                        && !step.starts_with("SCAN task_state_deliveries"),
+                    "{step}: {sql}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn local_planning_writes_take_the_clock_by_index() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("loopflow.db")).unwrap();

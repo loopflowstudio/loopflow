@@ -1,6 +1,6 @@
 # LOO-906: immediate interactions across Desktop and mobile
 
-Implementation continues 2026-11-15 from checkpoint `af09704482` on
+Implementation continues 2026-11-15 from checkpoint `a2292b2ae7` on
 origin/main `9cafc410ee`. Supersedes the Desktop-only delivery
 boundary. No shipping or merge decision is recorded. Placement remains this Task;
 no Wave is selected.
@@ -481,6 +481,9 @@ existing bounded input owners: no offline keystroke queue or automatic resend.
 
 ## Delete — do not maintain
 
+- Removed in this cut: newest-only delivery selection/acknowledgment in
+  `task_state_delivery`/`observe_task_state`; exact attempted-delivery recovery
+  replaces it. Current-decision acquisition and its adoption coverage remain.
 - Already removed: Git discovery in `operation::admit`, `check_creation`, and
   `WorkNavigator.waveRow`'s delayed selection. Remove view-owned mobile
   `SessionLink` teardown on ordinary Task switching; keep explicit Close,
@@ -577,14 +580,19 @@ separately. Neither that target nor a SQL bottleneck has been measured here.
 
 ## Implement direction
 
-Concept-review outcome (2026-11-15, checkpoint `af09704482`): no further model change or open product
-choice. The older-attempt recovery gap below is an unfinished part of the
-existing domain-owner contract, not another operation lifecycle. Next implement
-that recovery under the Task-state delivery lock, then finish the remaining
-mutation-family fences before shared membership/cache/projection and both-client
-cutover. Planning correlation does not complete client reconciliation or authorize
-retiring saved operations on presentation. Loop-or-next may advance this review;
+Concept-review outcome (2026-11-15, checkpoint `a2292b2ae7` plus workspace edits):
+no further model change or open product choice. Exact older-attempt recovery now uses the existing Task-state delivery
+lock. Finish client reordering and remaining mutation-family fences before shared
+membership/cache/projection and both-client cutover. Planning correlation does
+not complete client reconciliation or authorize retiring operations on presentation. Loop-or-next may advance this review;
 the implementation and native latency acceptance remain unfinished.
+
+Next verify the live shared owner with a newer planning-status receipt, an older
+saved-result reply and a lagging Work reading delivered in each order, including
+restart. Preserve the original result, current recovery action and per-query
+overlay independently; none of these replies may reselect the Task or replay the
+command. Persisted receipt-order tests already cover older saved replies; they do
+not establish live Work reconciliation or either client's presentation behavior.
 
 ### Recover the result; observe the remaining work
 
@@ -696,26 +704,28 @@ Task edit/move stages correlate exact Task-field or Project-order delivery IDs.
 Completion settlement now correlates its `task_state_deliveries` ID to every
 receipt for the exact request; Reopen correlates its own state delivery, including
 no-op coverage without inventing a change. `operation.get.planning` reads current
-status with its own snapshot fence. Settled conflicts are adoption, not delivery;
-older attempted writes remain uncertain despite newer local decisions. Missing
+status with its own snapshot fence. Conflicts record provider disagreement, not
+delivery; only the current decision adopts it. Older attempts remain uncertain
+until their own recovery, despite newer local decisions. Missing
 rows remain unavailable. Saved results/diagnostics never change with that status.
 Receipt revisions and subscription invalidation include planning revisions. Both
 native targets share the DTO and persisted receipt ordering; live action/projection
 migration is unfinished. No new queue, generic retry or migration was introduced.
 
-New recovery gap: the state-delivery owner selects/observes the newest decision
-(`task_state_delivery::pending_task_state`, `linear::acceptance::observe_task_state`).
-Resolve the exact older attempt under the existing Task-state delivery lock,
-without ingesting its result over the newer local decision. Provider history can
-settle it or prove noncommit; unknown history retains Inspect. Only then can the
-newer state writer reserve delivery. Held old acknowledgments, lost success,
-noncommit and restart must cover this before the registry releases its lane.
-Correlation keeps uncertainty visible; it does not authorize that external writer.
+State delivery now recovers the oldest unresolved attempted write under the
+existing Task lock. Exact acknowledgment/history resolves only that delivery;
+ordinary acquisition cannot adopt it over newer local intent. Proven noncommit
+leaves the older decision superseded; unknown history retains uncertainty even
+under Retry. A resolved observation rebases the unsent successor's provider
+baseline before its own delivery, without changing its local value. Reservation
+also excludes any other unresolved attempted writer. Repository maintenance finds
+old attempts even if the newest decision is already settled. Held acknowledgment,
+lost success, noncommit, changed/unknown history and restart have focused coverage.
+This is state-delivery ordering, not the unfinished client resource-lane registry.
 Definite refusal outside Task content/membership validation, other planning families,
 remote/detached operations and file/config confirmation remain open.
 
-Remaining, in order: older-attempt state-delivery recovery (above; every lookup
-still selects `max(seq)`); client reordering of saved results against Work and
+Remaining, in order: client reordering of saved results against Work and
 delivery-status readings; lost-output coverage for families beyond completion;
 remaining mutation-family recovery and fences (remote/detached,
 external file/config confirmation and other planning-delivery families included); exhaustive effect/stage registry and a
@@ -839,10 +849,8 @@ baseline; demo owns native usability judgment.
 
 Earlier focused checks and raw results: `fc50618e31:scratch/instant-task-session.md`.
 
-Focused checks (2026-11-15; inherited `LF_*` cleared):
-- `cargo nextest run -p loopflow --lib` named state-delivery/lost-output/10k/schema filters: 11 passed; final fixture rows passed in `0515918e-76a5-4917-8426-eb5e3cab5466`.
-- `cargo nextest run -p loopflow --test integration` named DTO/documented-command filters: 5 passed.
-- `scripts/test_desktop.sh --filter 'ServerProtocolTests|ClientWorkStoreTests' --jobs 4 -Xswiftc -gnone`: 43 passed.
-- `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/ReadingStampTests`: 5 passed.
-- `cargo clippy --all-targets --jobs 4 -- -D warnings`, fmt, architecture, Swift boundary and diff checks: passed.
-- `cargo package --locked --allow-dirty -p loopflow`: verified; registry warned `chacha20 v0.10.0` is yanked. Gate owns wider suites.
+Previous checks: `a2292b2ae7:scratch/instant-task-session.md`.
+Current cut (2026-11-15; inherited `LF_*` cleared):
+- `cargo nextest run -p loopflow --lib --build-jobs 4`, named state-attempt/held-ack/restart/uncertainty filters: 8 passed; 10k query plans indexed. Runs `476e77fd` and `79c825f0`.
+- `cargo clippy --all-targets --jobs 4 -- -D warnings`, fmt, architecture, test inventory and diff checks: passed.
+- `cargo test -p loopflow --test integration documented_commands:: --jobs 4`: 4 passed. Gate owns wider suites.

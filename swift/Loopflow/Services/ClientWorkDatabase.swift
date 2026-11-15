@@ -454,7 +454,7 @@ final class ClientWorkDatabase {
         }
         return try transaction {
             guard try observeMachineEpoch(stamp.epoch, machine: stamp.machine) else {
-                return try cached(machine: stamp.machine, key: key)
+                return try cached(machine: stamp.machine, key: key, observation: observation)
             }
             let stages = try fieldStages(machine: stamp.machine)
             for fact in reading.plans.flatMap({ $0.membership.facts }) {
@@ -462,12 +462,12 @@ final class ClientWorkDatabase {
             }
             // Field ingestion is useful even when this body cannot replace the
             // exact-query base. Incompleteness cannot certify filtered absence.
-            guard stamp.complete else { return try cached(machine: stamp.machine, key: key) }
+            guard stamp.complete else { return try cached(machine: stamp.machine, key: key, observation: observation) }
             let id = queryID(machine: stamp.machine, query: key)
             let previous = try queryState(id)
             if let previous, previous.stamp.epoch == stamp.epoch {
                 let domains = Set((previous.plans + reading.plans).flatMap { $0.membership.domains })
-                if !stamp.covers(previous.stamp, domains: domains) { return try cached(machine: stamp.machine, key: key) }
+                if !stamp.covers(previous.stamp, domains: domains) { return try cached(machine: stamp.machine, key: key, observation: observation) }
             }
             var reading = reading
             if previous?.stamp.epoch == stamp.epoch {
@@ -475,7 +475,7 @@ final class ClientWorkDatabase {
             }
             try execute("INSERT OR REPLACE INTO work_queries(id,state) VALUES(?,?)", id: id,
                 data: JSONEncoder().encode(reading))
-            return try cached(machine: stamp.machine, key: key)
+            return try cached(machine: stamp.machine, key: key, observation: observation)
         }
     }
 
@@ -625,8 +625,12 @@ final class ClientWorkDatabase {
             activityCurrent: facts.activity?.value.known == true && current(facts.activity, "activity"))
     }
 
-    func cached(machine: String, key: String) throws -> ClientWorkQuery? {
-        guard var reading = try queryState(queryID(machine: machine, query: key)), try usable(reading) else { return nil }
+    func cached(machine: String, key: String,
+                observation: MachineConnection.ObservationConnection? = nil) throws -> ClientWorkQuery? {
+        let id = queryID(machine: machine, query: key)
+        guard var reading = try queryState(id), try usable(reading) else { return nil }
+        var persisted = reading
+        let previous = reading.answer
         var effects = reading.effects ?? []
         for record in try pending() where record.destination == machine {
             guard let state = try state(record.id), let effect = try membershipEffect(state),
@@ -635,7 +639,18 @@ final class ClientWorkDatabase {
             effects.append(effect)
         }
         reading.effects = effects
-        reading.prepareProjection()
+        var fields: [WorkWorkspaceKey: WorkFieldReading] = [:]
+        for work in Set(reading.plans.flatMap { $0.membership.facts.map(\.work) }) {
+            fields[work] = try fieldReading(machine: machine, work: work, observation: observation)
+        }
+        reading.prepareProjection(fields: fields)
+        // Rows and their consumed coverage are one replaceable cache value.
+        // Recompute after restart and on connection changes; a persisted capture
+        // never becomes current merely because its observer returned.
+        if reading.answer != previous {
+            persisted.answer = reading.answer
+            try execute("UPDATE work_queries SET state=?2 WHERE id=?1", id: id, data: JSONEncoder().encode(persisted))
+        }
         return reading
     }
 

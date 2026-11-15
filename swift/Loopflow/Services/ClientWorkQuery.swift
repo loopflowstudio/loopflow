@@ -1,28 +1,40 @@
 import Foundation
 
 /// A confirmed Work query and its provenance. Projection never rewrites this
-/// body; each query incorporates a semantic effect independently.
+/// body. Fields incorporate stages; each derived answer retains its own inputs.
 public struct ClientWorkQuery: Codable, Sendable {
     public let stamp: ReadingStamp
     public let plans: [WorkViewPlan]
-    // Cache-local obligations survive operation retirement. Nil reads caches
-    // written before per-query incorporation was introduced.
-    var effects: [WorkQueryEffect]? { didSet { rendered = nil } }
-    private var rendered: [ProjectedWorkPlan]? = nil
-    private enum CodingKeys: String, CodingKey { case stamp, plans, effects }
+    // Retired effects and derived answers belong to this cache entry, never its
+    // immutable Machine body. Recompute coverage after every field/link change.
+    var effects: [WorkQueryEffect]? { didSet { answer = nil } }
+    var answer: WorkQueryAnswer? { didSet { rendered = nil } }
+    private var fields: [WorkWorkspaceKey: WorkFieldReading] = [:]
+    private var rendered: [ProjectedWorkPlan]?
+    private enum CodingKeys: String, CodingKey { case stamp, plans, effects, answer }
 
     init(stamp: ReadingStamp, plans: [WorkViewPlan]) {
         self.stamp = stamp
         self.plans = plans
     }
 
-    /// Disk reads prepare this on the store actor, before crossing to a host.
-    /// The transient rendering is never encoded as a confirmed query body.
-    mutating func prepareProjection() { rendered = makeProjection() }
+    mutating func prepareProjection(fields: [WorkWorkspaceKey: WorkFieldReading] = [:]) {
+        self.fields = fields
+        answer = deriveAnswer()
+        rendered = projection
+    }
 
-    public var projection: [ProjectedWorkPlan] { rendered ?? makeProjection() }
+    public var projection: [ProjectedWorkPlan] {
+        if let rendered { return rendered }
+        let answer = answer ?? deriveAnswer()
+        return zip(plans, answer.plans).map { plan, derived in
+            ProjectedWorkPlan(plan, membership: derived.membership,
+                knownAbsent: derived.knownAbsent, coverage: derived.coverage)
+        }
+    }
 
     func applying(_ intents: [WorkQueryEffect]) -> ClientWorkQuery {
+        guard !intents.isEmpty else { return self }
         var result = self
         var layers = effects ?? []
         var sequence = layers.map(\.sequence).max() ?? 0
@@ -35,10 +47,27 @@ public struct ClientWorkQuery: Codable, Sendable {
         return result
     }
 
-    private func makeProjection() -> [ProjectedWorkPlan] {
-        plans.map { plan in
+    private func deriveAnswer() -> WorkQueryAnswer {
+        func sameEpoch<Value>(_ fact: WorkFieldFact<Value>?) -> WorkFieldFact<Value>? {
+            guard let fact, fact.support.machine == stamp.machine,
+                  fact.support.epoch == stamp.epoch, fact.support.schema == stamp.schema else { return nil }
+            return fact
+        }
+        return WorkQueryAnswer(plans: plans.map { plan in
             var membership = plan.membership
+            for index in membership.facts.indices {
+                let original = membership.facts[index]
+                guard let reading = fields[original.work] else { continue }
+                let normalized = reading.facts
+                membership.facts[index] = .init(work: original.work, name: original.name,
+                    parent: sameEpoch(normalized.parent).map { .init(wave: $0.value, support: $0.support) } ?? original.parent,
+                    lifecycle: sameEpoch(normalized.lifecycle).map { .init(states: $0.value.states.sorted { $0.rawValue < $1.rawValue },
+                        known: $0.value.known, support: $0.support) } ?? original.lifecycle,
+                    activity: sameEpoch(normalized.activity).map { .init(states: $0.value.states.sorted { $0.rawValue < $1.rawValue },
+                        known: $0.value.known, support: $0.support) } ?? original.activity)
+            }
             var knownAbsent: [WorkWorkspaceKey: Set<WorkSelectionState>] = [:]
+            var projected: [WorkWorkspaceKey: Set<WorkField>] = [:]
             for effect in (effects ?? []).sorted(by: { $0.sequence < $1.sequence }) {
                 if effect.resolution?.resolution == .definitelyRefused { continue }
                 guard effect.directory == plan.repositoryPath,
@@ -48,14 +77,55 @@ public struct ClientWorkQuery: Codable, Sendable {
                 }.map(\.work))
                 for index in membership.facts.indices where keys.contains(membership.facts[index].work)
                     || membership.facts[index].work.id == effect.issue || membership.facts[index].name == effect.issue {
-                    let states = Set(membership.facts[index].states).subtracting(change.remove).union(change.insert)
-                    membership.facts[index].states = states.sorted { $0.rawValue < $1.rawValue }
                     let key = membership.facts[index].work
+                    // Incorporation is permanent for this field/stage. A stale
+                    // query or unavailable activity cannot resurrect the intent.
+                    if let commit = effect.resolution,
+                       let field = OperationDeclaration(kind: effect.kind)?.field,
+                       fields[key]?.facts.incorporates(commit, field: field) == true { continue }
+                    // Effects declare canonical state changes; Swift partitions
+                    // fields, without deriving Task lifecycle a second time.
+                    let fact = membership.facts[index]
+                    membership.facts[index].lifecycle = .init(states: Set(fact.lifecycle.states).subtracting(change.remove)
+                        .union(change.insert.filter { !$0.isActivity }).sorted { $0.rawValue < $1.rawValue }, known: true, support: nil)
+                    membership.facts[index].activity = .init(states: Set(fact.activity.states).subtracting(change.remove)
+                        .union(change.insert.filter(\.isActivity)).sorted { $0.rawValue < $1.rawValue }, known: fact.activity.known, support: nil)
+                    projected[key, default: []].insert(.lifecycle)
                     knownAbsent[key] = (knownAbsent[key] ?? []).union(change.remove).subtracting(change.insert)
                 }
             }
-            return ProjectedWorkPlan(plan, membership: membership, knownAbsent: knownAbsent)
-        }
+            let dependencies = membership.root.fieldDependencies
+            let facts = Dictionary(membership.facts.map { ($0.work, $0) }, uniquingKeysWith: { first, _ in first })
+            var consumed: [WorkAnswerDependency] = []
+            for key in dependencies.keys.sorted(by: { ($0.repository, $0.kind.rawValue, $0.id) < ($1.repository, $1.kind.rawValue, $1.id) }) {
+                for field in (dependencies[key] ?? []).sorted(by: { $0.rawValue < $1.rawValue }) {
+                    let reading = fields[key]
+                    let support = field == .lifecycle ? facts[key]?.lifecycle.support : facts[key]?.activity.support
+                    let current = field == .lifecycle ? reading?.lifecycleCurrent : reading?.activityCurrent
+                    // A pure exact-query lifecycle answer can still use its own
+                    // snapshot. This grants no cross-query field support and
+                    // never certifies externally derived activity.
+                    let exact = field == .lifecycle && support == nil
+                        && facts[key]?.lifecycle.known == true && stamp.complete
+                    let local = projected[key]?.contains(field) == true
+                        || (field == .activity && knownAbsent[key]?.isSuperset(of: [.available, .busy, .blocked]) == true)
+                    consumed.append(.init(work: key, field: field, support: support, current: local || current == true || exact,
+                        projected: local))
+                }
+            }
+            let resolution = membership.resolve(knownAbsent: knownAbsent)
+            let selected = Set(resolution.members.map(\.work))
+            let content = Set(plan.contents.map(\.work))
+            let missing = selected.subtracting(content)
+            let coverage = WorkAnswerCoverage(program: plan.selection, definitionRevision: plan.savedRevision,
+                root: plan.membership.root, candidates: stamp,
+                content: content.sorted { ($0.repository, $0.kind.rawValue, $0.id) < ($1.repository, $1.kind.rawValue, $1.id) },
+                dependencies: consumed, candidatesCurrent: stamp.complete && membership.unavailable.isEmpty,
+                // Missing native input/location readiness is not missing Task
+                // content and cannot invalidate an otherwise exact list/count.
+                contentCurrent: missing.isEmpty)
+            return WorkQueryAnswer.Plan(membership: membership, knownAbsent: knownAbsent, coverage: coverage)
+        })
     }
 }
 
@@ -118,5 +188,56 @@ struct SessionNameFact: Codable, Equatable, Sendable {
             && fence.revisions["sessions"].map { current in
                 other.revisions["sessions"].map { current >= $0 } == true
             } == true
+    }
+}
+
+
+/// Replaceable client computation, persisted beside its exact-query input.
+/// It is never exported as a Machine reading or used to settle delivery.
+struct WorkQueryAnswer: Codable, Equatable, Sendable {
+    struct Plan: Codable, Equatable, Sendable {
+        let membership: WorkMembershipPlan
+        let knownAbsent: [WorkWorkspaceKey: Set<WorkSelectionState>]
+        let coverage: WorkAnswerCoverage
+    }
+    let plans: [Plan]
+}
+
+struct WorkAnswerDependency: Codable, Equatable, Sendable {
+    let work: WorkWorkspaceKey
+    let field: WorkField
+    let support: WorkMembershipPlan.FieldSupport?
+    let current: Bool
+    let projected: Bool
+}
+
+struct WorkAnswerCoverage: Codable, Equatable, Sendable {
+    let program: WorkSelection
+    let definitionRevision: Int64?
+    let root: WorkMembershipPlan.Node
+    let candidates: ReadingStamp
+    let content: [WorkWorkspaceKey]
+    let dependencies: [WorkAnswerDependency]
+    let candidatesCurrent: Bool
+    let contentCurrent: Bool
+    var current: Bool { candidatesCurrent && contentCurrent && dependencies.allSatisfy(\.current) }
+}
+
+extension WorkSelectionState {
+    var isActivity: Bool { self == .available || self == .busy || self == .blocked }
+}
+
+extension WorkMembershipPlan.Node {
+    var fieldDependencies: [WorkWorkspaceKey: Set<WorkField>] {
+        switch self {
+        case .members: return [:]
+        case .state(let state, let members):
+            return Dictionary(members.map { ($0.work, Set([state.isActivity ? WorkField.activity : .lifecycle])) },
+                uniquingKeysWith: { $0.union($1) })
+        case .compose(let nodes), .intersect(let nodes):
+            return nodes.reduce(into: [:]) { result, node in
+                result.merge(node.fieldDependencies, uniquingKeysWith: { $0.union($1) })
+            }
+        }
     }
 }

@@ -419,6 +419,8 @@ must not close a handle that `deinit` owns.
 Swift async process fixtures install `terminationHandler` before `run()` and
 await its completion. Don't call blocking `waitUntilExit()` on a cooperative
 executor; it can stay in Foundation's run loop after the child has exited.
+Actor-isolated helpers advancing an `inout AsyncStream.Iterator` use
+`next(isolation: #isolation)` so Swift 6 retains the caller's isolation.
 
 Tests that touch `ClientWorkStore.shared` use a private `LF_HOME` inside the
 network boundary, so opening the outbox cannot import the account's real pending

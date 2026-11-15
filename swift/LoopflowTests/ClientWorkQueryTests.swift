@@ -269,6 +269,144 @@ final class ClientWorkQueryTests: XCTestCase {
         return try JSONDecoder().decode(OperationReceipt.self, from: JSONSerialization.data(withJSONObject: wire))
     }
 
+    private func selecting(_ plan: WorkViewPlan, _ state: WorkSelectionState) throws -> WorkViewPlan {
+        var wire = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(plan)) as? [String: Any])
+        var membership = try XCTUnwrap(wire["membership"] as? [String: Any])
+        membership["root"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(
+            WorkMembershipPlan.Node.state(state, plan.membership.resolve().members)))
+        wire["membership"] = membership
+        return try JSONDecoder().decode(WorkViewPlan.self, from: JSONSerialization.data(withJSONObject: wire))
+    }
+
+    func testDerivedAnswerUsesIncorporatedReopenAcrossQueriesRetirementAndRestart() throws {
+        for receiptFirst in [true, false] {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+            let database = try complete(directory)
+            let old = fieldStamp(planning: 7)
+            let reopened = fieldStamp("reopened", planning: 9)
+            let base = try fieldPlan(old)
+            _ = try database.cache(ClientWorkQuery(stamp: old, plans: [base]), key: "held")
+            try database.retainQueries(machine: "machine", keys: ["held"])
+            let commit = try fieldReceipt()
+            if receiptFirst { try database.receive(commit, epoch: "epoch", id: "saved") }
+            _ = try database.cache(ClientWorkQuery(stamp: reopened,
+                plans: [fieldPlan(reopened, lifecycle: [.working], clock: nil)]), key: "other")
+            if !receiptFirst { try database.receive(commit, epoch: "epoch", id: "saved") }
+            // The stale query still owns its original body, but consumes the
+            // shared lifecycle that has incorporated Complete and then Reopen.
+            _ = try database.cache(ClientWorkQuery(stamp: old, plans: [base]), key: "held")
+            let held = try XCTUnwrap(database.cached(machine: "machine", key: "held"))
+            XCTAssertEqual(held.plans, [base])
+            XCTAssertEqual(held.projection.first?.projection.visible.map(\.work.id), ["a"])
+            XCTAssertEqual(held.projection.first?.taskCount, 1)
+            let coverage = try XCTUnwrap(held.answer?.plans.first?.coverage)
+            XCTAssertEqual(coverage.candidates, old)
+            XCTAssertEqual(coverage.dependencies.map(\.field), [.lifecycle])
+            XCTAssertEqual(coverage.dependencies.first?.support?.revisions["planning"], 9)
+            XCTAssertTrue(coverage.current)
+            XCTAssertEqual(try database.state("saved")?.receipt, commit)
+            try database.retireIfConverged("saved")
+            XCTAssertTrue(try database.pending().isEmpty)
+            let restored = try XCTUnwrap(ClientWorkDatabase(directory: directory).cached(machine: "machine", key: "held"))
+            XCTAssertEqual(restored.projection.first?.projection.visible.map(\.work.id), ["a"])
+            XCTAssertEqual(restored.projection.first?.taskCount, 1)
+        }
+    }
+
+    func testDerivedBusyAnswerConsumesNewerActivityWithoutReplacingItsMachineBody() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let database = try ClientWorkDatabase(directory: directory)
+        let connection = MachineConnection.ObservationConnection(source: "observer", generation: UUID())
+        let old = fieldStamp()
+        let busy = try selecting(fieldPlan(old), .busy)
+        _ = try database.cache(ClientWorkQuery(stamp: old, plans: [busy]), key: "busy", observation: connection)
+        XCTAssertEqual(try database.cached(machine: "machine", key: "busy", observation: connection)?.projection.first?.taskCount, 1)
+        let newer = fieldStamp("other") // Process exit does not advance SQLite.
+        _ = try database.cache(ClientWorkQuery(stamp: newer,
+            plans: [fieldPlan(newer, activity: [], clock: 20)]), key: "other", observation: connection)
+        _ = try database.cache(ClientWorkQuery(stamp: old, plans: [busy]), key: "busy", observation: connection)
+        let held = try XCTUnwrap(database.cached(machine: "machine", key: "busy", observation: connection))
+        XCTAssertEqual(held.plans, [busy])
+        XCTAssertEqual(held.projection.first?.projection.visible, [])
+        XCTAssertEqual(held.projection.first?.taskCount, 0)
+        XCTAssertEqual(held.answer?.plans.first?.coverage.dependencies.first?.support?.observations,
+            .captured(.init(source: "observer", validatedAt: 20, dependencies: [.init(fact: "process", token: 20)])))
+        let offline = try XCTUnwrap(database.cached(machine: "machine", key: "busy"))
+        XCTAssertEqual(offline.projection.first?.resolution.members, [])
+        XCTAssertEqual(offline.projection.first?.projection.visible, [])
+        XCTAssertNil(offline.projection.first?.taskCount, "A last-known empty Busy list cannot certify an exact zero offline")
+        XCTAssertFalse(try XCTUnwrap(offline.projection.first).resolution.unavailable.isEmpty)
+        let reconnected = MachineConnection.ObservationConnection(source: "observer", generation: UUID())
+        XCTAssertNil(try database.cached(machine: "machine", key: "busy", observation: reconnected)?.projection.first?.taskCount)
+    }
+
+    func testDerivedCoveragePublishesDisconnectAndReconnectToBothWindowsWithoutCommands() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let first = FieldReadingCarrier(frame: Data("{}".utf8))
+        let second = FieldReadingCarrier(frame: Data("{}".utf8))
+        let links = FieldReadingLinks([first, second])
+        let connection = MachineConnection {
+            let carrier = await links.next()
+            return try await ServerLink.open(ServerEndpoint(
+                client: .init(kind: "test", platform: "test", name: "test", version: "test"),
+                control: { carrier }, ticketed: { carrier }))
+        }
+        let link = try await connection.link()
+        addTeardownBlock { await first.close(); await second.close() }
+        let disk = ClientWorkStore(directory: directory, connection: connection, machine: { "machine" },
+            read: { _ in XCTFail("Coverage changes need no command or read"); return "null" },
+            observe: { _ in XCTFail("No command recovery"); return ServerWatch(updates: AsyncThrowingStream { $0.finish() }, checkpoint: { _ in }, cancel: {}) },
+            send: { _ in XCTFail("Coverage changes cannot submit") })
+        addTeardownBlock { await disk.close() }
+        let stamp = fieldStamp()
+        let base = try fieldPlan(stamp, source: "fixture-observer")
+        let busy = try selecting(base, .busy)
+        let busyRead = ServedRead.viewSelect(expression: "state:busy")
+        let workingRead = ServedRead.viewSelect(expression: "state:working")
+        let attribution = ReceivingLink(machine: "machine", source: "fixture-observer", generation: link.generation)
+        _ = try await disk.receivePlans([busy], stamp: stamp, for: busyRead, receivingLink: attribution)
+        _ = try await disk.receivePlans([base], stamp: stamp, for: workingRead, receivingLink: attribution)
+        let owner = WorkInteraction(machine: "machine", store: disk)
+        stop(owner)
+        let (a, publishA) = AsyncStream<ProjectedWorkPlan>.makeStream()
+        let (b, publishB) = AsyncStream<ProjectedWorkPlan>.makeStream()
+        let (sql, publishSQL) = AsyncStream<ProjectedWorkPlan>.makeStream()
+        _ = owner.open(busyRead) { if let plan = $0?.first { publishA.yield(plan) } }
+        _ = owner.open(busyRead) { if let plan = $0?.first { publishB.yield(plan) } }
+        _ = owner.open(workingRead) { if let plan = $0?.first { publishSQL.yield(plan) } }
+        addTeardownBlock { publishA.finish(); publishB.finish(); publishSQL.finish() }
+        var windowA = a.makeAsyncIterator(), windowB = b.makeAsyncIterator(), lifecycle = sql.makeAsyncIterator()
+        func awaitCount(_ count: Int?, _ iterator: inout AsyncStream<ProjectedWorkPlan>.Iterator) async throws -> ProjectedWorkPlan {
+            while let plan = await iterator.next(isolation: #isolation) {
+                if plan.taskCount == count { return plan }
+            }
+            throw RegistryQueryError("Query publication ended")
+        }
+        _ = try await awaitCount(1, &windowA)
+        _ = try await awaitCount(1, &windowB)
+        _ = try await awaitCount(1, &lifecycle)
+        await link.close()
+        let offlineA = try await awaitCount(nil, &windowA)
+        let offlineB = try await awaitCount(nil, &windowB)
+        XCTAssertEqual(offlineA.resolution.members.map(\.work.id), ["a", "a"])
+        XCTAssertEqual(offlineA.coverage, offlineB.coverage)
+        let sqlOnly = try await awaitCount(1, &lifecycle)
+        XCTAssertTrue(try XCTUnwrap(sqlOnly.coverage).current)
+        let reopened = try await connection.link()
+        addTeardownBlock { await reopened.close() }
+        let stillStale = try await disk.cachedPlans(machine: "machine", for: busyRead)
+        XCTAssertNil(stillStale?.projection.first?.taskCount, "A welcome is not a capture")
+        _ = try await disk.receivePlans([base], stamp: stamp, for: workingRead,
+            receivingLink: ReceivingLink(machine: "machine", source: "fixture-observer", generation: reopened.generation))
+        _ = try await awaitCount(1, &windowA)
+        _ = try await awaitCount(1, &windowB)
+        let pending = try await disk.pending()
+        XCTAssertTrue(pending.isEmpty)
+    }
+
     func testFieldIncorporationJoinsReceiptAndNewerReopenInEitherOrderWithoutSettlingDelivery() throws {
         for receiptFirst in [true, false] {
             let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

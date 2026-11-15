@@ -1,13 +1,12 @@
 # Working assumptions
 
-- Field incorporation now persists per resource/field/stage in the existing fact
-  owner. Headless engineering choice: retain an antichain of commit fences per
-  stage, compacting comparable commits rather than retaining request IDs or full
-  commands. Projection consumption and disconnect-driven answer coverage are
-  still unbuilt. The three product questions below remain unanswered.
-  Headless review keeps derived answers as replaceable state in that same owner,
-  publishing rows and their consumed-dependency coverage together on both hosts;
-  no new product preference or second synchronization owner is implied.
+- Field incorporation persists per resource/field/stage in the existing fact
+  owner, compacting comparable commit fences. Derived membership answers now
+  consume it and publish membership dependencies beside rows on both hosts;
+  disconnect/reconnect changes flow through existing Machine/query owners.
+  Native-readiness diagnostics do not imply missing Task content. Dynamic
+  membership/Move and stamp-only retention/reload removal remain open. This
+  prerequisite follows the latest iteration order; no product answer is inferred.
 
 - Receiving-link attribution is local transport metadata on each reading, captured
   before buffering and checked against the shared Machine owner at ingestion.

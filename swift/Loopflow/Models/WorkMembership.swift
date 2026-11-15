@@ -80,14 +80,8 @@ public struct WorkMembershipPlan: Codable, Equatable, Sendable {
         public var lifecycle: StateFact
         public var activity: StateFact
         public var activityKnown: Bool { activity.known }
-        // The query overlay mutates a copy, never the confirmed fields.
         public var states: [WorkSelectionState] {
-            get { (lifecycle.states + activity.states).sorted { $0.rawValue < $1.rawValue } }
-            set {
-                let activityStates: Set<WorkSelectionState> = [.available, .busy, .blocked]
-                lifecycle = StateFact(states: newValue.filter { !activityStates.contains($0) }, known: lifecycle.known, support: nil)
-                activity = StateFact(states: newValue.filter { activityStates.contains($0) }, known: activity.known, support: nil)
-            }
+            (lifecycle.states + activity.states).sorted { $0.rawValue < $1.rawValue }
         }
     }
     public indirect enum Node: Codable, Equatable, Sendable {
@@ -191,11 +185,12 @@ public struct ProjectedWorkPlan: Equatable, Sendable {
     public let arrangement: WorkArrangement
     public let projection: WorkArrangementProjection
     public let states: [WorkWorkspaceKey: [WorkSelectionState]]
+    let coverage: WorkAnswerCoverage?
     public subscript<T>(dynamicMember keyPath: KeyPath<WorkViewPlan, T>) -> T { confirmed[keyPath: keyPath] }
     /// Unknown membership cannot produce an exact total. Occurrences of the
     /// same Task count once, regardless of arrangement or hidden tiles.
     public var taskCount: Int? {
-        guard resolution.unavailable.isEmpty else { return nil }
+        guard resolution.unavailable.isEmpty, coverage?.current != false else { return nil }
         return Set(resolution.members.filter { $0.work.kind == .task }.map(\.work)).count
     }
 
@@ -204,15 +199,30 @@ public struct ProjectedWorkPlan: Equatable, Sendable {
         guard let from = members.firstIndex(where: { $0.work.kind == .task && $0.work.id == task }),
               let to = members.firstIndex(where: { $0.work.kind == .task && $0.work.id == target }) else { return self }
         members.insert(members.remove(at: from), at: to)
-        return Self(confirmed, membership: membership, knownAbsent: knownAbsent, memberOrder: members)
+        return Self(confirmed, membership: membership, knownAbsent: knownAbsent, memberOrder: members, coverage: coverage)
     }
 
     public init(_ confirmed: WorkViewPlan, membership: WorkMembershipPlan? = nil, knownAbsent: [WorkWorkspaceKey: Set<WorkSelectionState>] = [:], memberOrder: [WorkMemberRef]? = nil) {
+        self.init(confirmed, membership: membership, knownAbsent: knownAbsent, memberOrder: memberOrder, coverage: nil)
+    }
+
+    init(_ confirmed: WorkViewPlan, membership: WorkMembershipPlan? = nil, knownAbsent: [WorkWorkspaceKey: Set<WorkSelectionState>] = [:], memberOrder: [WorkMemberRef]? = nil, coverage: WorkAnswerCoverage?) {
         self.confirmed = confirmed
         let membership = membership ?? confirmed.membership
         self.membership = membership
         self.knownAbsent = knownAbsent
+        self.coverage = coverage
         var resolution = membership.resolve(knownAbsent: knownAbsent)
+        let membershipIncomplete = !resolution.unavailable.isEmpty
+        if let coverage, !coverage.current {
+            var reasons = coverage.dependencies.filter { !$0.current }.map {
+                "Work \($0.work.id) \($0.field.rawValue) awaits confirmation"
+            }
+            if !coverage.candidatesCurrent { reasons.append("Work candidates await confirmation") }
+            if !coverage.contentCurrent { reasons.append("Work content awaits confirmation") }
+            resolution = WorkSelectionResolution(attention: resolution.attention, members: resolution.members,
+                unavailable: resolution.unavailable + reasons)
+        }
         let contentKeys = Set(confirmed.contents.map(\.work))
         let missing = Set(resolution.members.map(\.work)).subtracting(contentKeys)
         if !missing.isEmpty {
@@ -235,8 +245,11 @@ public struct ProjectedWorkPlan: Equatable, Sendable {
            let current = membership.possibleMembers(knownAbsent: knownAbsent) {
             departures = previous.subtracting(current)
         } else { departures = [] }
-        var order = (memberOrder != nil || confirmed.arrangement.mode == .auto) && resolution.unavailable.isEmpty
-            ? resolution.members : confirmed.arrangement.order.filter { (!resolution.unavailable.isEmpty && !departures.contains($0)) || selected.contains($0) }
+        // Losing live coverage keeps the last evaluated members. It must not
+        // resurrect occurrences removed by a newer normalized field merely
+        // because the immutable Machine body still contains them.
+        var order = (memberOrder != nil || confirmed.arrangement.mode == .auto) && !membershipIncomplete
+            ? resolution.members : confirmed.arrangement.order.filter { (membershipIncomplete && !departures.contains($0)) || selected.contains($0) }
         var present = Set(order)
         for member in resolution.members where present.insert(member).inserted { order.append(member) }
         let hidden = confirmed.arrangement.hidden.filter { present.contains($0) }

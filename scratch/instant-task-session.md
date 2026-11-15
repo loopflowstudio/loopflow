@@ -3,9 +3,9 @@
 Built on origin/main `9cafc410ee`: conversation/Machine link `a2a0a0fb33`,
 unreachable Machine and Desktop rename `35e2835de1`, fixture teardown `5231746858`,
 observation source `86f99e3315`, typed field support `f9a8da8ae9`. SQL-only and attributed external
-normalization and field-stage incorporation are now persisted; derived-answer
-coverage and projection consumption precede dynamic
-membership with disconnected Move. No shipping or merge decision; no Wave selected.
+normalization, field-stage incorporation and derived membership answers now
+share the client owner. Dynamic membership with disconnected Move remains the
+next replacement cut. No shipping or merge decision; no Wave selected.
 
 ## Direction
 
@@ -239,8 +239,7 @@ Still remove, with their consumers:
   (`performTaskAction`) and bind replacement bookkeeping (`replaceSession`,
   `supersedeSessions`).
 - Query-local `WorkQueryEffect.covered`, `ClientWorkDatabase.effectsCover`,
-  `ClientWorkQuery.makeProjection`'s state-only reducer, `WorkMembershipPlan.Facts.states`'s
-  transient union setter, and dynamic prefiltering
+  `ClientWorkQuery.deriveAnswer`'s fixed-candidate state overlay and dynamic prefiltering
   in Rust `Selection::compile_membership` / `compile_filter`, in one replacement
   cut. Keep explicit Work leaves, stable authored occurrence paths, descendant
   scopes, interleaved order, intersections, hidden/suppressed occurrences and
@@ -333,15 +332,16 @@ Wave/Dashboard rename and other mutations remain unmigrated.
 ### Why Move cannot use the current reducer
 
 Full account: `5d0187746f:scratch/instant-task-session.md`. `compile_membership`
-prefilters Wave descendants into fixed leaves; `ClientWorkQuery.makeProjection`
-only changes states of facts already present, so a destination that omitted Task
+prefilters Wave descendants into fixed leaves; `ClientWorkQuery.deriveAnswer`
+can only select facts already present in the compiled program, so a destination that omitted Task
 A cannot acquire it. `WorkQueryEffect.covered` decides by the held query's own
-`ReadingStamp`, so Complete→Reopen seen elsewhere, or Move A→B→C, reapplies the
-older effect. Acceptance: Required counterexamples below.
+`ReadingStamp`; projection now also consumes independent field incorporation,
+but dynamic parent predicates for Move A→B→C remain unbuilt. Acceptance: Required counterexamples below.
 
 ### Next implement direction: facts absorb effects; queries prove their answers
 
-Headless concept review, 2026-11-15, against `5d0187746f`. Proposed, unbuilt.
+Headless concept review, 2026-11-15, against `5d0187746f`. Field incorporation
+and fixed-program answer coverage are built; dynamic membership/Move remain unbuilt.
 The correction above becomes two contracts rather than one larger query stamp:
 
 1. **Field incorporation.** Each confirmed value identifies its Machine, epoch,
@@ -436,156 +436,44 @@ Proposed usage text for both READMEs after acceptance:
 
 No builtin skill changes; shipped READMEs claim only built behavior until acceptance.
 
-### Review direction: one observation source, independent facts · 2026-11-15
+### Observation and independent ingestion contracts · 2026-11-15
 
-Headless concept review against `5231746858`. It resolves
-`process_exit_changes_selection_without_advancing_sqlite_provenance` (activity and
-order change without SQLite revisions; investigation at `0883b66cf0`), not the
-three product questions. Source/capture, field declarations
-and SQL-only persisted normalization are built (sections below). The experience stays the same: a Task whose provider exits stops looking Busy in every
-cached view; missing activity does not undo an already incorporated Move. A
-Machine restart keeps conversations and saved changes, while live status awaits
-that Machine's new observations.
+Full source/capture and ingestion design, contrary cases and historical checks:
+`0a7fcf3e703fe36bb11a5c93262a4fbf5c8c12b5:scratch/instant-task-session.md`
+(Review direction through Independent ingestion and normalization). Live rules:
 
-**Source ownership and replacement.** Give the existing `observe::Cache` one
-opaque incarnation and one monotonic observation clock for its lifetime. The
-server already holds that cache through `service::run`; expose its incarnation in
-the negotiated welcome and carry it with captured observation evidence. Keep
-`welcome.instance` (server lifetime), database epoch and observation incarnation
-distinct: none orders the others. No new authority service or persistent observer
-ledger. A replacement cache requires a new welcome before publishing its facts.
-Bare reads without this owner may supply display inventory, never comparable
-external provenance.
+- The shared Machine link elects the observation incarnation before readings;
+  generations reject departed welcomes, frames and callbacks. Database epoch,
+  server lifetime and observer incarnation are distinct. Disconnect and restart
+  keep values last-known; reconnect, even to the same incarnation, needs captures.
+- One cache-wide clock never repeats tokens on eviction. Capture consumed inputs
+  together, reuse them within an invocation/inherited worker, validate the complete
+  dependency set atomically before export. Changed inputs make normalization
+  unavailable and schedule refresh. External identity includes process identity,
+  not PID alone; exported opaque tokens contain no private paths or words.
+- Field support declares its real SQLite domains, derivation and external inputs.
+  Compare complete supports; crossed vectors, equal conflicting values and changed
+  derivations cannot elect a winner. New dependency sets require complete captures.
+  An unrelated observation clock advance certifies nothing.
+- Ingestion precedes exact-query replacement. Partial or incomparable bodies can
+  contribute independently supported fields; complete bodies do not certify
+  unavailable activity. Parent/lifecycle normalize without live activity. Only
+  validated receiving-link attribution admits external facts. Local link generation
+  remains transport metadata, never a wire revision or persistent observer ledger.
+- Persist facts, incorporation and derived dependencies in the existing SQLite
+  owner. Restart invalidates external coverage; missing content/activity cannot
+  undo an incorporated parent/lifecycle stage. Old caches never acquire evidence
+  by assigning the current source. Keep exact requests and original-ID recovery.
+- Acceptance: same-SQL process exit changes Busy; eviction/recreation never repeats
+  a token; new welcome cannot revive old external coverage; changing inputs during
+  capture yields no mixed field; process replacement changes dependency sets; queued
+  A → reconnect B cannot borrow B's link. Parent incorporation survives offline
+  restart and new observer, without replay or later navigation.
 
-The shared Machine connection establishes the active observation source from its
-current welcome, before delivering readings. Connection generations reject old
-welcomes, reads and callbacks after reconnect; a delayed frame cannot elect its
-own source. Windows share this decision through the existing Machine owner.
-Disconnect preserves last-known content and pending intent, but dependent live
-answers become stale. On reconnect, even to the same incarnation, current-source
-readings revalidate their consumed inputs; welcome alone proves no field or
-membership. With a new incarnation, keep the previous values as last-known and
-invalidate their external coverage until replaced. Never compare incarnation IDs
-lexically, compare counters across them, or switch back on a delayed reading.
-
-**Capture and eviction.** Allocate from the cache-wide clock whenever a fact is
-first installed or its answer changes, including failure/unknown transitions.
-Entry eviction never resets that clock. Recreating a fact therefore produces a
-newer token within the same incarnation without retaining unbounded tombstones.
-Tokens compare only the same declared fact; an unrelated clock advance certifies
-nothing about another input. Process evidence includes OS process identity, not
-only PID. Export opaque dependency identities, not raw private paths, command
-arguments or transcript contents.
-
-Capture each consumed answer and token together, and reuse that captured answer
-for repeated reads within the invocation and inherited workers. Before exporting
-a derived field, validate its consumed dependency set against the observation
-owner and record the owner's clock atomically with that validation, synchronized
-with answer changes and entry replacement. Changed/evicted
-dependencies make the field unavailable for normalization and schedule the normal
-refresh; do not stamp a mixed computation as coherent or spin until it succeeds.
-The validation clock can order changed dependency sets within one incarnation;
-it never covers omitted dependencies. A later observation after validation makes
-the captured answer older, not invalid history. Preserve the pinned SQLite
-snapshot's revisions independently. Two captures with crossed SQLite/observation
-freshness remain incomparable; neither arrival order nor component maxima can
-create a replacement value.
-
-**Field evidence and answer coverage.** Declare inputs per field/predicate:
-parent and lifecycle consume their actual SQLite domains; activity consumes its
-SQLite inputs plus process/turn/deadline observations as applicable; ordering
-consumes the fields it actually sorts. A normalized derived value carries that
-complete support, including captured dependency identities/tokens and validation
-clock. A later comparable capture can replace it when the supporting set changes
-(for example, a Session acquires another process); an individual process fact
-alone cannot rewrite Task activity. Dynamic membership programs consume these
-typed fields, never infer Task lifecycle a second time in Swift. Candidate
-manifests declare observation coverage too if their eligibility depends on it;
-an identity/parent-only universe must not prefilter Busy Tasks.
-
-Persist normalized values, source identities, incorporation and derived-answer
-dependencies in the existing client SQLite transaction owner. Persisted external
-values are last-known after restart until the active source revalidates them;
-do not persist the server's clock as a durable Machine revision. Parent/lifecycle
-incorporation survives independently, so stale/missing activity cannot revive an
-absorbed Complete or Move. Eviction retains sufficient facts/coverage or the
-existing scoped reload floor. Missing content need not retain a full delivered
-command. Old caches cannot be upgraded by assigning the current incarnation.
-
-**Implement order and deletion.** First extend the observation owner and required
-wire DTO/fixtures on Rust, Desktop and iOS; then add field incorporation and
-derived-answer coverage; then dynamic membership and disconnected Move together
-with their callers. Preserve the original exact-query stamp/body as an input.
-Replace the query-local incorporation shortcuts and state-only reducer listed
-above; do not add a second observer, outbox or readiness owner. No production
-README or builtin skill claim changes until acceptance. The proposed Move usage
-text above remains the documentation target; observation tokens stay out of the
-product's interaction vocabulary.
-
-Acceptance adds these deterministic cases to the retained Move counterexamples:
-
-- Same SQLite revisions, process exits: held Busy membership, order and counts
-  consume the newer derived activity; reordered old evidence cannot restore Busy.
-- Evict/recreate the observed entry in the same cache: its token never repeats.
-  Replace the cache/server: new welcome invalidates old external coverage; delayed
-  old frames and welcomes cannot restore it, including across two windows.
-- Change a dependency during capture or read it twice across a held change: no
-  mixed field is normalized; refresh later supplies one complete dependency set.
-- Replace a Task's process (including PID reuse): a newer complete capture may
-  change the dependency set; a newer fact for only the old process cannot.
-- Restart offline after parent incorporation, then reconnect with a new observer
-  and unchanged database epoch: Move stays absorbed; activity/order/counts remain
-  last-known or incomplete until covered. Saved request IDs and original-Machine
-  recovery survive without resend or later navigation.
-
-Source/capture cut details and passing filters: `86f99e3315:scratch/instant-task-session.md`.
-Unresolved run `7bb50caf-46f5-485f-a8ff-d882ea6e5a98`: nextest marked
-`server::schema::tests::bare_time_serializes_as_its_described_tuple` LEAK;
-that case launches no children. Gate owns it; no retry was taken as a fix.
-
-### Independent ingestion and normalization
-
-Producer-declared parent, lifecycle and activity support is built. Consume each
-field's complete support and derivation identity; missing support differs from
-validated empty observations. SQL-only fields normalize independently. A newer
-parent with invalid activity incorporates only the parent; retain last-known
-activity and make only dependent answers incomplete. A later valid capture repairs
-those answers without reapplying Move or changing selection.
-
-**Ingestion precedes query replacement.** The next client API must accept a
-reading as a source of independently supported fields, not only as a replacement
-complete query. In the existing SQLite transaction owner: validate the connection's
-Machine/epoch/schema and negotiated observation source; join each comparable typed
-field; incorporate covered field effects; then evaluate whether the exact query
-body can replace its prior base and derive affected answers. Rejecting an older,
-incomplete or incomparable query as a whole must not discard a newer independently
-supported parent or lifecycle field within it. Conversely, an accepted query body
-does not validate unavailable activity. Preserve the original stamp/body unchanged.
-Field support must match the containing resource's Machine/epoch/schema; captured
-support also requires the current connection's source. A reading cannot elect a
-source or restore a departed epoch. SQLite-only fields need no live observation
-capture. Persisted external values still require reconnect revalidation.
-
-Add the boundary counterexample: the held query has newer activity but an older
-parent; another reading has a newer parent but older/unavailable activity, or is
-incomplete because content is missing. Keep the newer parent and prior last-known
-activity independently, absorb only the parent's committed effect, and retain
-incompleteness for answers consuming the missing inputs. Neither query replaces
-the other as a coherent Machine snapshot. Repeat reordered and after offline
-restart on both hosts. Receipt delivery remains unresolved until its own recovery
-answers; field incorporation never authorizes a resend or changes navigation.
-
-Built receiving-link attribution: `ReceivedReading` retains unchanged bytes,
-Machine, source and link generation before buffering through both hosts' decoding
-and checkpoint reuse. The shared Machine owner validates the link at ingestion.
-Unattributed/departed activity cannot revoke current coverage; independent SQL-only
-fields remain eligible. Reconnect requires another capture even for the same
-source. Field/query writes and in-memory proof roll back together. Local link
-generations never become wire DTOs, Machine revisions or another ledger.
-
-Normalization/transport checks and queued-A → reconnect-B details:
-`2c6146e43f:scratch/instant-task-session.md` (Persisted normalization and receiving-link gap).
-Earlier typed-field/query-plan checks: `0883b66cf0:scratch/instant-task-session.md`.
+Source/normalization checks: `86f99e3315`, `0883b66cf0`, `2c6146e43f`.
+Gate owns nextest run `7bb50caf-46f5-485f-a8ff-d882ea6e5a98`:
+`server::schema::tests::bare_time_serializes_as_its_described_tuple` reported LEAK;
+that case launches no children. No retry was taken as a fix.
 
 ### Concept review: incorporation survives stale answers · 2026-11-15
 
@@ -647,14 +535,41 @@ fences compact comparable commits without keeping request IDs or command bodies;
 retained query effects supply still-needed stages after retirement. Resource and
 bound-receipt lookups use indexes, with stage fan-out grouped by resource.
 
-This prerequisite does not change query projection. The deletion cut still removes
-`WorkQueryEffect.covered`, `effectsCover`, the union setter and state-only reducer
-together with dynamic membership/Move. Derived-answer dependencies and
-disconnect-driven coverage publication are next; no second evaluator was added
-to the predecessor. Full Complete→Reopen and Move A→B→C presentation acceptance
-remains open, including two clients and incomplete destinations.
+Field incorporation now feeds the derived-answer path below. The remaining
+deletion cut removes `WorkQueryEffect.covered`, `effectsCover` and fixed-candidate
+state projection together with dynamic membership/Move. Full Move A→B→C
+presentation acceptance remains open, including two clients and incomplete destinations.
 
 Checks: `scripts/test_desktop.sh --skip-build --filter 'ClientWorkQueryTests/testField|SessionRenameTests'` passes 14 XCTest + 6 Swift Testing cases after a fresh `swift build --build-tests --package-path swift`; `scripts/test_ios.py` with six explicit `testFieldIncorporation…` selections passes all 6; `check_swift_multiplatform_boundaries.py` passes. Resource/receipt EXPLAIN checks use indexes at 10k rows. Logs: `/tmp/loo-906-field-{build,tests,ios}.log`. Gate owns broader suites and the prior nextest LEAK.
+
+### Derived membership answers · 2026-11-15
+
+The existing query entry now persists one replaceable answer: authored selection,
+saved definition revision, compiled root, original candidate/content snapshot,
+consumed membership-field support and derived membership. Its Machine stamp/body
+remain immutable. Shared field incorporation suppresses an absorbed Complete
+before evaluating held Working queries, so a newer Reopen wins in either
+receipt/reading order and after retirement/restart. Coverage does not settle
+receipt recovery. The union setter and old `makeProjection` are removed; this
+is the existing projection owner, not a second evaluator.
+
+Both hosts publish rows and coverage together through their existing query
+leases. Machine connection changes invalidate only dependent live membership,
+without command traffic. Welcome alone revalidates nothing; current-link captures
+do. Losing coverage retains the latest evaluated members, including a last-known
+empty Busy answer, rather than restoring rows from its older Machine body.
+Native attachment/location diagnostics do not mean missing content or invalidate
+an exact count. Prepared renderings stay off the main actor for cached reads.
+
+The latest iteration calls for this prerequisite before the dynamic/Move cut;
+fixed candidates and stamp-based effect retention are still deletion targets, not
+new membership authority. No Move usage claim changes. The three product choices,
+valid native latency baseline and gate-owned nextest LEAK remain open.
+
+Checks: `scripts/test_desktop.sh --skip-build --filter 'ClientWorkQueryTests/testDerived|ClientWorkQueryTests/testField|ClientWorkQueryTests/testCompletionRetainsExplicit|ClientWorkQueryTests/testCompletionProjects'` passes 18 tests after `swift build --build-tests --package-path swift`; `scripts/test_ios.py` with the three explicit `testDerived…` selections passes 3; multiplatform check passes. `cargo test -p loopflow --test integration documented_commands::` passes 4 tests (linker unwind-size warning only). An initial check
+exposed native-readiness diagnostics being counted as missing content; the held
+publication check was stopped and that condition removed. Logs:
+`/tmp/loo-906-answer-{build,tests,ios}.log`.
 
 ## Current implementation cut
 
@@ -683,8 +598,8 @@ including without a network event. Retirement cancels its receipt observer and
 transfers lagging effects or scoped reload floors. The complete prior contracts and
 query checks remain at `6e944e73b5a:scratch/instant-task-session.md`.
 
-Remaining: projection consumption of field incorporation and derived-answer coverage,
-then disconnected Move; effect-policy duplication; cross-client closed-query convergence; exhaustive
+Remaining: dynamic membership and disconnected Move, including replacement of
+stamp-only effect retirement and reload shortcuts; effect-policy duplication; cross-client closed-query convergence; exhaustive
 effect/dependency declarations and cross-query provenance; other mutation recovery
 and resource lanes; retained mobile `SessionLink`; projected inspection;
 historical-restoration epoch reset; valid native benchmark baseline. One cross-platform PR; no shipping decision. SQLite

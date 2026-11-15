@@ -1191,6 +1191,15 @@ current. Disconnect and reconnect leave earlier activity last-known until a
 current-link capture revalidates it, even when the server retains its observation
 source. Queued old readings cannot borrow the new link or revoke its capture.
 Field facts, query writes and local revalidation proof commit or roll back together.
+Each cached query also stores a replaceable derived answer with its authored
+program, candidate snapshot, content identities and consumed membership fields.
+Projection uses normalized fields and their persisted stage incorporation:
+Complete followed by a newer Reopen cannot be reapplied by a held query.
+Rows and dependency coverage publish together. Disconnect invalidates Busy
+coverage in mounted windows without a new body or command, while lifecycle-only
+membership remains independent. A welcome alone cannot restore an exact Busy
+count; a current-link capture must revalidate its activity. Losing coverage
+retains the last evaluated membership rather than reviving old Machine rows.
 A query from a replacement epoch also invalidates outstanding receipt evidence
 for that Machine; recovery never replays an uncertain command. Rust compiles a
 finite membership program over selection states, preserving scope, source paths

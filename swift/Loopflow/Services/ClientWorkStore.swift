@@ -223,7 +223,7 @@ public actor ClientWorkStore {
     }
 
     public func cachedPlans(machine: String, for read: ServedRead) throws -> ClientWorkQuery? {
-        try disk().cached(machine: machine, key: queryKey(read))
+        try disk().cached(machine: machine, key: queryKey(read), observation: connection?.observationConnection)
     }
 
     func fieldReading(machine: String, work: WorkWorkspaceKey) throws -> WorkFieldReading? {

@@ -30,7 +30,7 @@ fn input(store: &SqliteStore, repo: &std::path::Path) -> NewTask {
         id: TaskId::new(),
         repository_id: crate::repository::location::ensure_repository(
             store,
-            crate::repository::CanonicalRepo::discover(repo)
+            crate::repository::discover(repo)
                 .unwrap()
                 .as_path()
                 .to_str()

@@ -101,7 +101,7 @@ impl Table {
             .unwrap()
             .unwrap();
         let sqlite = &self.store.sqlite;
-        sqlite.take_up_task_graph(&self.task.id, &graph).unwrap();
+        crate::store::task_work::take_up_task_graph(sqlite, &self.task.id, &graph).unwrap();
         assert!(sqlite.set_task_graph_step(&self.task.id, step).unwrap());
     }
 

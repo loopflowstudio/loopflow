@@ -3,8 +3,8 @@
 use super::repositories::RepositoryRegistration;
 use super::{planning_write, SqliteStore};
 use crate::store::work::edit::WorkValue as Edit;
+use crate::store::work::wave::{Wave, WaveLocator};
 use crate::store::StoreResult;
-use crate::work::wave::{Wave, WaveLocator};
 use loopflow_model::durable::RepositoryId;
 use loopflow_model::id::WaveId;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};

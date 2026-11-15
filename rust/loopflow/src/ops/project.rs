@@ -126,7 +126,7 @@ pub(crate) fn import_binding(store: &Store, wave: &Wave, guard: &PlanningLocks) 
 
 /// Address a retained Project by durable ID, provider ID, or unique slug/name.
 async fn resolve_project(store: &Store, repo: &Path, selector: &str) -> OpsResult<Project> {
-    let repo = crate::repository::CanonicalRepo::discover(repo)
+    let repo = crate::repository::discover(repo)
         .map_err(project_error)?
         .to_string();
     if let Ok(id) = loopflow_model::durable::ProjectId::parse(selector) {

@@ -59,6 +59,9 @@
   `store::task_work`; addresses and the display Graph move down as types. The
   alternative moves `CapturedGraph` down with `ConcreteStep`, `Skill`,
   occurrence settings and `Command`, so a skill-setting edit rebuilds storage.
-- `resolve_task_id_in` takes the requested canonical address as a value. Text
-  comparison is enough only if every `repository_plans.repo` writer saves the
-  canonical spelling; that check belongs to implement, not to this note.
+- Repository writers accept historical raw spellings. Scoped Task lookup now
+  observes candidate canonical aliases above SQL and compares its complete saved
+  candidate rows in the final savepoint. Capture-history projection needs the design correction
+  in `loo-650.md` before storage extraction; moving its manifest would pull
+  prepared launch/settings/skill types down, and erasing its request type would
+  weaken malformed-manifest evidence-gap handling.

@@ -4,8 +4,8 @@ use std::path::Path;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
 use super::SqliteStore;
-use crate::process::SessionAttachment;
-use crate::steer::{
+use crate::store::process::SessionAttachment;
+use crate::store::steer::{
     IdleConversation, IdleReach, NativeBoundary, SessionSteerPage, SessionSteerStatus, Steer,
     SteerAdapter,
 };
@@ -141,7 +141,7 @@ impl SqliteStore {
                 super::sessions::retain_history_in(
                     &tx,
                     &session,
-                    &[crate::session_record::provider_session_observation(
+                    &[crate::store::session_record::provider_session_observation(
                         &session,
                         &input,
                         &thread.into(),
@@ -191,7 +191,7 @@ impl SqliteStore {
             self.record_session_activity(
                 &adapter.session,
                 &attachment,
-                &crate::session::SessionActivity {
+                &crate::store::session::SessionActivity {
                     preview: None,
                     observed_at: time::OffsetDateTime::now_utc().unix_timestamp(),
                     // An unavailable task registry cannot settle known work.
@@ -246,7 +246,7 @@ impl SqliteStore {
                 Some(endpoint) => IdleReach::Codex(endpoint.into()),
                 None => IdleReach::Claude(row.get::<_, String>(6)?.into()),
             };
-            let source: Option<crate::session::WorkSource> = row
+            let source: Option<crate::store::session::WorkSource> = row
                 .get::<_, Option<String>>(7)?
                 .map(|source| serde_json::from_value(serde_json::Value::String(source)))
                 .transpose()
@@ -300,9 +300,9 @@ impl SqliteStore {
         session: &str,
     ) -> StoreResult<
         Option<(
-            crate::session::LfSession,
+            crate::store::session::LfSession,
             String,
-            crate::session_record::ProviderSessionRef,
+            crate::store::session_record::ProviderSessionRef,
         )>,
     > {
         let Some(session) = self.session(session)? else {
@@ -470,7 +470,7 @@ impl SqliteStore {
 
     pub fn save_repository_steer(
         &self,
-        repo: &crate::repository::CanonicalRepo,
+        repo: &crate::store::address::CanonicalRepo,
         author: &str,
         text: &str,
     ) -> StoreResult<Steer> {

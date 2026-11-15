@@ -8,7 +8,7 @@ use super::children::{
     ids_json, map_task_event_row, map_task_pr_row, task_acquisitions_in, TASK_PR_COLUMNS,
 };
 use super::SqliteStore;
-use crate::durable::TaskState;
+use crate::store::execution::TaskState;
 use crate::store::planning_sync::PlanningSyncReceipts;
 use crate::store::work::task::{Task, TaskEvent, TaskId, TaskPr, TaskPrId};
 use crate::store::{StoreError, StoreResult, TaskAcquisition};

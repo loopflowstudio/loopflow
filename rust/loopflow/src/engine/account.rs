@@ -85,10 +85,10 @@ pub fn next(
     } else {
         match repo {
             Some(repo) => Some(
-                crate::repository::CanonicalRepo::discover(Path::new(repo))
+                crate::repository::discover(Path::new(repo))
                     .map_err(|error| Error::new(ErrorCode::Invalid, error.to_string()))?,
             ),
-            None => crate::repository::CanonicalRepo::containing(directory).map_err(unavailable)?,
+            None => crate::repository::containing(directory).map_err(unavailable)?,
         }
     };
     block_on(crate::lf::commands::profile::next(repo_id.as_ref(), agent)).map_err(unavailable)

@@ -1568,7 +1568,7 @@ async fn switch_away(
     if !crate::provider_account::is_active_login(store, provider, account).await? {
         return Ok(());
     }
-    let repo = crate::repository::CanonicalRepo::containing(&std::env::current_dir()?)?;
+    let repo = crate::repository::containing(&std::env::current_dir()?)?;
     match crate::provider_account::replacement_login(store, provider, account, repo.as_ref())
         .await?
     {

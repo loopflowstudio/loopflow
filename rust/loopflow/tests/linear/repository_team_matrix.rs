@@ -7,7 +7,7 @@ use std::process::{Command, Output};
 use loopflow::id::WaveId;
 use loopflow::ops::linear::{canonical_wave_title_path, list_local_waves};
 use loopflow::store::sqlite::SqliteStore;
-use loopflow::work::wave::{Wave, WaveLocator};
+use loopflow::work::wave::Wave;
 
 fn git(repo: &Path, args: &[&str]) {
     let output = Command::new("git")
@@ -79,7 +79,7 @@ fn put_snapshot(
     snapshot: Inventory,
 ) {
     let registered = store
-        .get_wave_at(&WaveLocator::discover(repo, wave).unwrap())
+        .get_wave_at(&loopflow::work::wave::discover(repo, wave).unwrap())
         .unwrap()
         .expect("registered Wave");
     let goal = std::fs::read_to_string(repo.join(".lf/wave").join(wave).join("GOAL.md"))
@@ -160,7 +160,7 @@ fn repository_team_matrix() {
 
     let database = home.join("loopflow.db");
     let store = loopflow::store::open_sqlite(&database).unwrap();
-    let repo_locator = WaveLocator::discover(&repo, "survival").unwrap();
+    let repo_locator = loopflow::work::wave::discover(&repo, "survival").unwrap();
     let survival = Wave::new(
         WaveId::new(),
         "survival".to_string(),
@@ -181,7 +181,8 @@ fn repository_team_matrix() {
     loopflow::work::wave::bootstrap::upsert_wave(&store, &infrastructure).unwrap();
     loopflow::work::wave::bootstrap::upsert_wave(&store, &intelligence).unwrap();
     let foreign_repo = tempfile::tempdir().unwrap();
-    let foreign_locator = WaveLocator::discover(foreign_repo.path(), "intelligence").unwrap();
+    let foreign_locator =
+        loopflow::work::wave::discover(foreign_repo.path(), "intelligence").unwrap();
     loopflow::work::wave::bootstrap::upsert_wave(
         &store,
         &Wave::new(
@@ -330,7 +331,7 @@ fn repository_team_matrix() {
         .initiative_ids
         .push("initiative-survival".into());
     let survival = reopened
-        .get_wave_at(&WaveLocator::discover(&repo, "survival").unwrap())
+        .get_wave_at(&loopflow::work::wave::discover(&repo, "survival").unwrap())
         .unwrap()
         .unwrap();
     let accepted = reopened.list_projects(Some(survival.id())).unwrap();

@@ -2,7 +2,6 @@
 
 use std::path::Path;
 
-use crate::repository::CanonicalRepo;
 use crate::store::sqlite::wave_definitions::WaveBootstrapRow;
 use crate::store::sqlite::SqliteStore;
 use crate::store::work::project::Project;
@@ -52,7 +51,7 @@ fn ensure_wave_inner(
         return Err(invalid("invalid Wave name"));
     }
     let checkout = Path::new(repo);
-    let repo = CanonicalRepo::discover(checkout)
+    let repo = crate::repository::discover(checkout)
         .map_err(invalid)?
         .to_string();
     'acquire: loop {
@@ -364,7 +363,7 @@ mod tests {
         std::fs::create_dir_all(repo.path().join(".lf/wave/research/metrics")).unwrap();
 
         crate::work::wave::bootstrap::register_authored_waves(&store, root).unwrap();
-        let canonical = crate::repository::CanonicalRepo::discover(repo.path())
+        let canonical = crate::repository::discover(repo.path())
             .unwrap()
             .to_string();
         let mut live: Vec<String> = store
@@ -398,7 +397,7 @@ mod tests {
         ))
         .await
         .unwrap();
-        let canonical = crate::repository::CanonicalRepo::discover(repo.path()).unwrap();
+        let canonical = crate::repository::discover(repo.path()).unwrap();
         let id = crate::work::wave::bootstrap::ensure_wave(
             &store.sqlite,
             &canonical.to_string(),
@@ -456,7 +455,7 @@ mod tests {
         let blocked = repo.path().join(".lf/wave/tools/parser/MEMORY.md");
         std::fs::create_dir_all(&blocked).unwrap();
         assert!(super::ensure_wave(&store, repo.path().to_str().unwrap(), "tools/parser").is_err());
-        let canonical = crate::repository::CanonicalRepo::discover(repo.path())
+        let canonical = crate::repository::discover(repo.path())
             .unwrap()
             .to_string();
         assert!(store.repository_id(&canonical).unwrap().is_none());
@@ -489,7 +488,7 @@ mod tests {
             )
             .unwrap();
         assert!(super::ensure_wave(&store, repo.path().to_str().unwrap(), "tools/parser").is_err());
-        let canonical = crate::repository::CanonicalRepo::discover(repo.path())
+        let canonical = crate::repository::discover(repo.path())
             .unwrap()
             .to_string();
         assert!(store.repository_id(&canonical).unwrap().is_none());
@@ -539,7 +538,7 @@ mod tests {
             let path = repo.path().to_str().unwrap();
             let parent = super::ensure_wave(&store, path, "parent").unwrap();
             let id = super::ensure_wave(&store, path, "tools").unwrap();
-            let canonical = crate::repository::CanonicalRepo::discover(repo.path())
+            let canonical = crate::repository::discover(repo.path())
                 .unwrap()
                 .to_string();
             let ids = vec![id.clone()];
@@ -598,7 +597,7 @@ mod tests {
         assert!(!repo.path().join(".lf/wave/tools").exists());
         assert_eq!(
             store.get_wave(&id).unwrap().unwrap().repo(),
-            crate::repository::CanonicalRepo::discover(repo.path())
+            crate::repository::discover(repo.path())
                 .unwrap()
                 .to_string()
         );
@@ -619,7 +618,7 @@ mod tests {
         }
         std::fs::write(repo.path().join(".lf/wave/broken/config.yaml"), "id: [\n").unwrap();
         super::register_authored_waves(&store, path).unwrap();
-        let canonical = crate::repository::CanonicalRepo::discover(repo.path())
+        let canonical = crate::repository::discover(repo.path())
             .unwrap()
             .to_string();
         let live = store.list_waves(Some(&canonical)).unwrap();

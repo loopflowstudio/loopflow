@@ -12,23 +12,9 @@ use super::{conversation_home, scan, ExpiryPolicy, Indexed, RetentionState};
 use crate::harness::HarnessKind;
 use crate::store::sqlite::SqliteStore;
 use crate::store::ProviderAccountId;
-use loopflow_model::id::AgentSessionId;
 
 const WEEK: i64 = 7 * 86_400;
 const NEXT_EXPIRIES: usize = 20;
-
-/// A Session as the summary reads it.
-#[derive(Debug, Clone)]
-pub struct RetainedSession {
-    pub id: String,
-    pub title: String,
-    pub harness: String,
-    pub thread: Option<AgentSessionId>,
-    pub cwd: PathBuf,
-    /// Its last recorded activity, Unix seconds.
-    pub last_at: i64,
-    pub account: Option<ProviderAccountId>,
-}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RetentionSummary {

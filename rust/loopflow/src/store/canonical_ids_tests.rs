@@ -913,8 +913,7 @@ fn canonical_ids_released_work_upgrades_without_replacing_history() {
         "LF-AAAA",
     ] {
         assert_eq!(
-            store
-                .resolve_task_id(selector, None)
+            crate::store::children::resolve_task_id(&store, selector, None)
                 .unwrap()
                 .unwrap()
                 .as_str(),

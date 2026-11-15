@@ -1,6 +1,6 @@
 //! Saved acquisition and ownership facts shared by storage commands.
 
-use crate::work::wave::WaveLocator;
+use crate::store::work::wave::WaveLocator;
 use loopflow_model::id::WaveId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

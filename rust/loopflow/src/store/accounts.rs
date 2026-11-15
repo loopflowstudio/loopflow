@@ -1,6 +1,6 @@
 //! Saved provider accounts, credentials and capacity observations.
 
-use crate::profile::EmailAddress;
+use crate::store::profile::EmailAddress;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

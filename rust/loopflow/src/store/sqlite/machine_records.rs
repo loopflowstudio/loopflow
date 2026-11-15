@@ -3,7 +3,7 @@
 use rusqlite::types::ValueRef;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
-use crate::machine_records::{
+use crate::store::machine_records::{
     CopiedEvent, CopiedHistory, CopiedSession, CopyCounts, Record, RecordKind,
 };
 use crate::store::rows::now_unix;

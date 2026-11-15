@@ -24,8 +24,9 @@ use crate::provider_auth::Provider;
 use crate::repository::CanonicalRepo;
 use crate::session::{LfSession, PrimaryScope, TitleSource, WorkSource};
 use crate::store::sqlite::task_moves::{MoveInFlight, MoveStage};
-use crate::store::sqlite::task_work::{ShipApproval, TaskGraphRecord};
+use crate::store::sqlite::task_work::ShipApproval;
 use crate::store::sqlite::SqliteStore;
+use crate::store::task_work::TaskGraphRecord;
 use crate::store::work::task::Task;
 use crate::store::SharedStore;
 use crate::transcript::{Located, Source};
@@ -255,7 +256,7 @@ pub(crate) async fn send_task(
             task_id: task.id.clone(),
             identifier: task.identifier.clone(),
             ownership_marker: crate::store::sqlite::task_ownership::marker(&claim)?,
-            graph: store.sqlite.task_graph_record(&task.id)?,
+            graph: crate::store::task_work::task_graph_record(&store.sqlite, &task.id)?,
             stopped,
             approval: store.sqlite.task_ship_approval(&task.id)?,
         }),
@@ -511,7 +512,7 @@ fn checkpoint(
         crate::git::push_with_upstream(root, "origin", &branch, &|_| {})
             .with_context(|| format!("push {branch} before moving {name}"))?;
     }
-    let canonical = CanonicalRepo::discover(root)?;
+    let canonical = crate::repository::discover(root)?;
     Ok(MovedCheckout {
         repository_id: store
             .repository_id(&canonical.to_string())?
@@ -662,7 +663,7 @@ async fn receive_move(store: &SharedStore, moved: Move) -> Result<Option<LfSessi
         (None, Some(checkout)) => check_out(&main, checkout)?,
         (None, None) => bail!("Session {} moved without its checkout", moved_session.id),
     };
-    let canonical = CanonicalRepo::discover(&cwd)?;
+    let canonical = crate::repository::discover(&cwd)?;
     let session = admit(store, moved_session, task.as_ref(), &cwd, &canonical).await?;
     let (Some(history), Some(provider)) = (&moved.history, moved_session.provider.as_deref())
     else {
@@ -799,7 +800,8 @@ async fn take_in_task(
         })?;
     }
     if let Some(graph) = &moved.graph {
-        store.sqlite.place_moved_task_graph(
+        crate::store::task_work::place_moved_task_graph(
+            &store.sqlite,
             &moved.task_id,
             graph,
             crate::journal::current_lf_process_id().as_ref(),

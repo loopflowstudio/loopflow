@@ -342,8 +342,7 @@ pub fn selected_task_repository(
     let repo = crate::ops::task::task_repository(directory, selector)?;
     if cli.repo.is_some() {
         anyhow::ensure!(
-            crate::repository::CanonicalRepo::discover(directory)?
-                == crate::repository::CanonicalRepo::discover(&repo)?,
+            crate::repository::discover(directory)? == crate::repository::discover(&repo)?,
             "Task {} does not belong to selected repository {}",
             selector.unwrap_or("in this checkout"),
             directory.display()

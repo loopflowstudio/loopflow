@@ -1,8 +1,8 @@
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
 use serde_json::Value;
 
-use crate::session::{SessionEvent, SessionEventKind};
-use crate::session_record::ProviderSessionRef;
+use crate::store::session::{SessionEvent, SessionEventKind};
+use crate::store::session_record::ProviderSessionRef;
 use crate::store::{ProviderAccountId, StoreError, StoreResult};
 use loopflow_model::id::AgentSessionId;
 
@@ -36,7 +36,7 @@ impl SqliteStore {
             .map(|payload| Ok(serde_json::from_str(&payload?)?))
             .collect::<StoreResult<Vec<Value>>>()?;
         drop(conn);
-        crate::session_record::provider_session_from_history(payloads)
+        crate::store::session_record::provider_session_from_history(payloads)
             .map_err(|error| StoreError::InvalidData(error.to_string()))
     }
 
@@ -46,8 +46,8 @@ impl SqliteStore {
     pub(crate) fn session_turn_facts(
         &self,
         session: &str,
-    ) -> StoreResult<Vec<crate::transcript::ThreadFacts>> {
-        use crate::transcript::{ThreadFacts, TurnFacts};
+    ) -> StoreResult<Vec<crate::store::transcript::ThreadFacts>> {
+        use crate::store::transcript::{ThreadFacts, TurnFacts};
         let mut connection = self.conn.lock().expect("store mutex poisoned");
         let conn = connection.savepoint()?;
         let mut threads: Vec<ThreadFacts> = Vec::new();
@@ -221,7 +221,7 @@ impl SqliteStore {
     /// it ran on, for the retention summary.
     pub(crate) fn retention_sessions(
         &self,
-    ) -> StoreResult<Vec<crate::transcript::summary::RetainedSession>> {
+    ) -> StoreResult<Vec<crate::store::transcript::RetainedSession>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(
             "SELECT s.id,s.title,s.provider,s.provider_thread,s.cwd,
@@ -231,7 +231,7 @@ impl SqliteStore {
              FROM agent_sessions s WHERE s.provider IS NOT NULL ORDER BY s.created_at,s.id",
         )?;
         let rows = query.query_map([], |row| {
-            Ok(crate::transcript::summary::RetainedSession {
+            Ok(crate::store::transcript::RetainedSession {
                 id: row.get(0)?,
                 title: row.get(1)?,
                 harness: row.get(2)?,
@@ -281,7 +281,7 @@ impl SqliteStore {
     pub(crate) fn input_turn_context(
         &self,
         input: &str,
-    ) -> StoreResult<Vec<Option<crate::session::TurnContext>>> {
+    ) -> StoreResult<Vec<Option<crate::store::session::TurnContext>>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(
             "SELECT json_extract(done.payload,'$.context') FROM session_events start
@@ -344,7 +344,7 @@ impl SqliteStore {
             .clone();
         self.retain_session_observation(
             &session,
-            &crate::session::SessionObservation {
+            &crate::store::session::SessionObservation {
                 artifact_key: input,
                 source: format!("store-gap:{first_miss}:{last_miss}"),
                 observed_at: first_miss,
@@ -358,8 +358,8 @@ impl SqliteStore {
 
     pub(crate) fn retain_session_observation(
         &self,
-        session: &crate::session::LfSession,
-        observation: &crate::session::SessionObservation,
+        session: &crate::store::session::LfSession,
+        observation: &crate::store::session::SessionObservation,
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -371,16 +371,16 @@ impl SqliteStore {
     /// Keep one fact of `session`'s captured `input` at stream position `seq`.
     pub(crate) fn record_capture_fact(
         &self,
-        session: &crate::session::LfSession,
+        session: &crate::store::session::LfSession,
         input: &str,
         seq: u64,
         at: time::OffsetDateTime,
-        fact: &crate::session_record::CaptureFact,
+        fact: &crate::store::session_record::CaptureFact,
     ) -> StoreResult<()> {
         let (source, evidence) = fact.observation(seq, at);
         self.retain_session_observation(
             session,
-            &crate::session::SessionObservation {
+            &crate::store::session::SessionObservation {
                 artifact_key: input.to_owned(),
                 payload: serde_json::json!({"input_id": input, "source": source, "evidence": evidence}),
                 source,
@@ -395,8 +395,8 @@ impl SqliteStore {
     pub(crate) fn record_session_activity(
         &self,
         session: &str,
-        attachment: &crate::process::SessionAttachment,
-        activity: &crate::session::SessionActivity,
+        attachment: &crate::store::process::SessionAttachment,
+        activity: &crate::store::session::SessionActivity,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
@@ -419,7 +419,7 @@ impl SqliteStore {
     pub(crate) fn record_session_cpu(
         &self,
         session: &str,
-        attachment: &crate::process::SessionAttachment,
+        attachment: &crate::store::process::SessionAttachment,
         sampled_at: i64,
         quiet_since: Option<i64>,
     ) -> StoreResult<()> {
@@ -436,7 +436,7 @@ impl SqliteStore {
     pub(crate) fn session_liveness(
         &self,
         session: &str,
-    ) -> StoreResult<Option<crate::session::SessionLiveness>> {
+    ) -> StoreResult<Option<crate::store::session::SessionLiveness>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
@@ -447,7 +447,7 @@ impl SqliteStore {
                  AND act.agent_process_id=p.id",
                 [session],
                 |row| {
-                    Ok(crate::session::SessionLiveness {
+                    Ok(crate::store::session::SessionLiveness {
                         observed_at: row.get(0)?,
                         cpu_sampled_at: row.get(1)?,
                         cpu_quiet_since: row.get(2)?,
@@ -576,8 +576,8 @@ impl SqliteStore {
     pub(crate) fn session_turn_origin(
         &self,
         session: &str,
-        attachment: &crate::process::SessionAttachment,
-    ) -> StoreResult<crate::session::SessionTurnOrigin> {
+        attachment: &crate::store::process::SessionAttachment,
+    ) -> StoreResult<crate::store::session::SessionTurnOrigin> {
         let process = attachment.lf_process_id.as_ref().ok_or_else(|| {
             StoreError::InvalidAuthority("Native request has no attached Process".into())
         })?;
@@ -593,7 +593,7 @@ impl SqliteStore {
                 attachment.agent_process_id
             ],
             |row| {
-                Ok(crate::session::SessionTurnOrigin {
+                Ok(crate::store::session::SessionTurnOrigin {
                     session_id: session.into(),
                     lf_process_id: process.clone(),
                     agent_process_id: attachment.agent_process_id.clone(),
@@ -612,7 +612,7 @@ impl SqliteStore {
         &self,
         thread: &AgentSessionId,
         turn: &str,
-        origin: &crate::session::SessionTurnOrigin,
+        origin: &crate::store::session::SessionTurnOrigin,
     ) -> StoreResult<i64> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;

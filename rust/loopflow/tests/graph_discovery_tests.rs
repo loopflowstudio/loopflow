@@ -54,7 +54,7 @@ async fn public_graph_discovery_reads_saved_detail_without_selecting_work() {
     open_ephemeral_store(&StorageConfig::sqlite(dir.path().join("loopflow.db")))
         .await
         .unwrap();
-    let expected_repo = loopflow::repository::CanonicalRepo::discover(dir.path())
+    let expected_repo = loopflow::repository::discover(dir.path())
         .unwrap()
         .to_string();
     // A Graph whose definition no longer exists: only its Processes describe it.

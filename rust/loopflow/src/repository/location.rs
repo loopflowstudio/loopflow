@@ -49,7 +49,7 @@ fn git_locator(repo: &str, machine: &MachineId) -> crate::store::StoreResult<Opt
     let common = if common.is_dir() {
         common
     } else if common.is_file() {
-        let canonical = CanonicalRepo::discover(root).map_err(invalid)?;
+        let canonical = crate::repository::discover(root).map_err(invalid)?;
         if canonical.as_path() != root {
             return Ok(None);
         }
@@ -70,13 +70,13 @@ fn retained_checkout_matches(
     let Ok(observed) = crate::git::worktrees::list_porcelain(Path::new(repo)) else {
         return Ok(false);
     };
-    let canonical = CanonicalRepo::discover(Path::new(repo)).map_err(invalid)?;
+    let canonical = crate::repository::discover(Path::new(repo)).map_err(invalid)?;
     Ok(retained.iter().any(|(path, branch)| {
         let Ok(path) = Path::new(path).canonicalize() else {
             return false;
         };
         path.join(".git").is_file()
-            && canonical.contains(&path)
+            && crate::repository::discover(&path).is_ok_and(|other| other == canonical)
             && observed.iter().any(|(checkout, observed_branch)| {
                 checkout.canonicalize().ok().as_ref() == Some(&path)
                     && observed_branch.as_deref() == Some(branch.as_str())
@@ -229,7 +229,7 @@ pub fn reconcile(
         }
         if let Some(source) = store.repository_path(id)? {
             if source != destination {
-                if let Ok(current) = CanonicalRepo::discover(Path::new(&source)) {
+                if let Ok(current) = crate::repository::discover(Path::new(&source)) {
                     if current != *repo {
                         let source_locator =
                             crate::git::worktrees::git_common_dir(current.as_path())
@@ -336,7 +336,7 @@ pub fn reconnect_current() -> Result<()> {
     if registered.as_deref().map(Path::new) == root.as_deref() && registered.is_some() {
         return Ok(());
     }
-    let Some(repo) = CanonicalRepo::current()? else {
+    let Some(repo) = crate::repository::current()? else {
         return Ok(());
     };
     let needs_enrollment =

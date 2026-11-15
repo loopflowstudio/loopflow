@@ -8,10 +8,10 @@ use std::path::PathBuf;
 
 use rusqlite::{params, Connection, OptionalExtension};
 
-use crate::durable::{GraphProcessFilter, GraphProcessInventoryEntry, GraphProcessPage};
-use crate::graph::compiled::CompiledGraph;
-use crate::graph::process::{GraphProcess, GraphProcessStep};
-use crate::session::{GraphProcessSummary, GraphProcessSummaryState};
+use crate::store::execution::{GraphProcessFilter, GraphProcessInventoryEntry, GraphProcessPage};
+use crate::store::graph::CompiledGraph;
+use crate::store::graph_process::{GraphProcess, GraphProcessStep};
+use crate::store::session::{GraphProcessSummary, GraphProcessSummaryState};
 use crate::store::{StoreError, StoreResult};
 use loopflow_model::durable::TaskId;
 use loopflow_model::id::{LfProcessId, WaveId};
@@ -153,7 +153,7 @@ pub(crate) fn entry_of(
 /// and the receipt files of unfinished Processes.
 #[derive(Debug, Default)]
 pub(crate) struct GraphExecutionFacts {
-    pub open_processes: HashMap<TaskId, Vec<(LfProcessId, crate::process::LfProcess)>>,
+    pub open_processes: HashMap<TaskId, Vec<(LfProcessId, crate::store::process::LfProcess)>>,
     pub inputs: HashMap<LfProcessId, (String, String, i64)>,
     pub receipt_home: Option<PathBuf>,
     pub receipts: HashMap<LfProcessId, String>,
@@ -479,7 +479,7 @@ impl SqliteStore {
         );
         let ids = super::children::ids_json(tasks.iter().map(|task| task.as_str()));
         let mut open_processes =
-            HashMap::<TaskId, Vec<(LfProcessId, crate::process::LfProcess)>>::new();
+            HashMap::<TaskId, Vec<(LfProcessId, crate::store::process::LfProcess)>>::new();
         let columns = PROCESS_SELECT
             .strip_suffix(" FROM processes e")
             .expect("Process select ends with its table");
@@ -564,9 +564,6 @@ impl SqliteStore {
         steps: &[(&str, Option<&str>)],
         graph_outcome: Option<&str>,
     ) -> LfProcessId {
-        use crate::graph::ConcreteSkill;
-        use crate::graph::ConcreteStep;
-        use crate::graph::Skill;
         let graph_process = LfProcessId::new();
         let insert = |id: &LfProcessId,
                       parent: Option<&LfProcessId>,
@@ -595,19 +592,23 @@ impl SqliteStore {
             vec!["lf".into(), "run".into(), name.into()],
             graph_outcome,
         );
-        let compiled: Vec<_> = steps
-            .iter()
-            .map(|(label, _)| {
-                ConcreteStep::Skill(ConcreteSkill {
-                    skill: Skill::named(label),
+        let compiled = crate::store::graph::CompiledGraph {
+            name: name.into(),
+            steps: steps
+                .iter()
+                .enumerate()
+                .map(|(index, (label, _))| crate::store::graph::GraphNode {
+                    key: index as u32,
                     id: None,
+                    label: (*label).into(),
+                    kind: crate::store::graph::GraphNodeKind::Skill,
                     interactive: false,
-                    interactive_name: None,
-                    returns: None,
+                    returns_to: None,
                     sources: Vec::new(),
+                    paths: Vec::new(),
                 })
-            })
-            .collect();
+                .collect(),
+        };
         // A Graph started in a checkout is that Task's, as the launch binds it.
         let task = {
             let conn = self.conn.lock().expect("store mutex poisoned");
@@ -615,12 +616,8 @@ impl SqliteStore {
                 .unwrap()
                 .map(|task| TaskId::parse(&task).unwrap())
         };
-        self.record_graph_process(
-            &graph_process,
-            &CompiledGraph::new(name, &compiled),
-            task.as_ref(),
-        )
-        .unwrap();
+        self.record_graph_process(&graph_process, &compiled, task.as_ref())
+            .unwrap();
         for (index, (label, outcome)) in steps.iter().enumerate() {
             let step = LfProcessId::new();
             let mut argv = vec!["lf".to_string()];
@@ -917,7 +914,6 @@ mod tests {
 
     #[test]
     fn released_flow_records_read_as_graphs_after_the_rename() {
-        use crate::graph::compiled::CompiledGraph;
         use crate::graph::{ConcreteSkill, ConcreteStep, Skill};
 
         let _ledger = crate::journal::TestLedgerGuard::new();
@@ -933,7 +929,7 @@ mod tests {
             returns: None,
             sources: Vec::new(),
         });
-        let compiled = CompiledGraph::new("pursue", &[step]);
+        let compiled = crate::graph::compiled::compile("pursue", &[step]);
         let wave = loopflow_model::id::WaveId::new();
         let task = loopflow_model::durable::TaskId::new();
         let fixture = include_str!("../../../tests/fixtures/migrations/graph_rename_released.sql")

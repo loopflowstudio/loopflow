@@ -221,7 +221,7 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
                 repo: if *all {
                     None
                 } else {
-                    crate::repository::CanonicalRepo::containing(&std::env::current_dir()?)?
+                    crate::repository::containing(&std::env::current_dir()?)?
                         .map(|repo| repo.to_string())
                 },
                 ..Default::default()
@@ -426,7 +426,7 @@ pub(crate) fn list_filter(
         repo: if args.all {
             None
         } else {
-            crate::repository::CanonicalRepo::containing(directory)?.map(|repo| repo.to_string())
+            crate::repository::containing(directory)?.map(|repo| repo.to_string())
         },
         task: args.task.clone(),
         wave: args
@@ -729,10 +729,12 @@ fn copied_sessions(
     filter: &crate::session::SessionFilter,
 ) -> anyhow::Result<Vec<crate::machine_records::CopiedSession>> {
     let task = match &filter.task {
-        Some(selector) => match store.sqlite.resolve_task_id(selector, None)? {
-            Some(task) => Some(task),
-            None => return Ok(Vec::new()),
-        },
+        Some(selector) => {
+            match crate::store::children::resolve_task_id(&store.sqlite, selector, None)? {
+                Some(task) => Some(task),
+                None => return Ok(Vec::new()),
+            }
+        }
         None => None,
     };
     let repository = match &filter.repo {

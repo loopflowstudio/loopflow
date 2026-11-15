@@ -3,10 +3,10 @@
 use crate::store::work::edit::WorkValue as Edit;
 use rusqlite::TransactionBehavior;
 
+use crate::store::metric::MetricTarget;
 use crate::store::planning_sync::PlanningChange;
 use crate::store::work::project::ProjectKR;
 use crate::store::{StoreError, StoreResult};
-use crate::work::wave::metrics::MetricTarget;
 use loopflow_model::durable::ProjectId;
 
 use super::planning_changes::PlanningChanges;

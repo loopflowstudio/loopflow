@@ -515,7 +515,7 @@ fn terminal_context_refreshes_without_replacing_instructions_or_losing_failed_se
         &loopflow::work::wave::Wave::new(
             loopflow::id::WaveId::new(),
             "fixture".into(),
-            loopflow::repository::CanonicalRepo::discover(repo.path())
+            loopflow::repository::discover(repo.path())
                 .unwrap()
                 .to_string(),
         ),

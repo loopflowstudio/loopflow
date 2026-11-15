@@ -125,11 +125,13 @@ pub fn run(issue: Option<&str>) -> OpsResult<()> {
     block_on_task(async {
         let store = task_store().await?;
         let tasks = match issue {
-            Some(issue) => vec![store
-                .sqlite
-                .resolve_task_id(issue, None)
-                .map_err(task_error)?
-                .ok_or_else(|| task_error("Task is unknown"))?],
+            Some(issue) => {
+                vec![
+                    crate::store::children::resolve_task_id(&store.sqlite, issue, None)
+                        .map_err(task_error)?
+                        .ok_or_else(|| task_error("Task is unknown"))?,
+                ]
+            }
             None => store.sqlite.pending_retirements().map_err(task_error)?,
         };
         sweep(&store, &tasks).await

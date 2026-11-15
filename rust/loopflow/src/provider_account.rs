@@ -1802,11 +1802,11 @@ pub(crate) fn launch_repo_id(
     directory: Option<&Path>,
 ) -> Result<Option<CanonicalRepo>, ProviderAccountError> {
     match directory {
-        Some(directory) => Ok(CanonicalRepo::discover(directory).ok()),
+        Some(directory) => Ok(crate::repository::discover(directory).ok()),
         None => {
             let current = std::env::current_dir()
                 .map_err(|error| ProviderAccountError::Runtime(error.to_string()))?;
-            Ok(CanonicalRepo::discover(&current).ok())
+            Ok(crate::repository::discover(&current).ok())
         }
     }
 }
@@ -2784,7 +2784,7 @@ mod account_first_tests {
         for (scope, account) in [
             (RouteScope::Default, &machine),
             (
-                RouteScope::Repo(CanonicalRepo::discover(&repository).unwrap()),
+                RouteScope::Repo(crate::repository::discover(&repository).unwrap()),
                 &project,
             ),
         ] {
@@ -5025,7 +5025,6 @@ mod inspection_tests {
     use crate::profile::{EmailAddress, ProviderRoute, RouteScope};
     use crate::provider_account::{inspect_provider_route, new_account};
     use crate::provider_auth::Provider;
-    use crate::repository::CanonicalRepo;
     use crate::store::{
         open_ephemeral_store, AccountLimitWindow, ProviderAccountId, StorageConfig,
     };
@@ -5088,7 +5087,7 @@ mod inspection_tests {
                 .await
                 .unwrap(),
         );
-        let repo = CanonicalRepo::discover(temp.path()).unwrap();
+        let repo = crate::repository::discover(temp.path()).unwrap();
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
         assert!(
             inspect_provider_route(Some(&store), Some(&repo), Provider::Codex, None)

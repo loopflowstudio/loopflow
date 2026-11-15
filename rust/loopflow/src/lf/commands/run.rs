@@ -361,19 +361,14 @@ fn operator_scope(
     }
     let skill = resolve_skill(skill, cli, cwd)?;
     let scope = match (skill.as_ref().map(|skill| skill.name.as_str()), binding) {
-        (Some("repo-operate"), None) => {
-            PrimaryScope::Repository(crate::repository::CanonicalRepo::discover(cwd)?)
-        }
+        (Some("repo-operate"), None) => PrimaryScope::Repository(crate::repository::discover(cwd)?),
         (Some("wave-operate"), Some(binding)) => match &binding.work {
             WorkRef::Wave(id) => PrimaryScope::Wave(id.clone()),
             _ => return Ok(None),
         },
         _ => return Ok(None),
     };
-    Ok(
-        (crate::repository::CanonicalRepo::discover(cwd)?.as_path() == cwd.canonicalize()?)
-            .then_some(scope),
-    )
+    Ok((crate::repository::discover(cwd)?.as_path() == cwd.canonicalize()?).then_some(scope))
 }
 
 /// Captured identity and body take precedence, including during scope selection.

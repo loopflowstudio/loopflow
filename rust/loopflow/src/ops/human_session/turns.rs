@@ -117,7 +117,7 @@ pub(super) fn raw(store: &SqliteStore, repo: Option<&str>) -> Result<Vec<Session
             }
         }
         if let Some(repo) = repo {
-            let here = crate::repository::CanonicalRepo::containing(&conversation.cwd)
+            let here = crate::repository::containing(&conversation.cwd)
                 .ok()
                 .flatten();
             if here.is_none_or(|here| here.to_string() != repo) {

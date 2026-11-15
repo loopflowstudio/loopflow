@@ -320,15 +320,15 @@ mod tests {
     #[test]
     fn review_positions_are_reported_without_repeating_history() {
         let (_home, store, task) = task_session();
-        store
-            .take_up_task_graph(
-                &task,
-                &crate::task_graph::CapturedGraph {
-                    name: "feature".into(),
-                    steps: Vec::new(),
-                },
-            )
-            .unwrap();
+        crate::store::task_work::take_up_task_graph(
+            &store,
+            &task,
+            &crate::task_graph::CapturedGraph {
+                name: "feature".into(),
+                steps: Vec::new(),
+            },
+        )
+        .unwrap();
         let run = store.test_graph("feature", "/task-updates", &[("gate", None)], None);
         assert!(quiet(&store));
         finish_run(&store, &run, "succeeded");

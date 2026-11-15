@@ -1,5 +1,5 @@
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 use std::str::FromStr;
 
@@ -7,75 +7,30 @@ use serde::{Deserialize, Serialize};
 
 pub mod location;
 
-/// The Machine-local identity of a repository checkout.
-///
-/// Linked worktrees collapse to their main checkout and symlink spellings
-/// collapse to one absolute path. Provider repository identity remains
-/// [`RepoId`]; this type owns local Wave addressing.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[serde(transparent)]
-pub struct CanonicalRepo(PathBuf);
+pub use crate::store::address::{CanonicalRepo, CanonicalRepoError};
 
-#[derive(Debug, thiserror::Error)]
-#[error("cannot canonicalize repository {path}: {message}")]
-pub struct CanonicalRepoError {
-    path: PathBuf,
-    message: String,
+pub fn discover(path: &Path) -> Result<CanonicalRepo, CanonicalRepoError> {
+    let main = crate::git::worktrees::main_repo_root(path).unwrap_or_else(|_| path.to_path_buf());
+    let canonical = main.canonicalize().map_err(|error| CanonicalRepoError {
+        path: main,
+        message: error.to_string(),
+    })?;
+    if !canonical.is_dir() {
+        return Err(CanonicalRepoError {
+            path: canonical,
+            message: "repository root is not a directory".to_string(),
+        });
+    }
+    Ok(CanonicalRepo::from_canonical_path(canonical))
 }
 
-impl CanonicalRepo {
-    pub fn discover(path: &Path) -> Result<Self, CanonicalRepoError> {
-        let main =
-            crate::git::worktrees::main_repo_root(path).unwrap_or_else(|_| path.to_path_buf());
-        let canonical = main.canonicalize().map_err(|error| CanonicalRepoError {
-            path: main,
-            message: error.to_string(),
-        })?;
-        if !canonical.is_dir() {
-            return Err(CanonicalRepoError {
-                path: canonical,
-                message: "repository root is not a directory".to_string(),
-            });
-        }
-        Ok(Self(canonical))
-    }
-
-    /// Decode an address already canonicalized when it was saved.
-    pub(crate) fn from_saved_path(path: PathBuf) -> Self {
-        Self(path)
-    }
-
-    pub fn as_path(&self) -> &Path {
-        &self.0
-    }
-
-    /// The repository scope of the current working directory, or `None` when the
-    /// cwd is outside any git checkout (nothing to scope to).
-    pub fn current() -> anyhow::Result<Option<Self>> {
-        Self::containing(&std::env::current_dir()?)
-    }
-
-    /// The repository scope of `directory`, as [`Self::current`] reads the cwd.
-    pub fn containing(directory: &Path) -> anyhow::Result<Option<Self>> {
-        crate::repo::discover_repo_root(directory)?
-            .map(|root| Self::discover(&root).map_err(Into::into))
-            .transpose()
-    }
-
-    /// Whether `path` resolves to this same repository, collapsing worktrees to
-    /// their main checkout. A path that no longer exists on disk is not "this
-    /// repo" and returns `false`.
-    pub fn contains(&self, path: &Path) -> bool {
-        Self::discover(path)
-            .map(|other| &other == self)
-            .unwrap_or(false)
-    }
+pub fn current() -> anyhow::Result<Option<CanonicalRepo>> {
+    containing(&std::env::current_dir()?)
 }
-
-impl fmt::Display for CanonicalRepo {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.display().fmt(formatter)
-    }
+pub fn containing(directory: &Path) -> anyhow::Result<Option<CanonicalRepo>> {
+    crate::repo::discover_repo_root(directory)?
+        .map(|root| discover(&root).map_err(Into::into))
+        .transpose()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -204,19 +159,19 @@ mod tests {
             &["worktree", "add", "-b", "child", worktree.to_str().unwrap()],
         );
 
-        let scope_a = CanonicalRepo::discover(repo_a.path()).expect("discover A");
+        let scope_a = crate::repository::discover(repo_a.path()).expect("discover A");
         assert_eq!(
-            CanonicalRepo::discover(&worktree).expect("discover worktree"),
+            crate::repository::discover(&worktree).expect("discover worktree"),
             scope_a,
             "worktree should resolve to its main checkout"
         );
-        assert!(scope_a.contains(&worktree));
+        assert_eq!(crate::repository::discover(&worktree).unwrap(), scope_a);
 
         // A distinct repository is a different scope.
-        assert!(!scope_a.contains(repo_b.path()));
+        assert_ne!(crate::repository::discover(repo_b.path()).unwrap(), scope_a);
 
         // A path outside any checkout is not this repo.
-        assert!(!scope_a.contains(Path::new("/nonexistent/path")));
+        assert!(crate::repository::discover(Path::new("/nonexistent/path")).is_err());
     }
 
     #[test]

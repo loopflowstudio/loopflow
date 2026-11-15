@@ -7,3 +7,5 @@ pub mod task;
 
 #[cfg(test)]
 mod selection_tests;
+
+pub mod wave;

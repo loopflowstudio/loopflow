@@ -4,15 +4,15 @@ use std::time::Duration;
 
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
-use crate::profile::{AccessProfile, EmailAddress, ProfileId};
-use crate::provider_auth::Provider;
+use crate::store::profile::{AccessProfile, EmailAddress, ProfileId};
+use crate::store::provider::Provider;
 use crate::store::rows::{map_wave_row, now_unix};
 use crate::store::token_crypto;
+use crate::store::work::wave::{Wave, WaveLocator};
 use crate::store::{
     AccountLimitRow, CredentialState, ProviderAccount, ProviderAccountId, ProviderTokenReplacement,
     RoutingState, StoreError, StoreResult, WaveLocatorUpdate,
 };
-use crate::work::wave::{Wave, WaveLocator};
 use loopflow_model::durable::{ProjectId, TaskId, WorkRef};
 use loopflow_model::id::{AgentSessionId, WaveId};
 
@@ -56,7 +56,7 @@ fn write_account_windows(
 
 mod account_selection;
 mod admission;
-mod children;
+pub(crate) mod children;
 pub(crate) mod ci_incidents;
 pub mod creation;
 pub(crate) mod durable;
@@ -956,7 +956,7 @@ impl SqliteStore {
     pub(crate) fn provider_auth_snapshot(
         &self,
         provider: Provider,
-    ) -> StoreResult<Option<crate::provider_auth::ProviderAuthSnapshot>> {
+    ) -> StoreResult<Option<crate::store::provider::ProviderAuthSnapshot>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
             "SELECT login, expires_at, credential_type FROM provider_tokens WHERE provider = ?1",
@@ -970,12 +970,12 @@ impl SqliteStore {
         )
         .optional()?
         .map(|(login, expires_at, credential_type)| {
-            Ok(crate::provider_auth::ProviderAuthSnapshot {
+            Ok(crate::store::provider::ProviderAuthSnapshot {
                 provider,
                 status: if expires_at.is_some_and(|expiry| expiry <= now_unix()) {
-                    crate::provider_auth::AuthStatus::Expired
+                    crate::store::provider::AuthStatus::Expired
                 } else {
-                    crate::provider_auth::AuthStatus::Active { login }
+                    crate::store::provider::AuthStatus::Active { login }
                 },
                 expires_at,
                 next_refresh_at: None,
@@ -1841,14 +1841,14 @@ impl SqliteStore {
     /// ([`processes::FORGETTABLE`]). Each statement commits on its own so a
     /// writer holds the lock only briefly; a row an interrupted exit leaves is
     /// forgotten by the retention prune.
-    pub fn record_process(&self, process: &crate::process::LfProcess) -> StoreResult<()> {
+    pub fn record_process(&self, process: &crate::store::process::LfProcess) -> StoreResult<()> {
         self.record_hosted_process(process, None)
     }
 
     /// Record a Process start or exit; a start inside a held terminal names it.
     fn record_hosted_process(
         &self,
-        process: &crate::process::LfProcess,
+        process: &crate::store::process::LfProcess,
         held_terminal: Option<&loopflow_model::id::TerminalId>,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -1875,7 +1875,7 @@ impl SqliteStore {
     /// is one attempt.
     pub(crate) fn record_process_within(
         &self,
-        process: &crate::process::LfProcess,
+        process: &crate::store::process::LfProcess,
         held_terminal: Option<&loopflow_model::id::TerminalId>,
         wait: Duration,
     ) -> StoreResult<()> {
@@ -1905,7 +1905,7 @@ impl SqliteStore {
 /// in, so rules scoped to that terminal find the work started inside it.
 pub(super) fn record_process_in(
     conn: &rusqlite::Connection,
-    process: &crate::process::LfProcess,
+    process: &crate::store::process::LfProcess,
     held_terminal: Option<&loopflow_model::id::TerminalId>,
 ) -> StoreResult<()> {
     conn.execute(

@@ -241,7 +241,7 @@ fn a_copied_session_opens_after_its_origin_is_gone() {
     assert_eq!(history.task_id.as_deref(), Some(TASK));
     assert_eq!(history.events.len(), 1);
     assert_eq!(history.events[0].kind, "captured");
-    let shown = history.render(laptop_home.path());
+    let shown = super::render(&history, laptop_home.path());
     assert!(
         shown.contains(&format!("Session {SESSION} · from {origin}")),
         "{shown}"

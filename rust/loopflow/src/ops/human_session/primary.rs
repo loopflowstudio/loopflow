@@ -30,7 +30,7 @@ pub(crate) async fn ensure(
         Some(binding) => {
             PrimaryScope::Wave(binding.wave_id.clone().expect("explicit Wave selection"))
         }
-        None => PrimaryScope::Repository(crate::repository::CanonicalRepo::discover(repo)?),
+        None => PrimaryScope::Repository(crate::repository::discover(repo)?),
     };
     let _lock = lock_scope(&scope).await?;
     if let Some(previous) = store.sqlite.primary_session(&scope)? {
@@ -38,7 +38,7 @@ pub(crate) async fn ensure(
     }
     let session = match &binding {
         Some(binding) => wave_session(binding)?,
-        None => repository_session(&crate::repository::CanonicalRepo::discover(repo)?)?,
+        None => repository_session(&crate::repository::discover(repo)?)?,
     };
     let session = store.ensure_primary_session(&scope, session).await?;
     Ok((prepare(store, &session.id).await?, true))
@@ -459,7 +459,7 @@ mod tests {
         tokio::runtime::Runtime::new().unwrap().block_on(async {
             let store = home.store().await;
             let repo = loopflow_test_support::TestRepo::new();
-            let canonical = crate::repository::CanonicalRepo::discover(repo.path()).unwrap();
+            let canonical = crate::repository::discover(repo.path()).unwrap();
             let previous = store
                 .ensure_primary_session(
                     &crate::session::PrimaryScope::Repository(canonical.clone()),

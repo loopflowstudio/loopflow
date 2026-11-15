@@ -1016,7 +1016,7 @@ fn project_creation_binding_and_activation_save_offline() {
         }
         let path = home.path().join("loopflow.db");
         let store = loopflow::store::open_sqlite(&path).unwrap();
-        let canonical = loopflow::repository::CanonicalRepo::discover(repo.path()).unwrap();
+        let canonical = loopflow::repository::discover(repo.path()).unwrap();
         let wave = loopflow::work::wave::Wave::new(
             loopflow::id::WaveId::new(),
             "product".into(),
@@ -1222,7 +1222,7 @@ fn project_reads_keep_canonical_identity_and_authored_order_after_edits() {
         }
         let home = tempfile::tempdir().unwrap();
         let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
-        let canonical = loopflow::repository::CanonicalRepo::discover(repo.path()).unwrap();
+        let canonical = loopflow::repository::discover(repo.path()).unwrap();
         let wave = loopflow::work::wave::Wave::new(
             loopflow::id::WaveId::new(),
             "product".into(),
@@ -1387,7 +1387,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             .unwrap();
         }
         let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
-        let canonical = loopflow::repository::CanonicalRepo::discover(repo.path()).unwrap();
+        let canonical = loopflow::repository::discover(repo.path()).unwrap();
         let wave = loopflow::work::wave::Wave::new(
             loopflow::id::WaveId::new(),
             "product".into(),
@@ -1659,7 +1659,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
         }
         let path = home.path().join("loopflow.db");
         let store = loopflow::store::open_sqlite(&path).unwrap();
-        let canonical = loopflow::repository::CanonicalRepo::discover(repo.path()).unwrap();
+        let canonical = loopflow::repository::discover(repo.path()).unwrap();
         let wave = loopflow::work::wave::Wave::new(
             loopflow::id::WaveId::new(),
             "product".into(),
@@ -2013,7 +2013,7 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
         }
         let path = home.path().join("loopflow.db");
         let store = loopflow::store::open_sqlite(&path).unwrap();
-        let canonical = loopflow::repository::CanonicalRepo::discover(repo.path()).unwrap();
+        let canonical = loopflow::repository::discover(repo.path()).unwrap();
         let db = rusqlite::Connection::open(&path).unwrap();
         let mut projects = Vec::new();
         let mut observations = Vec::new();
@@ -3124,7 +3124,7 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
             "team_id":"team","due_date":"2026-10-11", "assignee":null, "url":null},
         "project":observed,"observed_at":17
     })).unwrap();
-    let scope = loopflow::repository::CanonicalRepo::discover(repo.path())
+    let scope = loopflow::repository::discover(repo.path())
         .unwrap()
         .to_string();
     store

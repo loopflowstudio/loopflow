@@ -87,10 +87,12 @@ pub(super) async fn resolve_target<'a>(
     if store.session(id).await?.is_some() {
         return Ok(target);
     }
-    Ok(match store.sqlite.resolve_task_id(id, None)? {
-        Some(_) => SessionTarget::Task(id),
-        None => target,
-    })
+    Ok(
+        match crate::store::children::resolve_task_id(&store.sqlite, id, None)? {
+            Some(_) => SessionTarget::Task(id),
+            None => target,
+        },
+    )
 }
 
 /// Resolve physical checkout ownership without admitting a conversation.
@@ -119,7 +121,7 @@ pub(super) async fn checkout_conversation(
 }
 
 pub(super) fn unassociated_checkout(cwd: &Path) -> Result<anyhow::Error> {
-    let path = crate::repository::CanonicalRepo::discover(cwd)?.to_string();
+    let path = crate::repository::discover(cwd)?.to_string();
     let command = shlex::try_join(["lf", "--repo", path.as_str(), "resume"])?;
     Ok(anyhow!("This worktree has no associated work conversation.\n  lf                         Start a new conversation in this worktree\n  {command}  Open the repository's ongoing conversation\n  lf resume SESSION          Continue a particular conversation"))
 }
@@ -157,7 +159,7 @@ pub(crate) async fn checkout_scope(
             ),
         }));
     }
-    let repo = crate::repository::CanonicalRepo::discover(cwd)?;
+    let repo = crate::repository::discover(cwd)?;
     if matches!(target, SessionTarget::Repository) {
         return Ok(Some(PrimaryScope::Repository(repo)));
     }
@@ -593,7 +595,7 @@ pub(crate) async fn list(
     let mut workspaces = workspace::associate(store, &mut sessions).await?;
     turns::read(&store.sqlite, &mut sessions)?;
     let task = match &filter.task {
-        Some(selector) => store.sqlite.resolve_task_id(selector, None)?,
+        Some(selector) => crate::store::children::resolve_task_id(&store.sqlite, selector, None)?,
         None => None,
     };
     let in_task = |session: &SessionRecord| {

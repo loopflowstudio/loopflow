@@ -3,11 +3,11 @@ use std::collections::BTreeMap;
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
 use time::OffsetDateTime;
 
-use crate::store::{StoreError, StoreResult};
-use crate::work::wave::metrics::{
+use crate::store::metric::{
     MetricContract, MetricIdentity, MetricObservation, MetricObservationEvidence,
     ObservationAcceptance,
 };
+use crate::store::{StoreError, StoreResult};
 #[cfg(test)]
 use loopflow_model::id::WaveId;
 

@@ -876,7 +876,7 @@ impl SqliteStore {
         let entry = move_in(&tx, task, target, me)?;
         super::sessions::complete_primary_session_in(
             &tx,
-            &crate::session::PrimaryScope::Task(task.clone()),
+            &crate::store::session::PrimaryScope::Task(task.clone()),
         )?;
         tx.commit()?;
         Ok(Some(entry))

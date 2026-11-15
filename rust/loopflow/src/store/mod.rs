@@ -8,20 +8,26 @@ use crate::provider_auth::Provider;
 use crate::work::wave::{Wave, WaveLocator};
 use loopflow_model::id::{AgentSessionId, WaveId};
 mod accounts;
+pub mod address;
 pub(crate) mod admission;
 mod canonical_ids;
 pub(crate) mod capacity;
 pub(crate) mod changes;
 pub mod child;
-mod children;
+pub(crate) mod children;
 pub(crate) mod ci_incidents;
 pub mod contention;
 pub(crate) mod copy;
 mod durable;
 mod error;
+pub mod execution;
+pub mod graph;
+pub(crate) mod graph_process;
 pub(crate) mod instrumentation;
 pub mod linear_records;
+pub mod machine_records;
 pub mod machines;
+pub mod metric;
 mod metrics;
 #[cfg(test)]
 mod migration_build;
@@ -30,9 +36,18 @@ mod migration_runner;
 mod migration_schema;
 pub mod migrations;
 pub(crate) mod opening;
+pub mod planning_destination;
 pub mod planning_exchange;
 pub mod pr_landing;
+pub mod process;
+pub mod profile;
+pub mod provider;
 pub mod rental;
+pub mod session;
+pub mod session_record;
+pub mod steer;
+pub mod task_session;
+pub mod transcript;
 pub mod work;
 pub use opening::open_sqlite;
 pub mod ownership;
@@ -322,7 +337,7 @@ impl Store {
         let Some(repo) = repo else {
             return run_sqlite(&self.sqlite, move |store| store.list_waves(None)).await;
         };
-        let canonical = match crate::repository::CanonicalRepo::discover(Path::new(repo)) {
+        let canonical = match crate::repository::discover(Path::new(repo)) {
             Ok(canonical) => canonical,
             Err(_) => {
                 let repo = repo.to_string();
@@ -336,7 +351,7 @@ impl Store {
             .into_iter()
             .filter(|wave| {
                 wave.repo() == canonical.to_string()
-                    || crate::repository::CanonicalRepo::discover(Path::new(wave.repo()))
+                    || crate::repository::discover(Path::new(wave.repo()))
                         .is_ok_and(|stored| stored == canonical)
             })
             .collect())
@@ -369,7 +384,7 @@ impl Store {
         let equivalent = candidates
             .into_iter()
             .filter(|wave| {
-                crate::repository::CanonicalRepo::discover(Path::new(wave.repo()))
+                crate::repository::discover(Path::new(wave.repo()))
                     .is_ok_and(|repo| &repo == locator.repo())
             })
             .collect::<Vec<_>>();
@@ -1310,9 +1325,7 @@ mod tests {
                     },
                 )],
             };
-            store
-                .sqlite
-                .take_up_task_graph(&task.id, &definition)
+            crate::store::task_work::take_up_task_graph(&store.sqlite, &task.id, &definition)
                 .unwrap();
             store
                 .sqlite

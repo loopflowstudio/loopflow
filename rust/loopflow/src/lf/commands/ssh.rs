@@ -575,7 +575,7 @@ fn build_preamble(cmd: &[String], extra_env: &[(&str, &str)]) -> String {
 fn current_repository(
     directory: &std::path::Path,
 ) -> anyhow::Result<Option<loopflow_model::durable::RepositoryId>> {
-    let Some(repo) = crate::repository::CanonicalRepo::containing(directory)? else {
+    let Some(repo) = crate::repository::containing(directory)? else {
         return Ok(None);
     };
     let Some(store) = crate::store::read_existing_registry()? else {

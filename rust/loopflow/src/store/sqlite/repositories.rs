@@ -185,8 +185,8 @@ impl SqliteStore {
         repository: &RepositoryId,
         task: &TaskId,
         request: &str,
-    ) -> StoreResult<crate::durable::TaskLocationObservation> {
-        use crate::durable::{TaskLocation, TaskLocationObservation};
+    ) -> StoreResult<crate::store::execution::TaskLocationObservation> {
+        use crate::store::execution::{TaskLocation, TaskLocationObservation};
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         // One snapshot that only reads: a savepoint, not the write lock.
         let tx = conn.savepoint()?;
@@ -197,8 +197,13 @@ impl SqliteStore {
                 [repository.as_str()],
                 |row| row.get(0),
             )?;
-            let id = super::children::resolve_task_id_in(&tx, task.as_str(), Some(&repo))?
-                .ok_or(StoreError::NotFound)?;
+            let id = super::children::resolve_task_id_in(
+                &tx,
+                task.as_str(),
+                Some(std::slice::from_ref(&repo)),
+                None,
+            )?
+            .ok_or(StoreError::NotFound)?;
             let checkout: Option<String> = tx
                 .query_row(
                     "SELECT worktree FROM task_checkouts WHERE task_id=?1",

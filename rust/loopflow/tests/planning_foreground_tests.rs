@@ -198,9 +198,12 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
             right.path().join("loopflow.db"),
         )))
         .unwrap();
-    let binding =
-        PlanningDestination::resolve(&source, "origin", "refs/loopflow/planning/shared/fixture")
-            .unwrap();
+    let binding = loopflow::planning_git::resolve_destination(
+        &source,
+        "origin",
+        "refs/loopflow/planning/shared/fixture",
+    )
+    .unwrap();
     configure(&source, &binding);
     configure(&target, &binding);
     runtime.block_on(async {
@@ -499,7 +502,7 @@ fn fetched_invalid_document_does_not_claim_import_or_publication() {
         .unwrap();
     let repo_path = repo.path().canonicalize().unwrap();
     let repo_key = repo_path.to_str().unwrap();
-    let binding = PlanningDestination::resolve(
+    let binding = loopflow::planning_git::resolve_destination(
         repo.path(),
         "origin",
         "refs/loopflow/planning/shared/invalid",
@@ -620,7 +623,7 @@ fn taskless_terminal_and_headless_sessions_keep_planning_live() {
             right.path().join("loopflow.db"),
         )))
         .unwrap();
-    let binding = PlanningDestination::resolve(
+    let binding = loopflow::planning_git::resolve_destination(
         &source_path,
         "origin",
         "refs/loopflow/planning/shared/taskless",
@@ -710,9 +713,12 @@ fn public_wave_reads_imported_planning_without_placing_or_changing_execution() {
     let source_store = loopflow::store::open_sqlite(&left.path().join("loopflow.db")).unwrap();
     let retained = create(&target, right.path(), "");
     let worker = loopflow::store::open_sqlite(&right.path().join("loopflow.db")).unwrap();
-    let binding =
-        PlanningDestination::resolve(&source, "origin", "refs/loopflow/planning/shared/fixture")
-            .unwrap();
+    let binding = loopflow::planning_git::resolve_destination(
+        &source,
+        "origin",
+        "refs/loopflow/planning/shared/fixture",
+    )
+    .unwrap();
     configure(&source, &binding);
     configure(&target, &binding);
     let source_key = source.to_str().unwrap();
@@ -885,9 +891,12 @@ fn planning_journal_reads_retained_changes_without_inventing_recovery_records() 
     let config = config_path
         .exists()
         .then(|| fs::read(&config_path).unwrap());
-    let other =
-        PlanningDestination::resolve(&source, "origin", "refs/loopflow/planning/shared/other")
-            .unwrap();
+    let other = loopflow::planning_git::resolve_destination(
+        &source,
+        "origin",
+        "refs/loopflow/planning/shared/other",
+    )
+    .unwrap();
     configure(&source, &other);
     let switched: serde_json::Value = serde_json::from_str(&run(
         &source,

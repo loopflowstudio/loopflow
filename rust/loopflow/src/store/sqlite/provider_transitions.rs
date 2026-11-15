@@ -201,7 +201,7 @@ impl SqliteStore {
 
     pub(crate) fn record_provider_lineage(
         &self,
-        next: &crate::session::LfSession,
+        next: &crate::store::session::LfSession,
         source: &ProviderLineage,
     ) -> StoreResult<()> {
         let mut payload = serde_json::to_value(source)?;

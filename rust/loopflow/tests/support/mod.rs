@@ -824,7 +824,7 @@ pub fn record_graph(home: &Path, cwd: &Path, graph: &str, label: &str, outcome: 
         )
         .expect("record Graph Process");
     }
-    let compiled = loopflow::graph::compiled::CompiledGraph::new(
+    let compiled = loopflow::graph::compiled::compile(
         graph,
         &[ConcreteStep::Skill(ConcreteSkill {
             skill: Skill::named(label),

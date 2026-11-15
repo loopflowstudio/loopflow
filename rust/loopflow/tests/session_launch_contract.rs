@@ -135,7 +135,7 @@ elif os.path.basename(sys.argv[0]) == 'codex':
             &loopflow::work::wave::Wave::new(
                 loopflow::id::WaveId::new(),
                 "fixture".into(),
-                loopflow::repository::CanonicalRepo::discover(self.repo.path())
+                loopflow::repository::discover(self.repo.path())
                     .unwrap()
                     .to_string(),
             ),

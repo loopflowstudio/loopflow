@@ -2,8 +2,8 @@ use crate::process::attachment;
 use rusqlite::{params, OptionalExtension};
 
 use super::{save_in, SqliteStore};
-use crate::steer::{NativeBoundary, Steer, SteerAdapter};
 use crate::store::sqlite::sessions::TerminalRetention::LiveTurn;
+use crate::store::steer::{NativeBoundary, Steer, SteerAdapter};
 use crate::store::StoreError;
 use loopflow_model::durable::Author;
 use loopflow_model::id::{LfProcessId, TerminalId};
@@ -24,7 +24,7 @@ const CLEAR: NativeBoundary<'static> = NativeBoundary::Select { source: "clear" 
 fn fixture() -> (tempfile::TempDir, SqliteStore, SteerAdapter) {
     let home = tempfile::tempdir().unwrap();
     let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
-    store.test_session("session", &crate::session_record::new_artifact_key());
+    store.test_session("session", &crate::store::session_record::new_artifact_key());
     let process = LfProcessId::new();
     store
         .conn
@@ -83,7 +83,7 @@ fn pending_requests_hold_the_terminal_until_the_current_attachment_settles_them(
     let first = store.session_attachment("session").unwrap().unwrap();
     let owner = first.lf_process_id.as_ref().unwrap();
     let terminal = hold(&store);
-    let mut activity = crate::session::SessionActivity {
+    let mut activity = crate::store::session::SessionActivity {
         preview: None,
         observed_at: 1,
         open_tools: 0,
@@ -488,7 +488,7 @@ fn source_revisions_supersede_unread_ones_and_keep_complete_sources() {
 fn scopes_graph_downward_and_each_session_reads_for_itself() {
     let (_home, store, adapter) = fixture();
     for name in ["peer", "sibling", "parent", "taskless"] {
-        store.test_session(name, &crate::session_record::new_artifact_key());
+        store.test_session(name, &crate::store::session_record::new_artifact_key());
     }
     let root = loopflow_model::id::WaveId::new();
     let child = loopflow_model::id::WaveId::new();
@@ -650,7 +650,7 @@ fn a_new_task_session_skips_steers_an_earlier_session_read() {
     assert_eq!(read(&store, &adapter, "native").len(), 1);
     // Pending for no Session when the next one starts.
     save("unread", "Never read");
-    store.test_session("next", &crate::session_record::new_artifact_key());
+    store.test_session("next", &crate::store::session_record::new_artifact_key());
     store
         .conn
         .lock()
@@ -660,7 +660,7 @@ fn a_new_task_session_skips_steers_an_earlier_session_read() {
             UPDATE agent_sessions SET cwd='/task',created_at=unixepoch()-5 WHERE id='next';",
         )
         .unwrap();
-    let texts = |page: crate::steer::SessionSteerPage| {
+    let texts = |page: crate::store::steer::SessionSteerPage| {
         page.items
             .into_iter()
             .map(|item| item.steer.text)
@@ -787,7 +787,7 @@ fn a_cleared_conversation_is_what_reconnect_resumes_on_the_same_account() {
     store
         .retain_session_observation(
             &session,
-            &crate::session_record::provider_session_observation(
+            &crate::store::session_record::provider_session_observation(
                 &session,
                 &input,
                 &"native".into(),

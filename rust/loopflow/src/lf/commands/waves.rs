@@ -511,12 +511,14 @@ fn scope_waves_to_repo(waves: Vec<Wave>, directory: &Path, all: bool) -> Result<
     if all {
         return Ok(waves);
     }
-    let Some(scope) = crate::repository::CanonicalRepo::containing(directory)? else {
+    let Some(scope) = crate::repository::containing(directory)? else {
         return Ok(waves);
     };
     Ok(waves
         .into_iter()
-        .filter(|wave| scope.contains(Path::new(wave.repo())))
+        .filter(|wave| {
+            crate::repository::discover(Path::new(wave.repo())).is_ok_and(|other| other == scope)
+        })
         .collect())
 }
 
@@ -768,7 +770,7 @@ fn removed_wave_at(
     let (Some(repo), Some(wave)) = (repo, wave) else {
         return Ok(None);
     };
-    let locator = crate::work::wave::WaveLocator::discover(repo, wave)?;
+    let locator = crate::work::wave::discover(repo, wave)?;
     Ok(store.sqlite.retired_wave_at(&locator)?)
 }
 
@@ -830,10 +832,13 @@ async fn show_roadmap(
             if task.is_some() && !all {
                 // Exact destinations carry a repository even when only its
                 // cached registration survives, without Git metadata.
-                let scope = crate::repository::CanonicalRepo::discover(directory)?;
+                let scope = crate::repository::discover(directory)?;
                 waves
                     .into_iter()
-                    .filter(|wave| scope.contains(Path::new(wave.repo())))
+                    .filter(|wave| {
+                        crate::repository::discover(Path::new(wave.repo()))
+                            .is_ok_and(|other| other == scope)
+                    })
                     .collect()
             } else {
                 scope_waves_to_repo(waves, directory, all)?
@@ -1103,7 +1108,7 @@ async fn repository_scope(
     repo: &Path,
     wave: Option<&str>,
 ) -> Result<Option<RepositoryScope>> {
-    let canonical = crate::repository::CanonicalRepo::discover(repo)?.to_string();
+    let canonical = crate::repository::discover(repo)?.to_string();
     let Some(id) = store.sqlite.repository_id(&canonical)? else {
         return Ok(None);
     };
@@ -1197,9 +1202,7 @@ async fn closed_task_page(
     };
     let after = after
         .map(|selector| {
-            store
-                .sqlite
-                .resolve_task_id(selector, Some(&scope.repo))?
+            crate::store::children::resolve_task_id(&store.sqlite, selector, Some(&scope.repo))?
                 .ok_or_else(|| anyhow!("no Task {selector} to continue after"))
         })
         .transpose()?;
@@ -1246,7 +1249,7 @@ async fn roadmap_snapshot(
         None => store.list_open_tasks(None).await?,
     };
     if let Some(repo) = repo_scope {
-        let repo = crate::repository::CanonicalRepo::discover(repo)?;
+        let repo = crate::repository::discover(repo)?;
         let repository = store.sqlite.repository_id(&repo.to_string())?;
         tasks.retain(|task| Some(&task.repository_id) == repository.as_ref());
     }
@@ -1261,7 +1264,9 @@ async fn roadmap_snapshot(
                 .sqlite
                 .repository_path(repository)?
                 .ok_or_else(|| anyhow!("Task repository {repository} has no local path"))?;
-            if let Some(id) = store.sqlite.resolve_task_id(selector, Some(&path))? {
+            if let Some(id) =
+                crate::store::children::resolve_task_id(&store.sqlite, selector, Some(&path))?
+            {
                 selected.insert(id);
             }
         }
@@ -1378,9 +1383,8 @@ async fn wave_tasks(
     };
     // Selection does not discard other Projects' backlog or ongoing work.
     if let Some(identifier) = identifier {
-        let selected = store
-            .sqlite
-            .resolve_task_id(identifier, Some(wave.repo()))?;
+        let selected =
+            crate::store::children::resolve_task_id(&store.sqlite, identifier, Some(wave.repo()))?;
         tasks.retain(|task| selected.as_ref() == Some(&task.id));
     }
     let (details, unavailable_tasks) = snapshot_tasks(
@@ -1463,7 +1467,7 @@ fn wave_checkout(wave: &Wave, checkouts: &mut Checkouts) -> Result<PathBuf> {
     if checkouts.current.is_none() {
         let current = match crate::repo::discover_repo_root(&std::env::current_dir()?)? {
             Some(checkout) => {
-                let repo = crate::repository::CanonicalRepo::discover(&checkout)?;
+                let repo = crate::repository::discover(&checkout)?;
                 Some((checkout, repo))
             }
             None => None,

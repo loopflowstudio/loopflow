@@ -1,7 +1,7 @@
 //! Retained provider planning records and their pure syntax.
 use super::{StoreError, StoreResult};
+use crate::store::metric::MetricTarget;
 use crate::store::work::project::{ProjectKR, ProjectStatus};
-use crate::work::wave::metrics::MetricTarget;
 use loopflow_model::comment::{TaskComment, TaskCommentAuthor};
 use serde::{Deserialize, Serialize};
 

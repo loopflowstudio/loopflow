@@ -70,9 +70,7 @@ async fn resolve_task(
     repo: Option<&str>,
     selector: &str,
 ) -> OpsResult<Option<Task>> {
-    if let Some(id) = store
-        .sqlite
-        .resolve_task_id(selector, repo)
+    if let Some(id) = crate::store::children::resolve_task_id(&store.sqlite, selector, repo)
         .map_err(task_error)?
     {
         return store.get_task(&id).await.map_err(task_error);
@@ -373,7 +371,7 @@ pub fn task_repository(directory: &Path, selector: Option<&str>) -> OpsResult<st
     let current = crate::repo::discover_repo_root(directory).map_err(task_error)?;
     let scope = current
         .as_ref()
-        .map(|repo| crate::repository::CanonicalRepo::discover(repo).map(|repo| repo.to_string()))
+        .map(|repo| crate::repository::discover(repo).map(|repo| repo.to_string()))
         .transpose()
         .map_err(task_error)?;
     if let Some(selector) = selector {

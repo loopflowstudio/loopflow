@@ -394,7 +394,7 @@ fn publish(report: &ContextCostReport, now: OffsetDateTime) -> Vec<String> {
         return Vec::new();
     }
     let published = (|| -> Result<Vec<String>> {
-        let Some(repo) = crate::repository::CanonicalRepo::current()? else {
+        let Some(repo) = crate::repository::current()? else {
             return Ok(vec!["not in a repository; not persisted".to_string()]);
         };
         tokio::runtime::Runtime::new()?.block_on(async {

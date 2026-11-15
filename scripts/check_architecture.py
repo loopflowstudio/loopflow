@@ -29,7 +29,7 @@ ARCHITECTURE = Path("docs/dev/reference.md")
 MIGRATIONS = Path("rust/loopflow/src/store/migrations")
 LF_MOD = Path("rust/loopflow/src/lf/mod.rs")
 CRATE_MANIFEST = Path("rust/loopflow/Cargo.toml")
-PROVIDERS = Path("rust/loopflow/src/provider_auth/mod.rs")
+PROVIDERS = Path("rust/loopflow/src/store/provider.rs")
 GRAPHS = Path(".lf/graphs")
 
 CODE_TOKEN = re.compile(r"`([^`]+)`")

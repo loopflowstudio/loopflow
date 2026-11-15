@@ -2,7 +2,7 @@
 mod panes;
 use super::sessions::{SessionProjection, SessionProjectionInputs};
 use super::SqliteStore;
-use crate::durable::{TaskSection, TaskState};
+use crate::store::execution::{TaskSection, TaskState};
 
 use crate::store::work::selection::{
     Arrangement, Dashboard, DashboardId, DashboardReading, Selection, SelectionExpression,
@@ -161,7 +161,7 @@ pub(crate) struct TaskActivity {
 #[derive(Debug)]
 pub(crate) struct TaskSelectionReading {
     pub order: TaskOrder,
-    pub activity: HashMap<crate::durable::TaskId, TaskActivity>,
+    pub activity: HashMap<crate::store::execution::TaskId, TaskActivity>,
 }
 
 #[derive(Debug)]
@@ -223,7 +223,7 @@ fn task_selection_in(
 ) -> StoreResult<TaskSelectionReading> {
     let sessions = super::sessions::session_summaries_in(
         conn,
-        &crate::session::SessionFilter {
+        &crate::store::session::SessionFilter {
             repo: Some(repo.to_owned()),
             limit: 0,
             after: Some(String::new()),
@@ -385,7 +385,7 @@ fn plan_in(
             content.title = task.title;
             let primary = super::sessions::primary_session_in(
                 conn,
-                &crate::session::PrimaryScope::Task(task_id.clone()),
+                &crate::store::session::PrimaryScope::Task(task_id.clone()),
             )?;
             content.primary_session = primary.as_ref().map(|session| session.id.to_string());
             if primary.is_none() {

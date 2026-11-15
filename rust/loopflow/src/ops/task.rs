@@ -340,8 +340,7 @@ pub(crate) fn file_store() -> OpsResult<SqliteStore> {
 }
 
 pub(crate) fn file_context(store: &SqliteStore, issue: &str) -> OpsResult<TaskCheckout> {
-    let task_id = store
-        .resolve_task_id(issue, None)
+    let task_id = crate::store::children::resolve_task_id(store, issue, None)
         .map_err(task_error)?
         .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
     let checkout = store
@@ -715,7 +714,8 @@ pub(crate) fn select_task_run(
 ) -> OpsResult<TaskRunSelection> {
     use crate::task_graph::{END, START};
     let issue = &task.identifier;
-    let current = store.sqlite.task_graph_row(&task.id).map_err(task_error)?;
+    let current =
+        crate::store::task_work::task_graph_row(&store.sqlite, &task.id).map_err(task_error)?;
     let (graph, row) = match (current, requested) {
         (Some(row), None) => (row.graph.clone(), Some(row)),
         (Some(row), Some(name)) if name == row.graph.name => (row.graph.clone(), Some(row)),
@@ -819,14 +819,10 @@ async fn start_task_run(
     let process = crate::journal::current_lf_process_id()
         .ok_or_else(|| task_error("a Task run requires a registered Process"))?;
     if take_up {
-        store
-            .sqlite
-            .take_up_task_graph(&task.id, &graph)
+        crate::store::task_work::take_up_task_graph(&store.sqlite, &task.id, &graph)
             .map_err(task_error)?;
     }
-    let row = store
-        .sqlite
-        .task_graph_row(&task.id)
+    let row = crate::store::task_work::task_graph_row(&store.sqlite, &task.id)
         .map_err(task_error)?
         .ok_or_else(|| task_error(format!("Task {issue} lost its graph while starting")))?;
     let Some(start) = start else {
@@ -852,10 +848,15 @@ async fn start_task_run(
     } else {
         format!("{} from {}", graph.name, graph.step_name(&start.place))
     };
-    if !store
-        .sqlite
-        .start_task_graph_run(&task.id, &row, &start.cursor, &process, ships)
-        .map_err(task_error)?
+    if !crate::store::task_work::start_task_graph_run(
+        &store.sqlite,
+        &task.id,
+        &row,
+        &start.cursor,
+        &process,
+        ships,
+    )
+    .map_err(task_error)?
     {
         return Err(task_error(format!(
             "Task {issue} moved on graph {} while this run was starting; read `lf task status {issue}` and run again",
@@ -974,9 +975,8 @@ fn prepare_task(
             )));
         }
         let wave = owning_wave(&store, &task).await?;
-        let canonical = crate::repository::CanonicalRepo::discover(&main).map_err(task_error)?;
-        if crate::repository::CanonicalRepo::discover(&repository_for_task(&store, &task)?)
-            .map_err(task_error)?
+        let canonical = crate::repository::discover(&main).map_err(task_error)?;
+        if crate::repository::discover(&repository_for_task(&store, &task)?).map_err(task_error)?
             != canonical
         {
             return Err(task_error("Task belongs to another repository"));
@@ -1831,8 +1831,7 @@ pub fn task_create(
                 .ok_or_else(|| task_error("Promoted Task is missing"));
         }
         if let Some(name) = wave {
-            let locator =
-                crate::work::wave::WaveLocator::discover(&main, name).map_err(task_error)?;
+            let locator = crate::work::wave::discover(&main, name).map_err(task_error)?;
             if store
                 .get_wave_at(&locator)
                 .await
@@ -2184,13 +2183,15 @@ pub async fn read_task_status(
     repo: &Path,
     selector: &str,
 ) -> OpsResult<TaskStatus> {
-    let task = store
-        .sqlite
-        .resolve_task_id(selector, Some(&repo.to_string_lossy()))
-        .and_then(|id| id.map(|id| store.sqlite.task(&id)).transpose())
-        .map_err(task_error)?
-        .flatten()
-        .ok_or_else(|| task_error(format!("Task {selector} is not registered")))?;
+    let task = crate::store::children::resolve_task_id(
+        &store.sqlite,
+        selector,
+        Some(&repo.to_string_lossy()),
+    )
+    .and_then(|id| id.map(|id| store.sqlite.task(&id)).transpose())
+    .map_err(task_error)?
+    .flatten()
+    .ok_or_else(|| task_error(format!("Task {selector} is not registered")))?;
     registered_task_status(store, task).await
 }
 
@@ -2998,8 +2999,8 @@ pub(crate) async fn resolve_saved_task(
     issue: &str,
 ) -> OpsResult<(SharedStore, Task)> {
     let store = Arc::new(super::planning_sync::planning_store().await?);
-    let canonical = crate::repository::CanonicalRepo::discover(repo)
-        .map_err(|error| OpsError::Message(error.to_string()))?;
+    let canonical =
+        crate::repository::discover(repo).map_err(|error| OpsError::Message(error.to_string()))?;
     let task = super::planning_sync::find_task(&store, &canonical.to_string(), issue).await?;
     let task = match task {
         Some(task) => task,
@@ -3039,9 +3040,9 @@ pub(crate) async fn validate_saved_task_scope(
     wave: Option<&str>,
     task: &Task,
 ) -> OpsResult<()> {
-    let canonical = crate::repository::CanonicalRepo::discover(repo).map_err(task_error)?;
+    let canonical = crate::repository::discover(repo).map_err(task_error)?;
     let task_repo = repository_for_task(store, task)?;
-    if crate::repository::CanonicalRepo::discover(&task_repo).map_err(task_error)? != canonical {
+    if crate::repository::discover(&task_repo).map_err(task_error)? != canonical {
         return Err(task_error("Task belongs to another repository"));
     }
     let expected_wave = match wave {

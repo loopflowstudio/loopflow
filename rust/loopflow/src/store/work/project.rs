@@ -49,7 +49,7 @@ pub struct Project {
     pub name: String,
     pub description: String,
     pub krs: Vec<ProjectKR>,
-    pub metric_targets: Vec<crate::work::wave::metrics::MetricTarget>,
+    pub metric_targets: Vec<crate::store::metric::MetricTarget>,
     pub status: ProjectStatus,
     /// Optional Linear binding, not a second owner of this record.
     pub linear_id: Option<LinearProjectId>,
@@ -146,7 +146,7 @@ impl Project {
 }
 
 pub(crate) fn validate_metric_targets(
-    targets: &[crate::work::wave::metrics::MetricTarget],
+    targets: &[crate::store::metric::MetricTarget],
 ) -> Result<(), String> {
     let mut ids = std::collections::BTreeSet::new();
     for metric in targets {

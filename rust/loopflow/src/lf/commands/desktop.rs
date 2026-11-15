@@ -622,7 +622,7 @@ fn repository_in(
     if let Some(repository) = selected {
         return Ok(repository.clone());
     }
-    let repo = crate::repository::CanonicalRepo::containing(directory)?
+    let repo = crate::repository::containing(directory)?
         .context("select a repository with --repo or --repository")?;
     store
         .repository_id(&repo.to_string())?
@@ -778,9 +778,7 @@ fn portfolio_repos() -> Result<Vec<String>> {
         if member.error.is_some() {
             continue;
         }
-        if let Some(repo) =
-            crate::repository::CanonicalRepo::containing(std::path::Path::new(&member.path))?
-        {
+        if let Some(repo) = crate::repository::containing(std::path::Path::new(&member.path))? {
             repos.push(repo.to_string());
         }
     }

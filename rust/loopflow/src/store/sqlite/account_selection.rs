@@ -2,7 +2,7 @@
 use rusqlite::{params, Connection, TransactionBehavior};
 
 use super::{read_account_limit_row, read_provider_account, SqliteStore, PROVIDER_ACCOUNT_COLUMNS};
-use crate::provider_auth::Provider;
+use crate::store::provider::Provider;
 use crate::store::rows::now_unix;
 use crate::store::{AccountLimitRow, ProviderAccount, ProviderAccountId, StoreError, StoreResult};
 

@@ -45,7 +45,7 @@ pub fn planning_connect(
         // `connect`, so it is only normalized here; ambient uses the
         // validating resolver.
         let name = match wave {
-            Some(raw) => crate::ops::normalize_wave_name(raw).ok_or_else(|| {
+            Some(raw) => crate::store::work::wave::normalize_wave_name(raw).ok_or_else(|| {
                 Error::new(
                     ErrorCode::Invalid,
                     "wave connect requires a non-empty wave name",

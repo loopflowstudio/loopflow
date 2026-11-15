@@ -646,15 +646,15 @@ fn membership_wire_ids_are_derived_from_their_captures() {
     let expected = std::collections::BTreeMap::from([
         (
             "00000000-0000-0000-0000-00000000f10w".to_string(),
-            CompiledGraph::new("task-design", &opening()),
+            crate::graph::compiled::compile("task-design", &opening()),
         ),
         (
             "00000000-0000-0000-0000-0000000000f1".to_string(),
-            CompiledGraph::new("feature", &past),
+            crate::graph::compiled::compile("feature", &past),
         ),
         (
             "00000000-0000-0000-0000-0000000000f2".to_string(),
-            CompiledGraph::new("feature", &current),
+            crate::graph::compiled::compile("feature", &current),
         ),
     ]);
     let graphs: std::collections::BTreeMap<String, CompiledGraph> = serde_json::from_str(

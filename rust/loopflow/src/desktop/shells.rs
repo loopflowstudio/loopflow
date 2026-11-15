@@ -47,8 +47,7 @@ pub fn run(args: &ShellArgs) -> Result<()> {
     // remain attachable/closable after retirement, and only the insert winner
     // launches execution, including when concurrent creation loses its reply.
     if *create && store.desktop_shell(id)?.is_none() {
-        let task = store
-            .resolve_task_id(issue, None)?
+        let task = crate::store::children::resolve_task_id(&store, issue, None)?
             .ok_or_else(|| anyhow!("Task is unknown"))?;
         let checkout = store
             .task_checkout(&task)?

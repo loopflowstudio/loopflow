@@ -106,7 +106,7 @@ impl ContextDelivery {
         let repository = crate::store::read_existing_registry()
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?
             .map(|store| -> Result<_, CoreError> {
-                let root = crate::repository::CanonicalRepo::discover(&repo)
+                let root = crate::repository::discover(&repo)
                     .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
                 Ok(store
                     .sqlite

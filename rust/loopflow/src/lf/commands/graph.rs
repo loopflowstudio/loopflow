@@ -72,7 +72,7 @@ pub fn run_task_graph(cli: &Cli, repo: &Path, binding: Option<&WorkBinding>) -> 
     };
     let store = block_on(open_graph_store())?;
     store.sqlite.require_task_launch(task)?;
-    let row = store.sqlite.task_graph_row(task)?;
+    let row = crate::store::task_work::task_graph_row(&store.sqlite, task)?;
     let Some((graph, (start, carrier))) = row.and_then(|row| row.run.map(|run| (row.graph, run)))
     else {
         anyhow::bail!("the Task is not on a run; `lf task run` starts one");
@@ -294,8 +294,7 @@ pub fn run_task_graph_for(
             return Err(exit_of(status).into());
         }
         // The failed Graph checkpointed after each step it finished.
-        let again = store
-            .task_graph_row(&task.id)?
+        let again = crate::store::task_work::task_graph_row(store, &task.id)?
             .and_then(|row| row.graph.step_name_of(&row.run?.0))
             .map_or_else(String::new, |step| format!(" at {step}"));
         eprintln!(
@@ -564,7 +563,7 @@ fn execute(
             .sqlite
             .record_graph_process(
                 &running.process,
-                &crate::graph::compiled::CompiledGraph::new(graph_name, items),
+                &crate::graph::compiled::compile(graph_name, items),
                 running.task.as_ref(),
             )
             .context("could not record the Graph; no steps launched")?;
@@ -1085,11 +1084,12 @@ impl SkillExecutor for &RunningGraph<'_> {
         // A Task run that fails starts again here, not where it began. A stale
         // cursor reruns finished steps; that beats failing a finished step.
         if let (Some(task), Some(carrier)) = (&self.task, &self.task_run) {
-            if let Err(error) = self
-                .store
-                .sqlite
-                .advance_task_graph_run(task, carrier, cursor)
-            {
+            if let Err(error) = crate::store::task_work::advance_task_graph_run(
+                &self.store.sqlite,
+                task,
+                carrier,
+                cursor,
+            ) {
                 tracing::warn!(%task, %error, "could not record where the Task run goes on");
             }
         }

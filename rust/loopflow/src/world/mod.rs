@@ -20,7 +20,6 @@ use std::process::Command;
 use anyhow::{anyhow, bail, Context, Result};
 use serde::Serialize;
 
-use crate::graph::compiled::CompiledGraph;
 use crate::graph::ConcreteStep;
 use crate::ops::human_session::provider_conversation;
 use crate::ops::task::TaskRunSelection;
@@ -603,9 +602,7 @@ impl World {
     ) -> Result<LfProcessId> {
         let store = self.store()?;
         let checkout = task.worktree()?.clone();
-        let names_step = store
-            .sqlite
-            .task_graph_row(&task.id)?
+        let names_step = crate::store::task_work::task_graph_row(&store.sqlite, &task.id)?
             .is_some_and(|row| row.graph.find(requested).is_some());
         let (graph, from) = match names_step {
             true => (None, Some(requested)),
@@ -643,13 +640,12 @@ impl World {
         let mut run = self.process(&trace, None, &checkout, argv, started - 2);
         store.sqlite.record_process(&run)?;
         if take_up {
-            store.sqlite.take_up_task_graph(&task.id, &captured)?;
+            crate::store::task_work::take_up_task_graph(&store.sqlite, &task.id, &captured)?;
         }
-        let row = store
-            .sqlite
-            .task_graph_row(&task.id)?
+        let row = crate::store::task_work::task_graph_row(&store.sqlite, &task.id)?
             .expect("the Task has a graph");
-        if !store.sqlite.start_task_graph_run(
+        if !crate::store::task_work::start_task_graph_run(
+            &store.sqlite,
             &task.id,
             &row,
             &start.cursor,
@@ -678,9 +674,7 @@ impl World {
     /// Put `task` at the interactive step `step`, as `lf task run --from` does.
     pub fn wait_at(&self, task: &Task, step: &str) -> Result<()> {
         let store = self.store()?;
-        let row = store
-            .sqlite
-            .task_graph_row(&task.id)?
+        let row = crate::store::task_work::task_graph_row(&store.sqlite, &task.id)?
             .with_context(|| format!("Task {} has no graph", task.identifier))?;
         if row.graph.interactive_step(step).is_none() {
             bail!("graph {} has no interactive step {step:?}", row.graph.name);
@@ -722,7 +716,7 @@ impl World {
         minutes: i64,
         outcome: Outcome,
     ) -> Result<()> {
-        let compiled = CompiledGraph::new(name, steps);
+        let compiled = crate::graph::compiled::compile(name, steps);
         let mut graph = self.process(trace, Some(parent), cwd, argv, started - 1);
         let mut begin = started;
         let mut records = Vec::new();

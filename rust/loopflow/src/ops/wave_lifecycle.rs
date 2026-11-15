@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::ops::{OpsError, OpsResult};
 use crate::store::work::project::Project;
 use crate::store::Store;
-use crate::work::wave::{Wave, WaveLocator};
+use crate::work::wave::Wave;
 use loopflow_model::id::WaveId;
 
 fn lifecycle_error(message: impl ToString) -> OpsError {
@@ -48,12 +48,12 @@ pub struct WaveAdded {
 /// Register a Wave, seed its authored files on the main checkout, ensure its
 /// first Project and commit the files. Re-adding a live Wave changes nothing.
 pub async fn add(repo: &Path, name: &str, objective: Option<&str>) -> OpsResult<WaveAdded> {
-    let main = crate::repository::CanonicalRepo::discover(repo)
+    let main = crate::repository::discover(repo)
         .map_err(lifecycle_error)?
         .as_path()
         .to_path_buf();
     let _lifecycle = recovery::lock(&main)?;
-    let locator = WaveLocator::discover(&main, name).map_err(lifecycle_error)?;
+    let locator = crate::work::wave::discover(&main, name).map_err(lifecycle_error)?;
     let store = super::planning_sync::planning_store().await?;
     // A clone's authored Waves join the store with the first explicit write here.
     crate::work::wave::bootstrap::register_authored_waves(&store.sqlite, &main.to_string_lossy())
@@ -144,7 +144,7 @@ async fn ensure_first_project(store: &Store, wave: &crate::work::wave::Wave) -> 
 /// this runs when a repository joins the portfolio and before `lf wave connect
 /// --all`; a directory of a removed Wave stays removed.
 pub async fn register_authored(repo: &Path) -> OpsResult<()> {
-    let main = crate::repository::CanonicalRepo::discover(repo).map_err(lifecycle_error)?;
+    let main = crate::repository::discover(repo).map_err(lifecycle_error)?;
     let store = super::planning_sync::planning_store().await?;
     crate::work::wave::bootstrap::register_authored_waves(&store.sqlite, &main.to_string())
         .map_err(lifecycle_error)
@@ -156,7 +156,7 @@ fn resolve_wave(store: &Store, main: &Path, name: &str) -> OpsResult<Option<Wave
     match WaveId::parse(name) {
         Ok(id) => store.sqlite.get_wave(&id).map_err(lifecycle_error),
         Err(_) => {
-            let locator = WaveLocator::discover(main, name).map_err(lifecycle_error)?;
+            let locator = crate::work::wave::discover(main, name).map_err(lifecycle_error)?;
             store.sqlite.get_wave_at(&locator).map_err(lifecycle_error)
         }
     }
@@ -289,7 +289,7 @@ pub fn remove(
     delete_backlog: bool,
 ) -> OpsResult<WaveRemoval> {
     let runtime = tokio::runtime::Runtime::new().map_err(lifecycle_error)?;
-    let main = crate::repository::CanonicalRepo::discover(repo).map_err(lifecycle_error)?;
+    let main = crate::repository::discover(repo).map_err(lifecycle_error)?;
     let repo_key = main.to_string();
     let main = main.as_path().to_path_buf();
     let store = runtime.block_on(super::planning_sync::planning_store())?;
@@ -313,7 +313,7 @@ pub fn remove(
     let wave = match wave {
         Some(wave) => wave,
         None => {
-            let locator = WaveLocator::discover(&main, name).map_err(lifecycle_error)?;
+            let locator = crate::work::wave::discover(&main, name).map_err(lifecycle_error)?;
             store
                 .sqlite
                 .retired_wave_at(&locator)
@@ -914,19 +914,19 @@ pub async fn rename(
     title: Option<&str>,
 ) -> OpsResult<WaveRenamed> {
     let store = super::planning_sync::planning_store().await?;
-    let main = crate::repository::CanonicalRepo::discover(repo)
+    let main = crate::repository::discover(repo)
         .map_err(lifecycle_error)?
         .as_path()
         .to_path_buf();
     let target = new_name
         .map(|name| {
-            crate::ops::normalize_wave_name(name)
+            crate::store::work::wave::normalize_wave_name(name)
                 .ok_or_else(|| lifecycle_error(format!("invalid Wave name {name:?}")))
         })
         .transpose()?;
     let _lifecycle = recovery::lock(&main)?;
     let repo_key = main.to_string_lossy().to_string();
-    let target_checkout = crate::repository::CanonicalRepo::discover(target_repo.unwrap_or(&main))
+    let target_checkout = crate::repository::discover(target_repo.unwrap_or(&main))
         .map_err(lifecycle_error)?
         .to_string();
     let operations = store

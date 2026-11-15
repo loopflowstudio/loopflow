@@ -14,7 +14,7 @@ use std::time::Duration;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 
-use crate::session_record::{native_baseline, native_peak, native_usage_key};
+use crate::store::session_record::{native_baseline, native_peak, native_usage_key};
 use crate::store::{StoreError, StoreResult};
 
 const PROCESS_BATCH: i64 = 10_000;
@@ -37,7 +37,7 @@ pub struct RetentionReport {
 /// When the store cannot be opened or a prune transaction fails.
 pub(crate) fn prune(
     database: &Path,
-    dead: &[(crate::process::ProcessEntry, Option<String>, i64)],
+    dead: &[(crate::store::process::ProcessEntry, Option<String>, i64)],
 ) -> StoreResult<RetentionReport> {
     let conn = Connection::open(database)?;
     conn.busy_timeout(BUSY_TIMEOUT)?;
@@ -250,7 +250,7 @@ fn merge_native_usage(saved: &serde_json::Value, later: &serde_json::Value) -> s
 /// Saved identities and locators for observation before pruning.
 pub(crate) fn unfinished_processes(
     database: &Path,
-) -> StoreResult<Vec<(crate::process::ProcessEntry, Option<String>)>> {
+) -> StoreResult<Vec<(crate::store::process::ProcessEntry, Option<String>)>> {
     let conn = Connection::open(database)?;
     let unfinished = conn
         .prepare(&format!(
@@ -269,7 +269,7 @@ fn process_receipt_select() -> String {
 
 fn process_receipt_row(
     row: &rusqlite::Row<'_>,
-) -> rusqlite::Result<(crate::process::ProcessEntry, Option<String>)> {
+) -> rusqlite::Result<(crate::store::process::ProcessEntry, Option<String>)> {
     Ok((
         super::processes::read_process(row)?,
         row.get("receipt_locator")?,
@@ -278,7 +278,7 @@ fn process_receipt_row(
 
 fn close_dead_processes(
     conn: &Connection,
-    dead: &[(crate::process::ProcessEntry, Option<String>, i64)],
+    dead: &[(crate::store::process::ProcessEntry, Option<String>, i64)],
 ) -> StoreResult<u64> {
     let mut closed = 0;
     for (process, locator, at) in dead {

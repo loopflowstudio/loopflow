@@ -3,8 +3,8 @@
 use rusqlite::params;
 
 use super::SqliteStore;
+use crate::store::work::wave::lifecycle::Operation;
 use crate::store::StoreResult;
-use crate::work::wave::lifecycle::Operation;
 
 impl SqliteStore {
     pub(crate) fn wave_operations(&self, repo: &str, kind: &str) -> StoreResult<Vec<Operation>> {

@@ -485,7 +485,7 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
     let paths = repos
         .iter()
         .map(|repo| {
-            loopflow::repository::CanonicalRepo::discover(repo.path())
+            loopflow::repository::discover(repo.path())
                 .unwrap()
                 .to_string()
         })

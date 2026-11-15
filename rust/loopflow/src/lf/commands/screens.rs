@@ -167,12 +167,13 @@ pub fn task_detail(directory: &Path, issue: &str) -> Result<TaskDetail> {
     let store = crate::store::read_existing_registry()?
         .map(Arc::new)
         .context("no Loopflow store exists on this Machine")?;
-    let id = match store
-        .sqlite
-        .resolve_task_id(issue, Some(&repo.to_string_lossy()))?
-    {
+    let id = match crate::store::children::resolve_task_id(
+        &store.sqlite,
+        issue,
+        Some(&repo.to_string_lossy()),
+    )? {
         Some(id) => Some(id),
-        None => store.sqlite.resolve_task_id(issue, None)?,
+        None => crate::store::children::resolve_task_id(&store.sqlite, issue, None)?,
     }
     .ok_or_else(|| {
         crate::engine::Error::new(

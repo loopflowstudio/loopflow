@@ -190,7 +190,7 @@ impl Machine {
         let id = self.store.repository_id(self.wave.repo()).unwrap().unwrap();
         loopflow::repository::location::reconcile(
             &self.store,
-            &loopflow::repository::CanonicalRepo::discover(self.repo()).unwrap(),
+            &loopflow::repository::discover(self.repo()).unwrap(),
             Some(&id),
             None,
         )
@@ -611,15 +611,15 @@ fn task_view_keeps_workflow_checkout_and_conversations_after_live_updates() {
     home.plan(1);
     let checkout = home.start(1);
     let task = home.store.task_by_issue("FIX-1").unwrap().unwrap();
-    home.store
-        .take_up_task_graph(
-            &task.id,
-            &crate::task_graph::CapturedGraph {
-                name: "feature".into(),
-                steps: vec![],
-            },
-        )
-        .unwrap();
+    crate::store::task_work::take_up_task_graph(
+        &home.store,
+        &task.id,
+        &crate::task_graph::CapturedGraph {
+            name: "feature".into(),
+            steps: vec![],
+        },
+    )
+    .unwrap();
     let session = home
         .store
         .test_session("task-view", &crate::session_record::new_artifact_key());

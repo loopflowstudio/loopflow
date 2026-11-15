@@ -32,7 +32,7 @@ pub fn repository_identity(
     bind: Option<&RepositoryId>,
     relocate: Option<&RepositoryId>,
 ) -> Result<(crate::repository::CanonicalRepo, RepositoryIdentity)> {
-    let repo = crate::repository::CanonicalRepo::containing(directory)?
+    let repo = crate::repository::containing(directory)?
         .ok_or_else(|| anyhow!("run `lf repo` in a repository"))?;
     let runtime = tokio::runtime::Runtime::new()?;
     let identity = runtime.block_on(async {
@@ -97,7 +97,7 @@ pub fn resolve_repository_selection(cli: &mut Cli) -> Result<()> {
     }
     let repo = if explicit_repository {
         Some(
-            crate::repository::CanonicalRepo::current()?
+            crate::repository::current()?
                 .ok_or_else(|| anyhow!("selected repository is unavailable"))?
                 .to_string(),
         )
@@ -512,8 +512,7 @@ fn primary_session(cli: &Cli, args: &[String], directory: &Path) -> Result<Optio
     };
     let registry: crate::store::SharedStore = std::sync::Arc::new(registry);
     let store = &registry.sqlite;
-    let repo =
-        crate::repository::CanonicalRepo::containing(directory)?.map(|repo| repo.to_string());
+    let repo = crate::repository::containing(directory)?.map(|repo| repo.to_string());
     let repository = match (&cli.repository, repo.as_deref()) {
         (Some(repository), _) => Some(repository.clone()),
         (None, Some(repo)) => store.repository_id(repo)?,
@@ -650,7 +649,7 @@ fn resolve_task(
             })?)
         } else if cli.repo.is_some() {
             Some(
-                crate::repository::CanonicalRepo::containing(directory)?
+                crate::repository::containing(directory)?
                     .ok_or_else(|| anyhow!("selected repository is unavailable"))?
                     .to_string(),
             )
@@ -676,7 +675,7 @@ pub fn location(
     let (repository, repo) = if let Some(repository) = &cli.repository {
         (repository.clone(), store.repository_path(repository)?)
     } else {
-        let repo = crate::repository::CanonicalRepo::current()?
+        let repo = crate::repository::current()?
             .ok_or_else(|| anyhow!("select a repository before reading execution location"))?
             .to_string();
         let repository = store
@@ -723,10 +722,10 @@ fn resolve_task_id(
     selector: &str,
     repo: Option<&str>,
 ) -> Result<Option<TaskId>> {
-    let task = store.resolve_task_id(selector, repo)?;
+    let task = crate::store::children::resolve_task_id(store, selector, repo)?;
     if let Some(repo) = repo.filter(|_| task.is_none()) {
         anyhow::ensure!(
-            store.resolve_task_id(selector, None)?.is_none(),
+            crate::store::children::resolve_task_id(store, selector, None)?.is_none(),
             "Task {selector} does not belong to selected repository {repo}"
         );
     }

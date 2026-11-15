@@ -3,28 +3,29 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::graph::runner::ExecutionCursor;
-use crate::process::LfProcess;
+use crate::store::process::LfProcess;
+use crate::store::task_session::TaskSession;
 use crate::store::StoreResult;
-use crate::task_graph::{CapturedGraph, END, START};
-use crate::task_work::TaskSession;
 use loopflow_model::durable::TaskId;
 use loopflow_model::id::LfProcessId;
 
 use super::SqliteStore;
 
+pub const START: &str = "start";
+pub const END: &str = "end";
+
 #[derive(Debug)]
 pub(crate) struct TaskOverviewRecords {
     pub sessions: Vec<TaskSession>,
-    pub graph_processes: Vec<crate::durable::GraphProcessInventoryEntry>,
-    pub graph: Option<TaskGraphRow>,
+    pub graph_processes: Vec<crate::store::execution::GraphProcessInventoryEntry>,
+    pub graph: Option<SavedTaskGraphRow>,
 }
 #[derive(Debug)]
 pub(crate) struct TaskWorkRecords {
     pub sessions: Vec<TaskSession>,
-    pub graph_processes: Vec<crate::durable::GraphProcessInventoryEntry>,
-    pub processes: Vec<crate::process::ProcessEntry>,
-    pub graph: Option<TaskGraphRow>,
+    pub graph_processes: Vec<crate::store::execution::GraphProcessInventoryEntry>,
+    pub processes: Vec<crate::store::process::ProcessEntry>,
+    pub graph: Option<SavedTaskGraphRow>,
 }
 
 /// Each Task with this Machine's checkout of it: `worktree` is NULL for a Task
@@ -166,7 +167,7 @@ fn task_graph_pairs(task_ids: &str) -> String {
 pub(super) fn graphs_of_task(
     conn: &rusqlite::Connection,
     task: &TaskId,
-) -> StoreResult<Vec<crate::graph::process::GraphProcess>> {
+) -> StoreResult<Vec<crate::store::graph_process::GraphProcess>> {
     super::graph_inventory::graphs_in(
         conn,
         &format!("e.id IN (SELECT graph FROM ({}))", task_graph_pairs("?1")),
@@ -207,7 +208,7 @@ fn completed_graph_steps(
 fn latest_task_graphs(
     conn: &rusqlite::Connection,
     tasks: &[&TaskId],
-) -> StoreResult<HashMap<TaskId, crate::graph::process::GraphProcess>> {
+) -> StoreResult<HashMap<TaskId, crate::store::graph_process::GraphProcess>> {
     let mut latest = HashMap::new();
     let mut query = conn.prepare(&format!(
         "SELECT task_id, graph FROM ({}) pairs
@@ -247,23 +248,26 @@ fn latest_task_graphs(
 /// run left, and that run with the cursor its next attempt sets out from: where
 /// it began, then the step after the last one it finished.
 #[derive(Debug)]
-pub(crate) struct TaskGraphRow {
-    pub graph: CapturedGraph,
+pub(crate) struct SavedTaskGraphRow {
+    pub graph: String,
     pub step: String,
-    pub run: Option<(ExecutionCursor, LfProcess)>,
+    pub run: Option<(String, LfProcess)>,
 }
 
 /// A Task's Graph as another Machine takes it up: the graph it took up, the
 /// step it stands at, and the cursor its run sets out from again, if it is on
 /// one. The run's Process stays behind.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub(crate) struct TaskGraphRecord {
-    pub graph: CapturedGraph,
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct SavedTaskGraphRecord {
+    pub graph: String,
     pub step: String,
-    pub run_start: Option<ExecutionCursor>,
+    pub run_start: Option<String>,
 }
 
-fn task_graph_row(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Option<TaskGraphRow>> {
+fn task_graph_row(
+    conn: &rusqlite::Connection,
+    task: &TaskId,
+) -> StoreResult<Option<SavedTaskGraphRow>> {
     use rusqlite::OptionalExtension;
     let Some((graph, step, start, process)) = conn
         .query_row(
@@ -284,7 +288,7 @@ fn task_graph_row(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Opt
     };
     let run = match start.zip(process) {
         Some((start, process)) => Some((
-            serde_json::from_str(&start)?,
+            start,
             conn.query_row(
                 &format!("{} WHERE e.id=?1", super::processes::PROCESS_SELECT),
                 [process],
@@ -293,11 +297,7 @@ fn task_graph_row(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Opt
         )),
         None => None,
     };
-    Ok(Some(TaskGraphRow {
-        graph: serde_json::from_str(&graph)?,
-        step,
-        run,
-    }))
+    Ok(Some(SavedTaskGraphRow { graph, step, run }))
 }
 
 /// Put the Task on a run from `start`, carried by `by`, if it still stands
@@ -309,7 +309,7 @@ fn start_run_in(
     tx: &rusqlite::Transaction<'_>,
     task: &TaskId,
     (step, stopped): (&str, Option<&LfProcessId>),
-    start: &ExecutionCursor,
+    start: &str,
     by: &LfProcessId,
     ships: bool,
 ) -> StoreResult<bool> {
@@ -318,7 +318,7 @@ fn start_run_in(
          WHERE task_id=?1 AND step=?5 AND lf_process_id IS ?6",
         rusqlite::params![
             task.as_str(),
-            serde_json::to_string(start)?,
+            start,
             by.as_str(),
             crate::store::rows::now_unix(),
             step,
@@ -664,8 +664,8 @@ pub(super) fn task_open_process_pairs(selector: &str, filter: &str) -> String {
 
 /// One of a Task's Graph processes with its inventory entry.
 type MemberGraph = (
-    crate::graph::process::GraphProcess,
-    crate::durable::GraphProcessInventoryEntry,
+    crate::store::graph_process::GraphProcess,
+    crate::store::execution::GraphProcessInventoryEntry,
 );
 
 /// A Task's Sessions and its Graphs. The entries name the Task being read and
@@ -767,7 +767,10 @@ impl SqliteStore {
     pub(crate) fn task_overview_records(
         &self,
         task: &TaskId,
-    ) -> StoreResult<(TaskOverviewRecords, Vec<crate::durable::GraphProcessDetail>)> {
+    ) -> StoreResult<(
+        TaskOverviewRecords,
+        Vec<crate::store::execution::GraphProcessDetail>,
+    )> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.savepoint()?;
         let (sessions, graphs) = members(&tx, task)?;
@@ -794,8 +797,8 @@ impl SqliteStore {
         &self,
         task: &TaskId,
     ) -> StoreResult<(
-        Option<TaskGraphRow>,
-        Vec<crate::durable::GraphProcessDetail>,
+        Option<SavedTaskGraphRow>,
+        Vec<crate::store::execution::GraphProcessDetail>,
     )> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.savepoint()?;
@@ -839,7 +842,7 @@ impl SqliteStore {
     pub(crate) fn task_open_processes(
         &self,
         task: &TaskId,
-    ) -> StoreResult<Vec<crate::process::ProcessEntry>> {
+    ) -> StoreResult<Vec<crate::store::process::ProcessEntry>> {
         let mut connection = self.conn.lock().expect("store mutex poisoned");
         let conn = connection.savepoint()?;
         let mut query = conn.prepare(&format!(
@@ -854,13 +857,16 @@ impl SqliteStore {
     }
 
     /// The Task's Graph as captured, for running it.
-    pub(crate) fn task_graph_row(&self, task: &TaskId) -> StoreResult<Option<TaskGraphRow>> {
+    pub(crate) fn task_graph_row(&self, task: &TaskId) -> StoreResult<Option<SavedTaskGraphRow>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         task_graph_row(&conn, task)
     }
 
     /// The Task's Graph as it moves to another Machine.
-    pub(crate) fn task_graph_record(&self, task: &TaskId) -> StoreResult<Option<TaskGraphRecord>> {
+    pub(crate) fn task_graph_record(
+        &self,
+        task: &TaskId,
+    ) -> StoreResult<Option<SavedTaskGraphRecord>> {
         use rusqlite::OptionalExtension;
         let conn = self.conn.lock().expect("store mutex poisoned");
         let Some((graph, step, run_start)) = conn
@@ -879,10 +885,10 @@ impl SqliteStore {
         else {
             return Ok(None);
         };
-        Ok(Some(TaskGraphRecord {
-            graph: serde_json::from_str(&graph)?,
+        Ok(Some(SavedTaskGraphRecord {
+            graph,
             step,
-            run_start: run_start.as_deref().map(serde_json::from_str).transpose()?,
+            run_start,
         }))
     }
 
@@ -892,7 +898,7 @@ impl SqliteStore {
     pub(crate) fn place_moved_task_graph(
         &self,
         task: &TaskId,
-        record: &TaskGraphRecord,
+        record: &SavedTaskGraphRecord,
         by: Option<&LfProcessId>,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -902,9 +908,9 @@ impl SqliteStore {
              VALUES(?1,?2,?3,?4,?5,?6)",
             rusqlite::params![
                 task.as_str(),
-                serde_json::to_string(&record.graph)?,
+                record.graph,
                 record.step,
-                run.map(|(start, _)| serde_json::to_string(start)).transpose()?,
+                run.map(|(start, _)| start),
                 run.map(|(_, by)| by.as_str()),
                 crate::store::rows::now_unix()
             ],
@@ -914,20 +920,11 @@ impl SqliteStore {
 
     /// Take up `graph` for the Task as it is defined now, at `start`. It
     /// replaces the Task's earlier Graph.
-    pub(crate) fn take_up_task_graph(
-        &self,
-        task: &TaskId,
-        graph: &CapturedGraph,
-    ) -> StoreResult<()> {
+    pub(crate) fn take_up_task_graph(&self, task: &TaskId, graph: &str) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "INSERT OR REPLACE INTO task_graphs(task_id,graph,step,updated_at) VALUES(?1,?2,?3,?4)",
-            rusqlite::params![
-                task.as_str(),
-                serde_json::to_string(graph)?,
-                START,
-                crate::store::rows::now_unix()
-            ],
+            rusqlite::params![task.as_str(), graph, START, crate::store::rows::now_unix()],
         )?;
         Ok(())
     }
@@ -938,15 +935,15 @@ impl SqliteStore {
     pub(crate) fn start_task_graph_run(
         &self,
         task: &TaskId,
-        row: &TaskGraphRow,
-        start: &ExecutionCursor,
+        step: &str,
+        stopped: Option<&LfProcessId>,
+        start: &str,
         by: &LfProcessId,
         ships: bool,
     ) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
-        let stopped = row.run.as_ref().map(|(_, process)| &process.id);
-        let started = start_run_in(&tx, task, (&row.step, stopped), start, by, ships)?;
+        let started = start_run_in(&tx, task, (step, stopped), start, by, ships)?;
         tx.commit()?;
         Ok(started)
     }
@@ -958,10 +955,9 @@ impl SqliteStore {
         &self,
         task: &TaskId,
         carrier: &LfProcessId,
-        cursor: &ExecutionCursor,
+        cursor: &str,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let cursor = serde_json::to_string(cursor)?;
         conn.execute(
             "UPDATE task_graphs SET run_start=?3,updated_at=?4
              WHERE task_id=?1 AND lf_process_id=?2 AND run_start IS NOT ?3",
@@ -1176,7 +1172,7 @@ impl SqliteStore {
     pub(crate) fn latest_task_graphs(
         &self,
         tasks: &[&TaskId],
-    ) -> StoreResult<HashMap<TaskId, crate::graph::process::GraphProcess>> {
+    ) -> StoreResult<HashMap<TaskId, crate::store::graph_process::GraphProcess>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         latest_task_graphs(&conn, tasks)
     }
@@ -1194,7 +1190,7 @@ impl SqliteStore {
     pub(crate) fn task_graphs(
         &self,
         task: &TaskId,
-    ) -> StoreResult<Vec<crate::graph::process::GraphProcess>> {
+    ) -> StoreResult<Vec<crate::store::graph_process::GraphProcess>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         graphs_of_task(&conn, task)
     }
@@ -1659,11 +1655,13 @@ mod tests {
                 },
             )],
         };
-        store.take_up_task_graph(&task, &definition).unwrap();
+        crate::store::task_work::take_up_task_graph(&store, &task, &definition).unwrap();
         let before = crate::store::task_work::task_graph(&store, &task)
             .unwrap()
             .unwrap();
-        let row = store.task_graph_row(&task).unwrap().unwrap();
+        let row = crate::store::task_work::task_graph_row(&store, &task)
+            .unwrap()
+            .unwrap();
         let start = crate::graph::runner::ExecutionCursor::default();
         drop(store);
         let store = crate::store::opening::open_ephemeral(&path).unwrap();
@@ -1683,13 +1681,20 @@ mod tests {
         );
 
         // No interactive step remains ahead: running it hands the Task off.
-        assert!(store
-            .start_task_graph_run(&task, &row, &start, &by, true)
-            .unwrap());
+        assert!(crate::store::task_work::start_task_graph_run(
+            &store, &task, &row, &start, &by, true
+        )
+        .unwrap());
         // A second run reading the same position cannot also set out.
-        assert!(!store
-            .start_task_graph_run(&task, &row, &start, &LfProcessId::new(), true)
-            .unwrap());
+        assert!(!crate::store::task_work::start_task_graph_run(
+            &store,
+            &task,
+            &row,
+            &start,
+            &LfProcessId::new(),
+            true
+        )
+        .unwrap());
         let state = || store.task_state(&task).unwrap();
         assert_eq!(state(), crate::durable::TaskState::Shipping);
         let shipping = store.task_shipping(&task).unwrap().unwrap();
@@ -1733,10 +1738,13 @@ mod tests {
         assert_eq!(state(), crate::durable::TaskState::Moving);
         assert_eq!(store.stop_shipping(&task, "stop", None).unwrap(), None);
         // The person's stop stands: a relaunch running to the end does not approve it.
-        let relaunch = store.task_graph_row(&task).unwrap().unwrap();
-        assert!(store
-            .start_task_graph_run(&task, &relaunch, &start, &by, true)
-            .unwrap());
+        let relaunch = crate::store::task_work::task_graph_row(&store, &task)
+            .unwrap()
+            .unwrap();
+        assert!(crate::store::task_work::start_task_graph_run(
+            &store, &task, &relaunch, &start, &by, true
+        )
+        .unwrap());
         assert!(store.task_shipping(&task).unwrap().is_none());
         assert_eq!(state(), crate::durable::TaskState::Moving);
         assert_eq!(
@@ -1873,15 +1881,15 @@ mod tests {
                 params![by, TraceId::new()],
             )
             .unwrap();
-        store
-            .take_up_task_graph(
-                &task,
-                &crate::task_graph::CapturedGraph {
-                    name: "review".into(),
-                    steps: Vec::new(),
-                },
-            )
-            .unwrap();
+        crate::store::task_work::take_up_task_graph(
+            &store,
+            &task,
+            &crate::task_graph::CapturedGraph {
+                name: "review".into(),
+                steps: Vec::new(),
+            },
+        )
+        .unwrap();
         store.set_task_graph_step(&task, "review").unwrap();
         assert!(store.task_shipping(&task).unwrap().is_none());
         assert!(store.end_task_graph(&task, &by).unwrap());
@@ -1942,7 +1950,7 @@ mod tests {
                 graphs.push((id, owner));
             }
         }
-        let graph = crate::graph::compiled::CompiledGraph::new("proof", &[]);
+        let graph = crate::graph::compiled::compile("proof", &[]);
         for (id, owner) in &graphs {
             store.record_graph_process(id, &graph, *owner).unwrap();
         }

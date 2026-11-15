@@ -7,7 +7,7 @@ use fs2::FileExt;
 use rusqlite::types::Value;
 use rusqlite::{params, params_from_iter, OptionalExtension, TransactionBehavior};
 
-use crate::process::{
+use crate::store::process::{
     AgentCaller, AgentProcess, LfProcess, LfProcessStart, ProcessCursor, ProcessEntry,
     ProcessFilter, ProcessOutcomeFilter, ProcessPage, ProcessWorkFilter, SessionAttachment,
 };
@@ -83,12 +83,12 @@ impl SessionTransfer<'_> {
 
     pub(crate) fn claim_input(
         self,
-        next: crate::session::LfSession,
+        next: crate::store::session::LfSession,
         process: &LfProcessId,
         previous: PreviousAgentDisposition,
         start: Option<&LfProcessStart>,
         caller: &SessionCaller,
-    ) -> StoreResult<(crate::session::LfSession, SessionAttachment)> {
+    ) -> StoreResult<(crate::store::session::LfSession, SessionAttachment)> {
         if loopflow_model::id::canonical_session(&next.id) != self.session {
             return Err(attachment_changed());
         }
@@ -169,7 +169,7 @@ impl SessionTransfer<'_> {
     pub(crate) fn finish(
         self,
         outcome: &str,
-        departure: Option<&crate::process::Departure>,
+        departure: Option<&crate::store::process::Departure>,
         closed: bool,
     ) -> StoreResult<()> {
         let session = self.session.as_str();
@@ -269,7 +269,7 @@ impl SessionTransfer<'_> {
 #[derive(Debug)]
 pub(crate) struct AgentProcessSettlement<'a> {
     store: &'a SqliteStore,
-    expected: crate::process::AgentProcessState,
+    expected: crate::store::process::AgentProcessState,
     _dispatch: File,
 }
 
@@ -863,8 +863,8 @@ impl SqliteStore {
         &self,
         id: &LfProcessId,
         person: Option<&str>,
-    ) -> StoreResult<crate::process::Starter> {
-        use crate::process::Starter;
+    ) -> StoreResult<crate::store::process::Starter> {
+        use crate::store::process::Starter;
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut current = Some(id.clone());
         let mut seen = std::collections::HashSet::new();
@@ -1340,12 +1340,14 @@ impl SqliteStore {
     }
 
     /// All unfinished agent rows, including detached and replaced processes.
-    pub(crate) fn agent_processes(&self) -> StoreResult<Vec<crate::process::AgentProcessState>> {
+    pub(crate) fn agent_processes(
+        &self,
+    ) -> StoreResult<Vec<crate::store::process::AgentProcessState>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&agent_process_query())?;
         let rows = query
             .query_map([], |row| {
-                Ok(crate::process::AgentProcessState {
+                Ok(crate::store::process::AgentProcessState {
                     process: read_agent_process(row)?,
                     attached_lf_process_id: row.get(19)?,
                     attachment_token: row.get(20)?,
@@ -1434,7 +1436,7 @@ impl SqliteStore {
     /// The returned claim keeps takeover excluded through external termination.
     pub(crate) fn begin_agent_settlement(
         &self,
-        expected: &crate::process::AgentProcessState,
+        expected: &crate::store::process::AgentProcessState,
     ) -> StoreResult<Option<AgentProcessSettlement<'_>>> {
         let session = expected
             .process
@@ -1512,10 +1514,10 @@ impl SqliteStore {
 
     /// Whether a recorded Session is bare: neither recorded as Task, Wave or
     /// repository work nor a scope's ongoing conversation.
-    pub(crate) fn is_bare(&self, session: &crate::session::LfSession) -> StoreResult<bool> {
+    pub(crate) fn is_bare(&self, session: &crate::store::session::LfSession) -> StoreResult<bool> {
         Ok(!session
             .work_source
-            .is_some_and(crate::session::WorkSource::is_managed)
+            .is_some_and(crate::store::session::WorkSource::is_managed)
             && self.primary_scope(&session.id)?.is_none())
     }
 
@@ -1524,7 +1526,7 @@ impl SqliteStore {
     pub(crate) fn is_work(
         &self,
         named_work: bool,
-        session: Option<&crate::session::LfSession>,
+        session: Option<&crate::store::session::LfSession>,
     ) -> StoreResult<bool> {
         match session {
             Some(session) if !named_work => Ok(!self.is_bare(session)?),
@@ -1627,7 +1629,7 @@ impl SqliteStore {
         &self,
         session: &str,
         attachment: &SessionAttachment,
-    ) -> StoreResult<Option<crate::process::Departure>> {
+    ) -> StoreResult<Option<crate::store::process::Departure>> {
         let canonical = loopflow_model::id::canonical_session(session);
         let conn = self.conn.lock().expect("store mutex poisoned");
         let payload = conn

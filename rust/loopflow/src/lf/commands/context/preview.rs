@@ -205,7 +205,7 @@ fn preview_graph(
     binding: Option<&WorkBinding>,
 ) -> Result<GraphContextPreview> {
     let items = compile_graph(graph, repo)?;
-    let compiled = CompiledGraph::new(&graph.name, &items);
+    let compiled = crate::graph::compiled::compile(&graph.name, &items);
     let mut current = if let Some(skill) = match items.first() {
         Some(crate::graph::ConcreteStep::Skill(skill)) => Some(skill.clone()),
         Some(crate::graph::ConcreteStep::Xor(branch)) => Some(branch.router_skill()),

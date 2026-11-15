@@ -1,8 +1,8 @@
 //! Linear Markdown and released-content conversion; never an ordinary Work model.
 
 use super::ProjectDocumentError;
+use crate::store::metric::MetricTarget;
 use crate::store::work::project::ProjectKR;
-use crate::work::wave::metrics::MetricTarget;
 
 type ProjectDocumentResult<T> = Result<T, ProjectDocumentError>;
 

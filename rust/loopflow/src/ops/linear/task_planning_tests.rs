@@ -1473,17 +1473,15 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
             error: None,
         };
         fixture.store.sqlite.record_process(&process).unwrap();
-        fixture
-            .store
-            .sqlite
-            .take_up_task_graph(
-                &task.id,
-                &crate::task_graph::CapturedGraph {
-                    name: "reopen".into(),
-                    steps: Vec::new(),
-                },
-            )
-            .unwrap();
+        crate::store::task_work::take_up_task_graph(
+            &fixture.store.sqlite,
+            &task.id,
+            &crate::task_graph::CapturedGraph {
+                name: "reopen".into(),
+                steps: Vec::new(),
+            },
+        )
+        .unwrap();
         fixture
             .store
             .sqlite

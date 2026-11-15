@@ -220,7 +220,7 @@ pub fn ensure_primary_session(
 /// do it before taking the write lock every other writer waits on.
 fn discover_session_repo(session: &mut LfSession) -> StoreResult<()> {
     if session.repo.is_none() && session.cwd.is_dir() {
-        session.repo = crate::repository::CanonicalRepo::containing(&session.cwd)
+        session.repo = crate::repository::containing(&session.cwd)
             .map_err(|error| super::StoreError::InvalidData(error.to_string()))?
             .map(|repo| repo.to_string());
     }
@@ -256,7 +256,6 @@ pub fn bind_session(
 
 #[cfg(test)]
 mod tests {
-    use crate::repository::CanonicalRepo;
     use crate::session::{LfSession, PrimaryScope, TitleSource};
 
     fn candidate(cwd: &std::path::Path) -> LfSession {
@@ -309,7 +308,7 @@ mod tests {
         let session = super::create_session(&store, candidate(&cwd), None).unwrap();
         assert_eq!(
             session.repo,
-            Some(CanonicalRepo::discover(&repo).unwrap().to_string())
+            Some(crate::repository::discover(&repo).unwrap().to_string())
         );
         assert_eq!(session.cwd, cwd);
         assert_eq!(store.session(&session.id).unwrap(), Some(session));
@@ -320,7 +319,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let checkout = directory.path().join("repository");
         std::fs::create_dir(&checkout).unwrap();
-        let repo = CanonicalRepo::discover(&checkout).unwrap();
+        let repo = crate::repository::discover(&checkout).unwrap();
         let scope = PrimaryScope::Repository(repo.clone());
         let store =
             crate::store::opening::open_ephemeral(&directory.path().join("registry.db")).unwrap();

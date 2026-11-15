@@ -5,7 +5,7 @@ use std::path::Path;
 
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 
-use crate::session::{LfSession, PrimaryScope, TitleSource};
+use crate::store::session::{LfSession, PrimaryScope, TitleSource};
 use crate::store::{StoreError, StoreResult};
 use loopflow_model::durable::TaskId;
 
@@ -15,7 +15,7 @@ use loopflow_model::id::{LfProcessId, TerminalId};
 /// Caller observations acquired before a Session command enters storage.
 #[derive(Debug, Clone)]
 pub struct SessionCaller {
-    pub agent: Option<crate::process::AgentCaller>,
+    pub agent: Option<crate::store::process::AgentCaller>,
     pub capture_key: Option<String>,
 }
 
@@ -86,7 +86,7 @@ pub(crate) fn session_projection_inputs_in(
     )?;
     let deadlines = query
         .query_map(
-            params![crate::session::AVAILABILITY_QUIET_SECONDS, now],
+            params![crate::store::session::AVAILABILITY_QUIET_SECONDS, now],
             |row| row.get(0),
         )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -187,13 +187,13 @@ fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<LfSessi
             captured: row.get(23)?,
             caller_artifact_key: row
                 .get::<_, Option<String>>(22)?
-                .map(|id| crate::session_record::parse_artifact_key(&id))
+                .map(|id| crate::store::session_record::parse_artifact_key(&id))
                 .transpose()
                 .map_err(invalid)?,
             id: row.get(0)?,
             artifact_key: row
                 .get::<_, Option<String>>(1)?
-                .map(|key| crate::session_record::parse_artifact_key(&key))
+                .map(|key| crate::store::session_record::parse_artifact_key(&key))
                 .transpose()
                 .map_err(invalid)?,
             title: row.get(2)?,
@@ -273,12 +273,12 @@ fn available_sql(session: &str, now: i64) -> String {
             ELSE act.attachment_token=p.attachment_token
                 AND (act.pending_input>0 OR (act.open_tools=0 AND (({session}.interactive=1 AND act.yielded=1)
                     OR {now}-act.observed_at>={quiet}))) END)",
-        quiet = crate::session::AVAILABILITY_QUIET_SECONDS
+        quiet = crate::store::session::AVAILABILITY_QUIET_SECONDS
     )
 }
 
 fn inventory_query(
-    filter: &crate::session::SessionFilter,
+    filter: &crate::store::session::SessionFilter,
     select: &str,
     now: i64,
     live_agents: &str,
@@ -314,7 +314,7 @@ fn inventory_query(
         ));
     }
     if let Some(primary) = filter.primary {
-        use crate::session::SessionPrimary;
+        use crate::store::session::SessionPrimary;
         let task = "EXISTS (SELECT 1 FROM task_primary_sessions t WHERE t.session_id=s.id)";
         sql.push_str(&match primary {
             SessionPrimary::All => {
@@ -412,7 +412,7 @@ fn read_summary(
     labels: &mut std::collections::HashMap<TaskId, Option<String>>,
     row: &rusqlite::Row<'_>,
     projection: &SessionProjection,
-) -> rusqlite::Result<StoreResult<crate::session::SessionSummary>> {
+) -> rusqlite::Result<StoreResult<crate::store::session::SessionSummary>> {
     Ok((|| {
         let task_id = row
             .get::<_, Option<String>>(7)?
@@ -428,10 +428,10 @@ fn read_summary(
             Some(graph_process) => {
                 let completed: Option<i64> = row.get(20)?;
                 let name: String = row.get(18)?;
-                Some(crate::session::GraphProcessSummary {
+                Some(crate::store::session::GraphProcessSummary {
                     id: graph_process,
                     name,
-                    state: crate::session::GraphProcessSummaryState::of_process(
+                    state: crate::store::session::GraphProcessSummaryState::of_process(
                         row.get::<_, Option<String>>(19)?.as_deref(),
                         completed,
                     ),
@@ -454,7 +454,7 @@ fn read_summary(
             .map(|id| super::children::cached_short_task_id(conn, labels, id))
             .transpose()?
             .flatten();
-        Ok(crate::session::SessionSummary {
+        Ok(crate::store::session::SessionSummary {
             transition: super::provider_transitions::latest_in(conn, &row.get::<_, String>(0)?)?,
             has_provider_history: row.get(36)?,
             preview: row
@@ -484,7 +484,7 @@ fn read_summary(
             id: row.get(0)?,
             artifact_key: row
                 .get::<_, Option<String>>(1)?
-                .map(|key| crate::session_record::parse_artifact_key(&key))
+                .map(|key| crate::store::session_record::parse_artifact_key(&key))
                 .transpose()
                 .map_err(invalid)?,
             title: row.get(2)?,
@@ -557,10 +557,10 @@ pub(super) fn primary_session_in(
 pub(super) fn claim_session_input_in(
     tx: &Transaction<'_>,
     mut next: LfSession,
-    expected: Option<&crate::process::SessionAttachment>,
+    expected: Option<&crate::store::process::SessionAttachment>,
     process: &LfProcessId,
-    start: Option<&crate::process::LfProcessStart>,
-) -> StoreResult<(LfSession, crate::process::SessionAttachment)> {
+    start: Option<&crate::store::process::LfProcessStart>,
+) -> StoreResult<(LfSession, crate::store::process::SessionAttachment)> {
     let previous = session_in(tx, &next.id)?.ok_or(StoreError::NotFound)?;
     if next.task_id == previous.task_id && next.task_id.is_some() {
         next.wave_id = previous.wave_id.clone();
@@ -583,9 +583,9 @@ pub(super) fn claim_session_input_in(
 
 pub(super) fn session_summaries_in(
     conn: &Connection,
-    filter: &crate::session::SessionFilter,
+    filter: &crate::store::session::SessionFilter,
     projection: &SessionProjection,
-) -> StoreResult<Vec<crate::session::SessionSummary>> {
+) -> StoreResult<Vec<crate::store::session::SessionSummary>> {
     let now = projection.now;
     let live_agents = &projection.live_agents;
     let mut labels = std::collections::HashMap::new();
@@ -740,7 +740,7 @@ impl SqliteStore {
     pub(crate) fn bind_session_terminal(
         &self,
         session: &str,
-        attachment: &crate::process::SessionAttachment,
+        attachment: &crate::store::process::SessionAttachment,
         terminal: &TerminalId,
     ) -> StoreResult<()> {
         let canonical = loopflow_model::id::canonical_session(session);
@@ -940,10 +940,10 @@ impl SqliteStore {
     /// Each row's Available is judged at `now`.
     pub(crate) fn projected_session_summaries(
         &self,
-        filter: &crate::session::SessionFilter,
+        filter: &crate::store::session::SessionFilter,
         inputs: &SessionProjectionInputs,
         projection: &SessionProjection,
-    ) -> StoreResult<Option<Vec<crate::session::SessionSummary>>> {
+    ) -> StoreResult<Option<Vec<crate::store::session::SessionSummary>>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let Some(snapshot) = inputs.pin(&mut conn)? else {
             return Ok(None);
@@ -969,7 +969,7 @@ impl SqliteStore {
         id: &str,
         inputs: &SessionProjectionInputs,
         projection: &SessionProjection,
-    ) -> StoreResult<Option<Option<crate::session::SessionSummary>>> {
+    ) -> StoreResult<Option<Option<crate::store::session::SessionSummary>>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let Some(conn) = inputs.pin(&mut conn)? else {
             return Ok(None);
@@ -1062,7 +1062,7 @@ impl SqliteStore {
         caller: Option<&str>,
         since: i64,
         include_finished: bool,
-    ) -> StoreResult<Vec<crate::session_record::SessionHistory>> {
+    ) -> StoreResult<Vec<crate::store::session_record::SessionHistory>> {
         self.conversation_inputs(
             wave,
             project,
@@ -1083,7 +1083,7 @@ impl SqliteStore {
         task: Option<&str>,
         since: i64,
         limit: usize,
-    ) -> StoreResult<(Vec<crate::session_record::SessionHistory>, bool)> {
+    ) -> StoreResult<(Vec<crate::store::session_record::SessionHistory>, bool)> {
         let (rows, truncated) =
             self.conversation_inputs(wave, project, task, None, (since, false, Some(limit)), None)?;
         Ok((rows, truncated))
@@ -1092,7 +1092,7 @@ impl SqliteStore {
     pub(crate) fn input_history(
         &self,
         selector: &str,
-    ) -> StoreResult<crate::session_record::SessionHistory> {
+    ) -> StoreResult<crate::store::session_record::SessionHistory> {
         let selected = self.resolve_history_input(selector)?;
         let input = self
             .session(&selected)?
@@ -1112,7 +1112,7 @@ impl SqliteStore {
         caller: Option<&str>,
         window: (i64, bool, Option<usize>),
         input: Option<&str>,
-    ) -> StoreResult<(Vec<crate::session_record::SessionHistory>, bool)> {
+    ) -> StoreResult<(Vec<crate::store::session_record::SessionHistory>, bool)> {
         let pending = self.pending_inputs(wave, project, task, caller, window, input)?;
         let histories = pending
             .inputs
@@ -1365,7 +1365,7 @@ impl SqliteStore {
         &self,
         pending: &PendingHistory,
         input: &PendingInput,
-    ) -> StoreResult<crate::session_record::SessionHistory> {
+    ) -> StoreResult<crate::store::session_record::SessionHistory> {
         let scope = (
             pending.scope.0.as_deref(),
             pending.scope.1.as_deref(),
@@ -1395,16 +1395,16 @@ impl SqliteStore {
         } = input.clone();
         let input = input
             .as_deref()
-            .map(crate::session_record::parse_artifact_key)
+            .map(crate::store::session_record::parse_artifact_key)
             .transpose()
             .map_err(invalid)?;
-        let session = crate::session::HistoryCapture {
+        let session = crate::store::session::HistoryCapture {
             captured,
             id: session_id.clone().into(),
             current_capture: current_input,
             caller_artifact_key: caller
                 .as_deref()
-                .map(crate::session_record::parse_artifact_key)
+                .map(crate::store::session_record::parse_artifact_key)
                 .transpose()
                 .map_err(invalid)?,
             task_id: task
@@ -1570,7 +1570,7 @@ impl SqliteStore {
             ))),
             Some((Some(kind), _, Some(repo))) if kind == "repository" => {
                 Ok(Some(PrimaryScope::Repository(
-                    crate::repository::CanonicalRepo::from_saved_path(repo.into()),
+                    crate::store::address::CanonicalRepo::from_canonical_path(repo.into()),
                 )))
             }
             Some((Some(kind), _, _)) => Err(invalid(format!(
@@ -1660,7 +1660,7 @@ impl SqliteStore {
     }
 
     /// Sessions assigned to a Task after they began, oldest bind first.
-    pub(crate) fn bound_sessions(&self) -> StoreResult<Vec<crate::session::SessionBind>> {
+    pub(crate) fn bound_sessions(&self) -> StoreResult<Vec<crate::store::session::SessionBind>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let conn = conn.savepoint()?;
         let mut query = conn.prepare(
@@ -1673,7 +1673,7 @@ impl SqliteStore {
         let mut labels = std::collections::HashMap::new();
         while let Some(row) = rows.next()? {
             let task = TaskId::from_raw(row.get::<_, String>(2)?);
-            binds.push(crate::session::SessionBind {
+            binds.push(crate::store::session::SessionBind {
                 session_id: row.get(0)?,
                 at: row.get(1)?,
                 task: super::children::cached_short_task_id(&conn, &mut labels, &task)?
@@ -1687,7 +1687,7 @@ impl SqliteStore {
     /// Every open Session.
     pub(crate) fn projected_sessions(
         &self,
-        filter: &crate::session::SessionFilter,
+        filter: &crate::store::session::SessionFilter,
         inputs: Option<&SessionProjectionInputs>,
         now: i64,
         live_agents: &str,
@@ -1713,7 +1713,7 @@ impl SqliteStore {
             "SELECT receipt_key FROM session_events WHERE kind='captured' AND session_id=?1 ORDER BY seq",
         )?;
         let rows = query.query_map([id], |row| row.get::<_, String>(0))?;
-        rows.map(|row| crate::session_record::parse_artifact_key(&row?).map_err(invalid))
+        rows.map(|row| crate::store::session_record::parse_artifact_key(&row?).map_err(invalid))
             .collect()
     }
 
@@ -1841,7 +1841,7 @@ fn generated_title_in(
     if source == TitleSource::Generated {
         if let Some(id) = &session.task_id {
             if let Some(label) = super::children::short_task_id(conn, id)? {
-                return Ok(crate::session::task_session_title(
+                return Ok(crate::store::session::task_session_title(
                     title, id, &label, previous,
                 ));
             }
@@ -1886,7 +1886,7 @@ pub(super) fn repair_task_titles_in(
 pub(super) fn retain_history_in(
     conn: &Connection,
     session: &LfSession,
-    history: &[crate::session::SessionObservation],
+    history: &[crate::store::session::SessionObservation],
 ) -> StoreResult<bool> {
     let mut changed = false;
     for observation in history {
@@ -1976,7 +1976,7 @@ pub(super) fn require_current_actor_in(
         }
     }
     if let Some(key) = &observed.capture_key {
-        crate::session_record::parse_artifact_key(key).map_err(invalid)?;
+        crate::store::session_record::parse_artifact_key(key).map_err(invalid)?;
         let (owner, current): (String, bool) = conn
             .query_row(
                 "SELECT s.id,e.seq IS s.current_capture FROM session_events e

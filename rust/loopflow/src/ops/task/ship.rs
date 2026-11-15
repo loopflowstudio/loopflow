@@ -278,9 +278,7 @@ pub fn ship_begin(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsRe
                 ..
             } = super::select_task_run(&store, &task, task.worktree()?, graph, Some("start"))?;
             if take_up {
-                store
-                    .sqlite
-                    .take_up_task_graph(&task.id, &selected)
+                crate::store::task_work::take_up_task_graph(&store.sqlite, &task.id, &selected)
                     .map_err(task_error)?;
             }
         } else if current.as_ref().is_some_and(
@@ -471,7 +469,8 @@ pub fn ship_settle_merge(issue: &str) -> OpsResult<ShipMerge> {
         {
             return Ok(ShipMerge::Open);
         }
-        let row = store.sqlite.task_graph_row(&task.id).map_err(task_error)?;
+        let row =
+            crate::store::task_work::task_graph_row(&store.sqlite, &task.id).map_err(task_error)?;
         // A Task already at `end` has checked the merge; it only completes.
         if let Some(row) = row.as_ref().filter(|row| row.step != END) {
             if let Some(step) = post_merge_step(&row.graph) {

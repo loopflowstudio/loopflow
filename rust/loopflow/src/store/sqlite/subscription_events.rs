@@ -1,7 +1,7 @@
 use rusqlite::{params, OptionalExtension};
 
 use super::SqliteStore;
-use crate::steer::Steer;
+use crate::store::steer::Steer;
 use crate::store::work::task::{TaskEvent, TaskId};
 use crate::store::{StoreError, StoreResult};
 use loopflow_model::comment::TaskComment;

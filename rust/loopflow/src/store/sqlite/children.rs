@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension, TransactionBehavior};
 use time::OffsetDateTime;
 
-use crate::durable::TaskState;
+use crate::store::execution::TaskState;
 use crate::store::linear_records::{LinearIssueId, LinearProjectId};
 use crate::store::rows::now_unix;
 use crate::store::work::project::{Project, ProjectEvent, ProjectEventKind, ProjectId};
@@ -271,7 +271,7 @@ impl SqliteStore {
         task_id: &TaskId,
         creation: Option<&NewTask>,
         placement: Option<&(PathBuf, TaskPr)>,
-        session: Option<&crate::session::LfSession>,
+        session: Option<&crate::store::session::LfSession>,
         destination: Option<&Path>,
         receipt: Option<&super::creation::CreationIdentity>,
         me: &super::task_ownership::OwnershipFacts,
@@ -579,21 +579,34 @@ impl SqliteStore {
     pub fn task_by_issue(&self, issue: &str) -> StoreResult<Option<Task>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let snapshot = conn.savepoint()?;
-        match resolve_task_id_in(&snapshot, issue, None)? {
+        match resolve_task_id_in(&snapshot, issue, None, None)? {
             Some(id) => task_on(&snapshot, &id),
             None => Ok(None),
         }
     }
 
-    /// Resolve identity without requiring Project metadata or checkout placement.
+    pub(crate) fn task_identity_candidates(
+        &self,
+        issue: &str,
+    ) -> StoreResult<Vec<(TaskId, String, Option<String>)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        task_candidates_in(&conn, issue)
+    }
+
+    /// Resolve from one saved snapshot, retrying changed scope above SQL.
     pub(crate) fn resolve_task_id(
         &self,
         issue: &str,
-        repo: Option<&str>,
+        scope: Option<&TaskRepositoryScope>,
     ) -> StoreResult<Option<TaskId>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let snapshot = conn.savepoint()?;
-        resolve_task_id_in(&snapshot, issue, repo)
+        resolve_task_id_in(
+            &snapshot,
+            issue,
+            scope.map(|scope| scope.matching.as_slice()),
+            scope.map(|scope| scope.saved.as_slice()),
+        )
     }
 
     pub fn task_by_branch(&self, branch: &str) -> StoreResult<Option<Task>> {
@@ -1975,11 +1988,16 @@ fn task_pr_github_observation_json(pr: &TaskPr) -> StoreResult<Option<String>> {
 
 // Keep physical lookup, correspondence validation and record hydration in the
 // caller's read snapshot. A concurrent mapping change cannot mix generations.
-pub(super) fn resolve_task_id_in(
+#[derive(Debug)]
+pub(crate) struct TaskRepositoryScope {
+    pub saved: Vec<(TaskId, String, Option<String>)>,
+    pub matching: Vec<String>,
+}
+
+fn task_candidates_in(
     conn: &Connection,
     issue: &str,
-    repo: Option<&str>,
-) -> StoreResult<Option<TaskId>> {
+) -> StoreResult<Vec<(TaskId, String, Option<String>)>> {
     let selector = loopflow_model::id::TaskSelector::parse(issue);
     let mut statement = conn.prepare(
         "SELECT t.id, COALESCE(t.issue_title, t.issue_identifier, t.id), w.repo FROM tasks t
@@ -1990,7 +2008,7 @@ pub(super) fn resolve_task_id_in(
                 AND json_extract(c.export_json,'$.id')=?3))
          ORDER BY t.id",
     )?;
-    let mut tasks = statement
+    let tasks = statement
         .query_map(
             params![
                 selector.id,
@@ -2007,15 +2025,24 @@ pub(super) fn resolve_task_id_in(
             },
         )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    if let Some(repo) = repo {
-        let canonical = crate::repository::CanonicalRepo::discover(std::path::Path::new(repo)).ok();
+    Ok(tasks)
+}
+
+pub(super) fn resolve_task_id_in(
+    conn: &Connection,
+    issue: &str,
+    repositories: Option<&[String]>,
+    expected: Option<&[(TaskId, String, Option<String>)]>,
+) -> StoreResult<Option<TaskId>> {
+    let mut tasks = task_candidates_in(conn, issue)?;
+    if expected.is_some_and(|expected| tasks != expected) {
+        return Err(StoreError::Stale("Task identity candidates changed".into()));
+    }
+    if let Some(repositories) = repositories {
         tasks.retain(|(_, _, owner)| {
-            owner.as_deref() == Some(repo)
-                || owner.as_ref().is_some_and(|owner| {
-                    canonical
-                        .as_ref()
-                        .is_some_and(|canonical| canonical.contains(std::path::Path::new(owner)))
-                })
+            owner
+                .as_ref()
+                .is_some_and(|owner| repositories.contains(owner))
         });
     }
     if tasks.len() > 1 {

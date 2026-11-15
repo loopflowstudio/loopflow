@@ -149,9 +149,7 @@ pub(crate) async fn select_work(
         None => None,
     };
     let (task, source) = if let Some(value) = selection.task {
-        let id = store
-            .sqlite
-            .resolve_task_id(value.trim(), None)
+        let id = crate::store::children::resolve_task_id(&store.sqlite, value.trim(), None)
             .map_err(run_error)?
             .ok_or_else(|| run_error(format!("Task {value:?} is not registered")))?;
         let task = store
@@ -265,9 +263,9 @@ async fn bind_selected_work(
         )
         .await,
     );
-    let cwd = if crate::repository::CanonicalRepo::discover(Path::new(wave.repo()))
-        .is_ok_and(|canonical| canonical.contains(repo))
-    {
+    let cwd = if crate::repository::discover(Path::new(wave.repo())).is_ok_and(|canonical| {
+        crate::repository::discover(repo).is_ok_and(|other| other == canonical)
+    }) {
         crate::git::worktree_root(repo).unwrap_or_else(|_| repo.to_path_buf())
     } else {
         PathBuf::from(wave.repo())
@@ -329,7 +327,7 @@ async fn resolve_wave(store: &SharedStore, repo: &Path, value: &str) -> OpsResul
     let wave = if let Ok(id) = WaveId::parse(value) {
         store.get_wave(&id).await.map_err(run_error)?
     } else {
-        let locator = crate::work::wave::WaveLocator::discover(repo, value).map_err(run_error)?;
+        let locator = crate::work::wave::discover(repo, value).map_err(run_error)?;
         store.get_wave_at(&locator).await.map_err(run_error)?
     };
     wave.ok_or_else(|| run_error(format!("Wave {value:?} is not registered")))

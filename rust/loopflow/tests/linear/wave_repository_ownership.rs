@@ -13,7 +13,7 @@ use loopflow::work::project::{Project, ProjectId};
 use loopflow::work::task::{LinearWritebackState, Observation, Task, TaskId, TaskPr, TaskPrId};
 use loopflow::work::wave::context::{resolve_managed_wave, WaveResolveError};
 use loopflow::work::wave::relocate::relocate_wave;
-use loopflow::work::wave::{Wave, WaveLocator};
+use loopflow::work::wave::Wave;
 use time::OffsetDateTime;
 
 fn repository(path: &Path) {
@@ -52,7 +52,7 @@ fn author_wave(repo: &Path, slug: &str, marker: &str) {
 }
 
 fn registered_wave(repo: &Path, slug: &str) -> Wave {
-    let locator = WaveLocator::discover(repo, slug).unwrap();
+    let locator = loopflow::work::wave::discover(repo, slug).unwrap();
     Wave::new(
         WaveId::new(),
         locator.slug().to_string(),
@@ -237,7 +237,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         let original_plans = plans();
         assert_eq!(original_plans.len(), 2);
         let resolved = store
-            .get_wave_at(&WaveLocator::discover(&repo_a, "legacy").unwrap())
+            .get_wave_at(&loopflow::work::wave::discover(&repo_a, "legacy").unwrap())
             .await
             .unwrap()
             .unwrap();
@@ -491,7 +491,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     );
     assert_eq!(
         store
-            .get_wave_at(&WaveLocator::discover(&repo_b, "infrastructure").unwrap())
+            .get_wave_at(&loopflow::work::wave::discover(&repo_b, "infrastructure").unwrap())
             .await
             .unwrap()
             .unwrap()
@@ -566,7 +566,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     );
     assert_eq!(
         store
-            .get_wave_at(&WaveLocator::discover(&repo_b, "infrastructure").unwrap())
+            .get_wave_at(&loopflow::work::wave::discover(&repo_b, "infrastructure").unwrap())
             .await
             .unwrap()
             .unwrap()

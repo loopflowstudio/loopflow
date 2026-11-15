@@ -111,7 +111,7 @@ work_values! {
     // Released peers recorded the Wave default here; it lives in the Wave config.yaml.
     (HistoricalWaveWorkflow, "wave_workflow", Option<String>),
     (Krs, "krs", Vec<crate::store::work::project::ProjectKR>),
-    (MetricTargets, "metric_targets", Vec<crate::work::wave::metrics::MetricTarget>),
+    (MetricTargets, "metric_targets", Vec<crate::store::metric::MetricTarget>),
     (Disposition, "disposition", Disposition),
     (CommentContent, "comment_content", CommentContent),
 }

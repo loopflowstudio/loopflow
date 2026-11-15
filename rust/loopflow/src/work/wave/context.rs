@@ -7,7 +7,7 @@
 //! Registry resolution uses the canonical repository. Authored Wave files are
 //! gathered by prompt assembly from the executing checkout.
 
-use crate::work::wave::{Wave, WaveLocator};
+use crate::work::wave::Wave;
 use loopflow_model::id::WaveId;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -148,7 +148,7 @@ async fn resolve_slug(
     slug: &str,
 ) -> Result<Wave, WaveResolveError> {
     if let Some(repo) = repo {
-        let locator = WaveLocator::discover(repo, slug)
+        let locator = crate::work::wave::discover(repo, slug)
             .map_err(|error| WaveResolveError::Registry(error.to_string()))?;
         return store
             .get_wave_at(&locator)
@@ -196,7 +196,7 @@ pub async fn resolve_managed_wave(
                 return Ok(wave);
             }
             if let Some(repo) = repo {
-                let locator = WaveLocator::discover(repo, wave.slug())
+                let locator = crate::work::wave::discover(repo, wave.slug())
                     .map_err(|error| WaveResolveError::Registry(error.to_string()))?;
                 let scoped = store
                     .get_wave_at(&locator)
@@ -212,8 +212,8 @@ pub async fn resolve_managed_wave(
             }
             return Ok(wave);
         }
-        let slug =
-            crate::ops::util::normalize_wave_name(raw).ok_or(WaveResolveError::EmptyExplicit)?;
+        let slug = crate::store::work::wave::normalize_wave_name(raw)
+            .ok_or(WaveResolveError::EmptyExplicit)?;
         let store = store.ok_or_else(|| {
             WaveResolveError::Registry("no wave registry on this machine".to_string())
         })?;
@@ -235,7 +235,7 @@ pub async fn resolve_managed_wave(
             return Ok(wave);
         }
         if let Some(repo) = repo {
-            let locator = WaveLocator::discover(repo, wave.slug())
+            let locator = crate::work::wave::discover(repo, wave.slug())
                 .map_err(|error| WaveResolveError::Registry(error.to_string()))?;
             let scoped = store
                 .get_wave_at(&locator)
@@ -255,7 +255,8 @@ pub async fn resolve_managed_wave(
         return Ok(wave);
     }
 
-    let slug = crate::ops::util::normalize_wave_name(raw).ok_or(WaveResolveError::NoContext)?;
+    let slug =
+        crate::store::work::wave::normalize_wave_name(raw).ok_or(WaveResolveError::NoContext)?;
     resolve_slug(store, repo, &slug)
         .await
         .map_err(|error| match error {
@@ -389,7 +390,7 @@ mod tests {
             ))
             .await
             .unwrap();
-            let locator = WaveLocator::discover(&repo, "product").unwrap();
+            let locator = crate::work::wave::discover(&repo, "product").unwrap();
             let wave = Wave::new(
                 WaveId::new(),
                 "product".to_string(),

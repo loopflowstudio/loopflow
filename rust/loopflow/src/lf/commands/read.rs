@@ -848,13 +848,12 @@ impl Read {
             // The command prints the path alone.
             Self::RepoPath { id } => {
                 let checkout = super::work_route::repository_path(id)?;
-                let repo =
-                    crate::repository::CanonicalRepo::containing(&checkout)?.ok_or_else(|| {
-                        not_found(
-                            format!("repository plan {id} has no local checkout"),
-                            serde_json::json!({ "repo_id": id }),
-                        )
-                    })?;
+                let repo = crate::repository::containing(&checkout)?.ok_or_else(|| {
+                    not_found(
+                        format!("repository plan {id} has no local checkout"),
+                        serde_json::json!({ "repo_id": id }),
+                    )
+                })?;
                 Ok(repo.to_string().into())
             }
             Self::WaveGraph { directory, wave } => {

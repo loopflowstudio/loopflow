@@ -3,7 +3,7 @@ use super::{
     planning_write::{self, WriteOrigin},
     SqliteStore,
 };
-use crate::planning_git::PlanningDestination;
+use crate::store::planning_destination::PlanningDestination;
 use crate::store::planning_exchange::{PlanningMutation, PlanningSnapshot};
 use crate::store::work::edit::WorkValue;
 use crate::store::{

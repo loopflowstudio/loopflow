@@ -315,10 +315,8 @@ pub(crate) fn selected_context(
     if cli.selects_repository() {
         if let ContextFact::Bound { value, .. } = &resolution.repository_path {
             anyhow::ensure!(
-                crate::repository::CanonicalRepo::current()?.as_ref()
-                    == Some(&crate::repository::CanonicalRepo::discover(Path::new(
-                        value
-                    ))?),
+                crate::repository::current()?.as_ref()
+                    == Some(&crate::repository::discover(Path::new(value))?),
                 "Work does not belong to the selected repository. Nothing was opened."
             );
         }
@@ -344,7 +342,7 @@ fn work_context(
         && session.is_none()
         && crate::store::read_existing_registry()?.is_none()
     {
-        let repo = crate::repository::CanonicalRepo::containing(directory)?
+        let repo = crate::repository::containing(directory)?
             .context("select a Git repository with --repo before opening it")?;
         let mut resolution = ContextExplanation::empty();
         resolution.repository_path = ContextFact::bound(repo, "local_locator");
@@ -491,9 +489,7 @@ fn describe(
                 (None, ContextFact::Bound { value, .. }) => {
                     PrimaryScope::Wave(loopflow_model::id::WaveId::parse(value)?)
                 }
-                _ => PrimaryScope::Repository(crate::repository::CanonicalRepo::discover(
-                    &repository_path,
-                )?),
+                _ => PrimaryScope::Repository(crate::repository::discover(&repository_path)?),
             };
             // A Task's primary follows its claim; a Wave's or repository's
             // follows your Session Machine for it.
@@ -617,7 +613,7 @@ fn repository_for(store: Option<&Store>, url: &WorkUrl, directory: &Path) -> Res
         [repo] => Ok(repo.path.clone()),
         [] => {
             // The current checkout locates a plain repository before it has a plan.
-            let current = crate::repository::CanonicalRepo::containing(directory)
+            let current = crate::repository::containing(directory)
                 .ok()
                 .flatten()
                 .map(|repo| repo.as_path().to_path_buf())
@@ -684,7 +680,7 @@ fn available(cli: &crate::lf::Cli) -> Result<(Vec<Resolved>, Vec<String>)> {
             on: None,
             orphan: false,
             repo: if scoped {
-                crate::repository::CanonicalRepo::current()?.map(|repo| repo.to_string())
+                crate::repository::current()?.map(|repo| repo.to_string())
             } else {
                 None
             },
@@ -737,7 +733,7 @@ fn available_target(
         .repo
         .clone()
         .or_else(|| {
-            crate::repository::CanonicalRepo::discover(&session.cwd)
+            crate::repository::discover(&session.cwd)
                 .ok()
                 .map(|repo| repo.to_string())
         })

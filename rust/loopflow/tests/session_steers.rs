@@ -201,7 +201,7 @@ fn claude_startup_preserves_large_combined_seed_and_correlated_answer() {
     let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let steer = store
         .save_repository_steer(
-            &loopflow::repository::CanonicalRepo::discover(repo.path()).unwrap(),
+            &loopflow::repository::discover(repo.path()).unwrap(),
             "Fixture author",
             &format!("STARTUP_DIRECTION {}", "界<&>".repeat(20_000)),
         )
@@ -912,7 +912,7 @@ fn public_commands_save_steers_without_launching_providers() {
         VALUES('idle','Idle fixture','human',1,?1,1,?2)",
         rusqlite::params![
             repo.path().to_str().unwrap(),
-            loopflow::repository::CanonicalRepo::discover(repo.path())
+            loopflow::repository::discover(repo.path())
                 .unwrap()
                 .to_string()
         ],

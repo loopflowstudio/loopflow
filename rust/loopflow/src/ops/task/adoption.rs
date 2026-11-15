@@ -57,9 +57,9 @@ async fn resolve_checkout(
         // Plain creation never adopts the caller's checkout or conversation.
         return Ok(Source::default());
     };
-    let main = crate::repository::CanonicalRepo::discover(repo).map_err(task_error)?;
+    let main = crate::repository::discover(repo).map_err(task_error)?;
     let root = crate::git::worktree_root(cwd).map_err(task_error)?;
-    if crate::repository::CanonicalRepo::discover(&root).map_err(task_error)? != main {
+    if crate::repository::discover(&root).map_err(task_error)? != main {
         return Err(task_error(
             "The selected work belongs to another repository; run promotion there",
         ));

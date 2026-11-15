@@ -78,6 +78,19 @@ mod token_crypto;
 pub(crate) mod token_key;
 mod write_holds;
 
+#[cfg(test)]
+mod admission_lifecycle_tests;
+#[cfg(test)]
+mod native_usage_tests;
+#[cfg(test)]
+mod ownership_lifecycle_tests;
+#[cfg(test)]
+mod rental_lifecycle_tests;
+#[cfg(test)]
+mod steer_lifecycle_tests;
+#[cfg(test)]
+mod test_fixture;
+
 pub use error::{StoreError, StoreResult};
 pub use planning_peers::{PeerPlanningStatus, PeerProjectionConflict, PlanningJournal};
 pub use recording_gap::{GapSpan, RecordingGap};

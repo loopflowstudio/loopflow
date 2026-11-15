@@ -41,7 +41,7 @@ one to three seconds:
 cargo nextest run -p loopflow --lib -E 'test(adoption::tests::)'            # promotion and binding
 cargo nextest run -p loopflow --lib -E 'test(run::launch_policy_tests::)'   # launch and resume settings
 cargo nextest run -p loopflow --lib -E 'test(ops::task::explain::tests::)'  # Task run and checkout previews
-cargo nextest run -p loopflow --lib -E 'test(ssh::dispatch_tests::) | test(task_ownership::tests::)'  # Machine dispatch and ownership
+cargo nextest run -p loopflow --lib -E 'test(ssh::dispatch_tests::) | test(task_ownership::tests::) | test(store::ownership_lifecycle_tests::)'  # Machine dispatch and ownership
 cargo nextest run -p loopflow --test session_lifecycle_tests -E 'test(promotion_)'
 ```
 

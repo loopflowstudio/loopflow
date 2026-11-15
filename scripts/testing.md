@@ -144,7 +144,7 @@ Never `cargo test`, `cargo test --all` or `cargo nextest run --all` here.
 Promotion and binding decisions (`test(adoption::tests::)`), launch and
 resume settings (`test(run::launch_policy_tests::)`), Task run and checkout
 previews (`test(ops::task::explain::tests::)`) and Machine dispatch and
-ownership (`test(ssh::dispatch_tests::) | test(task_ownership::tests::)`) run
+ownership (`test(ssh::dispatch_tests::) | test(task_ownership::tests::) | test(store::ownership_lifecycle_tests::)`) run
 as library rows
 (`cargo nextest run -p loopflow --lib -E '<filter>'`); run those before the
 surface's full-Machine tests. The lists are in

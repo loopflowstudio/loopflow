@@ -71,11 +71,6 @@ pub(crate) fn build() -> MigrationBuild<'static> {
 }
 
 #[cfg(test)]
-pub(crate) fn apply_all_but_head(conn: &rusqlite::Connection) -> StoreResult<()> {
-    super::migration_runner::apply_all_but_head(&observers(), &build(), conn)
-}
-
-#[cfg(test)]
 pub(crate) fn apply_newer_migration(
     conn: &rusqlite::Connection,
     sql: &'static str,

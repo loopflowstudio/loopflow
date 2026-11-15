@@ -1931,7 +1931,7 @@ pub(super) fn record_process_in(
 #[cfg(test)]
 mod frontier_tests {
     use super::SqliteStore;
-    use crate::store::migrations::{
+    use crate::store::migration_runner::{
         apply_all_but_head, apply_newer_migration, latest_applied_version_sqlite,
         latest_known_version, prior_known_version,
     };
@@ -1972,7 +1972,12 @@ mod frontier_tests {
     #[test]
     fn test_store_image_matches_migrations_and_copies_are_independent() {
         let migrated = rusqlite::Connection::open_in_memory().unwrap();
-        crate::store::migrations::apply_sqlite(&migrated).unwrap();
+        crate::store::migration_runner::apply_sqlite(
+            &crate::store::test_fixture::build(),
+            &migrated,
+            &crate::store::test_fixture::observers(),
+        )
+        .unwrap();
         let directory = tempfile::tempdir().unwrap();
         let first = directory.path().join("first.db");
         let second = directory.path().join("second.db");
@@ -2109,7 +2114,12 @@ mod frontier_tests {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         let conn = rusqlite::Connection::open(path).unwrap();
         conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
-        apply_all_but_head(&conn).unwrap();
+        apply_all_but_head(
+            &crate::store::test_fixture::observers(),
+            &crate::store::test_fixture::build(),
+            &conn,
+        )
+        .unwrap();
     }
 
     fn seed_current_wave(path: &Path) {
@@ -2154,6 +2164,8 @@ mod frontier_tests {
         seed_current_wave(&path);
         let conn = rusqlite::Connection::open(&path).unwrap();
         apply_newer_migration(
+            &crate::store::test_fixture::observers(),
+            &crate::store::test_fixture::build(),
             &conn,
             "ALTER TABLE waves ADD COLUMN colour TEXT;
              CREATE TABLE wave_badges (wave_id TEXT NOT NULL, badge TEXT);",
@@ -2187,10 +2199,16 @@ mod frontier_tests {
         open(&path, &shared.home, Authorized).unwrap();
         let running = open(&path, &shared.home, Forbidden).unwrap();
         let conn = rusqlite::Connection::open(&path).unwrap();
-        apply_newer_migration(&conn, "ALTER TABLE waves DROP COLUMN promoted_at;").unwrap();
+        apply_newer_migration(
+            &crate::store::test_fixture::observers(),
+            &crate::store::test_fixture::build(),
+            &conn,
+            "ALTER TABLE waves DROP COLUMN promoted_at;",
+        )
+        .unwrap();
 
         running
-            .validate_current_schema(&crate::store::migrations::build())
+            .validate_current_schema(&crate::store::test_fixture::build())
             .expect("the running reader keeps its store");
         let store = open(&path, &shared.home, Forbidden).expect("a fresh open keeps working");
 
@@ -2215,6 +2233,8 @@ mod frontier_tests {
 
         let newer = rusqlite::Connection::open(&path).unwrap();
         apply_newer_migration(
+            &crate::store::test_fixture::observers(),
+            &crate::store::test_fixture::build(),
             &newer,
             "ALTER TABLE waves ADD COLUMN colour TEXT;
              CREATE TABLE wave_badges (wave_id TEXT NOT NULL, badge TEXT);",
@@ -2222,7 +2242,7 @@ mod frontier_tests {
         .unwrap();
 
         running
-            .validate_current_schema(&crate::store::migrations::build())
+            .validate_current_schema(&crate::store::test_fixture::build())
             .expect("a newer migration keeps the running reader valid");
         let after = Wave::new(WaveId::new(), "After upgrade".into(), "/repo".into());
         crate::work::wave::bootstrap::upsert_wave(&running, &after).unwrap();
@@ -2421,8 +2441,11 @@ mod frontier_tests {
 
         open(&path, &shared.home, Forbidden)
             .expect("an ordinary open validates ledger and schema only");
-        crate::store::migrations::validate_sqlite(&conn)
-            .expect_err("full diagnosis still reports the dangling reference");
+        crate::store::migration_runner::validate_sqlite(
+            &crate::store::test_fixture::build(),
+            &conn,
+        )
+        .expect_err("full diagnosis still reports the dangling reference");
     }
 
     /// A private path (not ~/.lf/loopflow.db) initializes and migrates itself.

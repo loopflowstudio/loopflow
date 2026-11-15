@@ -1,12 +1,11 @@
-use crate::process::attachment;
+use crate::store::test_fixture::{native_steer as native_fixture, steer as fixture};
 use rusqlite::{params, OptionalExtension};
 
 use super::{save_in, SqliteStore};
-use crate::store::sqlite::sessions::TerminalRetention::LiveTurn;
 use crate::store::steer::{NativeBoundary, Steer, SteerAdapter};
 use crate::store::StoreError;
 use loopflow_model::durable::Author;
-use loopflow_model::id::{LfProcessId, TerminalId};
+use loopflow_model::id::LfProcessId;
 
 /// Claim the conversation's next unread steers and stamp them as printed.
 fn read(store: &SqliteStore, adapter: &SteerAdapter, thread: &str) -> Vec<Steer> {
@@ -18,118 +17,7 @@ fn read(store: &SqliteStore, adapter: &SteerAdapter, thread: &str) -> Vec<Steer>
     steers
 }
 
-const ACTIVATE: NativeBoundary<'static> = NativeBoundary::Activate { source: "startup" };
 const CLEAR: NativeBoundary<'static> = NativeBoundary::Select { source: "clear" };
-
-fn fixture() -> (tempfile::TempDir, SqliteStore, SteerAdapter) {
-    let home = tempfile::tempdir().unwrap();
-    let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
-    store.test_session("session", &crate::store::session_record::new_artifact_key());
-    let process = LfProcessId::new();
-    store
-        .conn
-        .lock()
-        .unwrap()
-        .execute(
-            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
-            [process.as_str()],
-        )
-        .unwrap();
-    let claim =
-        attachment::claim_session_attachment(&store, "session", None, &process, false).unwrap();
-    store
-        .record_agent_process_identity("session", &claim, std::process::id(), 1)
-        .unwrap();
-    let adapter = store.reserve_steer_adapter("session", &claim).unwrap();
-    store
-        .with_provider_context(&adapter, "native", ACTIVATE, || Ok(()))
-        .unwrap();
-    (home, store, adapter)
-}
-
-/// Host the fixture's Session in a held terminal.
-fn hold(store: &SqliteStore) -> TerminalId {
-    let terminal = TerminalId::new();
-    store.create_terminal(&terminal, "build").unwrap();
-    store
-        .conn
-        .lock()
-        .unwrap()
-        .execute(
-            "UPDATE agent_sessions SET interactive=1,held_terminal_id=?1 WHERE id='session'",
-            [&terminal],
-        )
-        .unwrap();
-    terminal
-}
-
-fn native_fixture() -> (tempfile::TempDir, SqliteStore, SteerAdapter, TerminalId) {
-    let (home, store, adapter) = fixture();
-    let terminal = hold(&store);
-    {
-        let conn = store.conn.lock().unwrap();
-        conn.execute(
-            "UPDATE processes SET agent_interactive=1 WHERE id=?1",
-            [&adapter.agent_process_id],
-        )
-        .unwrap();
-    }
-    (home, store, adapter, terminal)
-}
-
-#[test]
-fn pending_requests_hold_the_terminal_until_the_current_attachment_settles_them() {
-    let (_home, store, _adapter) = fixture();
-    let first = store.session_attachment("session").unwrap().unwrap();
-    let owner = first.lf_process_id.as_ref().unwrap();
-    let terminal = hold(&store);
-    let mut activity = crate::store::session::SessionActivity {
-        preview: None,
-        observed_at: 1,
-        open_tools: 0,
-        pending_input: 1,
-        yielded: true,
-    };
-    store
-        .record_session_activity("session", &first, &activity)
-        .unwrap();
-    for viewed in [false, true] {
-        store
-            .record_viewer_hold(
-                &terminal,
-                viewed.then_some(crate::store::sqlite::ViewerHold::Viewed(1)),
-            )
-            .unwrap();
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                r#"UPDATE session_activity SET program_status='{"records":[{"state":"idle"}]}' WHERE session_id='session'"#,
-                [],
-            )
-            .unwrap();
-        assert_eq!(store.terminal_retention(&terminal).unwrap(), Some(LiveTurn));
-    }
-    let next = attachment::claim_session_attachment(&store, "session", Some(&first), owner, false)
-        .unwrap();
-    assert_eq!(store.terminal_retention(&terminal).unwrap(), Some(LiveTurn));
-    activity.pending_input = 0;
-    store
-        .record_session_activity("session", &first, &activity)
-        .unwrap();
-    assert_eq!(store.terminal_retention(&terminal).unwrap(), Some(LiveTurn));
-    store
-        .record_session_activity("session", &next, &activity)
-        .unwrap();
-    assert_eq!(store.terminal_retention(&terminal).unwrap(), None);
-    activity.pending_input = 1;
-    store
-        .record_session_activity("session", &next, &activity)
-        .unwrap();
-    attachment::replace_session_agent_process(&store, "session", &next, None, || Ok(true)).unwrap();
-    assert_eq!(store.terminal_retention(&terminal).unwrap(), None);
-}
 
 /// The retention of a held terminal after `setup` changes its store.
 fn retention_after(
@@ -224,87 +112,6 @@ fn terminal_retention_names_the_graph_run_or_absence_that_holds_an_idle_terminal
             .unwrap();
     });
     assert_eq!(completed, Some(NoOpenSession));
-}
-
-#[test]
-fn silent_native_turns_follow_the_provider_through_attachment_handoff() {
-    let (_home, store, adapter, terminal) = native_fixture();
-    let first = store.session_attachment("session").unwrap().unwrap();
-    let owner = first.lf_process_id.as_ref().unwrap();
-    store
-        .record_native_turn(&adapter, "native", false, None)
-        .unwrap();
-    assert_eq!(store.terminal_retention(&terminal).unwrap(), Some(LiveTurn));
-    let next = attachment::claim_session_attachment(&store, "session", Some(&first), owner, false)
-        .unwrap();
-    assert_ne!(first.token, next.token);
-    // No editor input or open tool is needed to keep an unyielded turn.
-    {
-        let conn = store.conn.lock().unwrap();
-        conn.execute(
-            "UPDATE held_terminals SET viewed=1 WHERE id=?1",
-            [&terminal],
-        )
-        .unwrap();
-        conn.execute(
-            r#"UPDATE session_activity SET program_status='{"records":[{"state":"idle"}]}' WHERE session_id='session'"#,
-            [],
-        ).unwrap();
-    }
-    assert_eq!(store.terminal_retention(&terminal).unwrap(), Some(LiveTurn));
-    // The provider itself survived; its stop belongs to its current attachment.
-    store
-        .record_native_turn(&adapter, "native", true, Some(1))
-        .unwrap();
-    // A viewed prompt also cannot settle its provider-owned watch.
-    assert_eq!(store.terminal_retention(&terminal).unwrap(), Some(LiveTurn));
-    store
-        .record_native_turn(&adapter, "native", true, Some(0))
-        .unwrap();
-    assert_eq!(store.terminal_retention(&terminal).unwrap(), None);
-    store
-        .conn
-        .lock()
-        .unwrap()
-        .execute(
-            "UPDATE held_terminals SET viewed=0 WHERE id=?1",
-            [&terminal],
-        )
-        .unwrap();
-    store
-        .record_native_turn(&adapter, "native", false, None)
-        .unwrap();
-    assert_eq!(store.terminal_retention(&terminal).unwrap(), Some(LiveTurn));
-    assert!(store
-        .record_native_turn(&adapter, "child", true, Some(0))
-        .is_err());
-    assert_eq!(store.terminal_retention(&terminal).unwrap(), Some(LiveTurn));
-    let replacement =
-        attachment::replace_session_agent_process(&store, "session", &next, None, || Ok(true))
-            .unwrap();
-    // Activity from the old provider cannot keep its replacement alive.
-    assert_eq!(store.terminal_retention(&terminal).unwrap(), None);
-    assert!(store
-        .record_native_turn(&adapter, "native", true, Some(1))
-        .is_err());
-    let current = store
-        .reserve_steer_adapter("session", &replacement)
-        .unwrap();
-    store
-        .with_provider_context(&current, "native", ACTIVATE, || Ok(()))
-        .unwrap();
-    store
-        .record_native_turn(&current, "native", true, Some(1))
-        .unwrap();
-    assert_eq!(store.terminal_retention(&terminal).unwrap(), Some(LiveTurn));
-    assert!(store
-        .record_native_turn(&adapter, "native", true, Some(0))
-        .is_err());
-    assert_eq!(store.terminal_retention(&terminal).unwrap(), Some(LiveTurn));
-    store
-        .record_native_turn(&current, "native", true, Some(0))
-        .unwrap();
-    assert_eq!(store.terminal_retention(&terminal).unwrap(), None);
 }
 
 /// Interactive Codex: lf spawned its app-server, so the AgentProcess is not a
@@ -801,25 +608,6 @@ fn a_cleared_conversation_is_what_reconnect_resumes_on_the_same_account() {
     let resumed = store.input_provider_session(&input).unwrap().unwrap();
     assert_eq!(resumed.agent_session.as_str(), "cleared");
     assert_eq!(resumed.account_id, Some(account));
-}
-
-#[test]
-fn a_replaced_agent_process_cannot_select_any_conversation() {
-    let (_home, store, stale) = fixture();
-    let claim = store.session_attachment("session").unwrap().unwrap();
-    let next =
-        attachment::replace_session_agent_process(&store, "session", &claim, None, || Ok(true))
-            .unwrap();
-    for thread in ["native", "foreign"] {
-        assert!(matches!(
-            store.with_provider_context(&stale, thread, CLEAR, || Ok(())),
-            Err(StoreError::InvalidAuthority(_))
-        ));
-    }
-    let current = store.reserve_steer_adapter("session", &next).unwrap();
-    store
-        .with_provider_context(&current, "next", CLEAR, || Ok(()))
-        .unwrap();
 }
 
 #[test]

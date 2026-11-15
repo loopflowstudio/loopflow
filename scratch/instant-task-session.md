@@ -1,7 +1,7 @@
 # LOO-906: immediate interactions across Desktop and mobile
 
-Implementation updated 2026-11-15 after creation cut `72bb1d06d4` on origin/main `9cafc410ee`
-(unchanged). Supersedes the Desktop-only delivery
+Implementation updated 2026-11-15 after pending-operation cut `e010cda519` on
+origin/main `9cafc410ee` (unchanged). Supersedes the Desktop-only delivery
 boundary. No shipping or merge decision is recorded. Placement remains this Task;
 no Wave is selected.
 
@@ -392,8 +392,9 @@ Acceptance, held replies on both hosts: Complete shows no request row while
 delivering; disconnect shows the row as Waiting for connection with no action;
 reconnect delivers once without a gesture; restart while waiting keeps it; a
 refusal becomes attention and restores membership; Abandon selects like Complete.
-READMEs stop saying each pending command has a row, and claim disconnected
-delivery only once built.
+`swift/README.md` ("Each pending command has one row") stops saying so, and docs
+claim disconnected delivery only once built. Realign corrected the phone README's
+deleted **Retry Complete** to **Check request**.
 
 ## Current implementation cut
 

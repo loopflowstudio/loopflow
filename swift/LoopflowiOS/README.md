@@ -73,8 +73,8 @@ opens the whole file. A Task with no conversation opens on its Changes.
 
 **Complete** removes the Task from affected feeds and counts immediately, then
 replaces this route with the next visible Task or returns to the list. Other feeds
-keep their selections. The same command saves before sending; **Retry Complete**
-recovers its original identity after a failure. Save failure restores membership
+keep their selections. The same command saves before sending; its request row's
+**Check request** recovers its original identity after an unanswered send. Save failure restores membership
 without changing your newer navigation. A retained Task shows **Completing…** while
 its command remains pending. These local changes work while the network is waiting;
 provider readiness still comes from the Session connection.

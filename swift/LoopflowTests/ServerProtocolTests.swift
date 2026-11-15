@@ -10,6 +10,39 @@ struct ServerProtocolTests {
         try Data(contentsOf: root.appendingPathComponent("rust/loopflow/tests/fixtures/dto/server/\(name).json"))
     }
 
+    @Test func readingStampsRequireEveryFieldAndRoundTrip() throws {
+        let message = try fixture("reading_stamped")
+        let fields = try RawJSON(message).fields()
+        let frame = try #require(fields["frame"])
+        let reading = try frame.decode(SubscriptionReading<[JSONValue]>.self)
+        let stamp = try #require(reading.stamp)
+        #expect(stamp.revisions.sessions == 11)
+        #expect(stamp.complete)
+        #expect(stamp.schema == UInt32(ServerProtocol.revision))
+        let wire = try #require(try frame.fields()["stamp"])
+        #expect(try wire.decode(JSONValue.self) == JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(stamp)))
+        var object = try #require(JSONSerialization.jsonObject(with: wire.bytes) as? [String: Any])
+        for key in ["machine", "epoch", "schema", "query", "complete", "revisions"] {
+            var missing = object
+            missing.removeValue(forKey: key)
+            #expect(throws: DecodingError.self) {
+                try JSONDecoder().decode(ReadingStamp.self, from: JSONSerialization.data(withJSONObject: missing))
+            }
+        }
+        object["query"] = NSNull()
+        let unscoped = try JSONDecoder().decode(ReadingStamp.self, from: JSONSerialization.data(withJSONObject: object))
+        #expect(unscoped.query == nil)
+        #expect(try RawJSON(JSONEncoder().encode(unscoped)).fields()["query"]?.isNull == true)
+        for key in ["answers", "stamp", "unavailable", "body"] {
+            var missing = try #require(JSONSerialization.jsonObject(with: frame.bytes) as? [String: Any])
+            missing.removeValue(forKey: key)
+            #expect(throws: DecodingError.self) {
+                try JSONDecoder().decode(SubscriptionReading<[JSONValue]>.self,
+                    from: JSONSerialization.data(withJSONObject: missing))
+            }
+        }
+    }
+
     /// What `lf server describe --json` prints; a Rust test holds it to the wire types.
     private func schema() throws -> [String: Any] {
         let data = try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/server_schema.json"))

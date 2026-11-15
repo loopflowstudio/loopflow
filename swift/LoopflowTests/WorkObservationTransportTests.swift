@@ -200,8 +200,8 @@ private final class FakeSubscriptions: @unchecked Sendable {
         for _ in 0..<400 where id != 0 && !requests(read).contains(#"{"id":\#(id)}"#) {
             try await Task.sleep(for: .milliseconds(5))
         }
-        send(read, id == 0 ? #"{"answers":null,"unavailable":"gone","body":null}"#
-             : #"{"answers":\#(id),"unavailable":"gone","body":null}"#)
+        send(read, id == 0 ? #"{"answers":null,"stamp":null,"unavailable":"gone","body":null}"#
+             : #"{"answers":\#(id),"stamp":null,"unavailable":"gone","body":null}"#)
     }
 }
 

@@ -1,7 +1,7 @@
 {
   "type": "hello",
-  "revision": 5,
-  "min_revision": 5,
+  "revision": 6,
+  "min_revision": 6,
   "client": {
     "kind": "desktop",
     "platform": "macos",

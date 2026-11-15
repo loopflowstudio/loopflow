@@ -29,7 +29,7 @@ impl Drop for ReadSnapshot<'_> {
 
 /// One counter per kind of displayed change. Equal revisions mean nothing a
 /// workspace surface reads from that domain was committed in between.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct StoreRevisions {
     pub planning: i64,
     pub sessions: i64,
@@ -40,6 +40,17 @@ pub struct StoreRevisions {
 }
 
 impl SqliteStore {
+    /// Read inside the caller's pinned snapshot, alongside its revisions and body.
+    pub(crate) fn reading_identity(&self) -> StoreResult<(String, String)> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT machines.id, client_store_epoch.epoch FROM machines
+             CROSS JOIN client_store_epoch WHERE machines.is_local=1 AND singleton=1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?)
+    }
+
     /// Workflow observation excludes transcript, usage and ordinary tool traffic.
     pub(crate) fn task_update_revision(&self) -> StoreResult<i64> {
         Ok(self.conn.lock().expect("store mutex poisoned").query_row(
@@ -104,6 +115,7 @@ mod tests {
     /// domain; `session_events` is covered except for transcript and usage rows.
     const NEVER_DISPLAYED: &[&str] = &[
         "creation_receipts",
+        "client_store_epoch",
         "access_profiles",
         "pm_project_name_cutover",
         "planning_user",
@@ -173,6 +185,7 @@ mod tests {
         writer.test_session("second", &crate::session_record::new_artifact_key());
         let reader = SqliteStore::open_read_only(&dir.path().join("db")).unwrap();
         let snapshot = reader.read_snapshot().unwrap();
+        let identity = reader.reading_identity().unwrap();
         let before = reader.revisions().unwrap();
         assert_eq!(
             reader.session_summary("first", 1).unwrap().unwrap().title,
@@ -190,6 +203,7 @@ mod tests {
             "Retained"
         );
         assert_eq!(reader.revisions().unwrap(), before);
+        assert_eq!(reader.reading_identity().unwrap(), identity);
         drop(snapshot);
         assert_eq!(
             reader.session_summary("first", 1).unwrap().unwrap().title,
@@ -200,6 +214,10 @@ mod tests {
             "committed"
         );
         assert!(reader.revisions().unwrap().sessions > before.sessions);
+        let reopened = SqliteStore::open_read_only(&dir.path().join("db")).unwrap();
+        assert_eq!(reopened.reading_identity().unwrap(), identity);
+        let other = SqliteStore::open_ephemeral(&dir.path().join("other")).unwrap();
+        assert_ne!(other.reading_identity().unwrap().1, identity.1);
         // Failed projection exits release the transaction too.
         let failed = || -> crate::store::StoreResult<()> {
             let _snapshot = reader.read_snapshot()?;

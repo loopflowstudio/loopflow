@@ -14,14 +14,14 @@ pub(crate) fn copy(path: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(parent)?;
     let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
     temporary.write_all(include_bytes!(concat!(env!("OUT_DIR"), "/test-store.db")))?;
-    // A copied schema is shared; a Machine identity belongs to one home. No
+    // A copied schema is shared; Machine and database identities are not. No
     // product rows refer to the local Machine in this empty database.
     rusqlite::Connection::open(temporary.path())
         .and_then(|conn| {
-            conn.execute(
+            conn.execute_batch(
                 "UPDATE machines SET id='home_' || lower(hex(randomblob(16))),
-                 created_at=unixepoch(),observed_at=unixepoch() WHERE is_local=1",
-                [],
+                 created_at=unixepoch(),observed_at=unixepoch() WHERE is_local=1;
+                 UPDATE client_store_epoch SET epoch=lower(hex(randomblob(16))) WHERE singleton=1;",
             )
         })
         .map_err(std::io::Error::other)?;

@@ -8,10 +8,11 @@
 </style>
 <main>
 <header>LOO-906 · concept-review · 2026-11-14
-<p class="sources">Built from scratch/instant-task-session.md; scratch/desktop-reactivity-feedback.md; scratch/questions.md; swift/LoopflowMac/{WorkModel,WorkProjection,CreationSubmissions}.swift; Views/{NewTaskSheet,SessionsView}.swift; swift/Loopflow/Services/{RegistryQuery,WorkObservation}.swift; swift/LoopflowTests/{WorkModelTests,WorkDestinationTests}.swift; swift/README.md; docs/server.md.</p></header>
+<p class="sources">Built from scratch/{instant-task-session,desktop-reactivity-feedback,questions}.md; swift/LoopflowMac/{WorkModel,WorkProjection}.swift; swift/LoopflowMac/Views/WorkNavigator.swift; swift/Loopflow/Services/{ReadingStamp,WorkObservation}.swift; swift/LoopflowiOS/{RemoteTaskObservation,SessionView}.swift; rust/loopflow/src/{lf/commands/subscribe,server/subscriptions,store/sqlite/revisions}.rs.</p></header>
 <h1>Implement one shared interaction model across Desktop and mobile</h1>
 <p>Next step: confirmed cache + ordered operation overlays + a transactional outbox. This is the headless implementation direction, not a recorded product preference. No unanswered product choice stops implementation.</p>
-<p><strong>Biggest mismatch:</strong> each screen currently decides when a command, a refresh and navigation have finished. The proposed store makes local intent visible everywhere before I/O; Machine facts confirm it later. Native readiness still controls input.</p>
+<p><strong>Decision for implementation:</strong> distinguish an operation being retained for recovery from its effect still applying to a query. A fresh count must not subtract a completed Task again while a lagging list still needs the overlay.</p>
+<p><strong>Biggest mismatch:</strong> each screen currently decides when a command, a refresh and navigation have finished. Stamped reads now exist, but do not yet reconcile shared facts. The proposed store makes local intent visible everywhere before I/O; Machine facts confirm it later. Native readiness still controls input.</p>
 <table><thead><tr><th>Action</th><th>Concept</th><th>Proposed API / owner</th></tr></thead><tbody>
 <tr><td>Start, Complete, edit</td><td>Durable operation + projected Work</td><td><code>begin(command, origin)</code> → shared store/outbox</td></tr>
 <tr><td>Receive result / refresh</td><td>Receipt + complete stamped reading</td><td><code>receive(receipt)</code>, <code>receive(reading)</code> → rebase only the affected operation</td></tr>
@@ -21,7 +22,7 @@
 <section>
 <h2>The experience, before → proposed</h2>
 <p class="status">Existing sequencing; launch has a partial Desktop implementation</p>
-<p>Command → wait → refresh → change screen. Cached selection still performs preparation; Wave navigation delays selection by 120 ms. Mobile has separate submission and view-owned conversation lifetimes.</p>
+<p>Complete → wait for command → wait for refresh. Cached selection still performs preparation. Mobile has separate submission and view-owned conversation lifetimes. Wave/repository selection now changes synchronously; the former 120 ms delay is removed.</p>
 <div class="journey"><strong>Start</strong> → submitted words appear in the conversation immediately → persist/send → bind real Task and Session → attach in place.<br>
 <strong>Complete</strong> → row disappears and next Task opens, or an empty view → confirm in background.<br>
 <strong>Select recent Task</strong> → highlight + retained content → refresh.<br>
@@ -30,17 +31,19 @@
 </section>
 <section>
 <h2>Try to break it</h2>
-<p><strong>Normal:</strong> a receipt binds the operation to real IDs. Each affected query keeps its overlay until a complete reading covers the commit fence. A current no-Graph result restores ordinary Task controls.</p>
+<p><strong>Normal:</strong> a receipt binds the operation to real IDs. Each affected query keeps its effect until a complete reading covers the commit fence. Stop applying the effect to fresh queries while retaining it for lagging ones. A current no-Graph result restores ordinary Task controls.</p>
 <p><strong>Failure:</strong> completion refusal removes only its overlay and restores membership from the latest base. Success followed by refresh failure keeps pending confirmation. Attachment failure shows Retry opening beside Inspect, using the same Session.</p>
 <p><strong>Recovery:</strong> save before send; restart loads outbox layers before cached lists. Lost replies look up the same operation on its original Machine. Uncertain execution is never blindly replayed.</p>
 <p><strong>Counterexamples:</strong> A completes, then is reopened; A→B→A replies reorder; expand→collapse finishes loading late. Preserve the later intent. Unrelated revisions, partial pages, native readiness and old Task frames cannot retire an operation.</p>
+<p><strong>Shared-cache counterexamples:</strong> list revision 12 arrives before detail revision 11: keep the newer title. A fresh count incorporates Complete before a held list: do not subtract twice. A filtered list drops a Task: retain its entity and open workspace. An old frame arrives after epoch reset: keep the new base and recover uncertain operations without resending.</p>
 </section>
 <section>
 <h2>What changes underneath</h2>
-<p class="status">Proposed; the cross-platform rewrite is unbuilt</p>
+<p class="status">Built: revision-6 stamped reads and immediate Wave/repository selection. Proposed: shared store, receipts and client migration.</p>
 <p>One store in <code>swift/Loopflow</code> owns normalized facts, ordered projections and transactional persistence. Rust supplies durable command receipts, commit fences and complete query stamps. Desktop and mobile share reconciliation and membership semantics; routes keep selection and drafts; native owners retain execution and input control.</p>
 <p>Delete creation-only ledgers, per-action pending maps and duplicate cache/freshness owners as consumers move. Preserve saved requests, exact Session identity and domain recovery. Validate one membership vocabulary and GRDB support on both toolchains before adoption.</p>
-<p class="status">Source checkpoint: immediate Desktop launch, exact attachment, request-scoped Task reconciliation and attachment-retry cases exist. The latest focused Swift run was stopped before tests finished. Native latency and SQL costs remain unmeasured.</p>
+<p>Keep revision provenance on normalized fact groups and incorporation on each affected query. Filtered absence changes membership, not entity existence. Epoch changes invalidate old comparisons; pending operation identities survive for receipt recovery.</p>
+<p class="status">Recorded implementation checks: 50 focused Desktop tests, 15 focused Rust tests and one iOS stamp test passed; migration and multiplatform-boundary checks passed. These checks cover the read-contract cut, not the unbuilt store. No checks were rerun for this prose review. Native latency and SQL costs remain unmeasured.</p>
 </section>
 <section>
 <h2>Questions for the next demonstration</h2>

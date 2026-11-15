@@ -8,7 +8,8 @@
   overlays and transactional outbox for the next implementation; no requirement
   calls for a full mutable offline replica. This is not a recorded product
   preference. Validate membership coverage and GRDB/toolchains during implementation;
-  no library or server contract change is implemented.
+  GRDB is not adopted yet. Protocol revision 6 now adds stamped subscriptions;
+  transactional cache/outbox and membership migration remain unfinished.
 - Completion navigation: Jack Heart replied “1b for the question (or show noting)”
   to the numbered choice in `scratch/concept-review.html`. Remove the row and
   select the next Task immediately; an empty state is allowed when none remains.

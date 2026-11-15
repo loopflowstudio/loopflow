@@ -1,6 +1,6 @@
 # LOO-906: immediate interactions across Desktop and mobile
 
-Draft for architecture review, 2026-11-14. Supersedes the Desktop-only delivery
+Implementation in progress, 2026-11-14. Supersedes the Desktop-only delivery
 boundary. No shipping or merge decision is recorded. Placement remains this Task;
 no Wave is selected.
 
@@ -235,6 +235,33 @@ After all affected cached queries converge, drop the layer; retain failed or
 uncertain durable requests until resolved. Closed queries are invalidated and
 must reload beyond their fence before their cached base can be shown unoverlaid.
 
+Keep the durable operation's lifetime separate from where its effect still
+applies. Once a query incorporates a committed operation, stop applying that
+operation to that query, even while another query remains behind its fence.
+Retaining the operation for recovery must not subtract a completed Task twice
+from a fresh count. Track incorporation per affected query; retire the durable
+operation only after its remaining coverage obligations are discharged.
+
+Normalized records also need provenance across queries. Accept confirmed database
+facts only when the incoming stamp covers the domains those facts depend on and
+does not regress their stored revisions within the same Machine/epoch/schema.
+Generate those dependencies with the membership vocabulary; never order facts by
+arrival, checkpoint ID or query hash. Merge independently stamped fact groups;
+when freshness cannot be ordered, retain the known value as stale and request a
+covering reading rather than choosing a winner. External observations keep their
+own freshness. Missing membership in a complete filtered query removes that
+membership, not the normalized entity or its retained workspace. A partial or
+unavailable result establishes neither removal nor incorporation.
+
+Changing epoch invalidates comparison with the old confirmed cache and fences.
+Bind incoming frames to the active connection/store generation so a delayed old
+frame cannot switch the cache back. Keep submitted operations, their original
+identity and pending presentation while recovering receipts on the original
+Machine. An old fence cannot acknowledge the replacement base, and epoch reset
+is never permission to resend uncertain work.
+Historical-backup restoration must establish a new epoch before serving cached
+clients; the reset mechanism remains implementation work.
+
 Normalize Task/Session/Wave identity across lists, detail pages, boards, searches
 and counts. Cut `WorkViewPlan` membership over to a server-produced declarative
 selection/group/sort plan over display facts, evaluated by the shared client
@@ -317,8 +344,8 @@ existing bounded input owners: no offline keystroke queue or automatic resend.
 
 ## Delete — do not maintain
 
-- `WorkNavigator.waveRow`'s `pressedScope`/120 ms delayed selection and its exclusive
-  timing tests; cut callers over to immediate local navigation. Remove view-owned
+- Removed: `WorkNavigator.waveRow`'s `pressedScope`/120 ms delayed selection.
+  Production row actions now select synchronously. Remove view-owned
   mobile `SessionLink` teardown on ordinary Task switching; keep explicit Close,
   background policy and memory-pressure eviction under the retained owner.
 - Desktop `createdTaskIDs` predecessor and this pass's request-specific
@@ -359,9 +386,9 @@ Indivisible cross-platform cut, with internal slices; no publish/merge authoriza
 This scope exceeds the size-check signal because causal writes, both read paths
 and their consumers must converge together.
 
-1. **This slice: architecture review.** Carry the cache/overlay design into
-   implementation; validate query membership and persistence dependencies before
-   cutting consumers over. Completion navigation is specified above.
+1. **Architecture:** confirmed cache plus ordered overlays; validate query
+   membership and persistence dependencies before cutting consumers over.
+   Completion navigation is specified above.
 2. Extend receipt/commit-stamp contracts and domain recovery; migrate saved data.
 3. Build shared transactional client store and projection reducer; cut both
    transports over, including query membership. Delete predecessor owners.
@@ -454,17 +481,61 @@ creation-recovery instructions remain valid; no skill workflow change is needed.
 Show the same journeys with held network replies next, including overlap and
 restart recovery; demo still owns native latency samples.
 
+Additional held-response counterexamples for the shared owner: a list at planning
+revision 12 arrives before a detail response at revision 11 for the same Task;
+the title must not regress. A refreshed count already includes Complete while
+another affected list is held; apply the removal only to the lagging list. A Task
+leaves a filtered list but remains open elsewhere; retain its entity/workspace.
+After an epoch change, an old frame and a lost-write recovery reply arrive; neither
+may restore the old base or trigger a second submission. These refine the existing
+cache/overlay design and require no new product choice.
+
 Headless concept-review outcome: design changed; iterate to implement the shared
 client store and cross-platform cut. Completion follows the quoted 1b choice.
 The prior launch-only feedback is retained as regression requirements, rather
-than the final scope. No production code changed in this review.
+than the final scope. That concept review changed the design without changing production code.
 
-Checks (Desktop launch checkpoint, 2026-11-14): `scripts/test_desktop.sh --jobs 4
---no-parallel --filter` over `WorkDestinationTests.newTask`,
-`WorkDestinationTests.lateCreationReply`, `WorkDestinationTests.failedAutomatic`
-and `WorkModelStreamTests.launchReconciliation`: all passed (23 cases). Before
-this run the checkpoint did not compile: `SessionsContentView.body` exceeded the
-type checker (header split into `mainPaneHeader`), and tests encoded the
-Decodable-only `RoadmapTask` (now `WorkTestFixture.taskRowJSON`). The
-cross-platform rewrite has not started; gate/CI own its suites, demo owns native
-timing.
+The launch checkpoint and its earlier 23-case result are recorded at
+`9387f63e59ee91e8496e64b9304c73f152da589e:scratch/instant-task-session.md`.
+
+## Current implementation cut
+
+Shared subscriptions now carry `ReadingStamp` (protocol revision 6): Machine,
+persisted database epoch, schema, exact served-query/selection hash, whole-body
+coverage and SQLite revisions captured with the body in its pinned snapshot.
+Failed frames carry null; selected fragments cannot claim whole-query coverage.
+CLI streams have no served-query identity. Desktop and mobile use the same strict
+`SubscriptionReading` decoder; Desktop retains the stamp when re-answering a
+cached frame. Existing revision-5 creation payloads remain readable/recoverable
+because their write shape did not change. `client_operations.sql` is this Task's
+one draft migration; receipt work extends it in place.
+
+The navigator's delayed Wave/repository click task is also deleted; its real
+button action now selects before returning, with rapid-return coverage.
+
+This is the read-contract cut, not the shared state architecture's completion.
+Remaining: domain commit fences and generalized receipt admission/recovery;
+transactional confirmed cache/outbox and normalized membership projection;
+Desktop/mobile mutation, navigation and retained-occurrence migration; removal
+of the launch reconciliation exception and other owners in the delete list;
+held-response/overlap/crash acceptance and native latency sampling. `complete`
+currently describes transport coverage of the exact scoped query, not a claim
+that external dependencies or native input are ready. Membership projection must
+also retain the query's unavailable/unknown membership before retiring effects.
+A fresh database gets a fresh epoch; restoring a historical database backup into
+an existing store still needs epoch-reset handling before durable cache rollout.
+
+A distinct-epoch check initially exposed that prepared fixture databases copied
+one epoch. Fresh-file copies now reseed it beside the local Machine; concurrent
+first opens and subsequent reopens retain both identities.
+
+Checks (2026-11-14):
+
+- `scripts/test_desktop.sh --jobs 4 --no-parallel --filter 'ServerProtocolTests|DTOFixtureTests.subscribeFramesDecode|CreationSubmissionTests|WorkNavigationTests.waveClickSelectsBeforeReturningFromTheGesture|WorkObservationTransportTests|WorkModelStreamTests.launchReconciliation|WorkDestinationTests.newTask|WorkDestinationTests.lateCreationReply|WorkDestinationTests.failedAutomatic'`: 50 tests passed.
+- `cargo nextest run -p loopflow --lib -E 'test(reading_stamp) | test(a_commit_during_projection) | test(a_read_snapshot_keeps_joined) | test(server::schema::tests::) | test(store_revisions_cover_every_table) | test(concurrent_copies_share_one_initialized_machine) | test(test_store_image_matches_migrations_and_copies_are_independent)'`: 15 passed.
+- `uv run python scripts/check_migrations.py`: passed; one draft migration.
+- `uv run python scripts/check_swift_multiplatform_boundaries.py`: passed.
+- `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/ReadingStampTests`: 1 passed; app and test targets compiled; disposable Simulator removed.
+
+Gate owns wider store/transport/lifecycle, DTO integration, documented-command,
+packaging and clippy checks. Demo owns native latency sampling.

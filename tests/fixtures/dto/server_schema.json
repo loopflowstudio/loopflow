@@ -9089,6 +9089,45 @@
         }
       ]
     },
+    "ReadingStamp": {
+      "description": "SQLite facts read in the same snapshot as a subscription's body. External\nobservations (Git, providers, process liveness) are not certified by this fence.",
+      "properties": {
+        "complete": {
+          "description": "The whole scoped query was returned, rather than a selected JSON fragment.",
+          "type": "boolean"
+        },
+        "epoch": {
+          "type": "string"
+        },
+        "machine": {
+          "type": "string"
+        },
+        "query": {
+          "description": "SHA-256 of the served read and selection; absent on ordinary CLI streams.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "revisions": {
+          "$ref": "#/$defs/StoreRevisions"
+        },
+        "schema": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "machine",
+        "epoch",
+        "schema",
+        "query",
+        "complete",
+        "revisions"
+      ],
+      "type": "object"
+    },
     "Records": {
       "description": "Oldest first; replacement moves a record to the end. No heartbeat or clock.",
       "properties": {
@@ -12334,6 +12373,40 @@
       ],
       "type": "object"
     },
+    "StoreRevisions": {
+      "description": "One counter per kind of displayed change. Equal revisions mean nothing a\nworkspace surface reads from that domain was committed in between.",
+      "properties": {
+        "graphs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "planning": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "processes": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "sessions": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "usage": {
+          "description": "Token counts. Moves every few seconds while agents work.",
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "planning",
+        "sessions",
+        "graphs",
+        "processes",
+        "usage"
+      ],
+      "type": "object"
+    },
     "SubscriptionEvent": {
       "description": "An occurrence within the Tasks included in a subscription reading.",
       "oneOf": [
@@ -12454,6 +12527,17 @@
             }
           ]
         },
+        "stamp": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReadingStamp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Null when the reading could not establish a database snapshot."
+        },
         "unavailable": {
           "description": "Why the read failed. `body` is then `null`.",
           "type": [
@@ -12464,6 +12548,7 @@
       },
       "required": [
         "answers",
+        "stamp",
         "unavailable",
         "body"
       ],
@@ -19505,6 +19590,6 @@
     }
   ],
   "title": "Loopflow server protocol",
-  "x-min-revision": 5,
-  "x-revision": 5
+  "x-min-revision": 6,
+  "x-revision": 6
 }

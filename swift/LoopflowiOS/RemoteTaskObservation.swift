@@ -109,12 +109,7 @@ final class RemoteTaskObservation {
     }
 
     nonisolated static func decode(frame: RawJSON) throws -> (answers: UInt64?, reading: MobileTaskReading) {
-        struct Frame: Decodable {
-            let answers: UInt64?
-            let unavailable: String?
-            let body: [WorkViewPlan]?
-        }
-        let reading = try frame.decode(Frame.self)
+        let reading = try frame.decode(SubscriptionReading<[WorkViewPlan]>.self)
         if let reason = reading.unavailable {
             return (reading.answers, .failure(RegistryQueryError(reason)))
         }

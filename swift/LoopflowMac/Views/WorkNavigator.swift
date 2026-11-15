@@ -14,8 +14,6 @@ struct WorkNavigator: View {
     /// The clicked Wave row moves to the top; a Dashboard's label into the list header.
     @Namespace private var scopeTitle
     @State private var wavesHeight: CGFloat = 130
-    /// The Wave row just clicked, shown before its selection moves it.
-    @State private var pressedScope: WorkNavigation.SidebarScope?
     @State private var removingWave: WaveSnapshot?
     @State private var renamingWave: WaveSnapshot?
     @State private var taskDrag = TaskOrderDrag.State()
@@ -187,17 +185,10 @@ struct WorkNavigator: View {
     private func waveRow(scope: WorkNavigation.SidebarScope, name: String, icon: String?,
                          count: Int, unavailableReason: String?) -> some View {
         let reference: WorkReference? = if case .wave(let id) = scope { .wave(id: id) } else { nil }
-        let state: SidebarSelection = pressedScope == scope || model.navigation.destination == .work(reference) ? .shown
+        let state: SidebarSelection = model.navigation.destination == .work(reference) ? .shown
             : model.navigation.sidebarScope == scope ? .containing : .none
         return Button {
-            // The click darkens the row first; it moves once that has landed.
-            guard !reduceMotion else { model.select(reference); return }
-            withAnimation(.easeOut(duration: 0.12)) { pressedScope = scope }
-            Task {
-                try? await Task.sleep(for: .milliseconds(120))
-                model.select(reference)
-                pressedScope = nil
-            }
+            model.select(reference)
         } label: {
             HStack {
                 if let icon { Image(systemName: icon) }

@@ -110,7 +110,8 @@ public actor CreationSubmissions {
         // payload again needs the revision it was written for.
         var receipt = try await receipt(record.id)
         if receipt == nil || receipt?.disposition == .continue {
-            guard record.version == ServerProtocol.revision else {
+            // Revision 6 adds read stamps; saved revision-5 creation payloads are unchanged.
+            guard record.version == ServerProtocol.revision || (record.version == 5 && ServerProtocol.revision == 6) else {
                 throw RegistryQueryError("This submitted creation requires protocol revision \(record.version); its request is retained")
             }
             _ = try await send(record.payload)

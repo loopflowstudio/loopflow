@@ -2352,9 +2352,12 @@ mod frontier_tests {
                         super::copy_test_store(&path).unwrap();
                         rusqlite::Connection::open(&path)
                             .unwrap()
-                            .query_row("SELECT id FROM machines WHERE is_local=1", [], |row| {
-                                row.get::<_, String>(0)
-                            })
+                            .query_row(
+                                "SELECT machines.id,client_store_epoch.epoch FROM machines
+                                CROSS JOIN client_store_epoch WHERE is_local=1 AND singleton=1",
+                                [],
+                                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                            )
                             .unwrap()
                     })
                 })
@@ -2390,7 +2393,11 @@ mod frontier_tests {
                 let columns = query.column_count();
                 let mut rows: Vec<_> = query
                     .query_map([], |row| {
-                        (if table.name == "machines" { 3 } else { 0 }..columns)
+                        (match table.name.as_str() {
+                            "machines" => 3,
+                            "client_store_epoch" => 2,
+                            _ => 0,
+                        }..columns)
                             .map(|column| row.get::<_, rusqlite::types::Value>(column))
                             .collect::<rusqlite::Result<Vec<_>>>()
                     })

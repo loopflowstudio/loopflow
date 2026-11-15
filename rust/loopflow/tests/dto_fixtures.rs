@@ -580,6 +580,7 @@ fn subscribe_frames_carry_each_reads_json_result() {
     };
     let written = serde_json::to_value(SubscriptionFrame::<()> {
         answers: None,
+        stamp: None,
         unavailable: Some("gone".into()),
         body: None,
     })

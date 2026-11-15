@@ -1215,7 +1215,7 @@ private struct WorkTestFixture {
             return WorkFrame(sequence: sequence, answers: answers, unavailable: nil, content: .checkpoint, wire: nil)
         }
         let answers = answers.map(String.init) ?? "null"
-        let line = #"{"answers":\#(answers),"unavailable":null,"body":\#(body)}"#
+        let line = #"{"answers":\#(answers),"stamp":null,"unavailable":null,"body":\#(body)}"#
         return try WorkFrame.decode(part: try #require(WorkPart(rawValue: part)), scope: scope,
                                     sequence: sequence, line: Data(line.utf8))
     }

@@ -1074,6 +1074,10 @@ starting a provider. Waves group their full inventory as Owned and Unowned; rows
 ## Testing
 
 Test shared Work through the [server protocol](../rust/loopflow/src/server/README.md).
+Desktop and iOS decode subscription envelopes with the shared `SubscriptionReading`
+and retain their `ReadingStamp`. Its database epoch and revisions describe the same
+snapshot as the body; a local checkpoint acknowledgement cannot make cached facts
+newer. Protocol revision 6 requires the matching helper and phone app.
 Rust's `served_reads` verifies CLI/server mutation parity, input/output/errors,
 concurrent request traces in `logs/lf.log`, and no request Process rows or global
 context changes. Native cancellation releases the client's wait; a lost reply

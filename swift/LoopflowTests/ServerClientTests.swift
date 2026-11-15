@@ -171,7 +171,7 @@ struct ServerClientTests {
             let id = message["id"]!
             respond(["type": "response", "id": id, "trace_id": "trace", "result": NSNull()])
             respond(["type": "reading", "id": id, "checkpoint": "received-baseline",
-                     "frame": ["answers": NSNull(), "unavailable": NSNull(), "body": "baseline"]])
+                     "frame": ["answers": NSNull(), "stamp": NSNull(), "unavailable": NSNull(), "body": "baseline"]])
             return true
         }
         let subscription = ServerClient.subscribe(.allPlans, location: peer.location)
@@ -191,7 +191,7 @@ struct ServerClientTests {
                 #expect(resumed.get())
                 #expect(message["checkpoint"] as? Int == 100)
                 respond(["type": "reading", "id": message["id"]!, "checkpoint": "confirmed-baseline",
-                         "frame": ["answers": message["checkpoint"]!, "unavailable": NSNull(), "body": "confirmed"]])
+                         "frame": ["answers": message["checkpoint"]!, "stamp": NSNull(), "unavailable": NSNull(), "body": "confirmed"]])
             case "cancel": return false
             default: break
             }
@@ -213,7 +213,7 @@ struct ServerClientTests {
             let id = message["id"]!
             respond(["type": "response", "id": id, "trace_id": "trace", "result": NSNull()])
             respond(["type": "reading", "id": id, "checkpoint": "queued-baseline",
-                     "frame": ["answers": NSNull(), "unavailable": NSNull(), "body": "baseline"]])
+                     "frame": ["answers": NSNull(), "stamp": NSNull(), "unavailable": NSNull(), "body": "baseline"]])
             return false
         }
         let subscription = ServerClient.subscribe(.allPlans, location: peer.location)
@@ -228,7 +228,7 @@ struct ServerClientTests {
                 resumed.set(true) // The unchanged baseline is omitted on this connection.
             case "checkpoint":
                 respond(["type": "reading", "id": message["id"]!, "checkpoint": "queued-baseline",
-                         "frame": ["answers": message["checkpoint"]!, "unavailable": NSNull(), "body": "baseline"]])
+                         "frame": ["answers": message["checkpoint"]!, "stamp": NSNull(), "unavailable": NSNull(), "body": "baseline"]])
             case "cancel": return false
             default: break
             }
@@ -356,7 +356,7 @@ struct ServerClientTests {
             if message["type"] as? String == "checkpoint" { return false }
             if message["type"] as? String == "subscribe" {
                 respond(["type": "response", "id": message["id"]!, "trace_id": "trace", "result": NSNull()])
-                respond(["type": "reading", "id": message["id"]!, "checkpoint": "old", "frame": ["answers": NSNull(), "unavailable": NSNull(), "body": "old"]])
+                respond(["type": "reading", "id": message["id"]!, "checkpoint": "old", "frame": ["answers": NSNull(), "stamp": NSNull(), "unavailable": NSNull(), "body": "old"]])
             }
             return true
         }
@@ -368,7 +368,7 @@ struct ServerClientTests {
             case "subscribe":
                 #expect(message["resume"] is NSNull)
                 respond(["type": "response", "id": message["id"]!, "trace_id": "trace", "result": NSNull()])
-                respond(["type": "reading", "id": message["id"]!, "checkpoint": "fresh", "frame": ["answers": NSNull(), "unavailable": NSNull(), "body": "fresh"]])
+                respond(["type": "reading", "id": message["id"]!, "checkpoint": "fresh", "frame": ["answers": NSNull(), "stamp": NSNull(), "unavailable": NSNull(), "body": "fresh"]])
             case "cancel": return false
             default: break
             }
@@ -389,7 +389,7 @@ struct ServerClientTests {
                 #expect(message["resume"] is NSNull)
                 let id = message["id"]!
                 respond(["type": "response", "id": id, "trace_id": "trace", "result": NSNull()])
-                respond(["type": "reading", "id": id, "checkpoint": "baseline", "frame": ["answers": NSNull(), "unavailable": NSNull(), "body": [:]]])
+                respond(["type": "reading", "id": id, "checkpoint": "baseline", "frame": ["answers": NSNull(), "stamp": NSNull(), "unavailable": NSNull(), "body": [:]]])
             case "checkpoint":
                 let id = message["id"]!
                 // Another ID's event occupies seq=1. Routing must follow sequence checking.
@@ -434,11 +434,11 @@ struct ServerClientTests {
                 let id = message["id"] as! String
                 subscriptionID.set(id)
                 respond(["type": "response", "id": id, "trace_id": "trace", "result": NSNull()])
-                respond(["type": "reading", "id": id, "checkpoint": "fixture-checkpoint", "frame": ["answers": 1, "unavailable": NSNull(), "body": NSNull()]])
+                respond(["type": "reading", "id": id, "checkpoint": "fixture-checkpoint", "frame": ["answers": 1, "stamp": NSNull(), "unavailable": NSNull(), "body": NSNull()]])
             case ("checkpoint", _):
                 #expect(message["checkpoint"] as? Int == 4)
                 let id = subscriptionID.get()!
-                respond(["type": "reading", "id": id, "checkpoint": "fixture-checkpoint", "frame": ["answers": 4, "unavailable": "gone", "body": NSNull()]])
+                respond(["type": "reading", "id": id, "checkpoint": "fixture-checkpoint", "frame": ["answers": 4, "stamp": NSNull(), "unavailable": "gone", "body": NSNull()]])
                 respond(["type": "error", "id": id, "code": "unavailable", "message": "gone", "data": NSNull()])
             case ("request", _):
                 respond(["type": "response", "id": message["id"]!, "trace_id": "trace", "result": "still here"])

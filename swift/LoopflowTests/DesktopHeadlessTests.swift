@@ -149,7 +149,7 @@ struct DesktopHeadlessTests {
                 return WorkFrame(sequence: sequence, answers: answers, unavailable: nil, content: .checkpoint, wire: nil)
             }
             let line: [String: Any] = [
-                "answers": answers, "unavailable": NSNull(), "body": body,
+                "answers": answers, "stamp": NSNull(), "unavailable": NSNull(), "body": body,
             ]
             return try WorkFrame.decode(part: try #require(WorkPart(rawValue: part)),
                                         scope: WorkScope(repo: nil, headless: false, task: task, activity: nil, taskListWave: nil),

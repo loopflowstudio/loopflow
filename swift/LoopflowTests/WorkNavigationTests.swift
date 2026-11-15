@@ -217,6 +217,20 @@ struct WorkNavigationTests {
         #expect(model.navigation.sidebarWaveID == nil)
     }
 
+    @Test("Wave and repository clicks select immediately, including rapid return")
+    func waveClickSelectsBeforeReturningFromTheGesture() throws {
+        let model = try dashboardModel(claimed: true)
+        let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
+        try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-wave-wave-1").button().tap()
+        #expect(model.selection == .wave(id: "wave-1"))
+        #expect(model.navigation.sidebarScope == .wave("wave-1"))
+        try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-wave-repository").button().tap()
+        #expect(model.selection == nil)
+        #expect(model.navigation.sidebarScope == .repository)
+        try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-wave-wave-1").button().tap()
+        #expect(model.selection == .wave(id: "wave-1"))
+    }
+
     @Test("A Wave row counts its working and autonomous Tasks, not backlog or done")
     func waveRowCountsStartedTasks() throws {
         let model = try dashboardModel(claimed: true)

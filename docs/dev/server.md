@@ -120,7 +120,7 @@ An operation's API kind, its `lf` spelling and any setting for it share one
 name (`task.create` is `lf task create`); the nouns are Loopflow's primitives.
 Old spellings live in `lf/aliases.rs` for one release.
 
-The [operation reference](../../rust/loopflow/src/server/README.md#local-protocol-revision-5)
+The [operation reference](../../rust/loopflow/src/server/README.md#local-protocol-revision-6)
 lists the served kinds and their CLI equivalents. `lf server describe --json`
 generates their schemas and result types from this build. App automation remains
 CLI-only; a served operation calls the same Rust owner as its CLI equivalent.
@@ -162,7 +162,7 @@ lets local clients request readiness from the selected installation; it does not
 select or install a different build. Machine has no service subcommands.
 
 Rust `server/`, Swift `ServerClient` / `ServerProtocol` and the shared fixtures
-under `rust/loopflow/tests/fixtures/dto/server/` speak revision 5: one connection per client,
+under `rust/loopflow/tests/fixtures/dto/server/` speak revision 6: one connection per client,
 a negotiated revision, requests multiplexed by id, newline-delimited JSON on the
 Unix socket and one text frame per message on the remote WebSocket carrier.
 Control messages are bounded at 1 MiB; terminals and larger messages travel on

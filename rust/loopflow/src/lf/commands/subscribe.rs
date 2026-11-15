@@ -80,11 +80,28 @@ pub fn selected_answer<T: Serialize>(answer: &T) -> Result<serde_json::Value> {
     })
 }
 
+/// SQLite facts read in the same snapshot as a subscription's body. External
+/// observations (Git, providers, process liveness) are not certified by this fence.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ReadingStamp {
+    pub machine: String,
+    pub epoch: String,
+    pub schema: u32,
+    /// SHA-256 of the served read and selection; absent on ordinary CLI streams.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub query: Option<String>,
+    /// The whole scoped query was returned, rather than a selected JSON fragment.
+    pub complete: bool,
+    pub revisions: StoreRevisions,
+}
+
 /// One line of a subscription.
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 pub struct SubscriptionFrame<'a, T> {
     /// The newest request this reading began after.
     pub answers: Option<u64>,
+    /// Null when the reading could not establish a database snapshot.
+    pub stamp: Option<ReadingStamp>,
     /// Why the read failed. `body` is then `null`.
     pub unavailable: Option<String>,
     pub body: Option<&'a T>,
@@ -368,6 +385,7 @@ where
         SubscriptionUpdate {
             frame: encode(&SubscriptionFrame::<()> {
                 answers: None,
+                stamp: None,
                 unavailable: Some(error),
                 body: None,
             })
@@ -596,12 +614,32 @@ where
                 Ok(body) => (None, Some(body)),
                 Err(error) => (Some(format!("{error:#}")), None),
             };
+            let stamp = if body.is_some() {
+                store
+                    .as_ref()
+                    .zip(revisions)
+                    .map(|(store, revisions)| {
+                        let (machine, epoch) = store.sqlite.reading_identity()?;
+                        Ok::<_, crate::store::StoreError>(ReadingStamp {
+                            machine,
+                            epoch,
+                            schema: crate::server::wire::REVISION,
+                            query: None,
+                            complete: false,
+                            revisions,
+                        })
+                    })
+                    .transpose()?
+            } else {
+                None
+            };
             drop(snapshot);
             self.cost = began.elapsed();
             let identity = identity(unavailable.as_deref(), body.as_ref())?;
             if self.force || self.sent != Some(identity) {
                 update.frame = Some(encode(&SubscriptionFrame {
                     answers: self.answers,
+                    stamp,
                     unavailable,
                     body: body.as_ref(),
                 })?);
@@ -679,6 +717,7 @@ fn encode<T: Serialize>(frame: &SubscriptionFrame<'_, T>) -> Result<Vec<u8>> {
     if bytes.len() > MAX_FRAME {
         bytes = serde_json::to_vec(&SubscriptionFrame::<()> {
             answers: frame.answers,
+            stamp: None,
             unavailable: Some("subscription frame exceeds the 64 MiB transport limit".into()),
             body: None,
         })?;
@@ -821,6 +860,78 @@ mod tests {
                 return serde_json::from_slice(&frame).unwrap();
             }
         }
+    }
+
+    #[test]
+    fn reading_stamp_fixture_requires_its_complete_wire_shape() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/dto/server/reading_stamped.json"
+        ))
+        .unwrap();
+        let wire = fixture["frame"]["stamp"].clone();
+        let stamp: super::ReadingStamp = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(serde_json::to_value(stamp).unwrap(), wire);
+        for key in [
+            "machine",
+            "epoch",
+            "schema",
+            "query",
+            "complete",
+            "revisions",
+        ] {
+            let mut incomplete = wire.clone();
+            incomplete.as_object_mut().unwrap().remove(key);
+            assert!(
+                serde_json::from_value::<super::ReadingStamp>(incomplete).is_err(),
+                "{key}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_commit_during_projection_cannot_advance_the_frames_stamp() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home =
+            crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        let writer = Arc::new(
+            crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("loopflow.db"))
+                .unwrap(),
+        );
+        let before = writer.revisions().unwrap();
+        let (sender, wakes) = mpsc::channel();
+        let mut first = true;
+        let subscription = start_pull(
+            (),
+            move |store, ()| {
+                let store = store.unwrap();
+                if first {
+                    // The subscription has already pinned its revisions. Commit on
+                    // the independent writer before it reads the body.
+                    writer.test_session("during", &crate::session_record::new_artifact_key());
+                    first = false;
+                }
+                async move {
+                    Ok(store
+                        .sqlite
+                        .session_summary("during", 1)?
+                        .map(|session| session.title))
+                }
+            },
+            Box::new(move || {
+                let _ = sender.send(());
+            }),
+            None,
+            false,
+        )
+        .unwrap();
+        let first = next_frame(&subscription, &wakes);
+        assert!(first["body"].is_null());
+        assert_eq!(first["stamp"]["revisions"]["sessions"], before.sessions);
+        subscription.checkpoint(1);
+        let next = next_frame(&subscription, &wakes);
+        assert_eq!(next["body"], "Retained");
+        assert!(next["stamp"]["revisions"]["sessions"].as_i64().unwrap() > before.sessions);
     }
 
     #[test]

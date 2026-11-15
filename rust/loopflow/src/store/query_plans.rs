@@ -423,6 +423,17 @@ mod tests {
     }
 
     #[test]
+    fn reading_stamps_do_not_scan_work_history() {
+        let (_home, store, _task, _viewer) = fixture();
+        let traced = statements(&store, || {
+            store.reading_identity().unwrap();
+            store.revisions().unwrap();
+        });
+        let scans = growing_scans(&store, &traced);
+        assert!(scans.is_empty(), "{}", scans.join("\n"));
+    }
+
+    #[test]
     fn retirement_sweeps_and_viewer_polls_plan_by_index() {
         let (_home, store, task, viewer) = fixture();
         let traced = assert_no_empty_writes(&store, || {

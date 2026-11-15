@@ -30,7 +30,7 @@ struct CreationSubmissionTests {
         }
     }
 
-    @Test func restartAtEachSubmissionWindowRecoversTheOriginalResource() async throws {
+    @Test(arguments: [5, ServerProtocol.revision]) func restartAtEachSubmissionWindowRecoversTheOriginalResource(version: Int) async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let server = Server()
@@ -40,7 +40,7 @@ struct CreationSubmissionTests {
         }
         let payload = Data(#"{"kind":"task.create","request_id":"same","directory":"/original-repo"}"#.utf8)
         let record = SubmittedCreation(requestID: "same", destination: "original-machine", payload: payload,
-            version: ServerProtocol.revision, submittedAt: Date())
+            version: version, submittedAt: Date())
         try await client().save(record) // app exits before first send
         let cold = client()
         let saved = try #require(await cold.pending().first)
@@ -79,7 +79,7 @@ struct CreationSubmissionTests {
         let client = CreationSubmissions(directory: root, machine: { "original-machine" },
             lookup: { await server.lookup($0) }, send: { try await server.send($0) })
         let older = SubmittedCreation(requestID: "older", destination: "original-machine", payload: Data(),
-            version: ServerProtocol.revision - 1, submittedAt: Date())
+            version: 4, submittedAt: Date())
         await server.unknown("older")
         #expect(try await client.reconcile(older)?.disposition == .inspect)
         await server.continuation("older")

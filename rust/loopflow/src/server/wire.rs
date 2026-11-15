@@ -1,4 +1,4 @@
-//! Carrier-independent server protocol, revision 5: one connection per client,
+//! Carrier-independent server protocol, revision 6: one connection per client,
 //! negotiated revision, requests multiplexed by id. Local admission is
 //! same-user only; the remote carrier admits the Machine owner's other
 //! Tailscale devices. Each carrier delimits messages its own way: the Unix
@@ -11,9 +11,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// The newest revision this build speaks.
-pub const REVISION: u32 = 5;
+pub const REVISION: u32 = 6;
 /// The oldest revision this build speaks.
-pub const MIN_REVISION: u32 = 5;
+pub const MIN_REVISION: u32 = 6;
 /// The largest message a control connection carries, so a reading never waits
 /// behind a large body. Larger messages travel on a ticketed connection.
 pub const MAX_MESSAGE: usize = 1024 * 1024;
@@ -543,7 +543,7 @@ mod tests {
         }
         // A missing field is an error, never a default.
         assert!(serde_json::from_str::<ClientMessage>(
-            r#"{"type":"hello","revision":5,"min_revision":5}"#
+            r#"{"type":"hello","revision":6,"min_revision":6}"#
         )
         .is_err());
         assert!(

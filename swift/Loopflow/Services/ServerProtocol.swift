@@ -1,11 +1,11 @@
 import Foundation
 
-/// Revision 5 of the server protocol: one connection per client, a negotiated
+/// Revision 6 of the server protocol: one connection per client, a negotiated
 /// revision, requests multiplexed by id. Mirrors `rust/loopflow/src/server/wire.rs`;
 /// carriers add no Work authority.
 public enum ServerProtocol {
-    public static let revision = 5
-    public static let minRevision = 5
+    public static let revision = 6
+    public static let minRevision = 6
     /// The largest control-connection message; larger ones travel by ticket.
     public static let maxMessage = 1024 * 1024
     /// The largest message a ticketed connection carries.

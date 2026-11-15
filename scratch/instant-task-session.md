@@ -1,6 +1,6 @@
 # LOO-906: immediate interactions across Desktop and mobile
 
-Implementation continues 2026-11-15 from checkpoint `a2292b2ae7` on
+Implementation continues 2026-11-15 from checkpoint `fe92171d7b` on
 origin/main `9cafc410ee`. Supersedes the Desktop-only delivery
 boundary. No shipping or merge decision is recorded. Placement remains this Task;
 no Wave is selected.
@@ -580,7 +580,7 @@ separately. Neither that target nor a SQL bottleneck has been measured here.
 
 ## Implement direction
 
-Concept-review outcome (2026-11-15, checkpoint `a2292b2ae7` plus workspace edits):
+Concept-review outcome (2026-11-15, checkpoint `fe92171d7b`):
 no further model change or open product choice. Exact older-attempt recovery now uses the existing Task-state delivery
 lock. Finish client reordering and remaining mutation-family fences before shared
 membership/cache/projection and both-client cutover. Planning correlation does

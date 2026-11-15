@@ -136,7 +136,7 @@ pub(crate) fn hosts(
 #[cfg(test)]
 mod tests {
 
-    use loopflow_model::durable::TaskId;
+    use loopflow_model::durable::{RepositoryId, TaskId};
     use loopflow_model::id::TerminalId;
 
     #[test]
@@ -144,7 +144,16 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let store =
             crate::store::opening::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
-        let repo = crate::repository::location::ensure_repository(&store, "/repo").unwrap();
+        let repo = RepositoryId::new();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO repository_plans(repo,id,selected) VALUES('/repo',?1,1)",
+                [repo.as_str()],
+            )
+            .unwrap();
         let task = TaskId::new();
         store.conn.lock().unwrap().execute_batch(&format!(
             "INSERT INTO tasks(id,repository_id,issue_identifier,created_at) VALUES('{task}','{repo}','SHELL-1',1);
@@ -170,7 +179,7 @@ mod tests {
             Some(terminal.clone())
         );
         // Closing a running shell settles nothing until its terminal ends.
-        assert!(!crate::desktop::shells::jobs_settled(&store, &task).unwrap());
+        assert!(!super::jobs_settled(&store, &task).unwrap());
         store.settle_shell_jobs(&terminal).unwrap();
         assert!(store
             .create_desktop_shell("unacknowledged", &task, "/repo.task", None)
@@ -179,6 +188,6 @@ mod tests {
         assert!(store
             .bind_desktop_shell("unacknowledged", &TerminalId::new())
             .is_err());
-        assert!(crate::desktop::shells::jobs_settled(&store, &task).unwrap());
+        assert!(super::jobs_settled(&store, &task).unwrap());
     }
 }

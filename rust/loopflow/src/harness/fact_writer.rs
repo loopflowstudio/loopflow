@@ -113,7 +113,7 @@ impl FactWriter {
         let mut signals = Vec::new();
         for decoded in decoded {
             match decoded {
-                Decoded::Display(event) => self.context.hear(event),
+                Decoded::Display(event) => hear_context(&mut self.context, event),
                 Decoded::Fact(ProviderFact::Activity(signal)) => signals.push(signal.clone()),
                 Decoded::Fact(ProviderFact::SessionObserved(thread)) => self.select_session(thread),
                 &Decoded::Fact(ProviderFact::Request { input_tokens }) => {
@@ -228,36 +228,22 @@ impl FactWriter {
     }
 }
 
-impl TurnContext {
-    fn request(&mut self, input_tokens: u64) {
-        self.first_request_tokens.get_or_insert(input_tokens);
-        self.peak_request_tokens = self.peak_request_tokens.max(Some(input_tokens));
-    }
-
-    fn compacted(&mut self, pre_tokens: Option<u64>) {
-        self.compactions += 1;
-        if let Some(pre_tokens) = pre_tokens {
-            *self.compaction_tokens.get_or_insert(0) += pre_tokens;
+/// A completed command, edit or tool returned its result into the
+/// conversation; an edit's result carries no output to count.
+fn hear_context(context: &mut TurnContext, event: &ConversationEvent) {
+    let ConversationEvent::ItemCompleted { item, .. } = event else {
+        return;
+    };
+    let output = match item {
+        ConversationItem::Command { output, .. } | ConversationItem::Tool { output, .. } => {
+            output.as_deref()
         }
-    }
-
-    /// A completed command, edit or tool returned its result into the
-    /// conversation; an edit's result carries no output to count.
-    fn hear(&mut self, event: &ConversationEvent) {
-        let ConversationEvent::ItemCompleted { item, .. } = event else {
-            return;
-        };
-        let output = match item {
-            ConversationItem::Command { output, .. } | ConversationItem::Tool { output, .. } => {
-                output.as_deref()
-            }
-            ConversationItem::File { .. } => None,
-            _ => return,
-        };
-        self.tool_results += 1;
-        if let Some(output) = output {
-            self.tool_output_tokens += crate::prompt::count_tokens(output) as u64;
-        }
+        ConversationItem::File { .. } => None,
+        _ => return,
+    };
+    context.tool_results += 1;
+    if let Some(output) = output {
+        context.tool_output_tokens += crate::prompt::count_tokens(output) as u64;
     }
 }
 

@@ -1,8 +1,7 @@
 //! Desktop shell execution: create once, reattach, close, and retain history.
 //! The Machine server's holder keeps the PTY; Session viewers alone hold Task
 //! checkouts. This runtime needs no GUI on either execution Machine.
-mod store;
-pub(crate) use store::{hosts, jobs_settled};
+pub(crate) use crate::store::sqlite::desktop_shells::{hosts, jobs_settled};
 
 use std::collections::BTreeMap;
 use std::path::Path;

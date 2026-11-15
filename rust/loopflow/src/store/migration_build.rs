@@ -83,6 +83,7 @@ pub fn merged_order(git_root: &Path, directory: &Path) -> Vec<String> {
     let Ok(relative) = directory.strip_prefix(git_root) else {
         return Vec::new();
     };
+    let directories = migration_directories(relative);
     let shallow = Command::new("git")
         .args(["rev-parse", "--is-shallow-repository"])
         .current_dir(git_root)
@@ -104,7 +105,7 @@ pub fn merged_order(git_root: &Path, directory: &Path) -> Vec<String> {
             "--format=",
             "--",
         ])
-        .arg(relative)
+        .args(&directories)
         .current_dir(git_root)
         .output()
     else {
@@ -116,7 +117,10 @@ pub fn merged_order(git_root: &Path, directory: &Path) -> Vec<String> {
     let mut order = Vec::new();
     for line in String::from_utf8_lossy(&output.stdout).lines() {
         let path = Path::new(line);
-        if path.parent() != Some(relative) {
+        if !directories
+            .iter()
+            .any(|directory| path.parent() == Some(directory.as_path()))
+        {
             continue;
         }
         let Some(stem) = path
@@ -132,6 +136,18 @@ pub fn merged_order(git_root: &Path, directory: &Path) -> Vec<String> {
         }
     }
     order
+}
+
+// Both source locations contribute to one first-addition history. A relocation
+// must not give an existing slug a new position in the upgrade frontier.
+fn migration_directories(relative: &Path) -> Vec<PathBuf> {
+    let historical = Path::new("rust/loopflow/src/store/migrations");
+    let storage = Path::new("rust/loopflow-storage/src/migrations");
+    if relative == historical || relative == storage {
+        vec![historical.to_path_buf(), storage.to_path_buf()]
+    } else {
+        vec![relative.to_path_buf()]
+    }
 }
 
 /// Apply the ordered catalog to an empty schema.
@@ -248,6 +264,102 @@ mod tests {
         assert_eq!(
             merged_order(&root, &root.join("migrations")),
             ["second", "first"]
+        );
+    }
+
+    #[test]
+    fn relocation_keeps_catalog_bytes_schema_and_origin_main_refresh() {
+        let repo = tempfile::tempdir().unwrap();
+        let root = repo.path().canonicalize().unwrap();
+        git(&root, &["init", "--initial-branch=main"]);
+        git(&root, &["config", "user.email", "test@loopflow.studio"]);
+        git(&root, &["config", "user.name", "Test"]);
+        let old = root.join("rust/loopflow/src/store/migrations");
+        let moved = root.join("rust/loopflow-storage/src/migrations");
+        std::fs::create_dir_all(&old).unwrap();
+        write(&old, "0.10.001_initial", "CREATE TABLE tasks(id TEXT);");
+        write(&old, "z_first", "ALTER TABLE tasks ADD title TEXT;");
+        git(&root, &["add", "."]);
+        git(&root, &["commit", "-m", "initial frontier"]);
+        git(&root, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
+        let before = order_catalog(&old, &merged_order(&root, &old)).unwrap();
+        let bytes = before
+            .iter()
+            .map(|entry| std::fs::read(&entry.path).unwrap())
+            .collect::<Vec<_>>();
+        let schema =
+            super::super::migration_schema::product_schema(&apply_catalog(&before).unwrap())
+                .unwrap();
+        std::fs::create_dir_all(moved.parent().unwrap()).unwrap();
+        git(
+            &root,
+            &[
+                "mv",
+                "rust/loopflow/src/store/migrations",
+                "rust/loopflow-storage/src/migrations",
+            ],
+        );
+        git(&root, &["commit", "-m", "relocate storage"]);
+        let after = order_catalog(&moved, &merged_order(&root, &moved)).unwrap();
+        assert_eq!(versions(&before), versions(&after));
+        assert_eq!(
+            bytes,
+            after
+                .iter()
+                .map(|entry| std::fs::read(&entry.path).unwrap())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            *schema,
+            *super::super::migration_schema::product_schema(&apply_catalog(&after).unwrap())
+                .unwrap()
+        );
+        write(
+            &moved,
+            "a_later",
+            "CREATE INDEX task_titles ON tasks(title);",
+        );
+        git(&root, &["add", "."]);
+        git(&root, &["commit", "-m", "dependent migration"]);
+        let unmerged = order_catalog(&moved, &merged_order(&root, &moved)).unwrap();
+        assert_eq!(
+            versions(&unmerged),
+            [
+                ("0.10.001_initial", true),
+                ("z_first", true),
+                ("a_later", false)
+            ]
+        );
+        // Only the remote-tracking ref advances; the checkout and SQL stay put.
+        git(&root, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
+        let order = merged_order(&root, &moved);
+        assert_eq!(order, ["z_first", "a_later"]);
+        let merged = order_catalog(&moved, &order).unwrap();
+        assert_eq!(
+            versions(&merged),
+            [
+                ("0.10.001_initial", true),
+                ("z_first", true),
+                ("a_later", true)
+            ]
+        );
+        apply_catalog(&merged).unwrap();
+        // A source snapshot uses the saved order with no Git directory.
+        let snapshot = tempfile::tempdir().unwrap();
+        for entry in &merged {
+            std::fs::copy(
+                &entry.path,
+                snapshot.path().join(entry.path.file_name().unwrap()),
+            )
+            .unwrap();
+        }
+        let packaged = order_catalog(snapshot.path(), &order).unwrap();
+        assert_eq!(versions(&merged), versions(&packaged));
+        assert_eq!(
+            *super::super::migration_schema::product_schema(&apply_catalog(&merged).unwrap())
+                .unwrap(),
+            *super::super::migration_schema::product_schema(&apply_catalog(&packaged).unwrap())
+                .unwrap()
         );
     }
 }

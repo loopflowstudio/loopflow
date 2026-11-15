@@ -93,14 +93,7 @@ pub fn render(readings: &[TaskLocationObservation]) -> String {
     readings
         .iter()
         .map(|reading| {
-            let location = match &reading.location {
-                TaskLocation::Recorded { task_id, checkout } => format!(
-                    "recorded Task {task_id}: {}",
-                    checkout.as_deref().unwrap_or("checkout unavailable")
-                ),
-                TaskLocation::Unrecorded => "no local execution record".into(),
-                TaskLocation::Unavailable { reason } => format!("unavailable: {reason}"),
-            };
+            let location = reading.location.description();
             format!(
                 "{} at {}: {location}",
                 reading.machine_id, reading.observed_at

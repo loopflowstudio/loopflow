@@ -38,6 +38,10 @@ pub enum PrLandingState {
 }
 
 impl PrLandingState {
+    pub fn is_terminal(self) -> bool {
+        matches!(self, Self::Merged | Self::Closed)
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Watching => "watching",

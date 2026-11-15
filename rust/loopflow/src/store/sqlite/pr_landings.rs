@@ -288,11 +288,7 @@ impl super::SqliteStore {
             transaction.commit()?;
             return Ok(None);
         };
-        if matches!(
-            current.state,
-            PrLandingState::Merged | PrLandingState::Closed
-        ) || current.generation != expected_generation
-        {
+        if current.state.is_terminal() || current.generation != expected_generation {
             transaction.commit()?;
             return Ok(None);
         }

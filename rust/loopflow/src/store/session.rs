@@ -175,6 +175,20 @@ pub struct TurnContext {
     pub compaction_tokens: Option<u64>,
 }
 
+impl TurnContext {
+    pub fn request(&mut self, input_tokens: u64) {
+        self.first_request_tokens.get_or_insert(input_tokens);
+        self.peak_request_tokens = self.peak_request_tokens.max(Some(input_tokens));
+    }
+
+    pub fn compacted(&mut self, pre_tokens: Option<u64>) {
+        self.compactions += 1;
+        if let Some(pre_tokens) = pre_tokens {
+            *self.compaction_tokens.get_or_insert(0) += pre_tokens;
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TitleSource {
@@ -191,6 +205,17 @@ pub enum PrimaryScope {
     Repository(crate::store::address::CanonicalRepo),
     Wave(WaveId),
     Task(TaskId),
+}
+
+impl PrimaryScope {
+    /// Admission and replacement serialize on the same saved scope identity.
+    pub fn lock_key(&self) -> String {
+        match self {
+            Self::Repository(repo) => format!("primary:repository:{repo}"),
+            Self::Wave(wave) => format!("primary:wave:{wave}"),
+            Self::Task(task) => format!("primary:task:{task}"),
+        }
+    }
 }
 
 /// The Work a conversation names. Admission fills a Task's Wave.

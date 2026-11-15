@@ -1073,12 +1073,7 @@ async fn refresh_joined_request(store: &SharedStore, landing: &mut PrLanding) ->
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?
         .ok_or_else(|| OpsError::Message(format!("landing {} disappeared", landing.id)))?;
-    if current.generation != landing.generation
-        || matches!(
-            current.state,
-            PrLandingState::Merged | PrLandingState::Closed
-        )
-    {
+    if current.generation != landing.generation || current.state.is_terminal() {
         return Err(OpsError::Message(format!(
             "landing {} generation {} is no longer active",
             landing.id, landing.generation

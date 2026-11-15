@@ -2,7 +2,7 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-650 · storage relocation</title>
+<title>LOO-650 · storage ownership</title>
 <style>
 :root{color-scheme:light dark;font:16px/1.5 system-ui,sans-serif}
 body{max-width:760px;margin:2rem auto;padding:0 1rem 2rem}
@@ -16,63 +16,61 @@ li{margin:.4rem 0}.proposed{border-left:3px solid light-dark(#23734c,#8cd6ad);pa
 @media(max-width:520px){body{margin-top:1rem}table{font-size:.76rem}}
 </style>
 <header>LOO-650 · concept-review · November 15, 2026<br>
-Built from <code>scratch/loo-650.md</code>, the withdrawn relocation diagnostics,
-<code>desktop/shells/store.rs</code>, <code>linear/observations.rs</code>,
-<code>harness/fact_writer.rs</code>, <code>store/{session,execution,pr_landing}.rs</code>,
-<code>store/work/task</code>, <code>engine/creation.rs</code>,
-<code>ops/{task_actions,task_location,pr_landing}.rs</code>, and migration build/check/package scripts.</header>
+Built from <code>scratch/loo-650.md</code>, retained relocation compiler logs,
+<code>store/sqlite/{desktop_shells,linear_observations,children}.rs</code>,
+<code>store/{session,execution,pr_landing,opening,migration_runner,canonical_ids_tests}.rs</code>,
+<code>harness/fact_writer.rs</code> and migration build/check/package scripts.</header>
 <main>
-<h1>Iterate to implement: move saved facts and SQL together; keep execution policy above.</h1>
-<aside><strong>Biggest mismatch.</strong> The directory inventory missed SQL
-outside <code>store/</code> and application methods on moved records.
-Moving files also hid migrations’ original additions. A compiling library alone
-would establish neither correct upgrades nor cheaper application builds.</aside>
-<p>No open product choice. Capture-history selection and full-manifest projection
-are built, with recorded passing checks. Storage extraction and the corrections
-below remain proposed. Commands, receipts and recovery keep their behavior.</p>
+<h1>Iterate to implement: carry the storage boundary through test setup.</h1>
+<aside><strong>Biggest mismatch.</strong> Production storage takes prepared facts,
+but mixed tests still acquire application state and call private SQL helpers in
+one module. Moving that module across a crate boundary cannot retain both owners.
+The withdrawn attempt also left fixture includes relative to their old locations.</aside>
+<p><strong>Built preparation:</strong> Desktop and Linear SQL now live under
+<code>store/sqlite/</code>; tally arithmetic and pure record operations live with
+their values. Migration history includes both source paths. Full-manifest history
+projection and activity’s early stop remain. <strong>Pending:</strong> the storage
+crate, its independent test build, and rebuild measurements.</p>
 <h2>Actions → concepts → APIs</h2>
 <table>
-<tr><th>Action / concept</th><th>Existing</th><th>Proposed owner</th></tr>
-<tr><td>Open a shell / consumed launch receipt</td><td>SQL under Desktop</td><td>Storage owns receipt queries and atomic writes; application launches</td></tr>
-<tr><td>Acquire Linear changes / saved evidence</td><td>SQL under Linear</td><td>Storage owns observation transactions; application acquires</td></tr>
-<tr><td>Inspect context / saved tally</td><td>Writer implements tally methods</td><td>Pure arithmetic with TurnContext; application interprets events and counts tokens</td></tr>
-<tr><td>Continue work / scope and state</td><td>Application matches same-crate enums exhaustively</td><td>Owner supplies pure record operations; application keeps dispatch and recommendations</td></tr>
-<tr><td>Build another worktree / migration identity</td><td>Order follows additions at one path</td><td>One first-addition history across old and new paths; one current SQL directory</td></tr>
+<tr><th>Action / concept</th><th>Current checkout</th><th>Proposed extraction</th></tr>
+<tr><td>Open shell / consumed receipt</td><td>Storage-classified SQL, application launch</td><td>Move SQL owner unchanged; lost acknowledgment still consumes launch once</td></tr>
+<tr><td>Acquire Linear changes / saved evidence</td><td>Atomic observation and Work writes under storage</td><td>Storage owns transactions; acquisition remains above</td></tr>
+<tr><td>Inspect context / tally</td><td><code>TurnContext::request/compacted</code>; writer interprets events</td><td>Move saved tally and arithmetic together; keep token counting above</td></tr>
+<tr><td>Build a worktree / migration identity</td><td>Both source paths contribute first-addition history</td><td>One SQL directory and catalogue generator; application supplies provenance</td></tr>
+<tr><td>Check continuity / fixture inputs</td><td>Mixed private SQL and application-entry tests</td><td>SQL tests beside helpers; application tests prepare inputs and use public operations</td></tr>
 </table>
 <h2>Proposed source contract</h2>
 <p class="proposed">Application acquisition and policy → synchronous storage →
-saved records. Keep <code>request</code>/<code>compacted</code> arithmetic with
-<code>TurnContext</code>; make <code>hear(&amp;mut TurnContext, &amp;ConversationEvent)</code>
-an application function. No extension trait or storage callback into launch code.</p>
-<p>Keep non-exhaustive enums. Move string conversion, saved keys and location
-text with their records. An unsupported scope returns a dispatch error;
-unsupported recovery uses the uncertain-receipt path; unsupported landing holds
-delivery; an unsupported PR phase recommends NoAction. No panic, launch,
-completion or invented JSON fallback follows an unsupported value.</p>
+saved records. The same direction holds in tests. Split mixed modules by test
+function before relocating them. Shared setup does not determine ownership.</p>
+<p>Keep raw-schema and private transaction checks in storage. Keep CLI execution,
+repository/Wave bootstrap and process attachment in application tests. Storage
+fixtures use the prepared opener with explicit build, upgrade and key inputs.
+A dev-only inspection feature must not reconstruct application modules inside
+storage. Historical SQL fixtures retain one source; includes use each consuming
+crate’s manifest path. Generated schema fixtures follow the catalogue owner.</p>
+<p>Keep non-exhaustive enums and the planned owner operations. Dispatch,
+recommendation and uncertain-receipt handling remain application decisions;
+unsupported values never invent a launch or completion.</p>
 <h2>Normal → failure → recovery</h2>
-<p>A shell’s lost acknowledgment still leaves a consumed receipt. Retry discovers
-it rather than launching again. An uncertain creation retains its identity and
-inspection path. Capture history still validates the complete manifest; activity
-still stops before reading older evidence.</p>
-<p>A migration-directory move keeps each slug’s first merge position, timestamp
-and exact SQL. Refreshing only origin/main must update the generated catalogue.
-An interrupted upgrade retains the same transaction, exports and refusal policy.
-No new recovery lifecycle is proposed.</p>
-<h2>Counterexamples to keep</h2>
-<p>Alphabetical slug order already failed with missing <code>is_local</code>.
-Moving whole test modules exposed private SQL helpers and application setup in
-one module. Keep private invariant tests in storage; move application tests by
-function. Use prepared fixture values and dev-only inspection helpers.</p>
-<h2>Next implementation</h2>
-<ol>
-<li>Extract storage with the corrected SQL, record, reducer and test ownership.</li>
-<li>Compare catalogue order/checksums/schema; check a directory move, origin/main-only refresh, unmerged migration and no-Git package.</li>
-<li>Measure fresh-root reuse, application-only edits and Task-record edits separately. Root upkeep, whole-application cost, demo and review remain open.</li>
-</ol>
+<p>A shipping edit should reuse storage; a Task-record edit rebuilds storage and
+application. A fresh root should reuse unchanged libraries. Measure these three
+cases separately, including CPU, memory and cache receipts.</p>
+<p>A shell’s lost acknowledgment leaves its consumed receipt discoverable.
+An interrupted upgrade keeps its transaction, export fences and existing refusal
+policy. A migration move retains ordered SQL bytes and staging age; refreshing
+only origin/main updates the catalogue. No new recovery lifecycle is proposed.</p>
+<h2>What to show next</h2>
+<p>Compile storage tests independently before compiling application tests with the
+dev-only inspection feature. This exposes misplaced acquisition before feature
+unification can hide it. Then run continuity, history and migration checks and
+measure the three rebuild cases. Root upkeep, whole-application cost, interactive
+demo and review remain open.</p>
 <h2>Review questions</h2>
 <ol>
-<li>Does a product choice remain? No; these corrections follow the existing ownership and behavior requirements.</li>
-<li>What should loop-or-next do? Iterate to implement the revised relocation design in <code>scratch/loo-650.md</code>.</li>
+<li>Does a product choice remain? No; fixture ownership follows the existing production design.</li>
+<li>What changed for loop-or-next? The design now specifies mixed-test placement, fixture paths and independent test compilation. Iterate to implement.</li>
 </ol>
 </main>
 </html>

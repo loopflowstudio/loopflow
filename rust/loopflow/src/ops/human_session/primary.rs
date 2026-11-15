@@ -358,11 +358,7 @@ async fn prepare(store: &SharedStore, id: &str) -> Result<SessionRecord> {
 
 /// Admission and replacement of one scope are serial across processes.
 async fn lock_scope(scope: &PrimaryScope) -> Result<std::fs::File> {
-    let key = match scope {
-        PrimaryScope::Repository(repo) => format!("primary:repository:{repo}"),
-        PrimaryScope::Wave(wave) => format!("primary:wave:{wave}"),
-        PrimaryScope::Task(task) => format!("primary:task:{task}"),
-    };
+    let key = scope.lock_key();
     crate::journal::request::spawn_blocking(move || lock_session_process(&key))
         .await
         .context("lock primary Session scope")?

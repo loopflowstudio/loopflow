@@ -36,6 +36,19 @@ pub enum TaskLocation {
     },
 }
 
+impl TaskLocation {
+    pub fn description(&self) -> String {
+        match self {
+            Self::Recorded { task_id, checkout } => format!(
+                "recorded Task {task_id}: {}",
+                checkout.as_deref().unwrap_or("checkout unavailable")
+            ),
+            Self::Unrecorded => "no local execution record".into(),
+            Self::Unavailable { reason } => format!("unavailable: {reason}"),
+        }
+    }
+}
+
 /// A Task's state, derived from its checkout, Graph position, whether a
 /// Graph runs for it and the Auto-Ship approval. Completion and abandonment
 /// are durable; the open states follow what the Task is doing now. Whether

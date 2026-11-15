@@ -37,6 +37,10 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
 MIGRATIONS_DIR = REPO_ROOT / "rust/loopflow/src/store/migrations"
+MIGRATION_DIRECTORIES = (
+    Path("rust/loopflow/src/store/migrations"),
+    Path("rust/loopflow-storage/src/migrations"),
+)
 RELEASED = re.compile(r"^\d+\.\d+\.(?:\d+\.)?\d{3}_[a-z0-9_]+\.sql$")
 SLUG = re.compile(r"^([a-z][a-z0-9_]*)\.sql$")
 DRAFT_MARKER = re.compile(r"^--[ \t]*draft:[ \t]*([a-z][a-z0-9_]*)[ \t]*$", re.MULTILINE)
@@ -65,7 +69,14 @@ def _migrations_at(ref: str) -> dict[str, bytes] | None:
     if exists.returncode != 0:
         return None
     listed = subprocess.run(
-        ["git", "ls-tree", "--name-only", ref, "--", f"{MIGRATIONS_DIR.relative_to(REPO_ROOT)}/"],
+        [
+            "git",
+            "ls-tree",
+            "--name-only",
+            ref,
+            "--",
+            *(f"{directory}/" for directory in MIGRATION_DIRECTORIES),
+        ],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -133,7 +144,12 @@ def _check_runtime_sql() -> None:
     names its columns: no positional INSERT, no `SELECT *`."""
     positional = re.compile(r"\bINSERT(?:\s+OR\s+\w+)?\s+INTO\s+\w+\s+VALUES\b", re.IGNORECASE)
     wildcard = re.compile(r"\bSELECT\s+(?:\w+\.)?\*", re.IGNORECASE)
-    for path in sorted((REPO_ROOT / "rust/loopflow/src").rglob("*.rs")):
+    sources = (
+        path
+        for crate in ("loopflow", "loopflow-storage")
+        for path in (REPO_ROOT / "rust" / crate / "src").rglob("*.rs")
+    )
+    for path in sorted(sources):
         if "test" in path.stem:
             continue
         # Unit-test modules trail production code; their fixtures seed historical schemas.
@@ -221,12 +237,20 @@ class Catalog:
 
     @classmethod
     def of_origin_main(cls, files: dict[str, bytes]) -> Catalog:
-        directory = MIGRATIONS_DIR.relative_to(REPO_ROOT)
         listed = subprocess.run(
             [
-                "git", "log", "origin/main", "--first-parent", "--diff-merges=first-parent",
-                "--no-renames", "--diff-filter=A", "--reverse", "--format=%ct", "--name-only", "--",
-                f"{directory}/",
+                "git",
+                "log",
+                "origin/main",
+                "--first-parent",
+                "--diff-merges=first-parent",
+                "--no-renames",
+                "--diff-filter=A",
+                "--reverse",
+                "--format=%ct",
+                "--name-only",
+                "--",
+                *(f"{directory}/" for directory in MIGRATION_DIRECTORIES),
             ],
             cwd=REPO_ROOT,
             capture_output=True,
@@ -238,7 +262,7 @@ class Catalog:
         for line in listed.stdout.splitlines():
             if line.isdigit():
                 when = dt.datetime.fromtimestamp(int(line), dt.timezone.utc)
-            elif Path(line).parent == directory:  # `drafts/` once held same-named files
+            elif Path(line).parent in MIGRATION_DIRECTORIES:  # `drafts/` once held same-named files
                 added.setdefault(Path(line).name, when)
         return cls(files, added)
 
@@ -439,7 +463,8 @@ def _check_contract(name: str, sql: str, drops: list[str], catalog: Catalog) -> 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--write-package-order", action="store_true",
+        "--write-package-order",
+        action="store_true",
         help="record origin/main's migration order in the source package",
     )
     args = parser.parse_args()

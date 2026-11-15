@@ -59,11 +59,13 @@ mod admission;
 pub(crate) mod children;
 pub(crate) mod ci_incidents;
 pub mod creation;
+pub(crate) mod desktop_shells;
 pub(crate) mod durable;
 mod github_people;
 mod graph_inventory;
 #[cfg(test)]
 mod linear_migration_tests;
+mod linear_observations;
 mod project_adoption;
 mod subscription_events;
 

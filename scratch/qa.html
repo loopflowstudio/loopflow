@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>LOO-905 QA — readable Task names through planning load and recovery</title>
+<style>
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:980px;margin:2rem auto;padding:0 1rem;color:#1d1d1f}
+h1{font-size:1.5rem}h2{font-size:1.15rem;margin-top:2rem;border-top:1px solid #ddd;padding-top:1rem}
+pre{background:#f5f5f7;padding:.75rem;overflow-x:auto;font-size:12px;line-height:1.4}
+table{border-collapse:collapse;width:100%;font-size:13px}td,th{border:1px solid #ddd;padding:.35rem .5rem;text-align:left;vertical-align:top}
+.ok{color:#1a7f37}.bad{color:#b42318}.na{color:#8a6d00}
+</style></head><body>
+<h1>LOO-905 QA: Task names while planning loads and recovers</h1>
+<p>November 14, 2026. Branch at <code>2e070e1431</code> plus the <code>lf desktop ls</code> fix below.
+Real <code>Loopflow Dev.app</code> (debug build, bundled branch <code>lf 0.16.0+2e070e143</code>) on a private
+<code>lf-world portfolio</code> Machine at <code>/tmp/lf-qa-905/world</code>, with its own server, holder and stand-in Claude.
+The installed Loopflow and the real <code>~/.lf</code> were not touched.</p>
+
+<h2>What could and could not be seen</h2>
+<ul>
+<li class="na">The Mac's screen was locked (<code>CGSSessionScreenIsLocked = 1</code>). <code>screencapture</code> returned an all-black frame,
+and <code>screencapture -l &lt;window&gt;</code> failed with "could not create image from window". <b>No pixels of the sidebar were seen,</b>
+and the Retry button was not clicked: the registry has no Retry action, and no computer-use route was available.</li>
+<li>The Desktop control socket was read instead: <code>lf desktop ls --json</code> every ~0.5–2 s from launch. Each sample is the app's own
+<code>reading</code>/<code>reason</code> (the window's work status) and its <code>list</code> (sidebar rows in ⌘1–9 order, named via the same
+<code>taskPresentation</code> the sidebar renders, after the fix below).</li>
+<li class="na">Load average was ~187 during the walkthrough (other agents' builds). Times below are real but inflated; the control socket itself
+sometimes took more than 10 s to answer ("Desktop did not answer within 10 seconds").</li>
+</ul>
+
+<h2>Found and fixed: <code>lf desktop ls</code> named rows by raw ID and missed saved rows</h2>
+<p><code>WorkModel.desktopList</code>, which <code>lf desktop ls</code> and <code>lf desktop state</code> report as "the window's Tasks by position (as ⌘1–9 select them)",
+still used the deleted pattern <code>task(id:)?.task.name ?? id</code> and listed <code>workingTaskIDs</code> (the repository plan only). The
+<code>goto</code> action and the sidebar use <code>sidebarTaskIDs</code>. Two visible consequences:</p>
+<ul>
+<li>With saved planning restored and the server frozen, the sidebar had saved rows but <code>ls</code> listed none (before the fix):
+<pre>  0.79s {"reading":"updating","reason":"Updating…","list":[]}      ×21 samples, then
+ 20.58s {"reading":"unavailable","reason":"Couldn't update: Error: Loopflow server unavailable: … readiness request within 10s …","list":[]}</pre></li>
+<li>Whenever a Task-list member arrived before the roadmap, <code>ls</code> would title it <code>task_…</code>, the same leak this Task removed from the sidebar.</li>
+</ul>
+<p>Fix (<code>swift/LoopflowMac/WorkModel.swift</code>): <code>desktopList</code> enumerates <code>sidebarTaskIDs</code> and names each row with
+<code>taskPresentation(id:)</code>; the Work key still carries the ID. Same scenario after the fix:</p>
+<pre>  1.07s {"reading":"updating","reason":"Updating…","list":["63bc53 Record a reader floor per migration","ee196b Open conversations faster"]}   ×28 samples to 21 s</pre>
+<p>Tests: <code>listBeforePlanning</code> now checks <code>desktopList</code> titles/identifier/Work key for a list-before-planning member;
+<code>cachedRepositoryWindows</code> checks that both saved repository windows list their saved names before any list answers.</p>
+
+<h2>Scenarios</h2>
+<table>
+<tr><th>Scenario</th><th>What was done</th><th>What the app reported</th><th></th></tr>
+<tr><td>First launch, live server</td><td>Fresh world, server running, launch app</td>
+<td><code>1.00s loading "Loading work…" []</code> → <code>3.38s current</code> with both named rows. No ID, no unavailable.</td><td class="ok">ok</td></tr>
+<tr><td>First visit, no cache, delayed planning</td><td>Cache moved aside, server SIGSTOPped, launch; SIGCONT after 15 s</td>
+<td>Frozen: <code>loading "Loading work…" []</code> for 15 s (19 samples). After resume: <code>0.30s loading</code> with all three rows named (Task list ahead of planning), <code>1.68s current</code>.</td><td class="ok">ok</td></tr>
+<tr><td>Returning launch, delayed planning</td><td>Saved cache, server SIGSTOPped, relaunch</td>
+<td>Fixed build: saved names at 1.07 s, "Updating…" for the whole 21 s window.</td><td class="ok">ok after fix</td></tr>
+<tr><td>Server crash</td><td><code>kill -9</code> the server</td>
+<td>Desktop had registered <code>com.loopflow.server.8199051a875f8933</code>; launchd restarted it and the window went <code>current</code> at 3.47 s with no failure shown.</td><td class="ok">ok</td></tr>
+<tr><td>Sustained outage</td><td><code>launchctl bootout</code> that label</td>
+<td><code>5.67s unavailable "Couldn't update: Loopflow server unavailable or owned by another account"</code>, one coalesced message, both names kept for 60 s.</td><td class="ok">ok</td></tr>
+<tr><td>Recovery without Retry</td><td>Start <code>lf server run</code> by hand</td>
+<td>Still the old error to ~75 s; <code>107s</code> "Server disconnected mid-message; refresh state before retrying a command"; <code>147s current</code>. Names never changed.</td><td class="na">slow</td></tr>
+<tr><td>Earlier build, SIGCONT recovery</td><td>Pre-fix build, frozen 20 s then resumed</td>
+<td>Rows named again within ~42 s, but the window kept "Couldn't update: Initial setup failed: … Current server: …" until between 50 s and ~120 s.</td><td class="na">slow</td></tr>
+<tr><td>Complete, then reopen</td><td><code>lf task complete 63bc53</code>, then <code>lf task reopen 63bc53</code>, app running</td>
+<td>Row gone at 1.93 s; back with its name at the first sample (0.61 s) after reopen. Window stayed <code>current</code>.</td><td class="ok">ok</td></tr>
+<tr><td>Newly created Task</td><td><code>lf task create --title 'Show pending rows by name'</code>, then <code>lf task checkout 321fa1</code></td>
+<td>Unstarted: in Backlog, not the Working list (expected). After checkout: <code>321fa1 Show pending rows by name</code> at 3.69 s.</td><td class="ok">ok</td></tr>
+</table>
+
+<h2>Headless checks</h2>
+<p><code>scripts/test_desktop.sh --filter 'TaskPlanningReadabilityTests|TaskRowMetadataTests|WorkCacheTests|WorkModelTests|WorkOpeningCLITests|DashboardWorkspaceTests|DesktopPaneControlTests|WorkNavigationTests|WorkDestinationTests/composedOpeningWaitsForNativeSessionAndComparison|WorkDestinationTests/conversationAttachmentRecovery'</code>,
+WindowServer denied: <b>177 tests in 10 suites passed</b> (77.5 s). Before the fixes below, the same suites had three failures:</p>
+<ul>
+<li><code>DesktopPaneControlTests/navigationRoundTripsThroughInspection</code> expected <code>list == [a, b]</code> after selecting a Wave whose sidebar is empty and where <code>goto 1</code> fails. It encoded the old mismatch with ⌘1–9; it now checks <code>[a, b]</code> while the repository sidebar shows them, and <code>list == sidebarTaskIDs</code> in the Wave.</li>
+<li><code>WorkCacheTests/firstLaunchLoadsOnce</code>: the branch's empty-list "Loading Tasks…" repeated the window's "Loading work…". <b>Fixed in <code>WorkNavigator</code></b>: a pending list shows no empty-list line; the one status says it is loading. "Task list unavailable" and the real empty texts stay.</li>
+<li><code>WorkCacheTests/refreshAfterSelectionChange</code>: the branch now counts the Task list in <code>workStatus</code>. On the one-shot test transport, the list read for the old scope is fenced off and the Wave's list is unread until asked, so <code>.loading</code> is true; the test refreshes once more before expecting <code>.current</code>. Production always subscribes and re-reads on scope change.</li>
+</ul>
+
+<h2>What works now</h2>
+<ul>
+<li>No raw <code>task_…</code> title appeared in any sample, from the sidebar's naming path or from <code>lf desktop ls</code>.</li>
+<li>Initial load says "Loading work…"; saved planning says "Updating…"; a real outage says one "Couldn't update: …" and keeps names.</li>
+<li>Reopened and newly started local Tasks appear by name within the first sample after the command (no tracker in this world).</li>
+</ul>
+
+<h2>Not reached</h2>
+<ul>
+<li>Rendered pixels: row headings, "Last known"/"Updating…" row context, "Loading planning…" detail lines and the Retry button. Screen locked; covered only by the production-view tests.</li>
+<li>Two repository <em>windows</em> of the running app: only one repository exists in the world, and <code>lf open</code> could start the installed app. The two-window cache case is covered by <code>cachedRepositoryWindows</code>.</li>
+<li>Tracker (Linear) writeback delay and the LOO-673 "still opening" failure: the world uses local planning; no live Task was touched.</li>
+<li>Conversation input readiness after recovery: no panes were opened or typed into.</li>
+</ul>
+
+<h2>Still wrong, worst first</h2>
+<ol>
+<li>Recovery after a real outage took 107–147 s under load ~187 before the error changed or cleared, with a stale error text in between ("Initial setup failed: … Current server: …", then "Server disconnected mid-message"). This is the existing reconnect/backoff owner (<code>keepWorkCurrent</code>/<code>ServerLocation</code>), outside this Task's display change; names stayed readable throughout. Worth its own Task if it reproduces at normal load.</li>
+<li>The Desktop control socket intermittently took more than 10 s to answer during recovery; the main-thread sample showed ordinary SwiftUI work, not a block. Likely load; unconfirmed.</li>
+</ol>
+</body></html>

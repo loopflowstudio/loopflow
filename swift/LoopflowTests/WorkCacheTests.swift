@@ -764,6 +764,9 @@ struct WorkCacheTests {
 
         #expect(returning.selection == .wave(id: "wave-1"))
         #expect(returning.navigation.content == .details)
+        // The held list answered the old scope; this one-shot transport reads the Wave's list only when asked.
+        #expect(returning.workStatus == .loading)
+        await returning.refresh()
         #expect(returning.workStatus == .current)
         #expect(WorkCache(directory: directory).load()?.repositories[Self.repo]?.selection == .wave(id: "wave-1"))
     }

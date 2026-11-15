@@ -1082,13 +1082,13 @@ final class WorkModel {
 
     var repositoryName: String { repoPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Repository" }
 
-    /// The Working Tasks ⌘1–9 select, in that order.
+    /// The sidebar rows ⌘1–9 select, in that order and named as the sidebar names them.
     func desktopList(repository: String) -> [DesktopListEntry] {
-        workingTaskIDs.enumerated().map { index, id in
-            let task = task(id: id)?.task
+        sidebarTaskIDs.enumerated().map { index, id in
+            let presentation = taskPresentation(id: id)
             return DesktopListEntry(position: index + 1,
-                work: WorkWorkspaceKey(repository: repository, kind: .task, id: task?.id ?? id),
-                identifier: task?.task.identifier, title: task?.task.name ?? id)
+                work: WorkWorkspaceKey(repository: repository, kind: .task, id: task(id: id)?.task.id ?? id),
+                identifier: presentation.identifier, title: presentation.title)
         }
     }
 

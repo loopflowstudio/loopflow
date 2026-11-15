@@ -249,3 +249,21 @@ November 14 kickoff observations retained separately from current state:
 `lf open --host desktop --file swift/README.md` exited 1:
 “Error: task_faf6f1d7fda149a1a81ff2ade281f053 has no workspace in this Desktop window; nothing changed.”
 No alternate editor opened.
+
+### QA, November 14 (`scratch/qa.html`)
+
+- Live Dev app on a private `lf-world portfolio` Machine, read through
+  `lf desktop ls --json` (screen locked: no pixels, Retry not clicked). No raw
+  ID in any sample; cold load "Loading work…" then named rows; saved relaunch
+  with a frozen server names rows at 1.07 s as "Updating…"; outage keeps names
+  under one "Couldn't update"; complete/reopen/new Task rows named within the
+  first sample. Recovery after a sustained outage took 107–147 s at load ~187
+  (existing reconnect owner, not changed here).
+- Fixed: `desktopList` (`lf desktop ls`/`state`) listed `workingTaskIDs` and
+  named rows `task(id:)?.task.name ?? id`; it now lists `sidebarTaskIDs` (what
+  ⌘1–9 select) through `taskPresentation`. Fixed: a pending list's
+  "Loading Tasks…" duplicated "Loading work…" (`firstLaunchLoadsOnce`).
+- `scripts/test_desktop.sh --filter 'TaskPlanningReadabilityTests|TaskRowMetadataTests|WorkCacheTests|WorkModelTests|WorkOpeningCLITests|DashboardWorkspaceTests|DesktopPaneControlTests|WorkNavigationTests|WorkDestinationTests/composedOpeningWaitsForNativeSessionAndComparison|WorkDestinationTests/conversationAttachmentRecovery'`
+  — 177 tests in 10 suites passed (77.5 s), WindowServer denied.
+- Still unverified natively: rendered rows, row context labels, Retry click,
+  two app windows, tracker delay, conversation input after recovery.

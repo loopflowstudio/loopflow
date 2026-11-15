@@ -1395,6 +1395,11 @@ struct TaskPlanningReadabilityTests {
         model.applyTaskList(plan(), wave: nil, reason: "")
         #expect(model.sidebarTaskIDs == [key.id])
         #expect(model.workspaceTitle(key) == "Readable local Task")
+        // `lf desktop ls` names rows as the sidebar does, not by Work ID.
+        let listed = model.desktopList(repository: "repo")
+        #expect(listed.map(\.title) == ["Readable local Task"])
+        #expect(listed.map(\.identifier) == ["LOO-905"])
+        #expect(listed.map(\.work) == [key])
         let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
         #expect(try navigator.inspect().find(text: "Readable local Task").string() == "Readable local Task")
         #expect(try navigator.inspect().find(text: "Loading planning…").string() == "Loading planning…")
@@ -1455,7 +1460,8 @@ struct TaskPlanningReadabilityTests {
     func emptyListStates() throws {
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("No side effects") }, repoPath: "/src/loopflow")
         let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
-        #expect(try navigator.inspect().find(text: "Loading Tasks…").string() == "Loading Tasks…")
+        // A pending list makes no empty claim; the one work status says it is loading.
+        #expect(try navigator.inspect().find(text: "Loading work…").string() == "Loading work…")
         #expect(throws: (any Error).self) { try navigator.inspect().find(text: "No working Tasks in this list") }
         model.applyTaskList(nil, wave: nil, reason: "Offline")
         #expect(try navigator.inspect().find(text: "Task list unavailable").string() == "Task list unavailable")
@@ -1507,6 +1513,9 @@ struct TaskPlanningReadabilityTests {
             #expect(try crumbs.inspect().find(text: own.task.name).string() == own.task.name)
             #expect(try crumbs.inspect().find(text: "Updating…").string() == "Updating…")
             #expect(model.workStatus == .updating)
+            // ⌘1–9 and `lf desktop ls` reach the saved rows before any list answers.
+            #expect(model.desktopList(repository: "repo").map(\.title) == model.sidebarTaskIDs.map { model.taskPresentation(id: $0).title })
+            #expect(model.desktopList(repository: "repo").contains { $0.title == own.task.name })
             for other in windows where other !== model {
                 for task in other.visibleTasks {
                     #expect(model.task(id: task.id) == nil)

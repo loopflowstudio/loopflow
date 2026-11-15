@@ -32,12 +32,13 @@ struct WorkNavigator: View {
         return filter == .working ? scope : "\(scope) · \(filter.rawValue)"
     }
 
-    private var emptyListText: String {
+    /// Nil while the list loads: the work status above already says so, and an empty list is not yet known.
+    private var emptyListText: String? {
         switch model.navigation.sidebarScope {
         case .dashboard(let id):
             return model.dashboard(id) == nil ? "This Dashboard is no longer available." : "No Tasks in this Dashboard"
         case .repository, .wave:
-            if model.taskListReading.isLoading { return "Loading Tasks…" }
+            if model.taskListReading.isLoading { return nil }
             if model.taskListReading.errorMessage != nil { return "Task list unavailable" }
             if case .wave = model.navigation.sidebarScope { return "No working Tasks in this Wave" }
             return "No working Tasks in this list"
@@ -90,7 +91,7 @@ struct WorkNavigator: View {
                     ForEach(Array(taskIDs.enumerated()), id: \.element) { index, id in
                         taskRow(id, slotHint: index < 9 ? "⌘\(index + 1)" : nil)
                     }
-                    if taskIDs.isEmpty {
+                    if taskIDs.isEmpty, let emptyListText {
                         Text(emptyListText)
                             .font(Typography.body(12))
                             .foregroundStyle(palette.textSecondary).padding(10)

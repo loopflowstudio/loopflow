@@ -4,8 +4,9 @@
   ordering with unchanged SQLite revisions, so observed facts get a
   connection-established cache incarnation, a non-reusing cache clock, captured
   dependency evidence and persisted last-known values (`instant-task-session.md`,
-  Review direction). Built before field/answer separation and Move. No product
-  preference is inferred.
+  Review direction). Source/capture primitives and required wire evidence are
+  built; per-field persistence and answer separation still precede Move. No
+  product preference is inferred.
 
 - Jack Heart replied “1a” to the 2026-11-15 conversation review's disconnected-edit
   question: save and project Complete/rename/move locally, show “Waiting for

@@ -19,5 +19,6 @@
     "max_connections": 64,
     "max_open": 256,
     "max_retained_bytes": 67108864
-  }
+  },
+  "observations": "fixture-observer"
 }

@@ -34,6 +34,21 @@ address and its lock remain stable so already-running relays can recover across
 the rename. There is one listener, with no alias or alternate protocol path.
 Work and credentials stay in place.
 
+## External observation provenance
+
+The welcome names the active cache in `observations`, separately from the server
+`instance` and the database epoch. `stamp.observations` carries that source,
+opaque fact/token pairs, and the clock at which the consumed set was validated.
+Repeated reads and inherited workers reuse captured answers. Changes during the
+capture leave observation evidence null and trigger a normal refresh. Eviction
+never reuses a token; a replacement cache has another source.
+
+Clients establish sources from the current connection's welcome before accepting
+readings. Disconnect and reconnect invalidate external coverage, including a
+reconnect to the same cache. Persisted readings remain last-known; a welcome
+alone revalidates no field. SQLite revisions retain their independent meaning.
+Observation evidence grants no terminal input readiness.
+
 ## Local protocol, revision 6
 
 One connection per client over the same-user Unix socket. Every message is one

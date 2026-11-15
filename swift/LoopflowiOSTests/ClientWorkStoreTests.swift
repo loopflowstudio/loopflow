@@ -24,7 +24,7 @@ final class ClientWorkStoreTests: XCTestCase {
             let value: [String: Any] = ["answers": NSNull(), "unavailable": NSNull(),
                 "body": try JSONSerialization.jsonObject(with: JSONEncoder().encode(receipt)),
                 "stamp": ["machine": "machine_fixture", "epoch": "ab0123456789ab0123456789ab01234567",
-                          "schema": ServerProtocol.revision, "query": "operation-query", "complete": true,
+                          "schema": ServerProtocol.revision, "query": "operation-query", "complete": true, "observations": NSNull(),
                           "revisions": ["planning": 12, "sessions": 1, "graphs": 1, "processes": 1, "usage": 1]]]
             return try JSONDecoder().decode(SubscriptionReading<OperationReceipt>.self,
                 from: JSONSerialization.data(withJSONObject: value))

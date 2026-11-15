@@ -26,7 +26,8 @@
           "graphs": 3,
           "processes": 2,
           "usage": 0
-        }
+        },
+        "observations": null
       }
     }
   },

@@ -36,9 +36,9 @@ those facts directly, so they need no running server or saved server cache.
 ## Keep editing through a connection loss
 
 Keep a Task list open while Desktop reconnects: live Work updates resume
-automatically from the last retained reading. An unchanged list does not need
-to be downloaded again. If Work changed or the server restarted, Desktop receives
-a complete current reading. If recovery fails, the window reports unavailability
+automatically while the last retained reading stays visible. The new connection
+receives a current reading to revalidate live status, even when the list has not
+changed. If recovery fails, the window reports unavailability
 and retries. Task and Session creations recover through their saved request and
 server receipt. Other changes submitted before the connection dropped are never
 repeated automatically; check the current Work before submitting them again.

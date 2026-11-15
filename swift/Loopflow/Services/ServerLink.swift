@@ -34,6 +34,8 @@ public struct ServerEndpoint: Sendable {
 /// fails pending requests; watches resume their retained stream on the next
 /// link. Messages over the control limit travel on ticketed connections.
 public actor ServerLink {
+    nonisolated let generation = UUID()
+    private weak var owner: MachineConnection?
     public nonisolated let welcome: ServerWelcome
     private nonisolated let endpoint: ServerEndpoint
     private let carrier: any ServerCarrier
@@ -91,6 +93,14 @@ public actor ServerLink {
     }
 
     public var isClosed: Bool { failure != nil }
+
+    /// Establish the negotiated source before the connection can serve a watch.
+    func establish(_ connection: MachineConnection, attempt: UUID) throws -> Bool {
+        if let failure { throw failure }
+        guard connection.establish(self, attempt: attempt) else { return false }
+        owner = connection
+        return true
+    }
 
     /// Ends the connection on purpose: requests fail and watches end rather than resume.
     public func close() async {
@@ -267,7 +277,7 @@ public actor ServerLink {
             // A null result confirms a registered subscription; anything else is
             // a late answer to a forgotten request.
         case .reading(let id, let checkpoint, let frame):
-            subscriptions[id]?.receive(frame, checkpoint: checkpoint)
+            subscriptions[id]?.receive(frame, checkpoint: checkpoint, from: self)
         case .bulk(let id, let ticket, _):
             // Fetched off the reader, so other answers never wait behind it.
             Task {
@@ -330,6 +340,7 @@ public actor ServerLink {
     private func fail(_ error: any Error, resumable: Bool) {
         guard failure == nil else { return }
         failure = error
+        owner?.disconnected(self)
         order = ServerMessageOrder()
         let (waiting, watching) = (pending.values, subscriptions.values)
         pending = [:]
@@ -469,16 +480,13 @@ final class ServerSubscription: @unchecked Sendable {
         try Task.checkCancellation()
         let (stopped, resume) = lock.withLock { (self.stopped, consumesEvents ? nil : resumeToken) }
         guard !stopped else { return }
+        lock.withLock { self.link = link; eventBaseline = false }
         do { try await link.register(self, query: query, resume: resume) }
         catch {
             if await link.isClosed { throw ServerConnectionUnavailable(error) }
             throw error
         }
-        let checkpoint: UInt64? = lock.withLock {
-            self.link = link
-            eventBaseline = false
-            return pending ?? (reconnect ? 0 : nil)
-        }
+        let checkpoint: UInt64? = lock.withLock { pending ?? (retry ? 0 : nil) }
         // A failed send ends the link; its failure resumes this watch.
         if let checkpoint { try? await link.checkpoint(id, checkpoint) }
     }
@@ -515,10 +523,14 @@ final class ServerSubscription: @unchecked Sendable {
     }
 
     /// From the link's reader: one complete reading, ordered before its events.
-    func receive(_ frame: RawJSON, checkpoint: String) {
+    func receive(_ frame: RawJSON, checkpoint: String, from link: ServerLink) {
         do {
             let delivered = try lock.withLock {
-                guard !stopped else { return true }
+                guard !stopped, self.link === link, connection.isCurrent(link) else { return true }
+                if let stamp = try frame.fields()["stamp"]?.decode(ReadingStamp?.self),
+                   let evidence = stamp.observations, evidence.source != link.welcome.observations {
+                    throw RegistryQueryError("Reading came from an unnegotiated observation source")
+                }
                 guard try deliver(.reading(frame)) else { return false }
                 resumeToken = checkpoint
                 eventBaseline = true

@@ -3,8 +3,8 @@
 Conversation/Machine-link cut committed at `a2a0a0fb33` on origin/main
 `9cafc410ee`. Unreachable-Machine presentation and Desktop Session rename are
 committed at `35e2835de1`; SQLite fixture teardown at `5231746858`. Next
-implementation, in order: the observation-source contract (Review direction: one
-observation source), field incorporation and derived-answer coverage, then
+implementation, in order: finish field-level observation support using the source
+and capture primitives below, field incorporation and derived-answer coverage, then
 dynamic membership with disconnected Move. Supersedes the
 Desktop-only delivery boundary. No shipping or merge decision is recorded. Placement remains this Task;
 no Wave is selected.
@@ -224,6 +224,10 @@ existing bounded input owners: no offline keystroke queue or automatic resend.
 
 ## Delete — do not maintain
 
+Already removed in this cut: per-entry observation counters, uncaptured repeat
+reads within an invocation, and reuse of pre-observation query bases. Required
+behavior stays on the single cache, capture and client SQLite owners.
+
 Already removed: the list at `908e317e4f:scratch/instant-task-session.md`, plus
 creation in `CreationRecovery`, its Task presentation map, host request filters
 and the phone query-before-opening path. The pending-command cut also removes
@@ -334,86 +338,15 @@ input readiness and Retry opening for the same Session.
 Built at `6e944e73b5a` (details in that commit's plan); current behavior is under
 Current implementation cut. Two-client closed-query convergence is unexercised.
 
-### Prior conversation and pending-command cuts
+### Earlier cuts
 
-Built: operation-owned Start destinations (`5ccc4563bd`), same submitted
-conversation on both hosts (`72bb1d06d4`), shared pending-command presentation
-(`e010cda519`). Details and retained acceptance:
-`f2438fb1b49:scratch/instant-task-session.md` under the original headings. Current
-contracts are summarized under Current implementation cut; unresolved product
-choices remain below and in `questions.md`.
-
-### Healthy changes and reconnect cut
-
-Built at `c9b86d24f5`: one pending-command vocabulary and row on both hosts,
-origin-only next selection for Complete/Abandon, durable abandonment decisions,
-and receipt recovery on the original ID after reconnect or lost send. Detailed
-acceptance and deleted predecessors:
-`f2438fb1b49:scratch/instant-task-session.md` under this heading. Claim still has
-only a label/stage; its writer and projection are unmigrated.
-
-### Conversation and Machine-link cut · `a2a0a0fb33`
-
-The shared row has list and conversation contexts, renders the request title only
-in lists, and reads creation's progress words from the declaration. Both creation
-conversations keep submitted words once beside **Starting conversation…**. Phone
-Abandon uses Desktop's confirmation title, destructive action and explanation.
-
-`MachineConnection` owns the control link, waiting fact, concurrent waiters and
-one reconnect backoff for each Machine endpoint. Both hosts use it; receipt watches
-no longer own backoff, and Desktop's `ServerLinks` and the phone's `opening` cache
-are deleted. Canceling one watch releases only its connection wait; the last waiter
-cancels opening. Receipt recovery still decides admission by the original ID after
-the new stamped reading. The phone feed retains its subscription through failed
-first opens and connection loss; a pending refresh checkpoint survives reconnect.
-Protocol/identity failures terminate with attention rather than waiting.
-
-Earlier check details: `f2438fb1b49:scratch/instant-task-session.md` under this heading.
-
-### Unreachable-Machine and Session-name cuts · 2026-11-15
-
-Committed at `35e2835de1`. Previous review findings and deleted
-predecessors: `85564c1f20:scratch/instant-task-session.md`.
-
-- The phone feed shows its Machine's waiting fact once above cold or saved
-  Tasks. Waiting suppresses its cold spinner and empty-result overlay. Refresh
-  returns immediately while waiting; a refresh already underway also ends on
-  connection loss. Reconnect supplies a fresh reading. Refused/protocol/identity
-  errors retain the error card and Try again.
-- `ClientWorkStore` subscribes once to its endpoint's `MachineConnection`, reads
-  waiting once per presentation and applies it to all that Machine's saved
-  changes, even without live receipt watches. `ServerWatch.connections` and
-  `isWaiting`, the watch map and per-watch forwarding tasks are deleted. Lists
-  show one Machine line and held request titles; conversation rows retain the
-  words. Attention and unsaved failures outrank waiting. Desktop Complete and
-  Abandon no longer wait for a fresh Workflow reading; the actual unavailable-
-  reading buttons enter the same two-window projection checks. `delivering` has no
-  placeholder text; only creation/new Session and Complete declare visible
-  progress. Both Task surfaces use Complete's declaration.
-- Desktop Session rename publishes its value and closes the editor before save
-  or transport. All windows use the same `WorkInteraction`; name facts and
-  pending commands live in the existing SQLite owner. Lists, breadcrumbs, Work
-  inspection and retained pane headings consume those names by Session identity.
-  Stamped pages and Work frames order facts by the sessions revision across
-  query identities. Unstamped data remains fallback inventory; raw merges never
-  copy projected names back into the base.
-- `session.renamed` records actual name/source or definite refusal in the
-  domain transaction. The actual field value and fence join the normalized
-  name owner atomically with its receipt, so retirement needs no invented
-  exact-query stamp or membership reload. Saved renames serialize per Session
-  through the earlier domain outcome; lost delivery recovers the original ID.
-  A newer edit replaces an earlier name that never saved. Refusal changes no
-  later navigation or other name.
-- Deleted: `commitSessionRename`'s direct write/record replacement and its
-  draft's submitting/error state, unused `RegistryQuery.renameSession`, and
-  their exclusive held-write fixtures. Binding retains `replaceSession` and
-  `supersedeSessions`. The phone has no rename UI and still shows Task titles;
-  Wave/Dashboard rename and other mutation families remain unmigrated.
-
-Earlier check details, including the original SQLite unlink warning and the
-10k name-query SQL-only observations:
-`f2438fb1b49:scratch/instant-task-session.md` under this heading. Those observations
-were not a native latency baseline.
+Start, pending-command presentation, Complete/Abandon recovery, shared Machine
+connection, unreachable-Machine presentation and Desktop Session rename are built.
+Their retained contracts are above. Detailed ownership, deletions and prior checks:
+`9fbc729a63b4eb6286159bcfa04090a68f6a9388:scratch/instant-task-session.md`
+(Prior conversation and pending-command cuts through Unreachable-Machine and
+Session-name cuts). Claim, Wave/Dashboard rename and other mutations remain
+unmigrated; the phone still has no Session rename UI.
 
 ### Why Move cannot use the current reducer
 
@@ -553,20 +486,16 @@ observation evidence into native input readiness.
 (`store/sqlite/selections.rs`) exercises that store boundary with a child process
 and no timing sleep.
 
-Fixture teardown, committed at `5231746858`: `WorkInteraction.shutdown()` returns
-a joinable cancellation task; XCTest fixtures await it, then
-`ClientWorkStore.close()`, then remove directories. Checks, 2026-11-15, `LF_*`
-cleared: 3 Desktop `ClientWorkQueryTests` and 6 iOS
-`ClientWorkQueryTests`/`MobileTaskCreationTests`/`ClientWorkStoreTests` cases
-passed with no SQLite unlink warning; the Rust case above, `documented_commands::`
-(4), multiplatform boundaries, `cargo fmt --check` and clippy passed. Exact
-filters: `5231746858:scratch/instant-task-session.md`. Gate owns broader suites.
+Fixture teardown and its focused Desktop/iOS/Rust checks are recorded at
+`5231746858:scratch/instant-task-session.md`. The joinable shutdown/close/removal
+order remains required.
 
 ### Review direction: one observation source, independent facts · 2026-11-15
 
 Headless concept review against `5231746858`. This resolves the engineering gap
-above, not the three independent product questions. Proposed, unbuilt. The
-experience stays the same: a Task whose provider exits stops looking Busy in every
+above, not the three independent product questions. Source/capture primitives and
+wire transport are built in this cut; field declarations and normalized persisted
+facts remain unbuilt. The experience stays the same: a Task whose provider exits stops looking Busy in every
 cached view; missing activity does not undo an already incorporated Move. A
 Machine restart keeps conversations and saved changes, while live status awaits
 that Machine's new observations.
@@ -662,8 +591,33 @@ Acceptance adds these deterministic cases to the retained Move counterexamples:
   last-known or incomplete until covered. Saved request IDs and original-Machine
   recovery survive without resend or later navigation.
 
-No new runtime measurements in this review. Next implement owns these checks;
-native latency remains unmeasured and does not block this cut.
+Source/capture cut · 2026-11-15: the existing cache now owns an incarnation,
+non-reusing clock and opaque fact identities. One invocation and its inherited
+workers reuse the answer captured with each token; validation synchronizes with
+installation and eviction. `welcome.observations` establishes the source and
+`stamp.observations` carries nullable validated evidence independently of SQLite.
+Changed support participates in publication/resume identity even for an unchanged
+value. Shared connection generations reject obsolete links and unnegotiated
+sources; reconnect requests a reading even when a resume token matches. Saved
+cache evidence decodes on both platforms, but old bases without the required key
+are discarded without changing commands or receipts.
+
+This is the input contract, not completed field incorporation. Typed field input
+sets, normalization, stale/last-known answer presentation and derived dependencies
+still need the planned replacement cut. Query-local incorporation and the
+state-only reducer remain deletion targets, not extension points. Same-SQLite
+Busy/order/count and replaced-process acceptance still needs that consumer cut.
+Native latency remains unmeasured.
+
+
+Checks · 2026-11-15 (`LF_*` cleared; broader acceptance belongs to gate):
+- `cargo nextest run -p loopflow --lib -E 'test(/^observe::tests::/)'`: 11 passed, including held I/O, process exit, capture changes and eviction.
+- Source/schema/resume run `7bb50caf-46f5-485f-a8ff-d882ea6e5a98`: 21 passed; nextest marked `server::schema::tests::bare_time_serializes_as_its_described_tuple` LEAK. That case and the binary constructor launch no children; cause unresolved, retained for gate rather than retried away. Schema/fixture and scope/resume checks passed before the final capture scheduling refinement.
+- `cargo nextest run -p loopflow --lib --test integration -E 'test(/^observe::tests::a_capture_reuses_answers_across_changes_and_inherited_workers$/) | test(documented_commands::)'`: 5 passed; documentation results remain applicable after the capture-only refinement.
+- `scripts/test_desktop.sh --skip-build --filter 'ServerClientTests/(observationSourceComesFromTheCurrentWelcomeAcrossSharedConsumers|readingCannotReplaceTheNegotiatedObservationSource|disconnectedWatchKeepsItsQueuedBaselineUntilTheConsumerReadsIt|disconnectedWatchResumesItsBaselineAndNewestConfirmation)|ServerProtocolTests/(readingStampsRequireEveryFieldAndRoundTrip|helloAndWelcomeNegotiateTheRevision)'`: 6 passed; the separate `ClientWorkQueryTests/testObservationUpgradeDropsOldBasesAndRetainsSavedCommands` check also passed.
+- `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/ReadingStampTests -only-testing:LoopflowiOSTests/ClientWorkQueryTests/testObservationUpgradeDropsOldBasesAndRetainsSavedCommands`: 6 passed.
+- `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings`: passed on the final source/capture cut.
+- `uv run python scripts/check_swift_multiplatform_boundaries.py`: passed. Desktop/shared and iOS builds passed; no native latency measurement.
 
 ### Open product choices
 
@@ -699,7 +653,9 @@ including without a network event. Retirement cancels its receipt observer and
 transfers lagging effects or scoped reload floors. The complete prior contracts and
 query checks remain at `6e944e73b5a:scratch/instant-task-session.md`.
 
-Remaining: the observation-source contract (Review direction above), field incorporation and answer coverage, then disconnected Move; effect-policy duplication; cross-client closed-query convergence; exhaustive
+Remaining: typed per-field observation support, normalized values and reconnect
+coverage in the client SQLite owner; field incorporation and answer coverage,
+then disconnected Move; effect-policy duplication; cross-client closed-query convergence; exhaustive
 effect/dependency declarations and cross-query provenance; other mutation recovery
 and resource lanes; retained mobile `SessionLink`; projected inspection;
 historical-restoration epoch reset; valid native benchmark baseline. One cross-platform PR; no shipping decision. SQLite

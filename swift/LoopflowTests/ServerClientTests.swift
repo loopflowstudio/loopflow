@@ -160,6 +160,65 @@ struct ServerClientTests {
         #expect(try await ServerClient.read(.repoPath(id: "repo_1"), location: peer.location) == "/src/again")
     }
 
+    @Test func observationSourceComesFromTheCurrentWelcomeAcrossSharedConsumers() async throws {
+        let first = try ServerPeer()
+        let second = try ServerPeer()
+        first.serve(observations: "first-observer") { _, _ in true }
+        second.serve(observations: "second-observer") { _, _ in true }
+        let attempts = Mutex(0)
+        let connection = MachineConnection {
+            let peer = attempts.increment() == 1 ? first : second
+            return try await ServerLink.open(.unix(path: peer.location.path()))
+        }
+        let old = try await connection.link()
+        let sibling = try await connection.link()
+        #expect(old === sibling)
+        #expect(connection.observationSource == "first-observer")
+        await old.close()
+        #expect(connection.observationSource == nil)
+        let current = try await connection.link()
+        #expect(connection.observationSource == "second-observer")
+        #expect(!connection.isCurrent(old))
+        #expect(connection.isCurrent(current))
+        // An old close or delayed welcome cannot elect its source again.
+        connection.disconnected(old)
+        #expect(!connection.establish(old, attempt: UUID()))
+        #expect(connection.observationSource == "second-observer")
+        #expect(try await connection.link() === current)
+        await current.close()
+        #expect(connection.observationSource == nil)
+    }
+
+    @Test func readingCannotReplaceTheNegotiatedObservationSource() async throws {
+        let peer = try ServerPeer()
+        peer.serve(observations: "current-observer") { message, respond in
+            guard message["type"] as? String == "subscribe" else { return true }
+            respond(["type": "reading", "id": message["id"]!, "checkpoint": "delayed",
+                "frame": ["answers": NSNull(), "unavailable": NSNull(), "body": "old",
+                    "stamp": ["machine": "machine", "epoch": "epoch", "schema": ServerProtocol.revision,
+                        "query": "query", "complete": true,
+                        "revisions": ["planning": 1, "sessions": 1, "graphs": 1, "processes": 1, "usage": 1],
+                        "observations": ["source": "old-observer", "validated_at": 9, "dependencies": []]]]])
+            return true
+        }
+        let connection = MachineConnection { try await ServerLink.open(.unix(path: peer.location.path())) }
+        let watch = ServerLink.subscribe(.allPlans, connection: connection) { update -> RawJSON? in
+            guard case .reading(let frame) = update else { return nil }
+            return frame
+        }
+        defer { watch.cancel() }
+        var readings = watch.updates.makeAsyncIterator()
+        do {
+            _ = try await readings.next()
+            Issue.record("A reading elected an obsolete source")
+        } catch {
+            #expect(error.localizedDescription.contains("unnegotiated observation source"))
+        }
+        #expect(connection.observationSource == "current-observer")
+        let link = try await connection.link()
+        await link.close()
+    }
+
     @Test func receiptWatchWaitsAcrossFailedOpensAndLossBeforeItsFirstReading() async throws {
         let peer = try ServerPeer()
         let attempts = Mutex(0)
@@ -322,6 +381,9 @@ struct ServerClientTests {
         let value = try JSONSerialization.jsonObject(with: baseline) as! [String: Any]
         #expect(value["body"] as? String == "baseline")
         #expect(value["answers"] is NSNull)
+        let revalidated = try #require(try await frames.next())
+        let current = try JSONSerialization.jsonObject(with: revalidated) as! [String: Any]
+        #expect(current["answers"] as? Int == 0)
         subscription.send(Data(#"{"id":1}"#.utf8))
         let confirmed = try #require(try await frames.next())
         let confirmation = try JSONSerialization.jsonObject(with: confirmed) as! [String: Any]
@@ -689,7 +751,7 @@ private final class ServerPeer: @unchecked Sendable {
     }
 
     /// `handle` returns false to close the connection after this message.
-    func serve(_ handle: @escaping @Sendable (_ message: [String: Any], _ respond: (_ line: [String: Any]) -> Void) -> Bool) {
+    func serve(observations: String = "fixture-observer", _ handle: @escaping @Sendable (_ message: [String: Any], _ respond: (_ line: [String: Any]) -> Void) -> Bool) {
         Thread.detachNewThread { [self] in
             let fd = accept(listener, nil, nil)
             guard fd >= 0 else { return }
@@ -698,7 +760,7 @@ private final class ServerPeer: @unchecked Sendable {
             do {
                 _ = try connection.read() // hello
                 try connection.write([
-                    "type": "welcome", "client_id": "fixture-client", "revision": ServerProtocol.revision, "server_revision": ServerProtocol.revision, "min_revision": ServerProtocol.minRevision, "instance": "fixture",
+                    "type": "welcome", "observations": observations, "client_id": "fixture-client", "revision": ServerProtocol.revision, "server_revision": ServerProtocol.revision, "min_revision": ServerProtocol.minRevision, "instance": "fixture",
                     "build": "test", "executable_sha256": String(repeating: "f", count: 64), "machine": NSNull(),
                     "limits": ["max_message": 1_048_576, "max_connections": 64,"max_open":256,"max_retained_bytes":67108864],
                 ])

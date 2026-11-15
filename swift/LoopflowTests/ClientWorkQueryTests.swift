@@ -23,7 +23,7 @@ final class ClientWorkQueryTests: XCTestCase {
         // All fields, including nullable query, exercise the wire decoder.
         try! JSONDecoder().decode(ReadingStamp.self, from: JSONSerialization.data(withJSONObject: [
             "machine": "machine", "epoch": epoch, "schema": ServerProtocol.revision, "query": query,
-            "complete": true, "revisions": ["planning": revision, "sessions": revision, "graphs": revision,
+            "complete": true, "observations": NSNull(), "revisions": ["planning": revision, "sessions": revision, "graphs": revision,
                 "processes": revision, "usage": revision]]))
     }
 
@@ -901,6 +901,28 @@ final class ClientWorkQueryTests: XCTestCase {
         XCTAssertNil(future)
     }
 
+    func testObservationUpgradeDropsOldBasesAndRetainsSavedCommands() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let query = ServedRead.viewSelect(expression: "state:working")
+        do {
+            let database = try complete(directory)
+            _ = try database.cache(ClientWorkQuery(stamp: stamp("list", revision: 6), plans: [workingPlan(["a", "b"])]), key: key(query))
+        }
+        do {
+            var connection: OpaquePointer?
+            XCTAssertEqual(sqlite3_open(directory.appendingPathComponent("work.sqlite").path, &connection), SQLITE_OK)
+            defer { sqlite3_close(connection) }
+            XCTAssertEqual(sqlite3_exec(connection,
+                "UPDATE work_queries SET state=CAST(json_remove(CAST(state AS TEXT),'$.stamp.observations') AS BLOB)",
+                nil, nil, nil), SQLITE_OK)
+        }
+        let restarted = try ClientWorkDatabase(directory: directory)
+        XCTAssertNil(try restarted.cached(machine: "machine", key: key(query)))
+        XCTAssertEqual(try restarted.pending().map(\.id), ["saved"])
+        XCTAssertEqual(try restarted.state("saved")?.record.destination, "machine")
+    }
+
     func testLaterSettlementCannotReviveAnInvalidatedBaseWithAnUnrelatedEffect() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
@@ -1133,7 +1155,7 @@ private actor CompletionCarrier: ServerCarrier {
     func receive() async -> Data? {
         if !welcomed {
             welcomed = true
-            return Data(#"{"type":"welcome","client_id":"fixture","revision":6,"server_revision":6,"min_revision":6,"instance":"fixture","build":"test","executable_sha256":"hash","machine":null,"limits":{"max_message":1048576,"max_connections":64,"max_open":256,"max_retained_bytes":67108864}}"#.utf8)
+            return Data(#"{"type":"welcome","observations":"fixture-observer","client_id":"fixture","revision":6,"server_revision":6,"min_revision":6,"instance":"fixture","build":"test","executable_sha256":"hash","machine":null,"limits":{"max_message":1048576,"max_connections":64,"max_open":256,"max_retained_bytes":67108864}}"#.utf8)
         }
         if closed { return nil }
         return await withCheckedContinuation { waiting = $0 }

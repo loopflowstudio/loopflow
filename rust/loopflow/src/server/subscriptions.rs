@@ -533,8 +533,11 @@ impl Producer {
                 reason = frame["unavailable"].as_str().map(str::to_owned);
                 last = ends.ends_after(&frame["body"]);
                 // Internal generations never appear in a consumer's envelope.
-                let identity =
-                    crate::lf::commands::subscribe::identity(reason.as_deref(), frame.get("body"))?;
+                let identity = crate::lf::commands::subscribe::identity(
+                    reason.as_deref(),
+                    frame.get("body"),
+                    frame.pointer("/stamp/observations"),
+                )?;
                 frame["answers"] = Value::Null;
                 reading = Some(Arc::new(Reading {
                     generation,
@@ -759,8 +762,12 @@ mod tests {
             });
             Arc::new(Reading {
                 generation,
-                identity: crate::lf::commands::subscribe::identity(None, frame.get("body"))
-                    .unwrap(),
+                identity: crate::lf::commands::subscribe::identity(
+                    None,
+                    frame.get("body"),
+                    frame.pointer("/stamp/observations"),
+                )
+                .unwrap(),
                 frame,
                 _retained: Arc::new(Retained::empty()),
             })
@@ -862,8 +869,12 @@ mod tests {
                 "generated_at": at, "evidence_age_secs": at,
                 "condition": { "observed_at": at, "state": "ready" }, "title": "same"
             }});
-            let identity =
-                crate::lf::commands::subscribe::identity(None, frame.get("body")).unwrap();
+            let identity = crate::lf::commands::subscribe::identity(
+                None,
+                frame.get("body"),
+                frame.pointer("/stamp/observations"),
+            )
+            .unwrap();
             Arc::new(Reading {
                 generation,
                 frame,
@@ -906,7 +917,7 @@ mod tests {
         let frame =
             serde_json::json!({"answers": null, "unavailable": "snapshot failed", "body": null});
         let identity =
-            crate::lf::commands::subscribe::identity(Some("snapshot failed"), None).unwrap();
+            crate::lf::commands::subscribe::identity(Some("snapshot failed"), None, None).unwrap();
         let (latest, receiver) = tokio::sync::watch::channel(Latest {
             ready: true,
             events: 0,
@@ -955,7 +966,8 @@ mod tests {
         use std::sync::Mutex;
 
         let reason = Some("snapshot failed".to_owned());
-        let identity = crate::lf::commands::subscribe::identity(reason.as_deref(), None).unwrap();
+        let identity =
+            crate::lf::commands::subscribe::identity(reason.as_deref(), None, None).unwrap();
         let (latest, receiver) = tokio::sync::watch::channel(Latest {
             ready: true,
             events: 0,

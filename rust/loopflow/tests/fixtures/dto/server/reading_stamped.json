@@ -15,6 +15,16 @@
         "graphs": 3,
         "processes": 2,
         "usage": 0
+      },
+      "observations": {
+        "source": "fixture-observer",
+        "validated_at": 19,
+        "dependencies": [
+          {
+            "fact": "opaque-process-fact",
+            "token": 17
+          }
+        ]
       }
     },
     "unavailable": null,

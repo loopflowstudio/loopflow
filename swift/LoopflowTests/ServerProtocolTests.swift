@@ -130,13 +130,15 @@ struct ServerProtocolTests {
         let frame = try #require(fields["frame"])
         let reading = try frame.decode(SubscriptionReading<[JSONValue]>.self)
         let stamp = try #require(reading.stamp)
+        #expect(stamp.observations?.source == "fixture-observer")
+        #expect(stamp.observations?.dependencies.first?.token == 17)
         #expect(stamp.revisions.sessions == 11)
         #expect(stamp.complete)
         #expect(stamp.schema == UInt32(ServerProtocol.revision))
         let wire = try #require(try frame.fields()["stamp"])
         #expect(try wire.decode(JSONValue.self) == JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(stamp)))
         var object = try #require(JSONSerialization.jsonObject(with: wire.bytes) as? [String: Any])
-        for key in ["machine", "epoch", "schema", "query", "complete", "revisions"] {
+        for key in ["machine", "epoch", "schema", "query", "complete", "revisions", "observations"] {
             var missing = object
             missing.removeValue(forKey: key)
             #expect(throws: DecodingError.self) {
@@ -216,6 +218,7 @@ struct ServerProtocolTests {
         #expect(welcome.serverRevision == ServerProtocol.revision)
         #expect(welcome.minRevision == ServerProtocol.minRevision)
         #expect(welcome.instance == "service-incarnation")
+        #expect(welcome.observations == "fixture-observer")
         #expect(welcome.executableSHA256.count == 64)
         #expect(welcome.limits.maxMessage == 1_048_576)
         #expect(welcome.limits.maxConnections == 64)
@@ -629,7 +632,7 @@ struct ServerProtocolTests {
             try ServerMessage(line: Data(#"{"type":"reading","id":"x"}"#.utf8))
         }
         #expect(throws: (any Error).self) {
-            try ServerMessage(line: Data(#"{"type":"welcome","revision":5}"#.utf8))
+            try ServerMessage(line: Data(#"{"type":"welcome","observations":"fixture-observer","revision":5}"#.utf8))
         }
         #expect(throws: (any Error).self) {
             try ServerMessage(line: Data(#"{"type":"response","id":"x","result":{"kind":"bootstrap"}}"#.utf8))

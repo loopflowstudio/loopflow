@@ -6044,6 +6044,48 @@
         }
       ]
     },
+    "ObservationDependency": {
+      "properties": {
+        "fact": {
+          "type": "string"
+        },
+        "token": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "fact",
+        "token"
+      ],
+      "type": "object"
+    },
+    "ObservationEvidence": {
+      "description": "A coherent capture from one ephemeral observation source. IDs reveal no paths.",
+      "properties": {
+        "dependencies": {
+          "items": {
+            "$ref": "#/$defs/ObservationDependency"
+          },
+          "type": "array"
+        },
+        "source": {
+          "type": "string"
+        },
+        "validated_at": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "source",
+        "validated_at",
+        "dependencies"
+      ],
+      "type": "object"
+    },
     "OccurrenceSettings": {
       "description": "A Graph occurrence retains its defining graph through composition and capture.",
       "properties": {
@@ -9639,6 +9681,17 @@
         "machine": {
           "type": "string"
         },
+        "observations": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ObservationEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Null when consumed external answers changed during computation."
+        },
         "query": {
           "description": "SHA-256 of the served read and selection; absent on ordinary CLI streams.",
           "type": [
@@ -9661,7 +9714,8 @@
         "schema",
         "query",
         "complete",
-        "revisions"
+        "revisions",
+        "observations"
       ],
       "type": "object"
     },
@@ -10597,6 +10651,10 @@
               "minimum": 0,
               "type": "integer"
             },
+            "observations": {
+              "description": "Ephemeral external-observation source; independent of the database epoch.",
+              "type": "string"
+            },
             "revision": {
               "description": "The revision both sides speak for this connection.",
               "format": "uint32",
@@ -10620,6 +10678,7 @@
             "server_revision",
             "min_revision",
             "instance",
+            "observations",
             "build",
             "executable_sha256",
             "machine",
@@ -16849,6 +16908,10 @@
           "minimum": 0,
           "type": "integer"
         },
+        "observations": {
+          "description": "Ephemeral external-observation source; independent of the database epoch.",
+          "type": "string"
+        },
         "revision": {
           "description": "The revision both sides speak for this connection.",
           "format": "uint32",
@@ -16867,6 +16930,7 @@
         "server_revision",
         "min_revision",
         "instance",
+        "observations",
         "build",
         "executable_sha256",
         "machine",

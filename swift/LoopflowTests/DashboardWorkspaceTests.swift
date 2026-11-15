@@ -325,7 +325,7 @@ struct DashboardWorkspaceTests {
         let read = ServedRead.desktopViewGet(directory: "/repo", expression: expression)
         _ = owner.open(read) { _ in }
         let stamp = try JSONDecoder().decode(ReadingStamp.self, from: JSONSerialization.data(withJSONObject: [
-            "machine": fixtureMachineId, "epoch": "epoch", "schema": ServerProtocol.revision, "query": "query", "complete": true,
+            "machine": fixtureMachineId, "epoch": "epoch", "schema": ServerProtocol.revision, "query": "query", "complete": true, "observations": NSNull(),
             "revisions": ["planning": 1, "sessions": 1, "graphs": 1, "processes": 1, "usage": 1]]))
         try await owner.receive([plan], stamp: stamp, for: read)
         let query = RegistryQuery(subscribeRead: { _, _ in

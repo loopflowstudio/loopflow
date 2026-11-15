@@ -457,6 +457,7 @@ pub(super) async fn welcome<C: Carrier>(
             server_revision: REVISION,
             min_revision: MIN_REVISION,
             instance: instance.into(),
+            observations: crate::observe::Cache::shared().incarnation().into(),
             build: crate::build_info::BUILD_VERSION.to_owned(),
             executable_sha256: executable_sha256.into(),
             machine,
@@ -1443,8 +1444,11 @@ fn busy(id: &str, limit: &str, max: usize) -> ServerMessage {
 /// Recomputing it needs no retained payloads or disconnected subscriptions.
 pub(super) fn reading_checkpoint(scope: &[u8], frame: &serde_json::Value) -> Result<String> {
     use sha2::{Digest, Sha256};
-    let reading =
-        crate::lf::commands::subscribe::identity(frame["unavailable"].as_str(), frame.get("body"))?;
+    let reading = crate::lf::commands::subscribe::identity(
+        frame["unavailable"].as_str(),
+        frame.get("body"),
+        frame.pointer("/stamp/observations"),
+    )?;
     let mut hash = Sha256::new();
     hash.update(scope);
     hash.update(reading);
@@ -2446,6 +2450,24 @@ mod tests {
         assert_ne!(
             baseline,
             super::reading_checkpoint(&original, &frame("changed", 1, None)).unwrap()
+        );
+        let mut observed = frame("first", 1, None);
+        observed["stamp"] = serde_json::json!({"observations": {
+            "source": "cache", "validated_at": 4,
+            "dependencies": [{"fact": "opaque", "token": 3}]
+        }});
+        let supported = super::reading_checkpoint(&original, &observed).unwrap();
+        observed["stamp"]["observations"]["dependencies"][0]["token"] = 5.into();
+        observed["stamp"]["observations"]["validated_at"] = 5.into();
+        assert_ne!(
+            supported,
+            super::reading_checkpoint(&original, &observed).unwrap(),
+            "changed support must reach a client even when the derived value is unchanged"
+        );
+        observed["stamp"]["observations"]["source"] = "replacement".into();
+        assert_ne!(
+            supported,
+            super::reading_checkpoint(&original, &observed).unwrap()
         );
         for changed in [
             scope("restarted-server", &query, None),

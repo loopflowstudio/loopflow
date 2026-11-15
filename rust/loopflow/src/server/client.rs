@@ -610,6 +610,7 @@ mod tests {
                     server_revision: REVISION,
                     min_revision: MIN_REVISION,
                     instance: "fixture".into(),
+                    observations: "test-observer".into(),
                     build: "test".into(),
                     executable_sha256: "f".repeat(64),
                     machine: None,

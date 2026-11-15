@@ -384,6 +384,7 @@ public struct ServerWelcome: Decodable, Sendable {
     public let minRevision: Int
     /// Changes with every server start.
     public let instance: String
+    public let observations: String
     public let build: String
     public let executableSHA256: String
     /// `.null` while the Machine registry is unavailable or uninitialized.
@@ -391,7 +392,7 @@ public struct ServerWelcome: Decodable, Sendable {
     public let limits: ServerLimits
 
     private enum CodingKeys: String, CodingKey {
-        case revision, instance, build, machine, limits
+        case revision, instance, observations, build, machine, limits
         case clientID = "client_id", serverRevision = "server_revision", minRevision = "min_revision"
         case executableSHA256 = "executable_sha256"
     }

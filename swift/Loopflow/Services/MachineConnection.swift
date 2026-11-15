@@ -23,6 +23,14 @@ public actor MachineConnection {
     nonisolated func rememberMachine(_ machine: String) { state.rememberMachine(machine) }
     nonisolated func isWaiting(for machine: String) -> Bool { state.isWaiting(for: machine) }
 
+    nonisolated func isCurrent(_ link: ServerLink) -> Bool { state.isCurrent(link) }
+    nonisolated func disconnected(_ link: ServerLink) { state.disconnect(link) }
+    nonisolated func establish(_ link: ServerLink, attempt: UUID) -> Bool {
+        state.connected(link, attempt: attempt)
+    }
+    /// Nil while disconnected. Saved observation values then remain last-known.
+    public nonisolated var observationSource: String? { state.observationSource }
+
     public nonisolated var isWaiting: Bool { state.isWaiting }
     public nonisolated func changes() -> AsyncStream<Void> { state.changes() }
 
@@ -48,6 +56,8 @@ public actor MachineConnection {
     }
 
     private func connect() async {
+        guard !Task.isCancelled else { return }
+        let generation = state.beginOpening()
         var attempt = 0
         if reopening {
             reopening = false
@@ -58,10 +68,13 @@ public actor MachineConnection {
             do {
                 let link = try await open()
                 guard !Task.isCancelled else { await link.close(); return }
+                guard try await link.establish(self, attempt: generation), !Task.isCancelled else {
+                    await link.close()
+                    return
+                }
                 current = link
                 if case .string(let machine) = link.welcome.machine["id"] { state.identify(machine) }
                 opening = nil
-                state.setWaiting(false)
                 let ready = waiters.values
                 waiters = [:]
                 for waiter in ready { waiter.continuation.resume(returning: link) }
@@ -88,6 +101,39 @@ public actor MachineConnection {
 private final class ConnectionState: @unchecked Sendable {
     private let lock = NSLock()
     private var waiting = false
+    private var attempt: UUID?
+    private var generation: UUID?
+    private var source: String?
+    var observationSource: String? { lock.withLock { source } }
+    func isCurrent(_ link: ServerLink) -> Bool { lock.withLock { generation == link.generation } }
+    func beginOpening() -> UUID {
+        lock.withLock {
+            let next = UUID()
+            attempt = next
+            generation = nil
+            source = nil
+            return next
+        }
+    }
+    func connected(_ link: ServerLink, attempt: UUID) -> Bool {
+        lock.withLock {
+            guard self.attempt == attempt else { return false }
+            generation = link.generation
+            source = link.welcome.observations
+            waiting = false
+            for observer in observers.values { observer.yield(()) }
+            return true
+        }
+    }
+    func disconnect(_ link: ServerLink) {
+        lock.withLock {
+            guard generation == link.generation else { return }
+            generation = nil
+            source = nil
+            waiting = true
+            for observer in observers.values { observer.yield(()) }
+        }
+    }
     private var machine: String?
     init(machine: String?) { self.machine = machine }
     private var observers: [UUID: AsyncStream<Void>.Continuation] = [:]

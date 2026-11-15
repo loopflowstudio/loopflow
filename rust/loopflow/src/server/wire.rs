@@ -367,6 +367,8 @@ pub struct Welcome {
     pub min_revision: u32,
     /// Changes with every server start.
     pub instance: String,
+    /// Ephemeral external-observation source; independent of the database epoch.
+    pub observations: String,
     pub build: String,
     pub executable_sha256: String,
     /// Null while the Machine registry is unavailable or uninitialized.

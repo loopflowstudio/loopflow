@@ -93,6 +93,9 @@ pub struct ReadingStamp {
     /// The whole scoped query was returned, rather than a selected JSON fragment.
     pub complete: bool,
     pub revisions: StoreRevisions,
+    /// Null when consumed external answers changed during computation.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub observations: Option<crate::observe::ObservationEvidence>,
 }
 
 /// One line of a subscription.
@@ -684,6 +687,7 @@ where
                             query: None,
                             complete: false,
                             revisions,
+                            observations: self.observations.evidence(&self.dependencies),
                         })
                     })
                     .transpose()?
@@ -692,7 +696,11 @@ where
             };
             drop(snapshot);
             self.cost = began.elapsed();
-            let identity = identity(unavailable.as_deref(), body.as_ref())?;
+            let observations = stamp
+                .as_ref()
+                .map(|stamp| serde_json::to_value(&stamp.observations))
+                .transpose()?;
+            let identity = identity(unavailable.as_deref(), body.as_ref(), observations.as_ref())?;
             if self.force || self.sent != Some(identity) {
                 update.frame = Some(encode(&SubscriptionFrame {
                     answers: self.answers,
@@ -760,6 +768,7 @@ fn strip_reading_time(value: &mut serde_json::Value) {
 pub(crate) fn identity(
     unavailable: Option<&str>,
     body: Option<&serde_json::Value>,
+    observations: Option<&serde_json::Value>,
 ) -> Result<[u8; 32]> {
     let mut value = body.cloned().unwrap_or(serde_json::Value::Null);
     strip_reading_time(&mut value);
@@ -767,6 +776,7 @@ pub(crate) fn identity(
     let mut hash = Sha256::new();
     serde_json::to_writer(&mut hash, &unavailable)?;
     serde_json::to_writer(&mut hash, &value)?;
+    serde_json::to_writer(&mut hash, &observations)?;
     Ok(hash.finalize().into())
 }
 
@@ -936,6 +946,7 @@ mod tests {
             "query",
             "complete",
             "revisions",
+            "observations",
         ] {
             let mut incomplete = wire.clone();
             incomplete.as_object_mut().unwrap().remove(key);
@@ -1241,11 +1252,11 @@ mod tests {
                 "task": {"acquisition": {"state": "available", "observed_at": at}},
                 "project_readiness": {"state": "ready", "observed_at": at}}])
         };
-        let read = |body| identity(None, Some(&body)).unwrap();
+        let read = |body| identity(None, Some(&body), None).unwrap();
         assert_eq!(read(rows(1)), read(rows(2)));
         assert_ne!(
             read(rows(1)),
-            identity(Some("gone"), Some(&rows(1))).unwrap()
+            identity(Some("gone"), Some(&rows(1)), None).unwrap()
         );
     }
 }

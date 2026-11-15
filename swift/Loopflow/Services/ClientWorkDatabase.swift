@@ -110,6 +110,9 @@ final class ClientWorkDatabase {
         // Confirmed caches are replaceable. The outbox and its reload floors
         // survive a membership vocabulary change; never reinterpret an old plan.
         try execute("DELETE FROM work_queries WHERE EXISTS (SELECT 1 FROM json_each(CAST(work_queries.state AS TEXT),'$.plans') WHERE json_type(value,'$.membership.domains') IS NULL)")
+        // Old cache stamps cannot acquire evidence from a later connection.
+        // Keep exact outbox requests, receipts and reload requirements intact.
+        try execute("DELETE FROM work_queries WHERE json_type(CAST(state AS TEXT),'$.stamp.observations') IS NULL")
         let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "json" }
         let records = try files.map { try JSONDecoder().decode(SubmittedOperation.self, from: Data(contentsOf: $0)) }

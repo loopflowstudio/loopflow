@@ -233,7 +233,7 @@ private func roadmapJSON() throws -> String {
 private func nameStamp(_ revision: Int64, query: String = "sessions") throws -> ReadingStamp {
     try JSONDecoder().decode(ReadingStamp.self, from: JSONSerialization.data(withJSONObject: [
         "machine": "machine", "epoch": "epoch", "schema": ServerProtocol.revision, "query": query,
-        "complete": true, "revisions": ["planning": 1, "sessions": revision, "graphs": 1, "processes": 1, "usage": 1]]))
+        "complete": true, "observations": NSNull(), "revisions": ["planning": 1, "sessions": revision, "graphs": 1, "processes": 1, "usage": 1]]))
 }
 
 private func nameReceipt(_ id: String, title: String, refused: Bool = false) throws -> OperationReceipt {

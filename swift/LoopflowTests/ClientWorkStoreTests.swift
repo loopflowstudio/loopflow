@@ -12,7 +12,7 @@ func operationTestFrame(id: String = "same", delivery: String? = "finished", epo
     }
     let frame: [String: Any] = ["answers": NSNull(), "unavailable": NSNull(), "body": body as Any? ?? NSNull(),
         "stamp": ["machine": "machine", "epoch": epoch, "schema": ServerProtocol.revision, "query": "operation-query",
-                  "complete": true, "revisions": ["planning": 1, "sessions": 1, "graphs": 1, "processes": 1, "usage": 1]]]
+                  "complete": true, "observations": NSNull(), "revisions": ["planning": 1, "sessions": 1, "graphs": 1, "processes": 1, "usage": 1]]]
     return try JSONDecoder().decode(SubscriptionReading<OperationReceipt>.self, from: JSONSerialization.data(withJSONObject: frame))
 }
 
@@ -95,7 +95,7 @@ func operationPlanningTestFrame(delivered: Bool, diagnostic: String? = "planning
     receipt["planning"] = planning
     let frame: [String: Any] = ["answers": NSNull(), "unavailable": NSNull(), "body": receipt,
         "stamp": ["machine": "machine_fixture", "epoch": "ab0123456789ab0123456789ab01234567",
-                  "schema": ServerProtocol.revision, "query": "operation-query", "complete": true,
+                  "schema": ServerProtocol.revision, "query": "operation-query", "complete": true, "observations": NSNull(),
                   "revisions": ["planning": delivered ? 13 : 12, "sessions": 1, "graphs": 1, "processes": 1, "usage": 1]]]
     return try JSONDecoder().decode(SubscriptionReading<OperationReceipt>.self,
         from: JSONSerialization.data(withJSONObject: frame))

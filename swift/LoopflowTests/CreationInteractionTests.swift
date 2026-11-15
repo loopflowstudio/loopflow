@@ -11,7 +11,7 @@ func creationFrame(id: String, delivery: String = "dispatched", revision: Int = 
     return try JSONDecoder().decode(SubscriptionReading<OperationReceipt>.self, from: JSONSerialization.data(withJSONObject: [
         "answers": NSNull(), "unavailable": NSNull(),
         "stamp": ["machine": "machine", "epoch": "epoch", "schema": ServerProtocol.revision, "query": "operation",
-            "complete": true, "revisions": ["planning": 7, "sessions": 7, "graphs": 7, "processes": 7, "usage": 7]],
+            "complete": true, "observations": NSNull(), "revisions": ["planning": 7, "sessions": 7, "graphs": 7, "processes": 7, "usage": 7]],
         "body": ["request_id": id, "kind": "task.create", "fingerprint": "bound", "submitted_fingerprint": "content",
             "validation": "bound", "delivery": delivery, "revision": revision,
             "result": session == nil ? NSNull() as Any : result as Any, "error": diagnostic as Any? ?? NSNull(),

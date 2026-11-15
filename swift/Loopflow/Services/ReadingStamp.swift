@@ -11,6 +11,20 @@ public struct ReadingStamp: Codable, Equatable, Sendable {
         public let usage: Int64
     }
 
+    public struct Observations: Codable, Equatable, Sendable {
+        public struct Dependency: Codable, Equatable, Sendable {
+            public let fact: String
+            public let token: UInt64
+        }
+        public let source: String
+        public let validatedAt: UInt64
+        public let dependencies: [Dependency]
+        private enum CodingKeys: String, CodingKey {
+            case source, dependencies, validatedAt = "validated_at"
+        }
+    }
+
+    public let observations: Observations?
     public let machine: String
     public let epoch: String
     public let schema: UInt32
@@ -18,10 +32,11 @@ public struct ReadingStamp: Codable, Equatable, Sendable {
     public let complete: Bool
     public let revisions: Revisions
 
-    private enum CodingKeys: String, CodingKey { case machine, epoch, schema, query, complete, revisions }
+    private enum CodingKeys: String, CodingKey { case machine, epoch, schema, query, complete, revisions, observations }
 
     public init(from decoder: any Decoder) throws {
         let fields = try decoder.container(keyedBy: CodingKeys.self)
+        observations = try fields.decode(Observations?.self, forKey: .observations)
         machine = try fields.decode(String.self, forKey: .machine)
         epoch = try fields.decode(String.self, forKey: .epoch)
         schema = try fields.decode(UInt32.self, forKey: .schema)
@@ -32,6 +47,7 @@ public struct ReadingStamp: Codable, Equatable, Sendable {
 
     public func encode(to encoder: any Encoder) throws {
         var fields = encoder.container(keyedBy: CodingKeys.self)
+        try fields.encode(observations, forKey: .observations)
         try fields.encode(machine, forKey: .machine)
         try fields.encode(epoch, forKey: .epoch)
         try fields.encode(schema, forKey: .schema)

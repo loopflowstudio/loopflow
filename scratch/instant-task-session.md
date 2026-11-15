@@ -1,6 +1,6 @@
 # LOO-906: immediate interactions across Desktop and mobile
 
-Realigned 2026-11-15 at code `3b096ece9d` on origin/main `9cafc410ee`
+Realigned 2026-11-15 at code `14d5127895` on origin/main `9cafc410ee`
 (unchanged). Supersedes the Desktop-only delivery
 boundary. No shipping or merge decision is recorded. Placement remains this Task;
 no Wave is selected.
@@ -609,64 +609,30 @@ same-query mounts, covering refresh and restart as one sequence.
 
 ### Closing a view must not keep its whole answer alive
 
-Headless concept-review of the query-destination cut, 2026-11-15; no builds or
-latency trials ran in that review. Implemented query lifecycle direction: separate
-a mounted lease, a reusable prepared answer and a
-durable reload requirement. These are internal ownership distinctions; opening,
-closing and returning remain the only actions people learn. No product choice is
-open.
+Built at `14d5127895`; the full direction and acceptance list are at
+`3d2a4aa931:scratch/instant-task-session.md`. A mounted lease, a reusable
+prepared answer and a durable reload requirement are separate internal owners;
+opening, closing and returning stay the only actions people see. Live leases pin
+their entry; eight recent unleased answers stay reusable. Last-lease close
+suspends observation; reopening reconciles disk/outbox before first display, and
+publication generations reject pre-suspension answers. Retirement transfers a
+resolved effect into a retained usable base, or invalidates a closed base with a
+compact floor scoped by Machine/epoch/schema, repository, effect and domains, in
+the outbox transaction. Close and eviction never resend, infer refusal,
+acknowledge presentation or release an execution lane. Host usage docs
+(`swift/README.md`, `swift/LoopflowiOS/README.md`) describe the lifecycle.
 
-Proposed usage: returning to a recent query shows usable projected content while
-refreshing. Closing it never cancels a submitted command. After its cached answer
-has been evicted or invalidated, returning selects the same query immediately and
-loads there; it never briefly shows membership known to predate a resolved effect.
-A failed refresh keeps any still-usable projection with Retry. Loading a cold
-invalidated query does not reopen a Task or attach its native Session.
-
-Built 2026-11-15: the shared owner pins live leases and keeps eight recent unleased
-answers. Last-lease close suspends observation and clears reuse eligibility;
-reopening reconciles disk/outbox before displaying retained membership. Publication
-generations reject pre-suspension answers. Closing one lease leaves other mounts
-live. No command or native workspace lifetime belongs to this cache.
-
-Implement one bounded reusable query working set in the shared owner. Live leases
-pin their entry; unleased entries can be evicted without touching navigation,
-unsaved intent, saved commands or native workspaces. Prepare/publicize only live
-and retained reusable entries, rather than all expressions ever visited. A
-prepared answer includes its incorporated effects and publication generation.
-If store observation is suspended, that answer must be reconciled with current
-cache/outbox state before reuse; it cannot bypass invalidation on first display.
-Avoid a second host cache or an observation task for each closed expression.
-
-In the existing cache/outbox transaction, transfer a resolved effect either to
-an actively retained projected base or to invalidation of a closed base plus its
-scoped reload requirement. Store enough query/plan provenance to distinguish
-these cases. Compact requirements by Machine/epoch/schema, repository, effect
-and declared domains; retained metadata must not grow per completed operation.
-An invalidated base is unavailable until a complete covering reading arrives.
-Keep unresolved domain requests and unseen creation results independently.
-Eviction and close never authorize resend, infer refusal, acknowledge presentation
-or release an unresolved execution lane. Preserve legacy broad floors and all
-saved payloads. Use the existing SQLite owner, not another receipt ledger.
-
-Acceptance on both hosts: close all mounts while save or settlement is held;
-resolve success, refusal or supersession; reopen before a queued publication and
-after restart. Reorder a covering count and lagging list, then change the saved
-plan. No stale row flash, double count delta, lost command or reply-driven
-navigation. Close one of two same-query mounts: the other stays live. Visit and
-close more expressions than the reusable bound, settle repeated completions
-without reopening old queries, and show bounded retained entries/effects with
-eventual operation retirement. Preserve usable warm content on refresh failure,
-original-Machine recovery and replacement-epoch coverage. These are deterministic
-correctness/size checks; native reaction and input readiness still require their
-separate measurements. Existing skills need no new rule; update host usage docs
-when this lifecycle is built.
+Exercised on both hosts by shared `ClientWorkQueryTests`: closed settlement for
+committed, superseded and refused resolutions with reopen and restart; changed
+saved plan against an older list; eviction beyond the bound with independent
+leases pinned; 67 repeated completions compacted to one floor; a later effect
+cannot revive an invalidated base. Desktop adds one-of-two-window close during a
+failed refresh, then restart. Not exercised: two clients (Desktop and phone)
+converging on the same closed query.
 
 ### Start selects a conversation owned by the operation
 
-Headless concept-review at `14d5127895`, 2026-11-15. The query-lifecycle direction
-above is built; its recorded checks do not establish native latency. Next implement
-direction: extend the shared interaction owner to creation on both hosts. No new
+Headless concept-review at `14d5127895`, 2026-11-15. Next implement direction: extend the shared interaction owner to creation on both hosts. No new
 product choice is open. The existing launch timeline already requires immediate
 conversation selection, independent of receipt delivery and native readiness.
 
@@ -735,18 +701,11 @@ required; this direction does not finish the cross-platform cut.
 
 ## Current implementation cut
 
-Production Complete uses shared `WorkInteraction` on both hosts, and Desktop
-queries are mounted stamped subscriptions. The bounded reusable working set now
-reconciles suspended answers before first display. Retirement transfers exact
-resolved effects only into retained usable bases; closed or already-invalidated
-bases use compact scoped reload floors in the same outbox transaction. A retained
-base exceeding 64 retired effects becomes cold. Eviction drops transferred effects
-with their base, keeping its floor; no per-completion metadata remains for closed
-queries. The old full-cache decoding iterator is deleted. A partial SQLite index
-bounds eviction cleanup to effect-bearing bases; unchanged lease sets do no cleanup.
-Legacy broad floors, epoch recovery, unsent intent and unseen results retain their
-existing semantics. A later effect cannot revive a base invalidated by an earlier
-Task's completion.
+Production Complete uses shared `WorkInteraction` on both hosts; Desktop queries
+are mounted stamped subscriptions with the bounded lifecycle above. A retained
+base past 64 retired effects becomes cold under its floor; a partial SQLite index
+bounds eviction cleanup to effect-bearing bases. Legacy broad floors, epoch
+recovery, unsent intent and unseen results keep their semantics.
 
 Complete no longer discovers a Machine or mounts queries before publication.
 An unsaved intent contains immutable payload, ID and submission time; an unknown
@@ -765,9 +724,10 @@ in place. Ordered query effects stop independently on covering semantic fences;
 lagging lists retain their effects across retirement/restart. No SQL/native
 latency diagnosis follows from these correctness checks.
 
-Remaining: exhaustive effect/dependency declarations and normalized cross-query
-provenance; remaining mutation-family recovery and resource lanes (remote/files/config/planning);
-creation and retained-occurrence cutover on both clients; projected inspection
+Remaining, next first: creation cutover on both clients (direction above);
+exhaustive effect/dependency declarations and normalized cross-query provenance;
+remaining mutation-family recovery and resource lanes (remote/files/config/planning);
+retained-occurrence (mobile `SessionLink`) cutover; projected inspection
 DTO alongside confirmed inspection; historical-restoration epoch reset;
 crash/native acceptance and a valid benchmark baseline. This remains one
 indivisible cross-platform PR; no shipping or merge decision is recorded.

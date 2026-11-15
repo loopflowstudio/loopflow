@@ -1,6 +1,6 @@
 # LOO-906: immediate interactions across Desktop and mobile
 
-Implementation continues 2026-11-15 from checkpoint `268073be98` on
+Implementation continues 2026-11-15 from checkpoint `9614efd346` on
 origin/main `9cafc410ee`. Supersedes the Desktop-only delivery
 boundary. No shipping or merge decision is recorded. Placement remains this Task;
 no Wave is selected.
@@ -619,15 +619,12 @@ no longer mutate that resource; an unrelated planning wait must not hold every
 later edit, while a still-live external writer cannot be bypassed by lookup.
 Presentation acknowledgment and cache retirement retain their existing rules.
 
-Before both-client migration, hold external delivery across result recovery and
-restart; apply a newer edit; then resolve or supersede the old delivery. Reorder
-old saved results, current Work and delivery-status readings. Assert that newer
-values survive, unresolved recovery stays available, resolved failures stop
-appearing active, and no retry repeats authored intent. Also cover output loss
-after successful external delivery and unavailable confirmation. These are
-consequences of the existing staged recovery contract, with no open product
-choice. Finish mutation-family recovery/fences before cache and projection cutover;
-native latency remains unmeasured.
+Server side, `planning_recovery_tracks_the_exact_change_across_newer_edits_and_restart`
+(`store/sqlite/task_content.rs`) holds delivery across a newer edit and restart,
+resolves the old change only, and keeps missing evidence unavailable. Still open:
+client reordering of saved results, Work and delivery-status readings, and output
+loss after successful external delivery. Finish mutation-family recovery/fences
+before cache and projection cutover.
 
 Preserve the launch counterexamples in the shared tests: pre-admission cached
 Task data, a fresh unrelated planning frame, unavailable or missing Task rows,

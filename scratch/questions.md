@@ -70,3 +70,23 @@ next message in that conversation; newer input no longer turns a row into
 stays until the next limit. One reason string, "No eligible login is ready for
 this model", for both providers. Direction: interactive-limit-recovery.md,
 "Concept review — November 14, second pass".
+
+2026-11-14 QA repair: the recovery reader no longer filters on
+`processes.agent_interactive`. Every Codex AgentProcess is an app-server
+launched through the headless spawn path, so that column is 0 for interactive
+Codex conversations too; `agent_sessions.interactive=1` is the remaining
+interactive filter. Reversible alternative: set `agent_interactive` from the
+Session when the interactive open starts the app-server. Each live interactive
+Codex conversation now keeps one server side connection, because Codex runs no
+hook for a provider-rejected turn.
+
+2026-11-14 draft probe: use pyte to check the rendered PTY contents and native
+raw/bracketed-paste readiness. Keep the synthetic rejection held until each
+expected draft is visible; fail without re-pasting if readiness or visibility
+is absent. A dedicated reader drains PTYs during blocking fixture commands.
+This repairs the probe’s unverified timing; it does not attribute the earlier
+missing input to a product defect.
+
+2026-11-14 compress: keep completed strategy experiments in Git (source
+reference in the design), and keep the surviving runtime probe in this
+checkout. Future native validation should exercise that runtime.

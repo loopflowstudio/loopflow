@@ -16,7 +16,6 @@ use crate::store::sqlite::SqliteStore;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct NativeRecovery {
     pub selection: crate::provider_account::selection::AccountSelection,
-    pub guarded: bool,
     pub claude_home: Option<PathBuf>,
     pub transcript: Option<PathBuf>,
 }
@@ -45,10 +44,7 @@ pub(crate) fn record(
     store.with_provider_context(adapter, thread, crate::steer::NativeBoundary::Turn, || {
         let conn = store.conn.lock().expect("store mutex poisoned");
         let key = format!("quota_client:{}:{thread}", adapter.agent_process_id);
-        let exists: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM session_events WHERE session_id=?1 AND kind='observed' AND receipt_key=?2)", params![adapter.session,key], |row| row.get(0))?;
-        if !exists {
-            conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,task_id,wave_id,observed_at,payload,captured_event) SELECT id,'observed',?2,task_id,wave_id,unixepoch(),?3,current_capture FROM agent_sessions WHERE id=?1 ON CONFLICT DO NOTHING",params![adapter.session,key,payload])?;
-        }
+        conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,task_id,wave_id,observed_at,payload,captured_event) SELECT id,'observed',?2,task_id,wave_id,unixepoch(),?3,current_capture FROM agent_sessions WHERE id=?1 ON CONFLICT DO NOTHING",params![adapter.session,key,payload])?;
         Ok(())
     })?;
     Ok(())
@@ -56,7 +52,7 @@ pub(crate) fn record(
 
 fn clients(store: &SqliteStore) -> Result<Vec<Client>> {
     let conn = store.conn.lock().expect("store mutex poisoned");
-    let mut query = conn.prepare("SELECT s.id,p.id,a.capability,s.provider_thread,s.cwd,p.endpoint,p.inbox,e.payload,p.pid,p.os_started_at FROM processes p INDEXED BY processes_unfinished JOIN agent_sessions s ON s.agent_process_id=p.id JOIN steer_adapters a ON a.agent_process_id=p.id JOIN session_events e ON e.session_id=s.id AND e.kind='observed' AND e.receipt_key='quota_client:'||p.id||':'||s.provider_thread WHERE p.completed_at IS NULL AND s.interactive=1 AND p.agent_interactive=1")?;
+    let mut query = conn.prepare("SELECT s.id,p.id,a.capability,s.provider_thread,s.cwd,p.endpoint,p.inbox,e.payload,p.pid,p.os_started_at FROM processes p INDEXED BY processes_unfinished JOIN agent_sessions s ON s.agent_process_id=p.id JOIN steer_adapters a ON a.agent_process_id=p.id JOIN session_events e ON e.session_id=s.id AND e.kind='observed' AND e.receipt_key='quota_client:'||p.id||':'||s.provider_thread WHERE p.completed_at IS NULL AND s.interactive=1")?;
     let rows = query.query_map([], |row| {
         let live = row
             .get::<_, Option<u32>>(8)?
@@ -128,11 +124,14 @@ impl Reader {
             .collect();
         self.checks.retain(|id, _| active.contains(id));
         for client in clients {
-            let Some(recovery) = store.session_recovery(&client.adapter.session)? else {
+            let recovery = store.session_recovery(&client.adapter.session)?;
+            // Codex runs no hook for a turn its provider rejected; only a
+            // connected client sees it. Every live Codex conversation keeps one.
+            if recovery.is_none() && client.endpoint.is_none() {
                 continue;
-            };
+            }
             let requested = store.recovery_request_revision(&client.adapter.session)?;
-            let key = recovery.key();
+            let key = recovery.map(|recovery| recovery.key()).unwrap_or_default();
             if self
                 .checks
                 .get(&client.adapter.agent_process_id)
@@ -253,19 +252,9 @@ mod tests {
                 [],
             )
             .unwrap();
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "UPDATE processes SET agent_interactive=1 WHERE id=?1",
-                [&adapter.agent_process_id],
-            )
-            .unwrap();
         let selection = AccountSelection::from_flags(&[], &["codex=restricted".into()]).unwrap();
         let native = NativeRecovery {
             selection: selection.clone(),
-            guarded: true,
             claude_home: Some(home.path().join("native-claude")),
             transcript: None,
         };
@@ -339,6 +328,11 @@ mod tests {
             store
                 .record_session_recovery("limited", &fact, "ended")
                 .unwrap();
+            assert_eq!(
+                reader.read().unwrap().len(),
+                1,
+                "a Codex conversation stays connected for its next rejection"
+            );
             assert!(reader.read().unwrap().is_empty());
         }
     }

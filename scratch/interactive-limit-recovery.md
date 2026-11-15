@@ -207,14 +207,71 @@ poll and is still not selectable. Update the docs example and `session.json`.
 Left alone: the button on a `manual_retry` row, and Desktop's own copy of
 `can_retry`, as in the first pass.
 
+### Concept review — November 14, after realign
+
+Reviewed `bc18b3d3fb` against the two directions above. No further design
+change or open product choice: advance. The implemented row ends at later
+input, keeps Loopflow's resend distinct, and retains dispatch through reconnect.
+The five actions still map to one derived reading of one failed native turn;
+`session.recover` requests a check, not a second execution or a Graph move.
+Existing usage docs and QA instructions need no new direction.
+
+The review page now shows the implemented experience rather than asking to
+implement the second pass again. Next show the current candidate recovering
+several disposable conversations, keeping a draft and pending approval, then
+accepting later input and removing the row. Keep the existing gate/demo limits
+below, especially Codex token callbacks across a Machine-server restart;
+this source review supplies no new native or installed receipt.
+
+### QA — November 14 (repairs on the holder candidate)
+
+The native probe on `bc18b3d3fb` (Codex 0.169.0, Claude 2.1.325) recovered
+nothing. Three repairs, details and receipts in `scratch/qa.html`:
+
+- The reader required `processes.agent_interactive=1`, which no Codex
+  AgentProcess has (the app-server uses the headless spawn path), and opened a
+  Codex connection only for an existing row, while only that connection could
+  write the row. Now every live interactive Codex conversation keeps one
+  connection, which reads native history once on connect.
+- The interactive Codex open never pinned its thread to its login until exit,
+  so every rejection read "This Session's login is not one Loopflow manages".
+  It pins at open.
+- Claude 2.1.325 stores the inbox resend with a new UUID wrapped in a peer
+  preface, so settlement never matched it. The transcript matcher accepts that
+  one wrapper; the admission hook still requires the bare envelope.
+
+### Draft probe repair — November 14
+
+The Claude bulk probe previously pasted without confirming native composer
+readiness, stopped reading PTYs during synchronous setup/served reads, and
+released its 429 after 30 seconds even if setup had not finished. Its failed
+terminal captures contain neither `DRAFT_0` nor `DRAFT_1`; they establish no
+loss during recovery.
+
+Replace those fixture paths with a continuous PTY reader, raw/paste readiness,
+a rendered composer check for each draft, and explicit release only after both
+checks pass. Save before/after screens, require the drafts still visible after
+recovery and absent from inference until submission, then require the edited
+text on both screens and in inference. Do not re-paste on a failed check.
+The watchdog raises through cleanup rather than exiting past it.
+
+`uv run python scripts/test_network.py uv run --offline --script scratch/native_recovery_probe.py --lf target/debug/lf --claude ~/.local/bin/claude --output .lf/tmp/loo-811-draft-check/claude-bulk < /dev/null` — passed on candidate SHA256 `9fd625f394fcd741b6386cf8faab263af549a068c9d65cb5bd70fef4a250a182`: both established drafts survived, edited drafts reached inference, one resend per Session on second, rows ended, clients/owners/server reaped. Before/after screens retained beside results. Initial and recovery requests contained neither draft. Exact earlier paste loss remains unattributed; no product change was required.
+
+`uv run python scripts/test_network.py uv run --offline --script scratch/native_recovery_probe.py --lf target/debug/lf --codex ~/.local/bin/codex --approval --output .lf/tmp/loo-811-draft-check/codex-approval < /dev/null` — passed on the same candidate: visible/unsent draft retained across the other Session’s recovery, approval pending then EFFECT once, both edited drafts submitted, rows ended and all fixture processes reaped. No hang or slow served request; the earlier hang remains unattributed.
+
+`ruff check` and `ruff format --check scratch/native_recovery_probe.py`, `git diff --check`, `lf context` — passed; scratch remains within both limits. That draft-probe iteration changed no runtime source; its Rust results predate the compress pass below. Gate retains the broader matrix.
+
 ### Delete — do not maintain
 
-- Delete both provider branches that classify newer input as uncertain. Keep
+- Removed the unused `NativeRecovery.guarded` launch field and its callback/test writers; guard checks remain at the native rejection.
+- Removed `scratch/codex_drain_probe.py`, `scratch/claude_retry_correlation_probe.py` and `scratch/codex_auth_reload_probe.py`. Their completed strategy experiments remain at `bc18b3d3fb12a0141a26c035d443724b023c2e21:scratch/`; measured results and contrary findings remain below. `native_recovery_probe.py` now owns its synthetic Codex login seed and exercises the surviving runtime.
+- Removed the probe’s automatic 30-second rejection release and unchecked draft writes; held-lock cancellation and pending-approval coverage remain.
+- Removed both provider branches that classify newer input as uncertain. Keep
   incomplete-history and earlier-work uncertainty; keep dispatch and correlation.
-- Delete the server reader's exclusion of continued/undispatched uncertain rows:
+- Removed the server reader's exclusion of continued/undispatched uncertain rows:
   native-history fallback must still notice the next message. All row states
   share the existing check backoff; absent rows schedule no further checks.
-- Replace Codex's capacity wording and its fixture. No state alias or migration.
+- Replaced Codex's capacity wording and its fixture. No state alias or migration.
 
 The projection ends rows on a recorded later start when the resend ID is known
 (or no dispatch exists). Unconfirmed dispatch without an ID waits for native
@@ -228,6 +285,36 @@ marker instead of folding later facts into a hidden row. A recorded start with
 an unconfirmed resend ID still retains uncertainty until native history can
 identify the input.
 
+### Compress — November 14
+
+Claude now identifies an inbox resend once, by the retained UUID or exact
+attempt envelope. Later-input detection, admission's prior-history slice and
+settlement share that matcher, including the peer wrapper with a new UUID.
+The reconnect test exercises both transcript formats through completion and
+later input. Launch metadata uses its unique receipt directly, removing the
+redundant existence query at every native boundary. Codex startup reads its
+pinned account route once; the caller no longer reads the same mapping to pass
+it back as a fallback.
+The active probe correlates edited-input completion to Codex's completed turn
+or Claude's matching Stop; an earlier recovery marker cannot satisfy it. Its
+HTTP worker starts inside cleanup scope, and missing setup receipts do not
+skip shutdown. No further runtime deletion targets remain; the completed cuts
+are listed above.
+
+Final native candidate SHA256: `2239def04d00f768fcbe8c33e5d16c53809235cffd8ef00dba889e62f29a8442`.
+Both commands below passed with drafts confirmed before/after recovery and
+unsent until edited, one resend per affected Session, correlated completion
+of both edits, retained Task/cwd/model/owner, rows ended and all fixture
+processes reaped. Codex additionally retained its approval and executed EFFECT
+once. Neither run recorded a slow served request or hung; the earlier Codex
+hang remains unexplained. Receipts and screens: `.lf/tmp/loo-811-compress-final/`.
+
+- `uv run python scripts/test_network.py uv run --offline --script scratch/native_recovery_probe.py --lf target/debug/lf --claude ~/.local/bin/claude --output .lf/tmp/loo-811-compress-final/claude-bulk < /dev/null` — passed.
+- `uv run python scripts/test_network.py uv run --offline --script scratch/native_recovery_probe.py --lf target/debug/lf --codex ~/.local/bin/codex --approval --output .lf/tmp/loo-811-compress-final/codex-approval < /dev/null` — passed.
+- `cargo build -p loopflow --bin lf --jobs 4` (inherited LF_* unset), `cargo fmt --check`, probe Ruff checks — passed; the existing large `__eh_frame` linker warning remains.
+- `cargo test -p loopflow --lib --jobs 4 -- harness::claude_recovery harness::codex_recovery session_recovery server::recovery harness::recovery_gate harness::codex_connection` (inherited LF_* unset, closed stdin) — 18 passed on the final source.
+- `git diff --check`, `lf context` — passed; memory and scratch fit both limits. Broader static analysis, served/DTO/Swift checks and installed acceptance remain at gate/demo.
+
 ### Holder adaptation — November 14 (implementation)
 
 Integrated pinned main `114ff621767dea4525c9f89d638f82567ccab33e`, then
@@ -236,8 +323,9 @@ Claude capacity readings and #1898's planning repair. Both syncs stayed local.
 
 
 The Machine server owns recovery checks and native side connections; holders
-continue to own PTYs. Native boundaries retain the launch's account selection,
-guard availability, native home and transcript location. They open no new watcher. One server
+continue to own PTYs. Native boundaries retain the launch's account selection, native home and
+transcript location. Claude classifies guard availability at rejection; Codex
+checks its hook list live. They open no new watcher. One server
 reader schedules recoverable conversations; a single attempt per conversation
 owns admission and broker work. Codex retains its authenticated side connection
 for native refresh callbacks after switching. The same connection follows native
@@ -270,10 +358,11 @@ write one `wait:` phase; the two new tests use `test_ambient::EnvGuard`.
 
 ### Remaining verification
 
-The November 9 native and publication receipts below establish the earlier
-candidate, not the holder adaptation. Gate owns the revised candidate's
-served/DTO/Swift matrix and disposable native bulk, approval, cancellation and
-continued-input cases. Include a Machine-server restart while Codex is using
+The November 14 native receipts above establish the holder candidate's bulk,
+approval, held-lock cancellation and continued-input cases. November 9 receipts
+below establish only the earlier implementation. Gate owns the revised
+served/DTO/Swift matrix and the remaining native counterexamples. Include a
+Machine-server restart while Codex is using
 supplied-token login: retention of dispatch does not establish transfer of
 its native token-refresh callback connection. Do not infer that from the
 metadata-only reopen test.
@@ -302,9 +391,9 @@ manual retry row beside dispatched work; both languages read its DTO fixture.
 The gate selection reaches the recovery modules, provider-account/auth, native
 hook/context and fact writer, server boundary/wake/recovery, Session projection,
 CLI parsing/mutations, DTO/served reads, and their transport/lifecycle callers.
-Native bulk, held-lock cancellation, approval and continued-input cases need fresh
-receipts on this holder-based implementation; the November 9 passes below are
-not reused for them.
+The November 14 native receipts cover bulk recovery, held-lock cancellation,
+approval and continued input on the holder implementation. They do not replace
+the broader gate matrix or the remaining restart/real-login checks.
 
 
 November 9 publication, QA and concept-review commands and receipts: `253a13a2580c36539fffabe04f2139e6ebcfa33f:scratch/interactive-limit-recovery.md`, corresponding dated headings. They predate the holder adaptation and require renewed focused checks.

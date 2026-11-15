@@ -43,14 +43,7 @@ pub(crate) async fn run(
         crate::steer::NativeBoundary::Turn,
         || Ok(()),
     )?;
-    let account = store.provider_session_account(Provider::Codex, &client.thread)?;
-    let route = match account {
-        Some(account) => {
-            provider_account::session_account_route(Provider::Codex, &client.thread, &account)
-                .await?
-        }
-        None => None,
-    };
+    let route = provider_account::session_account_route(Provider::Codex, &client.thread).await?;
     let mut upstream = super::codex_connection::initialized(
         client.endpoint.as_ref().expect("Codex endpoint"),
         "loopflow_recovery",
@@ -63,6 +56,15 @@ pub(crate) async fn run(
     )
     .await?;
     let busy = result["thread"]["status"]["type"] == "active";
+    // A turn rejected before this subscription reported itself to nobody.
+    let endpoint = client.endpoint.as_ref().expect("Codex endpoint");
+    super::codex_connection::recover_history(
+        &store,
+        &client.adapter.session,
+        &client.thread,
+        endpoint,
+    )
+    .await?;
     let history = history(&store, &client, route.clone());
     let mut connection = Connection {
         client,
@@ -238,17 +240,6 @@ impl Connection {
                         self.failure.note("Codex recovery", &error);
                     }
                 }
-            }
-            // Once no native login was installed, a settled attempt has no connection to retain.
-            let Ok(retained) = self.store.session_recovery(&self.client.adapter.session) else {
-                continue;
-            };
-            if !self.installed
-                && retained.is_none_or(|r| !r.can_retry() && r.request.is_none())
-                && self.recovery.installing.is_none()
-                && self.recovery.preparing.is_none()
-            {
-                break;
             }
         }
         Ok(())
@@ -850,7 +841,6 @@ async fn recovery_fixture(home: &std::path::Path) -> (SqliteStore, Connection) {
         inbox: None,
         native: crate::server::recovery::NativeRecovery {
             selection: Default::default(),
-            guarded: true,
             claude_home: None,
             transcript: None,
         },

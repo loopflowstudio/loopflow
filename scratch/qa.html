@@ -1,190 +1,122 @@
 <!doctype html>
-<html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-811 · Recovery QA</title>
+<html lang="en"><head><meta charset="utf-8"><title>LOO-811 · Recovery QA · November 14</title>
 <style>
-body{font:17px/1.55 system-ui,sans-serif;color:#17242b;background:#f5f3ee;margin:0 auto;padding:40px 24px;max-width:1000px}
-h1{font-size:34px;line-height:1.2}h2{font-size:23px;margin-top:32px}a{color:#155775}
-code,pre{font-family:ui-monospace,monospace;font-size:13px}pre{background:#17242b;color:#f2f5f7;padding:18px;white-space:pre-wrap;overflow-wrap:anywhere;border-radius:6px}
-table{width:100%;border-collapse:collapse;font-size:15px}th,td{text-align:left;padding:12px;border-bottom:1px solid #ccc;vertical-align:top}
-.status{border-left:5px solid #b87929;background:#fff9e9;padding:16px 20px}.meta{color:#53636b;font-size:14px}
-summary{cursor:pointer;font-weight:600;padding:10px 0}li{margin:8px 0}code{overflow-wrap:anywhere}
-</style></head><body><main>
-<p class="meta">LOO-811 · November 9, 2026 · macOS · headless QA</p>
-<h1>Reachable checks pass. Live recovery is still unverified.</h1>
-<p class="status">No runtime defect surfaced. Public CLI and private-server checks passed;
-17 headless Desktop checks passed. Six supplemental native scenarios passed with synthetic
-logins and local responses. These results do not establish the full installed, real-login outcome.</p>
-<p>Candidate <code>lf 0.15.2+16efb4f8e.dirty</code>, SHA256
-<code>473e1d7353201b8a6ca85633c056ac74ee29926fc608eedadb41481ab282f963</code>. Native clients: Codex 0.167.0 and Claude Code 2.1.322.
-The installed CLI <code>0.15.2+28b0af568</code> created disposable returning state only.
-No production account, conversation or installation was changed.</p>
+body{font:15px/1.55 -apple-system,system-ui,sans-serif;max-width:860px;margin:2.5rem auto;padding:0 1.2rem;color:#1d1d1f}
+h1{font-size:1.6rem;margin-bottom:.2rem}h2{font-size:1.15rem;margin-top:2.2rem;border-top:1px solid #ddd;padding-top:1rem}
+code,pre{font:13px ui-monospace,Menlo,monospace}pre{background:#f5f5f7;padding:.8rem;overflow-x:auto;border-radius:6px}
+table{border-collapse:collapse;width:100%;margin:.6rem 0}td,th{border:1px solid #ddd;padding:.35rem .5rem;text-align:left;vertical-align:top;font-size:14px}
+th{background:#f5f5f7}.pass{color:#1a7f37;font-weight:600}.fail{color:#b42318;font-weight:600}.open{color:#9a6700;font-weight:600}
+</style></head><body>
+<h1>LOO-811 · Recovery QA</h1>
+<p>November 14, 2026 · macOS · headless · candidate <code>bc18b3d3fb</code> plus this run's repairs (uncommitted).
+Native clients: Codex 0.169.0, Claude Code 2.1.325.</p>
 
-<h2>1 · Arrive with an empty Machine</h2>
-<p>Ran the built CLI in a fresh Git repository with private HOME, LF_HOME, CODEX_HOME
-and CLAUDE_CONFIG_DIR, inherited LF_* removed, stdin closed and external egress denied.
-No accounts, usage facts or database rows were seeded.</p>
-<p>The Session list was empty. Recover without an ID printed usage and exited 2;
-a missing ID returned an empty list. Selecting a nonexistent login exited 2 with
-<code>lf account</code> as the next command. Help explains that uncertain input is never resent.</p>
-<details><summary>Public CLI transcript</summary><pre>$ lf --version
-lf 0.15.2+16efb4f8e.dirty (dirty build 16efb4f8e on v0.15.2)
-[exit 0]
+<p><strong>Before this run, the holder candidate recovered nothing on either provider.</strong>
+Three runtime defects kept every rejected conversation from getting a recovery row, or from
+leaving <em>Recovering</em>. All three are repaired. All six native scenarios now pass.
+The Claude bulk draft check passes with the repaired probe: both drafts are confirmed on screen before rejection is released and after recovery, then edited and submitted intact (details below).</p>
 
-$ lf help session recover
-Ask affected open conversations to check capacity again; uncertain input is never resent
-
-Usage: lf session recover [OPTIONS] &lt;IDS&gt;...
-
-Arguments:
-  &lt;IDS&gt;...
-
-Options:
-      --json
-  -a, --agent &lt;AGENT&gt;       Select this conversation or all agent steps of this Graph (harness[:model])
-      --setting &lt;SETTINGS&gt;  Override a typed preference for this invocation (KEY=YAML); repeatable
-  -v, --verbose             Show context accounting and diagnostic logs
-  -h, --help                Print help
-[exit 0]
-
-$ lf session list --json
-[]
-[exit 0]
-
-$ lf session recover --json
-error: the following required arguments were not provided:
-  &lt;IDS&gt;...
-
-Usage: lf session recover --json &lt;IDS&gt;...
-
-For more information, try &#x27;--help&#x27;.
-[exit 2]
-
-$ lf session recover session_missing --json
-[]
-[exit 0]
-
-$ lf account use claude=missing@example.test
-no stored login matches &#x27;missing@example.test&#x27;; lf account lists them
-[exit 2]
-
-$ lf --version
-lf 0.15.2+28b0af568 (build 28b0af568 on v0.15.2)
-[exit 0]
-
-$ lf session recover eac1b3d8cbea401199281833e43d2c18 --json
-[{&quot;recovery&quot;:null,&quot;transition&quot;:null,&quot;preview&quot;:null,&quot;primary_scope&quot;:&quot;repository&quot;,&quot;availability&quot;:null,&quot;program_status&quot;:null,&quot;agent_process_id&quot;:null,&quot;task_primary&quot;:false,&quot;task_ids&quot;:[],&quot;id&quot;:&quot;eac1b3d8cbea401199281833e43d2c18&quot;,&quot;workspace&quot;:null,&quot;interactive&quot;:true,&quot;work&quot;:null,&quot;wave_id&quot;:null,&quot;work_path&quot;:null,&quot;actions&quot;:[{&quot;kind&quot;:&quot;open&quot;,&quot;label&quot;:&quot;Start conversation&quot;,&quot;help&quot;:&quot;No saved provider history; start this conversation explicitly&quot;,&quot;unavailable_reason&quot;:null},{&quot;kind&quot;:&quot;reveal&quot;,&quot;label&quot;:&quot;Show conversation&quot;,&quot;help&quot;:&quot;Continue existing history without taking another terminal&#x27;s input&quot;,&quot;unavailable_reason&quot;:&quot;No saved provider history; start this conversation explicitly&quot;}],&quot;title&quot;:&quot;repo&quot;,&quot;title_source&quot;:&quot;generated&quot;,&quot;graph_membership&quot;:{&quot;kind&quot;:&quot;unknown&quot;,&quot;reason&quot;:&quot;Graph membership was not recorded&quot;},&quot;detail&quot;:&quot;codex&quot;,&quot;provider&quot;:&quot;codex&quot;,&quot;account&quot;:null,&quot;model&quot;:null,&quot;blocked&quot;:false,&quot;cwd&quot;:&quot;/private/tmp/loo811-qa-nq0hdm2v/repo.repo&quot;,&quot;state&quot;:&quot;unknown&quot;,&quot;ready_summary&quot;:null,&quot;open_argv&quot;:[&quot;/usr/bin/env&quot;,&quot;LF_BIN=/Users/jack/src/loopflow.loo-811-check-usage-limit/target/debug/lf&quot;,&quot;LF_HOME=/private/tmp/loo811-qa-nq0hdm2v/machine&quot;,&quot;/Users/jack/src/loopflow.loo-811-check-usage-limit/target/debug/lf&quot;,&quot;session&quot;,&quot;resume&quot;,&quot;eac1b3d8cbea401199281833e43d2c18&quot;],&quot;terminal_ids&quot;:[]}]
-[exit 0]
-</pre></details>
-
-<h2>2 · Reopen existing state and restart the server</h2>
-<p>Created a Session through the installed CLI using
-<code>lf -a codex session resume --prepare --json</code>, then reopened that same Session
-through the branch CLI. This prepares a record without starting a provider.
-ID, title, model and cwd stayed unchanged. Recovery returned <code>recovery: null</code>
-for this unrejected Session; it did not create a provider conversation.</p>
-<p>Started the branch's foreground server in the private Machine and sent the current
-revision-4 hello followed by <code>session.recover</code>. An empty selection returned
-<code>[]</code>. Selecting the prepared Session returned the same record before and
-after stopping and restarting that server.</p>
-<pre>installed prepare → branch prepare: same Session ID
-session.recover([]): []
-session.recover([id]): recovery = null
-private server restart → session.recover([id]): identical record
-private server reaped; temporary Machine removed</pre>
-<p>The first walkthrough stopped at a setup error: the empty Machine had no default
-agent. Adding <code>-a codex</code> fixed the probe and the complete walkthrough passed.
-The failure receipt is retained. This checks returning metadata and server continuity;
-there was no native conversation, draft or approval in this scenario.</p>
-
-<h2>3 · Exercise the Desktop controls headlessly</h2>
-<p>The supported script built the CLI, Desktop app and test targets, then ran with
-WindowServer access denied. The production recovery view displayed its wait reason,
-its <strong>Recover affected sessions</strong> button invoked the action, and an uncertain
-attempt showed its status with no recovery button. The Work checks covered loading,
-unavailable, empty and selected content, including the production navigation action.</p>
-<pre>scripts/test_desktop.sh -Xswiftc -gnone \
-  --filter 'sessionRecoveryControlKeepsUncertaintyVisible|DesktopHeadlessTests'
-
-✔ Suite "Desktop without a display" passed
-✔ Test sessionRecoveryControlKeepsUncertaintyVisible() passed
-✔ Test run with 17 tests in 1 suite passed</pre>
-<p>These are automated view and model checks, not a mounted-window walkthrough.
-No screenshot or physical keyboard observation was obtained. Existing compiler warnings
-included deprecated CVDisplayLink usage and unused action results.</p>
-
-<h2>4 · Supplemental native recovery scenarios</h2>
-<p>Ran each case through the branch CLI, real native clients and Desktop's served
-<code>session.recover</code> operation. Each run used two bound Task primary Sessions
-in separate disposable linked checkouts. Native input went through PTYs; accounts,
-usage responses and model responses were synthetic, with external egress denied.
-They are boundary checks, not live-provider acceptance.</p>
-<table><thead><tr><th>Scenario</th><th>Result</th><th>Observed</th></tr></thead><tbody>
-<tr><td>codex-bulk</td><td>Passed</td><td>Both rejected Sessions continued once; edited drafts completed on the second login.</td></tr>
-<tr><td>codex-approval</td><td>Passed</td><td>Approval stayed pending while the other Task recovered; answering executed EFFECT once; later input completed.</td></tr>
-<tr><td>codex-cancel</td><td>Passed</td><td>Escape while the credential lock was held left recovery uncertain; no retry or account change; edited drafts completed on the original login.</td></tr>
-<tr><td>claude-bulk</td><td>Passed</td><td>Both rejected Sessions continued once; edited drafts completed on the second login.</td></tr>
-<tr><td>claude-approval</td><td>Passed</td><td>Approval stayed pending while the other Task recovered; answering executed EFFECT once; later input completed.</td></tr>
-<tr><td>claude-cancel</td><td>Passed</td><td>Escape while the credential lock was held left recovery uncertain; no retry or account change; edited drafts completed on the original login.</td></tr>
-</tbody></table>
-<p>All six kept Task membership, primary status, owner, cwd and model. Rechecking
-recovery did not duplicate an admitted retry. Native transcripts correlated completion;
-edited drafts reached the endpoint and later input completed. Both bulk cases issued
-six inference requests with login order <code>first, first, second, second, second, second</code>.
-The cancellation cases issued no recovery input and left both Sessions uncertain.</p>
-<p>Cancellation held the credential lock <em>before</em> installation. It does not show
-what happens when cancellation follows an already-sent native account installation.
-These checks also do not show physical typing after a Desktop reopen.</p>
-<details><summary>Exact native command plan</summary><pre>uv run python scripts/test_network.py uv run --offline --script \
+<h2>How it was driven</h2>
+<p><code>scratch/native_recovery_probe.py</code> runs the branch <code>lf</code> and the real native clients
+through <code>scripts/test_network.py</code> with external egress denied. Each run uses a disposable root: a Git
+repository, two linked Task checkouts, private <code>LF_HOME</code>, private provider home, a private Machine
+server and two synthetic managed logins (<code>first</code>, <code>second</code>). Two Task primary Sessions run in
+PTYs and are bound before rejection. A loopback endpoint returns a usage-limit 429 to the
+<code>first</code> login's first two prompts. Desktop's served <code>session.recover</code> is called over the server socket.
+A continuous reader drains both PTYs during synchronous setup and served reads. The probe waits for raw/bracketed-paste mode,
+checks each draft in a rendered terminal before releasing the rejection, and saves before/after screens.
+After recovery it confirms the drafts remain visible and unsent, edits and submits them, and checks that the row ends.</p>
+<pre>uv run python scripts/test_network.py uv run --offline --script \
   scratch/native_recovery_probe.py --lf target/debug/lf \
-  --codex /Users/jack/.local/bin/codex \
-  --output .lf/tmp/loo-811-qa-expanded/codex-bulk &lt; /dev/null
+  --codex ~/.local/bin/codex [--approval|--cancel] --output .lf/tmp/loo-811-qa-nov14/&lt;name&gt; &lt; /dev/null
+# same with --claude ~/.local/bin/claude</pre>
 
-Repeat for --claude /Users/jack/.local/bin/claude (claude-bulk).
-For each provider, run --approval and --cancel into separate receipt directories.</pre></details>
+<h2>1 · First run on the candidate: nothing recovers</h2>
+<p><strong>Codex.</strong> Both turns were rejected (Codex showed its error), the Sessions stayed active,
+and <code>recovery</code> stayed <code>null</code>. No <code>recovery:*</code> receipt was written. The store did hold each launch's
+<code>quota_client</code> fact, so hooks had run.</p>
+<ul>
+<li>The recovery reader's query required <code>processes.agent_interactive=1</code>. Every Codex AgentProcess is a
+<code>codex app-server</code> started through the headless spawn path, so it records 0 even for an interactive
+conversation (probe dump: <code>agent_interactive=0</code> for both). The reader's unit test set the column to 1 by hand, which hid this.</li>
+<li>Even if the reader had found them, it opened a Codex side connection only for a conversation that already
+had a row. Only that connection writes the row, from <code>turn/completed … usageLimitExceeded</code>. Codex runs no
+Stop hook for a rejected turn, so the other writer (turn-end history import) never ran.</li>
+</ul>
+<p><strong>Codex, after the reader repair.</strong> Rows appeared, then went straight to <em>Send it again yourself</em> ·
+“This Session’s login is not one Loopflow manages”. The interactive Codex open starts the harness with the route,
+stops it, then opens the thread on a new connection. The thread was tied to its login (<code>provider_session_accounts</code>)
+only when the TUI exited, so a live rejection had no known login.</p>
+<p><strong>Claude.</strong> Rejections were recorded and both resends were admitted, sent on <code>second</code> and completed
+(“RECOVERY_COMPLETED”), but the rows stayed <em>Recovering</em>. Claude 2.1.325 records the inbox message under a
+new transcript UUID, wrapped as <code>Another Claude session sent a message:\n&lt;lf-recovery:…&gt;</code> plus Claude’s peer guidance.
+Settlement looked for the inbox UUID and the bare envelope, so it never matched. The admission hook still receives the bare envelope.</p>
 
-<h2>5 · Inspect what remained</h2>
-<p>Each native probe reaped its clients, owners, private server and HTTP worker.
-A separate check read all six results, confirmed their candidate hashes, looked for
-processes naming their exact temporary roots, and checked the exact Claude services
-without printing credentials.</p>
-<pre>6 native scenarios passed
-7 successful-scenario temporary roots removed
-0 remaining probe processes
-9 scoped Claude Keychain items absent
-public CLI private server reaped</pre>
-<p>The earlier setup failure's temporary root was also removed. No probe server or
-watcher remains running.</p>
+<h2>2 · Repairs</h2>
+<table><tr><th>Where</th><th>Change</th></tr>
+<tr><td><code>server/recovery.rs</code></td><td>Reader drops the <code>agent_interactive</code> filter (<code>agent_sessions.interactive=1</code> remains). It schedules
+every live interactive Codex conversation, row or not. The test no longer forces the column, and it asserts that a Codex conversation stays connected after its row ends.</td></tr>
+<tr><td><code>harness/codex_recovery.rs</code></td><td>On connecting, reads native history once (<code>recover_history</code>), so a rejection that came before the subscription still counts.
+The connection stays open while the conversation lives. The break that closed it once a row settled is deleted.</td></tr>
+<tr><td><code>lf/commands/util.rs</code></td><td>The interactive Codex open pins the new thread to its login right away, not just at exit.</td></tr>
+<tr><td><code>harness/recovery_gate.rs</code>, <code>claude_recovery.rs</code></td><td>The transcript matcher accepts Claude’s one peer preface (with trailing guidance). Settlement finds the resend by row UUID or envelope.
+A test covers the wrapped form, and confirms that an envelope after typed text does not match.</td></tr>
+</table>
+<p>The probe also needed updating for current main and clients. Hello revision 5 and <code>session.list.task</code>. Claude’s 429 now
+sends <code>anthropic-ratelimit-unified-representative-claim</code>; without it Claude 2.1.325 shows “Server is temporarily limiting requests
+(not your usage limit)” and treats the error as transient. The Session count is limited to the fixture’s Tasks, because the Claude run keeps the real <code>HOME</code>
+for the Keychain and listed an unrelated live Codex conversation (read-only). Completion checks now poll instead of using fixed waits.
+New check: after typed input every row is gone.</p>
+<pre>cargo test -p loopflow --lib --jobs 4 -- harness::claude_recovery harness::codex_recovery \
+  session_recovery server::recovery harness::recovery_gate harness::codex_connection
+test result: ok. 18 passed; 0 failed</pre>
 
-<h2>What changed and what still needs checking</h2>
-<p>No runtime repair was needed. The public probe now selects its agent explicitly.
-The repository QA skill now records Task binding before rejection, native completion
-checks and the limit of cancellation while a credential lock is held.</p>
-<p>What works in this run: empty and returning public CLI paths, private-server
-restart, headless recovery controls, and the six isolated native scenarios above.
-Still unverified, most consequential first:</p>
+<h2>3 · Native scenarios after the repairs</h2>
+<table><tr><th>Scenario</th><th>Result</th><th>Inference order</th><th>What was seen</th></tr>
+<tr><td>codex-bulk</td><td class="pass">Pass</td><td>first, first, second ×4</td><td>Both rows: reported → rejected → limited → dispatch → admitted → reply → input → settled <em>Continued</em>. One resend each, edited drafts completed on <code>second</code>, rows gone after typed input.</td></tr>
+<tr><td>codex-approval</td><td class="pass">Pass</td><td>first, first, second, first, first, second</td><td>The approval stayed pending while the other Task recovered. Answering it ran EFFECT once. Later input completed, and rows ended.</td></tr>
+<tr><td>codex-cancel</td><td class="pass">Pass</td><td>first ×4</td><td>Esc with the credential lock held left both rows <em>Review conversation</em> (<code>unconfirmed</code>). Nothing was resent and the login stayed the same. Drafts completed on <code>first</code>, and rows ended.</td></tr>
+<tr><td>claude-approval</td><td class="pass">Pass</td><td>first, first, second ×4</td><td>The pending Bash approval survived recovery. Answering it ran EFFECT once (75 s on this loaded Machine). Drafts and later input completed, and rows ended.</td></tr>
+<tr><td>claude-cancel</td><td class="pass">Pass</td><td>first ×4</td><td>Uncertain without resend. Drafts completed on <code>first</code>, and rows ended.</td></tr>
+<tr><td>claude-bulk</td><td class="pass">Pass with draft confirmation</td><td>first, first, second ×4</td><td>Both drafts visible before and after recovery, absent from the first four inference requests,
+and submitted as DRAFT_0_EDITED and DRAFT_1_EDITED in the last two. Both rows settled <em>Continued</em>, one resend each, rows ended at typed input.</td></tr>
+</table>
+<p>The Codex rows come from build <code>50b9039f</code>, before the matcher change. That change adds only Claude’s preface, which Codex input never carries.
+The Claude rows come from final build <code>9fd625f3</code>. Every run reaped its clients, holders and server. After the batch, the only leftovers were the
+two processes of the run killed by the time limit: a holder and a Codex app-server, both identified by that run’s temporary root and stopped by PID.</p>
+
+<p>The subsequent compress pass removed unused launch metadata, combined Claude's transcript matching and removed the superseded strategy probes.
+Final candidate <code>2239def04d00f768fcbe8c33e5d16c53809235cffd8ef00dba889e62f29a8442</code> passed Claude bulk and Codex approval again using the self-contained probe.
+Both runs confirmed drafts visible before/after recovery and unsent until editing, correlated both edited inputs to native completion, ended the rows and reaped all fixture processes.
+Codex's approval still executed EFFECT once; neither run hung or recorded a slow served request.
+Receipts: <code>.lf/tmp/loo-811-compress-final/</code>. The earlier hang's cause remains unknown.</p>
+
+<h2>What works now</h2>
+<ul>
+<li>Several stalled Task Sessions on either provider recover on their own when another managed login has room. Each gets one resend, on the same native conversation, with its Task binding, cwd and model unchanged.</li>
+<li>Pending approvals survive another conversation’s recovery and run once when answered. Cancellation never resends. Desktop’s <code>session.recover</code> recheck does not duplicate a dispatched attempt.</li>
+<li>The row ends at the person’s next message.</li>
+</ul>
+
+<h2>Not reached, and why</h2>
+<ul>
+<li><strong>Desktop.</strong> No Swift changed in this pass. With load average above 200 from other worktrees, the Desktop build and the headless view suite were not run. Gate owns them, along with clippy and the served/DTO matrix.</li>
+<li><strong>Real logins and the installed app.</strong> Synthetic logins and loopback 429s only. Real token rotation, real Claude headers, and installed Keychain behavior remain unverified.</li>
+<li><strong>Machine-server restart during Codex supplied-token login.</strong> Not exercised.</li>
+</ul>
+
+<h2>Still wrong or unexplained, worst first</h2>
 <ol>
-<li><strong>Installed, real-login bulk recovery and refresh ownership.</strong> No isolated
-real provider logins were available; production switching, paid inference and manufactured
-quota exhaustion were outside this run. Real token rotation, Claude no-model quota behavior,
-rental-token validity and installed unsuffixed Keychain repair remain open.</li>
-<li><strong>Ordinary physical typing after Desktop reopen.</strong> The existing incident
-has no established cause. PTY input and headless views do not establish its repair or
-how the recovery strip looks in a mounted pane.</li>
-<li><strong>The remaining gate matrix.</strong> Distinct models and restricted routes,
-no capacity and later reset, lost or late installation replies, cancellation after
-installation is sent, retained refresh grants, repeated limits, reconnect and earlier
-effects still need the affected gate checks. This run did not replace that matrix.</li>
-<li><strong>Native partial Keychain-write rejection and same-command retry.</strong>
-Earlier scoped checks covered stale-item reconciliation and a real marker permission
-failure; they did not reject a native Keychain write.</li>
+<li><strong>Earlier Claude draft probe failure repaired.</strong> The failed capture contained neither draft, so it established no loss during recovery.
+The fixture pasted without confirming native readiness, stopped draining PTYs during blocking commands, and released the rejection after 30 seconds regardless of setup.
+Those timing assumptions are removed. The revised run on the same <code>9fd625f3</code> candidate confirms both drafts before and after recovery and completes both edits.
+Receipts: <code>.lf/tmp/loo-811-draft-check/claude-bulk/</code> (<code>results.json</code>, four <code>draft-*-before/after.txt</code> screens, terminal captures).
+All clients, holders and the server were reaped. This establishes draft survival; it does not isolate which earlier timing assumption lost the unconfirmed paste.</li>
+<li><strong>One hung run.</strong> The first codex-approval run hung until the one-hour background limit with no output. A rerun passed in normal time. The cause is unknown. The probe now has a 15-minute traceback watchdog that raises through fixture cleanup, so a hang shows where it stopped and still reaps its processes.
+The revised <code>.lf/tmp/loo-811-draft-check/codex-approval/</code> run passed on candidate <code>9fd625f3</code> with no slow served requests or hang:
+draft visible and unsent across recovery, approval still pending then EFFECT once, both edited drafts submitted, rows ended, clients/owners/server reaped.
+Continuous PTY draining removes one source of fixture stalls, but this run does not identify the earlier hang.</li>
+<li><strong>Each live interactive Codex conversation now holds one server connection.</strong> This is intended, but it costs one socket per open conversation, and the reader only selects interactive Sessions. A headless step on an interactive Session would also be watched. The reversible choice is noted in <code>scratch/questions.md</code>.</li>
+<li><strong>Codex recovery depends on a live connection.</strong> A rejection while the server is down is caught on reconnect by the history read, but only if it is the conversation’s latest turn.</li>
 </ol>
-<p>No additional product failure was observed. The broader outcome remains unverified;
-publication, landing and Graph advancement were not performed by this QA step.</p>
-<p class="meta">Receipts and scripts: <code>.lf/tmp/loo-811-qa-expanded/</code>, including
-<code>public-cli.json</code>, <code>public-cli-no-agent.json</code>, <code>desktop.log</code>,
-six native <code>results.json</code> files with terminal transcripts, and <code>cleanup.json</code>.
-Build: <code>cargo build -p loopflow --bin lf</code>, inherited LF_* unset, passed.
-Earlier two-item Keychain QA remains in <a href="live-recovery.md">live-recovery.md</a>
-and the preceding version of this report in Git.</p>
-</main></body></html>
+</body></html>

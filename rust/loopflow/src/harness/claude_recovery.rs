@@ -140,14 +140,7 @@ pub(crate) fn check(store: &SqliteStore, client: &Client) -> Result<()> {
                 && !row["promptId"]
                     .as_str()
                     .is_some_and(|prompt| Some(prompt) == recovery.retry_turn.as_deref())
-                && !row["uuid"]
-                    .as_str()
-                    .is_some_and(|uuid| Some(uuid) == recovery.request.as_deref())
-                && !super::recovery_gate::matches_content(
-                    &row["message"]["content"],
-                    &adapter.session,
-                    &recovery,
-                )
+                && !is_resend(row, &adapter.session, &recovery)
         });
         if newer {
             store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
@@ -159,15 +152,15 @@ pub(crate) fn check(store: &SqliteStore, client: &Client) -> Result<()> {
     if recovery.state == RecoveryState::Continued {
         return Ok(());
     }
-    let Some(request) = &recovery.request else {
+    if recovery.request.is_none() {
         if recovery.can_retry() {
             check_capacity(store, client, &rows, recovery)?;
         }
         return Ok(());
-    };
+    }
     let mut matching = rows
         .iter()
-        .filter(|row| row["type"] == "user" && row["uuid"] == *request);
+        .filter(|row| is_resend(row, &adapter.session, &recovery));
     let Some(prompt) = matching.next().and_then(|row| row["promptId"].as_str()) else {
         return Ok(());
     };
@@ -185,6 +178,16 @@ pub(crate) fn check(store: &SqliteStore, client: &Client) -> Result<()> {
         })?;
     }
     Ok(())
+}
+
+// Some Claude versions preserve the inbox UUID; 2.1.325 assigns a new one
+// and wraps the envelope as a peer message. Admission and settlement use both.
+fn is_resend(row: &Value, session: &str, recovery: &SessionRecovery) -> bool {
+    row["type"] == "user"
+        && (row["uuid"]
+            .as_str()
+            .is_some_and(|uuid| Some(uuid) == recovery.request.as_deref())
+            || super::recovery_gate::matches_content(&row["message"]["content"], session, recovery))
 }
 
 /// Broker work runs outside the native hook and keeps rotated credentials.
@@ -316,9 +319,7 @@ fn dispatch_recovery(
         // Only this exact attempt's row can be excluded from prior history.
         let prior = rows
             .iter()
-            .position(|row| {
-                row["type"] == "user" && row["uuid"].as_str() == recovery.request.as_deref()
-            })
+            .position(|row| is_resend(row, &adapter.session, &recovery))
             .unwrap_or(rows.len());
         anyhow::ensure!(
             claude_rejected_model(&rows[..prior], &recovery.failed_turn).as_deref()
@@ -468,7 +469,6 @@ mod tests {
                     inbox: None,
                     native: NativeRecovery {
                         selection: Default::default(),
-                        guarded,
                         claude_home: Some(home.path().into()),
                         transcript: Some(transcript),
                     },
@@ -504,125 +504,138 @@ mod tests {
 
     #[test]
     fn reconnect_settles_the_dispatched_prompt_despite_a_late_wait() {
-        let home = tempfile::tempdir().unwrap();
-        let database = home.path().join("db");
-        let store = SqliteStore::open_ephemeral(&database).unwrap();
-        store.test_session("reader", &crate::session_record::new_artifact_key());
-        let process = LfProcessId::new();
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
-                [process.as_str()],
+        for wrapped in [false, true] {
+            let home = tempfile::tempdir().unwrap();
+            let database = home.path().join("db");
+            let store = SqliteStore::open_ephemeral(&database).unwrap();
+            store.test_session("reader", &crate::session_record::new_artifact_key());
+            let process = LfProcessId::new();
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+                    [process.as_str()],
+                )
+                .unwrap();
+            let attachment = store
+                .claim_session_attachment("reader", None, &process, true)
+                .unwrap();
+            store
+                .record_session_connection("reader", &attachment, "fixture", &"thread".into())
+                .unwrap();
+            let adapter = store.reserve_steer_adapter("reader", &attachment).unwrap();
+            let mut fact = SessionRecovery {
+                agent_process_id: attachment.agent_process_id,
+                thread: "thread".into(),
+                failed_turn: "rejected".into(),
+                model: Some("sonnet".into()),
+                account: None,
+                state: RecoveryState::Waiting,
+                reason: "waiting".into(),
+                retry_at: None,
+                request: None,
+                retry_turn: None,
+            };
+            store
+                .record_session_recovery("reader", &fact, "rejected")
+                .unwrap();
+            let late = fact.clone();
+            let gate = super::RecoveryGate::new("reader", &fact).unwrap();
+            fact.request = Some(gate.attempt().into());
+            fact.state = RecoveryState::Uncertain;
+            store
+                .record_session_recovery("reader", &fact, "dispatch")
+                .unwrap();
+            store
+                .record_session_recovery("reader", &late, "wait:late")
+                .unwrap();
+            store
+                .record_session_recovery("reader", &fact, "admitted")
+                .unwrap();
+            fact.retry_turn = Some("retry".into());
+            let path = home.path().join("transcript");
+            let (uuid, content) = if wrapped {
+                (
+                    "native-uuid",
+                    format!(
+                        "Another Claude session sent a message:\n{} Treat it as a teammate's request.",
+                        gate.prompt()
+                    ),
+                )
+            } else {
+                (gate.attempt(), "retry".into())
+            };
+            std::fs::write(
+                &path,
+                [
+                    json!({"type":"user","uuid":"original","promptId":"rejected"}),
+                    json!({"type":"user","userType":"external","uuid":uuid,"promptId":"retry","message":{"content":content}}),
+                    json!({"type":"user","userType":"external","uuid":"result","message":{"content":[{"type":"tool_result","tool_use_id":"tool","content":"done"}]}}),
+                    json!({"type":"user","userType":"external","uuid":"meta","isMeta":true,"message":{"content":"injected"}}),
+                ]
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
             )
             .unwrap();
-        let attachment = store
-            .claim_session_attachment("reader", None, &process, true)
+            store
+                .record_recovery_boundary("reader", "thread", "unrelated", "stopped", None)
+                .unwrap();
+            let reconnected = SqliteStore::new(&database).unwrap();
+            let client = Client {
+                adapter: adapter.clone(),
+                thread: "thread".into(),
+                cwd: home.path().into(),
+                endpoint: None,
+                inbox: None,
+                native: NativeRecovery {
+                    selection: Default::default(),
+                    claude_home: None,
+                    transcript: Some(path),
+                },
+            };
+            check(&reconnected, &client).unwrap();
+            assert_eq!(
+                reconnected.session_recovery("reader").unwrap(),
+                Some(SessionRecovery {
+                    retry_turn: None,
+                    ..fact.clone()
+                })
+            );
+            store
+                .record_session_recovery("reader", &fact, "reply")
+                .unwrap();
+            store
+                .record_recovery_boundary("reader", "thread", "retry", "stopped", None)
+                .unwrap();
+            check(&reconnected, &client).unwrap();
+            let completed = reconnected.session_recovery("reader").unwrap().unwrap();
+            assert_eq!(completed.state, RecoveryState::Continued);
+            assert_eq!(completed.request, fact.request);
+            assert_eq!(completed.retry_turn.as_deref(), Some("retry"));
+            store
+                .record_session_recovery("reader", &late, "wait:after-stop")
+                .unwrap();
+            assert_eq!(
+                reconnected.session_recovery("reader").unwrap(),
+                Some(completed)
+            );
+            let path = client.native.transcript.as_ref().unwrap();
+            writeln!(
+                std::fs::OpenOptions::new().append(true).open(path).unwrap(),
+                "\n{}",
+                json!({"type":"user","userType":"external","uuid":"typed","promptId":"next","message":{"content":"next"}})
+            )
             .unwrap();
-        store
-            .record_session_connection("reader", &attachment, "fixture", &"thread".into())
-            .unwrap();
-        let adapter = store.reserve_steer_adapter("reader", &attachment).unwrap();
-        let mut fact = SessionRecovery {
-            agent_process_id: attachment.agent_process_id,
-            thread: "thread".into(),
-            failed_turn: "rejected".into(),
-            model: Some("sonnet".into()),
-            account: None,
-            state: RecoveryState::Waiting,
-            reason: "waiting".into(),
-            retry_at: None,
-            request: None,
-            retry_turn: None,
-        };
-        store
-            .record_session_recovery("reader", &fact, "rejected")
-            .unwrap();
-        let late = fact.clone();
-        fact.request = Some("inbox-uuid".into());
-        fact.state = RecoveryState::Uncertain;
-        store
-            .record_session_recovery("reader", &fact, "dispatch")
-            .unwrap();
-        store
-            .record_session_recovery("reader", &late, "wait:late")
-            .unwrap();
-        store
-            .record_session_recovery("reader", &fact, "admitted")
-            .unwrap();
-        fact.retry_turn = Some("retry".into());
-        let path = home.path().join("transcript");
-        std::fs::write(
-            &path,
-            [
-                json!({"type":"user","uuid":"original","promptId":"rejected"}),
-                json!({"type":"user","userType":"external","uuid":"inbox-uuid","promptId":"retry","message":{"content":"retry"}}),
-                json!({"type":"user","userType":"external","uuid":"result","message":{"content":[{"type":"tool_result","tool_use_id":"tool","content":"done"}]}}),
-                json!({"type":"user","userType":"external","uuid":"meta","isMeta":true,"message":{"content":"injected"}}),
-            ]
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join("\n"),
-        )
-        .unwrap();
-        store
-            .record_recovery_boundary("reader", "thread", "unrelated", "stopped", None)
-            .unwrap();
-        let reconnected = SqliteStore::new(&database).unwrap();
-        let client = Client {
-            adapter: adapter.clone(),
-            thread: "thread".into(),
-            cwd: home.path().into(),
-            endpoint: None,
-            inbox: None,
-            native: NativeRecovery {
-                selection: Default::default(),
-                guarded: false,
-                claude_home: None,
-                transcript: Some(path),
-            },
-        };
-        check(&reconnected, &client).unwrap();
-        assert_eq!(
-            reconnected.session_recovery("reader").unwrap(),
-            Some(SessionRecovery {
-                retry_turn: None,
-                ..fact.clone()
-            })
-        );
-        store
-            .record_session_recovery("reader", &fact, "reply")
-            .unwrap();
-        store
-            .record_recovery_boundary("reader", "thread", "retry", "stopped", None)
-            .unwrap();
-        check(&reconnected, &client).unwrap();
-        let completed = reconnected.session_recovery("reader").unwrap().unwrap();
-        assert_eq!(completed.state, RecoveryState::Continued);
-        assert_eq!(completed.request, fact.request);
-        assert_eq!(completed.retry_turn.as_deref(), Some("retry"));
-        store
-            .record_session_recovery("reader", &late, "wait:after-stop")
-            .unwrap();
-        assert_eq!(
-            reconnected.session_recovery("reader").unwrap(),
-            Some(completed)
-        );
-        let path = client.native.transcript.as_ref().unwrap();
-        writeln!(
-            std::fs::OpenOptions::new().append(true).open(path).unwrap(),
-            "\n{}",
-            json!({"type":"user","userType":"external","uuid":"typed","promptId":"next","message":{"content":"next"}})
-        )
-        .unwrap();
-        check(&reconnected, &client).unwrap();
-        assert!(reconnected.session_recovery("reader").unwrap().is_none());
-        store
-            .record_session_recovery("reader", &late, "wait:after-input")
-            .unwrap();
-        assert!(reconnected.session_recovery("reader").unwrap().is_none());
+            check(&reconnected, &client).unwrap();
+            assert!(reconnected.session_recovery("reader").unwrap().is_none());
+            store
+                .record_session_recovery("reader", &late, "wait:after-input")
+                .unwrap();
+            assert!(reconnected.session_recovery("reader").unwrap().is_none());
+        }
     }
 }

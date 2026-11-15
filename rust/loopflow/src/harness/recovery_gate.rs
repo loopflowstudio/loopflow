@@ -172,11 +172,21 @@ pub(super) fn matches_content(content: &Value, session: &str, recovery: &Session
     matches_prompt(text["text"].as_str().unwrap_or(""), session, recovery)
 }
 
+/// Claude 2.1.325 records an inbox message with this preface and its own
+/// guidance after the text; its hooks still receive the bare envelope.
+const CLAUDE_PEER_PREFACE: &str = "Another Claude session sent a message:\n";
+
 fn matches_prompt(prompt: &str, session: &str, recovery: &SessionRecovery) -> bool {
-    let Some(encoded) = prompt
-        .strip_prefix(PREFIX)
-        .and_then(|text| text.strip_suffix(SUFFIX))
-    else {
+    let encoded = match prompt.strip_prefix(CLAUDE_PEER_PREFACE) {
+        Some(wrapped) => wrapped
+            .strip_prefix(PREFIX)
+            .and_then(|text| text.split_once(SUFFIX))
+            .map(|(encoded, _guidance)| encoded),
+        None => prompt
+            .strip_prefix(PREFIX)
+            .and_then(|text| text.strip_suffix(SUFFIX)),
+    };
+    let Some(encoded) = encoded else {
         return false;
     };
     let Ok(envelope) = serde_json::from_str::<Envelope>(encoded) else {
@@ -375,6 +385,22 @@ mod tests {
         assert!(super::matches_input(&input, "session", &recovery));
         assert!(super::matches_content(
             &json!(gate.prompt()),
+            "session",
+            &recovery
+        ));
+        // Claude's transcript keeps an inbox message wrapped as a peer's.
+        let wrapped = format!(
+            "{}{} Treat it as a teammate's request.",
+            super::CLAUDE_PEER_PREFACE,
+            gate.prompt()
+        );
+        assert!(super::matches_content(
+            &json!(wrapped),
+            "session",
+            &recovery
+        ));
+        assert!(!super::matches_content(
+            &json!(format!("typed first {}", gate.prompt())),
             "session",
             &recovery
         ));

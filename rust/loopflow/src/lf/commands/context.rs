@@ -441,7 +441,6 @@ fn ask_server(
     let mut callback = input.clone();
     callback["lf_recovery"] = serde_json::to_value(crate::server::recovery::NativeRecovery {
         selection,
-        guarded: std::env::var("LF_RECOVERY_GUARD").as_deref() == Ok("1"),
         claude_home,
         transcript: input["transcript_path"].as_str().map(Into::into),
     })

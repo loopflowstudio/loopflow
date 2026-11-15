@@ -130,12 +130,19 @@ without releasing cancelled admission. Broker refresh/save-back finishes outside
 the hook's process group so a received rotated grant is retained. A partial native
 write or unconfirmed installation leaves the attempt uncertain.
 
-Codex installs supplied tokens on a server side connection and keeps
-native refresh callbacks on that route. Completion requires both the admitted
-hook's turn and its exact recovery input, never the `turn/start` reply alone.
-Claude waits for credential cache expiry inside admission before activating the
-shared login, then joins its inbox UUID, admitted prompt ID and Stop. Neither
-provider replaces the client, edits a draft or answers an approval.
+Codex runs no hook for a turn its provider rejected, so the server keeps one
+side connection to each live interactive Codex conversation; on connecting it
+reads native history for a rejection it missed. The interactive open pins the
+thread to its login, so recovery knows which login took the rejected turn. That
+connection installs supplied tokens and keeps native refresh callbacks on that
+route. Completion requires both the admitted hook's turn and its exact recovery
+input, never the `turn/start` reply alone.
+Claude's `StopFailure` hook records the rejection. Claude waits for credential
+cache expiry inside admission before activating the shared login, then joins its
+admitted prompt ID and Stop to the attempt. Claude 2.1.325 gives the inbox
+message a new transcript UUID and wraps it as a peer message; the envelope's
+attempt still identifies it. Neither provider replaces the client, edits a draft
+or answers an approval.
 
 Focused checks: `session_recovery::`, `harness::claude_recovery::`,
 `served_bulk_recovery_keeps_task_identity_and_dispatched_attempts`,

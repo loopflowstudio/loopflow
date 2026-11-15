@@ -1314,15 +1314,13 @@ pub(crate) async fn record_session_limit(
 pub(crate) async fn session_account_route(
     provider: Provider,
     thread: &AgentSessionId,
-    launched: &ProviderAccountId,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
     let Some(store) = route_store().await? else {
         return Ok(None);
     };
-    let account = store
-        .provider_session_account(provider, thread)
-        .await?
-        .unwrap_or_else(|| launched.clone());
+    let Some(account) = store.provider_session_account(provider, thread).await? else {
+        return Ok(None);
+    };
     let Some(account) = store
         .get_provider_account(provider.as_str(), &account)
         .await?

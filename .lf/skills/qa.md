@@ -313,6 +313,14 @@ through the shared server and require a correlated native retry, retained draft,
 and later completed input. Check a pending approval in one Session while another
 recovers, then answer it and count its effect. Cancellation with the credential
 lock held covers cancellation before installation only.
+`scratch/native_recovery_probe.py` drives these cases (`--codex` or `--claude`,
+plus `--approval` or `--cancel`) through `scripts/test_network.py`. Claude
+2.1.325 reads a 429 without `anthropic-ratelimit-unified-representative-claim`
+as server throttling ("not your usage limit") and fires no spent-limit
+recovery; send the claim header. Its `--debug-file` shows which hooks ran. A
+probe that keeps the real `HOME` for the Keychain can list the account's own
+native conversations; count only the fixture's Task Sessions. Retain slow served
+read timings and watchdog tracebacks; a timeout alone does not identify the cause.
 Synthetic logins and local quota responses remain supplemental native checks,
 not real-login acceptance. No provider login is needed to check an empty Machine
 or reopen a Session created by `lf -a codex session resume --prepare --json`.

@@ -410,6 +410,8 @@ pub struct SessionPage<T = SessionRecord> {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SessionRecord {
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub recovery: Option<crate::session_recovery::SessionRecovery>,
     pub transition: Option<crate::store::sqlite::provider_transitions::ProviderTransition>,
     pub preview: Option<crate::session::SessionPreview>,
     pub primary_scope: Option<String>,
@@ -579,7 +581,9 @@ pub(crate) async fn list(
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     let capacity = LaunchCapacity::read(&store.sqlite)?;
     for session in store.session_summaries(&selection, now).await? {
-        sessions.push(summary_surface(&session, &capacity));
+        let mut reading = summary_surface(&session, &capacity);
+        reading.recovery = store.sqlite.session_recovery(&session.id)?;
+        sessions.push(reading);
     }
     let mut workspaces = workspace::associate(store, &mut sessions).await?;
     turns::read(&store.sqlite, &mut sessions)?;
@@ -680,6 +684,7 @@ pub(crate) fn listed(
             .find(|raw| raw.id.as_str() == id));
     };
     turns::read(&store.sqlite, std::slice::from_mut(&mut session))?;
+    session.recovery = store.sqlite.session_recovery(id)?;
     Ok(Some(session))
 }
 
@@ -802,6 +807,7 @@ fn summary_surface(
     };
     let provider = session.provider.clone().unwrap_or_default();
     SessionRecord {
+        recovery: None,
         transition: session.transition.clone(),
         preview: session.preview.clone(),
         primary_scope: session.primary_scope.clone(),
@@ -1818,6 +1824,7 @@ pub(crate) async fn surface(store: &SharedStore, session: &LfSession) -> Result<
         },
     };
     let mut reading = SessionRecord {
+        recovery: store.sqlite.session_recovery(&session.id)?,
         transition: store.sqlite.provider_transition(&session.id)?,
         preview: metadata.preview.clone(),
         primary_scope: metadata.primary_scope.clone(),

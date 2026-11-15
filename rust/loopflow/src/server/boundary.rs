@@ -99,6 +99,8 @@ pub(super) fn answer(
             .map(|(tasks, crons)| tasks.len() + crons.len());
         let thread = thread.ok_or_else(no_thread)?;
         store.record_native_turn(adapter, thread, yielded, open_tools)?;
+        crate::harness::claude_recovery::boundary(store, adapter, thread, callback)?;
+        crate::server::recovery::record(store, adapter, thread, callback)?;
     }
     if let Some(gap) = gap {
         store.record_recording_gap(&adapter.session, gap.first, gap.last)?;

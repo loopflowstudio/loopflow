@@ -486,14 +486,20 @@ Bare `claude` uses the saved Claude model, or Fable by default. With no saved
 model or other configured entry behind it, a Fable limit lets the step go on
 with Opus on the same account, in the same conversation, if Opus has capacity.
 
-Open Claude Sessions need nothing either. When one hits a limit, the login
-moves to the eligible account that ranks first, and every open Claude follows
-at its next request. Send your next message where you left off. A running
-Codex keeps its login until you `lf resume` it. Naming another login with
-`lf --account codex=<login> resume <session>` restarts it there, and the old
-terminal says where the conversation went. A running Claude stays put:
-`lf --account claude=<login> resume <session>` switches the Machine's login,
-which every open Claude follows, and attaches.
+Open Claude and Codex Sessions can continue automatically too. When one hits a
+limit and another eligible login has room for its model, the stopped turn continues on
+that login in the same conversation, with its history, draft and pending
+approval intact. A model that just failed rests briefly on that login even
+when a usage poll shows room. A turn that may already have reached the
+provider is never sent again.
+
+When nothing has room, the conversations wait, and Desktop's **Recover
+affected sessions** checks them all again in one click. A client opened by an
+older `lf`, or using a login Loopflow does not manage, instead shows **Send it
+again yourself** as soon as the rejection is confirmed. Send that message again
+in the conversation; Loopflow does not restart it. The button still rechecks
+these and the waiting conversations. What each state means:
+[Recover after a usage limit](sessions.md#recover-after-a-usage-limit).
 
 To see what would fail next, and move it in one go:
 
@@ -509,7 +515,8 @@ lf account unpause jack@                        # route to it again
 `--blocked` and `--on` are the one Session selector; `list` previews what
 `move` acts on. A move never writes preferences. Taking the active login out
 of automatic routing switches the Machine to the route's next login, and every
-open Claude follows; `lf account use` switches by hand and holds there. In the Desktop, View → Move Blocked Sessions… runs the same move.
+open Claude follows; `lf account use` switches by hand and holds there. In the
+Desktop, View → Move Blocked Sessions… runs the same model/provider move.
 
 ## Switch the shared account
 
@@ -541,6 +548,10 @@ when it needs a login, changing nothing. It first saves the current login back t
 so a token the provider refreshed while active is kept; a login Loopflow has
 never seen is kept as a new paused account.
 
+If a Claude login installation fails, fix the reported storage problem and repeat
+`lf account use claude=work@`. It finishes installing that login before reporting
+success.
+
 When Codex's native and stored copies name the same login but disagree, live
 status checks the native copy first. Only a definite authentication rejection
 allows checking the stored copy. Launches repair rejected credentials in the
@@ -554,7 +565,8 @@ For Codex, `use` also restarts its shared background app-server if it still hold
 another login, even when the file was already correct. Running turns get up to
 five minutes to finish; a turn still running at restart is interrupted. The login
 is installed before that wait, so new lf launches need not wait. lf's Codex
-terminals run their own private app-server and keep their login until restarted.
+terminals run their own private app-server. A shared-home switch leaves their
+login unchanged.
 An unreadable daemon login returns an error without restarting it; the selected
 login remains installed. Failed activity checks keep the grace period rather than
 ending it early. Expiry warns that restarting may interrupt remaining turns.
@@ -564,7 +576,7 @@ reconcile the daemon later.
 | | Codex | Claude |
 |---|---|---|
 | Where the home's login lives | `auth.json` | macOS Keychain item; `.credentials.json` elsewhere |
-| An lf process already running | keeps the login it started with until it restarts | follows the switch |
+| An lf process already running | keeps its login after a shared-home switch | follows the switch after its native credential cache reloads |
 | A turn in flight during a switch | may fail once; a headless run resumes it under the new account | continues |
 | Whose login the home holds | read from the login | asked of Claude once after Claude refreshes it |
 

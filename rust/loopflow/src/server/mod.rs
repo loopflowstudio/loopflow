@@ -5,13 +5,14 @@ pub(crate) mod events;
 pub mod holder;
 pub mod mobile;
 mod outbox;
+pub(crate) mod recovery;
 mod remote;
 pub mod schema;
 mod service;
 mod statistics;
 mod subscriptions;
 mod ticket;
-mod wake;
+pub(crate) mod wake;
 pub mod wire;
 
 use std::path::PathBuf;

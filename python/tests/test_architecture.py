@@ -172,6 +172,23 @@ def test_new_provider_must_join_an_external_edge(repo: Path) -> None:
     assert "provider edge missing from map: provider:codex" in _errors(repo)
 
 
+@pytest.mark.parametrize("visibility", ["", "pub ", "pub(crate) "])
+def test_test_module_subprocesses_are_not_production_edges(repo: Path, visibility: str) -> None:
+    _write(
+        repo,
+        "rust/loopflow/src/edge.rs",
+        "#[cfg(test)]\n" + visibility + 'mod tests { fn probe() { Command::new("sleep"); } }\n'
+        'fn git() { Command::new("git"); }\n',
+    )
+
+    assert architecture.check_repository(repo).ok
+
+    edge = repo / "rust/loopflow/src/edge.rs"
+    edge.write_text(edge.read_text() + 'fn probe() { Command::new("sleep"); }\n')
+
+    assert "subprocess edge missing from map: process:sleep" in _errors(repo)
+
+
 def test_one_owner_cannot_be_mapped_twice(repo: Path) -> None:
     architecture_doc = repo / "docs/dev/reference.md"
     architecture_doc.write_text(

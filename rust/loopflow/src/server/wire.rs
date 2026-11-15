@@ -181,7 +181,7 @@ pub struct SessionBoundary {
     /// `stop` only refreshes planning.
     #[serde(deserialize_with = "Option::deserialize")]
     pub adapter: Option<crate::steer::SteerAdapter>,
-    /// The JSON the provider sent the hook, unchanged.
+    /// The provider callback, with the hook's launch recovery metadata when available.
     #[schemars(with = "Untyped")]
     pub callback: serde_json::Value,
     /// The hook's open recording gap; the server writes it into the

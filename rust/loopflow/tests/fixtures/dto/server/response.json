@@ -64,6 +64,7 @@
     "model": null,
     "blocked": false,
     "turn": null,
-    "raw": false
+    "raw": false,
+    "recovery": null
   }
 }

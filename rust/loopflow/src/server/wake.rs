@@ -163,7 +163,7 @@ enum Reach<'a> {
 /// `<pid>.json` names the socket. `None` once that Claude exited or moved to
 /// another conversation, whose own boundary records it. Its `status` is not
 /// read: a Stop hook can run before it says `idle`.
-fn open_inbox(key: &Path, thread: &str) -> Result<Option<(UnixStream, String)>> {
+pub(crate) fn open_inbox(key: &Path, thread: &str) -> Result<Option<(UnixStream, String)>> {
     let pid = key
         .file_name()
         .and_then(|name| name.to_str())

@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>LOO-811 · Recovery QA · November 14</title>
+<style>
+body{font:15px/1.55 -apple-system,system-ui,sans-serif;max-width:860px;margin:2.5rem auto;padding:0 1.2rem;color:#1d1d1f}
+h1{font-size:1.6rem;margin-bottom:.2rem}h2{font-size:1.15rem;margin-top:2.2rem;border-top:1px solid #ddd;padding-top:1rem}
+code,pre{font:13px ui-monospace,Menlo,monospace}pre{background:#f5f5f7;padding:.8rem;overflow-x:auto;border-radius:6px}
+table{border-collapse:collapse;width:100%;margin:.6rem 0}td,th{border:1px solid #ddd;padding:.35rem .5rem;text-align:left;vertical-align:top;font-size:14px}
+th{background:#f5f5f7}.pass{color:#1a7f37;font-weight:600}.fail{color:#b42318;font-weight:600}.open{color:#9a6700;font-weight:600}
+</style></head><body>
+<h1>LOO-811 · Recovery QA</h1>
+<p>Latest pass: November 14, 2026 · macOS · headless · tree <code>5a959ef9d4</code> (after the main sync) plus this pass's two repairs,
+final candidate SHA256 <code>7ad9a2ef8cf6…8682</code>. Native clients: Codex 0.169.0, Claude Code 2.1.325.</p>
+
+<p><strong>On the synced tree, every native scenario passes on both providers, and a recovered Codex conversation
+keeps refreshing its login across a Machine-server restart.</strong> This pass fixed the recovery reader's
+per-Session scan of full history (533 ms → 14 ms across this Machine's 876 interactive Sessions) and made a failed
+Codex login refresh visible in <code>logs/lf.log</code>. Sections 1–3 are the earlier pass on <code>bc18b3d3fb</code>.</p>
+
+<h2>How it was driven</h2>
+<p><code>scratch/native_recovery_probe.py</code> runs the branch <code>lf</code> and the real native clients
+through <code>scripts/test_network.py</code> with external egress denied. Each run uses a disposable root: a Git
+repository, two linked Task checkouts, private <code>LF_HOME</code>, private provider home, a private Machine
+server and two synthetic managed logins (<code>first</code>, <code>second</code>). Two Task primary Sessions run in
+PTYs and are bound before rejection. A loopback endpoint returns a usage-limit 429 to the
+<code>first</code> login's first two prompts. Desktop's served <code>session.recover</code> is called over the server socket.
+A continuous reader drains both PTYs during synchronous setup and served reads. The probe waits for raw/bracketed-paste mode,
+checks each draft in a rendered terminal before releasing the rejection, and saves before/after screens.
+After recovery it confirms the drafts remain visible and unsent, edits and submits them, and checks that the row ends.</p>
+<pre>uv run python scripts/test_network.py uv run --offline --script \
+  scratch/native_recovery_probe.py --lf target/debug/lf \
+  --codex ~/.local/bin/codex [--approval|--cancel|--unauthorized|--restart] \
+  --output .lf/tmp/loo-811-qa-sync/&lt;name&gt; &lt; /dev/null
+# same with --claude ~/.local/bin/claude [--approval|--cancel]
+# inherited LF_* unset with env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /')</pre>
+
+<h2>1 · First run on the candidate: nothing recovers</h2>
+<p><strong>Codex.</strong> Both turns were rejected (Codex showed its error), the Sessions stayed active,
+and <code>recovery</code> stayed <code>null</code>. No <code>recovery:*</code> receipt was written. The store did hold each launch's
+<code>quota_client</code> fact, so hooks had run.</p>
+<ul>
+<li>The recovery reader's query required <code>processes.agent_interactive=1</code>. Every Codex AgentProcess is a
+<code>codex app-server</code> started through the headless spawn path, so it records 0 even for an interactive
+conversation (probe dump: <code>agent_interactive=0</code> for both). The reader's unit test set the column to 1 by hand, which hid this.</li>
+<li>Even if the reader had found them, it opened a Codex side connection only for a conversation that already
+had a row. Only that connection writes the row, from <code>turn/completed … usageLimitExceeded</code>. Codex runs no
+Stop hook for a rejected turn, so the other writer (turn-end history import) never ran.</li>
+</ul>
+<p><strong>Codex, after the reader repair.</strong> Rows appeared, then went straight to <em>Send it again yourself</em> ·
+“This Session’s login is not one Loopflow manages”. The interactive Codex open starts the harness with the route,
+stops it, then opens the thread on a new connection. The thread was tied to its login (<code>provider_session_accounts</code>)
+only when the TUI exited, so a live rejection had no known login.</p>
+<p><strong>Claude.</strong> Rejections were recorded and both resends were admitted, sent on <code>second</code> and completed
+(“RECOVERY_COMPLETED”), but the rows stayed <em>Recovering</em>. Claude 2.1.325 records the inbox message under a
+new transcript UUID, wrapped as <code>Another Claude session sent a message:\n&lt;lf-recovery:…&gt;</code> plus Claude’s peer guidance.
+Settlement looked for the inbox UUID and the bare envelope, so it never matched. The admission hook still receives the bare envelope.</p>
+
+<h2>2 · Repairs</h2>
+<table><tr><th>Where</th><th>Change</th></tr>
+<tr><td><code>server/recovery.rs</code></td><td>Reader drops the <code>agent_interactive</code> filter (<code>agent_sessions.interactive=1</code> remains). It schedules
+every live interactive Codex conversation, row or not. The test no longer forces the column, and it asserts that a Codex conversation stays connected after its row ends.</td></tr>
+<tr><td><code>harness/codex_recovery.rs</code></td><td>On connecting, reads native history once (<code>recover_history</code>), so a rejection that came before the subscription still counts.
+The connection stays open while the conversation lives. The break that closed it once a row settled is deleted.</td></tr>
+<tr><td><code>lf/commands/util.rs</code></td><td>The interactive Codex open pins the new thread to its login right away, not just at exit.</td></tr>
+<tr><td><code>harness/recovery_gate.rs</code>, <code>claude_recovery.rs</code></td><td>The transcript matcher accepts Claude’s one peer preface (with trailing guidance). Settlement finds the resend by row UUID or envelope.
+A test covers the wrapped form, and confirms that an envelope after typed text does not match.</td></tr>
+</table>
+<p>The probe also needed updating for current main and clients. Hello revision 5 and <code>session.list.task</code>. Claude’s 429 now
+sends <code>anthropic-ratelimit-unified-representative-claim</code>; without it Claude 2.1.325 shows “Server is temporarily limiting requests
+(not your usage limit)” and treats the error as transient. The Session count is limited to the fixture’s Tasks, because the Claude run keeps the real <code>HOME</code>
+for the Keychain and listed an unrelated live Codex conversation (read-only). Completion checks now poll instead of using fixed waits.
+New check: after typed input every row is gone.</p>
+<pre>cargo test -p loopflow --lib --jobs 4 -- harness::claude_recovery harness::codex_recovery \
+  session_recovery server::recovery harness::recovery_gate harness::codex_connection
+test result: ok. 18 passed; 0 failed</pre>
+
+<h2>3 · Native scenarios after the repairs</h2>
+<table><tr><th>Scenario</th><th>Result</th><th>Inference order</th><th>What was seen</th></tr>
+<tr><td>codex-bulk</td><td class="pass">Pass</td><td>first, first, second ×4</td><td>Both rows: reported → rejected → limited → dispatch → admitted → reply → input → settled <em>Continued</em>. One resend each, edited drafts completed on <code>second</code>, rows gone after typed input.</td></tr>
+<tr><td>codex-approval</td><td class="pass">Pass</td><td>first, first, second, first, first, second</td><td>The approval stayed pending while the other Task recovered. Answering it ran EFFECT once. Later input completed, and rows ended.</td></tr>
+<tr><td>codex-cancel</td><td class="pass">Pass</td><td>first ×4</td><td>Esc with the credential lock held left both rows <em>Review conversation</em> (<code>unconfirmed</code>). Nothing was resent and the login stayed the same. Drafts completed on <code>first</code>, and rows ended.</td></tr>
+<tr><td>claude-approval</td><td class="pass">Pass</td><td>first, first, second ×4</td><td>The pending Bash approval survived recovery. Answering it ran EFFECT once (75 s on this loaded Machine). Drafts and later input completed, and rows ended.</td></tr>
+<tr><td>claude-cancel</td><td class="pass">Pass</td><td>first ×4</td><td>Uncertain without resend. Drafts completed on <code>first</code>, and rows ended.</td></tr>
+<tr><td>claude-bulk</td><td class="pass">Pass with draft confirmation</td><td>first, first, second ×4</td><td>Both drafts visible before and after recovery, absent from the first four inference requests,
+and submitted as DRAFT_0_EDITED and DRAFT_1_EDITED in the last two. Both rows settled <em>Continued</em>, one resend each, rows ended at typed input.</td></tr>
+</table>
+<p>The Codex rows come from build <code>50b9039f</code>, before the matcher change. That change adds only Claude’s preface, which Codex input never carries.
+The Claude rows come from final build <code>9fd625f3</code>. Every run reaped its clients, holders and server. After the batch, the only leftovers were the
+two processes of the run killed by the time limit: a holder and a Codex app-server, both identified by that run’s temporary root and stopped by PID.</p>
+
+<p>The subsequent compress pass removed unused launch metadata, combined Claude's transcript matching and removed the superseded strategy probes.
+Final candidate <code>2239def04d00f768fcbe8c33e5d16c53809235cffd8ef00dba889e62f29a8442</code> passed Claude bulk and Codex approval again using the self-contained probe.
+Both runs confirmed drafts visible before/after recovery and unsent until editing, correlated both edited inputs to native completion, ended the rows and reaped all fixture processes.
+Codex's approval still executed EFFECT once; neither run hung or recorded a slow served request.
+Receipts: <code>.lf/tmp/loo-811-compress-final/</code>. The earlier hang's cause remains unknown.</p>
+
+<h2>4 · After the main sync</h2>
+<p>Rebuilt <code>lf</code> on <code>5a959ef9d4</code> and ran each scenario on both providers. Receipts, screens and
+each run's server <code>lf.log</code>: <code>.lf/tmp/loo-811-qa-sync/&lt;scenario&gt;/</code>.</p>
+<table><tr><th>Scenario</th><th>Result</th><th>What was seen</th></tr>
+<tr><td>claude-bulk</td><td class="pass">Pass</td><td>Both drafts on screen before release and after recovery, unsent, then edited and completed on <code>second</code>. One resend each, Task/cwd/model/owner unchanged, rows gone after typed input.</td></tr>
+<tr><td>claude-approval</td><td class="pass">Pass</td><td>Bash approval still pending after the other Task recovered; answering it ran EFFECT once. First Claude approval run on this tree recorded one 8.5 s <code>session.list</code> (see below); the rerun after the reader fix recorded none.</td></tr>
+<tr><td>claude-cancel</td><td class="pass">Pass</td><td>Esc while the credential lock was held: both rows <em>Review conversation</em>, nothing resent, login unchanged. One 2.0 s <code>session.list</code>.</td></tr>
+<tr><td>codex-bulk</td><td class="pass">Pass</td><td>Same as Claude bulk. Ran on both the pre-fix and final builds.</td></tr>
+<tr><td>codex-approval</td><td class="pass">Pass</td><td>Approval pending across recovery, EFFECT once, later input completed, rows ended.</td></tr>
+<tr><td>codex-cancel</td><td class="pass">Pass</td><td>Uncertain without resend; drafts completed on <code>first</code>.</td></tr>
+<tr><td>codex-unauthorized <em>(new)</em></td><td class="pass">Pass</td><td>After recovery, the probe rotated the access token in <code>second</code>'s broker copy and answered <code>second</code>'s next request (DRAFT_0_EDITED) with 401. Codex retried the same input carrying the rotated token, which only the broker held, so its refresh was answered by Loopflow's side connection. Inference order: first ×2, second ×5; only the retry carried the rotated token.</td></tr>
+<tr><td>codex-restart <em>(new)</em></td><td class="pass">Pass</td><td>Same, but the private Machine server was stopped and replaced after recovery and before the 401. The replacement server reconnected to both live conversations, the rows still read <em>Continued</em> on <code>second</code>, and the 401 retry again carried the rotated broker token. Both clients stayed up; drafts completed; rows ended. Run twice.</td></tr>
+</table>
+<p>Every run reaped its clients, holders and server. Desktop's recovery row was checked headless only:
+<code>scripts/test_desktop.sh --filter 'SessionRecoveryViewTests|DTOFixtureTests|SessionsStoreTests'</code> passed 97 tests in 3 suites,
+including the manual-retry fixture and the control that keeps uncertainty visible.</p>
+
+<h3>Repairs in this pass</h3>
+<ul>
+<li><strong>Recovery reads walked each Session's whole history.</strong> <code>session.list</code> and Session reads call
+<code>session_recovery</code> once per Session, and its <code>receipt_key LIKE 'recovery:%'</code> predicate cannot use the
+<code>(session_id, receipt_key)</code> index, so SQLite scanned every event of the Session under the store mutex.
+On this Machine's real store (read-only), the largest Session has 5,142 events: 5.2 ms for it, 533 ms for all 876 interactive Sessions.
+A range (<code>&gt;= 'recovery:' AND &lt; 'recovery;'</code>) searches the index: 0.01 ms and 14 ms. <code>recovery_request_revision</code>'s
+<code>quota_retry:</code> lookup got the same change and is now a covering-index search. Fixture stores are too small for this to explain the 8.5 s read.</li>
+<li><strong>A failed Codex login refresh left no trace.</strong> The refresh callback turned the broker's error into
+"Loopflow could not refresh this login" for Codex and logged nothing. It now warns with the Session and the cause, and warns when Codex asks
+to refresh a login the conversation no longer uses; an answered refresh logs at info (outside the file log's default filter).</li>
+</ul>
+<p>Focused Rust selection (<code>harness::claude_recovery harness::codex_recovery session_recovery server::recovery harness::recovery_gate harness::codex_connection</code>): 18 passed.
+<code>cargo clippy -p loopflow --all-targets -- -D warnings</code>, <code>cargo fmt</code>, probe Ruff check/format: clean.</p>
+
+<h2>What works now</h2>
+<ul>
+<li>Several stalled Task Sessions on either provider recover on their own when another managed login has room. Each gets one resend on the same native conversation, with its Task binding, cwd and model unchanged.</li>
+<li>Drafts stay in the composer, unsent, through recovery. Pending approvals survive another conversation's recovery and run once when answered. Cancellation never resends. Desktop's <code>session.recover</code> recheck does not duplicate a dispatched attempt.</li>
+<li>A recovered Codex conversation's native token refresh is answered from the broker, including after the Machine server is replaced.</li>
+<li>The row ends at the person's next message.</li>
+</ul>
+
+<h2>Not reached, and why</h2>
+<ul>
+<li><strong>Desktop in a window.</strong> Headless run: the recovery row, its button and progress were checked through view tests, not seen rendered or clicked. Physical keyboard input after reopen is still unchecked.</li>
+<li><strong>Real logins and the installed app.</strong> Synthetic logins and loopback 429/401 only. Real token rotation, real Claude rate-limit headers and installed Keychain behavior remain unverified; production conversations were not touched.</li>
+<li><strong>Claude across a Machine-server restart.</strong> Only Codex was restarted; a Claude conversation recovering across a restart was not exercised.</li>
+<li><strong>The broader gate matrix</strong> (served/DTO suites beyond the selection above, iOS, full Swift).</li>
+</ul>
+
+<h2>Still wrong or unexplained, worst first</h2>
+<ol>
+<li><strong>Slow <code>session.list</code> during Claude setup.</strong> One 8.5 s and one 2.0 s served read, both while two Claude clients were launching and binding; nothing in the server log covers them, and the store contention log reports no held write lock. Not reproduced on the rerun. A person would see Desktop's Session list stall for that long. Cause unknown; the probe records every served read over 2 s.</li>
+<li><strong>One earlier hung Codex approval run</strong> (previous pass) remains unexplained; it has not recurred in any Codex run since the watchdog was added, including this pass's thirteen.</li>
+<li><strong>Each live interactive Codex conversation holds one server connection.</strong> Intended, one socket per open conversation; the reversible choice is in <code>scratch/questions.md</code>.</li>
+<li><strong>Codex recovery depends on a live connection.</strong> A rejection while the server is down is caught on reconnect by the history read, but only if it is the conversation's latest turn.</li>
+</ol>
+</body></html>

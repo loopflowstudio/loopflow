@@ -1134,6 +1134,14 @@ async fn open_codex_native(
         .unwrap_or_else(|| "Loopflow".to_string());
     let thread = codex_connection::open_thread(&endpoint, params, &title).await?;
     store.record_session_connection(session, attachment, &endpoint.to_string_lossy(), &thread)?;
+    // Recovery needs the login a rejected turn ran on while the client is open.
+    if let Some(account) = &account {
+        store.pin_provider_session_route(
+            crate::provider_auth::Provider::Codex,
+            &thread,
+            account,
+        )?;
+    }
     if let Some(context) = &launch.conversation_context {
         // Hooks run on the app-server, which never inherits the terminal's
         // launch file. Bind before the client can send a turn.

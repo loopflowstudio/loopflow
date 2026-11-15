@@ -65,7 +65,8 @@
         "output_tokens": 1100
       }
     },
-    "raw": false
+    "raw": false,
+    "recovery": null
   },
   "liveness": "unknown",
   "control_holder": null,

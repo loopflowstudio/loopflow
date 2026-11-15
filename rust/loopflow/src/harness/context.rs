@@ -16,6 +16,7 @@ use crate::session::Holder;
 pub(crate) fn claude_args(context: &ContextDelivery, holder: Holder) -> Result<Vec<String>> {
     let mut hooks = context.hook_settings(holder)?;
     hooks["PostToolUseFailure"] = hooks["PostToolUse"].clone();
+    add_recovery_hook(&mut hooks, context, true)?;
     let mut settings = json!({"hooks": hooks});
     if holder == Holder::Server {
         // The Machine server wakes an idle conversation with steers and Task
@@ -39,7 +40,8 @@ pub(crate) fn codex_hooks(
     holder: Holder,
 ) -> Result<Value> {
     let mut hooks = session_hooks.cloned().unwrap_or_else(|| json!({}));
-    let additions = context.hook_settings(holder)?;
+    let mut additions = context.hook_settings(holder)?;
+    add_recovery_hook(&mut additions, context, false)?;
     let mut states = hooks
         .get("state")
         .and_then(Value::as_object)
@@ -90,6 +92,18 @@ pub(crate) fn codex_hooks(
     }
     hooks["state"] = Value::Object(states);
     Ok(hooks)
+}
+
+fn add_recovery_hook(hooks: &mut Value, context: &ContextDelivery, claude: bool) -> Result<()> {
+    let mut handler = json!({"type":"command", "command":super::recovery_gate::hook_command(&context.home)?, "timeout":60});
+    if claude {
+        handler["onFailure"] = json!("block");
+    }
+    hooks["UserPromptSubmit"]
+        .as_array_mut()
+        .expect("prompt hooks are an array")
+        .push(json!({"hooks":[handler]}));
+    Ok(())
 }
 
 pub(crate) fn add_opencode_context(

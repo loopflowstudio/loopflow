@@ -35,9 +35,10 @@ pub enum ContextMoment {
     Stop,
     /// A native turn ended on a usage limit: start `RecordLimit` and return.
     Limit,
-    /// Started by a limit hook: record the limit and move the shared login to
-    /// an account with capacity.
+    /// Started by a limit hook: retain the failed turn for recovery.
     RecordLimit,
+    /// Native recovery prompt admission, independent of ordinary hooks.
+    Recovery,
 }
 
 /// Captured source identities, not frozen context. Hooks reread scratch and Wave
@@ -257,6 +258,7 @@ impl ContextDelivery {
         let path = directory.join(format!("{}.json", uuid::Uuid::new_v4()));
         self.save(&path)?;
         command.env(CONTEXT_DELIVERY_ENV, &path);
+        command.env("LF_RECOVERY_GUARD", "1");
         Ok(path)
     }
 

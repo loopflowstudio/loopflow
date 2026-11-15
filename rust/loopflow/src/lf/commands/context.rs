@@ -250,6 +250,9 @@ pub fn emit_block(
     use crate::context_block::ContextMoment;
     use crate::server::wire::BoundaryMoment;
     let input = read_callback()?;
+    if moment == ContextMoment::Recovery {
+        return crate::harness::recovery_gate::hook(&input);
+    }
     if input.get("agent_id").is_some_and(|id| !id.is_null()) {
         return Ok(());
     }
@@ -419,11 +422,34 @@ fn ask_server(
         (Some(_), Some(thread)) => recording_gap(home, thread),
         _ => RecordingGap::default(),
     };
+    let selection = match crate::provider_account::selection::AccountSelection::from_env() {
+        Ok(selection) => selection,
+        Err(error) => {
+            gap.note("recovery account selection", &error);
+            return false;
+        }
+    };
+    let native = crate::provider_account::activation::native_home(
+        crate::provider_auth::Provider::Claude,
+        None,
+    );
+    let claude_home = if native.is_absolute() {
+        Some(native)
+    } else {
+        std::env::current_dir().ok().map(|cwd| cwd.join(native))
+    };
+    let mut callback = input.clone();
+    callback["lf_recovery"] = serde_json::to_value(crate::server::recovery::NativeRecovery {
+        selection,
+        claude_home,
+        transcript: input["transcript_path"].as_str().map(Into::into),
+    })
+    .expect("native recovery metadata serializes");
     let operation = Operation::Server(ServerOperation::SessionBoundary(SessionBoundary {
         moment,
         delivery: delivery.to_owned(),
         adapter: adapter.cloned(),
-        callback: input.clone(),
+        callback,
         gap: gap.span().map(|span| BoundaryGap {
             first: span.first_miss,
             last: span.last_miss,

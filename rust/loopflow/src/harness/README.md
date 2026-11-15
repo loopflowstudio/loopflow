@@ -98,6 +98,62 @@ its hooks reach the Machine server, which reads the thread's turns at each turn
 end. An app-server the server cannot read is a recording gap; history fills it
 at the next turn end or launch.
 
+## Quota recovery
+
+The Machine server records native boundaries and retains recovery observations
+in Session history. Complete native history can establish rejection before work,
+but cannot reserve the next input position. Previously dispatched attempts keep
+their fixed receipt; unknown delivery cannot be retried by reconnection or a
+Desktop request. Recovery dispatches only when the client has its native
+submission guard. Hooks retain the client's account restrictions and native home;
+credential work uses that home rather than the Machine server's environment.
+
+The projection folds each failed turn's dispatch and correlated result; a late
+wait cannot replace them or hide a subsequent rejection. Checking again cannot
+resend an attempt already dispatched. Temporary waits project `waiting`; a
+complete rejection without a managed login or a client able to take the resend
+projects `manual_retry` before capacity selection. Both accept recheck requests;
+Codex reads its hook list live so a later check can find the client ready.
+The row ends when the next person-started turn follows the rejection; native
+history supplies the fallback for clients with no recorded start. The correlated
+resend never ends its own row, including after an unconfirmed dispatch. Dispatch
+facts remain in history after the row ends.
+
+A recovery envelope binds the Session, native thread, rejected turn and one-use
+attempt. The recovery-only shell wrapper blocks failures and beats Codex's native
+fail-open timeout; ordinary hooks remain best-effort. Inside native submission,
+the server checks retained history before asking the existing account broker to
+prepare credentials. A private socket holds admission: close or expiry stops
+subsequent installation and retry release. An installation already sent to the
+native server can still take effect; a confirmed reply updates the account route
+without releasing cancelled admission. Broker refresh/save-back finishes outside
+the hook's process group so a received rotated grant is retained. A partial native
+write or unconfirmed installation leaves the attempt uncertain.
+
+Codex runs no hook for a turn its provider rejected, so the server keeps one
+side connection to each live interactive Codex conversation; on connecting it
+reads native history for a rejection it missed. The interactive open pins the
+thread to its login, so recovery knows which login took the rejected turn. That
+connection installs supplied tokens and keeps native refresh callbacks on that
+route. Completion requires both the admitted hook's turn and its exact recovery
+input, never the `turn/start` reply alone.
+Claude's `StopFailure` hook records the rejection. Claude waits for credential
+cache expiry inside admission before activating the shared login, then joins its
+admitted prompt ID and Stop to the attempt. Claude 2.1.325 gives the inbox
+message a new transcript UUID and wraps it as a peer message; the envelope's
+attempt still identifies it. Neither provider replaces the client, edits a draft
+or answers an approval.
+
+Focused checks: `session_recovery::`, `harness::claude_recovery::`,
+`served_bulk_recovery_keeps_task_identity_and_dispatched_attempts`,
+`provider_account::account_first_tests::recovery_respects_capacity_even_for_a_preferred_login`,
+and Desktop's `sessionRecoveryControlKeepsUncertaintyVisible`. Gate also covers
+provider-account, native decoder, hook, Session projection, served mutation and
+transport ownership suites. Native-client probes use disposable homes, synthetic
+logins and loopback responses; they do not establish real-token or installed-app
+acceptance.
+
+
 ## Task updates
 
 Keep several Task conversations open while a Graph finishes and a teammate adds

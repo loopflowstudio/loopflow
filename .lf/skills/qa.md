@@ -274,6 +274,13 @@ Graphs with `lf graph list --processes`, then `lf process show <ID>`; the live
 process list cannot find a finished run. Stop the private server and every
 remaining child after the scenarios.
 
+The server's `logs/lf.log` keeps `warn` and `loopflow::server` info only; an
+info line from `harness` or elsewhere never reaches it. To show that a native
+callback was answered, change what only that answer can carry (for a Codex
+token refresh, rotate the broker copy's access token, then 401 the next
+request) and check the retried request. Codex's own `logs_*.sqlite` in its
+home stops flushing early in a run and cannot show it.
+
 For Task-run retries, a bare `lf task run` returns at registration; poll
 `lf task status <id>` (`Graph <name>: running|stopped at <step>`) rather than
 `lf task wait`, which blocks until the Task is done. `lf task show <id> --json`
@@ -298,6 +305,42 @@ WorkCLISubscriptionTests/serverReplacementKeepsWorkCurrent` exercises the
 production Work model against a real private server: last reading during an
 outage, offline edits, continued updates after replacement, and cancellation
 during another outage. It is a headless automated check, not a window walkthrough.
+
+## Native account switching
+
+Use the branch CLI with private `LF_HOME` and `CLAUDE_CONFIG_DIR`, clearing
+inherited `LF_*`. On macOS a temporary config directory gets a scoped Keychain
+service; changing `HOME` alone does not isolate the login Keychain. Do not probe
+the unsuffixed service beside open production conversations.
+
+`tests/e2e/claude_shared_home.py` drives the real CLI, Keychain and Claude through
+`scripts/test_network.py`, with external egress denied. Its synthetic accounts
+and local inference response make it a supplemental boundary check, not live
+login acceptance. A disposable marker chmod 0400 exercises a real installation
+error; restore 0600, repeat the same account command, then inspect both items,
+marker time and hold. Seeded stale items show reconciliation, not a failed native
+Keychain write. Live refresh, running-client continuity and unsuffixed-service
+checks need disposable or idle provider logins and suitable OS-account isolation.
+Afterward verify the exact temporary service items and child processes are gone.
+
+For interactive recovery, create linked disposable Task checkouts and select each
+bound primary Session before triggering rejection; binding a running conversation
+adds Task input and changes the failed-turn scenario. Drive `session.recover`
+through the shared server and require a correlated native retry, retained draft,
+and later completed input. Check a pending approval in one Session while another
+recovers, then answer it and count its effect. Cancellation with the credential
+lock held covers cancellation before installation only.
+`scratch/native_recovery_probe.py` drives these cases (`--codex` or `--claude`,
+plus `--approval` or `--cancel`) through `scripts/test_network.py`. Claude
+2.1.325 reads a 429 without `anthropic-ratelimit-unified-representative-claim`
+as server throttling ("not your usage limit") and fires no spent-limit
+recovery; send the claim header. Its `--debug-file` shows which hooks ran. A
+probe that keeps the real `HOME` for the Keychain can list the account's own
+native conversations; count only the fixture's Task Sessions. Retain slow served
+read timings and watchdog tracebacks; a timeout alone does not identify the cause.
+Synthetic logins and local quota responses remain supplemental native checks,
+not real-login acceptance. No provider login is needed to check an empty Machine
+or reopen a Session created by `lf -a codex session resume --prepare --json`.
 
 ## Keep what you learned
 

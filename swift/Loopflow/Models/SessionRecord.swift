@@ -211,6 +211,7 @@ public struct ProviderTransition: Codable, Sendable, Hashable {
 }
 
 public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
+    public let recovery: SessionRecovery?
     public let transition: ProviderTransition?
     public let preview: SessionPreview?
     public let primaryScope: String?
@@ -286,6 +287,7 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     }
 
     enum CodingKeys: String, CodingKey {
+        case recovery
         case id, interactive, work, workspace, title, detail, provider, account, model, blocked, cwd, state, availability
         case preview, transition
         case programStatus = "program_status"
@@ -409,6 +411,7 @@ public struct SessionPage: Codable, Sendable, Hashable {
 extension SessionRecord {
     public func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(recovery, forKey: .recovery)
         try values.encode(transition, forKey: .transition)
         try values.encode(preview, forKey: .preview)
         try values.encode(primaryScope, forKey: .primaryScope)
@@ -443,6 +446,7 @@ extension SessionRecord {
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
+        recovery = try values.decode(SessionRecovery?.self, forKey: .recovery)
         transition = try values.decodeIfPresent(ProviderTransition.self, forKey: .transition)
         preview = try values.decodeIfPresent(SessionPreview.self, forKey: .preview)
         primaryScope = try values.decodeIfPresent(String.self, forKey: .primaryScope)
@@ -473,5 +477,73 @@ extension SessionRecord {
         terminalIds = try values.decode([String].self, forKey: .terminalIds)
         turn = try values.decode(SessionTurn?.self, forKey: .turn)
         raw = try values.decode(Bool.self, forKey: .raw)
+    }
+
+
+}
+
+public struct SessionRecovery: Codable, Sendable, Hashable {
+    public let agentProcessId: AgentProcessId
+    public enum State: String, Codable, Sendable {
+        case waiting = "waiting"
+        case manualRetry = "manual_retry"
+        case uncertain, recovering, continued
+
+        public var label: String {
+            switch self {
+            case .waiting: "Waiting"
+            case .manualRetry: "Send it again yourself"
+            case .uncertain: "Review conversation"
+            case .recovering: "Recovering"
+            case .continued: "Continued"
+            }
+        }
+    }
+    public let thread: AgentSessionId
+    public let failedTurn: String
+    public let model: String?
+    public let account: String?
+    public let state: State
+    public let reason: String
+    public let retryAt: Int64?
+    public let request: String?
+    public let retryTurn: String?
+
+    public var canRetry: Bool { request == nil && (state == .waiting || state == .manualRetry) }
+
+    enum CodingKeys: String, CodingKey {
+        case agentProcessId = "agent_process_id"
+        case thread, model, account, state, reason, request
+        case failedTurn = "failed_turn"
+        case retryAt = "retry_at"
+        case retryTurn = "retry_turn"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        agentProcessId = try values.decode(AgentProcessId.self, forKey: .agentProcessId)
+        thread = try values.decode(AgentSessionId.self, forKey: .thread)
+        failedTurn = try values.decode(String.self, forKey: .failedTurn)
+        model = try values.decode(String?.self, forKey: .model)
+        account = try values.decode(String?.self, forKey: .account)
+        state = try values.decode(State.self, forKey: .state)
+        reason = try values.decode(String.self, forKey: .reason)
+        retryAt = try values.decode(Int64?.self, forKey: .retryAt)
+        request = try values.decode(String?.self, forKey: .request)
+        retryTurn = try values.decode(String?.self, forKey: .retryTurn)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(agentProcessId, forKey: .agentProcessId)
+        try values.encode(thread, forKey: .thread)
+        try values.encode(failedTurn, forKey: .failedTurn)
+        try values.encode(model, forKey: .model)
+        try values.encode(account, forKey: .account)
+        try values.encode(state, forKey: .state)
+        try values.encode(reason, forKey: .reason)
+        try values.encode(retryAt, forKey: .retryAt)
+        try values.encode(request, forKey: .request)
+        try values.encode(retryTurn, forKey: .retryTurn)
     }
 }

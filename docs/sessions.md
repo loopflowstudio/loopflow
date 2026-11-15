@@ -505,6 +505,53 @@ then any eligible login with room. A resumed Session runs on the active login.
 A Graph carries its selection to every step; run a fresh Graph to choose
 again. Connecting logins and setting routes: [Ops](ops.md).
 
+## Recover after a usage limit
+
+Three Task conversations are open on the same login when it runs out. Each
+turn stops with the provider's limit message, and Desktop shows a row above
+each conversation:
+
+```text
+Waiting
+No eligible login is ready for this model
+Capacity reset: in 2 hours                      [Recover affected sessions]
+```
+
+Leave **Waiting** conversations open. If the row says **Send it again yourself**,
+send the stopped message again in that conversation; Loopflow cannot resend it
+for this client. When another eligible login has room for a conversation's
+model, Loopflow switches to it and sends the stopped turn again in the same
+conversation. The row reads **Recovering** while that turn runs, then
+**Continued**. History, the selected model, a draft you were typing and an
+approval waiting for your answer are all where you left them, and your next
+message goes through as usual.
+
+**Recover affected sessions** checks every affected conversation now. One
+click covers all of them, Claude and Codex. Use it after you connect a login
+or change a route. No CLI command is needed.
+
+| The row says | What it means | What to do |
+|---|---|---|
+| **Waiting** | The reason says what is pending: capacity (with a reset time when available), reading the stopped turn, its selected model, an earlier resend, or signing in the chosen login. | Leave it open, or [connect a login or change the route](subscriptions.md#route-a-repository), then **Recover affected sessions**. |
+| **Send it again yourself** | The turn was rejected before any work. This conversation was opened before Loopflow could resend for it, or its login is not one Loopflow manages. | Send the stopped message again yourself. Loopflow does not restart the client. **Recover affected sessions** can still recheck this and the other affected conversations. |
+| **Recovering** | The stopped turn is being sent again, or is running. | Nothing. Checking again does not send it twice. |
+| **Continued** | The retried turn finished. | Carry on. |
+| **Review conversation** | Loopflow cannot tell whether the stopped turn reached the provider, or a tool may already have acted. It also appears when a switch was cancelled or timed out partway. | Read the end of the conversation and continue from what happened. Nothing is resent for you. |
+
+The row goes away at your next message in that conversation.
+
+A stopped turn is sent again once at most. If you type something new before
+recovery starts, your message wins and the old turn is dropped. A message you
+send after recovery starts runs after the retried turn.
+
+Recovery only uses logins the Session is allowed to use: `--only-account`
+still holds. It checks capacity for the Session's own model and never changes
+model, provider or your preferences. It does not answer approvals, replay a
+tool action that completed, or rerun a finished Graph step. To continue on a
+different model or provider instead, [move the Sessions](#move-what-a-limit-blocks).
+Headless Graph steps recover on their own path:
+[Subscriptions](subscriptions.md#when-an-account-runs-out).
+
 ## Move what a limit blocks
 
 ```bash
@@ -516,11 +563,14 @@ lf account use claude=work@                  # switch the Machine's login and st
 `--blocked` and `--on <account|harness[:model]>` select Sessions; `list`
 previews what an `-a` move moves. An idle Session continues on the new agent at
 its next open, seeded with its conversation; a busy one moves after its turn.
-Logins belong to the Machine, not to a Session: every open Claude runs on the
-active one. A running Codex keeps its login until you restart it on another:
-`lf --account codex=<login> resume <session>`. `--blocked` and `--on` read the
-login each Session uses. `use` holds launches there until the login fills up
-or `lf account use auto`.
+Use a move when you want to choose another model or provider.
+`--blocked` and `--on` read the login each Session uses. Logins belong
+to the Machine, not to a Session: `use` switches the shared login and holds
+launches there until the login fills up or `lf account use auto`.
+
+A running Codex keeps its login. An explicit `lf --account codex=<login> resume <session>` restarts it.
+An explicit restart restores native history, but does not retain the old client's
+draft or pending approval.
 
 Interactive Sessions only; nothing is written to your preferences. More: [Subscriptions](subscriptions.md#when-an-account-runs-out).
 

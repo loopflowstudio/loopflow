@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LOO-811 · Recovery concept review</title>
+<style>
+:root{color-scheme:light dark;--fg:#202020;--bg:#fbfaf7;--muted:#62605a;--line:#d9d6cf;--accent:#14653e;--code:#eeece6}
+@media(prefers-color-scheme:dark){:root{--fg:#e8e6e1;--bg:#161616;--muted:#aaa69d;--line:#444;--accent:#78d6a0;--code:#252525}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 system-ui,sans-serif}
+main{max-width:46rem;margin:auto;padding:2rem 1rem 3rem}h1{font-size:1.6rem;line-height:1.25}h2{font-size:1.1rem;margin:1.8rem 0 .5rem}
+.meta{font-size:.8rem;color:var(--muted);overflow-wrap:anywhere}.decision{border-left:3px solid var(--accent);padding-left:1rem}
+pre,code{background:var(--code);font: .85rem/1.55 ui-monospace,Menlo,monospace}pre{padding:.8rem;white-space:pre-wrap;overflow-wrap:anywhere}code{padding:.1rem .2rem}
+.table{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:.9rem}th,td{text-align:left;vertical-align:top;border-bottom:1px solid var(--line);padding:.5rem .6rem .5rem 0}button{font:inherit;color:inherit;background:var(--code);border:1px solid var(--line);padding:.45rem .7rem;border-radius:.3rem}
+</style>
+</head>
+<body><main>
+<p class="meta">LOO-811 · concept-review · November 14, 2026 · headless · 5a959ef9d4</p>
+<p class="meta">Built from scratch/interactive-limit-recovery.md; docs/sessions.md; docs/subscriptions.md; swift/README.md; .lf/skills/qa.md; rust/loopflow/src/{session_recovery.rs,store/sqlite/session_events.rs,server/recovery.rs,harness/claude_recovery.rs,harness/codex_recovery.rs}; swift/Loopflow/Models/SessionRecord.swift; swift/LoopflowMac/Views/{SessionRecoveryView.swift,WorkspacePanesView.swift}.</p>
+<h1>Advance: the row now ends when you carry on</h1>
+<p class="decision"><strong>No further design change or open product choice.</strong> Both prior directions remain implemented after compression and the main sync. Advance to gate; retain the remaining demo checks. This review adds no execution receipt or installed acceptance.</p>
+<h2>Actions → concepts → APIs</h2>
+<div class="table"><table>
+<tr><th>You</th><th>Concept</th><th>API and owner</th></tr>
+<tr><td>Leave affected conversations open</td><td>Existing conversation and failed native turn</td><td>Machine server checks; account broker prepares an eligible login for the same model; native hook admits one resend. Holders keep terminals.</td></tr>
+<tr><td>Click Recover affected sessions</td><td>Check now</td><td><code>session.recover</code> → <code>request_session_recovery</code>. Desktop supplies affected Session IDs; no Graph movement.</td></tr>
+<tr><td>Read the row</td><td>One derived recovery reading</td><td><code>session_recovery</code> folds Session history → <code>SessionRecord.recovery</code> → row above pane.</td></tr>
+<tr><td>Send your next message</td><td>Recovery reading ends; history stays</td><td>Recorded later turn or native-history fallback makes the reading absent. Loopflow's own resend cannot end its row.</td></tr>
+</table></div>
+<h2>The mismatch, before → now</h2>
+<p><strong>Before the prior passes:</strong> a rejected turn that needed manual input said “Waiting for native conversation”. Sending that input produced “Review conversation”, which stayed; even “Continued” never ended.</p>
+<p><strong>Implemented now:</strong> each row says what to do. Manual continuation ends the row instead of creating another warning.</p>
+<pre id="example" aria-live="polite">Send it again yourself
+This conversation was opened before Loopflow could resend for it
+
+[Recover affected sessions]</pre>
+<button type="button" id="next">Illustrate your next message</button>
+<p class="meta">Local illustration only; this button sends no message and calls no API.</p>
+<div class="table"><table>
+<tr><th>Implemented row</th><th>Your action</th></tr>
+<tr><td>Waiting</td><td>Leave it open; reason names capacity, history, model or login preparation.</td></tr>
+<tr><td>Send it again yourself</td><td>Resend the rejected message in the conversation. The bulk button can still check other conversations.</td></tr>
+<tr><td>Recovering</td><td>Wait for the resent turn.</td></tr>
+<tr><td>Continued</td><td>Carry on.</td></tr>
+<tr><td>Review conversation</td><td>Read the end and continue from what happened; nothing is automatically resent.</td></tr>
+</table></div>
+<p>The row ends at your next message. Input queued behind a running resend starts afterward. Unconfirmed delivery keeps its warning until native history distinguishes the resend from your later input.</p>
+<h2>Normal, failure, recovery</h2>
+<p><strong>Normal:</strong> Waiting → Recovering → Continued → your next message → no row. The selected model, history, draft and pending approval stay with the native client.</p>
+<p><strong>Failure:</strong> a lost installation or resend reply remains uncertain. A second click or server reconnect cannot authorize another dispatch.</p>
+<p><strong>Recovery:</strong> your later message ends the old row. If that message hits a limit too, its own failed turn gets a new row. A late old-worker result cannot replace it.</p>
+<h2>What to show next</h2>
+<p><strong>Recorded before the main sync:</strong> the final compressed candidate passed native Claude bulk recovery and Codex approval checks with synthetic logins and local inference. Drafts were visible before and after recovery, remained unsent until edited, and completed after submission. Each affected Session had one resend; rows ended; Codex's approval executed its effect once. Fixture processes were reaped. Receipts: <code>.lf/tmp/loo-811-compress-final/</code>.</p>
+<p><strong>Still to check:</strong> gate rebuilds the synced tree and runs the focused selection and served/DTO/Swift matrix. Native checks must include Codex token callbacks across a Machine-server restart. Demo shows several recovering conversations, retained drafts and approval, continued input and disappearing rows in Desktop. Rendered Desktop, physical typing after reopen, and installed real-login behavior remain unverified.</p>
+<p><strong>Proposed behavior:</strong> none added by this pass. Existing docs and QA guidance stay as written. Labels and the row-ending direction remain agent-written; no new person decision is recorded.</p>
+<h2>Questions</h2>
+<ol><li>Any unresolved product choice for loop-or-next? None. Advance; retain the existing gate/demo checks.</li></ol>
+</main>
+<script>
+const example=document.getElementById('example');const next=document.getElementById('next');let ended=false;
+next.addEventListener('click',()=>{ended=!ended;example.textContent=ended?'Your next message starts.\n\n(no recovery row)':'Send it again yourself\nThis conversation was opened before Loopflow could resend for it\n\n[Recover affected sessions]';next.textContent=ended?'Reset illustration':'Illustrate your next message';});
+</script>
+</body></html>

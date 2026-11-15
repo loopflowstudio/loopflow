@@ -148,6 +148,7 @@ fn record(
 ) -> SessionRecord {
     let provider = harness.as_str().to_owned();
     SessionRecord {
+        recovery: None,
         transition: None,
         preview: None,
         primary_scope: None,

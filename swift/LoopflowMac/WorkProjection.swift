@@ -166,14 +166,11 @@ struct SessionBindingDraft: Equatable {
     var error: String?
 }
 
-/// An in-place Session name edit. It belongs to exactly one Session; a
-/// completion for another Session can never touch it.
+/// Local name editor; saving moves the request into WorkInteraction.
 struct SessionRenameDraft: Equatable {
     let id = UUID()
     let sessionId: String
     var text: String
-    var error: String?
-    var submitting = false
 }
 
 /// One Task's in-flight `lf task run` or `lf task move` and its refusal.
@@ -301,7 +298,7 @@ final class WorkNavigation {
             workspacePresentation.selectedSessionId = newValue
             // Leaving a Session abandons an unsubmitted edit; a submitted one
             // still settles against its own Session.
-            if let renaming, renaming.sessionId != selectedSessionId, !renaming.submitting {
+            if let renaming, renaming.sessionId != selectedSessionId {
                 self.renaming = nil
             }
             if let binding, binding.sessionId != selectedSessionId, !binding.submitting {

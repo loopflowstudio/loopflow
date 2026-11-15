@@ -16,7 +16,7 @@ final class RemoteMobileClient: MobileTaskCreationClient {
 
     init(savedMachine: SavedMachine) {
         self.savedMachine = savedMachine
-        connection = MachineConnection {
+        connection = MachineConnection(machine: savedMachine.machineID) {
             let link = try await ServerLink.open(.machine(savedMachine.endpoint))
             do {
                 guard try Self.identity(link.welcome) == savedMachine.machineID else {
@@ -47,7 +47,7 @@ final class RemoteMobileClient: MobileTaskCreationClient {
         let directory = URL.applicationSupportDirectory.appending(path: "submissions-\(savedMachine.machineID)")
         let machineID = savedMachine.machineID
         let connection = connection
-        return ClientWorkStore(directory: directory, prepareDirectory: { directory in
+        return ClientWorkStore(directory: directory, connection: connection, prepareDirectory: { directory in
             try FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
                 ofItemAtPath: directory.path)
         }, machine: { machineID }, read: { query in

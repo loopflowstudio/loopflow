@@ -2,13 +2,14 @@ import Foundation
 
 /// Semantic effects understood by the shared client. An unimplemented command
 /// remains inspectable; a finished transport result cannot invent its contract.
-struct OperationDeclaration {
+public struct OperationDeclaration {
     let stages: Set<String>
     let requiresPresentation: Bool
     let kind: Kind
 
     enum Kind: String {
         case create = "task.create", newSession = "session.new", complete = "task.complete", reopen = "task.reopen"
+        case rename = "session.rename"
         case update = "task.update", move = "task.move", abandon = "task.abandon", claim = "task.claim"
     }
 
@@ -22,18 +23,17 @@ struct OperationDeclaration {
         case .move: "Move Task"
         case .abandon: "Abandon Task"
         case .claim: "Claim Task"
+        case .rename: "Rename Session"
         }
     }
 
-    var progress: String {
+    public static let completionProgress = "Completing…"
+
+    public var progress: String? {
         switch kind {
         case .create, .newSession: "Starting conversation…"
-        case .complete: "Completing Task…"
-        case .reopen: "Reopening Task…"
-        case .update: "Updating Task…"
-        case .move: "Moving Task…"
-        case .abandon: "Abandoning Task…"
-        case .claim: "Claiming Task…"
+        case .complete: Self.completionProgress
+        case .reopen, .update, .move, .abandon, .claim, .rename: nil
         }
     }
 
@@ -45,7 +45,7 @@ struct OperationDeclaration {
             resolution: receipt?.commits.first { stages.contains($0.stage) })
     }
 
-    init?(kind: String) {
+    public init?(kind: String) {
         guard let declared = Kind(rawValue: kind) else { return nil }
         self.kind = declared
         requiresPresentation = kind == "task.create" || kind == "session.new"
@@ -58,6 +58,7 @@ struct OperationDeclaration {
         case .move: stages = ["task.membership_changed"]
         case .abandon: stages = ["task.abandoned"]
         case .claim: stages = ["task.claimed"]
+        case .rename: stages = ["session.renamed"]
         }
     }
 

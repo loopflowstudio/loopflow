@@ -149,9 +149,17 @@ final class WorkModel {
     func useInteractionForTesting(_ interaction: WorkInteraction) { self.interaction = interaction }
     #endif
 
+    func sessionTitle(id: String, fallback: String) -> String {
+        interaction?.sessionTitle(id: id, fallback: fallback) ?? fallback
+    }
+
+    func sessionTitle(_ record: SessionRecord) -> String { interaction?.named(record).title ?? record.title }
+
     func isCompleting(_ task: RoadmapTask) -> Bool {
         interaction?.isCompleting(issue: task.task.identifier, directory: WaveOrigin.cached(task.task.repo)) == true
     }
+
+    var waitingForConnection: Bool { interaction?.waitingForConnection == true }
 
     var presentationError: String? { interaction?.cacheError }
 
@@ -777,7 +785,7 @@ final class WorkModel {
         openTaskDestination(wave: wave, task: task, preservingOpening: true)
         supersedeSessions()
         // Merge this exact Session without waiting for the repository inventory.
-        let records = [record] + (sessions.value ?? []).filter { $0.id != record.id }
+        let records = [record] + (rawSessions.value ?? []).filter { $0.id != record.id }
         if let reason = sessions.errorMessage {
             // One successful acquisition does not repair an unrelated inventory failure.
             sessions = .unavailable(lastGood: records, reason: reason)
@@ -1074,7 +1082,7 @@ final class WorkModel {
             let record = try await query.prepareSession(id: id, cwd: repoPath, intent: .start)
             try Task.checkCancellation()
             guard destinationGeneration == generation else { return }
-            let records = [record] + (sessions.value ?? []).filter { $0.id != id }
+            let records = [record] + (rawSessions.value ?? []).filter { $0.id != id }
             supersedeSessions()
             if let reason = sessions.errorMessage { sessions = .unavailable(lastGood: records, reason: reason) }
             else { sessions = .available(records) }
@@ -1432,8 +1440,18 @@ final class WorkModel {
         set { peerPlanningReadings[repositoryReadingKey(repoPath ?? "")] = newValue }
     }
     private var peerPlanningGeneration = 0
+    private var rawSessions: WorkReading<[SessionRecord]> { sessionReadings[repositoryReadingKey(repoPath ?? "")] ?? .loading }
+
     private(set) var sessions: WorkReading<[SessionRecord]> {
-        get { sessionReadings[repositoryReadingKey(repoPath ?? "")] ?? .loading }
+        get {
+            let reading = rawSessions
+            let named = { (records: [SessionRecord]) in records.map { self.interaction?.named($0) ?? $0 } }
+            switch reading {
+            case .loading: return .loading
+            case .available(let records): return .available(named(records))
+            case .unavailable(let records, let reason): return .unavailable(lastGood: records.map(named), reason: reason)
+            }
+        }
         set { sessionReadings[repositoryReadingKey(repoPath ?? "")] = newValue }
     }
     private(set) var workActivity: WorkReading<WorkActivitySnapshot> = .loading
@@ -1851,7 +1869,7 @@ final class WorkModel {
         subscribedTaskRow = .unavailable(lastGood: subscribedTaskRow.value, reason: reason)
         roadmap = .unavailable(lastGood: roadmap.value, reason: reason)
         if let value = waves.value { waves = .unavailable(lastGood: value, reason: reason) }
-        if repoPath != nil, let value = sessions.value { sessions = .unavailable(lastGood: value, reason: reason) }
+        if repoPath != nil, let value = rawSessions.value { sessions = .unavailable(lastGood: value, reason: reason) }
         peerPlanningReadings = peerPlanningReadings.mapValues {
             .unavailable(lastGood: $0.value, reason: reason)
         }
@@ -1930,12 +1948,19 @@ final class WorkModel {
         case .sessions(let body):
             guard answers >= max(sessionsFloor, scopeFloor), let repoPath else { return }
             guard let body else {
-                sessions = .unavailable(lastGood: sessions.value, reason: reason)
+                sessions = .unavailable(lastGood: rawSessions.value, reason: reason)
                 break
             }
             guard body.repo.normalizedFilePath == repoPath.normalizedFilePath,
                   !body.includesHeadless else { return }
-            let remote = (sessions.value ?? []).filter {
+            if let stamp = frame.stamp, stamp.machine == observingMachineId {
+                if interaction == nil { interaction = .local(stamp.machine) }
+                let scope = workScope
+                do { try await interaction?.receiveNames(body.entries, stamp: stamp) }
+                catch { DesktopLog.home.error("Session name reading: \(error.localizedDescription)") }
+                guard scope == workScope, answers >= max(sessionsFloor, scopeFloor) else { return }
+            }
+            let remote = (rawSessions.value ?? []).filter {
                 guard let machine = $0.workspace?.machineId else { return false }
                 return workMachine == nil || machine != workMachine
             }
@@ -2591,7 +2616,7 @@ final class WorkModel {
 
     private func readSessions(repoPath: String, generation: Int) async {
         let key = repositoryReadingKey(repoPath)
-        let initialIDs = Set((sessions.value ?? []).map(\.id))
+        let initialIDs = Set((rawSessions.value ?? []).map(\.id))
         var records: [SessionRecord] = []
         var after: String?
         let wire = WireCapture()
@@ -2599,7 +2624,12 @@ final class WorkModel {
         let started = ContinuousClock.now
         do {
             repeat {
-                let page = try await query.sessionPage(includingHeadless: false, after: after, cwd: repoPath)
+                let reading = try await query.sessionPage(includingHeadless: false, after: after, cwd: repoPath)
+                let page = reading.page
+                if let stamp = reading.stamp {
+                    if interaction == nil { interaction = .local(stamp.machine) }
+                    try await interaction?.receiveNames(page.entries, stamp: stamp)
+                }
                 guard sessionsGeneration == generation, self.repoPath == repoPath,
                       repositoryReadingKey(repoPath) == key,
                       !Task.isCancelled else { return }
@@ -2607,7 +2637,7 @@ final class WorkModel {
                 let seen = Set(records.map(\.id))
                 // Keep prior rows until enumeration finishes, and preserve records
                 // added locally during this read. Native panes have their own lifetime.
-                let retained = (sessions.value ?? []).filter {
+                let retained = (rawSessions.value ?? []).filter {
                     !seen.contains($0.id) && (page.next != nil || !initialIDs.contains($0.id) || (workMachine != nil && $0.workspace?.machineId != nil && $0.workspace?.machineId != workMachine))
                 }
                 let next = WorkReading.available(records + retained)
@@ -2624,7 +2654,7 @@ final class WorkModel {
                       repositoryReadingKey(repoPath) == key,
                   !Task.isCancelled else { return }
             LaunchJournal.home.refreshed("sessions", ms: started.elapsedMs, ok: false)
-            let next = WorkReading.unavailable(lastGood: sessions.value, reason: error.localizedDescription)
+            let next = WorkReading.unavailable(lastGood: rawSessions.value, reason: error.localizedDescription)
             if sessions != next { sessions = next }
         }
     }
@@ -2899,36 +2929,17 @@ final class WorkModel {
 
     func beginSessionRename(_ record: SessionRecord) {
         guard navigation.renaming?.sessionId != record.id else { return }
-        navigation.renaming = SessionRenameDraft(sessionId: record.id, text: record.title)
+        navigation.renaming = SessionRenameDraft(sessionId: record.id, text: sessionTitle(record))
     }
 
-    /// Submit the current rename. Success publishes Rust's authoritative
-    /// record; rejection keeps the typed name and its error. Either outcome
-    /// settles only the Session and repository that started it.
     func commitSessionRename() async {
-        guard let repo = repoPath, let draft = navigation.renaming, !draft.submitting else { return }
-        let owner = navigation
-        let key = repositoryReadingKey(repo)
-        let target = draft.sessionId
-        owner.renaming?.submitting = true
-        owner.renaming?.error = nil
-        do {
-            let record = try await query.renameSession(id: target, name: draft.text, cwd: repo)
-            // A read started before the rename must not restore the old name.
-            supersedeSessions()
-            replaceSession(record, key: key)
-            if owner.renaming?.id == draft.id { owner.renaming = nil }
-        } catch {
-            guard owner.renaming?.id == draft.id else { return }
-            owner.renaming?.submitting = false
-            owner.renaming?.error = error.localizedDescription
-        }
-    }
-
-    func cancelSessionRename() {
-        guard navigation.renaming?.submitting == false else { return }
+        guard let repo = repoPath, let draft = navigation.renaming else { return }
+        if interaction == nil { interaction = .local(workMachine ?? savedMachineId) }
+        interaction?.renameSession(id: draft.sessionId, name: draft.text, directory: repo)
         navigation.renaming = nil
     }
+
+    func cancelSessionRename() { navigation.renaming = nil }
 
     func beginSessionBinding(_ record: SessionRecord) {
         guard navigation.binding == nil else { return }

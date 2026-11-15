@@ -3,7 +3,7 @@ import Loopflow
 
 extension ClientWorkStore {
     static let shared = ClientWorkStore(
-        directory: WorkCache.homeDirectory.appendingPathComponent("submissions"),
+        directory: WorkCache.homeDirectory.appendingPathComponent("submissions"), connection: ServerLocation.shared.connection,
         machine: { try await localMachine() },
         read: { try await ServerClient.read($0) },
         observe: { ServerClient.operationReceipts($0) },

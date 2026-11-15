@@ -3,8 +3,7 @@
 - Jack Heart replied “1a” to the 2026-11-15 conversation review's disconnected-edit
   question: save and project Complete/rename/move locally, show “Waiting for
   connection,” and deliver on reconnect to the original Machine. Retain across
-  restart; recover uncertain sends without duplicate execution. Implementation
-  remains required on both clients.
+  restart; recover uncertain sends without duplicate execution. Disconnected Move and the remaining cross-platform cutover are unbuilt.
 
 - Scope now covers Desktop and mobile interaction state throughout the app;
   launch, completion, cached/recent Task selection and Wave disclosure are
@@ -123,8 +122,20 @@
 - Headless reversible choices from the 2026-11-15 concept review of the
   conversation/Machine-link cut; nobody has stated a preference on either:
   - The phone feed shows one "Waiting for connection" line for its Machine, and
-    held changes list their titles under it without repeating the words. The
-    built cut shows the words per row and nothing when no change is held.
-  - Offline rename is scoped to Desktop (not yet built). The phone shows a Task title for
+    held changes list their titles under it without repeating the words. The current pass implements that presentation.
+  - Offline Session rename is built on Desktop. The phone shows a Task title for
     each conversation and has no rename; whether it should show Session names
     or offer rename is undiscussed (question 3 in `scratch/concept-review.html`).
+
+- Headless rename choice, 2026-11-15: a newer name edit replaces an older rename
+  that never saved, including when its save fails after the newer gesture. The
+  failed request cannot later retry behind the newer edit. Saved renames retain
+  their IDs and serialize by Session until the earlier domain outcome is known.
+  Stamped name readings and the rename stage's actual name join one field owner;
+  their sessions revision orders them across query identities. A name result can
+  retire independently of membership queries because it carries that field value
+  and fence; it never fabricates a Machine query stamp.
+
+- Rename targets retained Session metadata, including a completed conversation;
+  it does not require a live input attachment. The domain transaction still owns
+  naming permission, validation, the actual stored name and definite refusal.

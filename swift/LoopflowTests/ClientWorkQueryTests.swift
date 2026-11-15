@@ -913,8 +913,14 @@ final class ClientWorkQueryTests: XCTestCase {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
         let machine = HeldCompletionMachine()
+        let carrier = CompletionCarrier()
+        let connection = MachineConnection {
+            if machine.isWaiting { throw ServerConnectionUnavailable(RegistryQueryError("Offline")) }
+            return try await ServerLink.open(ServerEndpoint(client: .init(kind: "test", platform: "test", name: "test", version: "test"),
+                control: { carrier }, ticketed: { carrier }))
+        }
         func client() -> ClientWorkStore {
-            ClientWorkStore(directory: directory, machine: { XCTFail("Saved work needs no discovery"); return "machine" },
+            ClientWorkStore(directory: directory, connection: connection, machine: { XCTFail("Saved work needs no discovery"); return "machine" },
                 read: { _ in "null" }, observe: { machine.observe($0) }, send: { machine.send($0) })
         }
         let disk = client()
@@ -929,6 +935,7 @@ final class ClientWorkQueryTests: XCTestCase {
         var watches = machine.observations.makeAsyncIterator()
         _ = await watches.next()
         machine.setWaiting(true)
+        _ = try? await connection.link()
         await owner.refreshFromStore()
         let operation = try XCTUnwrap(owner.listedOperations.first)
         XCTAssertEqual(operation.presentation().status, .waitingForConnection)
@@ -948,6 +955,8 @@ final class ClientWorkQueryTests: XCTestCase {
         XCTAssertEqual(restarted.listedOperations.map(\.id), [id])
         XCTAssertEqual(restarted.listedOperations.first?.presentation().status, .waitingForConnection)
         machine.setWaiting(false)
+        let link = try await connection.link()
+        defer { Task { await link.close() } }
         machine.publish(try completionFrame(nil, epoch: "epoch"))
         var sends = machine.sends.makeAsyncIterator()
         _ = await sends.next()
@@ -1021,7 +1030,7 @@ final class ClientWorkQueryTests: XCTestCase {
         await owner.refreshFromStore()
         XCTAssertEqual(shown?.projection.visible.map(\.work), [a, b])
         XCTAssertEqual(selected, a)
-        XCTAssertTrue(owner.listedOperations.first?.presentation().status.text.contains("Cannot abandon") == true)
+        XCTAssertTrue(owner.listedOperations.first?.presentation().status.text?.contains("Cannot abandon") == true)
         XCTAssertTrue(machine.submissions.isEmpty)
     }
 
@@ -1058,9 +1067,9 @@ private final class HeldCompletionMachine: @unchecked Sendable {
     private var current: SubscriptionReading<OperationReceipt>?
     private var sent: [Data] = []
     private var waiting = false
-    private var connections: [UUID: AsyncStream<Void>.Continuation] = [:]
+    var isWaiting: Bool { lock.withLock { waiting } }
     func setWaiting(_ value: Bool) {
-        lock.withLock { waiting = value; for connection in connections.values { connection.yield(()) } }
+        lock.withLock { waiting = value }
     }
     var submissions: [Data] { lock.withLock { sent } }
     let observations: AsyncStream<Void>
@@ -1074,12 +1083,11 @@ private final class HeldCompletionMachine: @unchecked Sendable {
     func observe(_ id: String) -> ClientWorkStore.ReceiptWatch {
         let key = UUID()
         let (stream, continuation) = AsyncThrowingStream<SubscriptionReading<OperationReceipt>, any Error>.makeStream()
-        let (changes, connection) = AsyncStream<Void>.makeStream()
-        lock.withLock { watches[key] = continuation; connections[key] = connection; if let current { continuation.yield(current) } }
+        lock.withLock { watches[key] = continuation; if let current { continuation.yield(current) } }
         observing.yield(())
         return ServerWatch(updates: stream, checkpoint: { _ in }, cancel: { [self] in
-            lock.withLock { watches.removeValue(forKey: key)?.finish(); connections.removeValue(forKey: key)?.finish() }
-        }, connections: changes, isWaiting: { [self] in lock.withLock { waiting } })
+            lock.withLock { watches.removeValue(forKey: key)?.finish() }
+        })
     }
     func publish(_ frame: SubscriptionReading<OperationReceipt>) {
         lock.withLock { current = frame; for watch in watches.values { watch.yield(frame) } }
@@ -1098,4 +1106,20 @@ private actor HeldIntentMachine {
         return "machine"
     }
     func release() { ready = true; continuation?.resume(); continuation = nil }
+}
+
+private actor CompletionCarrier: ServerCarrier {
+    private var welcomed = false
+    private var closed = false
+    private var waiting: CheckedContinuation<Data?, Never>?
+    func send(_ message: Data) {}
+    func receive() async -> Data? {
+        if !welcomed {
+            welcomed = true
+            return Data(#"{"type":"welcome","client_id":"fixture","revision":6,"server_revision":6,"min_revision":6,"instance":"fixture","build":"test","executable_sha256":"hash","machine":null,"limits":{"max_message":1048576,"max_connections":64,"max_open":256,"max_retained_bytes":67108864}}"#.utf8)
+        }
+        if closed { return nil }
+        return await withCheckedContinuation { waiting = $0 }
+    }
+    func close() { closed = true; waiting?.resume(returning: nil); waiting = nil }
 }

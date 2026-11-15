@@ -180,22 +180,23 @@ struct ServerClientTests {
             }
             return false
         }
-        let watch = ServerLink.subscribe(.operationGet(requestID: "original"), reconnect: true, connection: MachineConnection {
+        let connection = MachineConnection {
             if attempts.increment() <= 2 { throw ServerConnectionUnavailable(RegistryQueryError("Offline")) }
             return try await ServerLink.open(.unix(path: peer.location.path()))
-        }) { update -> RawJSON? in
+        }
+        let watch = ServerLink.subscribe(.operationGet(requestID: "original"), reconnect: true, connection: connection) { update -> RawJSON? in
             guard case .reading(let frame) = update else { return nil }
             return frame
         }
         defer { watch.cancel() }
-        var connections = try #require(watch.connections).makeAsyncIterator()
-        while !watch.isWaiting() { _ = await connections.next() }
-        #expect(watch.isWaiting())
+        var connections = connection.changes().makeAsyncIterator()
+        while !connection.isWaiting { _ = await connections.next() }
+        #expect(connection.isWaiting)
         var frames = watch.updates.makeAsyncIterator()
         let frame = try #require(try await frames.next())
         #expect(try frame.fields()["body"]?.decode(String.self) == "reconnected")
         #expect(attempts.get() == 4)
-        #expect(!watch.isWaiting())
+        #expect(!connection.isWaiting)
     }
 
     @Test func threeHeldReceiptsShareOneMachineReconnectAndCancelIndependently() async throws {
@@ -226,14 +227,14 @@ struct ServerClientTests {
         defer { for watch in watches { watch.cancel() }; allow.finish(); signal.finish() }
         var opens = opened.makeAsyncIterator()
         _ = await opens.next()
-        #expect(watches.allSatisfy { $0.isWaiting() })
+        #expect(connection.isWaiting)
         watches[0].cancel()
         allow.yield(())
         for watch in watches.dropFirst() {
             var frames = watch.updates.makeAsyncIterator()
             let frame = try #require(try await frames.next())
             #expect(try frame.fields()["body"]?.decode(String.self) == "recovered")
-            #expect(!watch.isWaiting())
+            #expect(!connection.isWaiting)
         }
         #expect(attempts.get() == 2)
     }

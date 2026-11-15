@@ -76,7 +76,7 @@ struct TaskCompleteButton: View {
     let complete: () -> Void
     var pending = false
     var body: some View {
-        Button(pending ? "Completing…" : "Complete", action: complete)
+        Button(pending ? OperationDeclaration.completionProgress : "Complete", action: complete)
             .disabled(pending).accessibilityIdentifier("task-complete")
     }
 }

@@ -15,7 +15,7 @@ struct TaskWorkflowHeader: View {
     @State private var expandedTasks: Set<String> = []
 
     private var lifecycleLabel: String {
-        if model.isCompleting(task) { return "Completing…" }
+        if model.isCompleting(task) { return OperationDeclaration.completionProgress }
         return switch task.lifecycle {
         case .done: "Completed"
         case .abandoned: "Canceled"
@@ -85,7 +85,7 @@ struct TaskWorkflowHeader: View {
                         .accessibilityIdentifier("task-reopen")
                 } else {
                     Button("Complete") { model.completeTask(task) }
-                        .disabled(acting || model.isCompleting(task) || readingUnavailable != nil)
+                        .disabled(acting || model.isCompleting(task))
                         .accessibilityIdentifier("task-complete")
                     Button(task.runtime?.owner == nil ? "Claim" : "Unassign") {
                         Task { await model.assignTask(task, claimed: task.runtime?.owner == nil) }
@@ -93,7 +93,7 @@ struct TaskWorkflowHeader: View {
                     .disabled(acting || readingUnavailable != nil)
                     .accessibilityIdentifier("task-claim-unassign")
                     Button("Abandon…", role: .destructive) { confirmingAbandon = true }
-                        .disabled(acting || readingUnavailable != nil)
+                        .disabled(acting)
                         .accessibilityIdentifier("task-abandon")
                 }
                 workspaceActions
@@ -288,7 +288,7 @@ struct TaskShipControl: View {
                         .accessibilityIdentifier("task-unassign")
                         Button("Abandon…", role: .destructive) { confirmingAbandon = true }
                             .buttonStyle(WorkOutlineButtonStyle(destructive: true))
-                            .disabled(acting || readingUnavailable != nil)
+                            .disabled(acting)
                             .accessibilityIdentifier("task-ship-abandon")
                     }
                     Button("Auto-Ship") { Task { await model.shipTask(task) } }
@@ -614,9 +614,8 @@ struct TaskActionItems: View {
     var openSession: ((SessionRecord) -> Void)?
     @State private var copied: String?
 
-    private var unavailable: Bool {
-        model.navigation.taskRunDrafts[task.id]?.acting == true || model.roadmap.errorMessage != nil || model.showsSavedPlanning
-    }
+    private var acting: Bool { model.navigation.taskRunDrafts[task.id]?.acting == true }
+    private var unavailable: Bool { acting || model.roadmap.errorMessage != nil || model.showsSavedPlanning }
 
     var body: some View {
         Button("New conversation") { newConversation?() }.disabled(newConversation == nil || unavailable)
@@ -632,7 +631,7 @@ struct TaskActionItems: View {
         if task.isCompleted {
             Button("Reopen Task") { Task { await model.reopenTask(task) } }.disabled(unavailable)
         } else {
-            Button("Complete Task") { model.completeTask(task, visible: completionOrder) }.disabled(unavailable)
+            Button("Complete Task") { model.completeTask(task, visible: completionOrder) }.disabled(acting || model.isCompleting(task))
             Button(task.runtime?.owner == nil ? "Claim Task" : "Unassign Task") {
                 Task { await model.assignTask(task, claimed: task.runtime?.owner == nil) }
             }.disabled(unavailable)
@@ -838,7 +837,7 @@ struct TaskWorkView: View {
             }
             if let work = model.taskExecution[task.id].value?.work {
                 ForEach(work.sessions) { session in
-                    row(session.interactive ? "Session" : "Run", id: session.id, name: session.title,
+                    row(session.interactive ? "Session" : "Run", id: session.id, name: model.sessionTitle(id: session.id, fallback: session.title),
                         state: session.completedAt == nil ? "open" : "completed")
                 }
                 ForEach(work.processes) { process in

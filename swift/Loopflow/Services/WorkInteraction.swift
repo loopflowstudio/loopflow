@@ -26,9 +26,12 @@ public final class WorkInteraction {
     public var creations: [PendingOperation] { operations.filter(\.isCreation) }
     public var listedOperations: [PendingOperation] { operations.filter(\.isListed) }
     public private(set) var machine: String?
+    public private(set) var waitingForConnection = false
     public private(set) var cacheError: String?
     private var completing: Set<TaskTarget> = []
     private struct TaskTarget: Hashable { let issue: String; let directory: String }
+    private var confirmedNames: [String: SessionNameFact] = [:]
+    private var projectedNames: [String: (title: String, source: SessionTitleSource)] = [:]
     @ObservationIgnored private var saved: [SubmittedOperation] = []
     @ObservationIgnored private let store: ClientWorkStore
     @ObservationIgnored private var leases: [UUID: Lease] = [:]
@@ -48,6 +51,7 @@ public final class WorkInteraction {
     public init(machine: String?, store: ClientWorkStore) {
         self.machine = machine
         self.store = store
+        if let machine { store.rememberMachine(machine) }
     }
 
     deinit {
@@ -61,6 +65,7 @@ public final class WorkInteraction {
     public func bindMachine(_ machine: String) {
         guard self.machine == nil else { return }
         self.machine = machine
+        store.rememberMachine(machine)
     }
 
     public func open(_ read: ServedRead, receive: @escaping ([ProjectedWorkPlan]?) -> Void) -> UUID {
@@ -157,6 +162,48 @@ public final class WorkInteraction {
         guard stamp.machine == machine else { throw RegistryQueryError("Work belongs to another Machine") }
         _ = try await store.receivePlans(plans, stamp: stamp, for: read)
         await refreshFromStore()
+    }
+
+    public func receiveNames(_ records: [SessionRecord], stamp: ReadingStamp) async throws {
+        guard stamp.machine == machine else { throw RegistryQueryError("Session names belong to another Machine") }
+        start()
+        try await store.receiveNames(records, stamp: stamp)
+        await refreshFromStore()
+    }
+
+    public func sessionTitle(id: String, fallback: String) -> String {
+        projectedNames[id]?.title ?? fallback
+    }
+
+    public func named(_ record: SessionRecord) -> SessionRecord {
+        guard let name = projectedNames[record.id] else { return record }
+        var record = record
+        record.title = name.title
+        record.titleSource = name.source
+        return record
+    }
+
+    /// Freeze the name and close the editor in the same turn as publication.
+    @discardableResult
+    public func renameSession(id session: String, name: String, directory: String) -> String {
+        // A newer edit replaces a name that never saved. It cannot later retry
+        // behind that newer edit and reverse the requested order.
+        let replaced = Set(operations.filter {
+            $0.kind == "session.rename" && $0.targetSession == session && !$0.saved && $0.error != nil
+        }.map(\.id))
+        operations.removeAll { replaced.contains($0.id) }
+        intents.removeAll { replaced.contains($0.id) }
+        let id = UUID().uuidString.lowercased()
+        let command = ServedWrite.sessionRename(directory: directory, id: session, name: name)
+        let payload = try! JSONEncoder().encode(command)
+        let intent = Intent(id: id, payload: payload, submittedAt: Date(), draftID: nil, destination: machine, effect: nil)
+        operations.append(PendingOperation(id: id, payload: payload, kind: "session.rename", request: name,
+            directory: directory, wave: nil, graph: nil, submittedAt: intent.submittedAt, destination: machine))
+        intents.append(intent)
+        publish()
+        start()
+        enqueue(intent)
+        return id
     }
 
     /// Publication and origin navigation happen in this call, before disk or
@@ -264,7 +311,14 @@ public final class WorkInteraction {
                 guard !Task.isCancelled else { return }
                 deliver(record)
             } catch {
-                operations.first { $0.id == intent.id }?.fail(error.localizedDescription)
+                if let operation = operations.first(where: { $0.id == intent.id }) {
+                    operation.fail(error.localizedDescription)
+                    if operation.kind == "session.rename", let index = operations.firstIndex(where: { $0.id == intent.id }),
+                       operations.dropFirst(index + 1).contains(where: { $0.kind == "session.rename" && $0.targetSession == operation.targetSession }) {
+                        operations.removeAll { $0.id == intent.id }
+                        intents.removeAll { $0.id == intent.id }
+                    }
+                }
                 publish()
             }
         }
@@ -319,6 +373,15 @@ public final class WorkInteraction {
     }
 
     private func publish() {
+        var names = confirmedNames.mapValues { (title: $0.title, source: $0.source) }
+        for operation in operations where operation.kind == "session.rename" && operation.projectsEffect {
+            guard let command = try? JSONDecoder().decode(JSONValue.self, from: operation.payload),
+                  case .string(let session) = command["id"], case .string(let title) = command["name"] else { continue }
+            if operation.evidence?.validation == .bound, let commit = operation.evidence?.commits.first(where: { $0.stage == "session.renamed" }),
+               commit.resolution == .committed, confirmedNames[session]?.covers(commit.fence) == true { continue }
+            names[session] = (title, .human)
+        }
+        projectedNames = names
         completing = Set(operations.filter { $0.kind == "task.complete" && $0.projectsEffect }.compactMap {
             guard let issue = $0.targetIssue else { return nil }
             return TaskTarget(issue: issue, directory: $0.directory)
@@ -348,6 +411,8 @@ public final class WorkInteraction {
     func apply(_ update: ClientWorkStore.Presentation) {
         guard update.revision >= revision else { return }
         revision = update.revision
+        waitingForConnection = update.waitingForConnection
+        confirmedNames = update.names
         let savedIDs = Set(update.records.map(\.id))
         for (id, task) in deliveries where !savedIDs.contains(id) {
             task.cancel()

@@ -103,6 +103,8 @@ final class ClientWorkDatabase {
         }
         try execute("CREATE TABLE IF NOT EXISTS work_queries (id TEXT PRIMARY KEY, state BLOB NOT NULL)")
         try execute("CREATE INDEX IF NOT EXISTS work_queries_with_effects ON work_queries(id) WHERE json_array_length(CAST(state AS TEXT),'$.effects')>0")
+        try execute("CREATE TABLE IF NOT EXISTS session_names (id TEXT PRIMARY KEY, state BLOB NOT NULL)")
+        try execute("CREATE INDEX IF NOT EXISTS session_names_machine ON session_names(json_extract(CAST(state AS TEXT),'$.fence.machine'))")
         try execute("CREATE TABLE IF NOT EXISTS work_epochs (id TEXT PRIMARY KEY, state BLOB NOT NULL)")
         try execute("CREATE TABLE IF NOT EXISTS work_requirements (id TEXT PRIMARY KEY, state BLOB NOT NULL)")
         // Confirmed caches are replaceable. The outbox and its reload floors
@@ -244,7 +246,72 @@ final class ClientWorkDatabase {
         state.receiptEpoch = epoch
         // Learning the receipt's lifetime makes an imported journal recoverable.
         state.sentEpoch = epoch
-        try update(state)
+        try transaction {
+            try update(state)
+            for commit in receipt.commits where receipt.kind == "session.rename" && receipt.validation == .bound
+                && commit.stage == "session.renamed" && commit.resolution == .committed {
+                guard commit.fence.machine == state.record.destination, commit.fence.epoch == epoch,
+                      case .string(let session) = commit.result["id"],
+                      case .string(let title) = commit.result["title"],
+                      case .string(let source) = commit.result["title_source"],
+                      let source = SessionTitleSource(rawValue: source) else {
+                    throw RegistryQueryError("The Session rename result is missing its name or provenance")
+                }
+                let command = try JSONDecoder().decode(JSONValue.self, from: state.record.payload)
+                guard case .string(let target) = command["id"], StructuredIdentity.session(target) == session,
+                      commit.resources.contains(session) else {
+                    throw RegistryQueryError("The Session rename result names another Session")
+                }
+                try receiveName(SessionNameFact(id: session, title: title, source: source, fence: commit.fence))
+            }
+        }
+    }
+
+    func earlierRenamePending(_ record: SubmittedOperation) throws -> Bool {
+        let command = try JSONDecoder().decode(JSONValue.self, from: record.payload)
+        guard command["kind"] == .string("session.rename") else { return false }
+        let session = command["id"]
+        let epoch = try activeEpoch(machine: record.destination)
+        for earlier in try pending() {
+            if earlier.id == record.id { break }
+            guard earlier.destination == record.destination else { continue }
+            let prior = try JSONDecoder().decode(JSONValue.self, from: earlier.payload)
+            guard prior["kind"] == .string("session.rename"), prior["id"] == session,
+                  let state = try state(earlier.id) else { continue }
+            if state.receiptUnavailable == true || state.receiptEpoch != epoch { return true }
+            guard let receipt = state.receipt, receipt.validation == .bound,
+                  OperationDeclaration(kind: "session.rename")?.resolutions(in: receipt) != nil else { return true }
+        }
+        return false
+    }
+
+    func receiveNames(_ records: [SessionRecord], stamp: ReadingStamp) throws {
+        try transaction {
+            guard stamp.schema == ServerProtocol.revision,
+                  try observeMachineEpoch(stamp.epoch, machine: stamp.machine) else { return }
+            let fence = CommitFence(machine: stamp.machine, epoch: stamp.epoch, schema: stamp.schema,
+                revisions: ["sessions": stamp.revisions.sessions])
+            for record in records where record.titleSource != .unavailable {
+                try receiveName(SessionNameFact(id: record.id, title: record.title, source: record.titleSource, fence: fence))
+            }
+        }
+    }
+
+    private func receiveName(_ fact: SessionNameFact) throws {
+        guard fact.fence.schema == ServerProtocol.revision, fact.fence.revisions["sessions"] != nil,
+              try activeEpoch(machine: fact.fence.machine) == fact.fence.epoch else { return }
+        let key = queryID(machine: fact.fence.machine, query: fact.id)
+        if let previous = try rows("SELECT state FROM session_names WHERE id=?", id: key).first
+            .map({ try JSONDecoder().decode(SessionNameFact.self, from: $0) }),
+           previous.fence.epoch == fact.fence.epoch, !fact.covers(previous.fence) { return }
+        try execute("INSERT OR REPLACE INTO session_names(id,state) VALUES(?,?)", id: key, data: JSONEncoder().encode(fact))
+    }
+
+    func names(machine: String) throws -> [String: SessionNameFact] {
+        let epoch = try activeEpoch(machine: machine)
+        let facts = try rows("SELECT state FROM session_names WHERE json_extract(CAST(state AS TEXT),'$.fence.machine')=?", id: machine)
+            .map { try JSONDecoder().decode(SessionNameFact.self, from: $0) }.filter { $0.fence.epoch == epoch }
+        return Dictionary(facts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     }
 
     /// A single transaction owns presentation, query invalidation and retirement.
@@ -292,7 +359,9 @@ final class ClientWorkDatabase {
             }
         }
         var requirements = try requirements(state.record.destination)
-        for resolution in resolutions {
+        // Session names have one normalized field owner; the committed result
+        // already joined it in the receipt transaction. No membership reload.
+        for resolution in resolutions where receipt.kind != "session.rename" {
             let fence = resolution.fence
             // Bound requirements by lifetime, repository and effect declaration,
             // independent of the number of completed commands.

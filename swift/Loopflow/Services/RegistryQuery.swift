@@ -809,6 +809,8 @@ public struct RegistryQuery: Sendable {
     /// What a `ServedRead`'s `argv` prints: served in the app when the
     /// transport can, else run.
     private var serve: @Sendable (ServedRead) async throws -> String
+    /// A reading with the snapshot provenance of its body, when supported.
+    private var stamped: (@Sendable (ServedRead) async throws -> RawJSON)?
     /// What a `ServedWrite`'s `argv` prints: made in the app when the
     /// transport can, else run.
     private var write: @Sendable (ServedWrite) async throws -> String
@@ -821,12 +823,14 @@ public struct RegistryQuery: Sendable {
             throw RegistryQueryError("Draft comparison is unavailable on this transport")
         },
         serve: (@Sendable (ServedRead) async throws -> String)? = nil,
+        stamped: (@Sendable (ServedRead) async throws -> RawJSON)? = nil,
         write: (@Sendable (ServedWrite) async throws -> String)? = nil,
         watchFiles: (@Sendable ([String], String?) async throws -> TaskFilesObservation)? = nil,
         subscribeRead: (@Sendable ([String], String?) async throws -> LineSubscription)? = nil,
         subscribeWork: (@Sendable () async throws -> WorkObservation)? = nil,
         run: @escaping RegistryRunner
     ) {
+        self.stamped = stamped
         self.runWithInput = runWithInput
         self.serve = serve ?? { query in
             if let input = query.input { return try await runWithInput(query.argv, query.cwd, input) }
@@ -945,6 +949,14 @@ public struct RegistryQuery: Sendable {
             }
         }
         var query = self
+        if let stamped {
+            query.stamped = { read in
+                try await validate()
+                let output = try await stamped(read)
+                try await validate()
+                return output
+            }
+        }
         query.run = { [run] args, cwd in
             try await validate()
             let output = try await run(args, cwd)
@@ -1023,6 +1035,13 @@ public struct RegistryQuery: Sendable {
             let stdout = try await serve(read)
             record(stdout)
             return stdout
+        }
+        if let stamped {
+            query.stamped = { read in
+                let frame = try await stamped(read)
+                if let body = try frame.fields()["body"] { record(body.printed) }
+                return frame
+            }
         }
         query.write = { [write] change in
             let stdout = try await write(change)
@@ -1313,9 +1332,17 @@ public struct RegistryQuery: Sendable {
 
     /// One bounded page, ordered by stable Session identity.
     public func sessionPage(includingHeadless: Bool = false, after: String? = nil,
-                            cwd: String? = nil) async throws -> SessionPage {
-        try Self.decode(SessionPage.self, from: await serve(
-            .sessionList(directory: cwd ?? "/", headless: includingHeadless, after: after, limit: 100, task: nil)))
+                            cwd: String? = nil) async throws -> (page: SessionPage, stamp: ReadingStamp?) {
+        let read = ServedRead.sessionList(directory: cwd ?? "/", headless: includingHeadless, after: after, limit: 100, task: nil)
+        if let stamped {
+            let reading = try await stamped(read).decode(SubscriptionReading<SessionPage>.self)
+            if let reason = reading.unavailable { throw RegistryQueryError(reason) }
+            guard let page = reading.body, let stamp = reading.stamp else {
+                throw RegistryQueryError("Session page is missing its stamped contents")
+            }
+            return (page, stamp)
+        }
+        return (try Self.decode(SessionPage.self, from: await serve(read)), nil)
     }
 
     /// The repository or Wave's retained conversation; explicit opening only.
@@ -1358,17 +1385,6 @@ public struct RegistryQuery: Sendable {
                            task: work?.kind == .task ? work?.id : nil,
                            wave: work?.kind == .wave ? work?.id : nil,
                            agent: agent, intent: intent)))
-    }
-
-    /// Give one Session a human-assigned name and return the authoritative
-    /// record. The durable Session ID selects the conversation or Graph boundary.
-    public func renameSession(
-        id: String,
-        name: String,
-        cwd: String? = nil
-    ) async throws -> SessionRecord {
-        let stdout = try await write(.sessionRename(directory: cwd ?? "/", id: id, name: name))
-        return try Self.decode(SessionRecord.self, from: stdout)
     }
 
     /// Restart the conversation on a fresh provider thread seeded with what the

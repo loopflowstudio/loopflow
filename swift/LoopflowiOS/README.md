@@ -41,8 +41,11 @@ result and **Inspect** shows its receipt when recovery needs attention.
 **Reconnect** reopens the same Session after attachment fails. Complete and Abandon
 show no extra request row while delivering. A disconnected request shows
 **Waiting for connection** without an action and resumes automatically on its
-original Machine, including after app restart. Held changes and the Task feed
-share one Machine reconnect loop. A request needing attention shows recovery controls; a creation also keeps its row until its result has been shown.
+original Machine, including after app restart. The Task feed shows **Waiting for
+connection** once above saved Tasks or an empty list. Pull to refresh ends
+immediately while waiting; Tasks refresh automatically when the Machine returns.
+A request needing attention shows recovery controls; a creation also keeps its row
+until its result has been shown.
 
 The shared SQLite outbox saves the original request
 before `operation.submit` admits it. Receipt subscriptions observe preparation;

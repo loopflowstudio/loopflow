@@ -25,7 +25,56 @@ struct OperationRecoveryPresentationTests {
         #expect(try list.find(text: "Keep these words").string() == "Keep these words")
         #expect(throws: (any Error).self) { try list.find(text: "Starting conversation…") }
         #expect(OperationDeclaration(kind: "session.new")?.progress == "Starting conversation…")
-        #expect(OperationDeclaration(kind: "task.complete")?.progress == "Completing Task…")
+        #expect(OperationDeclaration(kind: "task.complete")?.progress == "Completing…")
+    }
+
+    @Test func waitingListsKeepTitlesAndAttentionKeepsItsActions() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ClientWorkStore(directory: root, machine: { "machine" }, read: { _ in "null" },
+            observe: { _ in fatalError("No delivery in a view inspection") }, send: { _ in })
+        let owner = WorkInteraction(machine: "machine", store: store)
+        defer { owner.shutdown() }
+        let command = ServedWrite.taskComplete(directory: "/repo", issue: "LOO-1")
+        let operation = PendingOperation(id: "request", payload: try JSONEncoder().encode(command), kind: "task.complete",
+            request: "", directory: "/repo", wave: nil, graph: nil, submittedAt: Date(), destination: "machine")
+        operation.markSaved()
+        operation.waitingForConnection = true
+        let list = try PendingOperationRow(operation: operation, interaction: owner, edit: { _ in }).inspect()
+        #expect(try list.find(text: "Complete Task · LOO-1").string() == "Complete Task · LOO-1")
+        #expect(throws: (any Error).self) { try list.find(text: "Waiting for connection") }
+        let conversation = try PendingOperationRow(operation: operation, interaction: owner, edit: { _ in }, context: .conversation).inspect()
+        #expect(try conversation.find(text: "Waiting for connection").string() == "Waiting for connection")
+        operation.fail("Inspect this request")
+        #expect(operation.presentation().status == .needsAttention(["Inspect this request"]))
+        #expect(operation.presentation().actions.contains(.check))
+        let unsaved = PendingOperation(id: "unsaved", payload: try JSONEncoder().encode(command), kind: "task.create",
+            request: "Words", directory: "/repo", wave: nil, graph: nil, submittedAt: Date(), destination: "machine")
+        unsaved.waitingForConnection = true
+        unsaved.fail("Disk unavailable")
+        #expect(unsaved.presentation().actions == [.tryAgain, .edit])
+    }
+
+    @Test func machineWaitingIncludesUnwatchedChangesAndNeverAnotherDestination() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let connection = MachineConnection(machine: "machine") { throw ServerConnectionUnavailable(RegistryQueryError("Offline")) }
+        _ = try? await connection.link()
+        let store = ClientWorkStore(directory: root, connection: connection, machine: { "machine" }, read: { _ in "null" },
+            observe: { _ in fatalError("Presentation needs no receipt watch") }, send: { _ in })
+        for destination in ["machine", "other"] {
+            try await store.save(SubmittedOperation(requestID: destination, destination: destination,
+                payload: JSONEncoder().encode(ServedWrite.taskComplete(directory: "/repo", issue: "LOO-1")),
+                version: ServerProtocol.revision, submittedAt: Date()))
+        }
+        let local = try await store.presentation(machine: "machine", queries: [:])
+        #expect(local.waitingForConnection)
+        #expect(local.operations.count == 1)
+        #expect(local.operations[0].waitingForConnection)
+        let other = try await store.presentation(machine: "other", queries: [:])
+        #expect(!other.waitingForConnection)
+        #expect(other.operations.count == 1)
+        #expect(!other.operations[0].waitingForConnection)
     }
 
     @Test func aPresentedResultKeepsObservingWhileItsPlanningConfirmationIsMissing() async throws {
@@ -51,7 +100,7 @@ struct OperationRecoveryPresentationTests {
         _ = await watches.next()
         _ = await watches.next()
         try await recovery.presented(record.id)
-        #expect(recovery.listedOperations.first?.presentation().status.text.contains("lost delivery acknowledgment") == true)
+        #expect(recovery.listedOperations.first?.presentation().status.text?.contains("lost delivery acknowledgment") == true)
         #expect(server.watchCount == 1)
 
         let changes = await submissions.changes()
@@ -191,7 +240,7 @@ struct OperationRecoveryPresentationTests {
         recovery.start()
         await recovery.refreshFromStore()
         #expect(recovery.listedOperations.first?.presentation().actions.contains(.inspect) == true)
-        #expect(recovery.listedOperations.first?.presentation().status.text.contains("lost delivery acknowledgment") == true)
+        #expect(recovery.listedOperations.first?.presentation().status.text?.contains("lost delivery acknowledgment") == true)
         _ = await watches.next() // saved-result lookup
         _ = await watches.next() // continued observation after returning the result
 
@@ -202,8 +251,8 @@ struct OperationRecoveryPresentationTests {
         }
         await recovery.refreshFromStore()
         #expect(recovery.listedOperations.first?.presentation().actions.contains(.inspect) == true)
-        #expect(recovery.listedOperations.first?.presentation().status.text.contains("planning response lost") == true)
-        #expect(recovery.listedOperations.first?.presentation().status.text.contains("lost delivery acknowledgment") == false)
+        #expect(recovery.listedOperations.first?.presentation().status.text?.contains("planning response lost") == true)
+        #expect(recovery.listedOperations.first?.presentation().status.text?.contains("lost delivery acknowledgment") == false)
         #expect(try await submissions.receipt(record.id)?.error == older.body?.error)
         #expect(try await submissions.receipt(record.id)?.result == older.body?.result)
 
@@ -218,7 +267,7 @@ struct OperationRecoveryPresentationTests {
         #expect(server.watchCount == 1)
         #expect(try await submissions.recovery(record.id)?.resultPresented == true)
         #expect(recovery.listedOperations.first?.presentation().actions.contains(.inspect) == true)
-        #expect(recovery.listedOperations.first?.presentation().status.text.contains("planning response lost") == true)
+        #expect(recovery.listedOperations.first?.presentation().status.text?.contains("planning response lost") == true)
         #expect(try await submissions.pending().first?.payload == record.payload)
     }
 }

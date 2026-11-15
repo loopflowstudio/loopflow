@@ -706,19 +706,9 @@ impl Read {
             Self::ViewSelect { expression } => {
                 value(&super::desktop::read_all_view_plans(expression.as_deref())?)
             }
-            Self::SessionList {
-                directory,
-                after,
-                limit,
-                ..
-            } => {
-                if after.is_some() && limit.is_none() {
-                    return Err(invalid("`after` pages a list: name its `limit` too").into());
-                }
-                value(&super::session::read_once(
-                    &self.session_filter(directory)?,
-                )?)
-            }
+            Self::SessionList { directory, .. } => value(&super::session::read_once(
+                &self.session_filter(directory)?,
+            )?),
             Self::TaskGet { directory, issue } => {
                 value(&super::desktop::read_task_pane(directory, issue)?)
             }
@@ -959,12 +949,9 @@ impl Read {
             Self::ViewSelect { expression } => {
                 super::desktop::subscribe_all_view_plans(expression, transport)
             }
-            Self::SessionList {
-                ref directory,
-                limit: None,
-                after: None,
-                ..
-            } => super::session::subscribe_list(self.session_filter(directory)?, transport),
+            Self::SessionList { ref directory, .. } => {
+                super::session::subscribe_list(self.session_filter(directory)?, transport)
+            }
             Self::TaskGet { directory, issue } => {
                 super::desktop::subscribe_task_pane(&directory, &issue, transport)
             }
@@ -1010,6 +997,16 @@ impl Read {
     /// The Sessions a `session list` read lists, its argv's flags parsed
     /// as the command parses them, defaults included.
     fn session_filter(&self, directory: &Path) -> anyhow::Result<SessionFilter> {
+        if matches!(
+            self,
+            Self::SessionList {
+                after: Some(_),
+                limit: None,
+                ..
+            }
+        ) {
+            return Err(invalid("`after` pages a list: name its `limit` too").into());
+        }
         // Past `--cwd <directory> session list`.
         let flags = std::iter::once("sessions".to_owned()).chain(self.argv().into_iter().skip(4));
         let command = SessionListArgs::augment_args(clap::Command::new("sessions"));

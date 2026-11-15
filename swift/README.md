@@ -18,9 +18,10 @@ Reopen a repository window: known Task names and identifiers stay readable in
 the sidebar and breadcrumbs while planning loads. A returning launch opens on
 the workspace saved at `<Machine>/desktop-cache/workspace.json` and shows
 **Updating…** until this launch's reads replace it. Saved rows open
-and navigate; Graph process state, Task condition, Session state and every action except
-opening a Session wait for the fresh read. The Portfolio window opens from the
-same saved workspace. With no known Task name yet, a row says **Loading Task…**
+and navigate. Graph process state, Task condition, Session state and execution
+actions wait for a fresh read. Complete, Abandon and Session rename publish their
+local changes immediately and retain saved requests while disconnected. The
+Portfolio window opens from the same saved workspace. With no known Task name yet, a row says **Loading Task…**
 until its first read answers. The working Task list shows loading until it has
 answered; an empty result then says there are no working Tasks. Newly created
 and reopened Tasks use their locally recorded names while tracker updates are
@@ -92,8 +93,8 @@ cannot replace the operation's saved outcome.
 Complete and Abandon show their projected result while delivering, with no extra request
 row. A disconnected request shows **Waiting for connection** without an action;
 its saved identity resumes automatically when its original Machine reconnects,
-including after app restart. Held changes share their Machine’s connection and
-reconnect loop. Requests needing attention show recovery controls.
+including after app restart. An unreachable Machine shows **Waiting for connection**
+once above held changes; their rows keep their request titles. Requests needing attention show recovery controls.
 Creations also keep a row until their result has been shown. Launch errors appear
 in the conversation. After a local save failure, **Try again** retries the
 same request ID; **Edit request** returns an unsaved creation's words to the editor.
@@ -141,6 +142,13 @@ Task conversations include Sessions bound to the Task and Sessions working in
 its checkout. Repository and Wave primary conversations keep their own scope,
 even in a Task checkout. The Task's conversation list and breadcrumb Session
 picker use the same membership.
+
+Rename a Session to change its name in lists, breadcrumbs and retained panes.
+Save closes the editor immediately. The name survives restart while waiting for
+its Machine, then delivers automatically in the order it was edited. A refusal
+restores only that name and shows the request's explanation; later navigation and
+other edits stay where you put them. A newer name replaces an earlier edit that
+never saved. Older refreshes cannot undo a confirmed rename.
 
 Drag a Task in the sidebar to change its shared order. Ordinary repository and
 Wave lists, boards and Task pickers keep that relative order after refresh.
@@ -537,9 +545,10 @@ start a provider or resolve a Session.
 The toolbar above the workspace shows its Work ancestry. On the left it drills
 Wave → Task → Session: Wave and Task crumbs return to their details; the Task's
 issue ID links to Linear. The Task crumb keeps the exact conversation name
-without a sibling picker. Repository/Wave crumbs can choose among their Sessions. The pencil renames the Session in place through `lf session
-rename`; the shown name is the shared readback, and a rejected name stays in the
-field with its error. A remote Graph Session's name lives on its Machine and is not
+without a sibling picker. Repository/Wave crumbs can choose among their Sessions. The pencil opens the
+Session name editor. Save closes it and shows the new name immediately, including
+while disconnected. A refusal restores that name and explains the saved request.
+A remote Graph Session's name lives on its Machine and is not
 renamed here. Outside Task navigation, the Session shows its Graph membership
 beside the name. Task navigation keeps that provenance in inspection. On the right sit
 the Task's read-only worktree location and the Activity glyph.
@@ -912,8 +921,10 @@ Terminal launches and remote Task file streams retain their CLI transports;
 Desktop's UI automation remains app-owned.
 
 Canceling releases the client's wait, but an admitted mutation may still complete.
-After a lost response, refresh authoritative state before another deliberate edit.
-Task creation (including Session adoption) and new Session threads use the shared
+Saved requests recover their original IDs after a lost response. Other mutation
+families still need an authoritative refresh before another deliberate edit.
+Task creation (including Session adoption), new Session threads, Complete, Abandon
+and Session rename use the shared
 `ClientWorkStore` outbox. It saves the exact command, request ID, original Machine
 and protocol version in SQLite before sending `operation.submit`. Admission saves
 the request before Git, planning or provider preparation; it does not enable input.
@@ -1160,8 +1171,10 @@ change or unavailable status keeps **Inspect**, as do unclassified diagnostics.
 Task filing follows its original export receipt; Session input replacement has no
 planning effect. A known, resolved command retires in the transaction that persists
 its required reload fence; creation also retains its result until it has been shown.
-Completion transfers its ordered removal to lagging stored queries in that same
-transaction. A covering query drops its own effect independently; a newly opened
+Session rename joins its actual name and sessions-domain fence to normalized
+field facts in that transaction; stamped Session pages and Work frames share those
+facts across windows and queries. It requires no membership reload. Completion
+transfers its ordered removal to lagging stored queries in that same transaction. A covering query drops its own effect independently; a newly opened
 query beyond retirement needs a covering base. Effects and reload requirements
 survive restart without relabeling projected facts as confirmed.
 
@@ -1182,8 +1195,8 @@ publications replace transient effects by ID and revision, including when a fast
 receipt has already retired the operation. Disk, receipt and cache changes repaint
 mounted queries without another server frame. Save failure retains the original
 command for retry. Shared query tests run on both targets, including held disk,
-reply permutations, restart and replacement epochs. Normalized cross-query facts,
-finite closed-query invalidation and the remaining mutation families are unfinished.
+reply permutations, restart and replacement epochs. Cross-query Task membership
+provenance and the remaining mutation families are unfinished.
 Desktop query destinations keep the original Machine, repository and expression,
 not a captured plan. Unsaved queries and saved Dashboard refreshes mount shared
 query leases; stamped replies update their confirmed bases before projection.

@@ -1920,21 +1920,18 @@ pub(crate) async fn rename(
     title: &str,
     source: SessionTitleSource,
 ) -> Result<SessionRecord> {
-    let session = find_session(store, session_id, false)
-        .await?
-        .ok_or_else(|| session_not_found(session_id))?;
-    let title = crate::naming::validate_session_title(title)
-        .map_err(|error| anyhow!("cannot rename Session {session_id}: {error}"))?;
+    let session = session_by_id(store, session_id).await?;
+    let id = session
+        .as_ref()
+        .map_or(session_id, |session| session.id.as_str());
     let title_source = match source {
         SessionTitleSource::Human => crate::session::TitleSource::Human,
         SessionTitleSource::Generated => crate::session::TitleSource::Generated,
         SessionTitleSource::Unavailable => bail!("unavailable is not a title source"),
     };
-    store
-        .rename_session(&session.id, title, title_source)
-        .await?;
+    store.rename_session(id, title, title_source).await?;
     let session = store
-        .session(&session.id)
+        .session(id)
         .await?
         .ok_or_else(|| session_not_found(session_id))?;
     surface(store, &session).await

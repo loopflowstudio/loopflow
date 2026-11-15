@@ -7,93 +7,171 @@ import Testing
 /// and no late publication into another Session or an older read.
 @MainActor
 @Suite struct SessionRenameTests {
-    @Test("A held rename publishes Rust's name; an older poll cannot restore the old one")
-    func heldRenameSurvivesNavigationAndPolling() async throws {
-        let source = RenameSource(records: [
-            try record("first", title: "review-design"),
-            try record("second", title: "lyric-cadenza"),
-        ])
-        let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
-        await model.refresh()
-        await model.refreshSessions()
-        model.navigation.selectedSessionId = "first"
-        model.beginSessionRename(try #require(model.sessions.value?.first { $0.id == "first" }))
-        model.navigation.renaming?.text = "Launch design"
-
-        await source.holdNext("rename")
-        let rename = Task { await model.commitSessionRename() }
-        await source.waitUntilHeld("rename")
-        #expect(model.navigation.renaming?.submitting == true)
-
-        // The human moves on while the rename is in flight, and a poll that
-        // started before the write is also held.
-        model.navigation.selectedSessionId = "second"
-        #expect(model.navigation.renaming?.sessionId == "first")
-        await source.holdNext("list")
-        let poll = Task { await model.refreshSessions() }
-        await source.waitUntilHeld("list")
-
-        await source.release("rename")
-        await rename.value
-        #expect(title(model, "first") == "Launch design")
-        #expect(model.sessions.value?.first { $0.id == "first" }?.titleSource == .human)
-        #expect(model.navigation.renaming == nil)
-        #expect(model.navigation.selectedSessionId == "second")
-
-        await source.release("list")
-        await poll.value
-        #expect(title(model, "first") == "Launch design")
-        #expect(title(model, "second") == "lyric-cadenza")
-        #expect(await source.renames == [["session", "rename", "--json", "--", "first", "Launch design"]])
-    }
-
-    @Test("A rejected rename keeps the typed name and error on that Session only")
-    func rejectionRetainsDraft() async throws {
-        let source = RenameSource(records: [
-            try record("first", title: "review-design"),
-            try record("second", title: "lyric-cadenza"),
-        ])
-        await source.reject("Session name must be at most 80 characters")
-        let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
-        await model.refreshSessions()
-        model.navigation.selectedSessionId = "first"
-        model.beginSessionRename(try #require(model.sessions.value?.first { $0.id == "first" }))
-        model.navigation.renaming?.text = "An overlong name"
-        await model.commitSessionRename()
-
-        let draft = try #require(model.navigation.renaming)
-        #expect(draft.sessionId == "first")
-        #expect(draft.text == "An overlong name")
-        #expect(draft.submitting == false)
-        #expect(draft.error?.contains("at most 80") == true)
-        #expect(title(model, "first") == "review-design")
-
-        // Leaving the Session abandons the unsubmitted edit rather than
-        // carrying it onto the next Session.
-        model.navigation.selectedSessionId = "second"
-        #expect(model.navigation.renaming == nil)
-    }
-
-    @Test("A late rename cannot dismiss a newer draft for the same Session")
-    func lateRenameKeepsNewDraft() async throws {
-        let first = try record("first", title: "Original")
+    @Test("Offline rename appears in two windows, survives restart, and rejects older names")
+    func offlineRenameUsesOneNameOwner() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        var first = try record("first", title: "Original")
+        first.workspace = SessionWorkspace(machineId: "execution-peer", worktree: "/repo", taskId: nil, unavailable: nil)
         let second = try record("second", title: "Other")
-        let source = RenameSource(records: [first, second])
-        let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
-        await model.refreshSessions()
-        model.beginSessionRename(first)
-        model.navigation.renaming?.text = "Submitted"
-        await source.holdNext("rename")
-        let saving = Task { await model.commitSessionRename() }
-        await source.waitUntilHeld("rename")
-        model.beginSessionRename(second)
-        model.beginSessionRename(first)
-        model.navigation.renaming?.text = "New unsent name"
-        await source.release("rename")
-        await saving.value
-        #expect(title(model, "first") == "Submitted")
-        #expect(model.navigation.renaming?.text == "New unsent name")
-        #expect(model.navigation.renaming?.submitting == false)
+        let page = String(decoding: try JSONEncoder().encode(SessionPage(entries: [first, second], next: nil)), as: UTF8.self)
+        let query = RegistryQuery { _, _ in page }
+        func store() -> ClientWorkStore {
+            ClientWorkStore(directory: root, machine: { "machine" }, read: { _ in "null" },
+                observe: { _ in ServerWatch(updates: AsyncThrowingStream { _ in }, checkpoint: { _ in }, cancel: {}) },
+                send: { _ in Issue.record("No stamped receipt has authorized a send") })
+        }
+        let disk = store()
+        let owner = WorkInteraction(machine: "machine", store: disk)
+        let windows = (0..<2).map { _ in WorkModel(query: query, repoPath: "/src/loopflow") }
+        for model in windows { model.useInteractionForTesting(owner); await model.refreshSessions() }
+        try await owner.receiveNames([first, second], stamp: nameStamp(6))
+        windows[0].navigation.selectedSessionId = "first"
+        windows[0].beginSessionRename(first)
+        windows[0].navigation.renaming?.text = "Launch design"
+        await windows[0].commitSessionRename()
+        #expect(windows[0].navigation.renaming == nil)
+        for model in windows { #expect(title(model, "first") == "Launch design") }
+        windows[0].navigation.selectedSessionId = "second"
+        windows[0].beginSessionRename(second)
+        windows[0].navigation.renaming?.text = "Unsent edit"
+        await owner.persistPending()
+        let saved = try #require(try await disk.pending().first)
+        owner.shutdown()
+        let reopened = store()
+        let restored = WorkInteraction(machine: "machine", store: reopened)
+        defer { restored.shutdown() }
+        restored.start()
+        await restored.refreshFromStore()
+        for model in windows { model.useInteractionForTesting(restored) }
+        #expect(title(windows[0], "first") == "Launch design")
+        let database = try ClientWorkDatabase(directory: root)
+        #expect(try database.observeEpoch("epoch", id: saved.id))
+        try database.receive(nameReceipt(saved.id, title: "Launch design"), epoch: "epoch", id: saved.id)
+        try database.retireIfConverged(saved.id)
+        await restored.refreshFromStore()
+        #expect(try await reopened.pending().isEmpty)
+        try await restored.receiveNames([first], stamp: nameStamp(5, query: "late-other-window"))
+        for model in windows {
+            await model.refreshSessions() // an unstamped old page cannot replace a stamped name
+            #expect(title(model, "first") == "Launch design")
+            #expect(title(model, "second") == "Other")
+        }
+        #expect(windows[0].navigation.selectedSessionId == "second")
+        #expect(windows[0].navigation.renaming?.text == "Unsent edit")
+    }
+
+    @Test("Refusal restores only that name, and a later rename waits for its earlier outcome")
+    func refusalAndRenameOrdering() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let disk = ClientWorkStore(directory: root, machine: { "machine" }, read: { _ in "null" },
+            observe: { _ in ServerWatch(updates: AsyncThrowingStream { _ in }, checkpoint: { _ in }, cancel: {}) }, send: { _ in })
+        let owner = WorkInteraction(machine: "machine", store: disk)
+        defer { owner.shutdown() }
+        let first = try record("first", title: "Original")
+        let other = try record("second", title: "Other")
+        try await owner.receiveNames([first, other], stamp: nameStamp(6))
+        let refused = owner.renameSession(id: first.id, name: "Refused", directory: "/repo")
+        let later = owner.renameSession(id: first.id, name: "Later", directory: "/repo")
+        owner.renameSession(id: other.id, name: "Other edit", directory: "/repo")
+        await owner.persistPending()
+        let database = try ClientWorkDatabase(directory: root)
+        let laterRecord = try #require(database.state(later)?.record)
+        #expect(try database.earlierRenamePending(laterRecord))
+        #expect(try database.observeEpoch("epoch", id: refused))
+        try database.receive(nameReceipt(refused, title: "Refused", refused: true), epoch: "epoch", id: refused)
+        #expect(try !database.earlierRenamePending(laterRecord))
+        await owner.refreshFromStore()
+        #expect(owner.named(first).title == "Later")
+        #expect(owner.named(other).title == "Other edit")
+        #expect(try database.observeEpoch("epoch", id: later))
+        try database.receive(nameReceipt(later, title: "Later", refused: true), epoch: "epoch", id: later)
+        await owner.refreshFromStore()
+        #expect(owner.named(first).title == "Original")
+        #expect(owner.named(other).title == "Other edit")
+    }
+
+    @Test("A newer edit replaces a rename that never saved")
+    func failedSaveCannotRetryBehindANewerName() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fault = IntentDiskFault()
+        let disk = ClientWorkStore(directory: root, prepareDirectory: { _ in try fault.check() }, machine: { "machine" },
+            read: { _ in "null" }, observe: { _ in
+                ServerWatch(updates: AsyncThrowingStream { _ in }, checkpoint: { _ in }, cancel: {})
+            }, send: { _ in Issue.record("No send without a stamped reading") })
+        let owner = WorkInteraction(machine: "machine", store: disk)
+        defer { owner.shutdown() }
+        let session = try record("first", title: "Original")
+        let failed = owner.renameSession(id: "first", name: "Never saved", directory: "/repo")
+        await owner.persistPending()
+        #expect(owner.named(session).title == "Original")
+        #expect(owner.listedOperations.first?.presentation().actions == [.tryAgain])
+        fault.recover()
+        let newer = owner.renameSession(id: "first", name: "New name", directory: "/repo")
+        await owner.persistPending()
+        owner.retry(failed)
+        #expect(owner.named(session).title == "New name")
+        #expect(try await disk.pending().map(\.id) == [newer])
+    }
+
+    @Test("Reconnect recovers the first rename by ID before delivering the next name once")
+    func reconnectKeepsRenameOrderAndOriginalIDs() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let machine = RenameMachine()
+        func store() -> ClientWorkStore {
+            ClientWorkStore(directory: root, machine: { "machine" }, read: { _ in "null" },
+                observe: { machine.observe($0) }, send: { try machine.send($0) })
+        }
+        let disk = store()
+        let owner = WorkInteraction(machine: "machine", store: disk)
+        let first = owner.renameSession(id: "first", name: "First name", directory: "/repo")
+        let second = owner.renameSession(id: "first", name: "Later name", directory: "/repo")
+        await owner.persistPending()
+        var sends = machine.sends.makeAsyncIterator()
+        #expect(await sends.next() == first)
+        #expect(machine.requestIDs == [first], "The next name waits for the first domain outcome")
+        owner.shutdown()
+        for await _ in await disk.changes() {
+            if await !disk.isRecovering(first), await !disk.isRecovering(second) { break }
+        }
+        // The first command committed, but both its answer and event were lost.
+        machine.publish(try nameReceipt(first, title: "First name"))
+        let reopened = store()
+        let restored = WorkInteraction(machine: "machine", store: reopened)
+        defer { restored.shutdown() }
+        restored.start()
+        #expect(await sends.next() == second)
+        #expect(machine.requestIDs == [first, second])
+        machine.publish(try nameReceipt(second, title: "Later name"))
+        for await _ in await reopened.changes() {
+            if try await reopened.pending().isEmpty { break }
+        }
+        await restored.refreshFromStore()
+        #expect(restored.sessionTitle(id: "first", fallback: "Original") == "Later name")
+        #expect(machine.requestIDs == [first, second], "Recovery never renames again under a fresh ID")
+    }
+
+    @Test("A committed name survives a later output failure")
+    func committedNameIsNeverRolledBackByOutputFailure() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let disk = ClientWorkStore(directory: root, machine: { "machine" }, read: { _ in "null" },
+            observe: { _ in ServerWatch(updates: AsyncThrowingStream { _ in }, checkpoint: { _ in }, cancel: {}) }, send: { _ in })
+        let owner = WorkInteraction(machine: "machine", store: disk)
+        defer { owner.shutdown() }
+        let id = owner.renameSession(id: "first", name: " Requested ", directory: "/repo")
+        await owner.persistPending()
+        let database = try ClientWorkDatabase(directory: root)
+        #expect(try database.observeEpoch("epoch", id: id))
+        var body = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(nameReceipt(id, title: "Requested"))) as? [String: Any])
+        body["error"] = "Output lost after the name changed"
+        try database.receive(JSONDecoder().decode(OperationReceipt.self, from: JSONSerialization.data(withJSONObject: body)), epoch: "epoch", id: id)
+        await owner.refreshFromStore()
+        #expect(owner.sessionTitle(id: "first", fallback: "Original") == "Requested")
+        #expect(owner.listedOperations.first?.presentation().actions.contains(.inspect) == true)
     }
 
     @Test("The breadcrumb drills Wave → Task → exact Session, with siblings as the final choice")
@@ -152,55 +230,63 @@ private func roadmapJSON() throws -> String {
     return try String(contentsOf: root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json"), encoding: .utf8)
 }
 
-/// A shared-CLI stand-in: `session list` returns the records as they were
-/// when the read began; `session rename` returns the authoritative record.
-private actor RenameSource {
-    private var records: [SessionRecord]
-    private var rejection: String?
-    private var holds: Set<String> = []
-    private var held: [String: CheckedContinuation<Void, Never>] = [:]
-    private var waiting: [String: CheckedContinuation<Void, Never>] = [:]
-    private(set) var renames: [[String]] = []
+private func nameStamp(_ revision: Int64, query: String = "sessions") throws -> ReadingStamp {
+    try JSONDecoder().decode(ReadingStamp.self, from: JSONSerialization.data(withJSONObject: [
+        "machine": "machine", "epoch": "epoch", "schema": ServerProtocol.revision, "query": query,
+        "complete": true, "revisions": ["planning": 1, "sessions": revision, "graphs": 1, "processes": 1, "usage": 1]]))
+}
 
-    init(records: [SessionRecord]) { self.records = records }
+private func nameReceipt(_ id: String, title: String, refused: Bool = false) throws -> OperationReceipt {
+    let commit: [String: Any] = ["stage": "session.renamed", "resolution": refused ? "definitely_refused" : "committed",
+        "resources": ["first"], "fence": ["machine": "machine", "epoch": "epoch", "schema": ServerProtocol.revision,
+            "revisions": ["sessions": 7]], "result": ["id": "first", "title": title, "title_source": "human"],
+        "planning_effect": "none", "planning_changes": []]
+    return try JSONDecoder().decode(OperationReceipt.self, from: JSONSerialization.data(withJSONObject: [
+        "request_id": id, "kind": "session.rename", "fingerprint": NSNull(), "submitted_fingerprint": "hash",
+        "validation": "bound", "delivery": "finished", "revision": 2, "result": NSNull(),
+        "error": refused ? "Name refused" : NSNull(), "commits": [commit], "planning": NSNull(), "created_at": 1, "updated_at": 2]))
+}
 
-    func reject(_ message: String) { rejection = message }
-    func holdNext(_ verb: String) { holds.insert(verb) }
+private final class RenameMachine: @unchecked Sendable {
+    private let lock = NSLock()
+    private var receipts: [String: OperationReceipt] = [:]
+    private var watches: [UUID: (String, AsyncThrowingStream<SubscriptionReading<OperationReceipt>, any Error>.Continuation)] = [:]
+    private var submitted: [String] = []
+    let sends: AsyncStream<String>
+    private let sending: AsyncStream<String>.Continuation
+    init() { (sends, sending) = AsyncStream.makeStream() }
+    var requestIDs: [String] { lock.withLock { submitted } }
 
-    func waitUntilHeld(_ verb: String) async {
-        if held[verb] != nil { return }
-        await withCheckedContinuation { waiting[verb] = $0 }
+    func observe(_ id: String) -> ClientWorkStore.ReceiptWatch {
+        let key = UUID()
+        let (stream, continuation) = AsyncThrowingStream<SubscriptionReading<OperationReceipt>, any Error>.makeStream()
+        lock.withLock {
+            watches[key] = (id, continuation)
+            continuation.yield(frame(receipts[id]))
+        }
+        return ServerWatch(updates: stream, checkpoint: { _ in }, cancel: { [self] in
+            lock.withLock { watches.removeValue(forKey: key)?.1.finish() }
+        })
     }
 
-    func release(_ verb: String) {
-        held.removeValue(forKey: verb)?.resume()
+    func send(_ data: Data) throws {
+        let command = try JSONDecoder().decode(JSONValue.self, from: data)
+        guard case .string(let id) = command["request_id"] else { throw RegistryQueryError("Missing request ID") }
+        lock.withLock { submitted.append(id) }
+        sending.yield(id)
+        throw ServerConnectionUnavailable(RegistryQueryError("Answer lost"))
     }
 
-    func read(_ args: [String]) async throws -> String {
-        if args == ["plan", "list", "--all", "--json"] {
-            return try roadmapJSON()
+    func publish(_ receipt: OperationReceipt) {
+        lock.withLock {
+            receipts[receipt.requestID] = receipt
+            for (id, continuation) in watches.values where id == receipt.requestID { continuation.yield(frame(receipt)) }
         }
-        let verb = args.prefix(2) == ["session", "list"] ? "list" : args.count >= 2 && args[0] == "session" ? args[1] : nil
-        guard let verb else { return "[]" }
-        let snapshot = records
-        if holds.remove(verb) != nil {
-            await withCheckedContinuation { continuation in
-                held[verb] = continuation
-                waiting.removeValue(forKey: verb)?.resume()
-            }
-        }
-        switch verb {
-        case "list":
-            return #"{"entries":\#(String(decoding: try JSONEncoder().encode(snapshot), as: UTF8.self)),"next":null}"#
-        case "rename":
-            renames.append(args)
-            if let rejection { throw RegistryQueryError(rejection) }
-            let id = args[4], name = args[5]
-            let renamed = try renameFixtureRecord(id, title: name, source: "human")
-            records = records.map { $0.id == id ? renamed : $0 }
-            return String(decoding: try JSONEncoder().encode(renamed), as: UTF8.self)
-        default:
-            return "[]"
-        }
+    }
+
+    private func frame(_ receipt: OperationReceipt?) -> SubscriptionReading<OperationReceipt> {
+        try! JSONDecoder().decode(SubscriptionReading<OperationReceipt>.self, from: JSONSerialization.data(withJSONObject: [
+            "answers": NSNull(), "unavailable": NSNull(), "stamp": JSONSerialization.jsonObject(with: JSONEncoder().encode(nameStamp(12))),
+            "body": receipt.map { try! JSONSerialization.jsonObject(with: JSONEncoder().encode($0)) } ?? NSNull()]))
     }
 }

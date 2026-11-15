@@ -281,6 +281,13 @@ currently emit stages. Other writers still require their domain commits before
 client projection cutover.
 Receipt changes wake receipt subscriptions without changing Work revisions.
 
+Session rename records `session.renamed` with the actual Session ID, name and
+name source, and a sessions-domain fence in the same transaction. Rejection
+records a definite refusal before returning its error. An interrupted worker
+recovers that result by its original operation ID. Clients normalize these name
+facts with stamped Session readings; a name result does not certify query
+membership or native readiness.
+
 ```sh
 lf server receipt operation-id --operation --json
 lf server receipt operation-id --operation --subscribe --json
@@ -316,7 +323,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `task.interrupt` | `lf task interrupt <issue>` | `engine::task` |
 | `task.update` | `lf task update <issue>` | write |
 | `task.move`, `.claim`, `.unassign`, `.save`, `.complete`, `.reopen`, `.abandon` | `lf task <verb>` | write |
-| `session.list` | `lf session list` | read |
+| `session.list` | `lf session list` | read/subscribe, including stable-ID pages; each page carries its own reading stamp |
 | `session.card` | `lf session card <id>` | read |
 | `session.start` | a managed launch: `lf task run`, `lf resume --task`, Wave session commands, Desktop panes | server |
 | `session.attach` | Desktop panes' relay and other clients that speak only the server protocol; CLI views of a held terminal enter `held.sock` directly | server |
@@ -417,7 +424,7 @@ beneath ordered per-query effects, including after command retirement and restar
   defaults, so a selected answer would not decode: it sends `null`, and gets
   a smaller payload only through a read with its own DTO.
 - `subscribe` takes a read with a subscription: `desktop.view.list`, `view.select`,
-  `session.list` without `limit`, `task.get`, `task.wait`, `session.history`,
+  `session.list` (whole lists or stable-ID pages), `task.get`, `task.wait`, `session.history`,
   `plan.list`, `repo.plan` and `process.list`. It answers
   a null `response`, then `reading {id,checkpoint,frame}` messages wrapping
   the existing complete `answers/stamp/unavailable/body` subscription frame.

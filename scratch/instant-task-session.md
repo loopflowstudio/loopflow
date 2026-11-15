@@ -1,8 +1,8 @@
 # LOO-906: immediate interactions across Desktop and mobile
 
 Conversation/Machine-link cut committed at `a2a0a0fb33` on origin/main
-`9cafc410ee` and concept-reviewed 2026-11-15. Next: its unreachable-Machine
-fixes, then Desktop Session rename, then disconnected Move. Supersedes the
+`9cafc410ee`. The current pass fixes unreachable-Machine presentation and adds
+Desktop Session rename. Move returns to design at local projection provenance. Supersedes the
 Desktop-only delivery boundary. No shipping or merge decision is recorded. Placement remains this Task;
 no Wave is selected.
 
@@ -396,90 +396,55 @@ Checks of this cut (2026-11-15, inherited `LF_*` cleared):
 - `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/MobileTaskCreationTests -only-testing:LoopflowiOSTests/ClientWorkQueryTests/testPhoneAbandonPublishesBothFeedsAndReplacesOnlyTheOriginRouteBeforeDisk`: 10 passed; the two changed rows passed after adding the phone's one-request/progress assertion; its named row passed again with the final refresh-deadline repair compiled. Disposable Simulators removed.
 - `uv run python scripts/check_swift_multiplatform_boundaries.py`, `git diff --check`: passed; gate owns documented-command and archive checks. Native latency remains unmeasured.
 
-### Next implement direction: an unreachable Machine says so once
+### Unreachable-Machine and Session-name cuts · 2026-11-15
 
-Headless concept review of `a2a0a0fb33`, 2026-11-15. Read in the code; none is
-built yet (rechecked by grep at realign). Fix these before rename; they finish
-the cut rather than extend it.
+Built in this pass, checks below. Previous review findings and deleted
+predecessors: `85564c1f20:scratch/instant-task-session.md`.
 
-1. **The phone feed can no longer say the Machine is unreachable.** Its
-   subscription now holds through failed opens, so `feed.error` stays nil:
-   a first launch with no saved reading shows `ProgressView` until the Machine
-   answers, a saved reading shows stale Tasks with no word, and pull to refresh
-   spins for the whole outage (`RemoteTaskObservation.refresh` waits on
-   `connection.link(reconnect: true)`). The "Couldn’t update Tasks" card went
-   with the second outage report; nothing replaced it when no change is held.
-   The feed shows the Machine's waiting fact once, as one **Waiting for
-   connection** line above its Tasks, saved or none. Pull to refresh while
-   waiting returns at once; reconnect already delivers a fresh reading. The
-   card stays for refused, protocol and identity failures, with its Try again.
-2. **Held changes still take Waiting from their own watch.**
-   `ClientWorkStore.presentation` reads `watches[record.id]?.isWaiting()`, each
-   watch runs a task forwarding `connections` to `changed()`, and `ServerWatch`
-   carries both as pass-throughs. A saved change with no live watch (delivery
-   paused, between observations) shows nothing while its Machine is down. The
-   store takes its Machine's connection once: one `changes()` subscription, one
-   `isWaiting` read per presentation; `ServerWatch.connections`/`isWaiting` and
-   the two per-watch forwarding tasks go. Counterexamples to keep: an unsaved
-   failure keeps **Try again** (saving is local), and a change needing
-   attention keeps **Inspect** offline, so attention outranks waiting in
-   `PendingOperation.presentation` (today waiting returns first and hides both).
-   Another Machine's fact never marks this Machine's changes.
-3. **One line of status in the list.** With the Machine line shown, a held
-   change's row lists its title without repeating "Waiting for connection"; the
-   conversation context keeps the words. Headless reversible choice, noted in
-   `questions.md` beside the open rows-or-summary note.
-4. **Progress words nobody sees.** `OperationDeclaration.progress` has eight
-   strings; the conversation context renders only creation's. Both hosts print
-   their own "Completing…" (`TaskWorkView.lifecycleLabel`,
-   `TaskWorkspaceView`), and "Delivering request…" survives as
-   `Status.delivering.text` and a fallback, with `progress: ""` for waiting.
-   One phrase per kind, where that kind is shown: creation and new Session keep
-   "Starting conversation…", Complete is "Completing…" read by both Task views,
-   and a kind with no surface has none. `Status.delivering` has no text of its
-   own; the placeholder string and fallback go.
-5. **READMEs say what a person sees.** "Held changes share their Machine’s
-   connection and reconnect loop" (`swift/README.md`, phone README) describes
-   the mechanism. Replace with the feed's waiting line and that pull to refresh
-   needs no retry.
-Acceptance: phone with its Machine unreachable — cold launch shows Waiting for
-connection, not a spinner; a saved feed shows the line above its Tasks; pull to
-refresh ends immediately; reconnect clears the line with no tap. Three held
-changes show three titles under one line. An unsaved failure and a
-needs-attention change keep their actions through the outage. A wrong-Machine
-address still shows the card with its explanation.
+- The phone feed shows its Machine's waiting fact once above cold or saved
+  Tasks. Waiting suppresses its cold spinner and empty-result overlay. Refresh
+  returns immediately while waiting; a refresh already underway also ends on
+  connection loss. Reconnect supplies a fresh reading. Refused/protocol/identity
+  errors retain the error card and Try again.
+- `ClientWorkStore` subscribes once to its endpoint's `MachineConnection`, reads
+  waiting once per presentation and applies it to all that Machine's saved
+  changes, even without live receipt watches. `ServerWatch.connections` and
+  `isWaiting`, the watch map and per-watch forwarding tasks are deleted. Lists
+  show one Machine line and held request titles; conversation rows retain the
+  words. Attention and unsaved failures outrank waiting. Desktop Complete and
+  Abandon no longer wait for a fresh Workflow reading; the actual unavailable-
+  reading buttons enter the same two-window projection checks. `delivering` has no
+  placeholder text; only creation/new Session and Complete declare visible
+  progress. Both Task surfaces use Complete's declaration.
+- Desktop Session rename publishes its value and closes the editor before save
+  or transport. All windows use the same `WorkInteraction`; name facts and
+  pending commands live in the existing SQLite owner. Lists, breadcrumbs, Work
+  inspection and retained pane headings consume those names by Session identity.
+  Stamped pages and Work frames order facts by the sessions revision across
+  query identities. Unstamped data remains fallback inventory; raw merges never
+  copy projected names back into the base.
+- `session.renamed` records actual name/source or definite refusal in the
+  domain transaction. The actual field value and fence join the normalized
+  name owner atomically with its receipt, so retirement needs no invented
+  exact-query stamp or membership reload. Saved renames serialize per Session
+  through the earlier domain outcome; lost delivery recovers the original ID.
+  A newer edit replaces an earlier name that never saved. Refusal changes no
+  later navigation or other name.
+- Deleted: `commitSessionRename`'s direct write/record replacement and its
+  draft's submitting/error state, unused `RegistryQuery.renameSession`, and
+  their exclusive held-write fixtures. Binding retains `replaceSession` and
+  `supersedeSessions`. The phone has no rename UI and still shows Task titles;
+  Wave/Dashboard rename and other mutation families remain unmigrated.
 
-### Next after that: rename is a Session name, on Desktop
+Checks (2026-11-15; inherited `LF_*` cleared):
+- `swift build --build-tests --package-path swift --jobs 4 -Xswiftc -gnone`: passed; gate owns the Xcode fallback build.
+- `scripts/test_desktop.sh --skip-build --filter 'SessionRenameTests|OperationRecoveryPresentationTests|ServerClientTests|RegistryQueryTests/sessionsReadPages|WorkModelTests/sessionRefreshReadsTaskGraphSteps'`: 34 Swift Testing rows passed. The final unavailable-reading Complete/Abandon and context-menu changes passed their two named `ClientWorkQueryTests` rows after rebuilding.
+- `scripts/test_ios.py` selecting cold/saved waiting + refresh, persisted completion reconnect, and both-feed Complete/Abandon: 4 passed; disposable Simulator removed. Fixture teardown logged “database integrity compromised by API violation: vnode unlinked while in use” for temporary SQLite files; cleanup must await readers/delivery and release SQLite before deleting those directories, without a delay or retry.
+- `cargo nextest run -p loopflow --lib -E 'test(session_rename_receipts_cover_the_name_and_refusal_without_replaying) | test(session_pages_subscribe_with_their_names_provenance_and_cursor)' --test-threads 1`: 2 passed; linker reported a debug `__eh_frame` over 16 MB.
+- `cargo test -p loopflow --test integration documented_commands::`: 4 passed; `cargo clippy --all-targets -- -D warnings`: passed.
+- `check_swift_multiplatform_boundaries.py`, `git diff --check`: passed; `cargo fmt --check` passed. Native latency remains unmeasured; broader/native checks belong to gate/demo.
+- SQLite `EXPLAIN QUERY PLAN` on 10,000 name facts: identity lookup uses the primary-key index; Machine lookup uses `session_names_machine`. This is indexing feedback, not a latency benchmark.
 
-From the 2026-11-15 concept review of `c9b86d24f5`; its other items (one
-request per conversation, kind-owned progress words, one connection per Machine,
-phone Abandon confirmation) are built at `a2a0a0fb33`.
-
-No command edits a Task title: `task.update` writes notes. What people rename is
-a Session (`session.rename`), a Wave or a Dashboard. A rename projects one name by
-identity wherever its Session is shown, held per reading until that reading covers
-the rename's stage fence, restored alone on refusal. It changes no membership and
-does not wait for Move. Wave rename joins when it has a served write.
-
-Desktop names come from `WorkModel.sessionReadings` (paginated `readSessions` and
-stamped Work frames), outside the shared store. The cut ingests Session-name facts
-there with sessions-domain provenance, moves Desktop's name consumers, adds the
-domain rename fence/refusal contract and declares `session.rename` before changing
-the write caller. An outbox declaration alone cannot settle names or reject old
-per-query values. Delete the direct-write/replace branch of `commitSessionRename`
-and `SessionRenameDraft.submitting/error`; keep local editor text and the unrelated
-callers of `supersedeSessions`. The phone shows the captured Task title
-(`SessionLink.title`) and has no rename; it is unchanged by this cut (open question
-in `questions.md`).
-
-Acceptance: rename a Session offline on Desktop; the name shows everywhere it is
-listed, survives restart, delivers once on reconnect, and a refusal restores only
-that name.
-
-`OperationDeclaration.changesMembership` repeats the plan's `effects` map, but
-removing it alone would scope reload floors for unmigrated `task.update` to a
-membership effect absent from the plan. Keep conservative invalidation until the
-shared effect/dependency cut replaces that policy.
 
 ### Continuation correction: state-only candidates cannot project a Move
 
@@ -506,6 +471,28 @@ Delete in that cut: prefiltered dynamic `State.members`/`Members` programs from
 Preserve explicit Work leaves, authored occurrence paths, duplicate winners,
 order/hidden state, partial-read semantics and the Complete/Abandon tests. No
 special Move branch in the candidate-only reducer.
+
+2026-11-15 continuation finding: a normalized fact frontier and an exact-query
+reading are different inputs. If a held source query predates Complete, another
+query can supply newer Task facts after Reopen. Reapplying Complete merely
+because the source's old `ReadingStamp` predates its fence hides the reopened Task
+again. Assigning the newer query's stamp to the source would invent an
+exact-query reading. The same problem applies to Move A→B followed by B→C:
+a source program using the newer parent must not reapply A→B under its old
+query stamp. The earlier draft did not specify the incorporation owner for this
+case; migrating Move under the current `WorkQueryEffect.covered` contract would
+be incorrect.
+
+Dependent Move work returns to design at that contract. The proposed next cut
+keeps the Machine's query stamp intact and represents local projection provenance
+separately: the cached query program/definition revision, candidate-universe
+coverage, and field revisions consumed by its evaluation. That proof must cover
+an effect before omitting it, including partial candidate/content coverage and
+closed-query retirement. Covering parent-Wave facts cannot discharge state or
+content dependencies. A client-derived answer cannot be serialized as a Machine
+`ReadingStamp`. Preserve the source/destination acceptance below and add the
+Complete→Reopen and A→B→C counterexamples before moving callers. No partial
+dynamic-program implementation remains.
 
 Acceptance before migrating callers: hold source and destination Wave readings
 with A absent from the destination; move offline; verify source removal,
@@ -540,8 +527,7 @@ including without a network event. Retirement cancels its receipt observer and
 transfers lagging effects or scoped reload floors. The complete prior contracts and
 query checks remain at `6e944e73b5a:scratch/instant-task-session.md`.
 
-Remaining: the unreachable-Machine fixes, offline Session rename on Desktop and the effect-policy duplication, then disconnected Move
-under the recorded 1a direction; cross-client closed-query convergence; exhaustive
+Remaining: disconnected Move under the recorded 1a direction and the projection-provenance correction above; effect-policy duplication; cross-client closed-query convergence; exhaustive
 effect/dependency declarations and cross-query provenance; other mutation recovery
 and resource lanes; retained mobile `SessionLink`; projected inspection;
 historical-restoration epoch reset; valid native benchmark baseline. One cross-platform PR; no shipping decision. SQLite
@@ -586,14 +572,7 @@ backend-stage baseline exists. Raw files and earlier detail: `8b42a874db`,
 Implementation owns a valid benchmark baseline; demo owns native usability.
 
 Earlier checks: `57cb8a3a22:scratch/instant-task-session.md`; 10k client-query
-observations: `6e944e73b5a:scratch/instant-task-session.md`. Checks of the
-healthy-change cut `c9b86d24f5` (2026-11-15; inherited `LF_*` cleared):
-- `swift build --build-tests --package-path swift --jobs 4 -Xswiftc -gnone`: passed; gate owns the Xcode fallback build.
-- `scripts/test_desktop.sh --skip-build --filter 'ClientWorkQueryTests|CreationInteractionTests|OperationRecoveryPresentationTests|receiptWatchWaitsAcrossFailedOpens|otherMachineAndUnavailableReceiptNeverSend|DesktopCreationInteractionTests|WorkDestinationTests'`: 45 XCTest and 76 Swift Testing rows passed; four XCTest rows initially failed (two stale button/row expectations, missing fixture connection events, cached-query restart). The repaired four passed; final transport/store/reconnect selection passed 4 XCTest and 37 Swift Testing rows. Reconnect teardown also closes its initial opening task, and canceled store refreshes cannot restart delivery.
-- `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/ClientWorkQueryTests -only-testing:LoopflowiOSTests/MobileTaskCreationTests`: 49/50 passed; the remaining stale Check request expectation was repaired and its named test passed. Covers both feeds' Abandon, persisted waiting, lost send and reconnect; disposable Simulators removed.
-- `cargo test -p loopflow --lib abandonment_receipts_keep_the_same_canceled_delivery_on_repeat`: passed; `state_attempt_recovery_is_keyed_at_ten_thousand_tasks`: passed, including the cancellation lookup. `query_selection_plan_wire_roundtrips` passed after correcting fixture enum ordering. The 10k whole check took 0.53 s; this is not a per-query latency measurement.
-- `cargo clippy --all-targets -- -D warnings`: passed.
-- `uv run python scripts/check_swift_multiplatform_boundaries.py`, `git diff --check`: passed; gate owns archive/documented-command checks. Native latency remains unmeasured.
+observations: `6e944e73b5a:scratch/instant-task-session.md`. Healthy-change check details: `85564c1f20:scratch/instant-task-session.md`.
 
 ## Conversation concept review · 2026-11-15
 
@@ -606,7 +585,7 @@ to the next Task (the earlier quoted 1b); rejection restores membership without
 undoing a later selection. Successful domain changes survive later sync errors.
 
 Desktop `assignTask`, `moveTask` and `reopenTask` still wait in `performTaskAction`;
-`OperationDeclaration` covers eight kinds; `session.rename` is not one. Unfinished cutover.
+`OperationDeclaration` now covers nine kinds including `session.rename`; the other callers remain unmigrated.
 
 Proposed usage, implementation still required:
 > Select a recent Task to see its retained conversation immediately. Expand a

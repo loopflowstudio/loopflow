@@ -10,6 +10,7 @@ public final class PendingOperation: Identifiable {
     public let payload: Data
     public let kind: String
     public let targetIssue: String?
+    public let targetSession: String?
     public let request: String
     public let directory: String
     public let wave: String?
@@ -46,9 +47,9 @@ public final class PendingOperation: Identifiable {
     public enum Status: Equatable {
         case delivering, waitingForConnection, needsAttention([String])
 
-        public var text: String {
+        public var text: String? {
             switch self {
-            case .delivering: "Delivering request…"
+            case .delivering: nil
             case .waitingForConnection: "Waiting for connection"
             case .needsAttention(let messages): messages.joined(separator: "\n")
             }
@@ -57,8 +58,8 @@ public final class PendingOperation: Identifiable {
     public struct Presentation {
         public let status: Status
         public let actions: [Action]
-        public let progress: String
-        public var text: String { status == .delivering ? progress : status.text }
+        public let progress: String?
+        public var text: String? { status == .delivering ? progress : status.text }
         public let evidence: String?
     }
     private var needsInspection: Bool {
@@ -73,7 +74,7 @@ public final class PendingOperation: Identifiable {
         return recovery?.needsInspection == true
     }
     var projectsEffect: Bool {
-        if let declaration = OperationDeclaration(kind: kind), let evidence,
+        if let declaration = OperationDeclaration(kind: kind), let evidence, evidence.validation == .bound,
            let resolutions = declaration.resolutions(in: evidence),
            resolutions.allSatisfy({ $0.resolution == .definitelyRefused }) { return false }
         return saved || error == nil
@@ -82,6 +83,7 @@ public final class PendingOperation: Identifiable {
     public var title: String {
         if isCreation { return receipt?.task.title ?? request }
         let noun = OperationDeclaration(kind: kind)?.label ?? "Request"
+        if kind == "session.rename" { return "\(noun) · \(request)" }
         if let targetIssue { return "\(noun) · \(targetIssue)" }
         return noun
     }
@@ -100,7 +102,7 @@ public final class PendingOperation: Identifiable {
     /// recovery vocabulary for the submitted command.
     public func presentation() -> Presentation {
         var actions: [Action] = []
-        if waitingForConnection { return Presentation(status: .waitingForConnection, actions: [], progress: "", evidence: nil) }
+        if waitingForConnection, !needsInspection { return Presentation(status: .waitingForConnection, actions: [], progress: nil, evidence: nil) }
         if !saved, error != nil {
             actions.append(.tryAgain)
             if isCreation { actions.append(.edit) }
@@ -117,13 +119,14 @@ public final class PendingOperation: Identifiable {
         messages = messages.filter { seen.insert($0).inserted }
         if needsInspection && messages.isEmpty { messages = ["The original request needs inspection"] }
         return Presentation(status: needsInspection ? .needsAttention(messages) : .delivering,
-            actions: actions, progress: OperationDeclaration(kind: kind)?.progress ?? "Delivering request…", evidence: evidence.map { String(decoding: $0, as: UTF8.self) })
+            actions: actions, progress: OperationDeclaration(kind: kind)?.progress, evidence: evidence.map { String(decoding: $0, as: UTF8.self) })
     }
 
     init(id: String, payload: Data, kind: String, request: String, directory: String, wave: String?, graph: String?, submittedAt: Date, destination: String?) {
         self.payload = payload
         let command = try? JSONDecoder().decode(JSONValue.self, from: payload)
         if case .string(let issue) = command?["issue"] { targetIssue = issue } else { targetIssue = nil }
+        if kind == "session.rename", case .string(let id) = command?["id"] { targetSession = id } else { targetSession = nil }
         self.kind = kind
         self.destination = destination
         self.id = id
@@ -186,8 +189,8 @@ public struct PendingOperationRow: View {
                     Button { select(operation) } label: { Text(operation.title).lineLimit(2) }
                 } else { Text(operation.title).lineLimit(2) }
             }
-            if context == .conversation || presentation.status != .delivering {
-                Text(presentation.text).font(.caption).textSelection(.enabled)
+            if let text = presentation.text, context == .conversation || presentation.status != .delivering && presentation.status != .waitingForConnection {
+                Text(text).font(.caption).textSelection(.enabled)
             }
             ForEach(presentation.actions) { action in
                 Button(action.rawValue) {
@@ -242,6 +245,7 @@ struct PendingOperationSnapshot: Sendable {
         } else { self.directory = "" }
         if case .string(let text) = command["request"] { request = text }
         else if case .string(let title) = command["title"] { request = title }
+        else if case .string(let name) = command["name"] { request = name }
         else { request = "" }
         if case .string(let name) = command["wave"] { wave = name } else { wave = nil }
         if case .string(let name) = command["graph"] { graph = name } else { graph = nil }

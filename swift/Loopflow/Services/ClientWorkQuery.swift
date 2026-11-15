@@ -104,3 +104,19 @@ extension CommitFence {
             revisions: revisions.filter { required.contains($0.key) })
     }
 }
+
+/// A name is one Session field, independent of the lists that mention it.
+/// Its sessions-domain fence orders stamped reads and the domain's rename result.
+struct SessionNameFact: Codable, Equatable, Sendable {
+    let id: String
+    let title: String
+    let source: SessionTitleSource
+    let fence: CommitFence
+
+    func covers(_ other: CommitFence) -> Bool {
+        fence.machine == other.machine && fence.epoch == other.epoch && fence.schema == other.schema
+            && fence.revisions["sessions"].map { current in
+                other.revisions["sessions"].map { current >= $0 } == true
+            } == true
+    }
+}

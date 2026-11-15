@@ -13,6 +13,46 @@ extension ClientWorkQueryTests {
         try await leaveBothFeeds(abandon: true)
     }
 
+    func testUnreachableMachineShowsWaitingForColdAndSavedFeedsAndRefreshReturns() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let connection = MachineConnection { throw ServerConnectionUnavailable(RegistryQueryError("Offline")) }
+        _ = try? await connection.link()
+        let disk = ClientWorkStore(directory: directory, connection: connection, machine: { "machine" },
+            read: { _ in "null" }, observe: { _ in
+                ServerWatch(updates: AsyncThrowingStream { _ in }, checkpoint: { _ in }, cancel: {})
+            }, send: { _ in XCTFail("No send while disconnected") })
+        let owner = WorkInteraction(machine: "machine", store: disk)
+        defer { owner.shutdown() }
+        let client = RemoteMobileClient(savedMachine: SavedMachine(endpoint: URL(string: "https://machine.invalid")!, machineID: "machine"))
+        client.journal = disk
+        client.interaction = owner
+        let feed = TaskFeed(client: client)
+        feed.mount()
+        defer { feed.stop() }
+        await owner.refreshFromStore()
+        XCTAssertTrue(feed.waitingForConnection)
+        XCTAssertFalse(feed.loaded)
+        XCTAssertNil(feed.error)
+        let query = ServedRead.viewSelect(expression: TaskList.started.expression(wave: nil))
+        let base = try workingPlan(["a", "b", "c", "d"])
+        _ = try await disk.receivePlans([base], stamp: stamp("list", revision: 6), for: query)
+        for issue in ["a", "b", "c"] {
+            try await disk.save(SubmittedOperation(requestID: issue, destination: "machine",
+                payload: JSONEncoder().encode(ServedWrite.taskComplete(directory: "/repo", issue: issue)),
+                version: ServerProtocol.revision, submittedAt: Date()))
+        }
+        await owner.refreshFromStore()
+        XCTAssertTrue(feed.loaded)
+        XCTAssertTrue(feed.waitingForConnection)
+        XCTAssertEqual(feed.repositories.first?.tasks.map(\.work.id), ["d"])
+        XCTAssertEqual(owner.listedOperations.map(\.title), ["Complete Task · a", "Complete Task · b", "Complete Task · c"])
+        let observation = RemoteTaskObservation(query: query, interaction: owner, connection: connection)
+        defer { observation.close() }
+        try await observation.refresh()
+        XCTAssertTrue(connection.isWaiting, "Refresh observes the existing reconnect, without waiting for it")
+    }
+
     private func leaveBothFeeds(abandon: Bool) async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }

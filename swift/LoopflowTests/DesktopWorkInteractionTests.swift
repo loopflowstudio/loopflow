@@ -45,7 +45,7 @@ extension ClientWorkQueryTests {
             let model = WorkModel(query: fixture.query, repoPath: "/src/loopflow")
             model.useInteractionForTesting(owner)
             model.confirmMachine("machine")
-            model.applyFixture(roadmap: .available(fixture.roadmap), waves: .available(fixture.waves),
+            model.applyFixture(roadmap: .unavailable(lastGood: fixture.roadmap, reason: "Machine offline"), waves: .available(fixture.waves),
                 workActivity: .available(fixture.workActivity), repos: [])
             model.select(.task(id: "issue-now"))
             model.syncWorkScope()
@@ -54,10 +54,17 @@ extension ClientWorkQueryTests {
         let first = window()
         let second = window()
         let task = try XCTUnwrap(first.task(id: "issue-now")?.task)
-        if abandon { await first.abandonTask(task) }
-        else {
-            let button = TaskWorkflowHeader(model: first, task: task, work: .loading)
-            try button.inspect().find(viewWithAccessibilityIdentifier: "task-complete").button().tap()
+        let controls = TaskWorkflowHeader(model: first, task: task,
+            work: .unavailable(lastGood: nil, reason: "Machine offline"))
+        if abandon {
+            XCTAssertFalse(try controls.inspect().find(viewWithAccessibilityIdentifier: "task-abandon").button().isDisabled())
+            await first.abandonTask(task)
+        } else {
+            let menu = TaskActionItems(model: first, task: task, wave: nil)
+            XCTAssertFalse(try menu.inspect().find(button: "Complete Task").isDisabled())
+            let button = try controls.inspect().find(viewWithAccessibilityIdentifier: "task-complete").button()
+            XCTAssertFalse(try button.isDisabled())
+            try button.tap()
         }
         XCTAssertTrue(first.pendingOperations.isEmpty)
         XCTAssertTrue(second.pendingOperations.isEmpty)

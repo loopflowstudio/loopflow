@@ -38,6 +38,7 @@ final class RemoteTaskObservation {
     private let watch: ServerWatch<RawJSON>
     private let connection: MachineConnection
     private var reader: Task<Void, Never>?
+    private var connectionChanges: Task<Void, Never>?
     private var nextCheckpoint: UInt64 = 0
     private var refreshing: (id: UInt64, continuation: CheckedContinuation<Void, any Error>)?
     private var closed = false
@@ -49,6 +50,15 @@ final class RemoteTaskObservation {
             return frame
         }
         (readings, continuation) = AsyncThrowingStream.makeStream(bufferingPolicy: .bufferingNewest(1))
+        connectionChanges = Task { [weak self, connection] in
+            for await _ in connection.changes() {
+                guard let self, !Task.isCancelled else { return }
+                if connection.isWaiting {
+                    self.refreshing?.continuation.resume()
+                    self.refreshing = nil
+                }
+            }
+        }
         reader = Task { [weak self, watch] in
             do {
                 for try await frame in watch.updates {
@@ -75,19 +85,14 @@ final class RemoteTaskObservation {
 
     func refresh() async throws {
         guard !closed else { throw RegistryQueryError("Task updates disconnected; reconnect for current Tasks") }
-        guard refreshing == nil else { return }
+        guard refreshing == nil, !connection.isWaiting else { return }
         nextCheckpoint += 1
         let checkpoint = nextCheckpoint
-        let timeout = Task { [weak self, connection] in
+        let timeout = Task { [weak self] in
             do {
-                while !Task.isCancelled {
-                    try await Task.sleep(for: RemoteMobileClient.requestDeadline)
-                    // Keep its checkpoint through an outage, then give the new
-                    // connection its normal answer deadline.
-                    if connection.isWaiting { _ = try await connection.link(reconnect: true); continue }
-                    self?.close(error: RegistryQueryError("The Machine did not respond in time"))
-                    return
-                }
+                try await Task.sleep(for: RemoteMobileClient.requestDeadline)
+                guard let self, !Task.isCancelled, self.refreshing?.id == checkpoint else { return }
+                self.close(error: RegistryQueryError("The Machine did not respond in time"))
             } catch is CancellationError { }
             catch { self?.close(error: error) }
         }
@@ -109,6 +114,7 @@ final class RemoteTaskObservation {
         closed = true
         watch.cancel()
         reader?.cancel()
+        connectionChanges?.cancel()
         continuation.finish(throwing: error)
         refreshing?.continuation.resume(throwing: error)
         refreshing = nil

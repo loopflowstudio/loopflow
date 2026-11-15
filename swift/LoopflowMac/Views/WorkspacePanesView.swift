@@ -1012,7 +1012,7 @@ struct SessionPaneView: View {
     /// otherwise the terminal's own title, then the pane kind.
     private var _title: String {
         if case .shell = pane.content, paneSessions.count == 1, let session = paneSessions.first {
-            return session.record.title
+            return model.sessionTitle(session.record)
         }
         let title = terminalTitle ?? _terminalIdentity.flatMap { sessions.surfaces.title(for: $0) }
         if let title, !title.isEmpty { return title }
@@ -1030,7 +1030,7 @@ struct SessionPaneView: View {
         case .browser: pane.content.selectedBrowserTab?.title ?? "Browser"
         }
         return PaneProgramHeading(provider: paneSessions.count == 1 ? paneSessions.first?.presentationProvider : nil,
-            title: paneSessions.count == 1 ? paneSessions.first?.record.title ?? _title : _title,
+            title: paneSessions.count == 1 ? paneSessions.first.map { model.sessionTitle($0.record) } ?? _title : _title,
             directory: pane.content.location?.worktree, fallback: fallback)
     }
 

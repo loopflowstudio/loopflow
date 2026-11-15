@@ -93,6 +93,9 @@ struct WavesView: View {
         .background(palette.background)
         .safeAreaInset(edge: .bottom) {
             VStack(alignment: .leading, spacing: 0) {
+                if model.waitingForConnection {
+                    Text("Waiting for connection").font(Typography.body(11)).foregroundStyle(palette.textSecondary).padding(10)
+                }
                 ForEach(model.pendingOperations.filter { !$0.isCreation }) { operation in
                     DesktopPendingOperationRow(model: model, operation: operation)
                 }

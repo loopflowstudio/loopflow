@@ -206,8 +206,7 @@ public actor ServerLink {
         let subscription = ServerSubscription(continuation, query: query, events: events, reconnect: reconnect,
             encode: map, connection: connection)
         subscription.begin()
-        return ServerWatch(updates: updates, checkpoint: subscription.checkpoint, cancel: subscription.cancel,
-            connections: connection.changes(), isWaiting: { connection.isWaiting })
+        return ServerWatch(updates: updates, checkpoint: subscription.checkpoint, cancel: subscription.cancel)
     }
 
     fileprivate func register(_ subscription: ServerSubscription, query: ServedRead, resume: String?) async throws {
@@ -404,8 +403,6 @@ public struct ServerWatch<Output: Sendable>: Sendable {
     public let updates: AsyncThrowingStream<Output, any Error>
     public let checkpoint: @Sendable (UInt64) -> Void
     public let cancel: @Sendable () -> Void
-    public var connections: AsyncStream<Void>? = nil
-    public var isWaiting: @Sendable () -> Bool = { false }
 }
 
 /// One subscription's updates across links; checkpoints before a link is ready wait.

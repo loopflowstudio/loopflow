@@ -120,6 +120,10 @@ pub(crate) fn execute(store: &SqliteStore, id: &str) -> Result<()> {
         }
         match &command {
             Write::TaskComplete { .. } => return recover_completion(store, id),
+            Write::SessionRename { .. } => {
+                store.recover_operation_result(id, "session.renamed")?;
+                return Ok(());
+            }
             Write::TaskReopen { .. } => {
                 store.recover_operation_result(id, "task.reopened")?;
                 return Ok(());

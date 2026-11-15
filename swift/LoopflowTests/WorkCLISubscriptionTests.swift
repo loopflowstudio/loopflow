@@ -109,7 +109,7 @@ struct WorkCLISubscriptionTests {
         #expect(session.launchArguments.contains("--start-if-free"))
         #expect(workspace.conversationStart == nil)
         #expect(await query.startOffer(refused: .reveal, issue: id, cwd: fixture.repo.path) == nil)
-        let recorded = try await query.sessionPage(cwd: fixture.repo.path).entries
+        let recorded = try await query.sessionPage(cwd: fixture.repo.path).page.entries
         #expect(recorded.filter(\.taskPrimary).map(\.id) == [session.id])
         #expect(recorded.filter { $0.primaryScope == "repository" }.count == 1)
         #expect(recorded.count == 2)

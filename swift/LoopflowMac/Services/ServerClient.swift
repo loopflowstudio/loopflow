@@ -18,6 +18,28 @@ enum ServerClient {
         return try await link.request(.read(query), deadline: deadline).printed
     }
 
+    /// One pinned reading, including the provenance of its body.
+    static func reading(_ query: ServedRead, location: ServerLocation = .shared) async throws -> RawJSON {
+        let watch = ServerLink.subscribe(query, connection: location.connection) { update -> RawJSON? in
+            guard case .reading(let frame) = update else { return nil }
+            return frame
+        }
+        defer { watch.cancel() }
+        return try await withThrowingTaskGroup(of: RawJSON.self) { group in
+            group.addTask {
+                for try await reading in watch.updates { return reading }
+                throw RegistryQueryError("Session reading ended before answering")
+            }
+            group.addTask {
+                try await Task.sleep(for: readDeadline)
+                throw RegistryQueryError(ServerLink.unanswered)
+            }
+            defer { group.cancelAll() }
+            guard let reading = try await group.next() else { throw CancellationError() }
+            return reading
+        }
+    }
+
     /// What the write returned, as JSON: what `lf <write> --json` prints.
     static func write(_ change: ServedWrite, location: ServerLocation = .shared) async throws -> String {
         String(decoding: try await request(.command(change), location: location).bytes, as: UTF8.self)

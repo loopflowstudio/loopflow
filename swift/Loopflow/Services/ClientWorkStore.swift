@@ -58,7 +58,8 @@ public actor ClientWorkStore {
     private let prepareDirectory: @Sendable (URL) throws -> Void
     private var database: ClientWorkDatabase?
     private var active: Set<String> = []
-    private var watches: [String: ReceiptWatch] = [:]
+    private nonisolated let connection: MachineConnection?
+    private var connectionChanges: Task<Void, Never>?
     private let currentMachine: @Sendable () async throws -> String
     private let read: @Sendable (ServedRead) async throws -> String
     private let observe: @Sendable (String) -> ReceiptWatch
@@ -66,12 +67,13 @@ public actor ClientWorkStore {
     private var publication: UInt64 = 0
     private var observers: [UUID: AsyncStream<Void>.Continuation] = [:]
 
-    public init(directory: URL,
+    public init(directory: URL, connection: MachineConnection? = nil,
                 prepareDirectory: @escaping @Sendable (URL) throws -> Void = { _ in },
                 machine: @escaping @Sendable () async throws -> String,
                 read: @escaping @Sendable (ServedRead) async throws -> String,
                 observe: @escaping @Sendable (String) -> ReceiptWatch,
                 send: @escaping @Sendable (Data) async throws -> Void) {
+        self.connection = connection
         self.directory = directory
         self.prepareDirectory = prepareDirectory
         currentMachine = machine
@@ -79,6 +81,10 @@ public actor ClientWorkStore {
         self.observe = observe
         self.send = send
     }
+
+    deinit { connectionChanges?.cancel() }
+
+    nonisolated func rememberMachine(_ machine: String) { connection?.rememberMachine(machine) }
 
     private func disk() throws -> ClientWorkDatabase {
         if let database { return database }
@@ -88,6 +94,14 @@ public actor ClientWorkStore {
     }
 
     public func changes() -> AsyncStream<Void> {
+        if connectionChanges == nil, let connection {
+            connectionChanges = Task { [weak self] in
+                for await _ in connection.changes() {
+                    guard !Task.isCancelled else { return }
+                    await self?.changed()
+                }
+            }
+        }
         let id = UUID()
         let (stream, continuation) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
         observers[id] = continuation
@@ -104,6 +118,8 @@ public actor ClientWorkStore {
 
     struct Presentation: Sendable {
         let revision: UInt64
+        let waitingForConnection: Bool
+        let names: [String: SessionNameFact]
         let requested: Set<String>
         let records: [SubmittedOperation]
         let queries: [String: ClientWorkQuery]
@@ -119,14 +135,20 @@ public actor ClientWorkStore {
         var readings: [String: ClientWorkQuery] = [:]
         for (key, read) in queries { readings[key] = try cachedPlans(machine: machine, for: read) }
         let records = try pending().filter { $0.destination == machine }
+        let waiting = connection?.isWaiting(for: machine) == true
         let operations = try records.map { record in
             let command = try JSONDecoder().decode(JSONValue.self, from: record.payload)
             var snapshot = try PendingOperationSnapshot(record: record, command: command,
                 receipt: receipt(record.id), recovery: recovery(record.id), legacyOutcome: disk().state(record.id)?.legacyOutcome)
-            snapshot.waitingForConnection = watches[record.id]?.isWaiting() == true
+            snapshot.waitingForConnection = waiting
             return snapshot
         }
-        return Presentation(revision: publication, requested: Set(queries.keys), records: records, queries: readings, operations: operations)
+        return Presentation(revision: publication, waitingForConnection: waiting, names: try disk().names(machine: machine), requested: Set(queries.keys), records: records, queries: readings, operations: operations)
+    }
+
+    public func receiveNames(_ records: [SessionRecord], stamp: ReadingStamp) throws {
+        try disk().receiveNames(records, stamp: stamp)
+        changed()
     }
 
     @discardableResult
@@ -159,7 +181,11 @@ public actor ClientWorkStore {
 
     public func draftSubmitted(_ id: String) throws -> Bool { try disk().draftSubmitted(id) }
 
-    public func resolveMachine() async throws -> String { try await currentMachine() }
+    public func resolveMachine() async throws -> String {
+        let machine = try await currentMachine()
+        rememberMachine(machine)
+        return machine
+    }
 
     public func isRecovering(_ id: String) -> Bool { active.contains(id) }
 
@@ -213,7 +239,7 @@ public actor ClientWorkStore {
     }
 
     public func record(_ command: ServedWrite, requestID: String) async throws -> SubmittedOperation {
-        let record = SubmittedOperation(requestID: requestID, destination: try await currentMachine(),
+        let record = SubmittedOperation(requestID: requestID, destination: try await resolveMachine(),
             payload: try JSONEncoder().encode(command), version: ServerProtocol.revision, submittedAt: Date())
         try save(record)
         // Return the original record, including its timestamp and sequence.
@@ -258,13 +284,7 @@ public actor ClientWorkStore {
         guard let state = try disk().state(record.id), state.retiredAt == nil else { return }
         try await verify(record)
         let watch = observe(record.id)
-        watches[record.id] = watch
-        let connectionChanges = Task { [weak self] in
-            if let connections = watch.connections {
-                for await _ in connections { await self?.changed() }
-            }
-        }
-        defer { watch.cancel(); connectionChanges.cancel(); watches[record.id] = nil }
+        defer { watch.cancel() }
         var cursor = ReceiptCursor(machine: record.destination)
         for try await frame in watch.updates {
             try Task.checkCancellation()
@@ -312,14 +332,12 @@ public actor ClientWorkStore {
 
     private func recover(_ record: SubmittedOperation) async throws -> OperationReceipt? {
         try await verify(record)
-        let watch = observe(record.id)
-        watches[record.id] = watch
-        let connectionChanges = Task { [weak self] in
-            if let connections = watch.connections {
-                for await _ in connections { await self?.changed() }
-            }
+        for await _ in changes() {
+            try Task.checkCancellation()
+            if try !disk().earlierRenamePending(record) { break }
         }
-        defer { watch.cancel(); connectionChanges.cancel(); watches[record.id] = nil }
+        let watch = observe(record.id)
+        defer { watch.cancel() }
         var cursor = ReceiptCursor(machine: record.destination)
         var submitted = false
         for try await frame in watch.updates {

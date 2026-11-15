@@ -1667,15 +1667,49 @@ impl SqliteStore {
     pub fn rename_session(&self, id: &str, title: &str, source: TitleSource) -> StoreResult<()> {
         let canonical = crate::id::canonical_session(id);
         let id = canonical.as_str();
-        if title.trim().is_empty() {
-            return Err(invalid("Session title cannot be empty"));
-        }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let session = session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
-        rename_session_in(&tx, &session, title, source, None)?;
+        let mut tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let renamed = {
+            let mut mutation = tx.savepoint()?;
+            let result = (|| {
+                let title = crate::naming::validate_session_title(title).map_err(invalid)?;
+                let session = session_in(&mutation, id)?.ok_or(StoreError::NotFound)?;
+                rename_session_in(&mutation, &session, title, source, None)?;
+                let session = session_in(&mutation, id)?.ok_or(StoreError::NotFound)?;
+                super::operations::commit_current_in(
+                    &mutation,
+                    "session.renamed",
+                    &[id],
+                    &["sessions"],
+                    Vec::new(),
+                    || {
+                        Ok(serde_json::json!({"id": id, "title": session.title,
+                        "title_source": title_source(session.title_source)}))
+                    },
+                )
+            })();
+            match result {
+                Ok(()) => {
+                    mutation.commit()?;
+                    Ok(())
+                }
+                Err(error) => {
+                    mutation.rollback()?;
+                    Err(error)
+                }
+            }
+        };
+        if let Err(error) = &renamed {
+            super::operations::refuse_current_in(
+                &tx,
+                "session.renamed",
+                &[id],
+                &["sessions"],
+                error,
+            )?;
+        }
         tx.commit()?;
-        Ok(())
+        renamed
     }
 
     /// The Session continues on `machine`: complete it here, naming where it went.
@@ -2145,6 +2179,72 @@ mod metadata_tests {
     use super::SqliteStore;
 
     use crate::session::{GraphProcessSummaryState, SessionFilter};
+
+    #[test]
+    fn session_rename_receipts_cover_the_name_and_refusal_without_replaying() {
+        use crate::session::TitleSource;
+        use crate::store::sqlite::operations::OperationResolution;
+
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        store.test_session("conversation", &crate::session_record::new_artifact_key());
+        let (machine, epoch) = store.reading_identity().unwrap();
+        for (id, target, name) in [
+            ("rename", "conversation", "New name"),
+            ("refused", "conversation", "two\nlines"),
+            ("missing", "absent", "Missing"),
+        ] {
+            store
+                .admit_operation(
+                    &epoch,
+                    id,
+                    "session.rename",
+                    id,
+                    &json!({"kind":"session.rename","id":target,"name":name}),
+                )
+                .unwrap();
+            store.dispatch_operation(id).unwrap();
+            let result = crate::journal::request::with_operation(Some(id.into()), || {
+                store.rename_session(target, name, TitleSource::Human)
+            });
+            let receipt = store.operation_receipt(id).unwrap().unwrap();
+            let commit = &receipt.commits[0];
+            assert_eq!(commit.stage, "session.renamed");
+            assert_eq!(commit.resources, [target]);
+            assert_eq!(commit.fence.machine, machine);
+            assert_eq!(commit.fence.epoch, epoch);
+            assert_eq!(commit.fence.revisions.len(), 1);
+            assert!(commit.fence.revisions.contains_key("sessions"));
+            if id == "rename" {
+                result.unwrap();
+                assert_eq!(commit.resolution, OperationResolution::Committed);
+                assert_eq!(commit.result["title"], "New name");
+                assert_eq!(commit.result["title_source"], "human");
+                assert!(store
+                    .recover_operation_result(id, "session.renamed")
+                    .unwrap());
+                assert_eq!(
+                    store
+                        .operation_receipt(id)
+                        .unwrap()
+                        .unwrap()
+                        .result
+                        .unwrap()["title"],
+                    "New name"
+                );
+            } else {
+                assert!(result.is_err());
+                assert_eq!(commit.resolution, OperationResolution::DefinitelyRefused);
+                assert!(!store
+                    .recover_operation_result(id, "session.renamed")
+                    .unwrap());
+            }
+            assert_eq!(
+                store.session("conversation").unwrap().unwrap().title,
+                "New name"
+            );
+        }
+    }
 
     #[test]
     fn a_released_tasks_primary_session_stays_its_conversation_here() {

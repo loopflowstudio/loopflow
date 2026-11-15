@@ -228,8 +228,8 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     public let waveId: String?
     public let workPath: String?
     public let actions: [SessionAction]
-    public let title: String
-    public let titleSource: SessionTitleSource
+    public var title: String
+    public var titleSource: SessionTitleSource
     public let graphMembership: SessionGraphMembership
     public let detail: String
     /// Provider harness recorded on the Session's capture manifest; nil when the

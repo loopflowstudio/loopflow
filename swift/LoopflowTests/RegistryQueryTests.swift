@@ -212,8 +212,8 @@ struct RegistryQueryTests {
         let query = RegistryQuery { args, _ in
             args.contains("--after") ? lastJSON : firstJSON
         }
-        let page = try await query.sessionPage(cwd: "/tmp/repo")
-        let final = try await query.sessionPage(after: page.next, cwd: "/tmp/repo")
+        let page = try await query.sessionPage(cwd: "/tmp/repo").page
+        let final = try await query.sessionPage(after: page.next, cwd: "/tmp/repo").page
         #expect(page.entries.map(\.id) == ["session-a"])
         #expect(page.next == "session-a")
         #expect(final.entries.map(\.id) == ["session-z"])
@@ -608,7 +608,7 @@ struct RegistryQueryTests {
             }
         }
 
-        let listed = try await query.sessionPage(cwd: "/tmp/repo").entries
+        let listed = try await query.sessionPage(cwd: "/tmp/repo").page.entries
         let opened = try await query.prepareSession(id: session.id, cwd: "/tmp/repo")
 
         #expect(listed == sessions)

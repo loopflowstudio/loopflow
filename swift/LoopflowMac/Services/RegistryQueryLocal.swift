@@ -10,7 +10,7 @@ enum RegistryQueryLocal {
         try await LocalWaveAgentLauncher.queryLf(args, cwd: cwd, input: input)
     }, serve: { query in
         try await ServerClient.read(query)
-    }, write: { change in
+    }, stamped: { try await ServerClient.reading($0) }, write: { change in
         switch change {
         case .taskCreate(_, let requestID, _, _, _, _, _, _), .sessionNew(_, let requestID, _, _):
             let answer = try await ClientWorkStore.shared.submit(change, requestID: requestID)

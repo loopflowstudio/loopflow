@@ -58,13 +58,16 @@ struct WorkNavigator: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let status = model.workStatus.message {
+            if let status = model.workStatus.message, !model.waitingForConnection {
                 WorkReadStatus(model: model, status: status)
             }
             if let error = model.dashboardError ?? model.presentationError ?? model.selectionPlans.errorMessage,
                ![model.roadmap.errorMessage, model.taskListReading.errorMessage, model.sessions.errorMessage]
                 .compactMap({ $0 }).contains(error) {
                 Text(error).font(Typography.body(11)).foregroundStyle(palette.warning).padding(10)
+            }
+            if model.waitingForConnection {
+                Text("Waiting for connection").font(Typography.body(11)).foregroundStyle(palette.textSecondary).padding(10)
             }
             ForEach(model.pendingOperations) { operation in
                 DesktopPendingOperationRow(model: model, operation: operation)

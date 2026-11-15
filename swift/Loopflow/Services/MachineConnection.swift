@@ -12,9 +12,16 @@ public actor MachineConnection {
     private var reopening = false
     private var opening: Task<Void, Never>?
     private var waiters: [UUID: Waiter] = [:]
-    private nonisolated let state = ConnectionState()
+    private nonisolated let state: ConnectionState
 
-    public init(open: @escaping @Sendable () async throws -> ServerLink) { self.open = open }
+    public init(machine: String? = nil, open: @escaping @Sendable () async throws -> ServerLink) {
+        self.open = open
+        state = ConnectionState(machine: machine)
+    }
+
+    /// Cached destinations keep offline changes on their original Machine.
+    nonisolated func rememberMachine(_ machine: String) { state.rememberMachine(machine) }
+    nonisolated func isWaiting(for machine: String) -> Bool { state.isWaiting(for: machine) }
 
     public nonisolated var isWaiting: Bool { state.isWaiting }
     public nonisolated func changes() -> AsyncStream<Void> { state.changes() }
@@ -52,6 +59,7 @@ public actor MachineConnection {
                 let link = try await open()
                 guard !Task.isCancelled else { await link.close(); return }
                 current = link
+                if case .string(let machine) = link.welcome.machine["id"] { state.identify(machine) }
                 opening = nil
                 state.setWaiting(false)
                 let ready = waiters.values
@@ -80,8 +88,22 @@ public actor MachineConnection {
 private final class ConnectionState: @unchecked Sendable {
     private let lock = NSLock()
     private var waiting = false
+    private var machine: String?
+    init(machine: String?) { self.machine = machine }
     private var observers: [UUID: AsyncStream<Void>.Continuation] = [:]
     var isWaiting: Bool { lock.withLock { waiting } }
+
+    func isWaiting(for machine: String) -> Bool { lock.withLock { waiting && self.machine == machine } }
+    func rememberMachine(_ machine: String) {
+        lock.withLock { if self.machine == nil { self.machine = machine } }
+    }
+    func identify(_ machine: String) {
+        lock.withLock {
+            guard self.machine != machine else { return }
+            self.machine = machine
+            for observer in observers.values { observer.yield(()) }
+        }
+    }
 
     func setWaiting(_ value: Bool) {
         lock.withLock {

@@ -3509,6 +3509,38 @@ mod tests {
     }
 
     #[test]
+    fn session_pages_subscribe_with_their_names_provenance_and_cursor() {
+        with_empty_home(async {
+            let store = home_store();
+            for id in ["first", "second"] {
+                store.test_session(id, &crate::session_record::new_artifact_key());
+            }
+            let mut client = Client::connect();
+            client.hello(REVISION, REVISION).await;
+            let page = |after| Read::SessionList {
+                directory: "/".into(),
+                headless: false,
+                after,
+                limit: Some(1),
+                task: None,
+            };
+            let first = subscribe(&mut client, "first-page", page(None)).await;
+            assert!(first["unavailable"].is_null(), "{first}");
+            assert_eq!(first["body"]["entries"][0]["id"], "first", "{first}");
+            assert_eq!(first["body"]["next"], "first", "{first}");
+            let before = first["stamp"]["revisions"]["sessions"].as_i64().unwrap();
+            store
+                .rename_session("second", "Renamed", crate::session::TitleSource::Human)
+                .unwrap();
+            let second = subscribe(&mut client, "second-page", page(Some("first".into()))).await;
+            assert_eq!(second["body"]["entries"][0]["title"], "Renamed", "{second}");
+            assert!(second["body"]["next"].is_null(), "{second}");
+            assert!(second["stamp"]["revisions"]["sessions"].as_i64().unwrap() > before);
+            assert_eq!(first["stamp"]["machine"], second["stamp"]["machine"]);
+        });
+    }
+
+    #[test]
     fn a_plan_watch_refreshes_and_a_task_view_resolves_its_primary_session() {
         with_empty_home(async {
             let store = home_store();

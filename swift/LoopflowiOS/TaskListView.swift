@@ -21,6 +21,7 @@ final class TaskFeed {
     private(set) var repositories: [RepositoryTasks] = []
     private(set) var loaded = false
     private(set) var error: String?
+    var waitingForConnection: Bool { client.interaction.waitingForConnection }
     private(set) var waves: [Wave] = []
     var filter = TaskList.started
     /// The Wave whose Tasks are listed; nil lists every Wave's.
@@ -192,9 +193,15 @@ struct TaskListView: View {
         return feed.waves.filter { $0.repo == path }.sorted { $0.displayName < $1.displayName }
     }
 
+    private var readingError: String? { feed.error ?? client.interaction.cacheError }
+
     var body: some View {
         NavigationStack(path: $path) {
             List {
+                if feed.waitingForConnection {
+                    Text("Waiting for connection").font(Typography.caption(13))
+                        .foregroundStyle(theme.palette.textSecondary)
+                }
                 ForEach(client.interaction.listedOperations) { operation in
                     PendingOperationRow(operation: operation, interaction: client.interaction, edit: {
                         client.interaction.editCreation($0.id) { creation = MobileTaskCreation(client: client, request: $0) }
@@ -202,7 +209,7 @@ struct TaskListView: View {
                     .buttonStyle(.borderless)
                 }
 
-                if let error = feed.error ?? client.interaction.cacheError {
+                if let error = readingError {
                     VStack(alignment: .leading, spacing: 8) {
                         Label("Couldn’t update Tasks", systemImage: "wifi.exclamationmark").font(Typography.strong(15))
                         Text(error).font(Typography.caption(13))
@@ -237,9 +244,9 @@ struct TaskListView: View {
             .scrollContentBackground(.hidden)
             .background(theme.palette.background)
             .overlay {
-                if !feed.loaded && feed.error == nil {
+                if !feed.loaded && readingError == nil && !feed.waitingForConnection {
                     ProgressView()
-                } else if sections.isEmpty && feed.error == nil {
+                } else if sections.isEmpty && readingError == nil && !feed.waitingForConnection {
                     if search.isEmpty {
                         ContentUnavailableView("No \(feed.filter.title.lowercased()) Tasks", systemImage: "checkmark.circle")
                     } else {

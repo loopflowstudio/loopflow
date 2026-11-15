@@ -101,9 +101,13 @@ pub(crate) fn commit_in(
     let span = tracing::info_span!("operation_domain_commit", operation_id = id, stage);
     let _entered = span.enter();
     let commit = domain_commit_in(conn, stage, resources, domains, result)?;
+    record_resolution_in(conn, id, &commit)
+}
+
+fn record_resolution_in(conn: &Connection, id: &str, commit: &OperationCommit) -> StoreResult<()> {
     if conn.execute(
         "UPDATE creation_receipts SET commits=json_insert(commits,'$[#]',json(?2)),updated_at=?3 WHERE request_id=?1 AND delivery_state<>'finished'",
-        params![id,serde_json::to_string(&commit)?,crate::store::rows::now_unix()],
+        params![id,serde_json::to_string(commit)?,crate::store::rows::now_unix()],
     )? != 1 {
         return Err(StoreError::NotFound);
     }
@@ -168,6 +172,29 @@ pub(super) fn commit_current_in(
 ) -> StoreResult<()> {
     if let Some(id) = crate::journal::request::operation_id() {
         commit_in(conn, &id, stage, resources, domains, &result()?)?;
+    }
+    Ok(())
+}
+
+/// The caller has rejected this effect before changing any domain fact. Keep
+/// the refusal in that transaction; a generic command error proves nothing.
+pub(super) fn refuse_current_in(
+    conn: &Connection,
+    stage: &str,
+    resources: &[&str],
+    domains: &[&str],
+    error: &StoreError,
+) -> StoreResult<()> {
+    if let Some(id) = crate::journal::request::operation_id() {
+        let mut resolution = domain_commit_in(
+            conn,
+            stage,
+            resources,
+            domains,
+            &serde_json::json!({"error": error.to_string()}),
+        )?;
+        resolution.resolution = OperationResolution::DefinitelyRefused;
+        record_resolution_in(conn, &id, &resolution)?;
     }
     Ok(())
 }
@@ -1875,7 +1902,8 @@ mod tests {
             let mut conn = store.conn.lock().unwrap();
             let tx = conn.transaction().unwrap();
             tx.execute("WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<10000)
-                INSERT INTO tasks(id,repository_id,issue_identifier,created_at) SELECT 'task_receipt_'||i,?1,'RECEIPT-'||i,1 FROM n",[repository.as_str()]).unwrap();
+                INSERT INTO tasks(id,repository_id,issue_identifier,issue_title,issue_description,workspace_slug,created_at,updated_at)
+                SELECT 'task_receipt_'||i,?1,'RECEIPT-'||i,'Receipt Task','','',1,1 FROM n",[repository.as_str()]).unwrap();
             tx.execute("INSERT INTO creation_receipts(request_id,kind,fingerprint,run,task_id,milestone,created_at,updated_at)
                 SELECT 'receipt_'||id,'task.complete','hash',0,id,'queued',1,1 FROM tasks",[]).unwrap();
             tx.commit().unwrap();
@@ -1946,6 +1974,36 @@ mod tests {
             crate::linear::acceptance::put_item(&tx, "/receipt-benchmark", 1, &issue).unwrap();
             tx.commit().unwrap();
         }));
+        let task = store
+            .task(&crate::durable::TaskId::from_raw("task_receipt_3"))
+            .unwrap()
+            .unwrap();
+        for (id, kind) in [
+            ("edit-content", "task.update"),
+            ("move-membership", "task.move"),
+        ] {
+            store
+                .admit_operation(&epoch, id, kind, "hash", &json!({}))
+                .unwrap();
+            traced.extend(crate::store::query_plans::statements(&store, || {
+                crate::journal::request::with_operation(Some(id.into()), || {
+                    if kind == "task.update" {
+                        store
+                            .edit_task(
+                                &task.id,
+                                task.revision,
+                                &crate::work::task::TaskUpdate {
+                                    description: Some("Query trace".into()),
+                                    ..Default::default()
+                                },
+                            )
+                            .unwrap();
+                    } else {
+                        store.move_task(&task.id, None, None).unwrap();
+                    }
+                });
+            }));
+        }
         let conn = store.conn.lock().unwrap();
         for sql in traced {
             if !sql.starts_with("SELECT") && !sql.starts_with("UPDATE") {
@@ -1963,7 +2021,10 @@ mod tests {
                 assert!(
                     !detail.starts_with("SCAN")
                         || detail == "SCAN CONSTANT ROW"
-                        || detail.starts_with("SCAN json_each VIRTUAL TABLE"),
+                        || detail.starts_with("SCAN json_each VIRTUAL TABLE")
+                        // Planning writes inspect the fixed schema's columns,
+                        // never Task rows, through SQLite's metadata table.
+                        || detail.starts_with("SCAN pragma_table_info VIRTUAL TABLE"),
                     "{detail}: {sql}"
                 );
             }

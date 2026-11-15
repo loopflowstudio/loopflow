@@ -61,14 +61,27 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = validate_move(&tx, id, expected_project, destination)?;
-        if current.project_id.as_ref() == destination {
-            return Ok(());
+        let current = match validate_move(&tx, id, expected_project, destination) {
+            Ok(current) => current,
+            Err(error) => {
+                super::operations::refuse_current_in(
+                    &tx,
+                    "task.membership_changed",
+                    &[id.as_str()],
+                    &["planning"],
+                    &error,
+                )?;
+                tx.commit()?;
+                return Err(error);
+            }
+        };
+        if current.project_id.as_ref() != destination {
+            PlanningChanges::Task(id).save(
+                &tx,
+                &[Edit::TaskProject(destination.map(ToString::to_string))],
+            )?;
         }
-        PlanningChanges::Task(id).save(
-            &tx,
-            &[Edit::TaskProject(destination.map(ToString::to_string))],
-        )?;
+        commit_edit_in(&tx, id, "task.membership_changed")?;
         tx.commit()?;
         Ok(())
     }
@@ -108,7 +121,20 @@ impl SqliteStore {
     ) -> StoreResult<Task> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let task = validate_edit(&tx, id, expected_revision, patch)?;
+        let task = match validate_edit(&tx, id, expected_revision, patch) {
+            Ok(task) => task,
+            Err(error) => {
+                super::operations::refuse_current_in(
+                    &tx,
+                    "task.updated",
+                    &[id.as_str()],
+                    &["planning"],
+                    &error,
+                )?;
+                tx.commit()?;
+                return Err(error);
+            }
+        };
         let mut edits = Vec::new();
         if let Some(value) = &patch.title {
             edits.push(Edit::TaskTitle(Some(value.clone())));
@@ -124,9 +150,22 @@ impl SqliteStore {
             super::planning_order::reorder_in(&tx, &task, rank)?;
         }
         let task = super::children::task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
+        commit_edit_in(&tx, id, "task.updated")?;
         tx.commit()?;
         Ok(task)
     }
+}
+
+fn commit_edit_in(conn: &rusqlite::Connection, id: &TaskId, stage: &str) -> StoreResult<()> {
+    super::operations::commit_current_in(conn, stage, &[id.as_str()], &["planning"], || {
+        let sync = super::planning_sync::task_planning_syncs_in(conn, std::slice::from_ref(id))?
+            .remove(id)
+            .ok_or(StoreError::NotFound)?;
+        Ok(serde_json::to_value(crate::ops::task::TaskEdit {
+            id: id.to_string(),
+            sync,
+        })?)
+    })
 }
 
 fn validate_edit(
@@ -189,6 +228,169 @@ mod tests {
     use crate::session_record::new_artifact_key;
     use crate::store::sqlite::SqliteStore;
     use crate::work::task::{NewTask, TaskUpdate};
+
+    #[test]
+    fn validation_refusal_resolves_only_the_uncommitted_edit_and_never_supplies_success() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let repository = home.path().canonicalize().unwrap();
+        let repository = repository.to_str().unwrap();
+        let repository_id = store.ensure_repository(repository).unwrap();
+        let task = store
+            .create_task(&NewTask {
+                id: TaskId::new(),
+                repository_id,
+                project_id: None,
+                title: "Current".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        let expected = store.ensure_wave_project(repository, "expected").unwrap();
+        let destination = store
+            .ensure_wave_project(repository, "destination")
+            .unwrap();
+        let epoch = store.reading_identity().unwrap().1;
+        for (id, kind, stage) in [
+            ("refused-edit", "task.update", "task.updated"),
+            ("refused-move", "task.move", "task.membership_changed"),
+        ] {
+            store
+                .admit_operation(&epoch, id, kind, "hash", &serde_json::json!({}))
+                .unwrap();
+            assert!(store.dispatch_operation(id).unwrap());
+            let before = store.revisions().unwrap();
+            crate::journal::request::with_operation(Some(id.into()), || {
+                if kind == "task.update" {
+                    assert!(store
+                        .edit_task(
+                            &task.id,
+                            task.revision + 1,
+                            &TaskUpdate {
+                                title: Some("Rejected".into()),
+                                ..Default::default()
+                            }
+                        )
+                        .is_err());
+                } else {
+                    assert!(store
+                        .move_task(&task.id, Some(&expected.id), Some(&destination.id))
+                        .is_err());
+                }
+            });
+            let receipt = store.operation_receipt(id).unwrap().unwrap();
+            assert_eq!(receipt.commits.len(), 1);
+            let resolution = &receipt.commits[0];
+            assert_eq!(resolution.stage, stage);
+            assert_eq!(
+                resolution.resolution,
+                super::super::operations::OperationResolution::DefinitelyRefused
+            );
+            assert_eq!(resolution.resources, [task.id.to_string()]);
+            assert!(resolution.result["error"].is_string());
+            assert_eq!(resolution.fence.revisions["planning"], before.planning);
+            assert!(!store.recover_operation_result(id, stage).unwrap());
+            assert_eq!(store.revisions().unwrap(), before);
+            assert!(store.pending_task_changes(&task.id).unwrap().is_empty());
+        }
+        assert_eq!(store.task(&task.id).unwrap().unwrap().title, "Current");
+        assert!(store.task(&task.id).unwrap().unwrap().project_id.is_none());
+    }
+
+    #[test]
+    fn edit_and_membership_fences_cover_noops_and_roll_back_with_their_facts() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let repository = home.path().canonicalize().unwrap();
+        let repository = repository.to_str().unwrap();
+        let repository_id = store.ensure_repository(repository).unwrap();
+        let task = store
+            .create_task(&NewTask {
+                id: TaskId::new(),
+                repository_id,
+                project_id: None,
+                title: "Original".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        let epoch = store.reading_identity().unwrap().1;
+        for (id, kind, stage) in [
+            ("noop-edit", "task.update", "task.updated"),
+            ("noop-move", "task.move", "task.membership_changed"),
+        ] {
+            store
+                .admit_operation(&epoch, id, kind, "hash", &serde_json::json!({}))
+                .unwrap();
+            let before = store.revisions().unwrap().planning;
+            crate::journal::request::with_operation(Some(id.into()), || {
+                if kind == "task.update" {
+                    store
+                        .edit_task(
+                            &task.id,
+                            task.revision,
+                            &TaskUpdate {
+                                title: Some(task.title.clone()),
+                                ..Default::default()
+                            },
+                        )
+                        .unwrap();
+                } else {
+                    store.move_task(&task.id, None, None).unwrap();
+                }
+            });
+            let receipt = store.operation_receipt(id).unwrap().unwrap();
+            assert_eq!(receipt.commits.len(), 1);
+            assert_eq!(receipt.commits[0].stage, stage);
+            assert_eq!(receipt.commits[0].fence.revisions["planning"], before);
+            assert_eq!(store.revisions().unwrap().planning, before);
+        }
+        let project = store.ensure_wave_project(repository, "product").unwrap();
+        for (id, kind) in [("failed-edit", "task.update"), ("failed-move", "task.move")] {
+            store
+                .admit_operation(&epoch, id, kind, "hash", &serde_json::json!({}))
+                .unwrap();
+            // Fail the receipt write after the domain write. Both must roll back.
+            store.conn.lock().unwrap().execute_batch(
+                "CREATE TEMP TRIGGER reject_commit BEFORE UPDATE OF commits ON creation_receipts
+                 BEGIN SELECT RAISE(ABORT,'held receipt write'); END;"
+            ).unwrap();
+            let before = store.revisions().unwrap();
+            crate::journal::request::with_operation(Some(id.into()), || {
+                if kind == "task.update" {
+                    assert!(store
+                        .edit_task(
+                            &task.id,
+                            task.revision,
+                            &TaskUpdate {
+                                title: Some("Must roll back".into()),
+                                ..Default::default()
+                            }
+                        )
+                        .is_err());
+                } else {
+                    assert!(store.move_task(&task.id, None, Some(&project.id)).is_err());
+                }
+            });
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute_batch("DROP TRIGGER reject_commit")
+                .unwrap();
+            assert_eq!(store.revisions().unwrap(), before);
+            assert!(store
+                .operation_receipt(id)
+                .unwrap()
+                .unwrap()
+                .commits
+                .is_empty());
+            let current = store.task(&task.id).unwrap().unwrap();
+            assert_eq!(current.title, task.title);
+            assert_eq!(current.project_id, None);
+            assert!(store.pending_task_changes(&task.id).unwrap().is_empty());
+        }
+    }
 
     #[test]
     fn rank_edits_stay_within_repository_and_project_membership() {

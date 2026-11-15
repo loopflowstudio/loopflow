@@ -124,6 +124,14 @@ pub(crate) fn execute(store: &SqliteStore, id: &str) -> Result<()> {
                 store.recover_operation_result(id, "task.reopened")?;
                 return Ok(());
             }
+            Write::TaskUpdate { .. } => {
+                store.recover_operation_result(id, "task.updated")?;
+                return Ok(());
+            }
+            Write::TaskMove { machine: None, .. } => {
+                store.recover_operation_result(id, "task.membership_changed")?;
+                return Ok(());
+            }
             _ => {}
         }
         let Some(creation) = store.creation_receipt(id)? else {
@@ -252,6 +260,125 @@ mod tests {
             session: None,
             run: false,
         }
+    }
+
+    #[test]
+    fn task_edit_recovery_preserves_the_committed_result_without_overwriting_newer_edits() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home = EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        let repo = loopflow_test_support::TestRepo::new();
+        let repository = repo.path().canonicalize().unwrap();
+        let path = crate::store::default_db_path();
+        let store = SqliteStore::new(&path).unwrap();
+        let repository_id = store
+            .ensure_repository(repository.to_str().unwrap())
+            .unwrap();
+        let task = store
+            .create_task(&crate::work::task::NewTask {
+                id: crate::durable::TaskId::new(),
+                repository_id,
+                project_id: None,
+                title: "Recovery".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        let project = store
+            .ensure_wave_project(repository.to_str().unwrap(), "product")
+            .unwrap();
+        let update = Write::TaskUpdate {
+            directory: repo.path().to_owned(),
+            issue: task.identifier.clone(),
+            notes: "Original edit".into(),
+        };
+        let movement = Write::TaskMove {
+            directory: repo.path().to_owned(),
+            issue: task.identifier.clone(),
+            wave: Some("product".into()),
+            machine: None,
+        };
+        for (id, command, stage) in [
+            ("edit", update, "task.updated"),
+            ("move", movement, "task.membership_changed"),
+        ] {
+            let epoch = store.reading_identity().unwrap().1;
+            super::admit(id, &epoch, &command).unwrap();
+            assert!(store.dispatch_operation(id).unwrap());
+            // A dispatch with no domain stage cannot authorize replay or
+            // establish an outcome from the current Task.
+            super::execute(&store, id).unwrap();
+            assert!(store
+                .operation_receipt(id)
+                .unwrap()
+                .unwrap()
+                .commits
+                .is_empty());
+            let current = store.task(&task.id).unwrap().unwrap();
+            crate::journal::request::with_operation(Some(id.into()), || match command {
+                Write::TaskUpdate { notes, .. } => {
+                    store
+                        .edit_task(
+                            &task.id,
+                            current.revision,
+                            &crate::work::task::TaskUpdate {
+                                description: Some(notes),
+                                ..Default::default()
+                            },
+                        )
+                        .unwrap();
+                }
+                Write::TaskMove { .. } => {
+                    store.move_task(&task.id, None, Some(&project.id)).unwrap()
+                }
+                _ => unreachable!(),
+            });
+            let receipt = store.operation_receipt(id).unwrap().unwrap();
+            assert_eq!(receipt.commits.len(), 1);
+            assert_eq!(receipt.commits[0].stage, stage);
+            assert_eq!(receipt.commits[0].resources, [task.id.to_string()]);
+            assert_eq!(
+                receipt.commits[0].fence.revisions["planning"],
+                store.revisions().unwrap().planning
+            );
+            let original = receipt.commits[0].result.clone();
+            assert_eq!(original["id"], task.id.as_str());
+            assert!(original["sync"].is_object());
+            store
+                .finish_operation(id, Err("planning response lost"))
+                .unwrap();
+        }
+        let current = store.task(&task.id).unwrap().unwrap();
+        store
+            .edit_task(
+                &task.id,
+                current.revision,
+                &crate::work::task::TaskUpdate {
+                    description: Some("Newer edit".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        store.move_task(&task.id, Some(&project.id), None).unwrap();
+        let newer = serde_json::to_value(store.task(&task.id).unwrap().unwrap()).unwrap();
+        drop(store);
+        let store = SqliteStore::new(&path).unwrap();
+        for id in ["edit", "move"] {
+            super::execute(&store, id).unwrap();
+            let recovered = store.operation_receipt(id).unwrap().unwrap();
+            assert_eq!(recovered.delivery, OperationDelivery::Finished);
+            assert_eq!(recovered.result, Some(recovered.commits[0].result.clone()));
+            assert_eq!(recovered.error.as_deref(), Some("planning response lost"));
+            super::execute(&store, id).unwrap();
+            assert_eq!(
+                store.operation_receipt(id).unwrap().unwrap().revision,
+                recovered.revision
+            );
+        }
+        assert_eq!(
+            serde_json::to_value(store.task(&task.id).unwrap().unwrap()).unwrap(),
+            newer
+        );
     }
 
     #[test]

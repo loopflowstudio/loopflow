@@ -1,7 +1,7 @@
 # LOO-906: immediate interactions across Desktop and mobile
 
-Implementation continues 2026-11-15 from checkpoint `9d25b68752` on
-origin/main `9cafc410ee` (no newer upstream). Supersedes the Desktop-only delivery
+Implementation continues 2026-11-15 from checkpoint `19612daf419f` on
+origin/main `9cafc410ee`. Supersedes the Desktop-only delivery
 boundary. No shipping or merge decision is recorded. Placement remains this Task;
 no Wave is selected.
 
@@ -643,7 +643,14 @@ presentation remain interim; no shared projection cutover is claimed.
 
 Completion/reopen recover their saved committed result without reissuing intent;
 subsequent errors remain visible rather than certifying cleanup/planning delivery.
-Other mutation families and both clients' completion presentation remain unfinished.
+Task field edits and Wave membership moves now record `task.updated` /
+`task.membership_changed` in their existing writer transaction, including no-ops.
+Their saved `TaskEdit` captures planning status before external delivery. Lost
+output recovers that result without overwriting newer edits. Writer validation
+failures record definite refusal before changing facts in the same transaction; write or
+external errors remain uncertain. Remote Machine moves are outside this recovery
+rule. Remaining mutation families and both clients' completion presentation remain
+unfinished.
 
 2026-11-15 supersession cut: each semantic entry in the existing `commits` array
 has a required typed `resolution` (committed, definitely_refused, superseded),
@@ -654,7 +661,8 @@ their fence requires a replacement reading, rather than supplying a guessed Task
 Reopen, replacement PR insertion and accepted Linear status changes resolve that
 request in their existing transaction. First resolution wins, even after command
 delivery finishes. Recovery uses only committed results and never continues a
-superseded request. Definitive-refusal classification remains unfinished.
+superseded request. Definitive-refusal classification outside Task content and
+membership writer validation remains unfinished.
 
 The 10k trace caught `SCAN repository_plans` in the new status-withdrawal lookup
 (`/tmp/loo906-supersession-atomic-query.log`). A Task-to-repository primary-key
@@ -810,19 +818,17 @@ boundary; the first invocation skipped when that boundary cleared `LF_*`.
 
 The earlier admission LEAK has no established cause; none appeared in this cut.
 
-Current checks (inherited `LF_*` cleared; logs under `/tmp/loo906-supersession-*`):
-
-- `cargo nextest run -p loopflow --lib -E 'test(store::sqlite::operations::tests::replacement_pr_resolves) | test(store::sqlite::operations::tests::linear_status_resolves) | test(store::sqlite::operations::tests::receipt_fixture_keeps) | test(store::sqlite::operations::tests::receipt_reads_and_duplicate_admission)'`: 4 passed; `final.log`. Earlier exact-request engine/periodic recovery results remain applicable (`rust.log`).
-- `cargo nextest run -p loopflow --lib -E 'test(store::sqlite::operations::tests::withdrawn_completion) | test(store::sqlite::operations::tests::receipt_reads_and_duplicate_admission)'`: rollback/restart passed; newly expanded query trace failed on the repo scan; `atomic-query.log`. The repaired query is checked below.
-- `cargo nextest run -p loopflow --lib -E 'test(store::sqlite::operations::tests::linear_status_resolves) | test(store::sqlite::operations::tests::receipt_reads_and_duplicate_admission)'`: 2 passed; `index.log`; all traced SELECT/UPDATE plans indexed except per-receipt JSON iteration.
-- `cargo nextest run -p loopflow --lib -E 'test(server::schema::tests::)'`: 8 passed; schema regenerated; `/tmp/loo906-schema-tests.log`.
-- `cargo nextest run -p loopflow --test integration -E 'test(documented_commands::)'`: 4 passed; `doc-tests.log`.
-- `swift build --build-tests --jobs 4 --package-path swift -Xswiftc -gnone`: passed; `swift-build.log`.
-- `swift test --skip-build --disable-sandbox --package-path swift --no-parallel -Xswiftc -gnone --filter 'ServerProtocolTests|restartRetainsSupersessionAfterAnOlderReceiptArrives'`: 26 passed under Desktop network boundary with private `LF_HOME`; `swift-tests.log`.
-- `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/ReadingStampTests`: 3 passed; `ios.log`.
-- `uv run python scripts/check_migrations.py`, `uv run python scripts/check_architecture.py`, `cargo fmt`, `git diff --check`: passed; still one draft migration and 89/89 SQLite owners.
-- `uv run python scripts/desktop_performance.py preflight --output /tmp/loo906-supersession-preflight`: rejected 2026-11-15T09:34:29Z, CPU 280%, one-minute load 8.75; raw `preflight/preflight.json`. Native trials remain unmeasured.
+Prior check details: `19612daf419f6d2b77f2f928077e8c2916e2a103:scratch/instant-task-session.md`.
+Preflight rejected native measurement at
+2026-11-15T09:34:29Z (CPU 280%, one-minute load 8.75), raw
+`/tmp/loo906-supersession-preflight/preflight.json`.
 
 Gate owns wider store/transport/lifecycle, DTO integration, documented-command,
 packaging and clippy checks. Implementation still owns a valid benchmark baseline
 and near-term measurements; demo owns native usability judgment, not all timing.
+
+Task content checks (2026-11-15; inherited `LF_*` cleared; `/tmp/loo906-task-content-*.log`):
+- `cargo nextest run -p loopflow --lib -E 'test(engine::operation::tests::task_edit_recovery) | test(store::sqlite::task_content::tests::) | test(store::sqlite::operations::tests::receipt_reads_and_duplicate_admission) | test(store::sqlite::operations::tests::completion_and_reopen_record_their_own)'`: 7 passed (`final.log`); 10k trace permits only JSON iteration and fixed schema metadata scans, no row-table scans.
+- `cargo nextest run -p loopflow --test integration -E 'test(documented_commands::)'`: 4 passed (`docs.log`).
+- `cargo clippy --all-targets --jobs 4 -- -D warnings`: passed (`clippy.log`).
+- `cargo fmt --all -- --check`, `uv run python scripts/check_architecture.py`, `git diff --check`: passed. Native acceptance and the remaining architecture above stay open.

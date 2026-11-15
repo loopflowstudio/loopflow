@@ -244,9 +244,18 @@ transaction. Late settlement cannot overwrite that resolution or borrow a newer
 request's completion. Recovery never repeats a superseded request.
 Completion and reopen recover their original committed Task result after a lost
 reply, even if the Task has since changed. Later failures remain in `error`: the
-recovered Task result does not certify cleanup or planning delivery. Other sent
-commands remain inspectable unless their domain authorizes continuation. There is
-no generic retry of uncertain effects.
+recovered Task result does not certify cleanup or planning delivery. Task field
+edits and Wave membership moves record `task.updated` and
+`task.membership_changed` with their saved `TaskEdit` result in the local write
+transaction. No-ops record the current result and fence without advancing Work
+revisions. Recovery returns that saved result without repeating an edit or move;
+its planning status describes the local commit, before subsequent delivery.
+Validation refused by either SQLite writer records `definitely_refused` for that
+stage before changing facts in the same transaction. A later persistence or
+delivery error remains uncertain; absence of a stage is never a refusal. Machine transfers have separate
+effects and do not use the Wave-move recovery rule. Other sent commands remain
+inspectable unless their domain authorizes continuation. There is no generic
+retry of uncertain effects.
 
 `commits` contains semantic stages with resource IDs, a result and
 Machine/epoch/schema/domain revision fences written in the domain transaction.
@@ -261,8 +270,9 @@ Each receipt's monotonic `revision` orders updates within its database epoch;
 a held admission reply cannot supersede a newer receipt. Command output is
 separate: `finished` alone cannot retire an optimistic layer or
 certify provider/input readiness. Completion request, completion settlement,
-reopen, Task filing and Session input replacement currently emit stages. Other
-writers still require their domain commits before client projection cutover.
+reopen, field editing, Wave membership, Task filing and Session input replacement
+currently emit stages. Other writers still require their domain commits before
+client projection cutover.
 Receipt changes wake receipt subscriptions without changing Work revisions.
 
 ```sh

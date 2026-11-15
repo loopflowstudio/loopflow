@@ -20,15 +20,16 @@ Preserved refs/bundle establish committed-history recovery only; no pre-deletion
 inventory establishes whether uncommitted/ignored data existed. Recovery must
 preserve MTG-193's active checkout and Task. LOO-543 remains separate.
 
-## Limit recovery (LOO-747/811, reconciled 2026-11-14)
+## Limit recovery (LOO-747/811, 2026-11-14)
 
 LOO-747 (#1828) owns Graph recovery without replay; LOO-811 owns interactive
 continuation and Desktop recovery. LOO-813/#1863 is complete opening/reconnect
-work. Account switching alone does not establish continuation. Keep history,
+work. Account switching alone is not continuation. Keep history,
 model, drafts and approvals; distinguish rejection from uncertain/completed work.
+A rejected turn the client can't take is `manual_retry`, decided at rejection.
 
 Restart is allowed, but idle account adoption proves no preservation: Codex
-replacement loses active work/approvals; SIGHUP drain exits on racing input;
+replacement loses active work; SIGHUP drain exits on racing input;
 active-response handoff fails.
 
 Claude 2.1.322's recovery-only wrapper blocks gate failure/timeout while ordinary
@@ -42,15 +43,15 @@ admitted prompt ID and Stop. Cache expiry and outside history reads reserve no i
 Since 2026-11-14 the Machine server owns recovery checks and native side
 connections; holders keep PTYs; no per-Session observer. A one-use
 socket holds native submission through preparation. Cancellation stops subsequent
-installation/retry, but cannot undo a native installation already sent: retain
-uncertainty and track confirmed account changes. Refresh/save-back must finish
+installation/retry but can't undo one already sent: keep uncertainty, track
+confirmed account changes. Refresh/save-back must finish
 outside the cancelled hook so received grants survive. Late waits retain dispatch
 and completion; only recovery depends on its gate, ordinary input stays best-effort.
 
-Pre-holder (Nov 9) synthetic checks covered two Task primary Sessions per provider through
-Desktop's served protocol: bulk continuation, drafts/later input, held-lock
+Nov 9 pre-holder synthetic checks covered two Task Sessions per provider via
+the served protocol: bulk continuation, drafts/later input, held-lock
 cancellation and an approval retained while the other Task recovers, executed
-once when answered: neither rendered Desktop nor installed/real-token acceptance. Model/routes,
+once when answered; not rendered Desktop or installed/real-token use. Routes,
 gate and the ordinary-typing incident remain open. Scoped Keychain
 checks cover USER plus one lexical legacy item, not native write rejection or
 installed/unsuffixed repair. Sources and candidate hashes:

@@ -63,8 +63,8 @@ The earlier design below describes the published November 9 implementation and
 must be reconciled during this pass. Keep production conversations untouched;
 use disposable validation and do not install, merge or enable Auto-Ship.
 
-User docs for this outcome, rewritten November 14 to lead with what Desktop
-shows and what to do per state: `docs/sessions.md#recover-after-a-usage-limit`,
+User docs for this outcome lead with what Desktop shows and what to do per
+state: `docs/sessions.md#recover-after-a-usage-limit`,
 `docs/subscriptions.md#when-an-account-runs-out` (open-Session paragraphs) and
 `swift/README.md` (recovery row). Main rewrote all three files since the PR
 head; keep these sections through the merge. They name the five Desktop state
@@ -72,8 +72,8 @@ labels and the row above the pane, so a relabel or move updates them.
 `rust/loopflow/src/harness/README.md#quota-recovery` now describes the
 Machine server's connections and holder-preserved terminals.
 
-November 14 reversible choice: keep the bulk recovery button on Waiting for
-native conversation. It can still recheck the other affected conversations;
+November 14 reversible choice: keep the bulk recovery button on the row a
+person must resend by hand (now `manual_retry`). It can still recheck the other affected conversations;
 the reason and guide explain manual continuation for an older client. The
 client is never restarted just to install its guard.
 
@@ -95,7 +95,7 @@ a second request for dispatched work, and starts no Process. Separate native
 fixtures now exercise automatic admission and pending approvals through the served
 protocol. None of these fixtures mounts Desktop.
 
-### Concept review — November 14: next implement direction
+### Concept review — November 14 (implemented)
 
 Read against `7a67cd6eb6..3b96422baa`. The three concepts, the served
 `session.recover` request and the Machine-server ownership hold. One mismatch,
@@ -119,7 +119,8 @@ same missing login as `uncertain`. The stated requirement is to "Distinguish
 rejected turns from uncertain delivery/completed effects": a turn known to be
 rejected that Loopflow cannot resend is neither a wait nor uncertain.
 
-Build each state as one thing the person does:
+Each state is now one thing the person does (labels and reasons are
+agent-written; nobody chose them):
 
 | State (wire) | Label | The person |
 |---|---|---|
@@ -129,27 +130,14 @@ Build each state as one thing the person does:
 | `continued` | Continued | Carries on. |
 | `uncertain` | Review conversation | Reads the end and continues. Unchanged. |
 
-- `WaitingCapacity` becomes `Waiting` and takes `WaitingNative`'s short waits.
-  `WaitingNative` becomes `ManualRetry` and keeps only the no-guard and
-  no-managed-login cases, once the rejection itself is established. Claude's
-  missing-login case moves there from `uncertain` when the model and rejected
-  chain are known; a missing model or incomplete chain stays `uncertain`.
-- Decide `manual_retry` at the rejection, before the capacity read. Still
-  record the spent limit for routing. Claude's guard is a launch fact
-  (`NativeRecovery.guarded`, `claude_home`). Codex reads `hooks/list` live, so
-  a later check may find the guard and take the turn while nothing newer was
-  sent; `can_retry` therefore keeps covering both `waiting` and `manual_retry`,
-  and the November 14 button choice stands.
-- Reasons are read in Desktop. Say them without "native", "guard",
-  "admission" or "installation": "This conversation was opened before Loopflow
-  could resend for it", "This Session's login is not one Loopflow manages",
-  "Reading what the stopped turn did", "The chosen login could not be signed
-  in; checking again", "The resent turn is running".
-- Nothing released has written these states; rename the wire values, Swift
-  enum, `server_schema.json` and DTO fixtures in place, with no alias.
-- `docs/sessions.md#recover-after-a-usage-limit` and `swift/README.md` follow
-  the table: the example row reads "Waiting", and "Leave them open" names the
-  `manual_retry` exception beside it.
+Rename was in place, no alias: Rust `RecoveryState`, Swift
+`SessionRecovery.State`, `server_schema.json`, `session.json` and the new
+`session_manual_retry.json` fixture. `manual_retry` is decided at the
+rejection, before capacity selection, and the spent limit is still recorded.
+Claude's guard is a launch fact (`LF_RECOVERY_GUARD`); Codex reads `hooks/list`
+live, so `can_retry` covers both retryable states and the button stays on both.
+Claude's missing managed login after a complete rejection is `manual_retry`;
+missing model or incomplete chain stays `uncertain`. Docs follow the table.
 
 Counterexamples kept: an unguarded conversation with no capacity anywhere
 resends by hand and is rejected again; that is a new failed turn with its own
@@ -190,26 +178,11 @@ Task-update polling loop; `task_updates::watch` and Pi watcher dispatch;
 interactive route selection. The `printed`/`SessionBoundaryAnswer` TODOs in
 `server/wire.rs` are main's LOO-838 compatibility, not leftovers here.
 
-### State replacement — November 14
+### State replacement — November 14 (done)
 
-Delete — do not maintain:
-
-- `RecoveryState::WaitingCapacity` / `WaitingNative`, Swift counterparts and old
-  wire strings; replace in place with `Waiting` / `ManualRetry`, without aliases.
-- Capacity-first no-guard branches in both providers. Keep spent-limit recording,
-  complete-history rejection checks, newer-input refusal, one dispatch and the
-  retained bulk recovery action on both retryable states.
-- Desktop's two misleading waiting labels and their documentation. Keep reset
-  times on temporary capacity waits and plain-language reasons on every row.
-
-The classification now happens before capacity selection. Claude's detached
-failure hook reads the launch's `LF_RECOVERY_GUARD`; the Machine server retains
-its launch metadata for subsequent checks. Codex checks the live hook list on
-each recheck; a failed read waits, while a confirmed absent hook needs manual
-retry. Missing Claude model/history remains uncertain; missing managed
-login after a complete rejection becomes manual retry. Gate owns broader served,
-wire/schema, documentation and Desktop suites; this implement pass runs focused
-recovery and row tests.
+The capacity-first no-guard branches and the two old waiting labels are gone.
+The Machine server keeps launch metadata for later checks. A failed Codex
+`hooks/list` read waits; a confirmed absent hook is manual retry.
 
 Compress pass: Claude's guard is classified once, by `record_limit`. The server
 check records the spent limit and returns for a `manual_retry` row instead of

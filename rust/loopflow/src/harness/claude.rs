@@ -11,7 +11,6 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::agent::{build_session_command, AgentConfig, ProviderInvocation};
-use crate::chat::types::{ConversationEvent, Lifecycle};
 use crate::harness::agent_process::AttachmentOwner;
 use crate::harness::claude_decode::ClaudeDecoder;
 use crate::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
@@ -22,6 +21,7 @@ use crate::id::AgentSessionId;
 use crate::provider_account::{resolve_provider_account_exact, ProviderAccountRoute};
 use crate::provider_auth::Provider;
 use crate::store::ProviderAccountId;
+use loopflow_model::chat::types::{ConversationEvent, Lifecycle};
 
 /// Launch settings and the admitted owner used for every turn and respawn.
 #[derive(Debug)]
@@ -1206,7 +1206,7 @@ cat > /dev/null
             match tokio::time::timeout(Duration::from_secs(180), rx.recv()).await {
                 Ok(Some(ConversationEvent::TextDelta { content, .. })) => text.push_str(&content),
                 Ok(Some(ConversationEvent::ItemCompleted {
-                    item: crate::chat::types::ConversationItem::Message { text: t, .. },
+                    item: loopflow_model::chat::types::ConversationItem::Message { text: t, .. },
                     ..
                 })) => text.push_str(&t),
                 Ok(Some(ConversationEvent::TurnCompleted { status, .. })) => {

@@ -1665,8 +1665,8 @@ fn _run_harness_once(
             })?;
     }
 
-    use crate::chat::types::{ConversationEvent, Lifecycle};
     use crate::harness::ApprovalPolicy;
+    use loopflow_model::chat::types::{ConversationEvent, Lifecycle};
 
     let runtime = process.runtime.as_ref();
     let (provider, _) = parse_agent(launch.agent()?);

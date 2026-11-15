@@ -10,7 +10,7 @@
 use std::ffi::c_void;
 use std::fmt;
 
-use crate::program_status::{Kind, Records, Report, State};
+use loopflow_model::program_status::{Kind, Records, Report, State};
 
 /// The Ghostty revision the linked library was built from.
 pub const REVISION: &str = env!("LOOPFLOW_GHOSTTY_REVISION");

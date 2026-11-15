@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 use crate::ghostty_vt;
-use crate::program_status::{Report, State};
+use loopflow_model::program_status::{Report, State};
 
 use super::{terminal, LIMIT};
 
@@ -117,7 +117,7 @@ impl Output {
         }
     }
 
-    pub fn program_status(&self) -> Option<&crate::program_status::Records> {
+    pub fn program_status(&self) -> Option<&loopflow_model::program_status::Records> {
         self.terminal().map(ghostty_vt::Terminal::program_status)
     }
 
@@ -280,7 +280,7 @@ mod tests {
 
     use super::{directory_report, local_directory_report, Output};
     use crate::ghostty_vt::Terminal;
-    use crate::program_status::{Kind, Records, Report, State};
+    use loopflow_model::program_status::{Kind, Records, Report, State};
 
     #[test]
     fn attachment_replays_launch_title_before_session_name_lookup() {

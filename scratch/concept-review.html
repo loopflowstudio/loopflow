@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-650 · concept review</title>
+<style>
+:root { color-scheme: light dark; font: 17px/1.5 system-ui, sans-serif; }
+body { max-width: 760px; margin: 3rem auto; padding: 0 1.2rem 2rem; }
+header, small { color: light-dark(#535962, #b2b9c3); font-size: .8rem; }
+h1 { font-size: 1.8rem; line-height: 1.2; margin-bottom: 1rem; }
+h2 { font-size: 1.1rem; margin: 1.6rem 0 .5rem; }
+p { margin: .6rem 0; }
+code { font: .85em ui-monospace, monospace; overflow-wrap: anywhere; }
+aside { border-left: 3px solid light-dark(#9b4b1f, #e9ac7e); padding-left: 1rem; }
+table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+th, td { text-align: left; vertical-align: top; padding: .65rem .4rem; border-bottom: 1px solid light-dark(#ccd0d4, #474d55); }
+th:first-child, td:first-child { padding-left: 0; }
+li { padding-left: .2rem; }
+@media (max-width: 520px) { body { margin-top: 1.5rem; } table { font-size: .78rem; } th, td { padding: .5rem .25rem; } }
+</style>
+<header>LOO-650 · concept-review · November 14, 2026<br>
+Built from <code>scratch/loo-650.md</code>, <code>scratch/publishing-discussion.md</code>,
+<code>scripts/testing.md</code>, the model/definitions crate READMEs, and
+<code>scripts/benchmarks/crate-rebuild/{README.md,probe.py}</code>.</header>
+<main>
+<h1>What happens when a cached frame points to a deleted worktree?</h1>
+<aside><strong>Decision needed.</strong> B can reuse A’s library and report B’s runtime
+identity correctly, yet still look for source in A. The probe observed those paths;
+source-debugger recovery has not been demonstrated.</aside>
+
+<h2>Before → implemented prototype → proposed experience</h2>
+<p><strong>Before:</strong> shipping edits rebuild one large application crate.
+Installed sccache 0.19.0 misses on identical Rust code in another root.</p>
+<p><strong>Implemented:</strong> private model and definition-content libraries;
+native packages replace registry publishing. An isolated newer-cache probe hits
+in B, misses on a semantic edit, and keeps runtime checkout identity correct.</p>
+<p><strong>Proposed, unbuilt:</strong> ordinary fresh-worktree builds reuse the
+larger stable libraries with automatic root upkeep and a defined source-debugging
+experience. Whole-build time and CPU savings remain unmeasured.</p>
+
+<h2>Actions → concepts → APIs</h2>
+<table>
+<thead><tr><th>Action</th><th>Concept</th><th>State owner / API</th></tr></thead>
+<tbody>
+<tr><td>Edit shipping; run <code>scripts/dev-lf --version</code></td><td>Changed dependency closure</td><td>Cargo → application → private libraries</td></tr>
+<tr><td>Build unchanged code in B</td><td>Reusable library artifact</td><td>sccache basedirs; identity env values remain verbatim</td></tr>
+<tr><td>Add a worktree</td><td>Derived root inventory</td><td>Git worktree listing → idle shared-daemon refresh <em>(proposed)</em></td></tr>
+<tr><td>Debug after deleting A</td><td>Exact compiled source</td><td>Source lookup/mapping <em>(unresolved)</em></td></tr>
+<tr><td>Build without the cache</td><td>Ordinary compilation</td><td><code>RUSTC_WRAPPER= cargo build -p loopflow --bin lf</code></td></tr>
+</tbody>
+</table>
+<p>No new Task/store lifecycle. Keep one shared cache daemon and independent
+worktree targets. Runtime provenance stays with the application.</p>
+
+<h2>Normal path, failure, recovery</h2>
+<p>A builds; unchanged B hits. Change a model value: B misses. Delete A: B’s
+cached debug paths can go stale. Mapping every path to B can show the wrong
+source if B has since changed. Recovery must address the exact compiled bytes,
+including generated source.</p>
+<p>The private probe also proves fresh-target reuse after root refresh. It does
+not establish shared-daemon integration; LOO-908’s recorded completion supplied
+none. Unknown roots may compile normally while refresh waits for idle builds.</p>
+
+<h2>1. Required debugging experience</h2>
+<ol type="a">
+<li>Find exact compiled source automatically after the producer checkout is
+removed. Requires a source mapping/retention design.</li>
+<li>Allow documented manual debugger mapping to matching source. Adds a recovery
+action for developers.</li>
+</ol>
+<p>Neither is selected. Answer <strong>1a</strong> or <strong>1b</strong>.
+Until resolved, keep automatic reuse experimental; the original Task outcome
+remains open. Next demonstrate source recovery, then ordinary root upkeep and
+whole-build measurements.</p>
+</main>
+</html>

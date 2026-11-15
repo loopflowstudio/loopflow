@@ -313,7 +313,7 @@ writes! {
         agent_process: Option<String>,
         stream: String,
         sequence: i64,
-        records: crate::program_status::Records,
+        records: loopflow_model::program_status::Records,
     } => super::session::StatusRecorded;
     {
         id, terminal, agent_process, stream, sequence, records, ..

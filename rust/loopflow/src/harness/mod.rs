@@ -34,7 +34,7 @@ use async_trait::async_trait;
 use tokio::sync::mpsc;
 
 use crate::agent::AgentConfig;
-use crate::chat::types::ConversationEvent;
+use loopflow_model::chat::types::ConversationEvent;
 
 pub(crate) fn configure_vendor_std_env(command: &mut std::process::Command) -> Result<()> {
     let context = crate::os_process::execution_context()?;

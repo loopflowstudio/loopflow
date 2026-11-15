@@ -191,7 +191,7 @@ pub(super) enum Request {
     Status {
         key: String,
         program: String,
-        state: crate::program_status::State,
+        state: loopflow_model::program_status::State,
         progress: Option<u8>,
     },
     Directory {
@@ -274,7 +274,7 @@ pub(super) enum Reply {
 pub(super) enum Event {
     /// Validated display evidence from the host's terminal parser. No action authority.
     ProgramStatus {
-        status: crate::program_status::Records,
+        status: loopflow_model::program_status::Records,
     },
     Resize {
         rows: u16,
@@ -512,12 +512,12 @@ mod tests {
 
     #[test]
     fn mobile_status_fixture_uses_shared_validated_records() {
-        let records = crate::program_status::Records {
+        let records = loopflow_model::program_status::Records {
             seen: true,
-            records: vec![crate::program_status::Report {
-                state: crate::program_status::State::Blocked,
+            records: vec![loopflow_model::program_status::Report {
+                state: loopflow_model::program_status::State::Blocked,
                 id: Some("provider".into()),
-                kind: Some(crate::program_status::Kind::Permission),
+                kind: Some(loopflow_model::program_status::Kind::Permission),
                 progress: None,
                 app: Some("codex".into()),
                 title: None,
@@ -535,7 +535,7 @@ mod tests {
                 "fixture-nonce",
                 4,
                 Event::ProgramStatus {
-                    status: crate::program_status::Records {
+                    status: loopflow_model::program_status::Records {
                         seen: true,
                         records: vec![],
                     },
@@ -600,7 +600,7 @@ mod tests {
             request: Request::Status {
                 key: "k".into(),
                 program: "lf/abc/step".into(),
-                state: crate::program_status::State::Working,
+                state: loopflow_model::program_status::State::Working,
                 progress: Some(40),
             },
         };

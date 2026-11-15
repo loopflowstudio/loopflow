@@ -7,12 +7,12 @@ use std::collections::{HashMap, HashSet};
 use serde_json::{json, Value};
 
 use super::fact::{self, Decoded, ProviderFact, ProviderTurn, Signal};
-use crate::chat::types::{
-    ConversationEvent, ConversationItem, FileEdit, ItemDelta, Lifecycle, TurnUsage,
-};
 use crate::harness::lf_tag::LfTagParser;
 use crate::id::AgentSessionId;
 use crate::provider_account::RateLimitSignal;
+use loopflow_model::chat::types::{
+    ConversationEvent, ConversationItem, FileEdit, ItemDelta, Lifecycle, TurnUsage,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ItemPhase {

@@ -13,7 +13,6 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::agent::AgentConfig;
-use crate::chat::types::{ConversationEvent, FailureEvidence};
 use crate::config::parse_agent;
 use crate::harness::agent_process::AttachmentOwner;
 use crate::harness::common::TurnInProgressGuard;
@@ -22,6 +21,7 @@ use crate::harness::fact_writer::FactWriter;
 use crate::harness::opencode_decode::{OpenCodeDecoder, ReaderState, Snapshot};
 use crate::harness::{ApprovalPolicy, Harness, HarnessError, SendCurrentOutcome};
 use crate::id::AgentSessionId;
+use loopflow_model::chat::types::{ConversationEvent, FailureEvidence};
 
 pub(crate) const OPENCODE_DISCONNECTED_CODE: &str = "opencode_disconnected";
 
@@ -1051,7 +1051,7 @@ mod tests {
 
     // -- Fake-SSE disconnect matrix --
 
-    use crate::chat::types::{ConversationItem, Lifecycle};
+    use loopflow_model::chat::types::{ConversationItem, Lifecycle};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 

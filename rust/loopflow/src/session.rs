@@ -326,7 +326,7 @@ pub(crate) struct SessionSummary {
     pub agent_process_evidence: crate::journal::ProcessIdentityEvidence,
     /// Available for a person, as of the read's clock.
     pub available: bool,
-    pub program_status: Option<crate::program_status::Records>,
+    pub program_status: Option<loopflow_model::program_status::Records>,
     /// None for a conversation Loopflow never attached to.
     pub agent_process_id: Option<crate::id::AgentProcessId>,
     pub task_terminal: bool,

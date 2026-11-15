@@ -21,8 +21,8 @@ use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-use crate::chat::types::{ConversationEvent, TurnUsage};
 use crate::store::{StoreError, StoreResult};
+use loopflow_model::chat::types::{ConversationEvent, TurnUsage};
 
 /// An opaque artifact directory key; it grants no conversation or Graph authority.
 pub(crate) fn new_artifact_key() -> String {
@@ -269,13 +269,13 @@ pub(crate) enum CaptureFact {
 pub(crate) enum TurnEnd {
     TurnCompleted {
         turn_id: String,
-        status: crate::chat::types::Lifecycle,
+        status: loopflow_model::chat::types::Lifecycle,
     },
     Error {
         code: String,
         message: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        evidence: Option<Box<crate::chat::types::FailureEvidence>>,
+        evidence: Option<Box<loopflow_model::chat::types::FailureEvidence>>,
     },
 }
 

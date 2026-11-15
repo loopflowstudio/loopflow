@@ -1241,9 +1241,9 @@ impl SkillExecutor for &RunningGraph<'_> {
 }
 
 fn print_step_progress(progress: Option<StepProgress>, name: &str) {
-    crate::transport::report(crate::program_status::State::Clear, true, None);
+    crate::transport::report(loopflow_model::program_status::State::Clear, true, None);
     crate::transport::report(
-        crate::program_status::State::Working,
+        loopflow_model::program_status::State::Working,
         true,
         progress.map(|p| (p.index * 100 / p.total.max(1)) as u8),
     );

@@ -3,8 +3,8 @@
 //! is the witness, and a later launch replaces it like any other provider.
 use rusqlite::{params, OptionalExtension};
 
-use crate::program_status::Records;
 use crate::store::{StoreError, StoreResult};
+use loopflow_model::program_status::Records;
 
 use super::SqliteStore;
 
@@ -115,9 +115,9 @@ impl SqliteStore {
 #[cfg(test)]
 mod tests {
     use crate::id::LfProcessId;
-    use crate::program_status::{Kind, Records, Report, State};
     use crate::session::{SessionActivity, SessionFilter};
     use crate::store::sqlite::SqliteStore;
+    use loopflow_model::program_status::{Kind, Records, Report, State};
 
     #[test]
     fn dead_agent_never_waits_for_approval_quiet_or_blocked_report() {

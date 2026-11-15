@@ -248,7 +248,7 @@ results, not mock calls; no flaky tests (see Testing).
 **Typer CLI code:** lowercase short flags only; pass args through to the
 underlying tool; default to sensible behavior (whole repo as context).
 
-**Builtin skills (`rust/loopflow/src/builtins/**`):** self-contained, since they
+**Builtin skills (`rust/loopflow-definitions/src/builtins/**`):** self-contained, since they
 run in repos without our docs. Teach a rule only in the skill that uses it;
 `LOOPFLOW.md` is paid for on every run. Builtins are a starting point people
 copy with `lf skill customize`, so keep them short and plain.

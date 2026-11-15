@@ -20,10 +20,10 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::id::{LfSessionId, TerminalId};
-use crate::program_status::Records;
 use crate::server::holder::client::Client;
 use crate::server::holder::wire::{self, Held};
 use crate::server::holder::Place;
+use loopflow_model::program_status::Records;
 
 use super::held::Source;
 use super::hosted::{Hosted, Pass, Watchers};

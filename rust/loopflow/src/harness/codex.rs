@@ -30,7 +30,6 @@ use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::agent::{build_codex_thread_start_params, AgentConfig};
-use crate::chat::types::ConversationEvent;
 use crate::harness::codex_decode::{self, CodexDecoder};
 use crate::harness::common::spawn_stderr_logger;
 use crate::harness::fact::{Decoded, ProviderFact};
@@ -42,6 +41,7 @@ use crate::os_process::{
 use crate::provider_account::{resolve_provider_account_exact, ProviderAccountRoute};
 use crate::provider_auth::Provider;
 use crate::store::ProviderAccountId;
+use loopflow_model::chat::types::ConversationEvent;
 
 fn build_thread_request(
     launch: &AgentConfig,

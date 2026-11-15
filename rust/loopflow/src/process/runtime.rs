@@ -7,7 +7,6 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use crate::chat::types::ConversationEvent;
 use crate::harness::agent_process::{close_session_agent_process, AttachmentOwner};
 use crate::id::AgentSessionId;
 use crate::process::SessionAttachment;
@@ -17,6 +16,7 @@ use crate::session_record::{
 };
 use crate::store::sqlite::SqliteStore;
 use crate::store::{StoreError, StoreResult};
+use loopflow_model::chat::types::ConversationEvent;
 
 /// Shared live resources for an lf invocation's provider work, with no separate
 /// execution identity. A skill keeps one runtime across provider retries.

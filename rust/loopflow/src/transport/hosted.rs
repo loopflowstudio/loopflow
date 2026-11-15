@@ -99,7 +99,7 @@ pub(super) struct Hosted {
     planning: Option<crate::ops::planning_sync::PlanningSync>,
     title: crate::terminal_title::OutputTitle,
     /// The Program Status viewers were last sent.
-    reported_status: Option<crate::program_status::Records>,
+    reported_status: Option<loopflow_model::program_status::Records>,
     /// A taken-up terminal's output through this PTY position is replayed
     /// from the ring: its queries were answered when it was printed, or
     /// went unanswered while no server ran. Nothing answers them now.
@@ -212,7 +212,7 @@ impl Hosted {
     }
 
     /// The Program Status the execution's output reported, once it has a screen.
-    pub fn program_status(&self) -> Option<&crate::program_status::Records> {
+    pub fn program_status(&self) -> Option<&loopflow_model::program_status::Records> {
         self.output
             .terminal()
             .map(|terminal| terminal.program_status())
@@ -693,15 +693,15 @@ impl Hosted {
             }
             self.output.report(
                 format!("{process}/step"),
-                crate::program_status::State::Clear,
+                loopflow_model::program_status::State::Clear,
                 None,
             );
             self.output.report(
                 process,
                 match settled.code {
-                    0 => crate::program_status::State::Done,
-                    130 => crate::program_status::State::Idle,
-                    _ => crate::program_status::State::Error,
+                    0 => loopflow_model::program_status::State::Done,
+                    130 => loopflow_model::program_status::State::Idle,
+                    _ => loopflow_model::program_status::State::Error,
                 },
                 None,
             );

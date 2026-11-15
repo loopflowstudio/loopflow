@@ -2434,7 +2434,11 @@ pub(crate) fn carry_across_exec(command: &mut Command) {
 }
 
 /// Status travels beside output to the sole writer, never through capture pipes.
-pub(crate) fn report(state: crate::program_status::State, step: bool, progress: Option<u8>) {
+pub(crate) fn report(
+    state: loopflow_model::program_status::State,
+    step: bool,
+    progress: Option<u8>,
+) {
     if !io::stdout().is_terminal() || std::env::args().any(|arg| arg == "--json") {
         return;
     }
@@ -2467,14 +2471,14 @@ pub(crate) fn report(state: crate::program_status::State, step: bool, progress: 
 
 /// Report the execution's actual return, never a viewer's disappearance.
 pub fn report_exit(code: u8) {
-    report(crate::program_status::State::Clear, true, None);
+    report(loopflow_model::program_status::State::Clear, true, None);
     report(
         if code == 0 {
-            crate::program_status::State::Done
+            loopflow_model::program_status::State::Done
         } else if code == 130 {
-            crate::program_status::State::Idle
+            loopflow_model::program_status::State::Idle
         } else {
-            crate::program_status::State::Error
+            loopflow_model::program_status::State::Error
         },
         false,
         None,

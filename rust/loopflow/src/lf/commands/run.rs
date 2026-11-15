@@ -515,7 +515,7 @@ fn build_prompt_at(
     };
 
     if let Some(skill) = &discovered_skill {
-        match crate::definition::name::portable_name(&skill.name).as_str() {
+        match loopflow_definitions::name::portable_name(&skill.name).as_str() {
             "task-session" => anyhow::ensure!(
                 task_input.is_some(),
                 "Select a Task with `lf resume --task ISSUE`"
@@ -741,7 +741,7 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<String>> {
 
     // Native terminals own their turn status. A separate lf record would remain
     // Working at their idle prompt until the provider process exits.
-    crate::transport::report(crate::program_status::State::Working, false, None);
+    crate::transport::report(loopflow_model::program_status::State::Working, false, None);
     let cli_check_start = Instant::now();
     if !check_cli_available(&built.harness) {
         return Err(anyhow!(missing_agent_message(&built.harness)));
@@ -965,7 +965,7 @@ pub(crate) fn attributed_context(
 
     if components.operate {
         let source_path = std::path::Path::new(&components.repo_root)
-            .join("rust/loopflow/src/builtins/LOOPFLOW.md");
+            .join("rust/loopflow-definitions/src/builtins/LOOPFLOW.md");
         push(
             &crate::prompt::loopflow_section(),
             Kind::OperatingInstructions,

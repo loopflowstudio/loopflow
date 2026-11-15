@@ -749,6 +749,7 @@ def test_rust_filter_runs_only_matching_tests_then_clippy():
     assert labels[-1] == "clippy"
     assert labels.index("rust") < labels.index("clippy")
     assert "--all" not in tests
+    assert "--workspace" in tests
     assert any("test(prompt::)" in argument for argument in tests)
 
 

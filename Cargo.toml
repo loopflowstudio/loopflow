@@ -2,6 +2,8 @@
 resolver = "2"
 members = [
   "rust/loopflow",
+  "rust/loopflow-model",
+  "rust/loopflow-definitions",
   "rust/loopflow-test-support",
 ]
 

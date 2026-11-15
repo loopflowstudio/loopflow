@@ -239,7 +239,7 @@ def _rust_commands(_changed: list[str], tests: Optional[str] = None) -> list[Com
     """Rust checks; `tests` narrows the test run to one nextest filter expression."""
     if tests is not None or shutil.which("cargo-nextest"):
         filters = [] if tests is None else [f"({tests})"]
-        scope = ["--all"] if tests is None else ["-p", "loopflow", "--no-tests", "fail"]
+        scope = ["--all"] if tests is None else ["--workspace", "--no-tests", "fail"]
         test_argv = [
             "cargo",
             "nextest",

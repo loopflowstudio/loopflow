@@ -525,7 +525,7 @@ pub(crate) async fn status_recorded(
     agent_process: Option<&str>,
     stream: &str,
     sequence: i64,
-    records: &crate::program_status::Records,
+    records: &loopflow_model::program_status::Records,
 ) -> anyhow::Result<StatusRecorded> {
     let store = open_shared_store().await?;
     let agent_process = agent_process

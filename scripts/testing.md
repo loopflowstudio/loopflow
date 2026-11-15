@@ -62,11 +62,9 @@ Server startup or background store maintenance changes also run
 Seed corrupt databases before starting SQLite readers or writers; overwriting
 only a live database's main file can leave readable pages in its WAL.
 
-Changes to compile-time embedded files also run
-`cargo package --locked --allow-dirty -p loopflow`. The extracted source archive
-must compile without access to files outside the crate. Server examples shared
-with Swift live under `rust/loopflow/tests/fixtures/dto/server/` so the archive
-contains them.
+Changes to compile-time embedded files also reach native package builds. Internal
+workspace crates are private path dependencies; the native package matrix owns
+asset verification on all four targets.
 
 Creation receipt changes also run `test(local_planning::)`,
 `test(context_launch_tests::)`, `test(settings_launch_tests::)` and
@@ -176,7 +174,8 @@ native archives and Cargo dependencies are fetched before networking is disabled
 suites inside `integration` take `test(name::)`, and an unknown binary name
 fails the whole filterset before anything runs. A change to what `src/bin/lf.rs`
 calls (store openers, work binding) reaches `binary(lf)`: `--lib` never runs it.
-A filtered run covers `-p loopflow` only. Substring filters such as
+A filtered run covers matching tests across the workspace, including extracted
+libraries. Substring filters such as
 `test(ship)` or `test(planning::)` also reach slow suites (`land_tests`,
 `local_planning`) and can exhaust the Rust phase's 1800 s budget; name modules.
 Changes to `swift/project.yml`, `scripts/loopflow-dev.py`, or the libghostty-vt
@@ -251,11 +250,60 @@ Omit `--rust-filter` (the whole workspace) only to reproduce a CI
 
 ## Builds
 
-- Cargo serializes builds per target directory, so a second concurrent `cargo`
-  command only waits on the lock. Never build `--release` to test.
-- Machines share compiled crates across worktrees through sccache, wired in
-  `~/.cargo/config.toml` (`[build] rustc-wrapper = "sccache"`). The repository
-  sets no wrapper because CI has no sccache.
+```bash
+cargo build -p loopflow --bin lf    # build this checkout's target/debug/lf
+scripts/dev-lf --version           # build and run this checkout's CLI
+```
+
+Run these from the checkout root with the repository's Rust toolchain. Invoke
+`scripts/dev-lf` directly; wrapping it in `uv run` changes argument and terminal
+handling. A build does not install the executable.
+
+Cargo rebuilds changed libraries and their dependents. An edit to Task shipping
+rebuilds the application; unchanged lower-level libraries can be reused. Changes
+to a shared library also rebuild its callers. Binaries and test executables
+still require compilation and linking even when library compilations hit the
+cache. Use debug builds for local verification; never build `--release` to test.
+
+Each worktree keeps its own target directory. Cargo serializes commands sharing
+one target directory, so run one Cargo command at a time in each worktree. Do
+not point sibling worktrees at a shared mutable target directory.
+
+### Optional compilation cache
+
+Machine-local `~/.cargo/config.toml` can set `[build] rustc-wrapper = "sccache"`.
+The repository sets no wrapper; ordinary Cargo builds work without a cache.
+The dev and test profiles disable incremental compilation so library builds can
+use sccache.
+
+Cross-worktree reuse needs sccache with Rust basedir normalization and verbatim
+environment-dependency tracking. Version 0.19.0 does not provide that reuse.
+The cache configuration must list each worktree's absolute root in
+`SCCACHE_BASEDIRS`; listing only their shared parent is insufficient. Use
+`SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS` to keep checkout identity values such as
+`CARGO_MANIFEST_DIR`, `CARGO_MANIFEST_PATH` and `LOOPFLOW_BUILD_SOURCE_ROOT`
+verbatim when compiled code reads them.
+
+Cache hits can retain another checkout's absolute debug-source paths. The
+[crate rebuild probe](benchmarks/crate-rebuild/README.md) records source paths
+alongside runtime-identity checks. Automatic cross-root reuse still needs a
+source-debugging contract and shared-server root upkeep.
+
+Use one machine-wide server for a shared local cache. Root configuration takes
+effect when that server starts; apply root changes when builds are idle. A new
+worktree can compile with cache misses until the server picks up its root. Do
+not restart the shared server during another build or run separate servers
+against the same local cache.
+
+If the configured wrapper is missing or the cache service fails, build directly:
+
+```bash
+RUSTC_WRAPPER= cargo build -p loopflow --bin lf
+```
+
+A cache miss costs compilation time. It does not require cleaning the target
+directory or resetting the shared cache. Compare build time and CPU as well as
+cache hits: a high hit rate does not account for linking or test execution.
 
 ## Leave to CI unless the change reaches them
 

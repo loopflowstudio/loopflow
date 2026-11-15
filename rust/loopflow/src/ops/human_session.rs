@@ -416,7 +416,7 @@ pub struct SessionRecord {
     /// Available for a person, judged from current stream or terminal reports; absent when it is
     /// working or nothing current says.
     pub availability: Option<SessionAvailability>,
-    pub program_status: Option<crate::program_status::Records>,
+    pub program_status: Option<loopflow_model::program_status::Records>,
     /// The provider's current AgentProcess; absent when Loopflow never launched one.
     pub agent_process_id: Option<crate::id::AgentProcessId>,
     /// Its Task names it as the Task's primary conversation.
@@ -2108,7 +2108,7 @@ pub(crate) async fn record_program_status(
     agent_process: Option<&crate::id::AgentProcessId>,
     stream: &str,
     sequence: i64,
-    records: &crate::program_status::Records,
+    records: &loopflow_model::program_status::Records,
 ) -> Result<()> {
     anyhow::ensure!(
         sequence > 0 && records.seen && records.validate(),

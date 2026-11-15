@@ -9,7 +9,7 @@ use super::pi::PiHarness;
 use super::pi_decode::Turn;
 use super::{Harness, SendCurrentOutcome};
 use crate::agent::AgentConfig;
-use crate::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
+use loopflow_model::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
 
 async fn completed(rx: &mut mpsc::UnboundedReceiver<ConversationEvent>) -> Vec<ConversationEvent> {
     tokio::time::timeout(Duration::from_secs(10), async {

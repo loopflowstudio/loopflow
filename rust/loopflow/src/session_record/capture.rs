@@ -361,8 +361,8 @@ impl SessionRecorder {
 #[cfg(test)]
 mod tests {
     use super::SessionRecorder;
-    use crate::chat::types::ConversationEvent;
     use crate::session_record::{SessionCaptureSpec, SessionGraphMembership};
+    use loopflow_model::chat::types::ConversationEvent;
     use time::OffsetDateTime;
 
     fn spec(home: &std::path::Path) -> SessionCaptureSpec {

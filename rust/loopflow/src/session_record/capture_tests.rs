@@ -2,12 +2,12 @@ use std::collections::BTreeMap;
 use std::fs;
 
 use crate::agent::AgentConfig;
-use crate::chat::types::{ConversationEvent, TurnUsage};
 use crate::process::LfProcessRuntime;
 use crate::session_record::{
     read_provider_session, AgentProcessRequest, SessionCaptureManifest, SessionCaptureSpec,
     SubjectAttribution, TerminalReceipt,
 };
+use loopflow_model::chat::types::{ConversationEvent, TurnUsage};
 
 #[test]
 fn native_usage_reads_each_providers_counter_once_by_its_shape() {
@@ -860,7 +860,7 @@ fn history_keeps_only_how_a_turn_ended() {
     });
     capture.record_conversation(ConversationEvent::TurnCompleted {
         turn_id: turn(),
-        status: crate::chat::types::Lifecycle::Completed,
+        status: loopflow_model::chat::types::Lifecycle::Completed,
     });
     capture.finish("completed").unwrap();
 

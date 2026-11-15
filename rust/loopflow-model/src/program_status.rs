@@ -39,7 +39,7 @@ pub struct Report {
 }
 
 impl Report {
-    pub(crate) fn encode(&self) -> Vec<u8> {
+    pub fn encode(&self) -> Vec<u8> {
         let state = match self.state {
             State::Idle => "idle",
             State::Working => "working",
@@ -146,7 +146,7 @@ impl Records {
     }
 
     /// Replace a viewer's status, including clearing claims from its last attachment.
-    pub(crate) fn replay(&self) -> Vec<u8> {
+    pub fn replay(&self) -> Vec<u8> {
         if !self.seen {
             return Vec::new();
         }

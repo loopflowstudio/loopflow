@@ -938,7 +938,7 @@ fn run_opencode_native(
                     tokio::select! {
                         _ = &mut closed_rx => break,
                         event = rx.recv() => {
-                            if let Some(crate::chat::types::ConversationEvent::Error { message, .. }) = event {
+                            if let Some(loopflow_model::chat::types::ConversationEvent::Error { message, .. }) = event {
                                 if let Some(path) = observer_diagnostics {
                                     use std::io::Write;
                                     if let Ok(mut log) = OpenOptions::new().append(true).open(path) {

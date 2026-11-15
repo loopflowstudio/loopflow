@@ -8,8 +8,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use serde_json::{json, Value};
 
 use super::fact::{self, Decoded, ProviderFact, ProviderTurn, Signal};
-use crate::chat::types::{ConversationEvent, ConversationItem, FileEdit, Lifecycle};
 use crate::id::AgentSessionId;
+use loopflow_model::chat::types::{ConversationEvent, ConversationItem, FileEdit, Lifecycle};
 
 #[derive(Debug)]
 pub(super) struct OpenCodeDecoder {
@@ -511,8 +511,8 @@ mod tests {
     use serde_json::{json, Value};
 
     use super::{OpenCodeDecoder, Signal};
-    use crate::chat::types::{ConversationEvent, Lifecycle};
     use crate::harness::fact::{self, Decoded, ProviderFact};
+    use loopflow_model::chat::types::{ConversationEvent, Lifecycle};
 
     /// Server events carry availability only; turns come from snapshots. A
     /// permission the attachment answers and another conversation's idle add

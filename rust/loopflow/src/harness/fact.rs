@@ -10,9 +10,9 @@ use std::collections::BTreeSet;
 
 use serde_json::Value;
 
-use crate::chat::types::{ConversationEvent, Lifecycle};
 use crate::id::AgentSessionId;
 use crate::provider_account::RateLimitSignal;
+use loopflow_model::chat::types::{ConversationEvent, Lifecycle};
 
 /// One provider turn in its native conversation.
 #[derive(Debug, Clone, PartialEq, Eq)]

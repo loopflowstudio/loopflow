@@ -167,10 +167,10 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
             if let Some(status) = &session.program_status {
                 for report in &status.records {
                     match report.state {
-                        crate::program_status::State::Working => {
+                        loopflow_model::program_status::State::Working => {
                             states.insert(SelectionState::Busy);
                         }
-                        crate::program_status::State::Blocked => {
+                        loopflow_model::program_status::State::Blocked => {
                             states.insert(SelectionState::Blocked);
                         }
                         _ => {}
@@ -1786,12 +1786,12 @@ mod tests {
                 "selection-surface",
             )
             .unwrap();
-        let report = crate::program_status::Records {
+        let report = loopflow_model::program_status::Records {
             seen: true,
-            records: vec![crate::program_status::Report {
-                state: crate::program_status::State::Blocked,
+            records: vec![loopflow_model::program_status::Report {
+                state: loopflow_model::program_status::State::Blocked,
                 id: None,
-                kind: Some(crate::program_status::Kind::Question),
+                kind: Some(loopflow_model::program_status::Kind::Question),
                 progress: None,
                 app: None,
                 title: None,

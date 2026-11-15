@@ -619,16 +619,13 @@ Departed/unattributed activity cannot replace or revoke a current capture, while
 its supported SQL-only parent/lifecycle facts remain eligible. Transaction
 rollback restores the previously committed in-memory proof with the SQL facts.
 
-The motivating queued-A → reconnect-B counterexample and earlier checks remain at
-`9183e2bba798785e6a480c29ec11012fed796ed5:scratch/instant-task-session.md`
-(Persisted normalization and receiving-link gap). Local generations never become
-wire DTOs, Machine revisions or a persistent ledger.
+Queued-A → reconnect-B counterexample and earlier checks: `9183e2bba7:scratch/instant-task-session.md`.
+Local generations never become wire DTOs, Machine revisions or a ledger.
 
-Next: field-targeted effects (`WorkFieldFact.covers(_:CommitFence)` exists,
-test-only caller), derived-answer dependencies and dynamic membership/Move with
-the predecessor deletion cut. Original exact-query inputs remain unchanged;
-resume/checkpoint/event ordering and scope cancellation stay on the existing path.
-Native latency remains unmeasured; gate owns the prior nextest LEAK.
+Next: field-targeted effects (`WorkFieldFact.covers(_:CommitFence)`, test-only
+caller), derived-answer dependencies, then dynamic membership/Move with the
+predecessor deletion. Exact-query inputs, resume/checkpoint ordering and scope
+cancellation are unchanged. Gate owns the prior nextest LEAK.
 
 Checks: `scripts/test_desktop.sh --filter 'ClientWorkQueryTests/testField|ServerClientTests|WorkObservationTransportTests'` passes 8 XCTest and 29 Swift Testing cases; final two-window reconnect case also passes alone. `scripts/test_ios.py -only-testing:LoopflowiOSTests/ClientWorkQueryTests/testFieldBufferedReadingsCannotBorrowReconnectedLinkInEitherOrder -only-testing:LoopflowiOSTests/ClientWorkQueryTests/testFieldAndQueryWritesRollbackTogetherAndFieldLookupIsKeyedAtTenThousandRows` passes 2 cases. `check_swift_multiplatform_boundaries.py` passes. Gate owns broader suites.
 

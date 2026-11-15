@@ -1,6 +1,6 @@
 # LOO-906: immediate interactions across Desktop and mobile
 
-Implementation continues 2026-11-15 from `d9bf1c21ae` on origin/main
+Concept review continues 2026-11-15 from `8a56fd337e` on origin/main
 `9cafc410ee` (unchanged at realign). Supersedes the Desktop-only delivery
 boundary. No shipping or merge decision is recorded. Placement remains this Task;
 no Wave is selected.
@@ -560,14 +560,73 @@ journey/platform, endpoints reported separately. Nothing here is measured yet.
 
 ## Implementation direction (2026-11-15)
 
+### One intent through the synchronous-to-durable handoff
+
+The portable membership program and durable ordered query effects now exist.
+The next design change makes their local publication and durable adoption one
+intent, rather than adding a second optimistic implementation at each gesture.
+No product choice is open: immediate next/empty navigation was specified above.
+
+Use one shared main-actor presentation owner per connected Machine/account,
+consumed by every window/feed, with per-window/route interaction state. The store
+actor continues to own disk, receipts and confirmed query preparation. A gesture
+creates its immutable operation ID, original Machine/repository, command and local
+ordering token from already known connection context. It publishes that effect
+through the same membership evaluator and changes only its originating selection
+before its first await. If the Machine is disconnected, preserve that original
+destination; discovery must never silently retarget an existing intent.
+
+Complete uses the origin's currently displayed occurrence order: remove A's
+affected occurrences, then choose the next remaining distinct visible Task, or
+empty. An explicit retained A destination remains reachable. Another window's
+selection stays unchanged even though its membership updates. A later manual
+selection always wins. Readiness remains the native owner's fact.
+
+The handoff must neither expose the unoverlaid base nor apply two layers. Memory
+and disk identify the effect by the same operation ID. Persist command/effect
+ordering atomically before send; serialize saves in gesture order without holding
+the main actor through I/O. Adoption replaces the transient representation by ID
+only when the published store update includes its durable layer or its established
+resolution. An older prepared query arriving during save must be rebased beneath
+all newer local intents. Do not wait for a network frame to repaint other mounted
+queries: save, receipt, retirement and cache changes all feed the same publication
+path. Reuse the existing store change stream rather than adding a polling owner.
+
+Save failure withdraws only the unsaved operation's effect, preserves its command
+and error for retry, and never changes selection again. Later local effects retain
+their order. A process exit before durable save can lose that unsaved intent; it
+must not have sent a command. Restart restores saved effects before the first
+cached presentation. This is the existing save-before-send contract, not an offline
+execution promise. Recovery/epoch replacement must not promote an old prepared
+publication over newer local intent or replay a dispatched request.
+
+Expose query open/close leases through this owner, distinct from stored query
+identity: two windows can mount the same query. Closing one cannot invalidate the
+other's usable projection. The last close may release presentation preparation;
+durable query obligations remain incorporated, transferred or invalidated under
+the existing transaction contract. Returning to a filter applies current effects
+before showing its cached frame. Keep confirmed DTOs for inspection and make the
+displayed projection available separately so inspection can explain a removed row.
+
+Next implement acceptance: hold the store actor/disk and all network replies;
+Complete A must publish B/count 1 and origin selection B synchronously on both
+hosts. Mount a second feed without a new server reply; it shows the same effect
+without taking selection. Deliver an older prepared base between gesture and
+durable adoption; A never flashes and the count never subtracts twice. Repeat with
+save failure followed by another operation, two same-query windows with one closed,
+rapid manual navigation, restart after save, and replacement epochs. Then rerun
+the existing real-body receipt/list/count permutations through these production
+action paths. Native paint/input timing still requires a valid benchmark host.
+
 Full review wording and counterexamples: `a127084469:scratch/instant-task-session.md`
 (the prior “Implement direction” section). This refines the contracts above;
 there is no open product choice.
 
-The next cut is projection, not another cache-only slice. The initial stage
-declaration, exact creation-export correlation and finite retirement are built at
-`ac6871e42f`; they no longer need to be proposed as missing. The declaration
-still needs effect/query dependencies and exhaustive command coverage.
+The next cut connects synchronous interaction to the existing projection on both
+clients. Ordered membership, persisted query effects and scoped completion reload
+requirements are built at `8a56fd337e`. The initial stage declaration still needs
+effect/query dependencies and exhaustive command coverage. The contracts below
+remain acceptance requirements through that cutover.
 
 - A reload floor prevents reuse of an obsolete confirmed base; it is not the
   displayed result of Complete. Keep a lagging active base usable only beneath

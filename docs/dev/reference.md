@@ -129,7 +129,7 @@ Intentional copies stay read projections:
 | [`TaskLinearObservation`](../../rust/loopflow-storage/src/work/task/mod.rs) / `task_linear_observations` | Linear Issue title, description and comment revisions | Reconciliation saves comments and appends deduplicated direction. Team acquisition also accepts issue state and Project membership through the typed Linear owner; the saved comment projection grants no graph or Process authority. |
 | [`GithubObservation`](../../rust/loopflow-storage/src/work/task/mod.rs) / `task_prs`, `ci_incidents` | GitHub PR/check state | Webhook or foreground reads update Task delivery evidence; GitHub remains merge truth. |
 | `tests/fixtures/dto/` | Rust `lf --json` DTOs | Rust and Swift fixture tests reject required-field or enum drift. |
-| `tests/fixtures/migrations/` | Released schemas that upgrade tests seed from | Rust build/runtime tests and `check_migrations.py` reject ordering, body-byte and checksum drift. |
+| `rust/loopflow-storage/tests/fixtures/migrations/` | Released schemas that upgrade tests seed from | Rust build/runtime tests and `check_migrations.py` reject ordering, body-byte and checksum drift. |
 <!-- architecture-projections:end -->
 
 `lf wave status` and `lf wave show` derive Task conditions from Work, Process and

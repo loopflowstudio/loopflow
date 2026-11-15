@@ -190,7 +190,7 @@ mod tests {
         );
         conn.execute_batch(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../loopflow/tests/fixtures/migrations/wave_removal_released.sql"
+            "/tests/fixtures/migrations/wave_removal_released.sql"
         )))
         .unwrap();
         apply_pending_migrations(

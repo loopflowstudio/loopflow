@@ -493,7 +493,7 @@ fn migration_preserves_released_event_copies_and_planning_receipts() {
     );
     conn.execute_batch(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../loopflow/tests/fixtures/migrations/session_steers_released.sql"
+        "/tests/fixtures/migrations/session_steers_released.sql"
     )))
     .unwrap();
     conn.execute_batch(&migration_section_sql("session_steers"))

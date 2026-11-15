@@ -962,7 +962,7 @@ mod tests {
             conn.execute_batch(
                 &include_str!(concat!(
                     env!("CARGO_MANIFEST_DIR"),
-                    "/../loopflow/tests/fixtures/migrations/planning_local_sessions.sql"
+                    "/tests/fixtures/migrations/planning_local_sessions.sql"
                 ))
                 .replace("task-proof", task.as_str())
                 .replace("wave-proof", local_wave.as_ref().unwrap().as_str()),

@@ -123,7 +123,7 @@ mod tests {
         );
         conn.execute_batch(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../loopflow/tests/fixtures/migrations/linear_team_checks_released.sql"
+            "/tests/fixtures/migrations/linear_team_checks_released.sql"
         )))
         .unwrap();
         conn.execute_batch(&migration_section_sql("linear_team_checks"))

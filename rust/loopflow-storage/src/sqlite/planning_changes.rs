@@ -535,7 +535,7 @@ mod tests {
         );
         conn.execute_batch(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../loopflow/tests/fixtures/migrations/creation_baselines.sql"
+            "/tests/fixtures/migrations/creation_baselines.sql"
         )))
         .unwrap();
         let sql = migration_section_sql("planning_peers");
@@ -605,7 +605,7 @@ mod tests {
                 );
                 conn.execute_batch(include_str!(concat!(
                     env!("CARGO_MANIFEST_DIR"),
-                    "/../loopflow/tests/fixtures/migrations/planning_relationships.sql"
+                    "/tests/fixtures/migrations/planning_relationships.sql"
                 )))
                 .unwrap();
                 conn.execute(

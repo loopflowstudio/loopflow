@@ -733,7 +733,7 @@ fn local_planning_migration_preserves_released_links_and_orphan_deletion_evidenc
     conn.execute(
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/migrations/local_planning_retained_task.sql"
+            "/../loopflow-storage/tests/fixtures/migrations/local_planning_retained_task.sql"
         )),
         params![task.as_str(), project.as_str()],
     )
@@ -754,7 +754,7 @@ fn local_planning_migration_preserves_released_links_and_orphan_deletion_evidenc
     conn.execute_batch(
         &include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/migrations/local_planning_retained_process.sql"
+            "/../loopflow-storage/tests/fixtures/migrations/local_planning_retained_process.sql"
         ))
         .replace("{task}", task.as_str())
         .replace("{wave}", wave.as_str()),

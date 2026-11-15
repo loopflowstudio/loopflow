@@ -9,8 +9,10 @@ uv run python scripts/benchmarks/crate-rebuild/run.py --base 3fbf3d2ca3 --candid
 The probe builds the actual model, definition-content, terminal and storage crates in two separate
 source/target roots. It requires a cold miss, identical-root B hit, semantic-edit
 miss and correct checkout identity from a path-sensitive fixture. A semantic Task-record
-edit must rebuild only storage. Root-refresh
-reuse is checked with a fresh disposable target; existing dependency artifacts
+edit must rebuild only storage. Storage reuse also covers its `test-support`
+feature and byte-identical embedded database templates; copied databases still
+acquire independent Machine identities. Root-refresh reuse is checked with a
+fresh disposable target; existing dependency artifacts
 can retain their earlier path hashes. It does not build the application. Use sccache with Rust basedir normalization and verbatim
 environment-dependency tracking; 0.19.0 lacks these features. The first verified
 upstream revision is `ca81ec2a2566efc623692741440d99c710268841`.
@@ -31,6 +33,8 @@ for migration ordering. Network fetches remain possible on cold builds.
 Both commands own a private local cache and daemon and stop it on failure or
 completion. They never reset the Machine's cache or share mutable targets. Raw
 Cargo JSON, native time logs and cache receipts remain in the output directory.
+The full comparison retains its source copies, targets and caches on failure
+and prints their directory, so a measurement error need not discard built work.
 Nonfresh Cargo artifacts include cache retrieval; inspect sccache hit/miss deltas
 to distinguish retrieval from compilation. Client-side compilation lets native
 time include compiler and linker CPU in the client process tree; storage-daemon

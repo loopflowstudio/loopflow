@@ -940,7 +940,7 @@ mod tests {
         let task = loopflow_model::durable::TaskId::new();
         let fixture = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../loopflow/tests/fixtures/migrations/graph_rename_released.sql"
+            "/tests/fixtures/migrations/graph_rename_released.sql"
         ))
         .replace("{compiled}", &serde_json::to_string(&compiled).unwrap())
         .replace("{wave}", wave.as_str())

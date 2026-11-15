@@ -588,9 +588,10 @@ mod tests {
     fn fixture(home: &std::path::Path) -> rusqlite::Connection {
         let conn = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
         apply_before_migration(&conn, "settings_authority");
-        conn.execute_batch(include_str!(
-            "../../tests/fixtures/migrations/settings_authority_released.sql"
-        ))
+        conn.execute_batch(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../loopflow-storage/tests/fixtures/migrations/settings_authority_released.sql"
+        )))
         .unwrap();
         conn
     }
@@ -669,9 +670,10 @@ mod tests {
     fn absent_origin_route_is_exported_without_becoming_a_global_override() {
         let home = tempfile::tempdir().unwrap();
         let conn = fixture(home.path());
-        conn.execute_batch(include_str!(
-            "../../tests/fixtures/migrations/settings_routes_released.sql"
-        ))
+        conn.execute_batch(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../loopflow-storage/tests/fixtures/migrations/settings_routes_released.sql"
+        )))
         .unwrap();
         preflight(&conn, &mut Vec::new()).unwrap();
         let recovery =

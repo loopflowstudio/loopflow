@@ -14,6 +14,11 @@ fn main() {
     let out = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo output"));
     let root = manifest.ancestors().find(|path| path.join(".git").exists());
     let unmerged = emit_migration_catalog(&manifest, root, &out);
+    let canonical_fixture = manifest.join("tests/fixtures/migrations/canonical_ids_authority.sql");
+    println!("cargo:rerun-if-changed={}", canonical_fixture.display());
+    let sql = fs::read_to_string(canonical_fixture).expect("read canonical authority fixture");
+    fs::write(out.join("canonical_fixture.rs"), format!("{sql:?}"))
+        .expect("write canonical authority fixture");
     println!("cargo:unmerged={}", unmerged.join(","));
     if let Some(root) = root {
         for reference in ["refs/remotes/origin/main", "packed-refs", "shallow"] {
@@ -103,6 +108,15 @@ fn emit_migration_catalog(
     // processes. Replaying the catalog here keeps that cost out of every fixture.
     let fixture = out_dir.join("test-store.db");
     let _ = fs::remove_file(&fixture);
+    // Each copied fixture replaces this identity. Stable source bytes let the
+    // test-support library reuse the same cache entry in another checkout.
+    connection
+        .execute(
+            "UPDATE machines SET id='home_00000000000000000000000000000000',
+             created_at=0,observed_at=0 WHERE is_local=1",
+            [],
+        )
+        .expect("normalize the fixture Machine");
     for (index, entry) in catalog.iter().enumerate() {
         let sql = fs::read(&entry.path).expect("read fixture migration");
         let checksum = format!("{:x}", Sha256::digest(&sql));

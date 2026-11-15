@@ -1,4 +1,4 @@
-//! Generate the migration catalogue and application provenance; link native helpers.
+//! Embed application provenance and link native helpers.
 
 use std::env;
 use std::path::{Path, PathBuf};

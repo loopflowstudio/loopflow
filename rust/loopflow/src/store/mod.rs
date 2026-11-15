@@ -983,9 +983,10 @@ mod tests {
         let path = temp.path().join("released.db");
         let connection = rusqlite::Connection::open(&path).unwrap();
         connection
-            .execute_batch(include_str!(
-                "../../tests/fixtures/migrations/task_ownership_released.sql"
-            ))
+            .execute_batch(include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../loopflow-storage/tests/fixtures/migrations/task_ownership_released.sql"
+            )))
             .unwrap();
         drop(connection);
         let before = std::fs::read(&path).unwrap();
@@ -1007,9 +1008,10 @@ mod tests {
         let path = temp.path().join("released.db");
         let connection = rusqlite::Connection::open(&path).unwrap();
         connection
-            .execute_batch(include_str!(
-                "../../tests/fixtures/migrations/task_placement_released.sql"
-            ))
+            .execute_batch(include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../loopflow-storage/tests/fixtures/migrations/task_placement_released.sql"
+            )))
             .unwrap();
         drop(connection);
         let before = std::fs::read(&path).unwrap();

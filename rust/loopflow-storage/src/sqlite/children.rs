@@ -2676,7 +2676,7 @@ mod local_planning_tests {
             conn.execute(
                 include_str!(concat!(
                     env!("CARGO_MANIFEST_DIR"),
-                    "/../loopflow/tests/fixtures/migrations/retired_work_lookup_task.sql"
+                    "/tests/fixtures/migrations/retired_work_lookup_task.sql"
                 )),
                 params![task.as_str(), project.as_str(), branch],
             )

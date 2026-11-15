@@ -74,7 +74,7 @@ fn hardware_rented_before_spot_existed_reads_as_on_demand() {
     );
     conn.execute_batch(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../loopflow/tests/fixtures/migrations/rental_spot_released.sql"
+        "/tests/fixtures/migrations/rental_spot_released.sql"
     )))
     .unwrap();
     conn.execute_batch(&migration_section_sql("rental_spot"))
@@ -102,7 +102,7 @@ fn runpod_rows_from_0_14_16_go_and_current_ones_stay() {
     );
     conn.execute_batch(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../loopflow/tests/fixtures/migrations/scope_tasks_capacity_released.sql"
+        "/tests/fixtures/migrations/scope_tasks_capacity_released.sql"
     )))
     .unwrap();
     conn.execute_batch(&migration_section_sql("scope_tasks_capacity"))
@@ -134,7 +134,7 @@ fn fly_rows_from_0_14_17_go_and_the_rest_still_read() {
     );
     conn.execute_batch(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../loopflow/tests/fixtures/migrations/forget_fly_rentals_released.sql"
+        "/tests/fixtures/migrations/forget_fly_rentals_released.sql"
     )))
     .unwrap();
     conn.execute_batch(&migration_section_sql("forget_fly_rentals"))

@@ -1258,9 +1258,10 @@ fn released_work_upgrades_to_saved_intent_without_rewriting_work() {
     let path = dir.path().join("db");
     let conn = rusqlite::Connection::open(&path).unwrap();
     crate::store::migrations::apply_before_migration(&conn, "saved_selections");
-    conn.execute_batch(include_str!(
-        "../../../tests/fixtures/migrations/saved_selection_work.sql"
-    ))
+    conn.execute_batch(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../loopflow-storage/tests/fixtures/migrations/saved_selection_work.sql"
+    )))
     .unwrap();
     crate::store::migrations::upgrade_from_migration(&conn, "saved_selections");
     // The idle Task has a checkout; the deferred one isn't Working.

@@ -1575,11 +1575,8 @@ pub fn canonical_fixture(
         &mut Vec::new(),
     )
     .unwrap();
-    conn.execute_batch(include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../loopflow/tests/fixtures/migrations/canonical_ids_authority.sql"
-    )))
-    .unwrap();
+    conn.execute_batch(include!(concat!(env!("OUT_DIR"), "/canonical_fixture.rs")))
+        .unwrap();
     (home, conn)
 }
 
@@ -1889,7 +1886,7 @@ mod tests {
         apply_before_migration(&observers(), &build(), &conn, "task_session_promotion");
         conn.execute_batch(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../loopflow/tests/fixtures/migrations/task_session_promotion.sql"
+            "/tests/fixtures/migrations/task_session_promotion.sql"
         )))
         .unwrap();
         apply_pending_migrations(&observers(), &build(), &conn);
@@ -1921,7 +1918,7 @@ mod tests {
         apply_before_migration(&observers(), &build(), &conn, "graph_process_task");
         conn.execute_batch(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../loopflow/tests/fixtures/migrations/graph_process_task_released.sql"
+            "/tests/fixtures/migrations/graph_process_task_released.sql"
         )))
         .unwrap();
         apply_pending_migrations(&observers(), &build(), &conn);
@@ -1994,7 +1991,7 @@ mod tests {
         apply_before_migration(&observers(), &build(), &conn, "planning_peers");
         conn.execute_batch(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../loopflow/tests/fixtures/migrations/project_content.sql"
+            "/tests/fixtures/migrations/project_content.sql"
         )))
         .unwrap();
         // Historical bytes are fixture data, not a second runtime content writer.
@@ -2073,7 +2070,7 @@ mod tests {
         apply_before_migration(&observers(), &build(), &conn, "planning_peers");
         conn.execute_batch(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../loopflow/tests/fixtures/migrations/planning_relationships.sql"
+            "/tests/fixtures/migrations/planning_relationships.sql"
         )))
         .unwrap();
         conn.execute_batch(r#"
@@ -2096,7 +2093,7 @@ mod tests {
         "#).unwrap();
         conn.execute_batch(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../loopflow/tests/fixtures/migrations/planning_local_sessions.sql"
+            "/tests/fixtures/migrations/planning_local_sessions.sql"
         )))
         .unwrap();
         let tables = [
@@ -2218,7 +2215,7 @@ mod tests {
         apply_before_migration(&observers(), &build(), &conn, "planning_peers");
         conn.execute_batch(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../loopflow/tests/fixtures/migrations/planning_relationships.sql"
+            "/tests/fixtures/migrations/planning_relationships.sql"
         )))
         .unwrap();
         let receipt = |conn: &rusqlite::Connection| {
@@ -2282,7 +2279,7 @@ mod tests {
         apply_before_migration(&observers(), &build(), &conn, "planning_peers");
         conn.execute_batch(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../loopflow/tests/fixtures/migrations/project_content.sql"
+            "/tests/fixtures/migrations/project_content.sql"
         )))
         .unwrap();
         apply_project_content_cut(&conn).unwrap();
@@ -2475,7 +2472,7 @@ mod tests {
         apply_before_migration(&observers(), &build(), &conn, "task_pr_continuation");
         conn.execute_batch(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../loopflow/tests/fixtures/migrations/task_pr_continuation.sql"
+            "/tests/fixtures/migrations/task_pr_continuation.sql"
         )))
         .unwrap();
         conn.execute_batch(&migration_section_sql("task_pr_continuation"))
@@ -2554,7 +2551,7 @@ mod tests {
         "#).unwrap();
         conn.execute_batch(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../loopflow/tests/fixtures/migrations/optional_task_pr_held_process.sql"
+            "/tests/fixtures/migrations/optional_task_pr_held_process.sql"
         )))
         .unwrap();
         apply_sqlite(&conn).unwrap();
@@ -2674,7 +2671,7 @@ mod tests {
         apply_before_migration(&observers(), &build(), &conn, "process_names");
         conn.execute_batch(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../loopflow/tests/fixtures/migrations/process_names_released.sql"
+            "/tests/fixtures/migrations/process_names_released.sql"
         )))
         .unwrap();
         let rows = |table: &str| -> Vec<Vec<rusqlite::types::Value>> {
@@ -2726,7 +2723,7 @@ mod tests {
         assert!(conn
             .execute_batch(include_str!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/../loopflow/tests/fixtures/migrations/process_names_unstarted_step.sql"
+                "/tests/fixtures/migrations/process_names_unstarted_step.sql"
             )))
             .is_err());
         conn.execute("UPDATE tasks SET started_at=started_at WHERE id='t'", [])
@@ -2736,7 +2733,7 @@ mod tests {
             .is_err());
         conn.execute_batch(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../loopflow/tests/fixtures/migrations/process_names_finish_parent.sql"
+            "/tests/fixtures/migrations/process_names_finish_parent.sql"
         )))
         .unwrap();
         let after: i64 = conn
@@ -3131,7 +3128,7 @@ mod tests {
         apply_before_migration(&observers(), &build(), &conn, "session_admission");
         conn.execute_batch(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../loopflow/tests/fixtures/migrations/conversation_admission_released.sql"
+            "/tests/fixtures/migrations/conversation_admission_released.sql"
         )))
         .unwrap();
         let started = || {
@@ -3183,7 +3180,7 @@ mod tests {
         apply_before_migration(&observers(), &build(), &conn, "repository_relocation");
         conn.execute_batch(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../loopflow/tests/fixtures/migrations/repository_relocation_released.sql"
+            "/tests/fixtures/migrations/repository_relocation_released.sql"
         )))
         .unwrap();
         conn.execute_batch(&migration_section_sql("repository_relocation"))
@@ -3205,7 +3202,7 @@ mod tests {
         apply_before_migration(&observers(), &build(), &conn, "designated_panes");
         conn.execute_batch(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../loopflow/tests/fixtures/migrations/pane_layouts_released.sql"
+            "/tests/fixtures/migrations/pane_layouts_released.sql"
         )))
         .unwrap();
         let sql = migration_section_sql("designated_panes");
@@ -3234,7 +3231,7 @@ mod tests {
         .unwrap();
         conn.execute_batch(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../loopflow/tests/fixtures/migrations/native_terminal_input_released.sql"
+            "/tests/fixtures/migrations/native_terminal_input_released.sql"
         )))
         .unwrap();
         apply_set(&observers(), &build(), &conn, MIGRATIONS, &mut Vec::new()).unwrap();
@@ -3254,7 +3251,7 @@ mod tests {
         apply_before_migration(&observers(), &build(), &conn, "session_preview");
         conn.execute_batch(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../loopflow/tests/fixtures/migrations/session_preview_released.sql"
+            "/tests/fixtures/migrations/session_preview_released.sql"
         )))
         .unwrap();
         conn.execute_batch(&migration_section_sql("session_preview"))
@@ -3271,7 +3268,7 @@ mod tests {
         apply_before_migration(&observers(), &build(), &conn, "session_facts_only");
         conn.execute_batch(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../loopflow/tests/fixtures/migrations/session_facts_only_released.sql"
+            "/tests/fixtures/migrations/session_facts_only_released.sql"
         )))
         .unwrap();
         conn.execute_batch(&migration_section_sql("session_facts_only"))
@@ -3466,7 +3463,7 @@ mod tests {
         apply_before_migration(&observers(), &build(), &conn, "server_request_stops");
         conn.execute_batch(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../loopflow/tests/fixtures/migrations/request_stops_released.sql"
+            "/tests/fixtures/migrations/request_stops_released.sql"
         )))
         .unwrap();
         apply_pending_migrations(&observers(), &build(), &conn);
@@ -3483,7 +3480,7 @@ mod tests {
         apply_before_migration(&observers(), &build(), &conn, "task_workspace_teardown");
         conn.execute_batch(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../loopflow/tests/fixtures/migrations/task_workspace_teardown_released.sql"
+            "/tests/fixtures/migrations/task_workspace_teardown_released.sql"
         )))
         .unwrap();
         apply_pending_migrations(&observers(), &build(), &conn);
@@ -3518,7 +3515,7 @@ mod tests {
         apply_before_migration(&observers(), &build(), &conn, "task_workspace_lifetimes");
         conn.execute_batch(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../loopflow/tests/fixtures/migrations/task_workspace_released.sql"
+            "/tests/fixtures/migrations/task_workspace_released.sql"
         )))
         .unwrap();
         apply_pending_migrations(&observers(), &build(), &conn);
@@ -3567,7 +3564,7 @@ mod tests {
         apply_before_migration(&observers(), &build(), &conn, "task_ownership");
         conn.execute_batch(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../loopflow/tests/fixtures/migrations/ownership_log_released.sql"
+            "/tests/fixtures/migrations/ownership_log_released.sql"
         )))
         .unwrap();
         super::_migration_transaction(&conn, |conn, _| {
@@ -3653,7 +3650,7 @@ mod tests {
         apply_before_migration(&observers(), &build(), &conn, "optional_task_ancestry");
         conn.execute_batch(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../loopflow/tests/fixtures/migrations/optional_task_ancestry.sql"
+            "/tests/fixtures/migrations/optional_task_ancestry.sql"
         )))
         .unwrap();
         super::_migration_transaction(&conn, |conn, _| {
@@ -4119,7 +4116,7 @@ mod tests {
         apply_before_migration(&observers(), &build(), &conn, "remove_landing_timeouts");
         conn.execute_batch(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../loopflow/tests/fixtures/migrations/landing_timeouts.sql"
+            "/tests/fixtures/migrations/landing_timeouts.sql"
         )))
         .unwrap();
         conn.execute_batch(&migration_section_sql("remove_landing_timeouts"))

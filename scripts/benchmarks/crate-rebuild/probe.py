@@ -21,6 +21,7 @@ def _verify_receipts(receipts: list[dict]) -> None:
         "definitions_b",
         "terminal_b",
         "storage_b",
+        "storage_test_support_b",
         "new_root_after_refresh",
     }
     for receipt in receipts:
@@ -155,7 +156,7 @@ def main() -> None:
         )
         receipts = []
 
-        def build(label: str, tree: Path, package: str) -> None:
+        def build(label: str, tree: Path, package: str, features: str | None = None) -> None:
             before = stats()
             start = time.monotonic()
             result = run(
@@ -173,6 +174,7 @@ def main() -> None:
                     "-p",
                     package,
                     "--message-format=json",
+                    *(["--features", features] if features else []),
                 ],
                 tree,
             )
@@ -201,6 +203,23 @@ def main() -> None:
                     and "lib" in item["target"]["kind"]
                 }
             )
+            if package == "loopflow-storage":
+                directories = {
+                    item["out_dir"]
+                    for item in artifacts
+                    if item.get("reason") == "build-script-executed"
+                    and "/loopflow-storage#" in item["package_id"]
+                }
+                if len(directories) != 1:
+                    raise RuntimeError(f"storage catalogue output missing in {label}")
+                directory = Path(directories.pop())
+                receipt["fixture_sha256"] = hashlib.sha256(
+                    (directory / "test-store.db").read_bytes()
+                ).hexdigest()
+                if label.endswith("_b"):
+                    first = next(item for item in receipts if item["case"] == "storage_a")
+                    if receipt["fixture_sha256"] != first["fixture_sha256"]:
+                        raise RuntimeError(f"fixture bytes changed between roots: {receipt}")
             if package.replace("-", "_") not in receipt["libraries"]:
                 raise RuntimeError(f"owner did not compile in {label}")
             receipts.append(receipt)
@@ -248,6 +267,12 @@ def main() -> None:
                     (output / f"{package}_{label}_source_paths.txt").write_text(
                         "\n".join(line for line in paths.splitlines() if str(root) in line) + "\n"
                     )
+                build(
+                    f"storage_test_support_{label}",
+                    tree,
+                    "loopflow-storage",
+                    "test-support",
+                )
                 build(f"path_{label}", tree, "path-fixture")
                 actual = run([str(tree / "target/debug/path-fixture")], tree).stdout.strip()
                 if actual != str(tree / "path-fixture"):

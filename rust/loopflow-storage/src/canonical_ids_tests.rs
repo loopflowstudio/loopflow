@@ -257,7 +257,7 @@ fn canonical_ids_wave_collision_preserves_original_metric_evidence() {
     let (_home, conn) = released();
     conn.execute_batch(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../loopflow/tests/fixtures/migrations/canonical_ids_metrics.sql"
+        "/tests/fixtures/migrations/canonical_ids_metrics.sql"
     )))
     .unwrap();
     conn.execute(
@@ -328,7 +328,7 @@ fn canonical_ids_released_work_upgrades_without_replacing_history() {
     let (home, conn) = released();
     conn.execute_batch(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../loopflow/tests/fixtures/migrations/canonical_ids_work.sql"
+        "/tests/fixtures/migrations/canonical_ids_work.sql"
     )))
     .unwrap();
     // Corrupt retained evidence is opaque; conversion and later writes never parse it.
@@ -502,7 +502,7 @@ fn canonical_ids_planning_key_collision_rolls_back_release() {
     let (_home, conn) = released();
     conn.execute_batch(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../loopflow/tests/fixtures/migrations/canonical_ids_work.sql"
+        "/tests/fixtures/migrations/canonical_ids_work.sql"
     )))
     .unwrap();
     conn.execute("INSERT INTO planning_peer_changes(id,record_table,mutation) SELECT lower(id),record_table,mutation FROM planning_peer_changes ORDER BY id LIMIT 1",[]).unwrap();
@@ -530,7 +530,7 @@ fn canonical_ids_unique_linear_claim_and_json_membership_collisions_roll_back() 
         "INSERT INTO planning_peer_changes(id,record_table,mutation) SELECT 'CCCCCCCC-CCCC-4CCC-8CCC-CCCCCCCCCCCC',record_table,json_set(mutation,'$.clock',2,'$.parents',json('[]')) FROM planning_peer_changes ORDER BY id LIMIT 1; UPDATE planning_peer_changes SET id=lower(id) WHERE id LIKE 'BBBB%'",
     ] {
         let (_home,conn)=released();
-        conn.execute_batch(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../loopflow/tests/fixtures/migrations/canonical_ids_work.sql"))).unwrap();
+        conn.execute_batch(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/migrations/canonical_ids_work.sql"))).unwrap();
         conn.execute_batch(setup).unwrap();
         let error=apply_sqlite(&conn).unwrap_err().to_string();
         assert!(error.contains("canonical identity collision"),"{error}");

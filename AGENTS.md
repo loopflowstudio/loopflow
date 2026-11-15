@@ -267,7 +267,7 @@ plan, code and memory and keeps open findings with the work.
 - Test the merged frontier against the finished migration, not the steps between.
 - Tables read by Work projections use `store_revision_<table>_<insert|update|delete>` triggers to advance their domain in `store_revisions` inside the write. An observation stamp is a reading time, not a change: planning update triggers compare every other column and count a stamp only when it goes NULL ↔ value (`planning_update_triggers_compare_every_column`); a new column joins its table's `WHEN` clause.
 - Runtime migration preflights recognize draft markers inside release batches and keep external lock guards through commit or rollback. Upgrade fixtures start before the whole release batch.
-- Seed a released schema from SQL under `rust/loopflow/tests/fixtures/migrations/`; test sources name only current columns.
+- Seed a released schema from SQL under `rust/loopflow-storage/tests/fixtures/migrations/`; test sources name only current columns.
 
 **Load:** one Machine runs hundreds of concurrent agents over about 10,000
 recorded Tasks and every steer, turn and event they wrote. Every agent shares

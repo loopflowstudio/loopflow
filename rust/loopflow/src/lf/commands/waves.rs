@@ -4578,16 +4578,19 @@ mod tests {
         let conn = rusqlite::Connection::open(&database).unwrap();
         crate::store::migrations::apply_before_migration(&conn, "task_paused");
         let task = loopflow_model::durable::TaskId::new();
-        let fixture = include_str!("../../../tests/fixtures/migrations/work_stream_released.sql")
-            .replace("{wave}", loopflow_model::id::WaveId::new().as_str())
-            .replace(
-                "{project}",
-                loopflow_model::durable::ProjectId::new().as_str(),
-            )
-            .replace("{task}", task.as_str())
-            .replace("{repo}", directory.path().to_str().unwrap())
-            // The upgrade keeps only Workflows standing at `end`.
-            .replace("}]}','demo',3)", "}]}','end',3)");
+        let fixture = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../loopflow-storage/tests/fixtures/migrations/work_stream_released.sql"
+        ))
+        .replace("{wave}", loopflow_model::id::WaveId::new().as_str())
+        .replace(
+            "{project}",
+            loopflow_model::durable::ProjectId::new().as_str(),
+        )
+        .replace("{task}", task.as_str())
+        .replace("{repo}", directory.path().to_str().unwrap())
+        // The upgrade keeps only Workflows standing at `end`.
+        .replace("}]}','demo',3)", "}]}','end',3)");
         conn.execute_batch(&fixture).unwrap();
         crate::store::migrations::upgrade_from_migration(&conn, "task_paused");
         // The planning read, not this setup, fails.

@@ -646,9 +646,10 @@ mod compatibility_tests {
         let store = home.path().join("loopflow.db");
         let conn = rusqlite::Connection::open(&store).unwrap();
         crate::store::migrations::apply_before_migration(&conn, "settings_authority");
-        conn.execute_batch(include_str!(
-            "../../../tests/fixtures/migrations/settings_authority_released.sql"
-        ))
+        conn.execute_batch(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../loopflow-storage/tests/fixtures/migrations/settings_authority_released.sql"
+        )))
         .unwrap();
         conn.execute(
             "UPDATE repository_plans SET repo=?1",

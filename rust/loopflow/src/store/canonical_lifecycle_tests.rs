@@ -291,7 +291,7 @@ fn canonical_ids_metric_upgrade_retains_evidence_and_reimport() {
     let (home, conn) = released();
     conn.execute_batch(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/migrations/canonical_ids_metrics.sql"
+        "/../loopflow-storage/tests/fixtures/migrations/canonical_ids_metrics.sql"
     )))
     .unwrap();
     let retained = || {
@@ -472,7 +472,7 @@ fn canonical_ids_commands_read_the_upgraded_work_and_native_history() {
     let (home, conn) = released();
     conn.execute_batch(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/migrations/canonical_ids_work.sql"
+        "/../loopflow-storage/tests/fixtures/migrations/canonical_ids_work.sql"
     )))
     .unwrap();
     let repo = loopflow_test_support::TestRepo::new();

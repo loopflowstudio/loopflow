@@ -445,7 +445,7 @@ mod tests {
         );
         conn.execute_batch(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../loopflow/tests/fixtures/migrations/creation_baselines.sql"
+            "/tests/fixtures/migrations/creation_baselines.sql"
         )))
         .unwrap();
         let sql = migration_section_sql("planning_peers");
@@ -515,7 +515,7 @@ mod tests {
         );
         conn.execute_batch(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../loopflow/tests/fixtures/migrations/creation_baselines.sql"
+            "/tests/fixtures/migrations/creation_baselines.sql"
         )))
         .unwrap();
         conn.execute("UPDATE task_creation_intents SET export_json=json_set(export_json,'$.model.assignee',42)", []).unwrap();
@@ -551,7 +551,7 @@ mod tests {
                 );
                 conn.execute_batch(include_str!(concat!(
                     env!("CARGO_MANIFEST_DIR"),
-                    "/../loopflow/tests/fixtures/migrations/creation_baselines.sql"
+                    "/tests/fixtures/migrations/creation_baselines.sql"
                 )))
                 .unwrap();
                 let (kind, table, key, original, later, external) = if project {

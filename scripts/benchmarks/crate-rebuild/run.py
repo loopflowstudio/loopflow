@@ -187,7 +187,8 @@ def main() -> None:
         + "\n"
     )
 
-    with tempfile.TemporaryDirectory(prefix="lf650-build-", dir="/tmp") as temporary:
+    temporary = tempfile.mkdtemp(prefix="lf650-build-", dir="/tmp")
+    try:
         root = Path(temporary).resolve()
         snapshots = {}
         for label, revision in (("base", args.base), ("candidate", args.candidate)):
@@ -309,11 +310,16 @@ def main() -> None:
                                 for item in artifacts
                                 if item.get("reason") == "compiler-artifact"
                                 and not item["fresh"]
-                                and "lib" in item["target"]["kind"]
+                                and set(item["target"]["kind"])
+                                & {"lib", "rlib", "dylib", "cdylib", "staticlib"}
                             }
                         ),
                         "stats_before": before,
                         "stats_after": after,
+                        "rust_cache_hits": after["cache_hits"]["counts"].get("Rust", 0)
+                        - before["cache_hits"]["counts"].get("Rust", 0),
+                        "rust_cache_misses": after["cache_misses"]["counts"].get("Rust", 0)
+                        - before["cache_misses"]["counts"].get("Rust", 0),
                         "timing": [
                             line.strip()
                             for line in log.splitlines()
@@ -345,13 +351,23 @@ def main() -> None:
                         expected = ["loopflow"]
                         if case == "task_record_b" and (tree / "rust/loopflow-storage").is_dir():
                             expected.append("loopflow_storage")
-                        if receipt["nonfresh_libraries"] != expected:
+                        actual = set(receipt["nonfresh_libraries"])
+                        if (
+                            not set(expected).issubset(actual)
+                            or receipt["rust_cache_misses"] != len(expected)
+                            or receipt["rust_cache_hits"] != len(actual) - len(expected)
+                        ):
                             raise RuntimeError(f"unexpected rebuild closure: {receipt}")
                     run([str(tree / "target/debug/lf"), "--version"], tree)
                 if label == "candidate" and (trees[0] / "rust/loopflow-storage").is_dir():
                     _verify_catalog_refresh(trees[0], output, run)
             finally:
                 run([str(cache), "--stop-server"])
+    except BaseException:
+        print(f"Build sources, targets and caches retained at {temporary}", flush=True)
+        raise
+    else:
+        shutil.rmtree(temporary)
 
 
 if __name__ == "__main__":

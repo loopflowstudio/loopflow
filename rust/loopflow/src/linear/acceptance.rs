@@ -192,10 +192,13 @@ mod tests {
             let project = ProjectId::new();
             let task = TaskId::new();
             conn.execute_batch(
-                &include_str!("../../tests/fixtures/migrations/planning_task_evidence.sql")
-                    .replace("{wave}", wave.as_str())
-                    .replace("{project}", project.as_str())
-                    .replace("{task}", task.as_str()),
+                &include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../loopflow-storage/tests/fixtures/migrations/planning_task_evidence.sql"
+                ))
+                .replace("{wave}", wave.as_str())
+                .replace("{project}", project.as_str())
+                .replace("{task}", task.as_str()),
             )
             .unwrap();
             conn.execute_batch(sql).unwrap();

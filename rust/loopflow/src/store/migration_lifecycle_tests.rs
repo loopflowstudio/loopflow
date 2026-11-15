@@ -6,9 +6,10 @@ fn settings_authority_preserves_task_history_and_migrates_preferences() {
     let home = tempfile::tempdir().unwrap();
     let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     apply_before_migration(&conn, "settings_authority");
-    conn.execute_batch(include_str!(
-        "../../tests/fixtures/migrations/settings_authority_released.sql"
-    ))
+    conn.execute_batch(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../loopflow-storage/tests/fixtures/migrations/settings_authority_released.sql"
+    )))
     .unwrap();
     let mut guards = Vec::new();
     crate::config::migrate::preflight(&conn, &mut guards).unwrap();
@@ -58,7 +59,10 @@ async fn retired_home_landings_remain_readable_and_fence_old_supervisors() {
     {
         for placement in ["home", "local"] {
             conn.execute(
-                include_str!("../../tests/fixtures/migrations/retired_home_landing.sql"),
+                include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../loopflow-storage/tests/fixtures/migrations/retired_home_landing.sql"
+                )),
                 rusqlite::params![
                     format!("{placement}_{state}"),
                     index as i64 + if placement == "home" { 1 } else { 11 },

@@ -75,3 +75,16 @@
 - The demo World records upstream disposition through a storage-owned command;
   the hook's quiet cache reads the database path through storage. Raw connection
   access is available only with the dev-only `test-support` feature.
+
+- The embedded empty test database uses a fixed build-time Machine placeholder;
+  each home copy still generates its own identity and timestamps. This keeps
+  test-support library bytes reusable across roots without sharing Machine identity.
+
+- Historical SQL fixtures belong to storage. The canonical helper consumes a
+  generated SQL literal, anchored by its build script, to keep test-support
+  reuse independent of application files and manifest-root environment values.
+
+- Before merge, check whether an initial lower-crate-only edit refreshes the
+  application dirty-build label. Application provenance watches its own source
+  and Git metadata; the timed Task-record edit follows a shipping edit, so it
+  does not answer that clean-to-dirty question.

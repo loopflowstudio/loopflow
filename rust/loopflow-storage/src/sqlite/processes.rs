@@ -2367,7 +2367,7 @@ mod attachment_tests {
         );
         conn.execute_batch(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../loopflow/tests/fixtures/migrations/agent_process_released.sql"
+            "/tests/fixtures/migrations/agent_process_released.sql"
         )))
         .unwrap();
         let history = || {

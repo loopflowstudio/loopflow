@@ -1,7 +1,7 @@
 # LOO-906: immediate interactions across Desktop and mobile
 
-Concept review continues 2026-11-15 from `8a56fd337e` on origin/main
-`9cafc410ee` (unchanged at realign). Supersedes the Desktop-only delivery
+Realigned 2026-11-15 at code `8a56fd337e` on origin/main `9cafc410ee`
+(unchanged). Supersedes the Desktop-only delivery
 boundary. No shipping or merge decision is recorded. Placement remains this Task;
 no Wave is selected.
 
@@ -618,15 +618,8 @@ rapid manual navigation, restart after save, and replacement epochs. Then rerun
 the existing real-body receipt/list/count permutations through these production
 action paths. Native paint/input timing still requires a valid benchmark host.
 
-Full review wording and counterexamples: `a127084469:scratch/instant-task-session.md`
-(the prior “Implement direction” section). This refines the contracts above;
-there is no open product choice.
-
-The next cut connects synchronous interaction to the existing projection on both
-clients. Ordered membership, persisted query effects and scoped completion reload
-requirements are built at `8a56fd337e`. The initial stage declaration still needs
-effect/query dependencies and exhaustive command coverage. The contracts below
-remain acceptance requirements through that cutover.
+Full review wording: `a127084469:scratch/instant-task-session.md`. The
+contracts below remain acceptance requirements through the cutover.
 
 - A reload floor prevents reuse of an obsolete confirmed base; it is not the
   displayed result of Complete. Keep a lagging active base usable only beneath
@@ -678,25 +671,16 @@ reordered-reading matrix; no native latency result is inferred.
   Reverse every receipt/list/count order; retain B throughout. A query opened
   after submission follows the same dependency rule. Closed bases must be
   incorporated or invalidated with a persisted reload fence before retirement.
-- Supersede the exact completion while settlement is held. Replacement coverage
-  restores membership; never a stale base or the saved result. Test both
-  transaction race orders, later completion, restart and epoch replacement.
-  Replacement retains unanswered commands and presentation acknowledgment;
-  delayed old replies neither resurrect bases nor replay or select.
+- Run the supersession matrix above through this same path; replacement epochs
+  retain unanswered commands and presentation acknowledgment.
 - Recover edit A after another edit elsewhere: return its original result, show
   newer Work facts, and recover only its exact pending planning change. Missing
   Task rows, unrelated planning, pre-admission caches, no-Graph results, Graph
   removal, departure/return and native readiness before current Task facts remain
   launch counterexamples. Attachment failure remains beside receipt recovery.
-- Native latency stays measured acceptance, not inferred from these tests.
 
-Proposed usage remains unshipped: Start opens submitted words immediately; Complete
-removes the row and chooses next/empty once; definite refusal restores only its
-row, preserving later selection. Interrupted outcomes stay pending. Reopen follows
-covering replacement facts. Showing results clears redundant prompts while remaining
-recovery and list/count work continue. New windows follow the same pending changes;
-recent Tasks retain content and Wave disclosure opens before child loading. Keep
-this proposed until both clients consume the full shared projection.
+The usage in Representative timelines stays proposed until both clients consume
+the full shared projection.
 
 ## Current implementation cut
 
@@ -761,8 +745,14 @@ reload floors. Desktop list/Dashboard and phone list readers consume projected
 query results, prepared on the store actor before host publication; Desktop inspection still exports the confirmed plan and needs its
 presentation DTO migration alongside the interaction cutover. This does not yet establish synchronous gesture publication.
 
+Production Complete is still unconnected: Desktop `WorkModel.completeTask` awaits
+`query.completeTask` through `performTaskAction` (no outbox, no projected effect,
+no next selection), and `abandonTask` still uses `abandoningTaskIDs`. The phone
+has no Complete action. The membership plan declares only `task.complete`
+(`membership.rs`, confirming stage `task.completed`).
+
 Remaining, in order: shared synchronous Complete A/select B interaction and both
-production action paths; query-open/close incorporation, dependency coverage for
+production action paths (outbox command, effect, next/empty selection); query-open/close incorporation, dependency coverage for
 all effects and normalized cross-query provenance; remaining mutation-family
 recovery/fences and resource lanes (remote, external files/config and planning
 families included); both-client retained-occurrence migration and deletion of
@@ -775,65 +765,15 @@ is query coverage, not membership or native readiness.
 
 ### Admission identity and recovery contract
 
-Admission means the submitted envelope is saved, not that repository identity,
-legacy compatibility or execution has been established. No repository discovery,
-Git, planning, creation lock or provider call precedes the acknowledgment. Local
-schema/ID checks and the receipt transaction remain necessary. Domain validation
-and its wait are visible through receipt observation in the same destination;
-there is no new screen or second submission.
+Built: admission saves the submitted envelope before any discovery, Git, planning,
+lock or provider call. Submitted content (versioned encoding plus digest) and the
+released canonical creation fingerprint stay separate in the one receipt owner;
+released rows adopt only the first verified envelope through recoverable candidate
+validation, never replacing an existing outcome. Adopted rows keep their domain
+recovery disposition (Complete/Continue/Inspect) and are never generically queued.
+Full contract: `465274b547:scratch/instant-task-session.md`; server fixtures list at
+`19612daf41:scratch/instant-task-session.md`.
 
-Keep two meanings separate in the single receipt owner:
-
-- **Submitted content:** a versioned deterministic encoding of the typed command,
-  preserving authored values and path spelling. It excludes transport IDs and
-  incidental JSON key order. Persist both content and its digest; a digest alone
-  cannot recover the command. New operations bind this content at admission.
-  Same ID/content returns the existing receipt without changing dispatch state;
-  changed content is a conflict. Retrying uses the saved envelope, not rebuilt
-  fields from a current form or a newly resolved directory.
-- **Creation identity:** the existing canonical domain fingerprint, computed by
-  the worker using the released normalization rules. Preserve it independently;
-  never put a raw-envelope digest into the legacy fingerprint field. New creation
-  rows need an explicitly unresolved domain identity until the worker establishes
-  it. Direct CLI creation and served envelopes must use the same atomic domain
-  claim, so a CLI attempt racing normalization cannot create a second Task.
-
-Released creation rows have canonical identity but no submitted envelope. Preserve
-all their IDs, results, launch data, milestones and recovery dispositions. For
-first envelope adoption, durably reserve one candidate in that same row before
-acknowledgment; this is pending validation, not a replacement command or permission
-to execute. Existing creation lookup remains usable while validation is held.
-The worker resolves its directory, compares the legacy fingerprint and atomically
-binds the **first verified** envelope. A symlink/subdirectory spelling that resolves
-to the old canonical payload can adopt it. A mismatch reports a candidate content
-conflict and releases only that reservation; it must not reject, overwrite or
-strand the previously successful creation. Unavailable normalization retains the
-candidate for recovery, without classifying it as a mismatch. Concurrent identical
-candidates share validation; a different candidate conflicts while reserved.
-Candidate finalization/release must compare its saved identity so a held worker
-cannot overwrite a newer reservation. After successful adoption, submitted content
-is immutable; subsequent envelope retries use that saved spelling. Legacy CLI
-recovery continues to compare canonical identity, including equivalent paths.
-
-Keep candidate validation and command dispatch distinct. Validation can repeat
-after restart because it has no domain effect. A new operation dispatches only
-after validation and an atomic claim. An adopted released row always consults its
-existing domain recovery disposition: Complete returns its saved result, Continue
-uses only the domain-proven continuation, Inspect remains inspectable. It never
-becomes generically queued. A crash after claim remains uncertain until domain
-recovery proves what happened. No invented commit fence certifies historical
-results; obtain current covering facts without replaying the creation.
-
-Extend the one draft migration in place. Represent submitted and canonical identity
-explicitly, including their absence; do not infer identity mode from a hash or
-reuse `queued` to mean adoption of a completed creation. Expose admission versus
-validation outcome in Rust/Swift fixtures and protocol docs before client cutover.
-Keep the existing Graph-admitted creation milestone distinct from envelope receipt.
-
-Server fixtures cover held Git before discovery, released-row upgrade and path
-adoption, wrong-then-correct candidates, restart/CLI races and duplicate
-submission (list at `19612daf41:scratch/instant-task-session.md`). Live clients
-use that admission; the shared receipt cursor and epoch race have focused checks.
 Still open: reordered validation replies must update only the active epoch with a
 newer receipt revision, never enabling input or retiring overlays, and full
 cross-platform presentation acceptance.
@@ -858,16 +798,14 @@ Rust CLI volume reports aggregate SQLite time; mutex/planning/provider attributi
 is incomplete. `measureWriteToVisible` still refers to removed `pm_items.body`.
 
 Observed: both hosts failed load preflight on 2026-11-14 and again 2026-11-15T10:40:27Z
-(CPU 371.0%, load 39.52); the mini runs macOS 15.5 against Desktop's macOS 26
-target. Debug 10k constructor warm P95 235.92 ms on a rejected host (diagnostic
+(CPU 371.0%, load 39.52); local again at 13:19:55Z (571.1% CPU, load 83.5), no
+native trial began. The mini runs macOS 15.5 against Desktop's macOS 26 target. Debug 10k constructor warm P95 235.92 ms on a rejected host (diagnostic
 only). 10k receipt lookup/admission P95 0.033 ms, all 20 receipt statements keyed
 (nextest `7f2b652c-19e3-4026-8961-d4e3f4d84d37`). No gesture, native paint/input or
 backend-stage baseline exists. Raw files and earlier detail: `8b42a874db`,
 `bb936ac371` (`scratch/instant-task-session.md`).
 
 Implementation owns a valid benchmark baseline; demo owns native usability.
-Local preflight 2026-11-15T13:19:55.670079+00:00: rejected at 571.1% background CPU,
-load [83.515625, 50.67626953125, 31.76611328125]; no native trial began.
 
 Checks before this cut: `d9bf1c21ae:scratch/instant-task-session.md` records focused
 Desktop/iOS query, receipt and recovery passes; Rust operations/schema/DTO passes;

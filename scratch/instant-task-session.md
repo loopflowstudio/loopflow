@@ -1,7 +1,7 @@
 # LOO-906: immediate interactions across Desktop and mobile
 
-Implementation continues 2026-11-15 from checkpoint `fff8aaa849` on
-origin/main `9cafc410ee`. Supersedes the Desktop-only delivery
+Implementation continues 2026-11-15 from `ac6871e42f` on origin/main
+`9cafc410ee` (unchanged at realign). Supersedes the Desktop-only delivery
 boundary. No shipping or merge decision is recorded. Placement remains this Task;
 no Wave is selected.
 
@@ -678,9 +678,12 @@ Complete Work plan bodies now persist with stamps in the same SQLite owner.
 Desktop live Task lists/Dashboards and phone live/restored Task lists use that
 ordering. Phone query-file reads/writes are removed; Forget clears confirmed
 queries while retaining unanswered commands. An old query cannot replace a newer
-persisted base. Reload floors suppress lagging bases after operation retirement;
-query-observed epoch replacement invalidates receipt evidence across the Machine.
-This is cache/retirement infrastructure, not ordered effect/query projection.
+persisted base. Reload floors suppress lagging bases after operation retirement:
+`cachedPlans` returns nil for a list stamped below the floor, so a restarted
+lagging list has no base rather than a projected removal (ClientWorkQueryTests).
+Query-observed epoch replacement invalidates receipt evidence across the Machine.
+This is cache/retirement infrastructure, not ordered effect/query projection; the
+per-query overlay must replace that gap before cutover.
 
 Remaining, in order: declarative membership plan over #1947 `selection_states`,
 ordered per-query overlays and normalized cross-query provenance; Complete A/select

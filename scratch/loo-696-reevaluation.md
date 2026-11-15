@@ -22,8 +22,9 @@ and no PR. No tests run for the conflict-free sync.
 Jack Heart, November 14: “ok lets fdo it”, following the explanation of fixing
 contradictory Task status across Desktop.
 
-The interrupted kickoff left only this note. On November 14, the resumed read
-reported the feature Graph at kickoff, with no PR or implementation diff.
+After implementation, `0917d5acf9` checkpointed the cutover and `409bc089d4`
+merged main `3fbf3d2ca3` (v0.16.0 release notes, migration order, a mobile test).
+None of main's files overlap this branch; no tests rerun for that merge.
 
 ## Architecture and decisions
 
@@ -182,7 +183,10 @@ consumers, not just the helper's output.
 
 ## Remaining work
 
-The Rust/Swift cutover is implemented as one change. Gate owns the bounded
+The Rust/Swift cutover is implemented as one change. Remaining Swift
+`primaryScope` reads (`WorkModel` warm primary conversation, `WorkProjection.subject`
+for unmatched Sessions) route repository/Wave primaries, not Task membership;
+`RepositoryWorkspace`'s visited/rank sort is warm-pane eviction. Gate owns the bounded
 performance/read-volume checks, full platform suites and final review; the
 interactive demo below remains. Publication and landing belong to their Graph
 steps, with no merge authorization implied here.
@@ -229,11 +233,9 @@ checks; the interactive demo still owns visible clarity and retained native inpu
 
 ### Shipping docs
 
-Read `swift/README.md` and `docs/surfaces.md` before implementation. They describe
-the intended lifecycle/ownership distinction, shared conversation membership and
-availability, Task order and its exceptions, and stoppable Auto-Ship handoffs.
-The Rust/Swift cutover implements these docs-first edits.
-No new product question arose while writing them.
+`swift/README.md` and `docs/surfaces.md` describe the lifecycle/ownership
+distinction, shared conversation membership and availability, Task order and its
+exceptions, and stoppable Auto-Ship handoffs; the cutover implements them.
 
 November 14: `lf open --host desktop --file swift/README.md --file docs/surfaces.md`
 exited successfully and reported opening both files in Loopflow Desktop.

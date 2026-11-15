@@ -1094,9 +1094,10 @@ Connection feedback overlays the terminal, so clearing it does not resize the
 provider or move its cursor. Both mount layout and pre-mount sizing keep the same
 viewport while status changes.
 Check native status, paused input, local copy/Find/scroll, Retry after exhaustion,
-one-shot **Move here**, and cancellation on pane closure. Only an owner exit means
-ended. Installed-helper replacement must preserve the Session and Graph owners
-and prove continued input and Graph progress; a socket restart alone is insufficient.
+one-shot **Move here**, and cancellation on pane closure. An orderly terminal close
+ends recovery and shows its replacement or retirement reason; bare EOF keeps the
+reason unknown. Installed-helper replacement must preserve the Session and Graph
+identities and prove continued input and Graph progress; a socket restart alone is insufficient.
 `scripts/test_desktop.sh --filter ServerProtocolTests` builds the consumer and
 checks shared Rust/Swift fixtures. Installation needs the selected app bundle;
 source experiments select a separate `LF_HOME`.

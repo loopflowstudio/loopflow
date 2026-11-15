@@ -1125,3 +1125,8 @@ idempotent registration without Work. Native rendered continuity remains demo.
 Linux supervisor replacement remains a Linux installation check; this service
 holds no PTY itself, and its unit uses `KillMode=process` so restarting it leaves
 holders and detached Work running, as `AbandonProcessGroup` does on macOS.
+
+Terminal close coverage checks final reasons through the server bridge, explicit
+Session replacement followed by attachment, shell retirement, and disabled Desktop
+input over the private status stream. Bare EOF remains unknown; held-server restart
+and heartbeat tests continue to own connection recovery.

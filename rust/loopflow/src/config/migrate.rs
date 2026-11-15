@@ -1,6 +1,7 @@
 //! Recoverable file cutover. The journal records before/after documents, never
 //! participates in preference resolution, and survives an interrupted SQL upgrade.
 use anyhow::{ensure, Context, Result};
+use loopflow_model::durable::DefaultScope;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_yaml_ng::Value;
@@ -20,6 +21,42 @@ struct Cutover {
     edits: Vec<Edit>,
 }
 
+fn home(conn: &Connection) -> Result<PathBuf> {
+    Ok(Path::new(
+        conn.path()
+            .context("file preferences require a file-backed registry")?,
+    )
+    .parent()
+    .context("registry has a parent")?
+    .to_owned())
+}
+
+fn location(conn: &Connection, scope: Option<&DefaultScope>) -> Result<(PathBuf, Vec<String>)> {
+    let Some(scope) = scope else {
+        return Ok((home(conn)?.join("config.yaml"), vec![]));
+    };
+    let (repo, wave): (String, Option<String>) = match scope {
+        DefaultScope::Repository(id) => (
+            conn.query_row(
+                "SELECT repo FROM repository_plans WHERE id=?1",
+                [id.as_str()],
+                |row| row.get(0),
+            )?,
+            None,
+        ),
+        DefaultScope::Wave(id) => conn.query_row(
+            "SELECT repo,id FROM wave_addresses WHERE id=?1",
+            [id.as_str()],
+            |row| Ok((row.get(0)?, Some(row.get(1)?))),
+        )?,
+    };
+    Ok((
+        super::files::private_path(Path::new(&repo))?,
+        wave.map(|name| vec!["waves".into(), name])
+            .unwrap_or_default(),
+    ))
+}
+
 fn table(conn: &Connection, name: &str) -> Result<bool> {
     Ok(conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
@@ -30,7 +67,7 @@ fn table(conn: &Connection, name: &str) -> Result<bool> {
 fn scoped(conn: &Connection, kind: &str, id: &str) -> Result<Vec<(PathBuf, Vec<String>)>> {
     let recover = || -> Result<Vec<(PathBuf, Vec<String>)>> {
         Ok(vec![(
-            super::placement::home(conn)?.join("settings-recovery.yaml"),
+            home(conn)?.join("settings-recovery.yaml"),
             vec![kind.into(), id.into()],
         )])
     };
@@ -55,12 +92,7 @@ fn scoped(conn: &Connection, kind: &str, id: &str) -> Result<Vec<(PathBuf, Vec<S
         return Ok(out);
     }
     let scope = match kind {
-        "global" | "default" => {
-            return Ok(vec![(
-                super::placement::home(conn)?.join("config.yaml"),
-                vec![],
-            )])
-        }
+        "global" | "default" => return Ok(vec![(home(conn)?.join("config.yaml"), vec![])]),
         "repository" => loopflow_model::durable::DefaultScope::Repository(
             loopflow_model::durable::RepositoryId::from_raw(id),
         ),
@@ -69,7 +101,7 @@ fn scoped(conn: &Connection, kind: &str, id: &str) -> Result<Vec<(PathBuf, Vec<S
         ),
         _ => anyhow::bail!("unknown preference scope {kind}"),
     };
-    match super::placement::location(conn, Some(&scope)) {
+    match location(conn, Some(&scope)) {
         Ok((path, prefix)) if path.parent().is_some_and(Path::is_dir) => Ok(vec![(path, prefix)]),
         _ => recover(),
     }
@@ -195,7 +227,7 @@ fn export(conn: &Connection) -> Result<Export> {
             ))
         })? {
             let (id, label, route) = row?;
-            let path = super::placement::home(conn)?.join("config.yaml");
+            let path = home(conn)?.join("config.yaml");
             let value = serde_yaml_ng::to_value(super::placement::MachineDeclaration {
                 id: loopflow_model::durable::MachineId::from_raw(id.clone()),
             })?;
@@ -243,7 +275,7 @@ fn export(conn: &Connection) -> Result<Export> {
                     .transpose()?
                     .map(|date| date.to_string()),
             };
-            let path = super::placement::home(conn)?.join("config.yaml");
+            let path = home(conn)?.join("config.yaml");
             super::settings::insert(
                 exports
                     .entry(path)
@@ -277,7 +309,7 @@ fn export(conn: &Connection) -> Result<Export> {
         if !declarations.is_empty() {
             put(
                 &mut exports,
-                super::placement::home(conn)?.join("config.yaml"),
+                home(conn)?.join("config.yaml"),
                 &[],
                 "auth_browsers",
                 serde_yaml_ng::to_value(declarations)?,
@@ -297,7 +329,7 @@ fn export(conn: &Connection) -> Result<Export> {
             let (name, off) = row?;
             super::settings::insert(
                 exports
-                    .entry(super::placement::home(conn)?.join("config.yaml"))
+                    .entry(home(conn)?.join("config.yaml"))
                     .or_insert(Value::Mapping(Default::default())),
                 &["pools", &name],
                 serde_yaml_ng::to_value(super::placement::PoolDeclaration { off })?,
@@ -327,7 +359,7 @@ fn export(conn: &Connection) -> Result<Export> {
             };
             super::settings::insert(
                 exports
-                    .entry(super::placement::home(conn)?.join("config.yaml"))
+                    .entry(home(conn)?.join("config.yaml"))
                     .or_insert(Value::Mapping(Default::default())),
                 &["ondemands", &name],
                 serde_yaml_ng::to_value(declaration)?,
@@ -413,7 +445,7 @@ fn cutover(
         );
         return Ok(vec![]);
     }
-    let home = super::placement::home(conn)?;
+    let home = home(conn)?;
     let global = home.join("config.yaml");
     let global_value = super::files::read(&global)?;
     if let Some(repos) = global_value.get("repos").and_then(Value::as_mapping) {

@@ -498,23 +498,22 @@ fn describe(
             // A Task's primary follows its claim; a Wave's or repository's
             // follows your Session Machine for it.
             let setting = loopflow_model::durable::MachineSetting::Session;
-            let local = store.sqlite.local_machine()?.id;
+            let local = crate::store::machines::local_machine(&store.sqlite)?.id;
             let remote = |machine: loopflow_model::durable::MachineId| {
                 (machine != local).then(|| machine.to_string())
             };
             let machine = match (&scope, &repository_id) {
                 (PrimaryScope::Task(_), _) => execution_machine.clone(),
-                (PrimaryScope::Wave(wave), _) => {
-                    remote(store.sqlite.wave_owning_machine(wave, setting)?.0)
-                }
+                (PrimaryScope::Wave(wave), _) => remote(
+                    crate::store::placement::wave_owning_machine(&store.sqlite, wave, setting)?.0,
+                ),
                 (PrimaryScope::Repository(_), Some(repository)) => remote(
-                    store
-                        .sqlite
-                        .repository_owning_machine(
-                            &loopflow_model::durable::RepositoryId::from_raw(repository.clone()),
-                            setting,
-                        )?
-                        .0,
+                    crate::store::placement::repository_owning_machine(
+                        &store.sqlite,
+                        &loopflow_model::durable::RepositoryId::from_raw(repository.clone()),
+                        setting,
+                    )?
+                    .0,
                 ),
                 (PrimaryScope::Repository(_), None) => None,
             };

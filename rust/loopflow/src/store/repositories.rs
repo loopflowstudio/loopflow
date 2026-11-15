@@ -5,7 +5,10 @@ use loopflow_model::durable::{RepositoryId, TaskId};
 impl Store {
     pub async fn task_execution_route(&self, task: &TaskId) -> StoreResult<TaskExecutionRoute> {
         let task = task.clone();
-        run_sqlite(&self.sqlite, move |store| store.task_execution_route(&task)).await
+        run_sqlite(&self.sqlite, move |store| {
+            crate::store::ownership::task_execution_route(&store, &task)
+        })
+        .await
     }
 
     pub async fn ensure_repository(&self, repo: &str) -> StoreResult<RepositoryId> {

@@ -49,8 +49,7 @@ impl Ssh {
         let machine = destination.shell_task(TASK);
         success(source.command(&["machine", "id"]));
         let source_store = SqliteStore::new(&source.home.path().join("loopflow.db")).unwrap();
-        source_store
-            .add_machine(&machine, "fixture", "fixture")
+        loopflow::store::machines::add_machine(&source_store, &machine, "fixture", "fixture")
             .unwrap();
         let root = source.home.path();
         for name in ["host", "client", "unauthorized"] {

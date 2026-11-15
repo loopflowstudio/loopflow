@@ -266,7 +266,7 @@ pub fn forward(cli: &Cli, args: &[String], directory: &Path) -> Result<Option<Fo
     let Some(route) = resolve_task(&store, cli, selector, directory)? else {
         return Ok(None);
     };
-    if route.machine_id == store.local_machine()?.id {
+    if route.machine_id == crate::store::machines::local_machine(&store)?.id {
         return Ok(None);
     }
     let ownership = matches!(
@@ -349,8 +349,8 @@ fn remote_task_in(store: &SqliteStore, selector: &str) -> Result<Option<TaskExec
     let Some(task) = resolve_task_id(store, selector, None)? else {
         return Ok(None);
     };
-    let route = store.task_execution_route(&task)?;
-    Ok((route.machine_id != store.local_machine()?.id).then_some(route))
+    let route = crate::store::ownership::task_execution_route(store, &task)?;
+    Ok((route.machine_id != crate::store::machines::local_machine(store)?.id).then_some(route))
 }
 
 /// The other Machine that writes the Task's ownership: where it runs, unless
@@ -453,8 +453,8 @@ fn moved_session(cli: &Cli, args: &[String]) -> Result<Option<Forward>> {
     let id = loopflow_model::id::canonical_session(id);
     let machine = match conversation_task(&store, &id)? {
         Some(task) => {
-            let runs_on = store.task_execution_route(&task)?.machine_id;
-            (runs_on != store.local_machine()?.id).then_some(runs_on)
+            let runs_on = crate::store::ownership::task_execution_route(&store, &task)?.machine_id;
+            (runs_on != crate::store::machines::local_machine(&store)?.id).then_some(runs_on)
         }
         None => store.session_moved_to(&id)?,
     };
@@ -535,12 +535,12 @@ fn primary_session(cli: &Cli, args: &[String], directory: &Path) -> Result<Optio
                 return Ok(None);
             };
             (
-                store
-                    .wave_owning_machine(
-                        &wave_id,
-                        loopflow_model::durable::MachineSetting::Session,
-                    )?
-                    .0,
+                crate::store::placement::wave_owning_machine(
+                    store,
+                    &wave_id,
+                    loopflow_model::durable::MachineSetting::Session,
+                )?
+                .0,
                 format!("Wave {wave}"),
             )
         }
@@ -549,17 +549,17 @@ fn primary_session(cli: &Cli, args: &[String], directory: &Path) -> Result<Optio
                 return Ok(None);
             };
             (
-                store
-                    .repository_owning_machine(
-                        repository,
-                        loopflow_model::durable::MachineSetting::Session,
-                    )?
-                    .0,
+                crate::store::placement::repository_owning_machine(
+                    store,
+                    repository,
+                    loopflow_model::durable::MachineSetting::Session,
+                )?
+                .0,
                 "this repository".to_string(),
             )
         }
     };
-    if machine == store.local_machine()?.id {
+    if machine == crate::store::machines::local_machine(store)?.id {
         return Ok(None);
     }
     // The destination finds its own checkout by identity, never by this path.
@@ -658,7 +658,7 @@ fn resolve_task(
             None
         };
     resolve_task_id(store, selector, repo.as_deref())?
-        .map(|task| store.task_execution_route(&task).map_err(Into::into))
+        .map(|task| crate::store::ownership::task_execution_route(store, &task).map_err(Into::into))
         .transpose()
 }
 
@@ -781,7 +781,7 @@ mod tests {
         let cli = Cli::try_parse_from(["lf", "--repo-id", prior.as_str()]).unwrap();
         assert_eq!(
             resolve_task(&store, &cli, "abcd", Path::new("/")).unwrap(),
-            Some(store.task_execution_route(&first).unwrap())
+            Some(crate::store::ownership::task_execution_route(&store, &first).unwrap())
         );
         assert_eq!(
             resolve_task(&store, &cli, first.as_str(), Path::new("/"))

@@ -146,7 +146,7 @@ pub(crate) async fn send(store: &SharedStore, id: &str, to: &MachineId) -> Resul
     )?;
     store.sqlite.complete_moved_session(&session.id, to)?;
     Ok(Move {
-        from_machine_id: store.sqlite.local_machine()?.id,
+        from_machine_id: crate::store::machines::local_machine(&store.sqlite)?.id,
         session: Some(moved),
         checkout: Some(checkout),
         history,
@@ -214,9 +214,7 @@ pub(crate) async fn send_task(
             stage: MoveStage::Leaving { claim_id, stopped },
             ..
         }) if &to_machine_id == to => {
-            let claim = store
-                .sqlite
-                .task_ownership(&task.id)?
+            let claim = crate::store::ownership::task_ownership(&store.sqlite, &task.id)?
                 .log
                 .into_iter()
                 .find(|entry| entry.id == claim_id)
@@ -242,14 +240,14 @@ pub(crate) async fn send_task(
         match leave(store, &task, worktree.as_deref(), to, conversation, stopped).await {
             Ok(left) => left,
             Err(error) => {
-                store.sqlite.hand_back(&task.id, &claim)?;
+                crate::store::ownership::hand_back(&store.sqlite, &task.id, &claim)?;
                 return Err(error);
             }
         };
     let (session, history) =
         taken.map_or((None, None), |(session, history)| (Some(session), history));
     let moved = Move {
-        from_machine_id: store.sqlite.local_machine()?.id,
+        from_machine_id: crate::store::machines::local_machine(&store.sqlite)?.id,
         session,
         checkout,
         history,
@@ -283,7 +281,7 @@ pub(crate) async fn sent_task_arrived(
         .get_task_by_issue(issue)
         .await?
         .ok_or_else(|| anyhow!("no Task {issue} on this Machine"))?;
-    let here = store.sqlite.local_machine()?.id;
+    let here = crate::store::machines::local_machine(&store.sqlite)?.id;
     Ok(store.sqlite.record_move_arrived(&task.id, &here, to)?)
 }
 
@@ -398,14 +396,15 @@ fn take(
 /// claim moves there. An unowned Task is claimed first; one `to` already owns
 /// has nothing to send.
 fn claim_for(store: &SqliteStore, task: &Task, to: &MachineId) -> Result<TaskOwnershipEntry> {
-    let owner = store
-        .task_ownership(&task.id)?
+    let owner = crate::store::ownership::task_ownership(store, &task.id)?
         .owner
         .and_then(|owner| owner.machine.id);
     if owner.as_ref() == Some(to) {
         bail!("{} already runs on {to}", task.identifier);
     }
-    Ok(store.begin_task_move(&task.id, to)?)
+    Ok(crate::store::ownership::begin_task_move(
+        store, &task.id, to,
+    )?)
 }
 
 /// Interrupt the Task so nothing starts again, then end each Graph still
@@ -636,9 +635,11 @@ pub(crate) async fn receive(store: &SharedStore, moved: Move) -> Result<Option<L
     // Arrival acknowledges the conversation as well as the checkout. A failed
     // transcript import must leave the checked move available for retry.
     if let Some(task) = task {
-        store
-            .sqlite
-            .record_move_arrived(&task, &from, &store.sqlite.local_machine()?.id)?;
+        store.sqlite.record_move_arrived(
+            &task,
+            &from,
+            &crate::store::machines::local_machine(&store.sqlite)?.id,
+        )?;
     }
     Ok(received)
 }
@@ -775,9 +776,11 @@ async fn take_in_task(
 ) -> Result<Task> {
     let name = &moved.identifier;
     arriving_task(store, main, &moved.task_id, name).await?;
-    store
-        .sqlite
-        .ingest_ownership_marker(&moved.task_id, &moved.ownership_marker)?;
+    crate::store::ownership::ingest_ownership_marker(
+        &store.sqlite,
+        &moved.task_id,
+        &moved.ownership_marker,
+    )?;
     if let Some(checkout) = checkout {
         let source = crate::ops::task::remote::TaskSource {
             branch: checkout.branch.clone(),

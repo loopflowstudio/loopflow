@@ -2202,10 +2202,7 @@ mod tests {
             }
         }
         let remote = loopflow_model::durable::MachineId::new();
-        store
-            .sqlite
-            .add_machine(&remote, "worker", "worker")
-            .unwrap();
+        crate::store::machines::add_machine(&store.sqlite, &remote, "worker", "worker").unwrap();
         let mut filter = SessionFilter {
             task: Some("PROOF-1".into()),
             limit: 1,

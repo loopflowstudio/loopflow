@@ -20,7 +20,7 @@ pub async fn observe(
     let local = store.observe_task_location(repository, task, request)?;
     let mut observations = vec![local];
     if peers {
-        for machine in store.machines()? {
+        for machine in crate::store::machines::machines(store)? {
             if machine.id == observations[0].machine_id {
                 continue;
             }
@@ -116,7 +116,7 @@ pub fn explain(
     task: &TaskId,
     resolution: &mut ContextExplanation,
 ) -> Result<TaskExecutionRoute> {
-    let route = match store.task_execution_route(task) {
+    let route = match crate::store::ownership::task_execution_route(store, task) {
         Ok(route) => route,
         Err(error) => {
             resolution.execution_machine = ContextFact::Unavailable {

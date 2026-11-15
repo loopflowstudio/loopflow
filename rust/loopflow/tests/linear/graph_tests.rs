@@ -1123,9 +1123,7 @@ fn observing_and_preparing_a_task_are_not_execution() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     // Allocating the checkout claimed the Task; nothing after it adds an entry.
     let entries = || {
-        task.store
-            .sqlite
-            .task_ownership(&task.task.id)
+        loopflow::store::ownership::task_ownership(&task.store.sqlite, &task.task.id)
             .unwrap()
             .log
             .len()
@@ -1179,11 +1177,15 @@ fn task_run_history_reads_only_that_tasks_runs_without_starting_it() {
 
     // A Task without Runs: an empty list, and asking prepares and claims nothing.
     let before = events();
-    let claims = task.store.sqlite.task_ownership(&task.task.id).unwrap().log;
+    let claims = loopflow::store::ownership::task_ownership(&task.store.sqlite, &task.task.id)
+        .unwrap()
+        .log;
     assert!(read("INF-123").is_empty());
     assert_eq!(events(), before, "reading Run history writes no Task event");
     assert_eq!(
-        task.store.sqlite.task_ownership(&task.task.id).unwrap().log,
+        loopflow::store::ownership::task_ownership(&task.store.sqlite, &task.task.id)
+            .unwrap()
+            .log,
         claims
     );
 

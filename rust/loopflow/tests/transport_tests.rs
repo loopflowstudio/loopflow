@@ -1717,7 +1717,7 @@ impl Fixture {
             self.repo.path().to_str().unwrap(),
         )
         .unwrap();
-        let machine = store.local_machine().unwrap().id;
+        let machine = loopflow::store::machines::local_machine(&store).unwrap().id;
         self.sql()
             .execute(
                 "INSERT INTO tasks(id,repository_id,issue_identifier,created_at)

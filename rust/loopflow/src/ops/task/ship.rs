@@ -299,7 +299,7 @@ pub fn ship_begin(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsRe
         // Shipping claims an unowned Task, as `lf task run` would; unassigning
         // it later is what stops shipping.
         if !store.sqlite.task_owned(&task.id).map_err(task_error)? {
-            store.sqlite.claim_task(&task.id).map_err(task_error)?;
+            crate::store::ownership::claim_task(&store.sqlite, &task.id).map_err(task_error)?;
         }
         store
             .sqlite

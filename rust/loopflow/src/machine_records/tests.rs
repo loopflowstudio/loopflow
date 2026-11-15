@@ -62,8 +62,7 @@ fn worker(home: &Path) -> SqliteStore {
 /// The laptop, which knows the worker as `code-1`.
 fn laptop(home: &Path, origin: &MachineId) -> SqliteStore {
     let store = with_task(home);
-    store
-        .add_machine(origin, "ssh://lf@203.0.113.7:40022", "code-1")
+    crate::store::machines::add_machine(&store, origin, "ssh://lf@203.0.113.7:40022", "code-1")
         .unwrap();
     store
 }
@@ -78,7 +77,7 @@ fn exported(store: &SqliteStore, home: &Path) -> Vec<u8> {
 fn copies_arrive_from_their_origin_without_becoming_local_rows() {
     let (worker_home, laptop_home) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     let pod = worker(worker_home.path());
-    let origin = pod.local_machine().unwrap().id;
+    let origin = crate::store::machines::local_machine(&pod).unwrap().id;
     let here = laptop(laptop_home.path(), &origin);
 
     let counts = import(
@@ -96,28 +95,28 @@ fn copies_arrive_from_their_origin_without_becoming_local_rows() {
         }
     );
 
-    let copied = here
-        .copied_sessions(Some(&TaskId::parse(TASK).unwrap()), None)
-        .unwrap();
+    let copied =
+        crate::store::machines::copied_sessions(&here, Some(&TaskId::parse(TASK).unwrap()), None)
+            .unwrap();
     assert_eq!(copied.len(), 1);
     assert_eq!(copied[0].id, SESSION);
     assert_eq!(copied[0].title, "Rent pods");
     assert_eq!(copied[0].origin_name(), "code-1");
     assert_eq!(
-        here.copied_history(SESSION)
+        crate::store::machines::copied_history(&here, SESSION)
             .unwrap()
             .unwrap()
             .session
             .origin_name(),
         "code-1"
     );
-    here.rename_machine("code-1", "builder").unwrap();
+    crate::store::machines::rename_machine(&here, "code-1", "builder").unwrap();
     assert_eq!(
-        here.copied_sessions(None, None).unwrap()[0].origin_name(),
+        crate::store::machines::copied_sessions(&here, None, None).unwrap()[0].origin_name(),
         "builder"
     );
     assert_eq!(
-        here.copied_history(SESSION)
+        crate::store::machines::copied_history(&here, SESSION)
             .unwrap()
             .unwrap()
             .session
@@ -157,7 +156,7 @@ fn copies_arrive_from_their_origin_without_becoming_local_rows() {
 fn copying_again_brings_rows_up_to_date() {
     let (worker_home, laptop_home) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     let pod = worker(worker_home.path());
-    let origin = pod.local_machine().unwrap().id;
+    let origin = crate::store::machines::local_machine(&pod).unwrap().id;
     let here = laptop(laptop_home.path(), &origin);
     import(
         &here,
@@ -182,7 +181,7 @@ fn copying_again_brings_rows_up_to_date() {
     )
     .unwrap();
     assert_eq!(counts.sessions, 1);
-    let copied = here.copied_sessions(None, None).unwrap();
+    let copied = crate::store::machines::copied_sessions(&here, None, None).unwrap();
     assert_eq!(copied[0].completed_at, Some(200));
 }
 
@@ -194,7 +193,7 @@ fn copies_are_the_final_record_once_the_origin_is_gone() {
     {
         let worker_home = tempfile::tempdir().unwrap();
         let pod = worker(worker_home.path());
-        origin = pod.local_machine().unwrap().id;
+        origin = crate::store::machines::local_machine(&pod).unwrap().id;
         here = laptop(laptop_home.path(), &origin);
         import(
             &here,
@@ -204,8 +203,8 @@ fn copies_are_the_final_record_once_the_origin_is_gone() {
         )
         .unwrap();
     }
-    here.remove_machine("code-1").unwrap();
-    let copied = here.copied_sessions(None, None).unwrap();
+    crate::store::machines::remove_machine(&here, "code-1").unwrap();
+    let copied = crate::store::machines::copied_sessions(&here, None, None).unwrap();
     assert_eq!(copied.len(), 1);
     assert_eq!(copied[0].origin_name(), origin.as_str());
     assert_eq!(here.copy_counts(&origin).unwrap().processes, 1);
@@ -219,7 +218,7 @@ fn a_copied_session_opens_after_its_origin_is_gone() {
     {
         let worker_home = tempfile::tempdir().unwrap();
         let pod = worker(worker_home.path());
-        origin = pod.local_machine().unwrap().id;
+        origin = crate::store::machines::local_machine(&pod).unwrap().id;
         here = laptop(laptop_home.path(), &origin);
         import(
             &here,
@@ -229,10 +228,16 @@ fn a_copied_session_opens_after_its_origin_is_gone() {
         )
         .unwrap();
     }
-    here.remove_machine("code-1").unwrap();
-    assert!(here.copied_history("not-a-session").unwrap().is_none());
+    crate::store::machines::remove_machine(&here, "code-1").unwrap();
+    assert!(
+        crate::store::machines::copied_history(&here, "not-a-session")
+            .unwrap()
+            .is_none()
+    );
 
-    let history = here.copied_history(SESSION).unwrap().unwrap();
+    let history = crate::store::machines::copied_history(&here, SESSION)
+        .unwrap()
+        .unwrap();
     assert_eq!(history.task_id.as_deref(), Some(TASK));
     assert_eq!(history.events.len(), 1);
     assert_eq!(history.events[0].kind, "captured");
@@ -262,5 +267,7 @@ fn an_export_from_another_machine_is_refused() {
     )
     .unwrap_err();
     assert!(error.to_string().contains("nothing was copied"), "{error}");
-    assert!(here.copied_sessions(None, None).unwrap().is_empty());
+    assert!(crate::store::machines::copied_sessions(&here, None, None)
+        .unwrap()
+        .is_empty());
 }

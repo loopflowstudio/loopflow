@@ -76,7 +76,7 @@ impl SqliteStore {
     /// A move of the Task from `from` checked that this Machine can take it.
     /// Until it arrives, running the move here asks `from` for it.
     pub(crate) fn record_move_checked(&self, task: &TaskId, from: &MachineId) -> StoreResult<()> {
-        let here = self.local_machine()?.id;
+        let here = self.saved_local_machine()?.id;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
         tx.execute(
@@ -120,7 +120,7 @@ impl SqliteStore {
         from: &MachineId,
         to: &MachineId,
     ) -> StoreResult<()> {
-        let here = &self.local_machine()?.id == to;
+        let here = &self.saved_local_machine()?.id == to;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
         let updated = tx.execute(
@@ -238,11 +238,14 @@ mod tests {
             })
             .unwrap()
             .id;
-        let (laptop, mini) = (store.local_machine().unwrap().id, MachineId::new());
+        let (laptop, mini) = (
+            crate::store::machines::local_machine(&store).unwrap().id,
+            MachineId::new(),
+        );
         assert_eq!(store.task_move_in_flight(&task).unwrap(), None);
 
         // Leaving, then sent: still one move, as old as when it began.
-        store.begin_task_move(&task, &mini).unwrap();
+        crate::store::ownership::begin_task_move(&store, &task, &mini).unwrap();
         let began = 1_000;
         store
             .conn

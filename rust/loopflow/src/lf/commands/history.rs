@@ -397,7 +397,7 @@ pub(crate) fn render(
         );
         if process.is_none() && session.is_none() {
             // A Session copied from a given-back Machine, when nothing here is it.
-            let copied = store.sqlite.copied_history(id)?;
+            let copied = crate::store::machines::copied_history(&store.sqlite, id)?;
             let copied =
                 copied.with_context(|| format!("Process or Session {id} was not found"))?;
             return Ok(Shown::Copied(copied));

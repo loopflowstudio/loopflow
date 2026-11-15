@@ -165,7 +165,7 @@ async fn relay_task(
         .get_task_by_issue(issue)
         .await?
         .ok_or_else(|| anyhow!("no Task {issue} on this Machine"))?;
-    let local = store.sqlite.local_machine()?.id;
+    let local = crate::store::machines::local_machine(&store.sqlite)?.id;
     let target = match crate::ops::task_ownership::resolve_machine(&store.sqlite, target) {
         Ok(target) => target,
         // The retry line the laptop printed names this Machine by the
@@ -224,9 +224,7 @@ async fn relay_task(
         if to != local || source == local {
             return error;
         }
-        let from = store
-            .sqlite
-            .machine_by_id(&source)
+        let from = crate::store::machines::machine_by_id(&store.sqlite, &source)
             .ok()
             .flatten()
             .map_or_else(|| source.to_string(), |machine| machine.name());
@@ -256,9 +254,11 @@ async fn relay_task(
             eprintln!("Committed and pushed {name} on {}", checkout.branch);
         }
     }
-    store
-        .sqlite
-        .ingest_ownership_marker(&task.id, &moved_task.ownership_marker)?;
+    crate::store::ownership::ingest_ownership_marker(
+        &store.sqlite,
+        &task.id,
+        &moved_task.ownership_marker,
+    )?;
     receive(store, &moved, target.as_ref())
         .await
         .map_err(|error| match &target {
@@ -291,7 +291,10 @@ async fn relay_task(
         repository: crate::ops::task::repository_for_task(store, &task)
             .map_err(|error| error.to_string()),
     });
-    Ok((store.sqlite.task_ownership(&task.id)?, stopped))
+    Ok((
+        crate::store::ownership::task_ownership(&store.sqlite, &task.id)?,
+        stopped,
+    ))
 }
 
 /// The Machine a Task moving to `to` comes from: the one `to` checked the
@@ -308,8 +311,7 @@ fn sender(
     if store.task_move_arrived_on(task, to)? {
         return Ok(None);
     }
-    Ok(store
-        .task_ownership(task)?
+    Ok(crate::store::ownership::task_ownership(store, task)?
         .log
         .into_iter()
         .rev()
@@ -338,7 +340,7 @@ pub(crate) fn arrived_on(task: &loopflow_model::durable::TaskId, to: &MachineId)
         let store = crate::store::open_existing_store()
             .await?
             .context("machine commands need an initialized local store")?;
-        let here = store.sqlite.local_machine()?.id;
+        let here = crate::store::machines::local_machine(&store.sqlite)?.id;
         store.sqlite.record_move_arrived(task, &here, to)?;
         Ok(true)
     })
@@ -365,7 +367,7 @@ async fn send_task(
     to: &MachineId,
     conversation: Option<&str>,
 ) -> Result<Move> {
-    if *source == store.sqlite.local_machine()?.id {
+    if *source == crate::store::machines::local_machine(&store.sqlite)?.id {
         return moves::send_task(store, task.id.as_str(), to, conversation).await;
     }
     let bytes = send_from(source, repository, task, to, conversation).await?;
@@ -404,7 +406,7 @@ async fn ready(
     task: Option<(&Task, &RepositoryId, &MachineId)>,
     what: &str,
 ) -> Result<()> {
-    if target.id == store.sqlite.local_machine()?.id {
+    if target.id == crate::store::machines::local_machine(&store.sqlite)?.id {
         return Ok(());
     }
     let mut args = vec!["session".into(), "receive".into(), "--check".into()];
@@ -452,7 +454,7 @@ async fn receive(store: &SharedStore, moved: &Move, target: Option<&Machine>) ->
     let args = ["session".to_string(), "receive".to_string()];
     let input = serde_json::to_vec(moved)?;
     match target {
-        Some(target) if target.id != store.sqlite.local_machine()?.id => {
+        Some(target) if target.id != crate::store::machines::local_machine(&store.sqlite)?.id => {
             super::ssh::request(target, &args, Some(&input)).await?;
         }
         _ => receive_here(&args, &input).await?,
@@ -502,18 +504,13 @@ fn retry_task(error: anyhow::Error, name: &str, target: &Machine) -> anyhow::Err
 }
 
 fn registered(store: &SharedStore, machine: &MachineId) -> Result<Machine> {
-    store
-        .sqlite
-        .machine_by_id(machine)?
+    crate::store::machines::machine_by_id(&store.sqlite, machine)?
         .ok_or_else(|| anyhow!("Machine {machine} is not registered here"))
 }
 
 fn describe(machine: Option<&Machine>) -> String {
     match machine {
         Some(machine) => machine.name(),
-        None => format!(
-            "{} (this Machine)",
-            crate::store::sqlite::task_ownership::local_label()
-        ),
+        None => format!("{} (this Machine)", crate::store::ownership::local_label()),
     }
 }

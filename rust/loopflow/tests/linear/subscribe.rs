@@ -152,14 +152,14 @@ impl Machine {
             created_at: now,
             updated_at: now,
         };
-        self.store
-            .place_task(
-                &task.id,
-                task.worktree.as_ref().unwrap(),
-                &task.workspace_slug,
-                &pr,
-            )
-            .unwrap();
+        loopflow::store::ownership::place_task(
+            &self.store,
+            &task.id,
+            task.worktree.as_ref().unwrap(),
+            &task.workspace_slug,
+            &pr,
+        )
+        .unwrap();
         self.store
             .append_task_event(
                 &task.id,

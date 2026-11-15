@@ -282,7 +282,7 @@ fn each_wave_runs_its_own_setup_and_the_repository_is_the_default() {
     loopflow::work::wave::bootstrap::ensure_wave(&store, checkout, "infra").unwrap();
     loopflow::work::wave::bootstrap::ensure_wave(&store, checkout, "research").unwrap();
     loopflow::work::wave::bootstrap::ensure_wave(&store, checkout, "plain").unwrap();
-    let here = store.local_machine().unwrap().id;
+    let here = loopflow::store::machines::local_machine(&store).unwrap().id;
     loopflow::provider_account::catalog::upsert_provider_account(
         &store,
         &loopflow::store::ProviderAccount {

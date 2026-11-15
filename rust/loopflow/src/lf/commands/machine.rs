@@ -42,7 +42,7 @@ async fn listings(store: &Store, label: Option<&str>) -> anyhow::Result<Vec<Mach
         Some(label) => vec![find_machine(store, label).await?],
         None => store.machines().await?,
     };
-    let defaults = store.sqlite.machine_defaults()?;
+    let defaults = crate::store::placement::machine_defaults(&store.sqlite)?;
     // This Machine is listed only when one of your defaults names it.
     let local = store.local_machine().await?;
     if label.is_none() && defaults.iter().any(|d| d.machine_id == local.id) {
@@ -144,7 +144,7 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
                     .transpose()?,
             };
             if let Some(pool) = pool {
-                if store.sqlite.pool(pool)?.is_none() {
+                if crate::store::rentals::pool(&store.sqlite, pool)?.is_none() {
                     return Err(anyhow!("no pool {pool}; `lf pool add {pool}` creates it"));
                 }
             }
@@ -174,9 +174,11 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             };
             let machine = store.add_machine(&probe.id?, route, &label).await?;
             if pool.is_some() || cost_usd.is_some() || expires_at.is_some() {
-                store
-                    .sqlite
-                    .set_machine_ownership(&machine.id, &ownership)?;
+                crate::store::rentals::set_machine_ownership(
+                    &store.sqlite,
+                    &machine.id,
+                    &ownership,
+                )?;
             }
             print_machine(&machine, *json)?;
         }
@@ -297,10 +299,7 @@ fn print_machine(machine: &Machine, json: bool) -> anyhow::Result<()> {
     } else {
         let label = match (&machine.label, machine.route.as_str()) {
             (Some(label), _) => label.clone(),
-            (None, "local") => format!(
-                "{} (this Machine)",
-                crate::store::sqlite::task_ownership::local_label()
-            ),
+            (None, "local") => format!("{} (this Machine)", crate::store::ownership::local_label()),
             (None, _) => String::new(),
         };
         println!("{label}  {}  {}", machine.route, machine.id);
@@ -601,11 +600,10 @@ pub fn validate_expected_machine_process() -> anyhow::Result<()> {
     if std::env::var_os(crate::lf::commands::ssh::EXPECTED_MACHINE_ID_ENV).is_none() {
         return Ok(());
     }
-    let local = crate::store::read_existing_registry()
+    let store = crate::store::read_existing_registry()
         .context("Machine identity unavailable")?
-        .ok_or_else(|| anyhow!("Machine identity unavailable: local registry is absent"))?
-        .sqlite
-        .local_machine()?;
+        .ok_or_else(|| anyhow!("Machine identity unavailable: local registry is absent"))?;
+    let local = crate::store::machines::local_machine(&store.sqlite)?;
     validate_expected_machine(&local.id)
 }
 

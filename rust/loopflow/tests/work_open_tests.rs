@@ -1387,11 +1387,9 @@ fn rex_follower_places_remote_arrivals_in_one_container_per_machine() {
     let registered = register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
     let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
     let peer = MachineId::new();
-    store
-        .add_machine(&peer, "remote.invalid", "Remote")
-        .unwrap();
-    store.claim_task(&registered.task.id).unwrap();
-    store.move_claim(&registered.task.id, &peer).unwrap();
+    loopflow::store::machines::add_machine(&store, &peer, "remote.invalid", "Remote").unwrap();
+    loopflow::store::ownership::claim_task(&store, &registered.task.id).unwrap();
+    loopflow::store::ownership::move_claim(&store, &registered.task.id, &peer).unwrap();
     // Remote checkout state is not copied here; the peer decides eligibility.
     rusqlite::Connection::open(home.path().join("loopflow.db"))
         .unwrap()

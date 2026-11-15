@@ -39,16 +39,22 @@ fn file_edits_change_admission_without_rewriting_live_rentals() {
     let (home, store) = store();
     let _home =
         crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
-    store.add_ondemand(&code(1)).unwrap();
-    let admitted = store.admit_rental("code", None, None, false).unwrap();
+    crate::store::rentals::add_ondemand(&store, &code(1)).unwrap();
+    let admitted = crate::store::rentals::admit_rental(&store, "code", None, None, false).unwrap();
     crate::engine::config::set(
         &crate::config::files::Destination::PersonalGlobal {},
         "ondemands.code.max_machines",
         "0",
     )
     .unwrap();
-    assert_eq!(store.ondemand("code").unwrap().unwrap().max_machines, 0);
-    assert!(store.admit_rental("code", None, None, false).is_err());
+    assert_eq!(
+        crate::store::rentals::ondemand(&store, "code")
+            .unwrap()
+            .unwrap()
+            .max_machines,
+        0
+    );
+    assert!(crate::store::rentals::admit_rental(&store, "code", None, None, false).is_err());
     assert_eq!(
         store.rental(&admitted.id).unwrap().cap_usd,
         admitted.cap_usd
@@ -58,46 +64,54 @@ fn file_edits_change_admission_without_rewriting_live_rentals() {
 #[test]
 fn pools_and_ondemands_share_one_namespace() {
     let (_dir, store) = store();
-    store.add_pool("lab.west").unwrap();
-    store.add_ondemand(&code(1)).unwrap();
-    assert_eq!(store.ondemand("code").unwrap(), Some(code(1)));
-    assert!(store.add_pool("code").is_err());
+    crate::store::rentals::add_pool(&store, "lab.west").unwrap();
+    crate::store::rentals::add_ondemand(&store, &code(1)).unwrap();
+    assert_eq!(
+        crate::store::rentals::ondemand(&store, "code").unwrap(),
+        Some(code(1))
+    );
+    assert!(crate::store::rentals::add_pool(&store, "code").is_err());
     let mut lab = code(1);
     lab.name = "lab.west".into();
-    assert!(store.add_ondemand(&lab).is_err());
-    store.set_pool_off("lab.west", true).unwrap();
-    assert!(store.pool("lab.west").unwrap().unwrap().off);
-    store.remove_pool("lab.west").unwrap();
-    assert!(store.pool("lab.west").unwrap().is_none());
-    assert!(store.remove_pool("lab.west").is_err());
+    assert!(crate::store::rentals::add_ondemand(&store, &lab).is_err());
+    crate::store::rentals::set_pool_off(&store, "lab.west", true).unwrap();
+    assert!(
+        crate::store::rentals::pool(&store, "lab.west")
+            .unwrap()
+            .unwrap()
+            .off
+    );
+    crate::store::rentals::remove_pool(&store, "lab.west").unwrap();
+    assert!(crate::store::rentals::pool(&store, "lab.west")
+        .unwrap()
+        .is_none());
+    assert!(crate::store::rentals::remove_pool(&store, "lab.west").is_err());
 }
 
 #[test]
 fn admission_records_identity_before_the_create_and_holds_the_limit() {
     let (_dir, store) = store();
-    store.add_ondemand(&code(1)).unwrap();
-    let rental = store.admit_rental("code", None, None, false).unwrap();
+    crate::store::rentals::add_ondemand(&store, &code(1)).unwrap();
+    let rental = crate::store::rentals::admit_rental(&store, "code", None, None, false).unwrap();
     assert_eq!(rental.state, RentalState::Requested);
     assert_eq!(rental.provider_name, format!("lf-{}", rental.id));
     assert_eq!(rental.cap_usd, usd("1.32696"));
-    let refused = store.admit_rental("code", None, None, true).unwrap_err();
+    let refused =
+        crate::store::rentals::admit_rental(&store, "code", None, None, true).unwrap_err();
     assert!(refused.to_string().contains("already has 1 of 1"));
 
     // A lost create stops counting against the limit; its history stays.
-    store
-        .set_rental_state(&rental.id, RentalState::Lost)
-        .unwrap();
-    store.admit_rental("code", None, None, true).unwrap();
+    crate::store::ownership::set_rental_state(&store, &rental.id, RentalState::Lost).unwrap();
+    crate::store::rentals::admit_rental(&store, "code", None, None, true).unwrap();
     assert_eq!(store.rentals(Some("code")).unwrap().len(), 2);
 }
 
 #[test]
 fn a_rental_moves_from_confirmed_to_running_to_ended() {
     let (_dir, store) = store();
-    store.add_ondemand(&code(2)).unwrap();
-    let rental = store.admit_rental("code", None, None, false).unwrap();
-    store
-        .set_rental_state(&rental.id, RentalState::Unconfirmed)
+    crate::store::rentals::add_ondemand(&store, &code(2)).unwrap();
+    let rental = crate::store::rentals::admit_rental(&store, "code", None, None, false).unwrap();
+    crate::store::ownership::set_rental_state(&store, &rental.id, RentalState::Unconfirmed)
         .unwrap();
     let booting = store
         .confirm_rental(&rental.id, "pod1", usd("0.25"))
@@ -109,8 +123,7 @@ fn a_rental_moves_from_confirmed_to_running_to_ended() {
         .is_err());
 
     let machine = MachineId::new();
-    store
-        .add_machine(&machine, "ssh://lf@203.0.113.7:40022", "code-1")
+    crate::store::machines::add_machine(&store, &machine, "ssh://lf@203.0.113.7:40022", "code-1")
         .unwrap();
     let running = store.attach_rental(&rental.id, &machine).unwrap();
     assert_eq!(running.state, RentalState::Running);
@@ -119,22 +132,21 @@ fn a_rental_moves_from_confirmed_to_running_to_ended() {
         rental.id
     );
     // A rented machine is never pooled.
-    store.add_pool("lab").unwrap();
+    crate::store::rentals::add_pool(&store, "lab").unwrap();
     let pooled = Ownership {
         pool: Some("lab".into()),
         cost_usd: Usd::ZERO,
         expires_at: None,
     };
-    assert!(store.set_machine_ownership(&machine, &pooled).is_err());
+    assert!(crate::store::rentals::set_machine_ownership(&store, &machine, &pooled).is_err());
 
-    assert!(store.remove_ondemand("code").is_err());
+    assert!(crate::store::rentals::remove_ondemand(&store, "code").is_err());
     store.set_rental_cost(&rental.id, usd("0.25")).unwrap();
-    let (ended, returned) = store
-        .set_rental_state(&rental.id, RentalState::Ended)
-        .unwrap();
+    let (ended, returned) =
+        crate::store::ownership::set_rental_state(&store, &rental.id, RentalState::Ended).unwrap();
     assert!(returned.is_empty());
     assert!(ended.ended_at.is_some());
-    store.remove_ondemand("code").unwrap();
+    crate::store::rentals::remove_ondemand(&store, "code").unwrap();
     assert_eq!(store.rentals(None).unwrap()[0].cost_usd, Some(usd("0.25")));
 }
 
@@ -142,22 +154,22 @@ fn a_rental_moves_from_confirmed_to_running_to_ended() {
 fn an_owned_machine_joins_a_pool_with_its_cost_and_leaves_when_the_pool_goes() {
     let (_dir, store) = store();
     let mini = MachineId::new();
-    store.add_machine(&mini, "jack@mini", "mini").unwrap();
+    crate::store::machines::add_machine(&store, &mini, "jack@mini", "mini").unwrap();
     let ownership = Ownership {
         pool: Some("lab".into()),
         cost_usd: usd("599"),
         expires_at: Some(OffsetDateTime::from_unix_timestamp(1_900_000_000).unwrap()),
     };
-    assert!(store.set_machine_ownership(&mini, &ownership).is_err());
-    store.add_pool("lab").unwrap();
-    store.set_machine_ownership(&mini, &ownership).unwrap();
+    assert!(crate::store::rentals::set_machine_ownership(&store, &mini, &ownership).is_err());
+    crate::store::rentals::add_pool(&store, "lab").unwrap();
+    crate::store::rentals::set_machine_ownership(&store, &mini, &ownership).unwrap();
 
-    let machines = store.pool_machines("lab").unwrap();
+    let machines = crate::store::machines::pool_machines(&store, "lab").unwrap();
     assert_eq!(machines.len(), 1);
     assert_eq!(machines[0].ownership, ownership);
     assert!(machines[0].tasks.is_empty());
 
-    store.remove_pool("lab").unwrap();
+    crate::store::rentals::remove_pool(&store, "lab").unwrap();
     let left = super::ownership_in(&store.conn.lock().unwrap(), &mini).unwrap();
     assert_eq!(left.pool, None);
     assert_eq!(left.cost_usd, usd("599"));
@@ -202,29 +214,31 @@ fn an_ended_rental_hands_its_open_tasks_back_here() {
     let (_dir, store) = store();
     let _home =
         crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", _dir.path().to_str().unwrap());
-    store.add_ondemand(&code(1)).unwrap();
-    let rental = store.admit_rental("code", None, None, false).unwrap();
+    crate::store::rentals::add_ondemand(&store, &code(1)).unwrap();
+    let rental = crate::store::rentals::admit_rental(&store, "code", None, None, false).unwrap();
     store
         .confirm_rental(&rental.id, "pod1", usd("0.24"))
         .unwrap();
     let code_1 = MachineId::new();
-    store
-        .add_machine(&code_1, "ssh://lf@203.0.113.7:40022", "code-1")
+    crate::store::machines::add_machine(&store, &code_1, "ssh://lf@203.0.113.7:40022", "code-1")
         .unwrap();
     store.attach_rental(&rental.id, &code_1).unwrap();
     let task = open_task(&store);
-    store.claim_task(&task).unwrap();
-    store.move_claim(&task, &code_1).unwrap();
-    let person = store.task_ownership(&task).unwrap().owner.unwrap().person;
+    crate::store::ownership::claim_task(&store, &task).unwrap();
+    crate::store::ownership::move_claim(&store, &task, &code_1).unwrap();
+    let person = crate::store::ownership::task_ownership(&store, &task)
+        .unwrap()
+        .owner
+        .unwrap()
+        .person;
 
-    let (_, returned) = store
-        .set_rental_state(&rental.id, RentalState::Ended)
-        .unwrap();
+    let (_, returned) =
+        crate::store::ownership::set_rental_state(&store, &rental.id, RentalState::Ended).unwrap();
 
     assert_eq!(returned, std::slice::from_ref(&task));
-    let ownership = store.task_ownership(&task).unwrap();
+    let ownership = crate::store::ownership::task_ownership(&store, &task).unwrap();
     let owner = ownership.owner.unwrap();
-    let local = store.local_machine().unwrap().id;
+    let local = crate::store::machines::local_machine(&store).unwrap().id;
     assert_eq!(owner.machine.id, Some(local.clone()));
     assert_eq!(owner.person, person);
     let history: Vec<_> = ownership
@@ -241,7 +255,7 @@ fn an_ended_rental_hands_its_open_tasks_back_here() {
         ]
     );
     // This Machine writes the Task again: `lf task run` stays here.
-    store.unassign_task(&task).unwrap();
+    crate::store::ownership::unassign_task(&store, &task).unwrap();
 }
 
 #[test]
@@ -251,32 +265,30 @@ fn hand_back_writes_nothing_when_a_claim_lacks_planning_facts() {
     let _home =
         crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", dir.path().to_str().unwrap());
     let machine = MachineId::new();
-    store.add_machine(&machine, "lf@pod", "pod").unwrap();
+    crate::store::machines::add_machine(&store, &machine, "lf@pod", "pod").unwrap();
     let first = open_task(&store);
-    store.claim_task(&first).unwrap();
-    store.move_claim(&first, &machine).unwrap();
-    let planning =
-        super::super::task_ownership::held_planning_in(&store.conn.lock().unwrap(), &machine)
-            .unwrap();
+    crate::store::ownership::claim_task(&store, &first).unwrap();
+    crate::store::ownership::move_claim(&store, &first, &machine).unwrap();
+    let (scope, planning) = crate::store::ownership::held_planning(&store, &machine).unwrap();
 
     // Another writer claims a Task after preflight but before BEGIN.
     let second = open_task(&store);
-    store.claim_task(&second).unwrap();
-    store.move_claim(&second, &machine).unwrap();
+    crate::store::ownership::claim_task(&store, &second).unwrap();
+    crate::store::ownership::move_claim(&store, &second, &machine).unwrap();
     {
         let mut conn = store.conn.lock().unwrap();
         let tx = conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .unwrap();
         assert_eq!(
-            super::super::task_ownership::hand_back_in(&tx, &machine, &planning).unwrap(),
+            super::super::task_ownership::hand_back_in(&tx, &machine, &scope, &planning).unwrap(),
             None
         );
         // Even committing this attempt must leave both claims untouched.
         tx.commit().unwrap();
     }
     for task in [&first, &second] {
-        let ownership = store.task_ownership(task).unwrap();
+        let ownership = crate::store::ownership::task_ownership(&store, task).unwrap();
         assert_eq!(ownership.owner.unwrap().machine.id, Some(machine.clone()));
         assert_eq!(ownership.log.len(), 2);
     }

@@ -408,7 +408,7 @@ fn renew_rental(
     login: &str,
     credential: &Credential,
 ) -> Result<Option<String>> {
-    let Some(machine) = store.sqlite.machine_by_id(machine_id)? else {
+    let Some(machine) = crate::store::machines::machine_by_id(&store.sqlite, machine_id)? else {
         return Ok(None);
     };
     if remote_holds_full_login(&machine, login)? {
@@ -604,7 +604,8 @@ async fn renew_rentals(store: &SharedStore) -> Result<()> {
         .filter(|rental| rental.state.is_live())
         .filter_map(|rental| rental.machine_id)
     {
-        let Some(machine) = store.sqlite.machine_by_id(&machine_id)? else {
+        let Some(machine) = crate::store::machines::machine_by_id(&store.sqlite, &machine_id)?
+        else {
             continue;
         };
         if let Err(error) = connect_claude_accounts(&machine, true).await {
@@ -1819,9 +1820,9 @@ esac
     fn live_rental(store: &SharedStore, route: &str) -> loopflow_model::durable::Machine {
         use crate::rental::{Hardware, OnDemand, Provider, Usd};
         let usd = |text| Usd::parse(text).unwrap();
-        store
-            .sqlite
-            .add_ondemand(&OnDemand {
+        crate::store::rentals::add_ondemand(
+            &store.sqlite,
+            &OnDemand {
                 name: route.into(),
                 provider: Provider::Daytona,
                 hardware: Hardware {
@@ -1835,17 +1836,21 @@ esac
                 max_usd_per_hour: usd("0.40"),
                 hours: 4.0,
                 created_at: time::OffsetDateTime::UNIX_EPOCH,
-            })
-            .unwrap();
-        let rental = store.sqlite.admit_rental(route, None, None, false).unwrap();
+            },
+        )
+        .unwrap();
+        let rental =
+            crate::store::rentals::admit_rental(&store.sqlite, route, None, None, false).unwrap();
         store
             .sqlite
             .confirm_rental(&rental.id, route, usd("0.25"))
             .unwrap();
         let id = loopflow_model::durable::MachineId::new();
-        store.sqlite.add_machine(&id, route, route).unwrap();
+        crate::store::machines::add_machine(&store.sqlite, &id, route, route).unwrap();
         store.sqlite.attach_rental(&rental.id, &id).unwrap();
-        store.sqlite.machine_by_id(&id).unwrap().unwrap()
+        crate::store::machines::machine_by_id(&store.sqlite, &id)
+            .unwrap()
+            .unwrap()
     }
 
     /// An `ssh` that logs each remote command and reports `owned-rental` as the

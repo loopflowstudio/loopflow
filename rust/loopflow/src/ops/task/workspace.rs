@@ -46,7 +46,7 @@ pub(crate) fn pinned_checkout(issue: &str, expected: &Path) -> Result<TaskChecko
 /// and neither do git-ignored writes such as `lf`'s own journal traces.
 pub fn watch_task_files(issue: &str, expected: &Path, request: &str) -> Result<()> {
     let checkout = pinned_checkout(issue, expected)?;
-    let machine_id = file_store()?.local_machine()?.id;
+    let machine_id = crate::store::machines::local_machine(&file_store()?)?.id;
     let metadata = crate::git::absolute_git_dir(expected)?;
     // Watchers report either the watched spelling or the resolved one.
     let roots = EventRoots {

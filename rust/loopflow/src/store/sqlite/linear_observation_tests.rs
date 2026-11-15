@@ -47,19 +47,29 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
     let now = OffsetDateTime::now_utc();
     let restored = edit("2026-07-15T02:00:00.000Z", &task.title, &task.description);
     let observation = edit("2026-07-15T01:00:00.000Z", "New title", "New body");
-    let outcome = store
-        .apply_linear_observation(&task.id, &observation, now, false)
-        .unwrap();
+    let outcome = crate::store::ownership::apply_linear_observation(
+        &store,
+        &task.id,
+        &observation,
+        now,
+        false,
+    )
+    .unwrap();
     assert!(!outcome.baselined);
     assert!(outcome.content_steer_applied);
     let steers = store.task_steers(&task.id).unwrap();
     assert_eq!(steers.len(), 1);
     assert!(steers[0].text.contains("New title"));
     assert!(
-        !store
-            .apply_linear_observation(&task.id, &observation, now, false)
-            .unwrap()
-            .content_steer_applied
+        !crate::store::ownership::apply_linear_observation(
+            &store,
+            &task.id,
+            &observation,
+            now,
+            false
+        )
+        .unwrap()
+        .content_steer_applied
     );
 
     let mut observation = observation;
@@ -72,9 +82,14 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
         author_name: Some("Maya".into()),
     });
     for expected in [1, 0] {
-        let outcome = store
-            .apply_linear_observation(&task.id, &observation, now, false)
-            .unwrap();
+        let outcome = crate::store::ownership::apply_linear_observation(
+            &store,
+            &task.id,
+            &observation,
+            now,
+            false,
+        )
+        .unwrap();
         assert_eq!(outcome.follow_ups_created.len(), expected);
     }
     assert_eq!(
@@ -87,8 +102,7 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
 
     let stale = edit("2026-07-15T00:30:00.000Z", &task.title, &task.description);
     assert!(
-        !store
-            .apply_linear_observation(&task.id, &stale, now, false)
+        !crate::store::ownership::apply_linear_observation(&store, &task.id, &stale, now, false)
             .unwrap()
             .content_steer_applied
     );
@@ -96,8 +110,7 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
     assert_eq!(cursor.last_title, "New title");
     assert_eq!(cursor.last_revision, "2026-07-15T01:00:00.000Z");
     assert!(
-        store
-            .apply_linear_observation(&task.id, &restored, now, false)
+        crate::store::ownership::apply_linear_observation(&store, &task.id, &restored, now, false)
             .unwrap()
             .content_steer_applied
     );

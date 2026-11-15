@@ -320,7 +320,7 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             ..
         } => {
             let store = open_shared_store().await?;
-            let here = store.sqlite.local_machine()?.id;
+            let here = crate::store::machines::local_machine(&store.sqlite)?.id;
             anyhow::ensure!(
                 store.sqlite.task_move_arrived_on(task, &here)?,
                 "Task {task} did not arrive here"
@@ -742,9 +742,11 @@ fn copied_sessions(
         },
         None => None,
     };
-    Ok(store
-        .sqlite
-        .copied_sessions(task.as_ref(), repository.as_ref())?)
+    Ok(crate::store::machines::copied_sessions(
+        &store.sqlite,
+        task.as_ref(),
+        repository.as_ref(),
+    )?)
 }
 
 async fn resume(

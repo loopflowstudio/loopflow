@@ -736,7 +736,9 @@ mod tests {
             },
         )
         .unwrap();
-        let claim = a.claim_task(&task.id).unwrap().unwrap();
+        let claim = crate::store::ownership::claim_task(&a, &task.id)
+            .unwrap()
+            .unwrap();
         let journal = a.export_peer_planning(path, &route.id()).unwrap();
         crate::store::planning_peers::import_peer_planning(
             &b,
@@ -756,11 +758,11 @@ mod tests {
             Some(path)
         );
         // The claim travels as a marked comment; the other Machine follows it.
-        let ownership = b.task_ownership(&task.id).unwrap();
+        let ownership = crate::store::ownership::task_ownership(&b, &task.id).unwrap();
         assert_eq!(ownership.log, vec![claim.clone()]);
         assert_eq!(
             ownership.owner.unwrap().machine.id,
-            Some(a.local_machine().unwrap().id)
+            Some(crate::store::machines::local_machine(&a).unwrap().id)
         );
         let project =
             crate::work::wave::bootstrap::ensure_wave_project(&b, path, "product").unwrap();

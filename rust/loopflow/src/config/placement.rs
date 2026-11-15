@@ -1,7 +1,6 @@
 //! File locations for domain operations that name a retained repository or Wave.
 use anyhow::{Context, Result};
 use loopflow_model::durable::DefaultScope;
-use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_yaml_ng::Value;
 use std::path::{Path, PathBuf};
@@ -103,68 +102,33 @@ pub struct MachineDeclaration {
     pub id: loopflow_model::durable::MachineId,
 }
 
-pub(crate) fn home(conn: &Connection) -> Result<PathBuf> {
-    Ok(Path::new(
-        conn.path()
-            .context("file preferences require a file-backed registry")?,
-    )
-    .parent()
-    .context("registry has a parent")?
-    .to_owned())
-}
-
-pub(crate) fn location(
-    conn: &Connection,
-    scope: Option<&DefaultScope>,
+pub(crate) fn location_at(
+    home: &Path,
+    scope: Option<&crate::store::sqlite::scope_defaults::ScopeAddress>,
 ) -> Result<(PathBuf, Vec<String>)> {
     let Some(scope) = scope else {
-        return Ok((home(conn)?.join("config.yaml"), vec![]));
-    };
-    let (repo, wave): (String, Option<String>) = match scope {
-        DefaultScope::Repository(id) => (
-            conn.query_row(
-                "SELECT repo FROM repository_plans WHERE id=?1",
-                [id.as_str()],
-                |row| row.get(0),
-            )?,
-            None,
-        ),
-        DefaultScope::Wave(id) => conn.query_row(
-            "SELECT repo,id FROM wave_addresses WHERE id=?1",
-            [id.as_str()],
-            |row| Ok((row.get(0)?, Some(row.get(1)?))),
-        )?,
+        return Ok((home.join("config.yaml"), vec![]));
     };
     Ok((
-        super::files::private_path(Path::new(&repo))?,
-        wave.map(|name| vec!["waves".into(), name])
-            .unwrap_or_default(),
+        super::files::private_path(Path::new(&scope.repo))?,
+        match &scope.scope {
+            DefaultScope::Repository(_) => vec![],
+            DefaultScope::Wave(id) => vec!["waves".into(), id.to_string()],
+        },
     ))
 }
 
-pub(crate) fn read(conn: &Connection, scope: Option<&DefaultScope>) -> Result<Value> {
-    let (path, prefix) = location(conn, scope)?;
+pub(crate) fn read_at(
+    home: &Path,
+    scope: Option<&crate::store::sqlite::scope_defaults::ScopeAddress>,
+) -> Result<Value> {
+    let (path, prefix) = location_at(home, scope)?;
     let mut value = super::files::read(&path)?;
     super::remote::apply_document(&path, &mut value)?;
     for part in prefix {
         value = value.get(part).cloned().unwrap_or(Value::Null);
     }
     Ok(value)
-}
-
-pub(crate) fn write(
-    conn: &Connection,
-    scope: Option<&DefaultScope>,
-    key: &[&str],
-    value: Option<Value>,
-) -> Result<bool> {
-    let (path, prefix) = location(conn, scope)?;
-    let path_parts: Vec<_> = prefix
-        .iter()
-        .map(String::as_str)
-        .chain(key.iter().copied())
-        .collect();
-    super::files::edit(&path, &path_parts, value, super::keys::Root::General)
 }
 
 pub(crate) fn route_location(
@@ -195,10 +159,6 @@ pub(crate) fn write_global(home: &Path, key: &[&str], value: Option<Value>) -> R
     )
 }
 
-pub(crate) fn global_settings(conn: &Connection) -> Result<super::Config> {
-    global_settings_at(&home(conn)?)
-}
-
 pub(crate) fn global_settings_at(home: &Path) -> Result<super::Config> {
     let path = home.join("config.yaml");
     let mut value = super::files::read(&path)?;
@@ -210,37 +170,6 @@ pub(crate) fn global_settings_at(home: &Path) -> Result<super::Config> {
         value,
     }];
     Ok(super::settings::resolve_layers(&declarations, None)?.config)
-}
-
-pub(crate) fn machine_declarations(
-    conn: &Connection,
-) -> Result<std::collections::BTreeMap<String, MachineDeclaration>> {
-    Ok(global_settings(conn)?.machines)
-}
-
-pub(crate) fn scopes(conn: &Connection) -> Result<Vec<(DefaultScope, String)>> {
-    let mut out = Vec::new();
-    let mut query = conn.prepare("SELECT id,repo FROM repository_plans WHERE selected=1")?;
-    for row in query.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    })? {
-        let (id, repo) = row?;
-        out.push((
-            DefaultScope::Repository(loopflow_model::durable::RepositoryId::from_raw(id)),
-            repo,
-        ));
-    }
-    let mut query = conn.prepare("SELECT id,slug FROM wave_addresses WHERE retired_at IS NULL")?;
-    for row in query.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    })? {
-        let (id, slug) = row?;
-        out.push((
-            DefaultScope::Wave(loopflow_model::id::WaveId::parse(&id).map_err(anyhow::Error::msg)?),
-            slug,
-        ));
-    }
-    Ok(out)
 }
 
 #[derive(schemars::JsonSchema, Debug, Clone, Default, Serialize, Deserialize)]

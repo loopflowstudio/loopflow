@@ -30,3 +30,14 @@
   storage's own files and keep their touch inside the write transaction.
 - After the storage crate moves, measure before choosing the next cut: `ops` and
   `lf` (about 123k of 331k lines) stay in the application either way.
+- Capacity commands retain the configuration editor's file lock through the SQL
+  command. This serializes declaration removal with admission without extending a
+  SQL transaction across file acquisition; the same file editor handles ordinary
+  preference updates.
+- The upgrade preflights follow the read/act/compare seam (storage returns the
+  export and process rows, the application writes files and judges processes,
+  storage compares inside the exclusive transaction). The alternative, a
+  callback run inside the transaction, is less code but puts application code
+  under storage's lock and contradicts the no-callback direction.
+- Acquisition modules under `store/` keep their paths until the storage
+  measurement picks the next cut; renaming them now changes no rebuild closure.

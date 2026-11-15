@@ -192,7 +192,7 @@ pub fn export(
     out: &mut impl Write,
 ) -> anyhow::Result<()> {
     let origin = ExportLine::Origin {
-        machine_id: sqlite.local_machine()?.id,
+        machine_id: crate::store::machines::local_machine(sqlite)?.id,
     };
     writeln!(out, "{}", serde_json::to_string(&origin)?)?;
     let (records, artifact_keys) = sqlite.export_records(since)?;

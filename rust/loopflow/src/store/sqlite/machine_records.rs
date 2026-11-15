@@ -183,14 +183,12 @@ impl SqliteStore {
     /// Copied Sessions, newest first, for one Task or one repository's Tasks
     /// when given. A Session's own `repo` is a path on its origin, so the
     /// repository is matched through its Task.
-    pub fn copied_sessions(
+    pub(crate) fn saved_copied_sessions(
         &self,
         task: Option<&TaskId>,
         repository: Option<&RepositoryId>,
     ) -> StoreResult<Vec<CopiedSession>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let machines = crate::config::placement::machine_declarations(&conn)
-            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
         let mut statement = conn.prepare(
             "SELECT r.origin_machine_id, r.key,
                     json_extract(r.row,'$.title'), json_extract(r.row,'$.completed_at')
@@ -208,13 +206,9 @@ impl SqliteStore {
             ],
             |row| {
                 let origin = MachineId::from_raw(row.get::<_, String>(0)?);
-                let origin_label = machines
-                    .iter()
-                    .find(|(_, declaration)| declaration.id == origin)
-                    .map(|(label, _)| label.clone());
                 Ok(CopiedSession {
                     origin,
-                    origin_label,
+                    origin_label: None,
                     id: row.get(1)?,
                     title: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
                     completed_at: row.get(3)?,
@@ -226,8 +220,9 @@ impl SqliteStore {
 
     /// One copied Session and its events in their origin's order, when a
     /// given-back Machine's copy holds it.
-    pub fn copied_history(&self, session: &str) -> StoreResult<Option<CopiedHistory>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
+    pub(crate) fn saved_copied_history(&self, session: &str) -> StoreResult<Option<CopiedHistory>> {
+        let mut connection = self.conn.lock().expect("store mutex poisoned");
+        let conn = connection.savepoint()?;
         let found = conn
             .query_row(
                 "SELECT origin_machine_id, row, observed_at
@@ -248,8 +243,6 @@ impl SqliteStore {
             return Ok(None);
         };
         let origin = MachineId::from_raw(origin);
-        let origin_label =
-            super::durable::map_machine_by_id(&conn, &origin)?.and_then(|machine| machine.label);
         let row: serde_json::Value = serde_json::from_str(&row)?;
         let mut statement = conn.prepare(
             "SELECT row FROM machine_records
@@ -281,7 +274,7 @@ impl SqliteStore {
         Ok(Some(CopiedHistory {
             session: CopiedSession {
                 origin,
-                origin_label,
+                origin_label: None,
                 id: session.to_string(),
                 title: text("title").unwrap_or_default(),
                 completed_at: row["completed_at"].as_i64(),

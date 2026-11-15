@@ -244,26 +244,30 @@ impl SqliteStore {
         task_deleted_on(&conn, task)
     }
 
-    pub fn place_task(
+    pub(crate) fn place_task_prepared(
         &self,
         task_id: &TaskId,
         worktree: &std::path::Path,
         workspace_slug: &str,
         pr: &TaskPr,
-    ) -> StoreResult<Task> {
+        me: &super::task_ownership::OwnershipFacts,
+    ) -> StoreResult<Option<Task>> {
         let _admission = self.lock_checkout(worktree)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let me = super::task_ownership::OwnershipFacts::of_task_in(&conn, task_id)?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        place_task_in(&tx, task_id, worktree, workspace_slug, pr, &me)?;
+        if !me.matches_task_in(&tx, task_id)? {
+            return Ok(None);
+        }
+        place_task_in(&tx, task_id, worktree, workspace_slug, pr, me)?;
         let task = task_on(&tx, task_id)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
-        Ok(task)
+        Ok(Some(task))
     }
 
     /// Commit promotion as one local effect. The caller holds checkout admission
     /// across source resolution and this write; no provider or filesystem is changed.
-    pub(crate) fn promote_task(
+    #[allow(clippy::too_many_arguments)] // These effects share the promotion transaction.
+    pub(crate) fn promote_task_prepared(
         &self,
         task_id: &TaskId,
         creation: Option<&NewTask>,
@@ -271,17 +275,19 @@ impl SqliteStore {
         session: Option<&crate::session::LfSession>,
         destination: Option<&Path>,
         receipt: Option<&super::creation::CreationIdentity>,
-    ) -> StoreResult<Task> {
+        me: &super::task_ownership::OwnershipFacts,
+    ) -> StoreResult<Option<Task>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let me = match creation {
-            Some(input) => super::task_ownership::OwnershipFacts::of_new_task_in(
-                &conn,
-                &input.repository_id,
-                input.project_id.as_ref(),
-            )?,
-            None => super::task_ownership::OwnershipFacts::of_task_in(&conn, task_id)?,
-        };
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let matches = match creation {
+            Some(input) => {
+                me.matches_new_task_in(&tx, &input.repository_id, input.project_id.as_ref())?
+            }
+            None => me.matches_task_in(&tx, task_id)?,
+        };
+        if !matches {
+            return Ok(None);
+        }
         if let Some(input) = creation {
             if let Some(project) = &input.project_id {
                 super::durable::require_selected_project(&tx, project)?;
@@ -303,7 +309,7 @@ impl SqliteStore {
             // Completion may have arrived after source preparation. Binding still
             // selects the conversation, without allocating or reopening work.
             if !super::durable::task_state_in(&tx, task_id)?.is_terminal() {
-                place_task_in(&tx, task_id, path, &pr.slug, pr, &me)?;
+                place_task_in(&tx, task_id, path, &pr.slug, pr, me)?;
                 insert_task_event_in(
                     &tx,
                     task_id,
@@ -315,7 +321,7 @@ impl SqliteStore {
             }
         }
         if let Some(session) = session {
-            super::task_ownership::claim_in(&tx, task_id, &me)?;
+            super::task_ownership::claim_in(&tx, task_id, me)?;
             // Transfer only the selected conversation out of its shared primary
             // scope. The checkout and historical captures retain their owners.
             tx.execute(
@@ -367,7 +373,7 @@ impl SqliteStore {
             )?;
         }
         tx.commit()?;
-        Ok(task)
+        Ok(Some(task))
     }
 
     pub fn create_task(&self, input: &NewTask) -> StoreResult<Task> {
@@ -942,15 +948,15 @@ impl SqliteStore {
     /// Persist one Linear observation as Task direction, atomically. Exactly-once
     /// comments are imported on the first read and deduplicated by revision.
     /// Issue revisions guard definition changes independently of comments.
-    pub(crate) fn apply_linear_observation(
+    pub(crate) fn apply_linear_observation_prepared(
         &self,
         task_id: &TaskId,
         observation: &crate::linear::LinearIssueObservation,
         observed_at: OffsetDateTime,
         planning_connected: bool,
+        machine_names: &std::collections::HashMap<loopflow_model::durable::MachineId, String>,
     ) -> StoreResult<LinearObservationOutcome> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let machine_names = super::task_ownership::machine_names_in(&conn)?;
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
 
         let existing = transaction
@@ -975,7 +981,7 @@ impl SqliteStore {
                 &transaction,
                 task_id,
                 comment,
-                &machine_names,
+                machine_names,
             )? {
                 continue;
             }
@@ -2573,18 +2579,17 @@ impl SqliteStore {
     }
 
     pub(crate) fn seed_task(&self, task: &Task, pr: &TaskPr) -> StoreResult<Task> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
         let me = task
             .worktree
             .is_some()
             .then(|| {
-                super::task_ownership::OwnershipFacts::of_new_task_in(
-                    &conn,
-                    &task.repository_id,
-                    task.project_id.as_ref(),
+                crate::store::ownership::acquire(
+                    self,
+                    self.new_task_scope(&task.repository_id, task.project_id.as_ref())?,
                 )
             })
             .transpose()?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         validate_task(task)?;
         validate_task_project(&tx, task)?;

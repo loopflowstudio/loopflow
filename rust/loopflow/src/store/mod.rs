@@ -15,13 +15,16 @@ pub(crate) mod ci_incidents;
 pub mod contention;
 pub(crate) mod copy;
 mod durable;
+pub mod machines;
 mod metrics;
 #[cfg(test)]
 mod migration_build;
 mod migration_catalog;
 mod migration_schema;
 pub mod migrations;
+pub mod ownership;
 pub(crate) mod people;
+pub mod placement;
 pub mod planning_peers;
 mod planning_reads;
 pub mod planning_sync;
@@ -31,6 +34,7 @@ mod project_adoption;
 #[cfg(test)]
 pub(crate) mod query_plans;
 mod recording_gap;
+pub mod rentals;
 mod repositories;
 pub mod rows;
 pub(crate) mod selections;
@@ -2905,7 +2909,7 @@ mod tests {
             )
             .await
             .expect("generic Run identity is opaque provenance, not planning authority");
-        let ownership = store.sqlite.task_ownership(&task.id).unwrap();
+        let ownership = crate::store::ownership::task_ownership(&store.sqlite, &task.id).unwrap();
         assert_eq!(ownership.owner.unwrap().machine.id, Some(home));
         let saved = store.get_task(&task.id).await.unwrap().unwrap();
         assert_eq!(saved.id, task.id);

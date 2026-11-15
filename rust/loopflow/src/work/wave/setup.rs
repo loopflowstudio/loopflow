@@ -128,7 +128,8 @@ fn machine(
     wave: &Wave,
     setting: MachineSetting,
 ) -> anyhow::Result<SetupValue> {
-    let (machine, source) = store.sqlite.wave_owning_machine(wave.id(), setting)?;
+    let (machine, source) =
+        crate::store::placement::wave_owning_machine(&store.sqlite, wave.id(), setting)?;
     let selected = match &source {
         OwningMachineSource::Preference(selected) => Some(selected.as_ref()),
         OwningMachineSource::ThisMachine => None,

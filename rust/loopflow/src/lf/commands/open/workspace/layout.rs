@@ -44,7 +44,7 @@ pub(super) fn layout(
         return Ok((tools.task_view()?, 0, None));
     };
     anyhow::ensure!(
-        location.machine_id == store.local_machine()?.id.as_str(),
+        location.machine_id == crate::store::machines::local_machine(store)?.id.as_str(),
         "Task runs on Machine {}; no local tool was created",
         location.machine_id
     );

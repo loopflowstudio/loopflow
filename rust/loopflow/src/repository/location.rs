@@ -208,7 +208,7 @@ pub fn reconcile(
     relocate: Option<&RepositoryId>,
 ) -> Result<RepositoryId> {
     let common = crate::git::worktrees::git_common_dir(repo.as_path())?;
-    let machine = store.local_machine()?.id;
+    let machine = crate::store::machines::local_machine(store)?.id;
     let common = locator_directory(&common, &machine);
     let _lock = lock_locator(&common)?;
     let locator = read_locator(&common)?;
@@ -323,7 +323,10 @@ pub fn reconnect_current() -> Result<()> {
         return Ok(());
     };
     let root = common.canonicalize()?.parent().map(Path::to_path_buf);
-    let common = locator_directory(&common, &store.sqlite.local_machine()?.id);
+    let common = locator_directory(
+        &common,
+        &crate::store::machines::local_machine(&store.sqlite)?.id,
+    );
     let locator = read_locator(&common)?;
     let registered = locator
         .as_ref()

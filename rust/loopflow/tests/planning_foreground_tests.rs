@@ -1046,8 +1046,7 @@ fn personal_plan_moves_to_shared_default_with_identity() {
     assert_eq!(right_task.identifier, left_task.identifier);
     assert_eq!(right_task.title, left_task.title);
     let people = |store: &loopflow::store::sqlite::SqliteStore| {
-        store
-            .task_ownership(&id)
+        loopflow::store::ownership::task_ownership(store, &id)
             .unwrap()
             .log
             .into_iter()

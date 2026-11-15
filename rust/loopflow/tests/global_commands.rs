@@ -132,8 +132,7 @@ fn explicit_home_ignores_retired_control_home_pins() {
     let source_db = source.path().join("loopflow.db");
     fs::write(&source_db, b"source must not be opened").unwrap();
     let marker = loopflow::durable::MachineId::new();
-    store
-        .add_machine(&marker, "ssh://proof@example.invalid", "proof")
+    loopflow::store::machines::add_machine(&store, &marker, "ssh://proof@example.invalid", "proof")
         .unwrap();
     for args in [
         vec!["machine", "rename", "proof", "renamed"],
@@ -1750,7 +1749,12 @@ fn repository_recovery_refuses_copies_and_reuses_verified_legacy_identity() {
     // basename or remote equality cannot silently merge it with another clone.
     fs::remove_file(
         old.join(".git/loopflow")
-            .join(store.local_machine().unwrap().id.as_str())
+            .join(
+                loopflow::store::machines::local_machine(&store)
+                    .unwrap()
+                    .id
+                    .as_str(),
+            )
             .join("loopflow-repository"),
     )
     .unwrap();
@@ -2520,18 +2524,22 @@ fn task_planning_explain_move_resolves_destination_and_retains_recorded_work() {
         "preview changed checkpointed storage"
     );
     let remote = loopflow::durable::MachineId::new();
-    store
-        .add_machine(&remote, "must-not-contact.invalid", "fixture-peer")
-        .unwrap();
-    store
-        .set_machine_default(
-            &loopflow::durable::DefaultScope::Wave(
-                loopflow::id::WaveId::parse(&destination_wave).unwrap(),
-            ),
-            loopflow::durable::MachineSetting::Tasks,
-            &remote,
-        )
-        .unwrap();
+    loopflow::store::machines::add_machine(
+        &store,
+        &remote,
+        "must-not-contact.invalid",
+        "fixture-peer",
+    )
+    .unwrap();
+    loopflow::store::placement::set_machine_default(
+        &store,
+        &loopflow::durable::DefaultScope::Wave(
+            loopflow::id::WaveId::parse(&destination_wave).unwrap(),
+        ),
+        loopflow::durable::MachineSetting::Tasks,
+        &remote,
+    )
+    .unwrap();
     db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
     let before = fs::read(&path).unwrap();
     let remote = read("destination");
@@ -2882,7 +2890,12 @@ fn repository_upgrade_enrolls_retained_linked_work_without_manual_binding() {
             .unwrap();
         let locator = main
             .join(".git/loopflow")
-            .join(store.local_machine().unwrap().id.as_str())
+            .join(
+                loopflow::store::machines::local_machine(&store)
+                    .unwrap()
+                    .id
+                    .as_str(),
+            )
             .join("loopflow-repository");
         fs::remove_file(&locator).unwrap();
         fs::write(checkout.join("unpublished.txt"), "keep me").unwrap();

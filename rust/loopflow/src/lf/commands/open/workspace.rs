@@ -325,7 +325,9 @@ fn place_task(
     let unplaced = plan.contents.iter().any(|content| {
         content.location.is_none() && !content.states.contains(&SelectionState::Done)
     });
-    if !unplaced || store.task_execution_route(&task.id)?.machine_id != *local {
+    if !unplaced
+        || crate::store::ownership::task_execution_route(store, &task.id)?.machine_id != *local
+    {
         return Ok(false);
     }
     crate::ops::task::task_checkout(
@@ -354,7 +356,7 @@ fn open_machines(
         .context("Repository has no Work identity")?;
     let repository = RepositoryId::parse(repository)?;
     let selected = scope(store, target)?;
-    let local = store.local_machine()?.id;
+    let local = crate::store::machines::local_machine(store)?.id;
     let mut plan = workspace_plan(store, &repository, selected.clone())?;
     if place_task(store, target, &plan, &local)? {
         plan = workspace_plan(store, &repository, selected.clone())?;
@@ -453,7 +455,7 @@ fn route<'a>(
         .filter(|content| explicit || !content.states.contains(&SelectionState::Done))
     {
         let task = TaskId::parse(&content.work.id)?;
-        match store.task_execution_route(&task) {
+        match crate::store::ownership::task_execution_route(store, &task) {
             Ok(route) if route.machine_id == *local => {
                 if explicit || started(content) {
                     routed.local.push(content);
@@ -589,8 +591,7 @@ fn remote_open(
     selection: &Selection,
     args: &WorkspaceArgs,
 ) -> Result<OpenReport> {
-    let machine = store
-        .machines()?
+    let machine = crate::store::machines::machines(store)?
         .into_iter()
         .find(|entry| entry.id.as_str() == machine)
         .context("Task execution Machine has no configured route")?;
@@ -1014,7 +1015,7 @@ fn follow(cli: &crate::lf::Cli, session: &str, args: &WorkspaceArgs) -> Result<(
     };
     let native = Native::Rex(rex.clone());
     let mut container = Container::existing(session);
-    let local = store.local_machine()?.id;
+    let local = crate::store::machines::local_machine(&store)?.id;
     let mut refresh = std::time::Instant::now();
     let mut request_id = 0_u64;
     loop {

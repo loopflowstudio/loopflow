@@ -9,8 +9,8 @@ use crate::store::{StoreError, StoreResult};
 use crate::work::project::ProjectEventKind;
 use crate::work::task::TaskEventKind;
 use loopflow_model::durable::{
-    Author, Machine, MachineId, ProjectId, TaskId, ToolResponseId, ToolResponseReceipt,
-    ToolResponseWrite, WorkRef, WorkStatus,
+    Author, MachineId, ProjectId, TaskId, ToolResponseId, ToolResponseReceipt, ToolResponseWrite,
+    WorkRef, WorkStatus,
 };
 use loopflow_model::id::WaveId;
 
@@ -47,16 +47,6 @@ impl SqliteStore {
             .map(Option::flatten)
     }
 
-    pub fn machine_by_id(&self, machine_id: &MachineId) -> StoreResult<Option<Machine>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        map_machine_by_id(&conn, machine_id)
-    }
-
-    pub fn local_machine(&self) -> StoreResult<Machine> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        map_local_machine(&conn)
-    }
-
     /// The name teammates see for this Machine, when it is public.
     pub fn local_public_name(&self) -> StoreResult<Option<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -78,100 +68,44 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn add_machine(
-        &self,
-        machine_id: &MachineId,
-        target: &str,
-        label: &str,
-    ) -> StoreResult<Machine> {
-        if target.is_empty() || target == "local" || label.trim().is_empty() {
-            return Err(StoreError::InvalidData(
-                "machine target and label must be nonempty; local is reserved".into(),
-            ));
-        }
+    pub(crate) fn register_machine(&self, machine_id: &MachineId) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        if map_local_machine(&conn)?.id == *machine_id {
-            return Err(StoreError::InvalidData(
-                "cannot add the local machine as remote".into(),
-            ));
-        }
-        // The declaration file is written first, outside any write transaction.
-        // A declared Machine needs no row until it is contacted.
-        let declaration = crate::config::placement::MachineDeclaration {
-            id: machine_id.clone(),
-        };
-        let path = crate::config::placement::home(&conn)
-            .map_err(|error| StoreError::InvalidData(error.to_string()))?
-            .join("config.yaml");
-        crate::config::files::update(&path, |document| {
-            if let Some(existing) = document
-                .get("machines")
-                .and_then(|machines| machines.get(label))
-            {
-                let existing: crate::config::placement::MachineDeclaration =
-                    serde_yaml_ng::from_value(existing.clone())?;
-                anyhow::ensure!(existing.id == *machine_id, "machine name already exists");
-            }
-            crate::config::settings::insert(
-                document,
-                &["machines", label],
-                serde_yaml_ng::to_value(declaration)?,
-            );
-            crate::config::settings::insert(
-                document,
-                &["connections", machine_id.as_str()],
-                target.into(),
-            );
-            Ok(())
-        })
-        .map_err(|error| StoreError::InvalidData(error.to_string()))?;
         conn.execute(
             "INSERT INTO machines(id,is_local,created_at,observed_at) VALUES(?1,0,?2,?2)
-            ON CONFLICT(id) DO UPDATE SET observed_at=excluded.observed_at",
+             ON CONFLICT(id) DO UPDATE SET observed_at=excluded.observed_at",
             params![machine_id.as_str(), now_unix()],
         )?;
-        map_machine_by_id(&conn, machine_id)?.ok_or(StoreError::NotFound)
-    }
-
-    pub fn machines(&self) -> StoreResult<Vec<Machine>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let declarations = crate::config::placement::machine_declarations(&conn)
-            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-        declarations
-            .values()
-            .map(|declaration| {
-                map_machine_by_id(&conn, &declaration.id)?.ok_or(StoreError::NotFound)
-            })
-            .collect()
-    }
-
-    pub fn rename_machine(&self, label: &str, name: &str) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let path = crate::config::placement::home(&conn)
-            .map_err(|error| StoreError::InvalidData(error.to_string()))?
-            .join("config.yaml");
-        crate::config::files::update(&path, |document| {
-            anyhow::ensure!(!name.trim().is_empty(), "machine label cannot be empty");
-            let machines = document
-                .get_mut("machines")
-                .and_then(serde_yaml_ng::Value::as_mapping_mut)
-                .ok_or(StoreError::NotFound)?;
-            anyhow::ensure!(!machines.contains_key(name), "machine name already exists");
-            let declaration = machines.remove(label).ok_or(StoreError::NotFound)?;
-            machines.insert(name.into(), declaration);
-            Ok(())
-        })
-        .map_err(|error| StoreError::InvalidData(error.to_string()))
-    }
-
-    pub fn remove_machine(&self, label: &str) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        if !crate::config::placement::write(&conn, None, &["machines", label], None)
-            .map_err(|error| StoreError::InvalidData(error.to_string()))?
-        {
-            return Err(StoreError::NotFound);
-        }
         Ok(())
+    }
+
+    pub(crate) fn saved_machine(
+        &self,
+        machine_id: &MachineId,
+    ) -> StoreResult<Option<SavedMachine>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        map_machine_by_id(&conn, machine_id)
+    }
+
+    pub(crate) fn saved_machines(&self) -> StoreResult<Vec<SavedMachine>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query =
+            conn.prepare("SELECT id,is_local,created_at,observed_at FROM machines ORDER BY id")?;
+        let rows = query
+            .query_map([], |row| {
+                Ok(SavedMachine {
+                    id: MachineId::from_raw(row.get::<_, String>(0)?),
+                    local: row.get(1)?,
+                    created_at: row.get(2)?,
+                    observed_at: row.get(3)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    pub(crate) fn saved_local_machine(&self) -> StoreResult<SavedMachine> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        map_local_machine(&conn)
     }
 
     pub fn abandon(&self, work: &WorkRef, reason: &str) -> StoreResult<AbandonReceipt> {
@@ -433,7 +367,16 @@ pub(super) fn local_public_name_in(conn: &Connection) -> StoreResult<Option<Stri
     .map_err(Into::into)
 }
 
-pub(super) fn map_local_machine(conn: &Connection) -> StoreResult<Machine> {
+/// The saved Machine identity and observation times; routes and labels are configuration.
+#[derive(Debug, Clone)]
+pub(crate) struct SavedMachine {
+    pub(crate) id: MachineId,
+    pub(crate) local: bool,
+    pub(crate) created_at: i64,
+    pub(crate) observed_at: i64,
+}
+
+pub(super) fn map_local_machine(conn: &Connection) -> StoreResult<SavedMachine> {
     let id: String = conn.query_row("SELECT id FROM machines WHERE is_local=1", [], |row| {
         row.get(0)
     })?;
@@ -443,40 +386,21 @@ pub(super) fn map_local_machine(conn: &Connection) -> StoreResult<Machine> {
 pub(super) fn map_machine_by_id(
     conn: &Connection,
     machine_id: &MachineId,
-) -> StoreResult<Option<Machine>> {
-    let row: Option<(bool, i64, i64)> = conn
+) -> StoreResult<Option<SavedMachine>> {
+    Ok(conn
         .query_row(
             "SELECT is_local,created_at,observed_at FROM machines WHERE id=?1",
             [machine_id.as_str()],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| {
+                Ok(SavedMachine {
+                    id: machine_id.clone(),
+                    local: row.get(0)?,
+                    created_at: row.get(1)?,
+                    observed_at: row.get(2)?,
+                })
+            },
         )
-        .optional()?;
-    let declarations = crate::config::placement::machine_declarations(conn)
-        .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-    let declaration = declarations
-        .into_iter()
-        .find(|(_, declaration)| &declaration.id == machine_id);
-    if row.is_none() && declaration.is_none() {
-        return Ok(None);
-    }
-    // A declared destination need not have been contacted on this installation.
-    let (local, created, observed) = row.unwrap_or((false, 0, 0));
-    Ok(Some(Machine {
-        id: machine_id.clone(),
-        route: if local {
-            "local".into()
-        } else {
-            crate::config::placement::global_settings(conn)
-                .map_err(|error| StoreError::InvalidData(error.to_string()))?
-                .connections
-                .get(machine_id)
-                .cloned()
-                .unwrap_or_default()
-        },
-        label: declaration.map(|(label, _)| label),
-        created_at: OffsetDateTime::from_unix_timestamp(created).map_err(invalid_durable)?,
-        observed_at: OffsetDateTime::from_unix_timestamp(observed).map_err(invalid_durable)?,
-    }))
+        .optional()?)
 }
 
 /// Completion and abandonment are durable. An open Task's state follows
@@ -832,7 +756,7 @@ mod durable_store_tests {
         store.insert_project(&other).unwrap();
         // Another Started Project does not compete with the configured identity.
         // An unclaimed Task is new work again; the newly placed checkout claims its Task.
-        store.unassign_task(&task_id).unwrap();
+        crate::store::ownership::unassign_task(&store, &task_id).unwrap();
         let (new_task, pr) = unregistered_task(&store, &task_id, dir.path().join("new"));
         store.seed_task(&new_task, &pr).unwrap();
         store.require_task_launch(&task_id).unwrap();
@@ -855,14 +779,14 @@ mod durable_store_tests {
         rejected_pr.slug = "rejected".into();
         rejected_pr.branch = "rejected".into();
         store.seed_unplaced_task(&rejected);
-        assert!(store
-            .place_task(
-                &rejected.id,
-                rejected.worktree.as_ref().unwrap(),
-                &rejected.workspace_slug,
-                &rejected_pr
-            )
-            .is_err());
+        assert!(crate::store::ownership::place_task(
+            &store,
+            &rejected.id,
+            rejected.worktree.as_ref().unwrap(),
+            &rejected.workspace_slug,
+            &rejected_pr
+        )
+        .is_err());
         assert!(store
             .task(&rejected.id)
             .unwrap()
@@ -893,7 +817,7 @@ mod durable_store_tests {
         let (_dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();
         // Owned Tasks are exempt; an unowned one must be in the selected active Project.
-        store.unassign_task(&task_id).unwrap();
+        crate::store::ownership::unassign_task(&store, &task_id).unwrap();
         store
             .conn
             .lock()
@@ -1205,7 +1129,8 @@ mod durable_store_tests {
         earlier.work_source = None;
         store.seed_unplaced_task(&task);
         let register = || {
-            store.place_task(
+            crate::store::ownership::place_task(
+                &store,
                 &task.id,
                 task.worktree.as_ref().unwrap(),
                 &task.workspace_slug,
@@ -1242,14 +1167,14 @@ mod durable_store_tests {
         drop(exclusion);
         let session = store.create_session(conversation, None).unwrap();
         store.seed_unplaced_task(&task);
-        store
-            .place_task(
-                &task.id,
-                task.worktree.as_ref().unwrap(),
-                &task.workspace_slug,
-                &pr,
-            )
-            .unwrap();
+        crate::store::ownership::place_task(
+            &store,
+            &task.id,
+            task.worktree.as_ref().unwrap(),
+            &task.workspace_slug,
+            &pr,
+        )
+        .unwrap();
         assert_eq!(
             store.session_task_ids(&session.id).unwrap(),
             vec![task.id.clone()]
@@ -1269,14 +1194,14 @@ mod durable_store_tests {
             .lock_checkout(&dir.path().join("unrelated-checkout/missing/src"))
             .unwrap();
         store.seed_unplaced_task(&task);
-        store
-            .place_task(
-                &task.id,
-                task.worktree.as_ref().unwrap(),
-                &task.workspace_slug,
-                &pr,
-            )
-            .unwrap();
+        crate::store::ownership::place_task(
+            &store,
+            &task.id,
+            task.worktree.as_ref().unwrap(),
+            &task.workspace_slug,
+            &pr,
+        )
+        .unwrap();
         assert_eq!(
             store.task(&task.id).unwrap().unwrap().worktree,
             task.worktree
@@ -1298,7 +1223,8 @@ mod durable_store_tests {
             .unwrap();
         store.seed_unplaced_task(&task);
         let register = || {
-            store.place_task(
+            crate::store::ownership::place_task(
+                &store,
                 &task.id,
                 task.worktree.as_ref().unwrap(),
                 &task.workspace_slug,
@@ -1366,7 +1292,7 @@ mod durable_store_tests {
     fn checkout_exclusion_preserves_unbound_history_until_binding_retries() {
         let (dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();
-        store.unassign_task(&task_id).unwrap();
+        crate::store::ownership::unassign_task(&store, &task_id).unwrap();
         let mut conversation = unpublished_conversation(None, None, 1);
         conversation.cwd = dir.path().join("elsewhere");
         let session = store.create_session(conversation, None).unwrap();
@@ -1418,7 +1344,7 @@ mod durable_store_tests {
     fn checkout_exclusion_covers_missing_subdirectories_and_explicit_tasks() {
         let (dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();
-        store.unassign_task(&task_id).unwrap();
+        crate::store::ownership::unassign_task(&store, &task_id).unwrap();
         let exclusion = store
             .lock_checkout(task.worktree.as_ref().unwrap())
             .unwrap();
@@ -1441,7 +1367,7 @@ mod durable_store_tests {
     fn session_binding_retains_a_task_in_completed_project_history() {
         let (dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();
-        store.unassign_task(&task_id).unwrap();
+        crate::store::ownership::unassign_task(&store, &task_id).unwrap();
         let mut conversation = unpublished_conversation(None, None, 1);
         conversation.cwd = dir.path().to_path_buf();
         let session = store.create_session(conversation, None).unwrap();
@@ -1482,16 +1408,16 @@ mod durable_store_tests {
         conversation.interactive = true;
         conversation.cwd = dir.path().to_path_buf();
         let session = store.create_session(conversation, None).unwrap();
-        store
-            .promote_task(
-                &task_id,
-                None,
-                None,
-                Some(&session),
-                task.worktree.as_deref(),
-                None,
-            )
-            .unwrap();
+        crate::store::ownership::promote_task(
+            &store,
+            &task_id,
+            None,
+            None,
+            Some(&session),
+            task.worktree.as_deref(),
+            None,
+        )
+        .unwrap();
 
         let admitted = store
             .admit_session_workspace(&session, &dir.path().join("old-scope"))
@@ -1526,9 +1452,16 @@ mod durable_store_tests {
         ))
             .unwrap();
         for _ in 0..2 {
-            let bound = store
-                .promote_task(&task_id, None, Some(&placement), Some(&session), None, None)
-                .unwrap();
+            let bound = crate::store::ownership::promote_task(
+                &store,
+                &task_id,
+                None,
+                Some(&placement),
+                Some(&session),
+                None,
+                None,
+            )
+            .unwrap();
             assert!(bound.worktree.is_none());
             assert_eq!(
                 store.task_state(&task_id).unwrap(),
@@ -1543,9 +1476,14 @@ mod durable_store_tests {
             assert_eq!(current.cwd, session.cwd);
         }
         assert!(
-            store
-                .place_task(&task_id, &placement.0, &placement.1.slug, &placement.1)
-                .is_err(),
+            crate::store::ownership::place_task(
+                &store,
+                &task_id,
+                &placement.0,
+                &placement.1.slug,
+                &placement.1
+            )
+            .is_err(),
             "ordinary checkout allocation still rejects done Tasks"
         );
     }

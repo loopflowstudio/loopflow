@@ -564,7 +564,7 @@ mod tests {
     fn a_move_in_flight_reads_its_row_and_the_ownership_log_by_index() {
         let (_home, store, task, _viewer) = fixture();
         let mini = loopflow_model::durable::MachineId::new();
-        store.begin_task_move(&task, &mini).unwrap();
+        crate::store::ownership::begin_task_move(&store, &task, &mini).unwrap();
         store.record_move_sent(&task, "{}").unwrap();
         let traced = statements(&store, || {
             assert!(store.task_move_in_flight(&task).unwrap().is_some());

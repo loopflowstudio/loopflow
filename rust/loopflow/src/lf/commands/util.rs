@@ -247,8 +247,7 @@ pub(crate) fn departure_notice(
             format!("This conversation moved to account {label}: lf resume {session}")
         }
         Departure::Machine { machine, task } => {
-            let label = store
-                .machine_by_id(&machine)?
+            let label = crate::store::machines::machine_by_id(store, &machine)?
                 .map_or_else(|| machine.to_string(), |machine| machine.name());
             // A Task that went with its conversation is resumed by its name.
             match task.map(|task| store.task(&task)).transpose()?.flatten() {

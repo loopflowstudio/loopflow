@@ -542,10 +542,7 @@ fn adopting_a_checkout_with_a_running_graph_prevents_another_run() {
         assert_eq!(snapshot.execution.state, state);
         assert_eq!(snapshot.status, TaskState::Moving);
         assert_eq!(
-            fixture
-                .store
-                .sqlite
-                .task_detail_facts(&[&fixture.task])
+            crate::store::ownership::task_detail_facts(&fixture.store.sqlite, &[&fixture.task])
                 .unwrap()
                 .states[&fixture.task.id],
             TaskState::Moving
@@ -821,12 +818,11 @@ fn task_checkout_machine_survives_without_lifecycle_reconciliation() {
     let repo = loopflow_test_support::TestRepo::new();
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let fixture = runtime.block_on(task_fixture_at("FILES-1", repo.path().to_path_buf()));
-    let local = fixture.store.sqlite.local_machine().unwrap().id;
+    let local = crate::store::machines::local_machine(&fixture.store.sqlite)
+        .unwrap()
+        .id;
     let remote = loopflow_model::durable::MachineId::new();
-    fixture
-        .store
-        .sqlite
-        .add_machine(&remote, "worker", "worker")
+    crate::store::machines::add_machine(&fixture.store.sqlite, &remote, "worker", "worker")
         .unwrap();
     let mut pr = runtime
         .block_on(fixture.store.active_task_pr(&fixture.task.id))

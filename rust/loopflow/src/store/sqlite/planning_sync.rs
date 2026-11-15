@@ -261,10 +261,11 @@ mod tests {
         let first = task(&store, &TestRepo::new());
         let second = task(&store, &TestRepo::new());
         let single = statements(&store, || {
-            store.task_detail_facts(&[&first]).unwrap();
+            crate::store::ownership::task_detail_facts(&store, &[&first]).unwrap();
         });
         let multiple = statements(&store, || {
-            let facts = store.task_detail_facts(&[&first, &second]).unwrap();
+            let facts =
+                crate::store::ownership::task_detail_facts(&store, &[&first, &second]).unwrap();
             assert_eq!(facts.planning_receipts.len(), 2);
             assert_ne!(
                 facts.planning_receipts[&first.id].repo,

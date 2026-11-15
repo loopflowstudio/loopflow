@@ -2212,7 +2212,9 @@ pub(crate) async fn registered_task_status(
         planning_stale: false,
         planning_state: acquisition.state,
         execution: Some(read_task_snapshot(store, task.clone()).await?),
-        ownership: Some(store.sqlite.task_ownership(&task.id).map_err(task_error)?),
+        ownership: Some(
+            crate::store::ownership::task_ownership(&store.sqlite, &task.id).map_err(task_error)?,
+        ),
         overview: Some(overview),
         graph_processes,
         comments: Some(store.task_comments(&task.id).map_err(task_error)?),
@@ -2235,10 +2237,7 @@ pub fn task_copied_sessions(
 ) -> OpsResult<Vec<crate::machine_records::CopiedSession>> {
     block_on_task(async {
         let store = task_store().await?;
-        store
-            .sqlite
-            .copied_sessions(Some(task), None)
-            .map_err(task_error)
+        crate::store::machines::copied_sessions(&store.sqlite, Some(task), None).map_err(task_error)
     })
 }
 

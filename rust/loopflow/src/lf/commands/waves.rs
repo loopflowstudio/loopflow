@@ -888,10 +888,10 @@ pub fn list_tasks(repo: &Path, query: &TaskListArgs, json: bool) -> Result<()> {
             println!("{}", serde_json::to_string(&tasks)?);
         } else if let Some(store) = &store {
             // Without a store there are no Tasks to print.
-            let local = store.sqlite.local_machine()?.id;
+            let local = crate::store::machines::local_machine(&store.sqlite)?.id;
             for task in tasks {
                 let id = loopflow_model::durable::TaskId::from_raw(task.task.id.clone());
-                let ownership = store.sqlite.task_ownership(&id)?;
+                let ownership = crate::store::ownership::task_ownership(&store.sqlite, &id)?;
                 let mut owner = owner_text(task.runtime.as_ref()).to_string();
                 // A move that has not arrived reads as that, as in `lf task status`.
                 let place = crate::ops::task_ownership::move_line(&store.sqlite, &id)?
@@ -1706,7 +1706,7 @@ impl<'a> DetailReads<'a> {
         {
             selection_readings.insert(repository.clone(), shared.selections(store, repository)?);
         }
-        let facts = store.sqlite.task_detail_facts(tasks)?;
+        let facts = crate::store::ownership::task_detail_facts(&store.sqlite, tasks)?;
         let mut planning_connections = HashMap::new();
         for receipts in facts.planning_receipts.values() {
             planning_connections

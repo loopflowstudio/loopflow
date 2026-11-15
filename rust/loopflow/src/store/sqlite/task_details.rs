@@ -38,7 +38,10 @@ pub struct TaskDetailFacts {
 }
 
 impl SqliteStore {
-    pub fn task_detail_facts(&self, tasks: &[&Task]) -> StoreResult<TaskDetailFacts> {
+    pub(crate) fn saved_task_detail_facts(
+        &self,
+        tasks: &[&Task],
+    ) -> StoreResult<(loopflow_model::durable::MachineId, TaskDetailFacts)> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let snapshot = conn.savepoint()?;
         let ids: Vec<TaskId> = tasks.iter().map(|task| task.id.clone()).collect();
@@ -118,8 +121,9 @@ impl SqliteStore {
             planning_receipts: super::planning_sync::task_planning_receipts_in(&snapshot, &ids)?,
             repository_paths: repository_paths_in(&snapshot)?,
         };
+        let local = super::task_ownership::local_machine_in(&snapshot)?;
         snapshot.commit()?;
-        Ok(facts)
+        Ok((local, facts))
     }
 }
 

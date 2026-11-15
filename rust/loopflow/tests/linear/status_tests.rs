@@ -301,14 +301,14 @@ fn seed_stale_project_work(
         updated_at: now,
     };
     planning::seed_unplaced_task(&home.join("loopflow.db"), &stale_task);
-    store
-        .place_task(
-            &stale_task.id,
-            stale_task.worktree.as_ref().unwrap(),
-            &stale_task.workspace_slug,
-            &stale_pr,
-        )
-        .expect("seed orphaned Task");
+    loopflow::store::ownership::place_task(
+        &store,
+        &stale_task.id,
+        stale_task.worktree.as_ref().unwrap(),
+        &stale_task.workspace_slug,
+        &stale_pr,
+    )
+    .expect("seed orphaned Task");
     if abandon_stale_project {
         let stale_work = store
             .work_for_child(&ChildRef::Project(stale.id.clone()))

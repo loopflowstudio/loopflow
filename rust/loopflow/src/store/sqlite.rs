@@ -59,7 +59,7 @@ mod admission;
 mod children;
 pub(crate) mod ci_incidents;
 pub mod creation;
-mod durable;
+pub(crate) mod durable;
 mod github_people;
 mod graph_inventory;
 #[cfg(test)]
@@ -88,7 +88,7 @@ mod rentals;
 pub(crate) mod repositories;
 pub(crate) mod retention;
 mod revisions;
-mod scope_defaults;
+pub(crate) mod scope_defaults;
 pub(crate) mod selections;
 mod session_events;
 pub(crate) mod sessions;

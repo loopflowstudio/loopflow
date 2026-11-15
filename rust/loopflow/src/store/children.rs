@@ -26,7 +26,8 @@ impl Store {
     ) -> StoreResult<Task> {
         let task_id = task_id.clone();
         run_planning_write(&self.sqlite, acquisition, move |store| {
-            store.promote_task(
+            crate::store::ownership::promote_task(
+                &store,
                 &task_id,
                 creation.as_ref(),
                 placement.as_ref(),
@@ -88,7 +89,7 @@ impl Store {
         let workspace_slug = workspace_slug.to_string();
         let pr = pr.clone();
         run_planning_write(&self.sqlite, acquisition, move |store| {
-            store.place_task(&task_id, &worktree, &workspace_slug, &pr)
+            crate::store::ownership::place_task(&store, &task_id, &worktree, &workspace_slug, &pr)
         })
         .await
     }
@@ -298,7 +299,13 @@ impl Store {
     ) -> StoreResult<LinearObservationOutcome> {
         let task_id = task_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.apply_linear_observation(&task_id, &observation, observed_at, planning_connected)
+            crate::store::ownership::apply_linear_observation(
+                &store,
+                &task_id,
+                &observation,
+                observed_at,
+                planning_connected,
+            )
         })
         .await
     }

@@ -2,11 +2,19 @@
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use std::path::PathBuf;
 
-use crate::durable::TaskExecutionRoute;
 use crate::store::{StoreError, StoreResult};
 use loopflow_model::durable::{RepositoryId, RepositoryIdentity, TaskId};
 
 use super::SqliteStore;
+
+/// Saved execution destination; configuration explains an unclaimed destination above SQL.
+#[derive(Debug)]
+pub(crate) struct SavedTaskRoute {
+    pub(crate) checkout: Option<String>,
+    pub(crate) repository_id: RepositoryId,
+    pub(crate) machine_id: loopflow_model::durable::MachineId,
+    pub(crate) claimed: bool,
+}
 
 /// Saved inputs used to discover a repository outside the connection lock.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -225,10 +233,16 @@ impl SqliteStore {
         })
     }
 
-    pub fn task_execution_route(&self, task: &TaskId) -> StoreResult<TaskExecutionRoute> {
+    pub(crate) fn task_execution_route_prepared(
+        &self,
+        task: &TaskId,
+        me: &super::task_ownership::OwnershipFacts,
+    ) -> StoreResult<Option<SavedTaskRoute>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let me = super::task_ownership::OwnershipFacts::of_task_in(&conn, task)?;
         let tx = conn.savepoint()?;
+        if !me.matches_task_in(&tx, task)? {
+            return Ok(None);
+        }
         let (repo, checkout): (String, Option<String>) = tx.query_row(
             "SELECT w.repo,c.worktree FROM tasks t JOIN repository_plans w ON w.id=t.repository_id
              LEFT JOIN task_checkouts c ON c.task_id=t.id WHERE t.id=?1",
@@ -238,14 +252,13 @@ impl SqliteStore {
         let repository_id = repository_id_in(&tx, &repo)?.ok_or_else(|| {
             StoreError::InvalidData(format!("repository {repo} has no selected plan identity"))
         })?;
-        let (machine_id, source) = super::task_ownership::writer_in(&tx, task, &me)?;
-        Ok(TaskExecutionRoute {
-            task_id: task.clone(),
+        let (machine_id, claimed) = super::task_ownership::writer_in(&tx, task, me)?;
+        Ok(Some(SavedTaskRoute {
             checkout,
             repository_id,
             machine_id,
-            source,
-        })
+            claimed,
+        }))
     }
 
     pub(crate) fn repository_registration(
@@ -452,65 +465,76 @@ mod tests {
                 .unwrap()
         };
         // Unset: this Machine takes the Task, and the claim is captured.
-        let local = store.local_machine().unwrap().id;
+        let local = crate::store::machines::local_machine(&store).unwrap().id;
         let claimed = new_task("Claimed here");
-        store.claim_task(&claimed.id).unwrap().unwrap();
-
-        store
-            .set_machine_default(
-                &DefaultScope::Repository(repository.clone()),
-                MachineSetting::Tasks,
-                &worker,
-            )
+        crate::store::ownership::claim_task(&store, &claimed.id)
+            .unwrap()
             .unwrap();
+
+        crate::store::placement::set_machine_default(
+            &store,
+            &DefaultScope::Repository(repository.clone()),
+            MachineSetting::Tasks,
+            &worker,
+        )
+        .unwrap();
         let task = new_task("Routed");
-        let route = store.task_execution_route(&task.id).unwrap();
+        let route = crate::store::ownership::task_execution_route(&store, &task.id).unwrap();
         assert_eq!(route.machine_id, worker);
         assert!(
             matches!(route.source, TaskExecutionSource::OwningMachine(OwningMachineSource::Preference(selected)) if selected.scope == crate::config::settings::SettingScope::Repository)
         );
         // The Wave's Session Machine places no Task.
-        store
-            .set_machine_default(
-                &DefaultScope::Wave(wave.clone()),
-                MachineSetting::Session,
-                &local,
-            )
-            .unwrap();
+        crate::store::placement::set_machine_default(
+            &store,
+            &DefaultScope::Wave(wave.clone()),
+            MachineSetting::Session,
+            &local,
+        )
+        .unwrap();
         assert_eq!(
-            store.task_execution_route(&task.id).unwrap().machine_id,
+            crate::store::ownership::task_execution_route(&store, &task.id)
+                .unwrap()
+                .machine_id,
             worker
         );
         assert_eq!(
-            store
-                .wave_owning_machine(&wave, MachineSetting::Session)
+            crate::store::placement::wave_owning_machine(&store, &wave, MachineSetting::Session)
                 .unwrap()
                 .0,
             local.clone()
         );
         // The Wave's default outranks the repository's.
-        store
-            .set_machine_default(
-                &DefaultScope::Wave(wave.clone()),
-                MachineSetting::Tasks,
-                &mini,
-            )
-            .unwrap();
-        let route = store.task_execution_route(&task.id).unwrap();
+        crate::store::placement::set_machine_default(
+            &store,
+            &DefaultScope::Wave(wave.clone()),
+            MachineSetting::Tasks,
+            &mini,
+        )
+        .unwrap();
+        let route = crate::store::ownership::task_execution_route(&store, &task.id).unwrap();
         assert_eq!(route.machine_id, mini);
         assert!(
             matches!(route.source, TaskExecutionSource::OwningMachine(OwningMachineSource::Preference(selected)) if selected.scope == crate::config::settings::SettingScope::Wave)
         );
         // Only your Machine for the Wave claims; this one refuses without writing.
-        assert!(store.claim_task(&task.id).is_err());
-        assert!(store.task_ownership(&task.id).unwrap().log.is_empty());
+        assert!(crate::store::ownership::claim_task(&store, &task.id).is_err());
+        assert!(crate::store::ownership::task_ownership(&store, &task.id)
+            .unwrap()
+            .log
+            .is_empty());
         // Captured, not inherited: a later default moves no claimed Task.
-        let route = store.task_execution_route(&claimed.id).unwrap();
+        let route = crate::store::ownership::task_execution_route(&store, &claimed.id).unwrap();
         assert_eq!(
             (route.machine_id, route.source),
             (local, TaskExecutionSource::Owner)
         );
-        assert_eq!(store.machine_defaults().unwrap().len(), 3);
+        assert_eq!(
+            crate::store::placement::machine_defaults(&store)
+                .unwrap()
+                .len(),
+            3
+        );
     }
 
     #[test]
@@ -536,37 +560,54 @@ mod tests {
             })
             .unwrap();
         let worker = MachineId::new();
-        store
-            .set_machine_default(
-                &DefaultScope::Repository(repository.clone()),
-                MachineSetting::Tasks,
-                &worker,
-            )
-            .unwrap();
-        assert_eq!(store.task_capacity(&task.id).unwrap(), None);
+        crate::store::placement::set_machine_default(
+            &store,
+            &DefaultScope::Repository(repository.clone()),
+            MachineSetting::Tasks,
+            &worker,
+        )
+        .unwrap();
+        assert_eq!(
+            crate::store::placement::task_capacity(&store, &task.id).unwrap(),
+            None
+        );
 
         // The Wave is nearer than the repository: its Tasks rent, and until
         // `lf task run` places one it stays on this Machine.
-        store.set_tasks_capacity(&wave, "code").unwrap();
+        crate::store::placement::set_tasks_capacity(&store, &wave, "code").unwrap();
         assert_eq!(
-            store.task_capacity(&task.id).unwrap().as_deref(),
+            crate::store::placement::task_capacity(&store, &task.id)
+                .unwrap()
+                .as_deref(),
             Some("code")
         );
         assert_eq!(
-            store
-                .wave_owning_machine(&project.wave_id, MachineSetting::Tasks)
-                .unwrap()
-                .0,
-            store.local_machine().unwrap().id
+            crate::store::placement::wave_owning_machine(
+                &store,
+                &project.wave_id,
+                MachineSetting::Tasks
+            )
+            .unwrap()
+            .0,
+            crate::store::machines::local_machine(&store).unwrap().id
         );
-        assert_eq!(store.capacity_defaults().unwrap().len(), 1);
+        assert_eq!(
+            crate::store::placement::capacity_defaults(&store)
+                .unwrap()
+                .len(),
+            1
+        );
 
         // A Machine at the same scope replaces it.
-        store
-            .set_machine_default(&wave, MachineSetting::Tasks, &worker)
+        crate::store::placement::set_machine_default(&store, &wave, MachineSetting::Tasks, &worker)
             .unwrap();
-        assert_eq!(store.task_capacity(&task.id).unwrap(), None);
-        assert!(store.capacity_defaults().unwrap().is_empty());
+        assert_eq!(
+            crate::store::placement::task_capacity(&store, &task.id).unwrap(),
+            None
+        );
+        assert!(crate::store::placement::capacity_defaults(&store)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

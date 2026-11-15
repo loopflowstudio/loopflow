@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-515 · concept review</title>
+<style>
+  :root { --bg:#fdfcf9; --fg:#1d1d1b; --muted:#6b6a65; --rule:#e4e1d8; --add:#e3f3e1; --del:#fbe4e1; --prop:#2f6fb3; --code:#f3f1ea; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#1a1a18; --fg:#ecebe6; --muted:#9a988f; --rule:#34332f; --add:#1f3a22; --del:#43221f; --prop:#7fb2ee; --code:#25241f; }
+  }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.6 -apple-system, "Lato", system-ui, sans-serif; }
+  main { max-width:44rem; margin:0 auto; padding:3rem 1.25rem 5rem; }
+  header p { color:var(--muted); margin:.2rem 0; font-size:.9rem; }
+  h1 { font-size:1.6rem; margin:0 0 .5rem; }
+  h2 { font-size:1.15rem; margin:2.6rem 0 .6rem; }
+  code, pre { font:13px/1.5 ui-monospace, Menlo, monospace; }
+  code { background:var(--code); padding:0 .25em; border-radius:3px; }
+  pre { background:var(--code); padding:.8rem 1rem; border-radius:6px; overflow-x:auto; }
+  .lede { font-size:1.08rem; border-left:3px solid var(--prop); padding-left:1rem; margin:2rem 0; }
+  .proposed { color:var(--prop); }
+  .row { display:grid; grid-template-columns:1fr 1fr; gap:1rem; }
+  @media (max-width:560px) { .row { grid-template-columns:1fr; } }
+  .panel { border:1px solid var(--rule); border-radius:6px; padding:.8rem 1rem; }
+  .panel h3 { margin:0 0 .4rem; font-size:.95rem; }
+  .panel.after { border-color:var(--prop); }
+  .del { background:var(--del); } .add { background:var(--add); }
+  ol li { margin:.6rem 0; }
+  table { border-collapse:collapse; width:100%; font-size:.92rem; }
+  td, th { text-align:left; padding:.4rem .5rem; border-bottom:1px solid var(--rule); vertical-align:top; }
+</style>
+</head>
+<body>
+<main>
+<header>
+  <h1>Task details: one diff reader</h1>
+  <p>LOO-515 · concept-review step · 2026-11-14</p>
+  <p>Built from <code>scratch/loo-515-task-details.md</code>, <code>swift/LoopflowMac/TaskFileDocument.swift</code>, <code>Views/TaskFilesView.swift</code>, <code>Views/TaskChangesView.swift</code>, <code>ReviewDiff.swift</code>, <code>PullRequestStore.swift</code>, <code>rust/loopflow/src/ops/task.rs</code></p>
+</header>
+
+<p class="lede">Decision recorded for the next implement pass: the Files page's per-file <b>Diff</b> mode renders through the same review stream as Changes. The separate patch renderer is deleted. No product choice is open.</p>
+
+<h2>Actions → concepts → APIs</h2>
+<table>
+  <tr><th>You do</th><th>Concept</th><th>API</th></tr>
+  <tr><td>⌥⌘1 read what was asked</td><td>Brief (derived from <code>RoadmapTask</code>)</td><td>none new</td></tr>
+  <tr><td>⌥⌘2 review the change, <code>]</code>/<code>[</code>, select → Ask</td><td>Changes: <code>TaskDelivery</code> + review stream</td><td><code>lf task changes</code>, <code>lf task diff</code>, <code>gh pr view</code></td></tr>
+  <tr><td>⌥⌘3 browse, open, edit a file</td><td>Files: <code>CheckoutTree</code> + document (Read / Edit / Diff)</td><td><code>lf task files</code> (served <code>task.files</code>), <code>lf task file</code></td></tr>
+  <tr><td>Diff one file while editing it</td><td class="proposed">same review stream, one file, draft included</td><td><code>lf task diff &lt;path&gt;</code> with <code>draft</code></td></tr>
+</table>
+
+<h2>The mismatch</h2>
+<p>Two readers show the same diff with different abilities. Changes has word emphasis, side by side, moves, cross-file next/previous and selection → Ask. Files' Diff mode is a plain text view with green and red line backgrounds. Changes' own file menu, "Open in Files", sends you to the weaker one. The design's forbidden outcomes already say "A second Diff renderer".</p>
+
+<div class="row">
+  <div class="panel">
+    <h3>Now</h3>
+<pre><span class="del">Files · Diff  → TaskPatchView
+              → TaskPatchTextView
+              → TaskPatchLine, patchLines</span>
+Changes       → ReviewDiff stream</pre>
+  </div>
+  <div class="panel after">
+    <h3 class="proposed">Proposed</h3>
+<pre>Files · Diff  → ReviewDiff stream
+                (one file, draft-aware)
+Changes       → ReviewDiff stream</pre>
+  </div>
+</div>
+<p>What must survive: diffing the unsaved draft as you type (the <code>draft</code> argument and 180 ms debounce in <code>loadDiff</code>). The stream gains it; nothing else about Files changes.</p>
+
+<h2>Smaller: the comparison's name</h2>
+<div class="row">
+  <div class="panel"><h3>Now</h3><code>Working tree · parent 42b31bc791</code></div>
+  <div class="panel after"><h3 class="proposed">Proposed</h3><code>Compared with main at 42b31bc791 · includes uncommitted changes</code></div>
+</div>
+<p>"parent" is the <code>--base</code> selector name for the Task's recorded base commit. In a stacked Task it reads as the parent Task. The page shows what <code>lf pr open</code> would compare, so it says so. The Ask reference uses the same words.</p>
+
+<h2>Kept as built</h2>
+<p><code>TaskDelivery</code> stays one derived value. <code>CheckoutTree</code> stays plain state on the store. A <code>.changes(comparison:)</code> browser tab and the Files tool's Changes page are two representations of one view, but merging them changes the persisted tab shape, which LOO-497/416 own.</p>
+
+<h2>Questions</h2>
+<ol>
+  <li>Files' Diff mode: (a) render through the review stream, as recorded; (b) delete Diff mode and send "Diff" to Changes focused on the file, losing the draft diff.</li>
+  <li>Comparison label: (a) <code>Compared with &lt;branch&gt; at &lt;sha&gt;</code>; (b) keep <code>parent</code>.</li>
+</ol>
+</main>
+</body>
+</html>

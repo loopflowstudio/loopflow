@@ -23,6 +23,36 @@ What pursue builds for the Changes page:
 
 Sections below from October (PR card, Files, Brief) still stand as the plan unless they conflict with this section; the October line "No GitHub patch renderer remains" stands: the stream renders the local PR-equivalent diff.
 
+## Concept review — November 14 (next implement direction)
+
+Against the built change. Page: `scratch/concept-review.html`.
+
+- **One diff reader.** Files' `Diff` mode still renders its own patch
+  (`TaskPatchView`, `TaskPatchTextView`, `TaskPatchLine`, `patchLines`), and
+  Changes' file menu "Open in Files" sends a file there. That is the "second
+  Diff renderer" the forbidden outcomes rule out, and it lacks the five
+  priorities. Direction: Files' Diff mode shows that one file through the
+  review stream (`ReviewDiff` of `lf task diff <path>`, same rows, layout
+  toggle, word emphasis, moves, selection → Ask), keeping its one ability the
+  stream lacks: diffing the unsaved draft (`draft:` on `taskDiff`, 180 ms
+  debounce). Delete `TaskPatchView`, `TaskPatchTextView`, `TaskPatchLine`,
+  `patchLines`. "Open in Files" from Changes keeps the file and mode.
+- **Name the comparison as the PR would.** The footer reads
+  `Working tree · parent <sha>`; "parent" is the `lf task changes --base`
+  selector (the Task's recorded base commit), and in a stacked Task reads as
+  the parent Task. Show what `lf pr open` would compare: `Compared with
+  <base branch> at <sha> · includes uncommitted changes` when the head is the
+  working tree. The `Ask` reference's revision string follows the same words.
+- **Keep, no change:** `TaskDelivery` as one derived value (no stored state);
+  `CheckoutTree` as plain state on `TaskFilesStore`; the `details` action's
+  three pages.
+- **Noted, not this Task:** a `.changes(comparison:)` browser tab and the Files
+  tool's Changes page are two representations of one view. Merging them
+  changes the persisted `WorkBrowserTab` shape, which LOO-497/416 own.
+
+No open product choice: both changes follow from "B review stream", the
+five priorities and the forbidden outcomes.
+
 ## How the direction was chosen — November 14
 
 - Jack: "i tink of htose, 1, 2, 5, 6 [live, not pause], 7 are the important ones for me" — the five priorities above, from a seven-item list. Reviewed marks, changed-since-reviewed and a pause control are secondary; basic place retention is expected.

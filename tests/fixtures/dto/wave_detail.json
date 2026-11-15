@@ -440,7 +440,13 @@
           "abandoned_at": null
         },
         "graph_source": null,
-        "section": "backlog"
+        "section": "backlog",
+        "lifecycle": "unstarted",
+        "selection_states": [
+          "open",
+          "unstarted",
+          "backlog"
+        ]
       },
       {
         "task": {
@@ -565,7 +571,12 @@
         "shipping": null,
         "pr": null,
         "graph_source": null,
-        "section": "backlog"
+        "section": "backlog",
+        "lifecycle": "unstarted",
+        "selection_states": [
+          "unstarted",
+          "backlog"
+        ]
       }
     ],
     "truncated": false

@@ -1128,8 +1128,20 @@ fn a_task_identifier_connects_and_a_viewerless_terminal_reads_detached() {
     assert_eq!(detached["terminal_ids"], serde_json::json!([]));
     assert_eq!(detached["actions"][0]["label"], "Reconnect");
     assert!(detached["actions"][0]["unavailable_reason"].is_null());
-    // A held terminal takes any number of views: opening is the one action.
-    assert_eq!(detached["actions"].as_array().unwrap().len(), 1);
+    // Reopening and Desktop's passive reveal both attach to the held terminal.
+    let actions: Vec<_> = detached["actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|action| (&action["kind"], &action["unavailable_reason"]))
+        .collect();
+    assert_eq!(
+        actions,
+        [
+            (&serde_json::json!("open"), &Value::Null),
+            (&serde_json::json!("reveal"), &Value::Null),
+        ]
+    );
 
     db.execute(
         "UPDATE held_terminals SET viewed=1 WHERE id=?1",

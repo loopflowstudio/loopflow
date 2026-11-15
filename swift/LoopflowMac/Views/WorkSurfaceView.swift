@@ -108,10 +108,7 @@ struct WorkSurfaceView: View {
         if let selection = model.selection, let found = model.task(id: selection.id) {
             let task = found.task
             let sessions = model.sessions.value.map { _ in
-                model.visibleSessions.filter { record in
-                    guard record.primaryScope == nil else { return false }
-                    return task.runtime.map { record.names(task: $0.workId) } ?? false
-                }
+                model.visibleSessions.filter { $0.names(task: task.id) }
             }
             scrollingDetail(identifier: "loopflow-detail-task") {
                 VStack(alignment: .leading, spacing: Spacing.sm) {

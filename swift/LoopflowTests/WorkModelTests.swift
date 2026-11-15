@@ -635,7 +635,7 @@ struct WorkModelStreamTests {
         defer { keeping.cancel() }
         let listed = { (filter: TaskHistoryFilter) -> Bool in
             guard let row = model.task(id: "issue-now")?.task else { return false }
-            return filter.includes(row.task, condition: row.condition, now: Date())
+            return filter.includes(row, now: Date())
         }
         var completed = TaskHistoryFilter()
         completed.showCompleted = true
@@ -647,7 +647,7 @@ struct WorkModelStreamTests {
         #expect(listed(TaskHistoryFilter()))
 
         await feed.send(try fixture.planningFrame(sequence: 2, answers: nil, completing: "issue-now"))
-        try await eventually { model.task(id: "issue-now")?.task.task.isTerminal == true }
+        try await eventually { model.task(id: "issue-now")?.task.isCompleted == true }
         #expect(!listed(TaskHistoryFilter()))
         #expect(listed(completed))
         // Still in the reading, so the open Task is not deselected.
@@ -1253,6 +1253,9 @@ private struct WorkTestFixture {
                 plan["completed_at"] = Date().addingTimeInterval(-60).formatted(.iso8601)
                 rows[row]["task"] = plan
                 rows[row]["runtime"] = NSNull()
+                rows[row]["lifecycle"] = "done"
+                rows[row]["section"] = "done"
+                rows[row]["selection_states"] = ["done"]
                 if var condition = rows[row]["condition"] as? [String: Any] {
                     condition["unresolved_execution"] = false
                     rows[row]["condition"] = condition

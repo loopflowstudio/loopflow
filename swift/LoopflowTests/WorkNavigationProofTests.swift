@@ -32,7 +32,7 @@ struct WorkNavigationProofTests {
             planning["completed"] = false
             task["task"] = planning
             var runtime = try #require(task["runtime"] as? [String: Any])
-            runtime["work_id"] = "scroll-work-\(index)"
+            runtime["work_id"] = "scroll-task-\(index)"
             runtime["owner"] = ["person": "Jack Heart", "person_id": NSNull(), "machine": ["id": NSNull(), "label": NSNull()]] as [String: Any]
             task["runtime"] = runtime
             return task
@@ -127,7 +127,7 @@ struct WorkNavigationProofTests {
         let surfaces = try terminals.map { try #require($0.surface) }
         let shells = workspace.multiplexer.layout.allPanes.map(\.id)
         let layout = workspace.multiplexer.layout
-        let task = WorkReference.task(id: "ts_review00000000000000000000000000")
+        let task = WorkReference.task(id: "issue-review")
         let named = try NamedSessionSource(records: JSONSerialization.data(withJSONObject: ["first", "second"].enumerated().map { index, id in
             let record = try renameFixtureRecord(id, title: index == 0 ? "review-design" : "lyric-cadenza", work: task)
             var value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any])
@@ -585,9 +585,9 @@ struct WorkNavigationProofTests {
         )), at: "/src/loopflow"), as: UTF8.self)
         let records = """
         [{"id":"navigation-split", "run_id": "navigation-split", "interactive": true,
-          "work":{"kind":"task","id":"ts_review00000000000000000000000000"},
+          "work":{"kind":"task","id":"issue-review"},
           "title":"Navigation proof","detail":"Local cat PTY","cwd":"/tmp",
-          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(state: "active")),"blocked": false, "title_source":"generated","task_primary":false, "graph_membership":{"kind":"independent"},"task_ids": ["ts_review00000000000000000000000000"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "turn":null,"raw":false,"terminal_ids":[],"open_argv":["/bin/cat"]}]
+          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(state: "active")),"blocked": false, "title_source":"generated","task_primary":false, "graph_membership":{"kind":"independent"},"task_ids": ["issue-review"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "turn":null,"raw":false,"terminal_ids":[],"open_argv":["/bin/cat"]}]
         """
         let otherRecords = """
         [{"id":"context-session", "run_id": "context-session", "interactive": true,"work":null,

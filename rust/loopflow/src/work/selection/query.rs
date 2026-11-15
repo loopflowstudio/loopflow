@@ -141,7 +141,6 @@ impl Selection {
                 SelectionFilter::Kind(kind) => Some(&item.key.kind == kind),
                 SelectionFilter::State(state) if item.key.kind == WorkWorkspaceKind::Task => {
                     match state {
-                        SelectionState::Open => item.open,
                         _ if item.states.contains(state) => Some(true),
                         SelectionState::Available
                         | SelectionState::Busy

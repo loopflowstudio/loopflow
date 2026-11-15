@@ -1827,10 +1827,26 @@ async fn a_held_task_conversation_without_a_view_offers_attach() {
         .iter()
         .map(|action| (action.label.as_str(), action.unavailable_reason.as_deref()))
         .collect();
-    assert_eq!(offered, [("Reconnect", None)]);
+    assert_eq!(offered, [("Reconnect", None), ("Show conversation", None)]);
     assert!(row.actions[0]
         .help
         .ends_with(&format!("lf resume {}", session.id)));
+    // Desktop reopens and refreshes a pane with reveal; it needs the action
+    // that carries whether revealing can attach.
+    let prepared = super::open_without_replacing(
+        &logins.store,
+        &session.id,
+        SessionOpenIntent::Reveal,
+        false,
+        false,
+        false,
+    )
+    .await
+    .unwrap();
+    assert!(prepared
+        .actions
+        .iter()
+        .any(|action| action.kind == super::SessionActionKind::Reveal));
 }
 
 struct ListFilters {

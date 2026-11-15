@@ -237,7 +237,11 @@
           "connected": true
         },
         "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
-      }
+      },
+      "lifecycle": "done",
+      "selection_states": [
+        "done"
+      ]
     },
     "status": {
       "comments": {
@@ -931,7 +935,11 @@
             "connected": true
           },
           "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
-        }
+        },
+        "lifecycle": "done",
+        "selection_states": [
+          "done"
+        ]
       },
       "sync": {
         "changes": [
@@ -1239,7 +1247,11 @@
           "connected": true
         },
         "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
-      }
+      },
+      "lifecycle": "done",
+      "selection_states": [
+        "done"
+      ]
     },
     "status": {
       "comments": {
@@ -1889,7 +1901,11 @@
             "connected": true
           },
           "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
-        }
+        },
+        "lifecycle": "done",
+        "selection_states": [
+          "done"
+        ]
       },
       "sync": {
         "changes": [
@@ -2177,7 +2193,13 @@
           "connected": true
         },
         "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
-      }
+      },
+      "lifecycle": "shipping",
+      "selection_states": [
+        "open",
+        "shipping",
+        "autonomous"
+      ]
     },
     "status": {
       "comments": {
@@ -2799,7 +2821,13 @@
             "connected": true
           },
           "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
-        }
+        },
+        "lifecycle": "shipping",
+        "selection_states": [
+          "open",
+          "shipping",
+          "autonomous"
+        ]
       },
       "sync": {
         "changes": [

@@ -498,6 +498,11 @@ struct DesktopHeadlessTests {
         planning["state"] = state
         planning["completed"] = state == "completed"
         row["task"] = planning
+        row["runtime"] = NSNull()
+        let lifecycle = state == "completed" ? "done" : state == "canceled" ? "abandoned" : "unstarted"
+        row["lifecycle"] = lifecycle
+        let refusal: Any = state == "unstarted" ? NSNull() : "Reopen the Task"
+        row["run_control"] = ["unavailable": refusal]
         let task = try JSONDecoder().decode(RoadmapTask.self, from: JSONSerialization.data(withJSONObject: row))
         #expect(task.id == original.id)
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Rendering must not mutate") })

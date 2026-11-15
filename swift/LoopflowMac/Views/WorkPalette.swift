@@ -124,9 +124,9 @@ extension WorkModel {
             }
             rows = waves + tasks
         case .wave(let id):
-            rows = (wave(id: id)?.tasks.items ?? []).sorted { $0.task.rank < $1.task.rank }.map { task in
+            rows = (wave(id: id)?.tasks.items ?? []).map { task in
                 WorkPaletteRow(id: .task(task.id), title: task.task.name,
-                    detail: task.task.identifier + (task.runtime?.owner != nil ? "" : " · Not started"), key: task.task.identifier)
+                    detail: task.task.identifier + (task.awaitsStart ? " · Not started" : " · \(task.lifecycle.label.capitalized)"), key: task.task.identifier)
             }
         }
         guard !query.isEmpty else { return rows }

@@ -256,7 +256,7 @@ private struct WavePlanView: View {
                     Text(reason).foregroundStyle(palette.warning)
                 case .available(let inventory, let truncated):
                     let tasks = closed.merged(after: inventory).filter {
-                        historyFilter.includes($0.task, condition: $0.condition, now: historyNow)
+                        historyFilter.includes($0, now: historyNow)
                     }
                     WorkSectionHeading(title: "Tasks", count: tasks.count) {
                         TaskHistoryControls(filter: $historyFilter)
@@ -718,7 +718,7 @@ private struct RoadmapTaskView: View {
 
     /// State, owner when owned, and who moves next.
     private var statusLine: String {
-        let state = task.task.historyLabel ?? task.runtime?.status.label ?? "unstarted"
+        let state = task.historyLabel
         let owner = task.runtime?.owner.map { " · \($0.summary)" } ?? ""
         return "\(state)\(owner) · next: \(task.nextMove.owner.rawValue)"
     }
@@ -786,7 +786,7 @@ private struct WaveWorkInspector: View {
                     .font(Typography.sectionTitle(15))
                     .foregroundStyle(palette.text)
                 details(
-                    status: task.task.historyLabel ?? task.runtime?.status.label ?? "unstarted",
+                    status: task.historyLabel,
                     reason: task.condition.reason,
                     provider: task.runtime?.provider,
                     location: taskLocation,

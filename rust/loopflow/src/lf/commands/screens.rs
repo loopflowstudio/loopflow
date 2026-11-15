@@ -41,7 +41,7 @@ pub struct BoardPr {
 impl From<RoadmapTask> for PlanBoardTask {
     fn from(row: RoadmapTask) -> Self {
         Self {
-            state: super::waves::task_state(&row),
+            state: row.lifecycle,
             id: row.task.id,
             identifier: row.task.identifier,
             title: row.task.name,
@@ -216,7 +216,7 @@ pub fn task_detail(directory: &Path, issue: &str) -> Result<TaskDetail> {
         })
         .transpose()?;
     Ok(TaskDetail {
-        state: super::waves::task_state(&row),
+        state: row.lifecycle,
         section: row.section,
         task: row.task,
         pr: row.pr,

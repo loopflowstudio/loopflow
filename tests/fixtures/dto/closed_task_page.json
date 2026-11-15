@@ -339,7 +339,11 @@
       "ship_control": {
         "unavailable": null
       },
-      "shipping": null
+      "shipping": null,
+      "lifecycle": "done",
+      "selection_states": [
+        "done"
+      ]
     }
   ],
   "next": "ts_22222222222222222222222222222222"

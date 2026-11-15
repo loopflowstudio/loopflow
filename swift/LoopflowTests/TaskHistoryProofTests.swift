@@ -42,7 +42,7 @@ struct TaskHistoryProofTests {
         let shells = workspace.multiplexer.layout.allPanes.map(\.id)
         let layout = workspace.multiplexer.layout
 
-        let work = WorkReference.task(id: "ts_review00000000000000000000000000")
+        let work = WorkReference.task(id: "issue-review")
         var design = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(
             renameFixtureRecord("design", title: "review-design", work: work)
         )) as? [String: Any])

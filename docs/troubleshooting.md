@@ -68,6 +68,22 @@ and any write that held the store lock for 3 s or more, grouped by the lf
 binary that logged them, with the holder's pids and the function that held the
 lock. Lines from binaries older than this check group as `unidentified (older lf)`.
 
+## Desktop reopened, but the Session will not accept typing
+
+Select the same Task and use **Refresh session** in the Session pane's toolbar.
+The surviving conversation keeps its draft and pending requests, and the selected
+pane regains focus when input is ready. Switching Tasks is unnecessary.
+
+While **Opening… Input paused** or **Reconnecting…** appears, the screen may be
+readable before typing is available. If another view has control, choose
+**Take back** only when you want to move input here; Refresh does not take it.
+If the provider has ended, use the offered resume action to continue its history.
+Refresh never repeats a submitted message or restarts the Task's Graph.
+
+If Refresh leaves input paused, follow the pane's connection error and recovery
+action, then check the server below. See [Session recovery](sessions.md#when-desktop-loses-its-connection)
+for what survives a Desktop exit versus a provider exit.
+
 ## Desktop cannot connect
 
 ```bash

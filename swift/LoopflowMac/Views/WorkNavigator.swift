@@ -306,7 +306,7 @@ struct WorkNavigator: View {
                            status: SessionProgramStatus, selected: Bool, hover: HoverFlag) -> some View {
         let shipping = found?.task.shipping.map { "\($0.label) · \($0.reason)" }
         return VStack(alignment: .leading, spacing: 6) {
-            if hasSummary || preview.age != nil || presentation.context == nil {
+            if shipping != nil || hasSummary || preview.age != nil || (found == nil && presentation.context == nil) {
                 Text(shipping ?? (hasSummary || preview.age != nil ? preview.text : "Loading planning…"))
                     .font(Typography.code(11)).lineLimit(status.session?.availability == .available ? 2 : 1)
                     .foregroundStyle(selected ? palette.workSelectedSecondaryText : palette.textSecondary)

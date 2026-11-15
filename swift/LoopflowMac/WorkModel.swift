@@ -2190,27 +2190,38 @@ final class WorkModel {
     func taskPresentation(id: String, repository: String? = nil) -> TaskPresentation {
         let record = task(id: id)?.task
         let workID = record?.runtime?.workId ?? record?.id ?? id
-        let plans = [taskList].compactMap { $0 } + (selectionPlans.value ?? [])
-        let contents = plans.lazy.filter { repository == nil || $0.repository == repository }
-            .flatMap(\.contents).filter {
-                $0.work.kind == .task && ($0.work.id == workID || $0.work.id == id)
-            }
-        let member = contents.first { $0.title != $0.work.id && !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        let failed = roadmap.errorMessage != nil || taskListReading.errorMessage != nil
-            || selectionPlans.errorMessage != nil
-            || (record == nil && member == nil && contents.first?.unavailable.isEmpty == false)
-        let saved = showsSavedPlanning || roadmap.errorMessage != nil || currentTask(id: id) == nil
-        let context: String? = failed ? "Last known" : saved ? "Updating…" : nil
-        if let record, !saved {
-            return TaskPresentation(title: record.task.name, identifier: record.task.identifier, context: context)
-        }
-        if let member {
-            return TaskPresentation(title: member.title, identifier: member.identifier,
-                                    context: failed ? "Last known" : nil)
-        }
+        let recordContext: String? = roadmap.errorMessage != nil ? "Last known"
+            : showsSavedPlanning || currentTask(id: id) == nil ? "Updating…" : nil
+        var candidates: [TaskPresentation] = []
         if let record {
-            return TaskPresentation(title: record.task.name, identifier: record.task.identifier, context: context)
+            candidates.append(TaskPresentation(title: record.task.name, identifier: record.task.identifier,
+                                               context: recordContext))
         }
+        let listSource: WorkReading<[WorkViewPlan]> = switch taskListReading {
+        case .loading: .loading
+        case .available(let plan): .available([plan])
+        case .unavailable(let plan, let reason): .unavailable(lastGood: plan.map { [$0] }, reason: reason)
+        }
+        let sources = [listSource, selectionPlans]
+        var missingFacts = false
+        for source in sources {
+            let contents = (source.value ?? []).lazy
+                .filter { repository == nil || $0.repository == repository }
+                .flatMap(\.contents).filter {
+                    $0.work.kind == .task && ($0.work.id == workID || $0.work.id == id)
+                }
+            missingFacts = missingFacts || contents.first?.unavailable.isEmpty == false
+            if let member = contents.first(where: {
+                $0.title != $0.work.id && !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }) {
+                candidates.append(TaskPresentation(title: member.title, identifier: member.identifier,
+                    context: source.errorMessage != nil ? "Last known" : nil))
+            }
+        }
+        // Prefer current identity in source order before falling back to retained identity.
+        if let chosen = candidates.first(where: { $0.context == nil }) ?? candidates.first { return chosen }
+        let failed = roadmap.errorMessage != nil || taskListReading.errorMessage != nil
+            || selectionPlans.errorMessage != nil || missingFacts
         if let repository = repository ?? workspaceRepository, let retained = workspaceRegistry?.retained(.init(repository: repository, kind: .task, id: workID)),
            retained.title != workID, retained.title != "Loading Task…", retained.title != "Task unavailable" {
             return TaskPresentation(title: retained.title, identifier: nil, context: failed ? "Last known" : "Updating…")

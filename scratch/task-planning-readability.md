@@ -179,49 +179,35 @@ and retained workspace titles; `WorkNavigator.taskRow` no longer renders raw IDs
 or "Summary · Planning unavailable"; list loading/failure feeds `workStatus`;
 Retry uses the model refresh owner; README startup wording updated.
 
-### Remaining — implement next (from the November 14 concept review)
+### November 14 concept-review corrections
 
-Concept review outcome: iterate to implement. No open product choice. Keep the
-single derived presentation, existing cache and refresh owner. Three independent
-facts: the Task's readable identity, the reading being recovered, and the
-conversation's input readiness. Retry refreshes readings, not execution. A list
-failure changes membership confidence, not a name supplied by a successful
-roadmap; a roadmap failure does not stale a name supplied by a successful list.
+Identity freshness now follows the source supplying the name. Current roadmap,
+Task-list and selection-plan names precede retained names in that order; another
+source's failure stays in its read status. Saved identity says Updating, and a
+failed source says Last known. No cache or read owner was added.
 
-1. Per-source freshness. `taskPresentation` (`WorkModel.swift`, `let failed =`)
-   ORs roadmap, Task-list and selection-plan errors into one Boolean, so any
-   failure labels every name Last known. Carry the chosen source's freshness
-   instead: resolve current readable identity before retained identity (keeping
-   the current preference order), and keep the `WorkReading` until the source is
-   chosen; flattening `.value` first loses this. Saved identity says Updating;
-   identity whose own source failed says Last known; another read's error stays
-   in the workspace notice with Retry.
-2. Absent vs empty details. `WorkNavigator.rowDetail` shows "Loading planning…"
-   when `context == nil` and there is no summary or live excerpt — including a
-   loaded Task (`found != nil`) whose description is empty. Omit the preview line
-   once details are loaded; show Loading planning only while details are pending.
-   The same condition hides `shipping` whenever `context != nil` and there is no
-   summary; shipping context must show independently of identity context.
-3. README: replace "A failed planning or Task-list refresh keeps known names
-   visible as Last known" (`swift/README.md`) with: "Last known describes the
-   reading supplying the displayed name. Other read failures remain visible
-   beside Retry. A Task without a description has no summary line."
+Loaded empty descriptions omit the preview; title-only members still show pending
+details. Shipping context renders independently of identity context. README wording
+matches these distinctions. Regression cases cover each review counterexample,
+including replacement of one source while another source remains failed.
 
-Focused counterexamples for `TaskPlanningReadabilityTests`: current roadmap name
-with a failed list; fresh list name with a failed roadmap; failed retained list
-content beside a current selection-plan name; a loaded Task with an empty
-description; a title-only list member whose details are still pending; a shipping
-Task with no description during Updating. In each recovery only the replaced
-source clears its error. Complete removal still wins over saved names/membership;
-repository/Machine scoping, late-reply fences, panes, drafts and input readiness
-still hold. No DTO, schema, persistence, transport or skill change.
+Remaining: gate's broader filter and native demo/review in Acceptance above.
+The walkthrough `scratch/concept-review.html` reflects the corrected behavior.
 
-The walkthrough is `scratch/concept-review.html`.
+Concept-review continuation, November 14: no further design change or open product
+choice. The interrupted implementation already contains the previous review's
+corrections and counterexamples. Fresh names and independent read errors coexist;
+loaded empty details stay empty; retained shipping context survives Updating.
+Advance to the next Graph step. Gate and native review remain separate obligations;
+this review adds no rendered or timing observation.
 
-### Check results (earlier implementation run; not rerun since)
+### Check results
 
-- `swift build --build-tests --package-path swift` — passed, including the app
-  and all test consumers of optional Task metadata.
+- November 14 review corrections: `swift build --build-tests --package-path swift`
+  — passed (114.50 s); `scripts/test_desktop.sh --skip-build --filter TaskPlanningReadabilityTests`
+  — 12 tests passed (5.795 s), WindowServer denied. Covers all new source-freshness,
+  empty-description and shipping counterexamples, plus existing scoped recovery.
+
 - `scripts/test_desktop.sh --skip-build --filter 'TaskPlanningReadabilityTests|TaskRowMetadataTests|WorkOpeningCLITests/localCreatedAndReopenedNamesPrecedeRoadmapDelivery|WorkModelStreamTests/incompletePlanningRetainsSavedWork|WorkCacheTests/failedRefreshKeepsSaved|WorkCacheTests/returningLaunchRestores|WorkNavigationTests/dashboardSidebarHeader'`
   — 25 tests in 6 suites passed in 31.144 s, WindowServer denied. Covers saved
   names in two repository models, list/Session ordering, real Retry, reconnect,

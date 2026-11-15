@@ -26,8 +26,9 @@ answered; an empty result then says there are no working Tasks. Newly created
 and reopened Tasks use their locally recorded names while tracker updates are
 pending.
 
-A failed planning or Task-list refresh keeps known names visible as **Last known**
-and shows the read error with **Retry**, combining shared failures into one notice.
+**Last known** describes the reading supplying the displayed name. Other read
+failures remain visible beside **Retry**, combining shared failures into one
+notice. A Task without a description has no summary line.
 If no name is known, the failed row says
 **Task unavailable**. Desktop reconnects automatically; choose **Retry** beside
 the failure to request another read. A successful replacement clears the notice

@@ -18,13 +18,14 @@ Sources: <code>scratch/task-planning-readability.md</code>,
 <code>swift/LoopflowMac/{WorkModel,SessionProgramStatus}.swift</code>,
 <code>swift/LoopflowMac/Views/WorkNavigator.swift</code>,
 <code>swift/LoopflowTests/WorkModelTests.swift</code>, <code>swift/README.md</code>.</header>
-<h1>Iterate: attach freshness to the name's source</h1>
-<p>The biggest mismatch: one failed reading currently makes an independently
-current name say “Last known.” Recovery should describe the fact being recovered.</p>
-<h2>Current patch → proposed repair</h2>
+<h1>Advance: freshness follows the name's source</h1>
+<p>No further design change or open product choice. The previous mismatch is
+corrected in the workspace: a failed reading leaves an independently current name
+current. Its error remains visible until that reading recovers.</p>
+<h2>Before → implemented behavior</h2>
 <p>A current list supplies this name while the roadmap fails:</p>
-<div class="row"><small>Current patch</small><p>LOO-905 · Readable local Task · Last known</p><p>Couldn't update: Planning offline · Retry</p></div>
-<div class="row"><small>Proposed</small><p>LOO-905 · Readable local Task</p><p>Couldn't update: Planning offline · Retry</p></div>
+<div class="row"><small>Before correction</small><p>LOO-905 · Readable local Task · Last known</p><p>Couldn't update: Planning offline · Retry</p></div>
+<div class="row"><small>Implemented; native review pending</small><p>LOO-905 · Readable local Task</p><p>Couldn't update: Planning offline · Retry</p></div>
 <p>If that list itself fails and no other current source supplies the name,
 keep the name with “Last known.” Retry keeps the conversation and draft in place.
 Successful replacement clears the corresponding error.</p>
@@ -36,15 +37,25 @@ Successful replacement clears the corresponding error.</p>
 <tr><td>Continue typing</td><td>Session input readiness</td><td>Existing Task opening and mounted Session owners</td></tr>
 </tbody></table>
 <h2>Missing prose is not loading</h2>
-<p>Current patch: a fully read Task with no description or live excerpt says
-“Loading planning…” beneath its name. Proposed: omit the preview line. A title-only
-list member still waiting for details keeps its genuine loading context.</p>
+<p>Before correction, a fully read Task with no description or live excerpt said
+“Loading planning…” beneath its name. The workspace now omits that preview line.
+A title-only list member still waiting for details keeps its loading context.</p>
+<div class="row"><small>Implemented; retained shipping Task during refresh</small>
+<p>LOO-905 · Readable local Task · Updating…</p><p>Landing · Checks passed</p></div>
 <p>Keep the existing cache, current-removal behavior, scope fences, shipping
 context and Session previews. No new record, persistence, transport or skill is needed.</p>
 <h2>Next checks</h2>
-<p>Exercise current roadmap + failed list, current list + failed roadmap,
-current selection + retained failed list, then independent recovery. Compare a
-loaded description-free Task with one still awaiting details. Rendered Desktop
-behavior and input continuity remain unverified; this page is a proposal.</p>
-<p>No open product questions. Next Graph step: implement these refinements.</p>
+<p>The recorded focused run passed 12 tests with WindowServer denied: current
+roadmap + failed list, current list + failed roadmap, current selection + retained
+failed list, independent replacement/recovery, empty descriptions and retained
+shipping context. This continuation reviewed the source and tests; it did not
+rerun them. Gate's broader checks remain.</p>
+<p>Native review still needs two repository windows, rendered recovery and Retry,
+launch-to-name/current-reading timing, and retained Session input. Headless checks
+do not establish these observations.</p>
+<h2>Review questions</h2>
+<ol>
+<li>Further implementation direction? None from this review; advance.</li>
+<li>Open product choice? None. Native verification remains a later obligation.</li>
+</ol>
 </html>

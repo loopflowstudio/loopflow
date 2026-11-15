@@ -1245,6 +1245,94 @@ struct TaskPlanningReadabilityTests {
         return String(decoding: try JSONSerialization.data(withJSONObject: root), as: UTF8.self)
     }
 
+    @Test("Name freshness follows its source while other reads fail", arguments: [false, true])
+    func independentNameFreshness(roadmapFails: Bool) throws {
+        let fixture = try WorkTestFixture.load()
+        let model = WorkModel(query: fixture.query, repoPath: "/src/loopflow")
+        let record = try #require(fixture.roadmap.tasks.items.first { $0.id == "issue-now" })
+        let work = WorkWorkspaceKey(repository: "repo", kind: .task, id: record.runtime?.workId ?? record.id)
+        let member = WorkViewPlan.Content(paneRevision: nil, face: nil, work: work, title: "Fresh list name",
+            states: [.working], identifier: record.task.identifier, primarySession: nil, location: nil, argv: nil, unavailable: [])
+        let list = fixtureViewPlan(owner: key, members: [member])
+        func planning(_ failed: Bool) {
+            model.applyFixture(roadmap: failed ? .unavailable(lastGood: fixture.roadmap, reason: "Planning offline") : .available(fixture.roadmap),
+                waves: .available(fixture.waves), workActivity: .available(fixture.workActivity), repos: [], fixed: true)
+        }
+        planning(roadmapFails)
+        model.applyTaskList(list, wave: nil, reason: "")
+        if !roadmapFails { model.applyTaskList(nil, wave: nil, reason: "List offline") }
+        let expected = roadmapFails ? "Fresh list name" : record.task.name
+        #expect(model.taskPresentation(id: record.id).title == expected)
+        #expect(model.taskPresentation(id: record.id).context == nil)
+        let row = WorkTaskIdentity(presentation: model.taskPresentation(id: record.id))
+        #expect(try row.inspect().find(text: expected).string() == expected)
+        #expect(throws: (any Error).self) { try row.inspect().find(text: "Last known") }
+        #expect(model.workStatus.message?.contains(roadmapFails ? "Planning offline" : "List offline") == true)
+        // Replacing the healthy source cannot clear the other source's failure.
+        if roadmapFails { model.applyTaskList(list, wave: nil, reason: "") } else { planning(false) }
+        #expect(model.workStatus.message?.contains(roadmapFails ? "Planning offline" : "List offline") == true)
+        if roadmapFails { planning(false) } else { model.applyTaskList(list, wave: nil, reason: "") }
+        #expect(model.workStatus.message == nil)
+    }
+
+    @Test("A current selection name precedes failed retained list content")
+    func currentSelectionName() throws {
+        let fixture = try WorkTestFixture.load()
+        let model = WorkModel(query: fixture.query, repoPath: "/src/loopflow")
+        model.applyTaskList(plan(title: "Old list name"), wave: nil, reason: "")
+        model.applyTaskList(nil, wave: nil, reason: "List offline")
+        model.applySelectionPlans([plan(title: "Current selection name")], reason: "")
+        #expect(model.taskPresentation(id: key.id).title == "Current selection name")
+        #expect(model.taskPresentation(id: key.id).context == nil)
+        model.applySelectionPlans(nil, reason: "Selection offline")
+        #expect(model.taskPresentation(id: key.id).title == "Old list name")
+        #expect(model.taskPresentation(id: key.id).context == "Last known")
+        model.applySelectionPlans([plan(title: "Recovered selection name")], reason: "")
+        #expect(model.taskPresentation(id: key.id).title == "Recovered selection name")
+        #expect(model.taskPresentation(id: key.id).context == nil)
+        #expect(model.taskListReading.errorMessage == "List offline")
+        #expect(model.selectionPlans.errorMessage == nil)
+    }
+
+    @Test("Loaded empty descriptions omit the preview; shipping remains visible while updating", arguments: [false, true])
+    func emptyDescription(shipping: Bool) throws {
+        let fixture = try WorkTestFixture.load()
+        var root = try #require(JSONSerialization.jsonObject(with: Data(fixture.roadmapJSON.utf8)) as? [String: Any])
+        var tasks = try #require(root["tasks"] as? [String: Any])
+        var items = try #require(tasks["items"] as? [[String: Any]])
+        var task = try #require(items[0]["task"] as? [String: Any])
+        task["description"] = ""
+        items[0]["task"] = task
+        items[0]["section"] = "working"
+        items[0]["shipping"] = shipping ? ["shipped_at": 1, "state": "landing", "reason": "Checks passed"] : NSNull()
+        tasks["items"] = items
+        root["tasks"] = tasks
+        let wire = try JSONSerialization.data(withJSONObject: root)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = WorkCache(directory: directory)
+        cache.saveRoadmap(String(decoding: wire, as: UTF8.self))
+        cache.flush()
+        let model = WorkModel(query: fixture.query, repoPath: "/src/loopflow", cache: shipping ? cache : nil)
+        if !shipping {
+            model.applyFixture(roadmap: .available(try JSONDecoder().decode(RoadmapSnapshot.self, from: wire)),
+                waves: .available(fixture.waves), workActivity: .available(fixture.workActivity), repos: [], fixed: true)
+        }
+        let record = try #require(model.task(id: "issue-now")?.task)
+        let member = WorkViewPlan.Content(paneRevision: nil, face: nil,
+            work: .init(repository: "repo", kind: .task, id: record.runtime?.workId ?? record.id),
+            title: record.task.name, states: [.working], identifier: record.task.identifier,
+            primarySession: nil, location: nil, argv: nil, unavailable: [])
+        if !shipping { model.applyTaskList(fixtureViewPlan(owner: key, members: [member]), wave: nil, reason: "") }
+        let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
+        #expect(try navigator.inspect().find(text: record.task.name).string() == record.task.name)
+        #expect(throws: (any Error).self) { try navigator.inspect().find(text: "Loading planning…") }
+        if shipping {
+            #expect(try navigator.inspect().find(text: "Updating…").string() == "Updating…")
+            #expect(try navigator.inspect().find(text: "Landing · Checks passed").string() == "Landing · Checks passed")
+        }
+    }
+
     @Test("A named list arrives before planning; failure and replacement retain readable identity")
     func listBeforePlanning() throws {
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("No side effects") }, repoPath: "/src/loopflow")
@@ -1254,6 +1342,7 @@ struct TaskPlanningReadabilityTests {
         #expect(model.workspaceTitle(key) == "Readable local Task")
         let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
         #expect(try navigator.inspect().find(text: "Readable local Task").string() == "Readable local Task")
+        #expect(try navigator.inspect().find(text: "Loading planning…").string() == "Loading planning…")
         #expect(throws: (any Error).self) { try navigator.inspect().find(text: "Planning unavailable") }
         model.select(.task(id: key.id))
         #expect(model.selection == key.reference)

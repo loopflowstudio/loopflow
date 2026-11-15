@@ -233,8 +233,9 @@ only; SQLite commits precede rewrites.
 
 Still remove, with their consumers:
 
-- Desktop `TaskRunDraft.phase`, other mutation refresh
-  barriers and rename/bind replacement bookkeeping.
+- Desktop `TaskRunDraft.phase`, other mutation refresh barriers
+  (`performTaskAction`) and bind replacement bookkeeping (`replaceSession`,
+  `supersedeSessions`).
 - View-owned mobile `SessionLink` teardown on ordinary Task switching; keep
   explicit Close, background policy and memory-pressure eviction.
 - WorkCache/TaskFeed duplicate authoritative caches and duplicate freshness
@@ -452,59 +453,21 @@ Checks (2026-11-15; inherited `LF_*` cleared):
   not a native latency baseline.
 
 
-### Continuation correction: state-only candidates cannot project a Move
+### Why Move cannot use the current reducer
 
-2026-11-15, implementation finding. `compile_membership` filters Wave descendants
-before emitting fixed `Members`/`State.members` leaves; `MembershipFacts` carries
-states, not parent Wave. `ClientWorkQuery.makeProjection` only changes states of
-facts already present. A cached destination Wave that omitted Task A cannot
-acquire A when A moves there while disconnected, and its Task DTO is absent too.
-A per-view insertion or a fabricated Task would contradict the shared owner.
-Removal remains valid.
-
-Draft revised cut for Move: dynamic scopes/filters retain their authored paths
-and predicates over shared, provenance-stamped Task facts (parent Wave included),
-with candidate coverage and actual cached content for arrivals. Explicit authored
-Work leaves keep their fixed identities. Projection updates the shared facts,
-evaluates source and destination queries/counts, and retains each query's
-coverage until its stage fence is incorporated. Incomplete candidate/content
-coverage stays unavailable rather than inventing an empty destination or a DTO.
-Field provenance rejects stale cross-query values; arrival order is no authority.
-Use the portable-core option if shared Swift cannot evaluate the program.
-
-Delete in that cut: prefiltered dynamic `State.members`/`Members` programs from
-`compile_membership`/`compile_filter` and their Swift dynamic-node evaluation.
-Preserve explicit Work leaves, authored occurrence paths, duplicate winners,
-order/hidden state, partial-read semantics and the Complete/Abandon tests. No
-special Move branch in the candidate-only reducer.
-
-2026-11-15 continuation finding: a normalized fact frontier and an exact-query
-reading are different inputs. If a held source query predates Complete, another
-query can supply newer Task facts after Reopen. Reapplying Complete merely
-because the source's old `ReadingStamp` predates its fence hides the reopened Task
-again. Assigning the newer query's stamp to the source would invent an
-exact-query reading. The same problem applies to Move A→B followed by B→C:
-a source program using the newer parent must not reapply A→B under its old
-query stamp. The earlier draft did not specify the incorporation owner for this
-case; migrating Move under the current `WorkQueryEffect.covered` contract would
-be incorrect.
-
-Dependent Move work returns to design at that contract. The proposed next cut
-keeps the Machine's query stamp intact and represents local projection provenance
-separately: the cached query program/definition revision, candidate-universe
-coverage, and field revisions consumed by its evaluation. That proof must cover
-an effect before omitting it, including partial candidate/content coverage and
-closed-query retirement. Covering parent-Wave facts cannot discharge state or
-content dependencies. A client-derived answer cannot be serialized as a Machine
-`ReadingStamp`. Preserve the source/destination acceptance below and add the
-Complete→Reopen and A→B→C counterexamples before moving callers. No partial
-dynamic-program implementation remains.
-
-Acceptance before migrating callers: hold source and destination Wave readings
-with A absent from the destination; move offline; verify source removal,
+2026-11-15 implementation findings; full account at
+`5d0187746f:scratch/instant-task-session.md`. `compile_membership` filters Wave
+descendants before emitting fixed `Members`/`State.members` leaves;
+`MembershipFacts` carries states, not parent Wave; `ClientWorkQuery.makeProjection`
+only changes states of facts already present. A cached destination that omitted
+Task A cannot acquire it. Separately, `WorkQueryEffect.covered` decides by the
+held query's own `ReadingStamp`, so Complete→Reopen seen through another query,
+or Move A→B→C, would reapply the older effect. No partial dynamic-program code
+remains. Acceptance before migrating callers: held source and destination Wave
+readings with A absent from the destination; move offline; source removal,
 destination insertion and counts in two windows and both clients; restart with
-both queries closed; reject reordered older values and restore only the refused
-membership without changing later navigation. The broader one-PR scope remains.
+both queries closed; reordered older values rejected; refusal restores only its
+membership without changing later navigation.
 
 ### Next implement direction: facts absorb effects; queries prove their answers
 
@@ -607,19 +570,14 @@ First repair the recorded iOS SQLite fixture teardown by awaiting its owners and
 closing readers/connections before removing temporary directories. No sleeps or
 retries. Native latency remains unmeasured and does not gate this pass.
 
-### Open product choices carried into loop-or-next
+### Open product choices
 
 The disconnected-edit answer named Complete, rename and move. It does not settle
-Abandon, canceling a never-sent change, or phone Session naming. These remain real
-product choices, not engineering defaults; the built provisional behavior is
-described in `scratch/questions.md`. The regenerated review page retains their
-numbering: (1) queue destructive Abandon offline or require a reachable Machine;
-(2) offer Cancel before first send or leave no cancellation action; (3) keep Task
-titles on the phone or show/rename Session names. Their consequences are destructive
-work delivered later, recovery from a mistaken offline action, and the identity a
-phone conversation presents. Nobody has answered them. For this headless
-concept-review, report **Blocked** with those questions to loop-or-next; this
-does not erase the implementation direction above or restart execution.
+three choices numbered in `scratch/concept-review.html`: (1) queue destructive
+Abandon offline or require a reachable Machine; (2) offer Cancel before first send
+or no cancellation; (3) keep Task titles on the phone or show/rename Session names.
+Nobody has answered them; built provisional behavior is in `scratch/questions.md`.
+None blocks field incorporation or Move; (3) decides whether phone rename exists.
 
 ## Current implementation cut
 
@@ -648,7 +606,7 @@ including without a network event. Retirement cancels its receipt observer and
 transfers lagging effects or scoped reload floors. The complete prior contracts and
 query checks remain at `6e944e73b5a:scratch/instant-task-session.md`.
 
-Remaining: disconnected Move under the recorded 1a direction and the projection-provenance correction above; effect-policy duplication; cross-client closed-query convergence; exhaustive
+Remaining: field incorporation and answer coverage, then disconnected Move (Next implement direction); iOS SQLite fixture teardown; effect-policy duplication; cross-client closed-query convergence; exhaustive
 effect/dependency declarations and cross-query provenance; other mutation recovery
 and resource lanes; retained mobile `SessionLink`; projected inspection;
 historical-restoration epoch reset; valid native benchmark baseline. One cross-platform PR; no shipping decision. SQLite

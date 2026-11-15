@@ -662,6 +662,77 @@ correctness/size checks; native reaction and input readiness still require their
 separate measurements. Existing skills need no new rule; update host usage docs
 when this lifecycle is built.
 
+### Start selects a conversation owned by the operation
+
+Headless concept-review at `14d5127895`, 2026-11-15. The query-lifecycle direction
+above is built; its recorded checks do not establish native latency. Next implement
+direction: extend the shared interaction owner to creation on both hosts. No new
+product choice is open. The existing launch timeline already requires immediate
+conversation selection, independent of receipt delivery and native readiness.
+
+Proposed usage text for both hosts: **Start** closes the editor and opens a
+conversation showing the submitted words immediately. Preparation updates that
+conversation in place. Leaving it does not cancel the request. A lost reply checks
+the same request on its original Machine; **Retry opening** attaches the recorded
+Session. A save failure retains editable words. Background recovery never changes
+the current selection. These are proposed launch semantics, not a claim about the
+current phone flow; keep existing usage docs accurate until the cutover.
+
+The mismatch is ownership, not another loading label. Desktop's `beginTask` already
+publishes `StartingTask` synchronously, but submission, receipt binding and
+checkpoint reconciliation still belong to `WorkModel`. On iOS, `MobileTaskCreation`
+keeps submission/outcome/savedRequests in its draft file; `MobileNewTaskView` owns
+the action's lifetime and requires **Open Task** after settlement. `TaskListView`
+then acknowledges presentation in the sheet callback before installing its route.
+The shared outbox already preserves admission and receipts; it must also own the
+operation's presentation facts, leaving only editor state and selection with hosts.
+
+Implement these consequences together:
+
+- Generalize the shared synchronous intent entry point used by Complete to accept
+  typed creation. Freeze payload, ID, submission time and original scope once;
+  publish the operation destination before discovery, disk or network. Do not
+  route creation through `ClientWorkStore.submit`'s finished-result wait before
+  publishing. Keep save-before-send and the existing receipt/recovery owner.
+- A route initially identifies the operation, not a fabricated Task/Session.
+  Receipt stages may bind exact identities while other stages remain unresolved.
+  Binding updates that destination's content; it cannot navigate after departure.
+  Preserve the existing distinction between filed identity, Graph admission and
+  native attachment. Missing or uncertain identity stays inspectable; current
+  Task selection or a query answer cannot substitute for the original result.
+- Build creation presentation from saved command plus current receipt/recovery
+  evidence in the shared owner. Hosts render it and attach through their native
+  owners. A mount acknowledges presentation only after the intended result is
+  displayed; a sheet dismissal or Open callback does not. That acknowledgment
+  neither enables input nor incorporates list/count effects.
+- Import phone submission/outcome/savedRequests into the existing SQLite owner
+  transactionally and idempotently before removing their draft-file writers.
+  Preserve every request's original Machine, ID, exact words and recoverable
+  result. When an outbox record already exists, validate the match and keep its
+  send epoch/receipt; never replace it with a newly unsent record. A legacy file
+  without send evidence follows the existing inspect/lookup policy, never blind
+  replay. Unsent editor text stays a draft; unreadable/conflicting saved data
+  stays recoverable rather than being overwritten. Keep sources until commit.
+- Replace Desktop `StartingTask` submission/checkpoint ownership and mobile
+  submitted/outcome/recovery lists plus sheet-owned actions in the same cut.
+  Keep host navigation generations, native surface ownership, explicit recovery,
+  device protection and independent per-query coverage. Extend creation's effect
+  declarations as needed; do not predict membership or counts without facts.
+  Existing skills need no additional rule; update host usage docs with the code.
+
+Show next: production-path Desktop and iOS tests hold save, admission and attachment
+independently. Immediately after Start the editor is closed and submitted words
+are selected, with input still governed by the native owner. Leave for B, then
+deliver A's receipt: B stays selected and A remains recoverable. Hold Graph admission
+after filing, fail attachment after admission, restart after uncertain send, and
+retry opening the same Session without creating again. Import legacy phone files
+beside matching and conflicting outbox records; crash around import commit and
+retain a newer unsent draft. Mount a result while another query is held, then
+restart: acknowledgment must not erase its coverage or unresolved recovery.
+Retain query-close, bounded-reuse, epoch and reordered-reply coverage. Native
+reaction/input measurements and the wider mutation/provenance migration remain
+required; this direction does not finish the cross-platform cut.
+
 ## Current implementation cut
 
 Production Complete uses shared `WorkInteraction` on both hosts, and Desktop

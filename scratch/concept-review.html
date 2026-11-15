@@ -2,45 +2,46 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-906 · Closing a query</title>
+<title>LOO-906 · Start opens the conversation</title>
 <style>
 :root{color-scheme:light dark}body{font:16px/1.5 system-ui,sans-serif;margin:0}main{max-width:760px;margin:auto;padding:24px}header,small{font-size:13px;opacity:.75}h1{font-size:28px;line-height:1.2}h2{font-size:20px}table{width:100%;border-collapse:collapse}td,th{text-align:left;vertical-align:top;padding:8px;border-bottom:1px solid #8886}code{overflow-wrap:anywhere}blockquote{margin:16px 0;padding-left:16px;border-left:3px solid #888}li{margin:12px 0}@media(max-width:520px){main{padding:14px}td,th{padding:5px}table{font-size:12px}}
 </style>
 <main>
-<header>LOO-906 · concept-review · 2026-11-15<br>Sources: scratch/{instant-task-session,questions,desktop-reactivity-feedback}.md; swift/Loopflow/Services/{WorkInteraction,ClientWorkStore,ClientWorkDatabase,ClientWorkQuery}.swift; swift/LoopflowMac/{WorkModel,WorkProjection}.swift; Desktop and mobile interaction tests. Reviewed cfebc7f89a plus the query-destination working tree.</header>
-<h1>Closing a query must release its answer</h1>
-<p><strong>Next direction: iterate to implement.</strong> Bound reusable query answers and replace closed-query effects with persisted reload requirements. The existing design implies this; no product choice is open.</p>
-<p><strong>Biggest mismatch:</strong> query navigation now uses the shared projection, but every visited expression remains in its prepared set. Retired completions can leave exact effects in closed saved queries until those queries receive covering reads.</p>
+<header>LOO-906 · concept-review · 2026-11-15<br>Reviewed code: 14d5127895. Sources: scratch/{instant-task-session,questions,desktop-reactivity-feedback}.md; shared WorkInteraction, ClientWorkStore, ClientWorkDatabase and OperationDeclaration; Desktop WorkModel; iOS MobileTaskCreation, MobileNewTaskView, TaskListView and RemoteMobileClient; query and creation tests.</header>
+<h1>Start opens the conversation</h1>
+<p><strong>Next direction: iterate to implement.</strong> Give both hosts one operation-backed launch destination. The existing design settles this; no product choice is open.</p>
+<p><strong>Biggest mismatch:</strong> the phone still asks for <strong>Open Task</strong> after creation. Desktop shows submitted words immediately, but owns a separate launch handoff. Shared durable admission has not yet replaced those presentation lifecycles.</p>
 <table>
 <tr><th>Action</th><th>Concept</th><th>API / owner</th></tr>
-<tr><td>Open / return</td><td>Query destination</td><td>Existing local selection → WorkInteraction.open</td></tr>
-<tr><td>Read cached content</td><td>Reusable projected answer</td><td>Proposed bounded shared working set</td></tr>
-<tr><td>Close</td><td>Release one mount</td><td>Existing close; proposed eviction of unleased entries</td></tr>
-<tr><td>Complete / recover</td><td>Durable intent and confirming facts</td><td>Existing outbox; proposed transactional closed-base invalidation</td></tr>
+<tr><td>Start</td><td>Submitted conversation</td><td>Proposed shared synchronous begin → local operation selection</td></tr>
+<tr><td>Prepare / recover</td><td>Immutable saved request</td><td>Existing ClientWorkStore + receipt owner</td></tr>
+<tr><td>Show admitted result</td><td>Exact Task / Session binding</td><td>Proposed shared presentation → host native attachment</td></tr>
+<tr><td>Leave / return</td><td>Local destination</td><td>Host selection generation; operation remains saved</td></tr>
 </table>
 <h2>Existing → proposed</h2>
-<p><strong>Existing in the working tree:</strong> destinations hold query identity; stamped subscriptions publish projected membership; Complete publishes before discovery/disk and follows the origin's displayed order. Recorded focused Desktop and iOS checks passed. This review ran no builds or latency trials.</p>
-<p><strong>Proposed:</strong> a mount pins a query entry, not every answer ever visited. Evict unused prepared entries. Resolved effects leave compact reload requirements for closed bases. Reconcile suspended prepared entries before reuse. Keep pending commands, navigation and native workspaces under their existing owners.</p>
-<blockquote><strong>Proposed usage:</strong> Return to a recent view: usable projected content appears while refreshing. Return to an evicted or invalidated view: the same destination selects immediately and loads there. Retry stays in place. Closing never cancels the saved action.</blockquote>
+<p><strong>Existing:</strong> bounded reusable query answers, shared leases and transactional closed-base reload requirements are built. Focused Desktop/iOS passes are recorded in the working design. Desktop launch publishes a StartingTask before waiting. iOS retains submission/outcome in a draft file and opens the Task through a separate sheet callback.</p>
+<blockquote><strong>Proposed experience:</strong> Start → editor closes → submitted words appear in the selected conversation → exact admitted Session attaches there. Leave for B while A prepares: B stays selected. Retry opening A uses its recorded Session.</blockquote>
 <table>
-<tr><th>Journey</th><th>Visible result / recovery</th></tr>
-<tr><td>Complete A; list and count open</td><td>A disappears; next Task selected only in the origin.</td></tr>
-<tr><td>Count covers settlement; list is held</td><td>Live list keeps its effect; count does not subtract twice.</td></tr>
-<tr><td>Close the list; completion resolves</td><td>Proposed: atomically invalidate its old base and retain its reload requirement.</td></tr>
-<tr><td>Restart; return to the list</td><td>Saved pending intent is projected, or invalidated content loads until covered. No replay or navigation from a reply.</td></tr>
-<tr><td>Refresh fails with usable warm content</td><td>Keep the projection and Retry. A known-invalid base is not usable.</td></tr>
+<tr><th>Journey</th><th>Proposed visible result / recovery</th></tr>
+<tr><td>Save or admission held</td><td>Conversation shows submitted words immediately; native readiness governs input.</td></tr>
+<tr><td>Filed; Graph admission held</td><td>Keep exact identity and preparation in place; filing alone does not mean ready.</td></tr>
+<tr><td>Save fails</td><td>Keep editable words and the same unsent intent; send nothing.</td></tr>
+<tr><td>Reply lost; restart</td><td>Recover original ID on original Machine. Uncertain delivery never permits blind replay.</td></tr>
+<tr><td>Attachment fails</td><td>Retry opening the recorded Session; never create another Task.</td></tr>
+<tr><td>Result displayed; list held</td><td>Acknowledge presentation independently; keep query coverage and unresolved recovery.</td></tr>
 </table>
 <details>
-<summary>Follow ownership through storage and execution</summary>
-<p>One shared working set serves both hosts. Live leases pin entries; closed entries may be evicted. Publication work follows that set, not navigation history. Keep confirmed bases, outbox, incorporation and scoped reload requirements in the existing SQLite transaction owner. Compact requirements by Machine/epoch/schema, repository, effect and declared domains, rather than retaining one per completion.</p>
-<p>Do not remove the current retirement transfer before transactional invalidation replaces it. Preserve unresolved recovery and unseen creation results independently. Closing or eviction never infers refusal, releases an unresolved execution lane, acknowledges a result, resends a command or disposes a native workspace. Existing broad requirements keep their conservative meaning.</p>
+<summary>Follow the handoff through persistence and recovery</summary>
+<p>Generalize the shared intent path already used by Complete. Publish before discovery/disk/network; persist before sending. Derive presentation from immutable commands and current receipt evidence. Bind identities in place without reply-driven navigation or fake wire records. Keep attachment and input with native owners.</p>
+<p>Import phone submission/outcome/savedRequests into the existing SQLite owner before deleting their writers. Preserve original Machine, ID, words and result; validate matching outbox records without resetting send history. Keep unreadable or conflicting sources recoverable, and sources until commit. Legacy records without send evidence follow lookup/inspection policy. Editor text remains a draft.</p>
+<p>Replace Desktop launch/checkpoint ownership and phone sheet-owned actions and recovery lists together. A result mount acknowledges what was displayed; a sheet callback cannot establish presentation, query incorporation or readiness. Keep the bounded query working set and scoped floors.</p>
 </details>
 <h2>Questions for the next implementation check</h2>
 <ol>
-<li>Does closing one of two same-query mounts leave the other current?<br><strong>1a.</strong> Keep this covered behavior. <strong>1b.</strong> Repair any regression.</li>
-<li>Can a closed query release exact resolved effects while retaining its required confirmation?<br><strong>2a.</strong> Demonstrated through restart and reordered replies. <strong>2b.</strong> Implement atomic invalidation and reload. Current direction: 2b.</li>
-<li>Do many closed expressions and repeated completions leave bounded reusable entries and compact obligations?<br><strong>3a.</strong> Demonstrated without weakening recovery. <strong>3b.</strong> Bound retention and exercise the counterexample. Current direction: 3b.</li>
+<li>Do both production Start actions select submitted words before held save/admission?<br><strong>1a.</strong> Demonstrated. <strong>1b.</strong> Complete the shared handoff. Current direction: 1b.</li>
+<li>Do departure, failed attachment and restart recover the same operation and Session?<br><strong>2a.</strong> Demonstrated on both hosts. <strong>2b.</strong> Repair the ownership gap before cutover.</li>
+<li>Can legacy phone requests migrate without losing a result, resetting send evidence or overwriting a newer draft?<br><strong>3a.</strong> Demonstrated across import crashes and conflicts. <strong>3b.</strong> Implement transactional import before deleting old writers. Current direction: 3b.</li>
 </ol>
-<p><small>Headless outcome: design changed → iterate to implement. Retain refusal, supersession, epoch and origin-order coverage. Launch, other mutation families, normalized provenance, retained native content and valid latency measurements remain in scope. No publish or merge.</small></p>
+<p><small>Headless outcome: design changed → iterate to implement. No code changed or builds ran in this review. Wider mutation/provenance and retained-native cutover remain open; native latency remains unmeasured. No publish or merge.</small></p>
 </main>
 </html>

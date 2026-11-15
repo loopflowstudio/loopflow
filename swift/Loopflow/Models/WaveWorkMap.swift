@@ -98,11 +98,6 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
         }
     }
 
-    public var historyLabel: String? {
-        isSuccessful && completedAt == nil ? "Completed · date unavailable" : terminalLabel
-    }
-
-    public var isTerminal: Bool { isSuccessful || state == "canceled" || state == "duplicate" }
     public var isSuccessful: Bool { state == "completed" }
 }
 
@@ -207,6 +202,10 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
 
     public let task: TaskPlanningSnapshot
     public let reference: TaskReferenceSnapshot
+    /// Effective lifecycle, including planning withdrawal of never-started work.
+    public let lifecycle: TaskState
+    /// The same states Rust uses for Task selections and conversation activity.
+    public let selectionStates: Set<WorkSelectionState>
     public let runtime: TaskRuntimeSnapshot?
     public let nextMove: WorkNextMove
     public let condition: TaskConditionSnapshot
@@ -222,7 +221,8 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     public let section: TaskSection
 
     enum CodingKeys: String, CodingKey {
-        case task, reference, runtime, condition, actions, execution, section, pr
+        case task, reference, runtime, condition, actions, execution, section, pr, lifecycle
+        case selectionStates = "selection_states"
         case graphName = "graph_name"
         case graphSource = "graph_source"
         case latestGraphProcess = "latest_graph_process"
@@ -235,7 +235,7 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     /// A started Task nobody owns: nothing moves it until someone claims it.
     public var isUnassigned: Bool {
         guard let runtime else { return false }
-        return runtime.owner == nil && runtime.status != .unstarted && !runtime.status.isTerminal
+        return runtime.owner == nil && lifecycle != .unstarted && !lifecycle.isTerminal
     }
 
     // What a Task's Session slot does follows its state alone, never its owner:
@@ -243,14 +243,19 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
 
     /// Not yet started and still open: it has no checkout, so no conversation to
     /// open, and its Session slot offers Start instead.
-    public var awaitsStart: Bool { (runtime?.status ?? .unstarted) == .unstarted && !task.isTerminal }
+    public var awaitsStart: Bool { lifecycle == .unstarted }
 
-    public var isCompleted: Bool { runtime?.status.isTerminal ?? task.isTerminal }
+    /// Completion dates may be unknown even when the lifecycle is settled.
+    public var historyLabel: String {
+        lifecycle == .done && task.completedAt == nil ? "Done · date unavailable" : lifecycle.label
+    }
+
+    public var isCompleted: Bool { lifecycle.isTerminal }
 
     /// Working Tasks start their conversation when opened, owned or not: opening
     /// claims nothing. Unstarted and finished Tasks only show history.
     public var conversationIntent: SessionOpenIntent {
-        runtime?.status.isWorking == true ? .start : .reveal
+        lifecycle.isWorking ? .start : .reveal
     }
 }
 

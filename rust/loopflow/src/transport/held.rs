@@ -16,7 +16,7 @@ use crate::server::holder::Place;
 use loopflow_model::id::TerminalId;
 
 use super::hosted::Chunk;
-use super::input::PendingInput;
+use super::input::{Paste, PendingInput};
 
 /// The first wait before asking a holder again; it doubles to `RETRY_LIMIT`.
 const RETRY: Duration = Duration::from_millis(100);
@@ -55,6 +55,8 @@ pub(super) struct Source {
     at: u64,
     output: Option<(UnixStream, Decoder)>,
     input: Option<UnixStream>,
+    input_paste: Paste,
+    input_resume: VecDeque<u8>,
     /// Requests that need no answer read: resize and restore.
     requests: Option<UnixStream>,
     unsent: VecDeque<u8>,
@@ -77,6 +79,8 @@ impl Source {
             at,
             output: None,
             input: None,
+            input_paste: Paste::default(),
+            input_resume: VecDeque::new(),
             requests: None,
             unsent: VecDeque::new(),
             raw: false,
@@ -265,10 +269,21 @@ impl Source {
         if self.input.is_none() && self.may_connect() && !pending.is_empty() {
             let opened = Client::connect_within(&self.place, CONNECT)
                 .map_err(anyhow::Error::from)
-                .and_then(|client| client.write(self.terminal.as_str()))
-                .and_then(|socket| Ok(socket.set_nonblocking(true).map(|()| socket)?));
+                .and_then(|mut client| {
+                    let closes_pastes = client.hello()?.revision >= 2;
+                    let socket = client.write(self.terminal.as_str())?;
+                    socket.set_nonblocking(true)?;
+                    Ok((socket, closes_pastes))
+                });
             match opened {
-                Ok(socket) => self.input = Some(socket),
+                Ok((socket, closes_pastes)) => {
+                    self.input_resume = if closes_pastes {
+                        self.input_paste.resume().into()
+                    } else {
+                        VecDeque::new()
+                    };
+                    self.input = Some(socket);
+                }
                 Err(_) => self.lost(),
             }
         }
@@ -456,8 +471,21 @@ impl Write for Input<'_> {
         let Some(socket) = self.0.input.as_mut() else {
             return Err(io::ErrorKind::WouldBlock.into());
         };
-        match socket.write(bytes) {
-            Ok(n) if n > 0 => Ok(n),
+        let restoring = !self.0.input_resume.is_empty();
+        let sending = if restoring {
+            self.0.input_resume.as_slices().0
+        } else {
+            bytes
+        };
+        match socket.write(sending) {
+            Ok(n) if n > 0 && restoring => {
+                self.0.input_resume.drain(..n);
+                Err(io::ErrorKind::WouldBlock.into())
+            }
+            Ok(n) if n > 0 => {
+                self.0.input_paste.observe(&bytes[..n]);
+                Ok(n)
+            }
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => Err(e),
             _ => {
                 self.0.input = None;
@@ -469,5 +497,90 @@ impl Write for Input<'_> {
 
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::os::unix::net::UnixListener;
+
+    use super::Source;
+    use crate::id::TerminalId;
+    use crate::server::holder::wire::{Answer, Request};
+    use crate::server::holder::Place;
+    use crate::transport::input::PendingInput;
+
+    #[test]
+    fn a_reopened_holder_connection_keeps_the_unsent_tail_inside_a_paste() {
+        for revision in [1, 2] {
+            let directory = tempfile::tempdir_in("/tmp").unwrap();
+            let place = Place {
+                socket: directory.path().join("holder.sock"),
+                lock: directory.path().join("holder.lock"),
+                state: directory.path().join("state"),
+            };
+            let listener = UnixListener::bind(&place.socket).unwrap();
+            let peer = std::thread::spawn(move || {
+                let mut received = Vec::new();
+                for _ in 0..2 {
+                    let (socket, _) = listener.accept().unwrap();
+                    socket
+                        .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+                        .unwrap();
+                    let mut socket = BufReader::new(socket);
+                    for greeting in [true, false] {
+                        let mut line = String::new();
+                        socket.read_line(&mut line).unwrap();
+                        let request: Request = serde_json::from_str(&line).unwrap();
+                        let answer = if greeting {
+                            assert!(matches!(request, Request::Hello { .. }));
+                            Answer::Welcome {
+                                revision,
+                                build: "fixture".into(),
+                                pid: 1,
+                            }
+                        } else {
+                            assert!(matches!(request, Request::Write { .. }));
+                            Answer::Writing
+                        };
+                        socket
+                            .get_mut()
+                            .write_all(&crate::server::holder::wire::line(&answer))
+                            .unwrap();
+                    }
+                    let mut bytes = Vec::new();
+                    socket.read_to_end(&mut bytes).unwrap();
+                    received.push(bytes);
+                }
+                received
+            });
+            let mut source = Source::new(place, TerminalId::new(), 1, 0);
+            let mut pending = PendingInput::default();
+            pending.push(b"\x1b[200~one");
+            source.forward(&mut pending);
+            assert!(pending.is_empty());
+            // The input socket went away while the same server still holds the queue.
+            drop(source.input.take());
+            pending.push(b"\ntwo\x1b[201~");
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while !pending.is_empty() {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "holder did not accept the paste tail"
+                );
+                source.forward(&mut pending);
+            }
+            drop(source);
+            let received = peer.join().unwrap();
+            assert_eq!(received[0], b"\x1b[200~one");
+            let expected: &[u8] = if revision == 2 {
+                b"\x1b[200~\ntwo\x1b[201~"
+            } else {
+                // Old holders leave the native paste open across writer loss.
+                b"\ntwo\x1b[201~"
+            };
+            assert_eq!(received[1], expected);
+        }
     }
 }

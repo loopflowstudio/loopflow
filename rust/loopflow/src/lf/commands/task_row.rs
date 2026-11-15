@@ -143,8 +143,8 @@ impl TaskNames {
     }
 
     pub(crate) fn row(&self, task: RoadmapTask) -> TaskRow {
-        let state = super::waves::task_state(&task);
-        let next = next_command(&task, state);
+        let state = task.lifecycle;
+        let next = next_command(&task);
         let summary = task.task;
         TaskRow {
             wave: summary
@@ -180,9 +180,9 @@ impl TaskNames {
     }
 }
 
-fn next_command(task: &RoadmapTask, state: TaskState) -> Option<String> {
+fn next_command(task: &RoadmapTask) -> Option<String> {
     let id = &task.task.identifier;
-    match state {
+    match task.lifecycle {
         TaskState::Done | TaskState::Abandoned | TaskState::Moving | TaskState::Shipping => None,
         _ if task
             .pr

@@ -44,12 +44,9 @@ struct WaveStandup: Equatable {
 
     /// `tasks` fill Backlog, Working and Autonomous; `closed` fills Done. Today both come from the
     /// Wave roadmap; LOO-604 moves closed Tasks to `lf task list --done`, which then
-    /// becomes `closed` alone. `github` maps lowercase owner emails to their users;
-    /// `sessions` names each started Task's Session attention.
-    init(tasks: [RoadmapTask], closed: [RoadmapTask], doneDays: Int, now: Date, github: [String: GitHubPerson],
-         sessions: [String: SessionAttention]) {
+    /// becomes `closed` alone. `github` maps lowercase owner emails to their users.
+    init(tasks: [RoadmapTask], closed: [RoadmapTask], doneDays: Int, now: Date, github: [String: GitHubPerson]) {
         self.doneDays = doneDays
-        let ranked = tasks.sorted { $0.task.rank < $1.task.rank }
         let since = now.addingTimeInterval(-Double(doneDays) * 86_400)
         var emails: [String: String] = [:]
         for owner in (tasks + closed).compactMap({ $0.runtime?.owner }) {
@@ -69,15 +66,16 @@ struct WaveStandup: Equatable {
         }.sorted { ($0.task.completedAt ?? "") > ($1.task.completedAt ?? "") }
             .map { Row(task: $0, person: person($0), note: nil, session: nil) }
         func started(_ section: TaskSection) -> [Row] {
-            ranked.filter { $0.section == section }.map { task in
+            tasks.filter { $0.section == section }.map { task in
                 let note = task.pr?.phase == .merged ? "merged" : task.nextMove.reason
                 return Row(task: task, person: person(task), note: note.isEmpty ? nil : note,
-                           session: sessions[task.id])
+                           session: task.selectionStates.contains(.available) ? .available
+                            : task.selectionStates.contains(.busy) ? .busy : nil)
             }
         }
         working = started(.working)
         autonomous = started(.autonomous)
-        backlog = ranked.filter { $0.section == .backlog }
+        backlog = tasks.filter { $0.section == .backlog }
             .map { Row(task: $0, person: nil, note: nil, session: nil) }
         showsPeople = Set((working + autonomous + done).compactMap { $0.person?.key }).count >= 2
     }

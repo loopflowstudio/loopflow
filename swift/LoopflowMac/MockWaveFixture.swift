@@ -233,7 +233,7 @@ enum MockWaveFixture {
                   "provider": "codex",
                   "owner": {"person": "Jack Heart", "person_id": null, "machine": {"id": null, "label": null}}
                 },
-                "graph_name":"feature","graph_source":"wave","latest_graph_process":null,"execution":null,"run_control":{"unavailable":null},
+                "graph_name":"feature","graph_source":"wave","latest_graph_process":null,"execution":null,"lifecycle":"unstarted","selection_states":["unstarted","backlog"],"run_control":{"unavailable":null},
                 "ship_control":{"unavailable":null},"shipping":null,
                 "next_move": {
                   "owner": "user",
@@ -309,7 +309,7 @@ enum MockWaveFixture {
                   "workspace": null
                 },
                 "runtime": null,
-                "graph_name":"feature","graph_source":"wave","latest_graph_process":null,"execution":null,"run_control":{"unavailable":null},
+                "graph_name":"feature","graph_source":"wave","latest_graph_process":null,"execution":null,"lifecycle":"unstarted","selection_states":["unstarted","backlog"],"run_control":{"unavailable":null},
                 "ship_control":{"unavailable":null},"shipping":null,
                 "next_move": {
                   "owner": "wave",

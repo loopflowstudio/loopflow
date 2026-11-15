@@ -10,8 +10,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-/// The protocol this build's holder speaks.
-pub const REVISION: u32 = 1;
+/// Revision 2 closes an unfinished paste when its input writer disconnects.
+pub const REVISION: u32 = 2;
 /// The largest stream frame a holder emits.
 pub(super) const CHUNK: usize = 64 * 1024;
 /// The largest request line a holder accepts; a `start` carries a whole environment.

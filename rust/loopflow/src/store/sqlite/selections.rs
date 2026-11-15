@@ -77,46 +77,25 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
         kind,
         id,
     };
-    let mut work = vec![SelectionWork {
+    let repository_work = SelectionWork {
         key: key(WorkWorkspaceKind::Repository, repository.to_string()),
         parent_wave: None,
-        open: None,
         name: repo.clone(),
         states: BTreeSet::new(),
         activity_known: false,
-    }];
+    };
+    let mut wave_work = Vec::with_capacity(waves.len());
     for wave in &waves {
-        work.push(SelectionWork {
+        wave_work.push(SelectionWork {
             key: key(WorkWorkspaceKind::Wave, wave.id().to_string()),
             parent_wave: wave.parent_wave_id().cloned(),
-            open: None,
             name: wave.name().to_string(),
             states: BTreeSet::new(),
             activity_known: false,
         });
     }
-    let mut tasks = super::children::repository_tasks_in(conn, repository)?;
-    tasks.sort_by(|a, b| (a.rank, a.id.as_str()).cmp(&(b.rank, b.id.as_str())));
-    let sessions = super::sessions::session_summaries_in(
-        conn,
-        &crate::session::SessionFilter {
-            repo: Some(repo),
-            limit: 0,
-            after: Some(String::new()),
-            ..Default::default()
-        },
-        time::OffsetDateTime::now_utc().unix_timestamp(),
-        "[]",
-    )?;
-    let mut sessions_by_task = HashMap::<_, Vec<_>>::new();
-    for session in sessions
-        .iter()
-        .filter(|session| session.completed_at.is_none())
-    {
-        for task in &session.task_ids {
-            sessions_by_task.entry(task).or_default().push(session);
-        }
-    }
+    let tasks = super::children::repository_tasks_in(conn, repository)?;
+    let reading = task_selection_in(conn, repository, &repo)?;
     // State, publication and ownership for every Task in a fixed number of
     // statements: a query per Task costs thousands on a large repository.
     let ids: Vec<_> = tasks.iter().map(|task| task.id.clone()).collect();
@@ -126,82 +105,175 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
     )?;
     let published = super::project_adoption::published_in(conn, &ids)?;
     let owners = super::task_ownership::owners_in(conn, &ids)?;
+    let mut task_work = Vec::with_capacity(tasks.len());
     for task in tasks {
         let state = *task_states
             .get(&task.id)
             .ok_or_else(|| invalid(format!("Task {} has no state", task.id)))?;
         let owned = owners.contains_key(&task.id);
-        // Started as `task_started_or_published_in` defines it.
-        let started = owned || published.contains(&task.id);
-        let open = started && !state.is_terminal();
-        let mut states = BTreeSet::new();
-        if open {
-            states.insert(SelectionState::Open);
-        }
-        states.insert(match state {
-            TaskState::Unstarted => SelectionState::Unstarted,
-            TaskState::Idle => SelectionState::Idle,
-            TaskState::Active => SelectionState::Active,
-            TaskState::Moving => SelectionState::Moving,
-            TaskState::Shipping => SelectionState::Shipping,
-            TaskState::Done | TaskState::Abandoned => SelectionState::Done,
-        });
-        let section = TaskSection::of(state, owned, task.state.as_deref());
-        states.insert(match section {
-            TaskSection::Backlog => SelectionState::Backlog,
-            TaskSection::Working => SelectionState::Working,
-            TaskSection::Autonomous => SelectionState::Autonomous,
-            TaskSection::Done | TaskSection::Abandoned => SelectionState::Done,
-        });
-        let mut activity_known = true;
-        for session in sessions_by_task.get(&task.id).into_iter().flatten() {
+        let states = task_selection_states(
+            state,
+            owned,
+            published.contains(&task.id),
+            task.state.as_deref(),
+            reading.activity.get(&task.id),
+        );
+        let activity_known = reading
+            .activity
+            .get(&task.id)
+            .is_none_or(|activity| activity.known);
+        let order = reading.order.key(task.id.as_str(), task.rank, &states);
+        task_work.push((
+            order,
+            SelectionWork {
+                key: key(WorkWorkspaceKind::Task, task.id.to_string()),
+                parent_wave: task.wave_id,
+                name: task.identifier,
+                states,
+                activity_known,
+            },
+        ));
+    }
+    task_work.sort_by(|left, right| left.0.cmp(&right.0));
+    // Tasks precede the already alphabetized Waves, then the repository.
+    Ok(task_work
+        .into_iter()
+        .map(|(_, task)| task)
+        .chain(wave_work)
+        .chain([repository_work])
+        .collect())
+}
+
+/// Conversation activity is independent of Task lifecycle and ownership.
+#[derive(Debug, Clone)]
+pub(crate) struct TaskActivity {
+    states: BTreeSet<SelectionState>,
+    known: bool,
+}
+
+/// Shared repository ordering and conversation facts; read once for each plan.
+#[derive(Debug)]
+pub(crate) struct TaskSelectionReading {
+    pub order: TaskOrder,
+    pub activity: HashMap<crate::durable::TaskId, TaskActivity>,
+}
+
+#[derive(Debug)]
+pub(crate) struct TaskOrder(HashMap<String, usize>);
+
+impl TaskOrder {
+    pub fn key(
+        &self,
+        id: &str,
+        rank: u32,
+        states: &BTreeSet<SelectionState>,
+    ) -> (usize, bool, u32, String) {
+        let waiting = states.contains(&SelectionState::Available)
+            || states.contains(&SelectionState::Blocked);
+        (
+            self.0.get(id).copied().unwrap_or(usize::MAX),
+            !waiting,
+            rank,
+            id.to_owned(),
+        )
+    }
+}
+
+/// The same lifecycle, section and activity set for roadmap rows and selections.
+pub(crate) fn task_selection_states(
+    runtime: TaskState,
+    owned: bool,
+    published: bool,
+    plan_state: Option<&str>,
+    activity: Option<&TaskActivity>,
+) -> BTreeSet<SelectionState> {
+    let state = runtime.lifecycle(plan_state);
+    let mut states = activity.map_or_else(BTreeSet::new, |activity| activity.states.clone());
+    if (owned || published) && !state.is_terminal() {
+        states.insert(SelectionState::Open);
+    }
+    states.insert(match state {
+        TaskState::Unstarted => SelectionState::Unstarted,
+        TaskState::Idle => SelectionState::Idle,
+        TaskState::Active => SelectionState::Active,
+        TaskState::Moving => SelectionState::Moving,
+        TaskState::Shipping => SelectionState::Shipping,
+        TaskState::Done | TaskState::Abandoned => SelectionState::Done,
+    });
+    states.insert(match TaskSection::of(runtime, owned, plan_state) {
+        TaskSection::Backlog => SelectionState::Backlog,
+        TaskSection::Working => SelectionState::Working,
+        TaskSection::Autonomous => SelectionState::Autonomous,
+        TaskSection::Done | TaskSection::Abandoned => SelectionState::Done,
+    });
+    states
+}
+
+fn task_selection_in(
+    conn: &Connection,
+    repository: &RepositoryId,
+    repo: &str,
+) -> StoreResult<TaskSelectionReading> {
+    let sessions = super::sessions::session_summaries_in(
+        conn,
+        &crate::session::SessionFilter {
+            repo: Some(repo.to_owned()),
+            limit: 0,
+            after: Some(String::new()),
+            ..Default::default()
+        },
+        time::OffsetDateTime::now_utc().unix_timestamp(),
+        "[]",
+    )?;
+    let mut activity = HashMap::<_, TaskActivity>::new();
+    for session in sessions
+        .iter()
+        .filter(|session| session.completed_at.is_none())
+    {
+        for task in &session.task_ids {
+            let activity = activity
+                .entry(task.clone())
+                .or_insert_with(|| TaskActivity {
+                    states: BTreeSet::new(),
+                    known: true,
+                });
             // A conversation Loopflow never attached cannot be running here.
             if session.agent_process_id.is_some()
                 && session.agent_process_evidence
                     == crate::journal::ProcessIdentityEvidence::Unknown
             {
-                activity_known = false;
+                activity.known = false;
             }
             if session.available {
-                states.insert(SelectionState::Available);
+                activity.states.insert(SelectionState::Available);
             }
-            if let Some(status) = &session.program_status {
-                for report in &status.records {
-                    match report.state {
-                        loopflow_model::program_status::State::Working => {
-                            states.insert(SelectionState::Busy);
-                        }
-                        loopflow_model::program_status::State::Blocked => {
-                            states.insert(SelectionState::Blocked);
-                        }
-                        _ => {}
+            for report in session
+                .program_status
+                .iter()
+                .flat_map(|status| &status.records)
+            {
+                match report.state {
+                    loopflow_model::program_status::State::Working => {
+                        activity.states.insert(SelectionState::Busy);
                     }
+                    loopflow_model::program_status::State::Blocked => {
+                        activity.states.insert(SelectionState::Blocked);
+                    }
+                    _ => {}
                 }
             }
         }
-        work.push(SelectionWork {
-            key: key(WorkWorkspaceKind::Task, task.id.to_string()),
-            parent_wave: task.wave_id,
-            open: Some(open),
-            name: task.identifier,
-            states,
-            activity_known,
-        });
     }
-    // The person's Task order comes first; Tasks it does not name follow, waiting
-    // first. Stable sorting retains rank/ID within each attention class.
-    let order = task_order_in(conn, repository)?;
-    work.sort_by_key(|item| match item.key.kind {
-        WorkWorkspaceKind::Task => {
-            let waiting = item.states.contains(&SelectionState::Available)
-                || item.states.contains(&SelectionState::Blocked);
-            let position = order.iter().position(|id| id == &item.key.id);
-            (0, position.unwrap_or(usize::MAX), u8::from(!waiting))
-        }
-        WorkWorkspaceKind::Wave => (1, 0, 0),
-        WorkWorkspaceKind::Repository => (2, 0, 0),
-    });
-    Ok(work)
+    Ok(TaskSelectionReading {
+        order: TaskOrder(
+            task_order_in(conn, repository)?
+                .into_iter()
+                .enumerate()
+                .map(|(position, id)| (id, position))
+                .collect(),
+        ),
+        activity,
+    })
 }
 
 fn task_order_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<String>> {
@@ -586,6 +658,21 @@ impl SqliteStore {
             selection,
             &catalog_in(&snapshot, repository)?,
         )
+    }
+
+    /// Shared conversation activity and ordering, without loading unrelated Tasks.
+    pub(crate) fn task_selection_reading(
+        &self,
+        repository: &RepositoryId,
+    ) -> StoreResult<TaskSelectionReading> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let snapshot = conn.savepoint()?;
+        let repo: String = snapshot.query_row(
+            "SELECT repo FROM repository_plans WHERE id=?1",
+            [repository.as_str()],
+            |row| row.get(0),
+        )?;
+        task_selection_in(&snapshot, repository, &repo)
     }
 
     pub fn dashboards(&self, repository: &RepositoryId) -> StoreResult<Vec<Dashboard>> {
@@ -1034,6 +1121,41 @@ mod tests {
             store.read_dashboard(&repo, &id).unwrap().unwrap().saved,
             moved
         );
+    }
+
+    #[test]
+    fn owned_unstarted_task_is_open_but_excluded_from_working_queries() {
+        let (_dir, store, repo) = fixture();
+        let task = "task_33333333333333333333333333333333";
+        store.conn.lock().unwrap().execute(
+            "INSERT INTO task_ownership(id,task_id,kind,person,machine_id,at,ordered_at,written_here)
+             VALUES('own_33333333333333333333333333333333',?1,'recorded',NULL,NULL,2,2000,1)",
+            [task],
+        ).unwrap();
+        for expression in [
+            None,
+            Some("state:working"),
+            Some("wave:Product state:working"),
+        ] {
+            let plan = store.view_plan(&repo, expression).unwrap();
+            assert_eq!(
+                plan.resolution.task_ids(),
+                ["task_22222222222222222222222222222222"]
+            );
+            assert!(plan.resolution.unavailable.is_empty());
+        }
+        for expression in [
+            "state:open",
+            "wave:Product state:open",
+            "state:unstarted state:backlog",
+        ] {
+            let plan = store.view_plan(&repo, Some(expression)).unwrap();
+            assert!(
+                plan.resolution.task_ids().iter().any(|id| id == task),
+                "{expression}"
+            );
+            assert!(plan.resolution.unavailable.is_empty());
+        }
     }
 
     #[test]

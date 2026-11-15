@@ -29,19 +29,15 @@ struct WorkProjection {
 
     init(roadmaps: [WaveRoadmap], inventory: [RoadmapTask], sessions: [SessionRecord]) {
         var matched = Set<String>()
-        let visibleTaskIds = Set(inventory.flatMap { [$0.id, $0.runtime?.workId].compactMap { $0 } })
+        let visibleTaskIds = Set(inventory.map(\.id))
         var taskSessions: [String: [SessionRecord]] = [:]
         var waveSessions: [String: [SessionRecord]] = [:]
         // Index the shared memberships once. A Session may belong to more than
         // one Task; workspace and explicit membership must not duplicate a row.
         for session in sessions {
-            var taskIds = Set(session.taskIds)
-            if let taskId = session.workspace?.taskId { taskIds.insert(taskId) }
-            let visibleMemberships = taskIds.intersection(visibleTaskIds)
-            if session.primaryScope == nil {
-                for taskId in visibleMemberships {
-                    taskSessions[taskId, default: []].append(session)
-                }
+            let visibleMemberships = Set(session.taskIds).intersection(visibleTaskIds)
+            for taskId in visibleMemberships {
+                taskSessions[taskId, default: []].append(session)
             }
             if visibleMemberships.isEmpty {
                 let waveId = session.work?.kind == .wave ? session.work?.id
@@ -57,8 +53,8 @@ struct WorkProjection {
                 id: WorkNodeKey(repo: repo, work: .wave(id: wave.wave.id)),
                 roadmap: wave,
                 sessions: records,
-                tasks: wave.tasks.items.sorted { $0.task.rank < $1.task.rank }.map { task in
-                    let records = task.runtime.flatMap { taskSessions[$0.workId] } ?? []
+                tasks: wave.tasks.items.map { task in
+                    let records = taskSessions[task.id] ?? []
                     matched.formUnion(records.map(\.id))
                     return TaskProjection(
                         id: WorkNodeKey(repo: repo, work: .task(id: task.id)),
@@ -67,8 +63,8 @@ struct WorkProjection {
                 }
             )
         }
-        standaloneTasks = inventory.filter { $0.task.waveId == nil }.sorted { $0.task.rank < $1.task.rank }.map { task in
-            let records = taskSessions[task.runtime?.workId ?? task.id] ?? []
+        standaloneTasks = inventory.filter { $0.task.waveId == nil }.map { task in
+            let records = taskSessions[task.id] ?? []
             matched.formUnion(records.map(\.id))
             return TaskProjection(id: WorkNodeKey(repo: task.task.repo, work: .task(id: task.id)), task: task, sessions: records)
         }
@@ -105,7 +101,7 @@ struct WorkProjection {
         }
         guard let selection else { return nil }
         if let task = standaloneTasks.first(where: {
-            $0.id.work == selection || $0.task.runtime.map { WorkReference.task(id: $0.workId) } == selection
+            $0.id.work == selection
         }) {
             return WorkBreadcrumb(wave: nil, task: task, session: nil, siblings: task.sessions)
         }
@@ -114,7 +110,7 @@ struct WorkProjection {
                 return WorkBreadcrumb(wave: wave, task: nil, session: nil, siblings: wave.sessions)
             }
             if let task = wave.tasks.first(where: {
-                $0.id.work == selection || $0.task.runtime.map { WorkReference.task(id: $0.workId) } == selection
+                $0.id.work == selection
             }) {
                 return WorkBreadcrumb(wave: wave, task: task, session: nil, siblings: task.sessions)
             }
@@ -133,7 +129,7 @@ struct WorkProjection {
         guard let session = unmatchedSessions.first(where: { $0.id == sessionId }) else { return nil }
         if session.primaryScope == "repository" { return nil }
         if session.primaryScope == "wave" { return session.waveId.map { .wave(id: $0) } }
-        return session.workspace?.taskId.map { .task(id: $0) } ?? session.work
+        return session.taskIds.first.map { .task(id: $0) } ?? session.work
     }
 }
 
@@ -151,10 +147,8 @@ struct WorkBreadcrumb {
     }
 
     var taskWork: WorkReference? {
-        guard session?.primaryScope == nil else { return nil }
         if let task { return task.id.work }
-        if let id = session?.workspace?.taskId { return .task(id: id) }
-        if let work = session?.work, work.kind == .task { return work }
+        if let id = session?.taskIds.first { return .task(id: id) }
         return nil
     }
 }

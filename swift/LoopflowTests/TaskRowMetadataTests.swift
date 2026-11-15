@@ -9,14 +9,22 @@ import ViewInspector
 @Suite("Sidebar Task metadata")
 @MainActor
 struct TaskRowMetadataTests {
-    @Test("Validated reports win over runtime inference", arguments: [ProgramStatusState.idle, .working, .done, .blocked, .error])
-    func reportedStatus(state: ProgramStatusState) throws {
+    @Test("Validated reports win over runtime inference", arguments: [
+        (ProgramStatusState.idle, "Available"), (.working, "Busy"), (.done, "Done"),
+        (.blocked, "Blocked"), (.error, "Error"),
+    ])
+    func reportedStatus(state: ProgramStatusState, label: String) throws {
         let report = ProgramStatusReport(state: state, id: "worker", kind: nil, progress: nil,
                                          app: "cargo", title: nil, msg: "**literal**\u{202E}")
         let reporting = try session("reporter", status: ProgramStatusRecords(seen: true, records: [report]))
         let waiting = try session("waiting", availability: .available)
         let status = SessionProgramStatus(sessions: [waiting, reporting], unavailable: nil)
-        #expect(status.label == state.rawValue.capitalized)
+        #expect(status.label == label)
+        let task = try #require(roadmap().waves.first?.tasks.items[1])
+        let row = TaskRowMetadata(id: task.id, task: task, status: status)
+        #expect(try row.inspect().find(text: label).string() == label)
+        let pane = ProgramStatusLabel(status: try #require(reporting.programStatus))
+        #expect(try pane.inspect().find(text: "\(label) · **literal**").string() == "\(label) · **literal**")
         #expect(status.help.contains("reporter"))
         #expect(status.help.contains("**literal**"))
         #expect(!status.help.contains("\u{202E}"))
@@ -221,9 +229,9 @@ struct TaskRowMetadataTests {
         value["id"] = id
         value["title"] = id
         value["state"] = state.rawValue
-        value["task_ids"] = ["ts_review00000000000000000000000000"]
+        value["task_ids"] = ["issue-review"]
         var workspace = try #require(value["workspace"] as? [String: Any])
-        workspace["task_id"] = "ts_review00000000000000000000000000"
+        workspace["task_id"] = "issue-review"
         value["workspace"] = workspace
         value["availability"] = availability?.rawValue ?? NSNull() as Any
         value["program_status"] = try status.map { try JSONSerialization.jsonObject(with: JSONEncoder().encode($0)) } ?? NSNull()

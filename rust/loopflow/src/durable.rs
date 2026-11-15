@@ -125,6 +125,15 @@ impl TaskState {
         )
     }
 
+    /// Planning withdraws never-started work; started work follows execution.
+    pub fn lifecycle(self, plan_state: Option<&str>) -> Self {
+        match (self, plan_state) {
+            (Self::Unstarted, Some("completed")) => Self::Done,
+            (Self::Unstarted, Some("canceled" | "duplicate")) => Self::Abandoned,
+            _ => self,
+        }
+    }
+
     /// The Task as Work: open until it is done or abandoned.
     pub(crate) fn work_status(&self) -> WorkStatus {
         match self {
@@ -154,14 +163,10 @@ impl TaskSection {
     /// `owned`: someone holds the Task's claim. `plan_state` is planning's state
     /// type; closing a Task there withdraws it only if it never started.
     pub fn of(state: TaskState, owned: bool, plan_state: Option<&str>) -> Self {
-        match state {
+        match state.lifecycle(plan_state) {
             TaskState::Done => Self::Done,
             TaskState::Abandoned => Self::Abandoned,
-            TaskState::Unstarted => match plan_state {
-                Some("completed") => Self::Done,
-                Some("canceled" | "duplicate") => Self::Abandoned,
-                _ => Self::Backlog,
-            },
+            TaskState::Unstarted => Self::Backlog,
             _ if !owned => Self::Backlog,
             TaskState::Shipping => Self::Autonomous,
             TaskState::Idle | TaskState::Active | TaskState::Moving => Self::Working,
@@ -250,6 +255,29 @@ impl GraphStepProcess {
 #[cfg(test)]
 mod tests {
     use super::{TaskSection, TaskState};
+
+    #[test]
+    fn lifecycle_withdraws_only_never_started_work() {
+        for (planning, terminal) in [
+            ("completed", TaskState::Done),
+            ("canceled", TaskState::Abandoned),
+            ("duplicate", TaskState::Abandoned),
+        ] {
+            assert_eq!(TaskState::Unstarted.lifecycle(Some(planning)), terminal);
+            for runtime in [
+                TaskState::Idle,
+                TaskState::Active,
+                TaskState::Moving,
+                TaskState::Shipping,
+            ] {
+                assert_eq!(runtime.lifecycle(Some(planning)), runtime);
+                assert_eq!(
+                    TaskSection::of(runtime, false, Some(planning)),
+                    TaskSection::Backlog
+                );
+            }
+        }
+    }
 
     #[test]
     fn task_sections_put_unassigned_and_withdrawn_tasks_where_the_board_does() {

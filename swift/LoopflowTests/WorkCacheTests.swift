@@ -931,6 +931,7 @@ private actor Source {
             row["task"] = task
             var runtime = row["runtime"] as! [String: Any]
             runtime["work_id"] = "prefetch-\(index)"
+            row["lifecycle"] = state
             runtime["status"] = state
             runtime["updated_at"] = String(format: "2026-11-04T10:00:%02dZ", index)
             runtime["owner"] = index == states.count - 1 ? NSNull() : [
@@ -960,6 +961,7 @@ private actor Source {
             var runtime = item["runtime"] as! [String: Any]
             runtime["status"] = "idle"
             item["runtime"] = runtime
+            item["lifecycle"] = "idle"
             return item
         }
         wire["tasks"] = inventory
@@ -976,6 +978,7 @@ private actor Source {
                 var runtime = item["runtime"] as! [String: Any]
                 runtime["status"] = "done"
                 item["runtime"] = runtime
+                item["lifecycle"] = "done"
                 return item
             }
             return inventory

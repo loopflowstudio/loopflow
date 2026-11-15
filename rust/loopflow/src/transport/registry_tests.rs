@@ -143,6 +143,50 @@ fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
 }
 
 #[test]
+fn an_interrupted_paste_ends_before_the_next_view_types() {
+    for interruption in ["disconnect", "replace", "restart"] {
+        let _ledger = TestLedgerGuard::new();
+        let place = holder();
+        let mut registry = Registry::open(BUILD).unwrap();
+        let terminal = registry
+            .start(shell(
+                None,
+                "interrupted-paste",
+                "stty raw -echo; printf '\\r\\nready\\r\\n'; dd bs=1 count=9 2>/dev/null | od -An -tx1; printf '\\r\\nprefix\\r\\n'; dd bs=1 count=6 2>/dev/null | od -An -tx1; printf '\\r\\nclosed\\r\\n'; read line; printf '\\r\\nreply:%s\\r\\n' \"$line\"",
+            ))
+            .unwrap();
+        let mut first = View::attach(&terminal);
+        first.wait_for("ready");
+        first.type_in(b"\x1b[200~abc");
+        first.wait_for("prefix");
+        let mut next = if interruption == "replace" {
+            View::attach(&terminal)
+        } else {
+            if interruption == "restart" {
+                registry.close();
+                registry = Registry::open(BUILD).unwrap();
+            }
+            drop(first);
+            View::attach(&terminal)
+        };
+        next.wait_for("closed");
+        assert!(String::from_utf8_lossy(&next.seen)
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .contains("1b 5b 32 30 31 7e"));
+        next.type_in(b"next\n");
+        next.wait_for("reply:next");
+        wait_until("paste child exit receipt", || {
+            crate::server::holder::recorded_exit(&place, terminal.as_str())
+                .unwrap()
+                .is_some()
+        });
+        registry.close();
+    }
+}
+
+#[test]
 fn a_held_terminal_outlives_the_server_that_started_it() {
     let _ledger = TestLedgerGuard::new();
     let place = holder();
@@ -443,7 +487,8 @@ fn a_view_continues_from_its_position_after_the_server_restarts() {
     // The server goes; the agent keeps printing into the holder's ring.
     first.close();
     drop(view);
-    std::thread::sleep(Duration::from_millis(500));
+    // Wait for output, not time: at least five full counter lines.
+    ring(&place, &terminal, left, left + 60);
 
     let second = Registry::open(BUILD).unwrap();
     let mut view = View::attach_from(&terminal, Some(left));

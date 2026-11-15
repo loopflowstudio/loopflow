@@ -64,7 +64,11 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "abandoned",
+    "selection_states": [
+      "done"
+    ]
   },
   {
     "task": {
@@ -131,7 +135,11 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "abandoned",
+    "selection_states": [
+      "done"
+    ]
   },
   {
     "task": {
@@ -198,7 +206,11 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "abandoned",
+    "selection_states": [
+      "done"
+    ]
   },
   {
     "task": {
@@ -265,7 +277,11 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "abandoned",
+    "selection_states": [
+      "done"
+    ]
   },
   {
     "task": {
@@ -332,7 +348,11 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "abandoned",
+    "selection_states": [
+      "done"
+    ]
   },
   {
     "task": {
@@ -399,7 +419,11 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "abandoned",
+    "selection_states": [
+      "done"
+    ]
   },
   {
     "task": {
@@ -466,7 +490,11 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "abandoned",
+    "selection_states": [
+      "done"
+    ]
   },
   {
     "task": {
@@ -533,7 +561,12 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "unstarted",
+    "selection_states": [
+      "unstarted",
+      "backlog"
+    ]
   },
   {
     "task": {
@@ -600,7 +633,12 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "unstarted",
+    "selection_states": [
+      "unstarted",
+      "backlog"
+    ]
   },
   {
     "task": {
@@ -667,7 +705,12 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "unstarted",
+    "selection_states": [
+      "unstarted",
+      "backlog"
+    ]
   },
   {
     "task": {
@@ -734,7 +777,12 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "unstarted",
+    "selection_states": [
+      "unstarted",
+      "backlog"
+    ]
   },
   {
     "task": {
@@ -801,7 +849,11 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "done",
+    "selection_states": [
+      "done"
+    ]
   },
   {
     "task": {
@@ -868,7 +920,11 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "done",
+    "selection_states": [
+      "done"
+    ]
   },
   {
     "task": {
@@ -935,7 +991,11 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "done",
+    "selection_states": [
+      "done"
+    ]
   },
   {
     "task": {
@@ -1002,7 +1062,12 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "unstarted",
+    "selection_states": [
+      "unstarted",
+      "backlog"
+    ]
   },
   {
     "task": {
@@ -1069,6 +1134,10 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "abandoned",
+    "selection_states": [
+      "done"
+    ]
   }
 ]

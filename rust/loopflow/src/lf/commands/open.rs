@@ -1341,6 +1341,23 @@ pub fn explain_workspace(cli: &crate::lf::Cli, args: &WorkspaceArgs, json: bool)
     print_links(cli, &selection, args.available, route(selection.host))
 }
 
+fn desktop_workspace_url(
+    repository: &Path,
+    task: Option<&str>,
+    wave: Option<&str>,
+) -> reqwest::Url {
+    let expression = match (task, wave) {
+        (Some(task), _) => format!("task:{task}"),
+        (_, Some(wave)) => format!("wave:{wave} state:working"),
+        _ => "state:working".into(),
+    };
+    let mut url = reqwest::Url::parse("loopflow://open").expect("fixed Desktop URL");
+    url.query_pairs_mut()
+        .append_pair("repo", &repository.to_string_lossy())
+        .append_pair("view", &expression);
+    url
+}
+
 pub fn run_workspace(cli: &crate::lf::Cli, args: &WorkspaceArgs) -> Result<()> {
     if args.selection.link {
         return print_links(
@@ -1373,15 +1390,11 @@ pub fn run_workspace(cli: &crate::lf::Cli, args: &WorkspaceArgs) -> Result<()> {
                         focus,
                     );
                 }
-                let mut url = reqwest::Url::parse("loopflow://open").expect("fixed Desktop URL");
-                let expression = match (&target.task, &target.wave) {
-                    (Some(task), _) => format!("task:{}", task.id),
-                    (_, Some(wave)) => format!("wave:{wave} kind:task state:open"),
-                    _ => "kind:task state:open".into(),
-                };
-                url.query_pairs_mut()
-                    .append_pair("repo", &target.repository_path.to_string_lossy())
-                    .append_pair("view", &expression);
+                let url = desktop_workspace_url(
+                    &target.repository_path,
+                    target.task.as_ref().map(|task| task.id.as_str()),
+                    target.wave.as_deref(),
+                );
                 match open_desktop(url.as_str(), focus) {
                     Ok(()) => target.receipt(Some(host), None, OpenStatus::Opening, None),
                     Err(error) => target.receipt(
@@ -1508,6 +1521,27 @@ fn print_unknown(unknown: &[String]) {
 mod tests {
     use super::{named_bundle, DesktopApp, DESKTOP_BUNDLE};
     use std::path::PathBuf;
+
+    #[test]
+    fn desktop_workspace_urls_select_working_tasks_in_repository_and_wave() {
+        for (task, wave, expression) in [
+            (None, None, "state:working"),
+            (None, Some("product"), "wave:product state:working"),
+            (Some("task_123"), Some("product"), "task:task_123"),
+        ] {
+            let url =
+                super::desktop_workspace_url(std::path::Path::new("/repo with spaces"), task, wave);
+            assert_eq!(url.scheme(), "loopflow");
+            assert_eq!(url.host_str(), Some("open"));
+            assert_eq!(
+                url.query_pairs().collect::<Vec<_>>(),
+                [
+                    ("repo".into(), "/repo with spaces".into()),
+                    ("view".into(), expression.into())
+                ]
+            );
+        }
+    }
 
     #[test]
     fn host_inventory_can_exceed_pipe_capacity() {

@@ -135,6 +135,12 @@ requests. A `TerminalId` names one PTY and is never reused: a `read` of a
 terminal the holder does not hold, or from a position past what that
 terminal has written, is an error and never an answer from byte 0.
 
+Revision 2 closes an unfinished bracketed paste when its writer disconnects.
+A server reconnecting that writer restores only the paste's delimiters before
+forwarding its unsent tail; content is never replayed. Older holders leave the
+paste open, so their writers continue without restoring delimiters. Those
+holders keep their original behavior until their conversations end.
+
 Output frames are `tag u8 · length u32 BE · payload`:
 
 | Tag | Payload |
@@ -298,9 +304,9 @@ return, including detaching or moving to another view. Terminal traffic does
 not wait for store reads; the final record is read after relaying ends.
 `lf resume SESSION --prepare --json` returns the one command Desktop runs,
 without opening a socket or starting a provider. Desktop decides from the
-record's `state` whether showing a pane reattaches: a `detached` Session
-reattaches, an `active` one waits for **Move here**, and an ended one waits for
-an explicit open.
+record's actions whether showing a pane reattaches: a held Session offers
+reveal, attaching read-only if another viewer holds input. **Move here** takes
+input explicitly; an ended Session waits for an explicit open.
 
 `lf session rename SESSION 'Resume repair'` updates the attached terminal
 title, including Rex and other terminals that support OSC titles. Reattaching
@@ -318,6 +324,18 @@ Input then goes straight to the holder's PTY; only bytes not yet written are
 queued, and no store read or write delays forwarding. Returning does not
 resubmit input. Unsent input is lost when the conversation is quit and
 resumed.
+
+An interrupted bracketed paste ends when its controlling view leaves or loses
+control. This releases the native parser's accumulated draft without submitting
+it. A reconnect tracks paste delimiters even while dropping queued input and
+restores paste framing before forwarding any remaining content. Ctrl+] inside
+a paste is content; outside a paste it detaches the view. No paste timeout or
+Return is added.
+Held-terminal protocol revision 3 pairs this behavior with relays that restore
+paste framing after a reconnect; a relay from another revision is replaced by
+the selected installation before it attaches.
+The entrance handshakes in `tests/transport_tests.rs` and
+`tests/machine_commands.rs` pin this revision; update both when advancing it.
 
 A local attachment waits up to five seconds for acknowledgement. Over command
 pipes it allows sixty seconds for SSH setup and destination Session
@@ -349,7 +367,8 @@ without replacing input or geometry. Choose **Move here** in the read-only
 pane's connection row to edit the same running Session; input stays paused
 until the server acknowledges, and a lost reply never repeats that takeover.
 Eight attempts with capped backoff lead to **Session unavailable** and a native
-**Retry connection** action. Only a child exit means ended. Closing the
+**Retry connection** action. A final Close frame ends recovery and disables input;
+its reason explains replacement, completion or retirement. Bare EOF remains unknown. Closing the
 surface cancels recovery. Ordinary explicit Open remains separate.
 
 The native surface listens on a private Unix socket and passes its path through
@@ -435,6 +454,7 @@ at most 64 KiB; a payload over 4 MiB is a protocol error.
 | `0x03` out | server → view | PTY output |
 | `0x05` position | server → view | the PTY position the stream stands at, u64 BE |
 | `0x06` aside | server → view | lf's reports and events; not PTY bytes |
+| `0x07` close | server → view | final JSON `{reason: replaced\|finished\|retired}`; not PTY bytes |
 | `0x11` request | view → server | JSON with `id` and `kind` |
 | `0x12` input | view → server | keystrokes from the connection holding input control |
 
@@ -455,8 +475,12 @@ reply carries the `seq` of the last event queued when it was computed. Kinds:
 `resize {rows,cols}`, `theme {theme}`, `program_status {status}`,
 `owner {viewer,name,held}`, `control {held,notice}` (input control left this
 connection), `child_exited {code}`, `detached`, `hint {text}`,
-`return {detach}` and `live`. A view that receives `control` with
-`held: false` restores its terminal, prints the notice and leaves.
+`return {detach}` and `live`. A terminal view that receives `control` with
+`held: false` restores its terminal, prints the notice and leaves. Desktop keeps
+its view attached read-only and offers Move here, the only action that replaces
+another view's control. When a heartbeat's `controlled` reply says nobody holds
+input, a read-only Desktop view asks for it without replacing; Busy keeps it
+read-only.
 
 Input control and geometry release when a connection ends; a reconnecting view
 asks for them again. Another view's input or geometry claim survives, and
@@ -632,8 +656,8 @@ Desktop's automatic opening uses a non-replacing input claim: working Tasks use
 Start, which permits first-thread creation; other Work uses reveal, which
 requires existing history. Their prepared commands keep that distinction
 through launch. If another view wins before attachment, the server returns
-Busy and keeps that view's input. Only Take back uses ordinary resume to take
-control; Try again on a consumed first launch uses it on a Session no client
+Busy; Desktop attaches read-only and keeps that view's input. Only Take back uses
+ordinary resume to take control; Try again on a consumed first launch uses it on a Session no client
 holds. The live relay announces native input readiness to Desktop after the
 server acknowledges the native client; saved screen bytes never provide that
 announcement. A successful automatic attach records its Desktop terminal

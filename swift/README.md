@@ -65,8 +65,8 @@ yourself, call `/usr/bin/log`, since zsh's builtin `log` shadows it:
 /usr/bin/log show --last 1h --predicate 'process == "runningboardd" AND eventMessage CONTAINS "loopflow" AND eventMessage CONTAINS "termination reported by launchd"'
 ```
 
-Working Tasks lists every started, uncompleted Task, on any Machine this store
-records, in the repository plan's order (waiting first, then rank). It is the
+Working Tasks lists owned, started, unfinished Tasks, on any Machine this store
+records, in the repository's shared Task order. It is the
 repository's built-in query, so opening a Task neither adds nor reorders it.
 Click a Wave to scope the sidebar to its Working Tasks and subwaves; its board's
 Backlog keeps the unstarted ones. **‹ Repo** returns to Working Tasks. Unstarted Tasks
@@ -78,9 +78,9 @@ Click a row to select its retained workspace. The title-bar **Repo › Wave › 
 path follows hierarchy: click a name to go there, or the **›** after it to list and
 search what it contains; Back and **⌘[ / ⌘]** follow visits. **⌘K** searches Work
 across repositories and opens another repository in its own window. Its
-**Sidebar shows** picker filters Working tasks / Available / Running without
+**Sidebar shows** picker filters Working tasks / Available / Busy without
 changing the selected Work. Click a Wave and its name moves into the
-sidebar header; the rows below are its Tasks, in plan order, until
+sidebar header; the rows below keep that same relative Task order until
 **‹ repo** returns to Working Tasks. **⌘1–9** selects the sidebar's Task rows by
 position and **⌃Tab / ⌃⇧Tab** cycles them. Missing slots do nothing. Selecting a
 Dashboard's Task, from any of these, keeps the Dashboard in the path, as its tile does.
@@ -89,6 +89,33 @@ widens the same navigator. **Shift-F10** opens the focused Task's actions withou
 changing the open workspace.
 
 The Task action menu moves work into a Wave or back to **No Wave** through the shared planning operation, retaining its workspace and drafts.
+
+Open an active Task whose planning state is **Todo**: wherever its lifecycle
+appears in the page, sidebar, board or breadcrumb picker, it shows **Active**.
+Planning state remains editable in Task details. Once work has started, its execution determines the lifecycle
+shown across Desktop. Completing or canceling a never-started Task instead shows
+it as completed or abandoned and offers **Reopen**.
+
+Ownership is separate. Unassigning a started, unfinished Task puts it in **Backlog** while
+keeping its lifecycle, checkout, PR and conversations. **Start** and **Not started**
+apply to work that has never started; an unassigned running Task remains Active.
+
+A Task is **Available** when one of its conversations is available for your next
+turn, and **Busy** when a current activity report says it is working. An open
+conversation with unknown activity adds neither. With an available conversation
+and a busy one, the Task matches both filters; its board badge shows Available.
+The board and sidebar use the same activity reading. These badges describe
+conversations; the Task's lifecycle and NOW condition remain separate.
+
+Task conversations include Sessions bound to the Task and Sessions working in
+its checkout. Repository and Wave primary conversations keep their own scope,
+even in a Task checkout. The Task's conversation list and breadcrumb Session
+picker use the same membership.
+
+Drag a Task in the sidebar to change its shared order. Ordinary repository and
+Wave lists, boards and Task pickers keep that relative order after refresh.
+Filtering or opening a Task leaves the order intact. Saved Dashboard arrangements,
+search results and Done's completion-date ordering keep their own order.
 
 Each Work keeps one pane layout and document store. The browser offers Files,
 Changes, Task & workflow, Graph processes and web pages. A Task with no saved
@@ -146,7 +173,7 @@ turn of any primary reads its scope and reports where it stands. A failed
 automatic Start shows its error with **Retry**. A launch that ended with no saved
 history stays closed until **Try again** repeats it; Retry and refresh never do.
 If another client holds input, the pane offers **Take back** and leaves that client
-in control until clicked. Close and eviction discard late opening results.
+in control until clicked or until it closes. Close and eviction discard late opening results.
 
 Finite CLI requests time out after 30 seconds. Canceling preparation ends only
 that request; running Sessions continue. If a change times out, refresh to learn
@@ -181,8 +208,12 @@ falls back to a labeled summary. Local Machine names stay hidden. Links open
 separately from the Task row; unknown activity and live clients without reports
 show no activity label.
 
-Follow a turn in the pane and Task row: Working during active work, Blocked for
-a question or permission request, and the provider’s Idle or Done on completion.
+Follow a conversation in the pane and sidebar: Busy for a working report,
+Available for an idle report, Blocked for a question or permission request, and
+Done for a reported result. Both labels use the same report wording. A pane
+describes its own conversation; a Task's Available/Busy filters and board badge
+aggregate all its conversations in Rust, so a busy pane can belong to an
+Available Task. Reported Done is a program result, independent of Task lifecycle.
 Reconnect restores the current report without sending another prompt. Quiet output
 does not change activity; clearing a report removes its label without completing
 the Task.
@@ -236,8 +267,10 @@ Source and license notices ship offline with the catalogue.
 
 **Auto-Ship** hands a Task off; it leaves Working tasks and its ship process lands it.
 It sits at the right end of the Workflow bar under the jump bar, beside the Task's
-stages as dots (click them for each stage) and what is running now. While shipping,
-the same spot holds Stop Auto-Ship, and the toast's Undo is Stop Auto-Ship. Open a Dashboard with `state:shipping` to watch it.
+stages as dots (click them for each stage) and what is running now. While the
+handoff exists, the same spot holds Stop Auto-Ship, including while it is
+restarting or waiting for assignment; the toast's Undo is Stop Auto-Ship.
+Open a Dashboard with `state:shipping` to watch Tasks executing autonomously.
 
 ```text
 ⌘T          new shell tab in the Task’s Shell tool
@@ -424,8 +457,8 @@ The compact header shows the current Workflow position and available actions;
 feedback stays inside the terminal area. Resolving a conversation installs its
 record and pane before ending preparation, including explicit Session links.
 Cached switches reuse their panes and drafts without preparing again.
-When the selected Task completes or is canceled, it stays visible with a green
-**Completed** or red **Canceled** header. Navigating away restores the ordinary
+When the selected Task's lifecycle becomes completed or abandoned, it stays
+visible with a green **Completed** or red **Canceled** header. Navigating away restores the ordinary
 sidebar filters. **Back** (⌘[) returns to the retained workspace and its sidebar
 row, preserving conversations, files and drafts without starting execution.
 The expanded graph scales to the window:
@@ -828,6 +861,11 @@ same local protocol, including Task files, diffs, Waves, Machine identity,
 Portfolio, saved panes, Task ownership and Graphs. Desktop links no Loopflow Rust
 library; GhosttyKit remains its native renderer.
 
+Ghostty owns terminal frame scheduling. Desktop forces a synchronous draw only
+for a pending key-to-draw measurement, rather than on every display tick.
+Hidden or detached retained surfaces pause rendering while their children and
+terminal history continue; showing them resumes the native renderer.
+
 The [server boundary](../docs/dev/server.md) puts registration and updates under
 installation. First connection obtains the selected helper; later connections
 only reconnect. CLI commands and served writes call the same Rust operations,
@@ -1076,10 +1114,18 @@ Opening shows **Opening… Input paused** through attachment and native readines
 Connection feedback overlays the terminal, so clearing it does not resize the
 provider or move its cursor. Both mount layout and pre-mount sizing keep the same
 viewport while status changes.
+Refresh waits for its previous viewer to retire before preparing a replacement.
+`WarmPaneMountTests` checks this headless with paused input and overlapping
+Refresh requests. Take back replaces read-only and ended attachments; the transport
+fixture `desktop_crash_reopen` checks control loss, read-only Refresh, explicit
+takeover and input returning when the other viewer closes, against a surviving
+provider. `GhosttyTerminalMountTests` checks mounted
+focus separately.
 Check native status, paused input, local copy/Find/scroll, Retry after exhaustion,
-one-shot **Move here**, and cancellation on pane closure. Only an owner exit means
-ended. Installed-helper replacement must preserve the Session and Graph owners
-and prove continued input and Graph progress; a socket restart alone is insufficient.
+one-shot **Move here**, and cancellation on pane closure. An orderly terminal close
+ends recovery and shows its replacement or retirement reason; bare EOF keeps the
+reason unknown. Installed-helper replacement must preserve the Session and Graph
+identities and prove continued input and Graph progress; a socket restart alone is insufficient.
 `scripts/test_desktop.sh --filter ServerProtocolTests` builds the consumer and
 checks shared Rust/Swift fixtures. Installation needs the selected app bundle;
 source experiments select a separate `LF_HOME`.

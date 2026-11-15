@@ -110,12 +110,12 @@ pub enum SelectionFilter {
 #[serde(rename_all = "snake_case")]
 pub enum SelectionState {
     Open,
-    /// Session axis: a Task Session's turn ended and it is ready for the person.
+    /// Session axis: a Task conversation is available for the person's next turn.
     Available,
-    /// Session axis: a Task Session is mid-turn.
+    /// Session axis: a current Task Session report says it is working.
     Busy,
     Blocked,
-    /// Task axis: the Task's own state, as `TaskState` derives it.
+    /// Task axis: effective lifecycle, including withdrawal of never-started work.
     Unstarted,
     Idle,
     Active,
@@ -158,12 +158,11 @@ impl SelectionResolution {
     }
 }
 
-/// Facts from the shared Work reader. Unknown Task state remains unknown.
+/// Facts from a complete shared Work read. Task state failures fail the read.
 #[derive(Debug, Clone)]
 pub struct SelectionWork {
     pub key: WorkWorkspaceKey,
     pub parent_wave: Option<WaveId>,
-    pub open: Option<bool>,
     pub name: String,
     pub states: BTreeSet<SelectionState>,
     /// An unobservable process is different from a complete read with no current reports.
@@ -390,11 +389,6 @@ impl Selection {
                                     .parent_wave
                                     .as_ref()
                                     .is_some_and(|parent| descendants.contains(parent.as_str()));
-                            if in_scope && item.open.is_none() {
-                                result
-                                    .unavailable
-                                    .push(format!("Task {} state is unavailable", item.name));
-                            }
                             // The repository and a Wave list the board's Working
                             // section; the others are `state:backlog`, `state:autonomous`
                             // and `state:done`.

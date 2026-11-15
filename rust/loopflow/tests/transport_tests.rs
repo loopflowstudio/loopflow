@@ -334,7 +334,7 @@ read -r answer < /dev/tty
     }
 }
 /// The revision of what follows the held-terminal entrance's answer.
-const HELD_REVISION: u32 = 1;
+const HELD_REVISION: u32 = 3;
 const REPLY: u8 = 0x01;
 const SNAPSHOT: u8 = 0x02;
 const OUT: u8 = 0x03;
@@ -343,6 +343,7 @@ const ERR: u8 = 0x04;
 const POSITION: u8 = 0x05;
 /// lf's own events and reports to a held terminal's viewer.
 const ASIDE: u8 = 0x06;
+const CLOSE: u8 = 0x07;
 const REQUEST: u8 = 0x11;
 const INPUT: u8 = 0x12;
 
@@ -372,6 +373,7 @@ fn read_frame(reader: &mut impl Read) -> Option<(u8, Vec<u8>)> {
 #[derive(Debug, Clone, PartialEq)]
 enum Item {
     Reply(Value),
+    Close(Value),
     Snapshot(Vec<u8>),
     Out(Vec<u8>),
     Err(Vec<u8>),
@@ -430,6 +432,7 @@ impl Viewer {
         }
         Some(match tag {
             REPLY => Item::Reply(serde_json::from_slice(&payload).unwrap()),
+            CLOSE => Item::Close(serde_json::from_slice(&payload).unwrap()),
             SNAPSHOT => Item::Snapshot(payload),
             ERR => Item::Err(payload),
             OUT | ASIDE => {
@@ -449,6 +452,15 @@ impl Viewer {
         loop {
             if let Item::Reply(reply) = self.next().expect("server closed before replying") {
                 return reply;
+            }
+        }
+    }
+    #[track_caller]
+    fn until_close(&mut self) -> Value {
+        loop {
+            if let Item::Close(close) = self.next().expect("terminal closed without a reason") {
+                assert_eq!(self.next(), None, "close must be the final frame");
+                return close;
             }
         }
     }
@@ -1302,8 +1314,168 @@ fn every_viewer_starts_with_the_snapshot_and_shares_live_output() {
     first.input("done\n");
     first.finish();
     second.finish();
-    assert!(first.next().is_none());
-    assert!(second.next().is_none());
+    assert_eq!(first.until_close(), json!({"reason":"finished"}));
+    assert_eq!(second.until_close(), json!({"reason":"finished"}));
+}
+
+#[test]
+fn server_close_replaced_reattaches_by_session_then_finished_stops() {
+    let fixture = Fixture::new();
+    let _server = fixture.machine_server();
+    let path = fixture.provider(
+        r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+stty -echo < /dev/tty
+native=
+previous=
+for argument in "$@"; do
+    case "$previous" in --session-id|--resume) native="$argument"; break;; esac
+    previous="$argument"
+done
+[ -n "$native" ] || exit 2
+mkdir -p "$CLAUDE_CONFIG_DIR/projects/fixture"
+printf '%s\n' '{"type":"user","userType":"external","message":{"content":"Continue the same conversation"}}' > "$CLAUDE_CONFIG_DIR/projects/fixture/$native.jsonl"
+printf '%s:%s:%s\n' "$$" "$LF_CAPTURE_KEY" "$*" >> "$HOME/launches"
+printf 'ready\n'
+read -r answer < /dev/tty
+printf '%s\n' "$answer" >> "$HOME/answers"
+"#,
+    );
+    let launch = |args: &[&str]| {
+        let mut command = fixture.command(args);
+        command
+            .env("PATH", &path)
+            .env("CLAUDE_CONFIG_DIR", fixture.home.path().join("claude"));
+        Terminal::spawn_with_placement(command, Some(true))
+    };
+    let mut first = launch(&["-a", "claude", "resume"]);
+    let session = session_of(&fixture.sql(), &fixture.launches(1)[0]);
+    let terminal = fixture.terminal_of(&session);
+    let attach = |control: bool| {
+        let socket = loopflow::server::client::attach(
+            &fixture.endpoint("machine"),
+            &session.as_str().into(),
+        )
+        .unwrap();
+        Viewer::new(socket).attach(json!({"kind":"attach","control":control,
+            "replace":control,"own":null,"rows":24,"cols":80}))
+    };
+    let mut observer = attach(false);
+    let next = fixture
+        .command(&["session", "new", &session, "--prepare", "--json"])
+        .env("PATH", &path)
+        .env("CLAUDE_CONFIG_DIR", fixture.home.path().join("claude"))
+        .output()
+        .unwrap();
+    assert!(next.status.success(), "{next:?}");
+    assert_eq!(observer.until_close(), json!({"reason":"replaced"}));
+    first.wait_exit();
+    fixture.held_ends(&terminal);
+    assert_eq!(fixture.launches(1).len(), 1);
+    assert!(!fixture.home.path().join("answers").exists());
+    assert!(loopflow::server::client::attach(
+        &fixture.endpoint("machine"),
+        &session.as_str().into(),
+    )
+    .is_err());
+
+    // Only an explicit resume starts the prepared replacement. Attachment just finds it.
+    let mut second = launch(&["resume", &session]);
+    fixture.launches(2);
+    let successor = fixture.terminal_of(&session);
+    assert_ne!(successor, terminal);
+    let mut viewer = attach(true);
+    viewer.input("once\n");
+    assert_eq!(viewer.until_close(), json!({"reason":"finished"}));
+    second.wait_exit();
+    fixture.held_ends(&successor);
+    assert_eq!(fixture.launches(2).len(), 2);
+    assert_eq!(fixture.wait_file("answers"), "once\n");
+    assert!(loopflow::server::client::attach(
+        &fixture.endpoint("machine"),
+        &session.as_str().into(),
+    )
+    .is_err());
+}
+
+#[test]
+fn viewer_stream_close_passes_reason_unchanged() {
+    let fixture = Fixture::new();
+    let _server = fixture.machine_server();
+    let held = fixture.start_held(&["/bin/sh", "-c", "read -r line; printf 'last\\033]'; exit 7"]);
+    let mut child = fixture
+        .command(&["session", "attach", "--terminal", &held])
+        .env("LF_VIEWER_STREAM", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut input = child.stdin.take().unwrap();
+    input.write_all(&frame(REQUEST, br#"{"id":1,"kind":"attach","control":true,"replace":false,"own":null,"rows":24,"cols":80}"#)).unwrap();
+    let mut output = child.stdout.take().unwrap();
+    assert_eq!(read_frame(&mut output).unwrap().0, REPLY);
+    input.write_all(&frame(INPUT, b"finish\n")).unwrap();
+    let mut ending = None;
+    while let Some((tag, payload)) = read_frame(&mut output) {
+        assert!(ending.is_none(), "close must be the final frame");
+        if tag == CLOSE {
+            ending = Some(payload);
+        }
+    }
+    assert_eq!(ending.unwrap(), br#"{"reason":"finished"}"#);
+    assert!(wait_for_viewer(child, Duration::from_secs(5))
+        .status
+        .success());
+    fixture.held_ends(&held);
+}
+
+#[test]
+fn decoded_relay_close_disables_input_and_keeps_the_exit_code() {
+    let fixture = Fixture::new();
+    let _server = fixture.machine_server();
+    let path = fixture.provider(
+        r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+stty -echo < /dev/tty
+printf '%s:%s:%s\n' "$$" "$LF_CAPTURE_KEY" "$*" >> "$HOME/launches"
+printf 'ready\n'
+read -r answer < /dev/tty
+exit 7
+"#,
+    );
+    let mut launch = fixture.command(&["-a", "claude", "resume"]);
+    launch.env("PATH", &path);
+    let first = Terminal::spawn_with_placement(launch, Some(true));
+    let session = session_of(&fixture.sql(), &fixture.launches(1)[0]);
+    let held = fixture.terminal_of(&session);
+    first.stop();
+    let status = ConnectionStatus::new(fixture.home.path().join("connection.sock"));
+    let mut command = fixture.command(&[
+        "session",
+        "attach",
+        "--terminal",
+        &held,
+        "--session",
+        &session,
+    ]);
+    command
+        .env("PATH", &path)
+        .env("LF_SERVER", "1")
+        .env("LF_SERVER_STATUS", &status.path);
+    let mut relay = Terminal::spawn(command);
+    wait_server_status(&status, "connected", true, 1);
+    relay
+        .child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(b"finish\n")
+        .unwrap();
+    wait_server_status(&status, "ended", false, 1);
+    assert_eq!(relay.wait_exit().code(), Some(7));
+    assert_eq!(status.reading().unwrap()["state"], "ended");
+    fixture.held_ends(&held);
 }
 
 #[test]
@@ -1503,10 +1675,8 @@ fn completed_task_cleanup_ends_its_held_shell_and_settles_jobs() {
         String::from_utf8_lossy(&cleanup.stderr).contains("Retained PR-less checkout"),
         "{cleanup:?}"
     );
-    let ended = viewer.until_event("control");
-    assert!(events(&ended, "control")
-        .iter()
-        .any(|event| event["notice"] == "Task completed"));
+    until_out(&mut viewer, "Task completed");
+    assert_eq!(viewer.until_close(), json!({"reason":"retired"}));
     fixture.held_ends(&owner);
     fixture.shell_settles(&owner);
     let (settled, requested): (bool, i64) = fixture
@@ -1743,6 +1913,7 @@ fn shell_reconnects_and_settles(integrated: bool) {
         "{}",
         String::from_utf8_lossy(&close.stderr)
     );
+    assert_eq!(returning.until_close(), json!({"reason":"retired"}));
     fixture.held_ends(&owner);
     fixture.shell_settles(&owner);
     let settled: bool = fixture
@@ -2761,7 +2932,7 @@ fn server_startup_cancels_its_pending_installer_when_pane_closes() {
     command
         .env("LF_BIN", &installer)
         .env("LF_SERVER", "1")
-        .env("LF_SERVER_STATUS", directory.join("status.json"));
+        .env("LF_SERVER_STATUS", directory.join("status.sock"));
     let mut relay = Terminal::stream(command);
     let pid = fixture.wait_file("installer-pid").parse::<i32>().unwrap();
     std::fs::remove_dir_all(directory).unwrap();
@@ -2800,6 +2971,189 @@ fn command_line(pid: libc::pid_t) -> (libc::pid_t, String) {
         parent.trim().parse().unwrap_or(0),
         command.trim().to_owned(),
     )
+}
+
+/// Desktop's viewer can disappear with a draft still in the provider's editor.
+/// Reopening and Refresh replace views, never that provider or accepted input.
+#[test]
+fn desktop_crash_reopen_keeps_draft_and_submits_new_input_once() {
+    let fixture = Fixture::new();
+    let service = ServerProof::start(&fixture, false);
+    let path = fixture.provider(
+        r#"#!/bin/bash
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+stty -echo -icanon min 1 < /dev/tty
+printf '%s:%s:%s\n' "$$" "$LF_CAPTURE_KEY" "$*" >> "$HOME/launches"
+printf 'editor-ready\r\n'
+draft=
+while IFS= read -r -n 1 char < /dev/tty; do
+    if [ -z "$char" ]; then
+        printf '%s\n' "$draft" >> "$HOME/answers"
+        printf 'received:%s\r\n' "$draft"
+        draft=
+    else
+        draft="$draft$char"
+        printf 'draft:%s\r\n' "$draft"
+    fi
+done
+"#,
+    );
+    let mut launch = fixture.command(&["-a", "claude", "resume"]);
+    launch.env("PATH", &path);
+    let mut first = Terminal::spawn(launch);
+    let launched = fixture.launches(1).pop().unwrap();
+    let provider: libc::pid_t = launched.split(':').next().unwrap().parse().unwrap();
+    let _provider = KillOnDrop(provider);
+    let session = session_of(&fixture.sql(), &launched);
+    let held = fixture.terminal_of(&session);
+    let agent: String = fixture
+        .sql()
+        .query_row(
+            "SELECT agent_process_id FROM agent_sessions WHERE id=?1",
+            [&session],
+            |row| row.get(0),
+        )
+        .unwrap();
+    first.wait_text("editor-ready");
+    first
+        .child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(b"unsent-")
+        .unwrap();
+    first.wait_text("draft:unsent-");
+    first.stop();
+
+    let open = |name: &str, input: bool| {
+        let status = ConnectionStatus::new(fixture.home.path().join(name));
+        let mut command = service.command(&["session", "resume", "--reveal-existing", &session]);
+        command
+            .env("PATH", &path)
+            .env("LF_SERVER", "1")
+            .env("LF_SERVER_STATUS", &status.path);
+        let mut view = Terminal::spawn(command);
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let reading = status.reading();
+            if reading.as_ref().is_some_and(|reading| {
+                reading["state"] == "connected"
+                    && reading["input"] == input
+                    && reading["native_ready"] == true
+            }) {
+                break;
+            }
+            view.assert_viewing("the Desktop recovery viewer");
+            assert!(Instant::now() < deadline, "not ready: {reading:?}");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        (view, status)
+    };
+    let (mut reopened, status) = open("reopened.sock", true);
+    reopened
+        .child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(b"draft\n")
+        .unwrap();
+    reopened.wait_text("received:unsent-draft");
+    // A second non-replacing attachment cannot take this viewer's input.
+    let (socket, _) = fixture.held_entrance(&held);
+    let mut competing = Viewer::new(socket);
+    competing.request(json!({"kind":"attach","control":true,"replace":false,
+        "rows":24,"cols":80,"own":"request"}));
+    assert_eq!(competing.until_reply()["kind"], "busy");
+    drop(competing);
+    let mut takeover = service.command(&["session", "resume", &session]);
+    takeover.env("PATH", &path);
+    let mut takeover = Terminal::spawn(takeover);
+    wait_server_status(&status, "connected", false, 0);
+    reopened.assert_viewing("the read-only Desktop viewer");
+    takeover
+        .child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(b"other-viewer\n")
+        .unwrap();
+    reopened.wait_text("received:other-viewer");
+    reopened.stop();
+    drop(status);
+    // Refresh must display the same provider without displacing the newer viewer.
+    let (mut refreshed, status) = open("refreshed.sock", false);
+    takeover
+        .child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(b"still-elsewhere\n")
+        .unwrap();
+    refreshed.wait_text("received:still-elsewhere");
+    takeover.assert_viewing("the controller after Desktop Refresh");
+    // Desktop's explicit Move here action takes control on this same connection.
+    let generation = status.reading().unwrap()["generation"].as_u64().unwrap();
+    writeln!(
+        status.state.borrow_mut().socket.as_mut().unwrap(),
+        "{}",
+        json!({"kind":"move", "generation":generation})
+    )
+    .unwrap();
+    wait_server_status(&status, "connected", true, generation + 1);
+    assert!(takeover.wait_exit().success());
+    refreshed
+        .child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(b"after-refresh\n")
+        .unwrap();
+    refreshed.wait_text("received:after-refresh");
+    // When the viewer that took input leaves, nobody holds it: Desktop types again
+    // without Move here.
+    let mut visitor = service.command(&["session", "resume", &session]);
+    visitor.env("PATH", &path);
+    let mut visitor = Terminal::spawn(visitor);
+    wait_server_status(&status, "connected", false, 0);
+    visitor
+        .child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(b"visitor\n")
+        .unwrap();
+    refreshed.wait_text("received:visitor");
+    visitor.stop();
+    wait_server_status(&status, "connected", true, 0);
+    refreshed
+        .child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(b"after-visitor\n")
+        .unwrap();
+    refreshed.wait_text("received:after-visitor");
+    assert_eq!(
+        fixture.wait_file("answers"),
+        "unsent-draft\nother-viewer\nstill-elsewhere\nafter-refresh\nvisitor\nafter-visitor\n"
+    );
+    assert_eq!(fixture.launches(1), vec![launched.clone()]);
+    assert_eq!(session_of(&fixture.sql(), &launched), session);
+    assert_eq!(fixture.terminal_of(&session), held);
+    let current_agent: String = fixture
+        .sql()
+        .query_row(
+            "SELECT agent_process_id FROM agent_sessions WHERE id=?1",
+            [&session],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(current_agent, agent);
+    assert!(alive(provider));
+    refreshed.stop();
+    // SAFETY: this fixture's provider recorded its own pid.
+    unsafe { libc::kill(provider, libc::SIGKILL) };
+    fixture.held_ends(&held);
 }
 
 #[test]

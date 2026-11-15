@@ -5,7 +5,7 @@
 mod connection;
 mod held;
 mod hosted;
-mod input;
+pub(crate) mod input;
 mod lifetime;
 mod native;
 mod output;
@@ -16,7 +16,7 @@ mod stream;
 use loopflow_terminal::repaint as terminal;
 #[cfg(test)]
 mod viewer_tests;
-mod wire;
+pub(crate) mod wire;
 
 use std::collections::VecDeque;
 use std::ffi::CStr;
@@ -36,9 +36,11 @@ use sha2::{Digest, Sha256};
 
 use crate::harness::native_exit::{NativeExit, Settled};
 use crate::store::sqlite::ViewerHold;
-use input::PendingInput;
+use input::{Paste, PendingInput};
 use loopflow_model::id::{LfSessionId, TerminalId};
-use wire::{Decoder, Event, Incoming, Outgoing, Own, Reply, Request, Scanner, Tag};
+use wire::{
+    Close, CloseReason, Decoder, Event, Incoming, Outgoing, Own, Reply, Request, Scanner, Tag,
+};
 
 /// The held terminal a direct child runs in.
 const HELD_ENV: &str = "LF_TRANSPORT_HELD";
@@ -107,6 +109,7 @@ impl Settling {
             since: Instant::now(),
             fallback: departure.unwrap_or_else(|| Settled {
                 code: provider_exit_code(status),
+                moved: false,
                 lines: Vec::new(),
             }),
             process,
@@ -130,6 +133,7 @@ impl Settling {
                 tracing::warn!(process = self.process, "exit records are still being written; returning the terminal with its known outcome");
                 Settled {
                     code: self.fallback.code,
+                    moved: self.fallback.moved,
                     lines: std::mem::take(&mut self.fallback.lines),
                 }
             }
@@ -863,6 +867,46 @@ fn end_viewers(viewers: &mut [Viewer], event: Event) {
     }
 }
 
+/// End the protocol outside the terminal stream, then give queued output a
+/// bounded chance to drain. Slow or lost connections still end with unknown EOF.
+fn close_viewers(viewers: &mut [Viewer], reason: CloseReason) {
+    let payload = serde_json::to_vec(&Close { reason }).expect("close reason serializes");
+    for viewer in viewers.iter_mut().filter(|v| v.attached && !v.draining) {
+        let _ = viewer.flush_events();
+        wire::encode(Tag::Close, &payload, &mut viewer.output);
+    }
+    let deadline = Instant::now() + Duration::from_millis(200);
+    loop {
+        let mut pending = Vec::new();
+        for viewer in viewers.iter_mut().filter(|v| v.attached) {
+            if viewer.flush().is_err() {
+                viewer.output.clear();
+                viewer.draining = true;
+            }
+            if !viewer.output.is_empty() {
+                pending.push(libc::pollfd {
+                    fd: viewer.socket.as_raw_fd(),
+                    events: libc::POLLOUT,
+                    revents: 0,
+                });
+            }
+        }
+        if pending.is_empty() || Instant::now() >= deadline {
+            break;
+        }
+        let timeout = deadline
+            .saturating_duration_since(Instant::now())
+            .as_millis() as i32;
+        // SAFETY: poll borrows the live sockets for this call.
+        unsafe {
+            libc::poll(pending.as_mut_ptr(), pending.len() as _, timeout);
+        }
+    }
+    for viewer in viewers.iter_mut().filter(|v| v.attached) {
+        let _ = viewer.socket.shutdown(std::net::Shutdown::Both);
+    }
+}
+
 /// Send reports the stream can carry now, and any directory they changed.
 fn publish_reports(output: &mut output::Output, viewers: &mut Vec<Viewer>) {
     if let Some(reports) = output.take_reports() {
@@ -1443,6 +1487,23 @@ impl CatchingUp {
 enum Recovery {
     Reconnect,
     Takeover,
+    /// A read-only Desktop view asks for input nobody holds; Busy leaves it read-only.
+    Claim,
+}
+
+/// Input control requested on the live connection; the fresh snapshot repaints.
+fn control_request(replace: bool) -> Request {
+    let (rows, cols) = size();
+    Request::Attach {
+        control: true,
+        replace,
+        own: Some(if replace { Own::Take } else { Own::Request }),
+        rows,
+        cols,
+        name: tty_name(libc::STDIN_FILENO),
+        moved: None,
+        from: None,
+    }
 }
 
 /// A view of a held terminal always outlives its server connection.
@@ -1455,8 +1516,11 @@ fn attach_with_terminal(
 ) -> Result<()> {
     let mut status = connection::Status::from_env();
     let mut recovery = None;
+    let mut paste = Paste::default();
     let socket = if let Some(status) = &mut status {
-        let Some((socket, recovered)) = status.connect(id, bridged_session(session)?, true)? else {
+        let Some((socket, recovered)) =
+            status.connect(id, bridged_session(session)?, true, &mut paste)?
+        else {
             return Ok(());
         };
         recovery = recovered.then_some(Recovery::Reconnect);
@@ -1476,6 +1540,7 @@ fn attach_with_terminal(
             session,
             status,
             recovery,
+            paste,
         }),
         moved,
         terminal,
@@ -1531,6 +1596,7 @@ struct RelayRoute<'a> {
     session: Option<&'a LfSessionId>,
     status: Option<connection::Status>,
     recovery: Option<Recovery>,
+    paste: Paste,
 }
 
 /// The server attaches by Session; only Desktop's Session panes bridge through
@@ -1549,10 +1615,11 @@ fn view(
     replace: bool,
 ) -> Result<()> {
     let server = route.is_some();
-    let (session, mut status, mut recovery) = match route {
-        Some(route) => (route.session, route.status, route.recovery),
-        None => (None, None, None),
+    let (session, mut status, mut recovery, mut paste) = match route {
+        Some(route) => (route.session, route.status, route.recovery, route.paste),
+        None => (None, None, None, Paste::default()),
     };
+    let mut resume_input = true;
     let mut acknowledgement_deadline = Some(Instant::now() + attach_timeout);
     let (rows, cols) = size();
     let mut output = RelayOutput::default();
@@ -1584,6 +1651,7 @@ fn view(
     let mut previous_size = (rows, cols);
     let mut title = id.map(crate::terminal_title::ViewerTitle::new);
     let mut heartbeat = Instant::now() + HEARTBEAT_INTERVAL;
+    let mut child_code = 0;
     let mut last_response = Instant::now();
     let mut catching_up: Option<CatchingUp> = None;
     'relay: loop {
@@ -1600,11 +1668,11 @@ fn view(
             let held = id.context("only a known terminal reconnects")?;
             let next = if let Some(status) = &mut status {
                 status
-                    .connect(held, bridged_session(session)?, false)?
+                    .connect(held, bridged_session(session)?, false, &mut paste)?
                     .map(|(socket, _)| socket)
             } else {
                 tracing::debug!(%reason, terminal = %held, "view reconnecting");
-                let next = reconnect_held(held);
+                let next = reconnect_held(held, &mut paste);
                 if let Some(skew) = next
                     .as_ref()
                     .err()
@@ -1641,6 +1709,7 @@ fn view(
             controlled = false;
             owned = false;
             recovery = Some(Recovery::Reconnect);
+            resume_input = true;
             if let Err(error) = send(&mut socket, output.recover()) {
                 interrupted = Some(error.to_string());
                 continue;
@@ -1711,7 +1780,7 @@ fn view(
             decoder.extend(&bytes[..n]);
             while let Some((tag, payload)) = decoder.next()? {
                 match tag {
-                    Tag::Reply | Tag::Aside => {}
+                    Tag::Reply | Tag::Aside | Tag::Close => {}
                     Tag::Position => {
                         output.received = wire::parse_position(&payload)?;
                         output.positioned = true;
@@ -1724,6 +1793,33 @@ fn view(
                     _ => output.received += payload.len() as u64,
                 }
                 let pieces = match tag {
+                    Tag::Close => {
+                        let close: Close = serde_json::from_slice(&payload)?;
+                        let message = match close.reason {
+                            CloseReason::Finished => None,
+                            CloseReason::Replaced => {
+                                Some("Session terminal replaced; reattach by Session.")
+                            }
+                            CloseReason::Retired => {
+                                Some("Session terminal retired; resume when needed.")
+                            }
+                        };
+                        if let Some(status) = &mut status {
+                            status.ended(message);
+                        }
+                        if let Some(message) = message {
+                            write_output(
+                                &mut terminal,
+                                2,
+                                format!("\r\n{message}\r\n").as_bytes(),
+                            )?;
+                        }
+                        return if child_code == 0 {
+                            Ok(())
+                        } else {
+                            Err(crate::process::CommandExit(child_code).into())
+                        };
+                    }
                     Tag::Reply => {
                         let reply: Outgoing = serde_json::from_slice(&payload)?;
                         match reply.reply {
@@ -1748,7 +1844,7 @@ fn view(
                                 }
                                 owned = owner.as_ref() == Some(&viewer);
                                 let recovered = recovery.take();
-                                if recovered == Some(Recovery::Takeover) {
+                                if matches!(recovered, Some(Recovery::Takeover | Recovery::Claim)) {
                                     // Reset the parser at the fresh snapshot, keeping
                                     // this connection's cumulative resume offset.
                                     output.scanner = Some(Scanner::new(&nonce));
@@ -1756,7 +1852,7 @@ fn view(
                                 let continued = output.acknowledged(&nonce, reply.seq);
                                 catching_up = continued.then_some(CatchingUp::Replaying);
                                 if recovered.is_some() || status.is_some() {
-                                    discard_reconnect_input()?;
+                                    discard_reconnect_input(&mut paste)?;
                                     fds[1].revents = 0;
                                 }
                                 // A continued screen shows the agent's output and nothing else.
@@ -1787,7 +1883,26 @@ fn view(
                                     status.connected(controlled);
                                 }
                             }
-                            Reply::Busy if recovery.is_some() => {
+                            // Another viewer took input first; this view stays attached read-only.
+                            Reply::Busy if recovery == Some(Recovery::Claim) => {
+                                recovery = None;
+                                acknowledgement_deadline = None;
+                            }
+                            // Input came free: the viewer holding it left. Moving
+                            // here is not needed to type again.
+                            Reply::Controlled { held: false, .. }
+                                if status.is_some()
+                                    && !controlled
+                                    && acknowledgement_deadline.is_none() =>
+                            {
+                                recovery = Some(Recovery::Claim);
+                                if let Err(error) = send(&mut socket, control_request(false)) {
+                                    interrupted = Some(error.to_string());
+                                    continue 'relay;
+                                }
+                                acknowledgement_deadline = Some(Instant::now() + attach_timeout);
+                            }
+                            Reply::Busy if recovery.is_some() || status.is_some() => {
                                 // A fresh screen cannot atomically ask for optional
                                 // input. On Busy, attach passively to the same terminal.
                                 if let Err(error) = send(&mut socket, output.passive()) {
@@ -1870,6 +1985,11 @@ fn view(
                             held: false,
                             notice,
                         } => {
+                            if let Some(status) = &mut status {
+                                controlled = false;
+                                status.connected(false);
+                                continue;
+                            }
                             drop(terminal.take());
                             if let Some(notice) = notice {
                                 eprintln!("\n{notice}");
@@ -1878,14 +1998,7 @@ fn view(
                             return Ok(());
                         }
                         Event::ChildExited { code } => {
-                            if let Some(status) = &mut status {
-                                status.ended();
-                            }
-                            return if code == 0 {
-                                Ok(())
-                            } else {
-                                Err(crate::process::CommandExit(code).into())
-                            };
+                            child_code = code;
                         }
                         Event::Detached => {
                             // Detached on purpose: an SSH viewer must not read as lost.
@@ -1957,20 +2070,10 @@ fn view(
                 controlled = false;
                 owned = false;
                 recovery = Some(Recovery::Takeover);
-                discard_reconnect_input()?;
+                resume_input = true;
+                discard_reconnect_input(&mut paste)?;
                 fds[1].revents = 0;
-                let (rows, cols) = size();
-                let request = Request::Attach {
-                    control: true,
-                    replace: true,
-                    own: Some(Own::Take),
-                    rows,
-                    cols,
-                    name: tty_name(libc::STDIN_FILENO),
-                    moved: None,
-                    from: None,
-                };
-                if let Err(error) = send(&mut socket, request) {
+                if let Err(error) = send(&mut socket, control_request(true)) {
                     interrupted = Some(error.to_string());
                     continue;
                 }
@@ -1982,7 +2085,7 @@ fn view(
             let n = io::stdin().read(&mut bytes)?;
             if n == 0 {
                 stdin_open = false;
-            } else if terminal.is_some() && bytes[..n].contains(&0x1d) {
+            } else if terminal.is_some() && paste.detaches(&bytes[..n]) {
                 // Restore the terminal before saying how to return.
                 drop(terminal.take());
                 let _ = send(&mut socket, Request::Leave);
@@ -1992,20 +2095,35 @@ fn view(
                 }
                 return Ok(());
             } else if controlled {
-                let typed = match &mut catching_up {
-                    None => &bytes[..n],
+                let discarded = match &mut catching_up {
+                    None => 0,
                     Some(catching) => match catching.pass(&bytes[..n]) {
                         Some(rest) => {
+                            let discarded = n - rest.len();
                             catching_up = None;
-                            rest
+                            discarded
                         }
-                        None => &[],
+                        None => n,
                     },
                 };
-                let sent = match typed {
-                    [] => Ok(()),
-                    typed => send_frame(&mut socket, Tag::Input, typed),
+                paste.observe(&bytes[..discarded]);
+                let typed = &bytes[discarded..n];
+                let framing = if !typed.is_empty() && resume_input {
+                    resume_input = false;
+                    paste.resume()
+                } else {
+                    Vec::new()
                 };
+                paste.observe(typed);
+                let sent = (|| {
+                    if !framing.is_empty() {
+                        send_frame(&mut socket, Tag::Input, &framing)?;
+                    }
+                    match typed {
+                        [] => Ok(()),
+                        typed => send_frame(&mut socket, Tag::Input, typed),
+                    }
+                })();
                 if let Err(error) = sent {
                     if !can_reconnect {
                         return Err(error);
@@ -2014,6 +2132,8 @@ fn view(
                     interrupted = Some(error.to_string());
                     continue;
                 }
+            } else {
+                paste.observe(&bytes[..n]);
             }
         }
         let current_size = size();
@@ -2039,12 +2159,12 @@ fn view(
 /// Wait for a server to host the terminal again. Nothing is drawn: the
 /// screen stays as the agent left it, and the server that takes the terminal
 /// up paints its own. What is typed meanwhile is discarded; Ctrl+] closes.
-fn reconnect_held(terminal: &TerminalId) -> Result<Option<UnixStream>> {
+fn reconnect_held(terminal: &TerminalId, paste: &mut Paste) -> Result<Option<UnixStream>> {
     let mut wait = Duration::from_millis(100);
     loop {
         match registry::connect(terminal) {
             Ok(socket) => {
-                discard_reconnect_input()?;
+                discard_reconnect_input(paste)?;
                 return Ok(Some(socket));
             }
             // A server answered: the terminal has ended, or another build hosts it.
@@ -2069,8 +2189,12 @@ fn reconnect_held(terminal: &TerminalId) -> Result<Option<UnixStream>> {
             let mut bytes = [0; 8192];
             match io::stdin().read(&mut bytes) {
                 Ok(0) => return Ok(None),
-                Ok(n) if bytes[..n].contains(&0x1d) => return Ok(None),
-                Ok(_) => {}
+                Ok(n) => {
+                    if paste.detaches(&bytes[..n]) {
+                        return Ok(None);
+                    }
+                    paste.observe(&bytes[..n]);
+                }
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
                 Err(e) => return Err(e.into()),
             }
@@ -2125,7 +2249,7 @@ fn ended_exit(error: &anyhow::Error) -> Option<(u8, Option<String>)> {
     Some((code, data["provider"].as_str().map(str::to_owned)))
 }
 
-fn discard_reconnect_input() -> io::Result<()> {
+fn discard_reconnect_input(paste: &mut Paste) -> io::Result<()> {
     let mut fd = libc::pollfd {
         fd: 0,
         events: libc::POLLIN,
@@ -2139,7 +2263,9 @@ fn discard_reconnect_input() -> io::Result<()> {
             return Ok(());
         }
         let mut bytes = [0; 8192];
-        if io::stdin().read(&mut bytes)? == 0 {
+        let n = io::stdin().read(&mut bytes)?;
+        paste.observe(&bytes[..n]);
+        if n == 0 {
             return Ok(());
         }
     }
@@ -2538,6 +2664,7 @@ mod tests {
             settled,
             since: std::time::Instant::now() - super::SETTLE_WAIT,
             fallback: crate::harness::native_exit::Settled {
+                moved: true,
                 code: 0,
                 lines: vec!["This conversation moved to tmux %9".into()],
             },
@@ -2546,6 +2673,7 @@ mod tests {
         };
         let outcome = settling.poll().unwrap();
         assert_eq!(outcome.code, 0);
+        assert!(outcome.moved);
         assert_eq!(outcome.lines, ["This conversation moved to tmux %9"]);
         assert!(settling.poll().is_none());
     }
@@ -2559,6 +2687,40 @@ mod tests {
         // Only uptime advances this deadline; wall time spent asleep is absent.
         assert!(!viewer.heartbeat_expired(viewer.heartbeat_at + Duration::from_secs(29)));
         assert!(viewer.heartbeat_expired(viewer.heartbeat_at + Duration::from_secs(30)));
+    }
+
+    #[test]
+    fn close_is_one_final_frame_after_output_for_every_reason() {
+        use super::{close_viewers, Close, CloseReason};
+        use std::io::Read;
+        for reason in [
+            CloseReason::Replaced,
+            CloseReason::Finished,
+            CloseReason::Retired,
+        ] {
+            let (socket, mut peer) = UnixStream::pair().unwrap();
+            socket.set_nonblocking(true).unwrap();
+            let mut viewer = Viewer::new(socket);
+            viewer.attached = true;
+            // An incomplete terminal escape cannot swallow the close frame.
+            viewer.stream(wire::Tag::Out, b"last\x1b]").unwrap();
+            close_viewers(std::slice::from_mut(&mut viewer), reason);
+            let mut bytes = Vec::new();
+            peer.read_to_end(&mut bytes).unwrap();
+            let mut decoder = wire::Decoder::default();
+            decoder.extend(&bytes);
+            assert_eq!(
+                decoder.next().unwrap(),
+                Some((wire::Tag::Out, b"last\x1b]".to_vec()))
+            );
+            let (tag, payload) = decoder.next().unwrap().unwrap();
+            assert_eq!(tag, wire::Tag::Close);
+            assert_eq!(
+                serde_json::from_slice::<Close>(&payload).unwrap().reason,
+                reason
+            );
+            assert!(decoder.next().unwrap().is_none());
+        }
     }
 
     #[test]

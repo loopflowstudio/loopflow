@@ -130,8 +130,32 @@ Run the app's bundled `lf` with the world's `env.json` variables and
   `/Applications/Loopflow.app` carries the same bundle ID macOS starts that app
   on the world instead. It then owns the socket, and its panes run the installed
   `lf`.
+- `lf desktop enter <tile>` reaches only the shown Working tiles; Backlog Tasks
+  have no socket route, so their pages need a person or headless view tests.
+  `lf desktop move -p <task> --destination <task>` writes the shared Task order;
+  `lf desktop do working-tasks` and `do back` navigate.
+- Look at the window with `screencapture -x -o -l <id>`; list window IDs with a
+  `swift` script over `CGWindowListCopyWindowInfo` (owner `Loopflow Dev`).
+- `lf desktop send` refuses control characters. To make a held conversation
+  report activity, write `ESC]7501;state=working:app=claude-code ESC\` (or
+  `state=idle`) to its stand-in's tty (`ps -o tty` of the `bin/claude` child of
+  the world's holder); `lf task list --json` then shows `busy`/`available`.
+- Wait for the app with `pgrep -x "Loopflow Dev"`: `pgrep -f` with the bundle
+  path matches the waiting shell's own command line. The first `run-debug`
+  builds the bundled `lf` in its own target directory (28 minutes on a loaded Machine).
 - An install that fails with "Third-party inputs changed" means `Cargo.lock`
   changed: `uv run python scripts/third_party.py refresh`, and commit the result.
+- Desktop puts `~/.local/bin` ahead of the world's `bin` on its panes' `PATH`,
+  so a provider Desktop starts is the real `claude` (check `lsof -p <pid>` txt).
+  Start the Task's conversation first from a PTY running the prepared
+  `open_argv` with `--start-if-free` under the world's `PATH`; Desktop's panes
+  then attach to that stand-in. `lf desktop do refresh-session|take-back-session
+  -p session`, `desktop send`/`send-key` and `desktop capture --region scrollback`
+  drive and read the pane; a pane's `attachment` reads `usable`, `elsewhere` or
+  `failed`. Reuse no markers across runs: scrollback keeps earlier replies.
+- Reinstalling the bundle changes its `lf`: the running private server then
+  answers "uses another executable" and panes lose their surfaces. Restart that
+  server with the new bundled `lf`; held providers survive in the old holder.
 - To see what a pane inherited, compare `lsof -p <app pid>` pipe addresses with
   those of its children and of the PIDs in the world's `processes` table.
 - Quit with `NSRunningApplication(processIdentifier:).terminate()` from a
@@ -143,6 +167,19 @@ Run the app's bundled `lf` with the world's `env.json` variables and
   screen is locked (`CGSSessionScreenIsLocked`), `screencapture` is black and
   `-l <window>` fails: sample `lf desktop ls --json` instead. Its `reading`/
   `reason` are the window's work status and `list` the sidebar rows.
+- To run beside another QA app, copy the installed bundle, set its own
+  `CFBundleIdentifier` with `plutil -replace`, `codesign -f --deep -s -`, and
+  `open -n --env …` it with `LF_DESKTOP` set to that ID. Conversations the app
+  opens run the account's real `claude` (with the world's `CLAUDE_CONFIG_DIR`, so
+  at sign-in) even when you start the copy's bundled `lf server run` first; a CLI
+  `lf checkout` keeps the world's stand-in. OSC 7501 reports written to the
+  conversation's tty still drive activity; avoid Graph runs there. Stop the
+  holder's children by the holder's PID, then unregister the copy with `lsregister -u`.
+- On the Working Tasks Dashboard (`lf desktop working-tasks`),
+  `lf desktop move -p <task> --destination <task>` moves a tile and writes the
+  shared `task_orders`; Wave tiles are not enterable there, so the Wave board has
+  no socket route. A locked screen also denies accessibility reads
+  (`AXIsProcessTrusted` false), so header text is left to headless view tests.
 - To delay or break Work reads, SIGSTOP the private server. Desktop registers
   it under launchd, so `kill -9` restarts it within seconds; for a sustained
   outage boot out the `server.plist` label, then `lf server run` to recover.
@@ -630,6 +667,17 @@ most); a PTY driver that answers only `ESC[6n` sees that pause. After a build
 swap, `lf monitor rollover --dry-run` should list the old holder and its views
 as staying; `lf ps` BINARIES names each build with its version.
 
+For final bridge reasons, attach through `session.attach` and consume the viewer
+frames described in `transport/README.md`. Check one final `0x07` Close before
+EOF: `replaced` after `session new --prepare`, `finished` after provider exit,
+and `retired` after shell Close or Task cleanup. Reattach by the same Session
+only after the replacement starts; assert no extra provider launch or input
+replay. Fault the server separately: absent a Close, EOF remains unknown and
+recovery retains the same held terminal. Use the existing heartbeat checks for
+quiet providers and a lost return path. Desktop status travels over its private
+`LF_SERVER_STATUS` Unix stream; inspect readings and actions there, never files.
+Mounted presentation still needs a display-capable check.
+
 ## Task conversation lifetime
 
 `cargo build -p loopflow --bin lf-world`, then `lf-world build one-task <dir>`
@@ -737,6 +785,14 @@ family, plus one Clap → ops wiring break (e.g. drop `worktree` in
 A break no test notices is a missing row; add it, then repeat the break.
 Edit only from one shell, one cargo command at a time, so no other build
 compiles the mutated source.
+
+For a Swift-only test change, skip the wrapper's Rust rebuild: run
+`swift build --build-tests --package-path swift --jobs 4`, then
+`scripts/test_desktop.sh --skip-build --filter <Suite>/<test>`. Rebuild after
+`git checkout` restores a mutation, or the next `--skip-build` run tests the
+mutated binary. A break that leaves an unbounded Observation wait pending
+hangs until Swift Testing's 300-second limit stops the run; run that break
+in the foreground so its exit status reaches you.
 
 A Swift "passes under parallel load" check can't use two `swift test`
 processes: the second waits on the `.build` lock ("Another instance of

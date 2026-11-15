@@ -37,7 +37,7 @@
       }
     },
     "runtime": {
-      "work_id": "ts_commits",
+      "work_id": "source-issue",
       "status": "moving",
       "completion_pending": "Completion pending: follow-through needs resolution. Retry: lf task complete W2-SOURCE",
       "reason": "ready",
@@ -283,7 +283,13 @@
       "merge_commit": "merged-head",
       "abandoned_at": null
     },
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "moving",
+    "selection_states": [
+      "open",
+      "moving",
+      "working"
+    ]
   },
   "done": {
     "task": {
@@ -323,7 +329,7 @@
       }
     },
     "runtime": {
-      "work_id": "ts_commits",
+      "work_id": "source-issue",
       "status": "done",
       "completion_pending": null,
       "reason": "done",
@@ -569,7 +575,11 @@
       "merge_commit": "merged-head",
       "abandoned_at": null
     },
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "done",
+    "selection_states": [
+      "done"
+    ]
   },
   "none": {
     "task": {
@@ -609,7 +619,7 @@
       }
     },
     "runtime": {
-      "work_id": "ts_commits",
+      "work_id": "source-issue",
       "status": "done",
       "completion_pending": null,
       "reason": "done",
@@ -855,7 +865,11 @@
       "merge_commit": "merged-head",
       "abandoned_at": null
     },
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "done",
+    "selection_states": [
+      "done"
+    ]
   },
   "due": {
     "task": {
@@ -927,7 +941,12 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "unstarted",
+    "selection_states": [
+      "unstarted",
+      "backlog"
+    ]
   },
   "unrelated": {
     "task": {
@@ -999,7 +1018,12 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "unstarted",
+    "selection_states": [
+      "unstarted",
+      "backlog"
+    ]
   },
   "conversion": {
     "task": {
@@ -1039,7 +1063,7 @@
       }
     },
     "runtime": {
-      "work_id": "ts_commits",
+      "work_id": "source-issue",
       "status": "moving",
       "completion_pending": null,
       "reason": "ready",
@@ -1285,7 +1309,13 @@
       "merge_commit": "merged-head",
       "abandoned_at": null
     },
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "moving",
+    "selection_states": [
+      "open",
+      "moving",
+      "working"
+    ]
   },
   "completed_running": {
     "task": {
@@ -1325,7 +1355,7 @@
       }
     },
     "runtime": {
-      "work_id": "ts_commits",
+      "work_id": "source-issue",
       "status": "done",
       "completion_pending": null,
       "reason": "ready",
@@ -1571,6 +1601,10 @@
       "merge_commit": "merged-head",
       "abandoned_at": null
     },
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "done",
+    "selection_states": [
+      "done"
+    ]
   }
 }

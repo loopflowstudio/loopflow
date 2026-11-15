@@ -97,11 +97,16 @@ The Mac app shows the same records the commands print; it keeps no copy of its o
 - **Dashboards**: Tasks side by side, chosen by a query.
 - **Wave view**: the Wave conversation beside a standup board, with the Tasks
   being worked on three to a page below. The board shows one section at a time:
-  Backlog, Working (with each Session Available or Busy), Autonomous (shipping)
-  and Done. The repository page is the same view over every repository Task.
+  Backlog (unstarted or unassigned), Working (with Task conversation availability),
+  Autonomous (shipping) and Done. The repository page is the same view over every repository Task.
   Every pane and view part zooms and hides from buttons on hover, its dividers
   drag, and the header's `Show…` menu brings hidden parts back.
 - **⌘K**: search Waves, Tasks, Sessions and Graphs.
+
+Task lifecycle, conversation membership and availability agree across the page,
+sidebar, board and pickers. Dragging a sidebar Task changes the shared order used
+by ordinary repository and Wave lists. See the [Desktop guide](../swift/README.md)
+for status, ownership and ordering details.
 
 ```bash
 lf desktop view 'state:available'                       # a Dashboard of every available conversation
@@ -109,8 +114,8 @@ lf desktop dashboard query attention 'state:available or state:blocked'   # save
 ```
 
 Queries take `wave:`, `task:`, `kind:task|wave` and
-`state:open|available|running|blocked|paused|idle|backlog|done`; whitespace
-means AND, and `or` and parentheses compose.
+`state:open|available|busy|blocked|unstarted|idle|active|moving|shipping|backlog|working|autonomous|done`;
+whitespace means AND, and `or` and parentheses compose.
 
 ### Connection recovery
 
@@ -181,11 +186,14 @@ Every Task list read (`lf task list`, `lf wave show`, `lf wave status`,
  "runtime": {"status": "active", "reason": "…", "owner": {…}, …},
  "next_move": {"owner": "task", "reason": "…"},
  "condition": {"state": "clear", "reason": "…", …},
- "graph_name": "code", "pr": {"phase": "open", …}, "section": "now", …}
+ "graph_name": "code", "pr": {"phase": "open", …}, "section": "working",
+ "lifecycle": "active", "selection_states": ["open", "busy", "active", "working"], …}
 ```
 
 `runtime.status` is one of `unstarted`, `idle`, `active`, `moving`,
-`shipping`, `done` or `abandoned` (`runtime` is `null` before a first run);
+`shipping`, `done` or `abandoned`. `lifecycle` includes completion or cancellation
+of never-started work; `selection_states` supplies the same lifecycle, board
+section and conversation activity used by Dashboard filters;
 `next_move.owner` (`user`, `wave`, `task`, `ci`, `external`) says who moves it
 on. `lf task status <issue> --json` prints one
 Task as a row, each fact once, with its Sessions, Graph processes and

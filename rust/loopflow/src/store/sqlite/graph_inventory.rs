@@ -639,13 +639,12 @@ mod tests {
 
     use crate::durable::GraphProcessFilter;
     use crate::session::GraphProcessSummaryState;
-    use crate::store::sqlite::SqliteStore;
 
     /// Two waits on one Task's step and a later wait still running its time.
     #[test]
     fn a_task_past_its_limit_wait_is_found_once_and_only_when_due() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let repository = crate::repository::location::ensure_repository(&store, "/repo").unwrap();
         let task = loopflow_model::durable::TaskId::new();
         store
@@ -693,7 +692,7 @@ mod tests {
     #[test]
     fn a_step_lands_after_its_graphs_mark_when_an_unrelated_rowid_is_reused() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let process = |parent: Option<&loopflow_model::id::LfProcessId>, pid: u32| {
             let process = crate::process::LfProcess {
                 id: loopflow_model::id::LfProcessId::new(),
@@ -739,7 +738,7 @@ mod tests {
     #[test]
     fn a_task_run_finds_its_graph_after_a_conversation_started_beside_it() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let [carrier, conversation, graph] =
             std::array::from_fn(|_| loopflow_model::id::LfProcessId::new());
         let execute = |sql: &str, params: &[&dyn rusqlite::ToSql]| {
@@ -771,7 +770,7 @@ mod tests {
     #[test]
     fn step_input_is_the_steps_own_capture() {
         let directory = tempfile::tempdir().unwrap();
-        let store = SqliteStore::new(&directory.path().join("loopflow.db")).unwrap();
+        let store = crate::store::open_sqlite(&directory.path().join("loopflow.db")).unwrap();
         let [step, nested] = std::array::from_fn(|_| loopflow_model::id::LfProcessId::new());
         {
             let conn = store.conn.lock().unwrap();
@@ -834,7 +833,7 @@ mod tests {
     #[test]
     fn graphs_are_their_graph_and_step_processes() {
         let directory = tempfile::tempdir().unwrap();
-        let store = SqliteStore::new(&directory.path().join("loopflow.db")).unwrap();
+        let store = crate::store::open_sqlite(&directory.path().join("loopflow.db")).unwrap();
         let running = store.test_graph(
             "feature",
             "/repo",
@@ -957,7 +956,7 @@ mod tests {
         crate::store::migrations::upgrade_from_migration(&conn, "rename_flow_to_graph");
         drop(conn);
 
-        let store = SqliteStore::new(&database).unwrap();
+        let store = crate::store::open_sqlite(&database).unwrap();
         let (graph, entry) = store
             .graph_process("00000000-0000-4000-8000-00000000f100")
             .unwrap()

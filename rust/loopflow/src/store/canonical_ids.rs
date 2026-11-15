@@ -8,7 +8,8 @@ use fs2::FileExt;
 use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 
-use crate::journal::{process_identity_evidence, ProcessIdentityEvidence};
+use super::migration_runner::MigrationProcess;
+use super::ProcessIdentityEvidence;
 use crate::store::{StoreError, StoreResult};
 
 pub(crate) fn session_fence_file(database: &Path, locator: &str) -> StoreResult<File> {
@@ -40,7 +41,11 @@ fn changes_session(value: &str) -> bool {
 
 /// The caller owns the guards until SQLite commits or rolls back. Never wait for
 /// a fence while holding SQLite: its holder may be waiting to finish admission.
-pub(super) fn preflight(conn: &Connection, guards: &mut Vec<File>) -> StoreResult<()> {
+pub(super) fn preflight(
+    conn: &Connection,
+    guards: &mut Vec<File>,
+    observe: &dyn Fn(Option<&Path>, &MigrationProcess) -> ProcessIdentityEvidence,
+) -> StoreResult<()> {
     let database = conn.path().filter(|path| !path.is_empty()).map(Path::new);
     let mut affected_owners = HashSet::new();
     let mut sessions = conn.prepare(
@@ -103,35 +108,18 @@ pub(super) fn preflight(conn: &Connection, guards: &mut Vec<File>) -> StoreResul
         if !affected {
             continue;
         }
-        let kind: String = row.get(2)?;
-        let completed: Option<i64> = row.get(6)?;
-        let evidence = if kind == "agent" {
-            crate::journal::agent_process_evidence(
-                completed,
-                row.get(3)?,
-                row.get(4)?,
-                None,
-                process_identity_evidence,
-            )
-        } else {
-            let receipt = database.and_then(Path::parent).map(|home| {
-                crate::journal::read_process_receipt(&crate::journal::process_receipt_path(
-                    home, &id,
-                ))
-            });
-            match receipt {
-                Some(Ok(Some(receipt))) if receipt.matches_process(&id, &trace) => {
-                    receipt.process_evidence()
-                }
-                Some(Ok(None))
-                    if completed.is_some() || crate::journal::began_before_boot(row.get(5)?) =>
-                {
-                    ProcessIdentityEvidence::Dead
-                }
-                // A malformed or mismatched receipt is not absence, even for an old row.
-                _ => ProcessIdentityEvidence::Unknown,
-            }
-        };
+        let evidence = observe(
+            database,
+            &MigrationProcess {
+                id: id.clone(),
+                trace,
+                kind: row.get(2)?,
+                pid: row.get(3)?,
+                os_started_at: row.get(4)?,
+                started_at: row.get(5)?,
+                completed_at: row.get(6)?,
+            },
+        );
         if evidence != ProcessIdentityEvidence::Dead {
             return Err(StoreError::InvalidData(format!(
                 "canonical identity migration deferred: Process {id} has {evidence:?} ownership evidence; retry after ordinary settlement or repair the receipt"

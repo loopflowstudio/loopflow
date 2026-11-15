@@ -632,7 +632,8 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let _home =
             crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
-        let store = SqliteStore::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
+        let store =
+            crate::store::opening::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .max_blocking_threads(2)

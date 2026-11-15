@@ -877,7 +877,7 @@ mod tests {
     #[test]
     fn native_event_preparation_stays_bounded_and_keeps_identity_checks() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("conversation", &crate::session_record::new_artifact_key());
         {
             let conn = store.conn.lock().unwrap();
@@ -976,7 +976,7 @@ mod tests {
     #[test]
     fn a_recovered_gap_enters_the_sessions_history_once() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("session", &crate::session_record::new_artifact_key());
         let marker = home.path().join("thread.store-gap");
         let gap = || RecordingGap::marked(marker.clone());
@@ -1049,7 +1049,7 @@ mod tests {
     #[test]
     fn delayed_origin_preserves_pre_bind_assignment_and_rejects_conflicting_repeat() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let session =
             store.test_session("conversation", &crate::session_record::new_artifact_key());
         let process = loopflow_model::id::LfProcessId::new();
@@ -1133,7 +1133,7 @@ mod tests {
     #[test]
     fn provider_identity_uses_original_event_order_and_fresh_publications() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("conversation", "run_00000000000000000000000000000001");
         let input =
             crate::session_record::parse_artifact_key("run_00000000000000000000000000000001")
@@ -1225,7 +1225,7 @@ mod tests {
     #[test]
     fn first_provider_attempt_follows_original_input_order_after_import() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("conversation", "run_00000000000000000000000000000001");
         let input =
             crate::session_record::parse_artifact_key("run_00000000000000000000000000000001")
@@ -1288,7 +1288,7 @@ mod tests {
     #[test]
     fn silences_follow_input_order() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("conversation", "run_00000000000000000000000000000001");
         let input =
             crate::session_record::parse_artifact_key("run_00000000000000000000000000000001")
@@ -1321,7 +1321,7 @@ mod tests {
     #[test]
     fn history_limits_precede_payload_reads_and_keep_unfinished_work_and_exact_callers() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let mut template = store.test_session("seed", "run_000000000000000000000000000000ff");
         template.captured = None;
         template.caller_artifact_key = Some(template.input_key().unwrap().clone());
@@ -1449,7 +1449,8 @@ mod tests {
     fn process_completion_ends_inputs_without_exit_events() {
         for captured in [true, false] {
             let home = tempfile::tempdir().unwrap();
-            let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+            let store =
+                crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
             let mut session =
                 store.test_session("seed", &crate::session_record::new_artifact_key());
             session.id = "conversation".into();
@@ -1530,7 +1531,7 @@ mod tests {
     #[test]
     fn aggregate_history_discovers_unattributed_native_receipts_without_a_capture() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("conversation", "run_00000000000000000000000000000001");
         let counts = json!({"inputTokens":12,"outputTokens":3,
             "cachedInputTokens":0,"reasoningOutputTokens":0});
@@ -1640,7 +1641,8 @@ mod tests {
 
         for transfer in [false, true] {
             let home = tempfile::tempdir().unwrap();
-            let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+            let store =
+                crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
             let session =
                 store.test_session("conversation", &crate::session_record::new_artifact_key());
             let first = loopflow_model::id::LfProcessId::new();
@@ -1738,7 +1740,7 @@ mod tests {
     fn session_exit_retires_orphans_and_headless_runs_but_preserves_primary_and_task_conversations()
     {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let wave = loopflow_model::id::WaveId::new();
         let project = crate::work::project::ProjectId::new();
         let task = crate::work::task::TaskId::new();
@@ -1858,7 +1860,7 @@ mod tests {
     #[test]
     fn no_decoded_time_follows_its_inputs_bound() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let old = crate::session_record::new_artifact_key();
         let session = store.test_session("old", &old);
         store.test_session("new", &crate::session_record::new_artifact_key());
@@ -1935,7 +1937,7 @@ mod tests {
     #[test]
     fn completed_turn_does_not_complete_the_conversation() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let session = store.test_session("unfinished", &crate::session_record::new_artifact_key());
         for kind in [SessionEventKind::Started, SessionEventKind::Completed] {
             store
@@ -1964,7 +1966,7 @@ mod tests {
     #[test]
     fn stopped_turn_and_stale_attachment_cannot_retire_a_resumed_conversation() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let session =
             store.test_session("conversation", &crate::session_record::new_artifact_key());
         let first = loopflow_model::id::LfProcessId::new();
@@ -2045,7 +2047,7 @@ mod tests {
     #[test]
     fn native_usage_survives_attachment_and_input_replacement_without_double_counting() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("conversation", "run_00000000000000000000000000000001");
         let first_input =
             crate::session_record::parse_artifact_key("run_00000000000000000000000000000001")
@@ -2203,7 +2205,7 @@ mod tests {
     #[test]
     fn a_second_usage_receipt_for_a_turn_conflicts() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("conversation", &crate::session_record::new_artifact_key());
         let usage = |total: u64| {
             let counts = json!({"inputTokens":total,"outputTokens":0});
@@ -2223,7 +2225,7 @@ mod tests {
     #[test]
     fn deleting_a_session_event_probes_captured_event_by_index() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let plan: Vec<String> = {
             let conn = store.conn.lock().unwrap();
             let mut statement = conn
@@ -2245,7 +2247,7 @@ mod tests {
     #[test]
     fn native_usage_cannot_skip_a_turn_without_a_notification_for_its_baseline() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let input = crate::session_record::new_artifact_key();
         store.test_session("conversation", &input);
         let counts = |value| {
@@ -2289,7 +2291,7 @@ mod tests {
     #[test]
     fn recovered_completion_keeps_missing_start_and_usage_and_rejects_conflicts() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("conversation", "run_00000000000000000000000000000001");
         let completed = json!({"status":"completed", "error":null, "started_at":10, "completed_at":20, "duration_ms":10000});
         let seq = store

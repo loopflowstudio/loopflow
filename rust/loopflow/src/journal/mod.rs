@@ -749,7 +749,7 @@ fn ledger_insert(context: &ProcessContext, event: &LfEvent, exit_code: Option<i3
         .waited;
     let recorded = match context.ledger.get().cloned().map_or_else(
         || {
-            let store = SqliteStore::new(&context.ledger_path)?;
+            let store = crate::store::open_sqlite(&context.ledger_path)?;
             let _ = context.ledger.set(store.clone());
             Ok::<_, crate::store::StoreError>(store)
         },
@@ -808,7 +808,7 @@ fn first_ledger_failure() -> bool {
 
 /// Open the local ledger store, creating and migrating it if needed.
 pub fn open_ledger() -> Result<SqliteStore, crate::store::StoreError> {
-    SqliteStore::new(&ledger_db_path()?)
+    crate::store::open_sqlite(&ledger_db_path()?)
 }
 
 /// Whether the ledger exists, so a read that could only find nothing can

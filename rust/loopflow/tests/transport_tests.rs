@@ -1709,9 +1709,7 @@ impl Fixture {
     fn shell_task(&self, task: &str) -> loopflow::durable::MachineId {
         let output = self.command(&["machine", "id"]).output().unwrap();
         assert!(output.status.success(), "{output:?}");
-        let store =
-            loopflow::store::sqlite::SqliteStore::new(&self.home.path().join("loopflow.db"))
-                .unwrap();
+        let store = loopflow::store::open_sqlite(&self.home.path().join("loopflow.db")).unwrap();
         let repo = loopflow::repository::location::ensure_repository(
             &store,
             self.repo.path().to_str().unwrap(),

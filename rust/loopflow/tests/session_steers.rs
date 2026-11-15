@@ -198,8 +198,7 @@ fn claude_startup_preserves_large_combined_seed_and_correlated_answer() {
     let home = tempfile::tempdir().unwrap();
     let _task =
         support::register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
-    let store =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let steer = store
         .save_repository_steer(
             &loopflow::repository::CanonicalRepo::discover(repo.path()).unwrap(),
@@ -254,8 +253,7 @@ fn a_bare_skill_in_a_task_checkout_takes_a_steer_and_asks_no_server() {
     let home = tempfile::tempdir().unwrap();
     let task =
         support::register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
-    let store =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let output = launch_startup_proof(&repo, home.path(), &store, None);
     assert_launched(&output, home.path());
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
@@ -285,8 +283,7 @@ fn a_task_launch_with_no_machine_server_fails_naming_it() {
     let home = tempfile::tempdir().unwrap();
     let _task =
         support::register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
-    let store =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     // The selected installation's `lf install server` reaches no supervisor.
     let lf = home.path().join("lf");
     fs::write(
@@ -324,8 +321,7 @@ impl InteractiveTask {
         let home = tempfile::tempdir().unwrap();
         let _task =
             support::register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
-        let store =
-            loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+        let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
         connect_fixture_account(home.path(), &store);
         let bin = home.path().join("bin");
         fs::create_dir(&bin).unwrap();
@@ -481,7 +477,7 @@ fn a_task_pane_reopened_by_session_id_fails_naming_a_missing_server() {
 #[test]
 fn public_context_capability_survives_claim_changes_and_rejects_children_and_replacement() {
     use loopflow::id::LfProcessId;
-    use loopflow::store::sqlite::SqliteStore;
+
     use std::io::Write;
     use std::time::{Duration, Instant};
 
@@ -491,7 +487,7 @@ fn public_context_capability_survives_claim_changes_and_rejects_children_and_rep
     // capability and starts beside the Machine server its hooks call.
     let _task =
         support::register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
-    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let mut server = Some(MachineServer::start(env!("CARGO_BIN_EXE_lf"), home.path()));
     connect_fixture_account(home.path(), &store);
     // Signing the shared Claude home in goes through the Keychain on macOS.
@@ -897,7 +893,7 @@ fn public_commands_save_steers_without_launching_providers() {
     ]);
     // A thread entry can sort after the comment this command saves. Its
     // timestamp must not decide which comment's steer the command returns.
-    loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db"))
+    loopflow::store::open_sqlite(&home.path().join("loopflow.db"))
         .unwrap()
         .append_task_comment(
             &task.task.id,

@@ -74,7 +74,7 @@ impl LfProcessRuntime {
         process: AgentProcessRequest,
     ) -> StoreResult<Self> {
         let home = crate::store::lf_home_dir();
-        let store = crate::store::sqlite::SqliteStore::new(
+        let store = crate::store::open_sqlite(
             &crate::store::database_path_from_env().map_err(record_error)?,
         )?;
         let lf_process_id = crate::journal::current_lf_process_id().ok_or_else(|| {
@@ -583,7 +583,7 @@ mod tests {
         crate::process::SessionAttachment,
     ) {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("resume", &crate::session_record::new_artifact_key());
         let sql = rusqlite::Connection::open(home.path().join("store.db")).unwrap();
         sql.execute(
@@ -619,7 +619,7 @@ mod tests {
         const RECOVERY_HOME: &str = "LOOPFLOW_TEST_SESSION_RECOVERY";
         if let Some(home) = std::env::var_os(RECOVERY_HOME) {
             let home = std::path::PathBuf::from(home);
-            let store = SqliteStore::new(&home.join("store.db")).unwrap();
+            let store = crate::store::open_sqlite(&home.join("store.db")).unwrap();
             std::fs::write(home.join("recovering"), "ready").unwrap();
             let result = crate::process::resume_session_agent_process(
                 &store,
@@ -1403,7 +1403,7 @@ mod tests {
         let _ambient = crate::test_ambient::EnvGuard::new();
         let home = tempfile::tempdir().unwrap();
         let database = home.path().join("store.db");
-        let store = SqliteStore::open_ephemeral(&database).unwrap();
+        let store = crate::store::opening::open_ephemeral(&database).unwrap();
         store.test_session("retry", "run_00000000000000000000000000000001");
         let sql = rusqlite::Connection::open(&database).unwrap();
         sql.execute(

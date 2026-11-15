@@ -13,7 +13,6 @@ use loopflow::child::ChildRef;
 use loopflow::id::WaveId;
 use loopflow::linear::{LinearIssueId, LinearProjectId};
 use loopflow::store::migrations;
-use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::StorageConfig;
 use loopflow::work::project::{Project, ProjectEventKind, ProjectId};
 use loopflow::work::task::{
@@ -34,7 +33,7 @@ fn seed(home: &Path, wave_name: &str) -> Wave {
     let repo = home.join("repo");
     std::fs::create_dir_all(&repo).expect("repo");
     let db = home.join("loopflow.db");
-    let store = SqliteStore::new(&db).expect("open store");
+    let store = loopflow::store::open_sqlite(&db).expect("open store");
     let wave = Wave::new(
         WaveId::new(),
         wave_name.to_string(),
@@ -94,7 +93,7 @@ fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
         }],
         "items": []
     });
-    let store = SqliteStore::new(&home.join("loopflow.db")).expect("open status store");
+    let store = loopflow::store::open_sqlite(&home.join("loopflow.db")).expect("open status store");
     select_project(home, wave, project.linear_id.as_ref().unwrap().as_str());
     store
         .seed_inventory(&InventoryFixture {
@@ -109,7 +108,7 @@ fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
 
 fn seed_credential_history(home: &Path) -> Project {
     let wave = seed(home, "infrastructure");
-    let store = SqliteStore::new(&home.join("loopflow.db")).expect("open status store");
+    let store = loopflow::store::open_sqlite(&home.join("loopflow.db")).expect("open status store");
     let now = OffsetDateTime::now_utc();
     let project = test_project(&wave, "stability-security", now);
     store.insert_project(&project).expect("seed Project");
@@ -225,7 +224,7 @@ fn seed_stale_project_work(
     let wave = seed(home, "product");
     let repo = home.join("repo");
     std::fs::create_dir_all(&repo).expect("repo");
-    let store = SqliteStore::new(&home.join("loopflow.db")).expect("open store");
+    let store = loopflow::store::open_sqlite(&home.join("loopflow.db")).expect("open store");
     let now = OffsetDateTime::now_utc();
     let stale = Project {
         id: ProjectId::parse(STALE_WORK_ID).expect("recorded Project Work id"),
@@ -454,7 +453,8 @@ fn seed_previous_release_task_pr(home: &Path) {
     migrations::apply_sqlite(&connection).expect("apply migrations to historical fixture");
     drop(connection);
 
-    let store = SqliteStore::new(&database).expect("open migrated previous release store");
+    let store =
+        loopflow::store::open_sqlite(&database).expect("open migrated previous release store");
     let task_id = TaskId::parse(PERSISTED_TASK_ID).expect("recorded Task id");
     let pr = store
         .active_task_pr(&task_id)
@@ -515,7 +515,7 @@ fn project_operator_failures_remain_historical_without_reappearing_on_the_wave()
     }
     let human = status_human(home.path(), "infrastructure");
     assert!(!human.contains("credential"));
-    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     assert_eq!(
         store
             .latest_project_failure(&project.id)
@@ -575,7 +575,7 @@ fn wave_list_keeps_abandoned_registrations_until_they_are_removed() {
     let home = tempfile::tempdir().unwrap();
     let current = seed(home.path(), "current");
     let abandoned = seed(home.path(), "accidental");
-    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let work = loopflow::durable::WorkRef::Wave(abandoned.id().clone());
     store.abandon(&work, "accidental registration").unwrap();
     let run = |args: &[&str]| {
@@ -651,7 +651,8 @@ Count dispatched Task loops that settle without rescue.
         }],
         "items": []
     });
-    let sqlite = SqliteStore::new(&home.path().join("loopflow.db")).expect("open store");
+    let sqlite =
+        loopflow::store::open_sqlite(&home.path().join("loopflow.db")).expect("open store");
     let now = OffsetDateTime::now_utc();
     sqlite
         .seed_inventory(&InventoryFixture {
@@ -720,7 +721,7 @@ Count dispatched Task loops that settle without rescue.
     assert_eq!(status["projects"]["state"], "ok");
     let projects = status["projects"]["items"].as_array().unwrap();
     assert_eq!(projects.len(), 1);
-    let owned = SqliteStore::new(&home.path().join("loopflow.db"))
+    let owned = loopflow::store::open_sqlite(&home.path().join("loopflow.db"))
         .unwrap()
         .list_projects(Some(wave.id()))
         .unwrap()
@@ -761,7 +762,7 @@ fn a_wave_with_no_runs_reports_an_empty_reading_not_a_missing_one() {
     let home = tempfile::tempdir().expect("tempdir");
     std::fs::create_dir_all(home.path()).expect("home");
     let database = home.path().join("loopflow.db");
-    let store = SqliteStore::new(&database).expect("open store");
+    let store = loopflow::store::open_sqlite(&database).expect("open store");
     std::fs::create_dir_all(home.path().join("repo")).expect("repo");
     let wave = Wave::new(
         WaveId::new(),
@@ -1055,7 +1056,7 @@ fn exact_task_roadmap_retains_history_without_starting_work() {
 fn exact_task_roadmap_scopes_duplicate_identifiers_to_registered_repositories() {
     let home = tempfile::tempdir().unwrap();
     let mut snapshot = seed_stale_project_work(home.path(), false, false);
-    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let original = store.list_waves(None).unwrap().remove(0);
     let other_repo = home.path().join("other-repo");
     std::fs::create_dir_all(&other_repo).unwrap();
@@ -1125,7 +1126,7 @@ fn exact_task_roadmap_scopes_duplicate_identifiers_to_registered_repositories() 
 fn ordinary_task_due_date_is_visible_before_checkout() {
     let home = tempfile::tempdir().unwrap();
     let mut planning = seed_stale_project_work(home.path(), false, false);
-    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let mut child = planning.snapshot.items[0].clone();
     child.id = "follow-up-issue".into();
     child.identifier = "W2-FOLLOW".into();

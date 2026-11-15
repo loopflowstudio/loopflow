@@ -194,13 +194,13 @@ pub fn copied_history(
 #[cfg(test)]
 mod tests {
     use super::{add_machine, machines};
-    use crate::store::sqlite::SqliteStore;
+
     use loopflow_model::durable::MachineId;
 
     #[test]
     fn aliases_of_one_machine_keep_the_same_saved_observation() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         let id = MachineId::new();
         let first = add_machine(&store, &id, "mini", "builder").unwrap();
         add_machine(&store, &id, "mini", "alias").unwrap();

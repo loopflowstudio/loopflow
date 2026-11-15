@@ -68,7 +68,7 @@ fn seed(home: &Path, pid: u32) {
         .unwrap()
         .success());
     let repo = repo.canonicalize().unwrap();
-    let store = SqliteStore::open_ephemeral(&home.join("loopflow.db")).unwrap();
+    let store = crate::store::opening::open_ephemeral(&home.join("loopflow.db")).unwrap();
     let repository_id =
         crate::repository::location::ensure_repository(&store, repo.to_str().unwrap()).unwrap();
     for i in 0..64 {
@@ -136,7 +136,7 @@ fn subscription_writer() {
     let home = std::env::var("SUBSCRIPTION_HOME").unwrap();
     std::env::set_var("LF_HOME", &home);
     let home = Path::new(&home);
-    let store = SqliteStore::open_ephemeral(&home.join("loopflow.db")).unwrap();
+    let store = crate::store::opening::open_ephemeral(&home.join("loopflow.db")).unwrap();
     let attachments: Vec<SessionAttachment> =
         serde_json::from_slice(&std::fs::read(home.join("attachments.json")).unwrap()).unwrap();
     let session = store.session("session-127").unwrap().unwrap();

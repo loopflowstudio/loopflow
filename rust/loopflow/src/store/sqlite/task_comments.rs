@@ -322,7 +322,7 @@ pub(super) fn comment_steer_in(
 
 #[cfg(test)]
 mod tests {
-    use crate::store::sqlite::SqliteStore;
+
     use crate::work::wave::Wave;
     use loopflow_model::comment::{TaskComment, TaskCommentAuthor};
     use loopflow_model::durable::TaskId;
@@ -331,7 +331,7 @@ mod tests {
     #[test]
     fn a_sessions_comment_is_stored_as_its_requesters_and_read_as_the_sessions() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let wave = Wave::new(WaveId::new(), "planning".into(), "/repo".into());
         crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let project = loopflow_model::durable::ProjectId::new();
@@ -377,7 +377,7 @@ mod tests {
     fn linear_comment_adoption_preserves_local_history_and_execution() {
         let home = tempfile::tempdir().unwrap();
         let database = home.path().join("store.db");
-        let store = SqliteStore::open_ephemeral(&database).unwrap();
+        let store = crate::store::opening::open_ephemeral(&database).unwrap();
         let wave = Wave::new(WaveId::new(), "planning".into(), "/repo".into());
         crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let project = loopflow_model::durable::ProjectId::new();
@@ -431,7 +431,7 @@ mod tests {
         )
         .unwrap();
         drop(store);
-        let store = SqliteStore::open_ephemeral(&database).unwrap();
+        let store = crate::store::opening::open_ephemeral(&database).unwrap();
         store.record_comment_delivery(&original.id, None).unwrap();
         store
             .record_comment_delivery(&original.id, Some("late failure"))

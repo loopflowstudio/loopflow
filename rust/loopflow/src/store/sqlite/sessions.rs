@@ -2199,8 +2199,6 @@ mod metadata_tests {
     use rusqlite::params;
     use serde_json::json;
 
-    use super::SqliteStore;
-
     use crate::session::{GraphProcessSummaryState, SessionFilter};
 
     #[test]
@@ -2242,7 +2240,7 @@ mod metadata_tests {
     #[test]
     fn session_inventory_distinguishes_primary_sessions_from_unassigned_tasks() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("primary", &crate::session_record::new_artifact_key());
         store.test_session("other", &crate::session_record::new_artifact_key());
         let repository = loopflow_model::durable::RepositoryId::new();
@@ -2285,7 +2283,7 @@ mod metadata_tests {
     #[test]
     fn input_replacement_retains_workspace_and_task_membership() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let session = store.test_session("moving", &crate::session_record::new_artifact_key());
         let wave = loopflow_model::id::WaveId::new();
         let project = crate::work::project::ProjectId::new();
@@ -2351,7 +2349,7 @@ mod metadata_tests {
     #[test]
     fn retained_sessions_without_repo_use_their_recorded_wave() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("retained", &crate::session_record::new_artifact_key());
         let wave = loopflow_model::id::WaveId::new();
         {
@@ -2394,7 +2392,7 @@ mod metadata_tests {
     #[test]
     fn retrying_retired_input_preserves_completion_and_rejects_stale_snapshots() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let first = store.test_session("retired", &crate::session_record::new_artifact_key());
         let mut next = first.clone();
         next.artifact_key = Some(crate::session_record::new_artifact_key());
@@ -2433,7 +2431,7 @@ mod metadata_tests {
     fn captured_reservation_survives_interruption_and_fences_replacement() {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("store.db");
-        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let store = crate::store::opening::open_ephemeral(&path).unwrap();
         let old_key = "run_00000000000000000000000000000001";
         let first = store.test_session("conversation", old_key);
         let history = store.session_history("conversation", 0, 100).unwrap();
@@ -2450,7 +2448,7 @@ mod metadata_tests {
                 .unwrap();
         assert_ne!(next.captured, first.captured);
         drop(store);
-        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let store = crate::store::opening::open_ephemeral(&path).unwrap();
         let retained = store.session("conversation").unwrap().unwrap();
         assert_eq!(retained, next);
         assert!(!retained.input_published);
@@ -2489,7 +2487,7 @@ mod metadata_tests {
     #[test]
     fn session_metadata_reads_its_graph_from_the_process_that_captured_its_input() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let input = crate::session_record::new_artifact_key();
         let graph_process =
             store.test_graph("retained", "/unavailable", &[("implement", None)], None);
@@ -2573,7 +2571,7 @@ mod metadata_tests {
     #[test]
     fn session_metadata_receipts_remain_idempotent_and_conflicts_do_not_relabel() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let input = crate::session_record::new_artifact_key();
         store.test_session("imported", &input);
         let session = store.session("imported").unwrap().unwrap();
@@ -2619,7 +2617,7 @@ mod metadata_tests {
     #[test]
     fn history_windows_find_inputs_by_each_start_and_end() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         {
             let conn = store.conn.lock().unwrap();
             // (session, capture recorded, manifest observed, terminal observed)
@@ -2686,7 +2684,7 @@ mod metadata_tests {
     #[test]
     fn task_history_reads_every_row_naming_the_task() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let repository = crate::repository::location::ensure_repository(&store, "/repo").unwrap();
         let [task, other] = [0, 1].map(|_| {
             let id = loopflow_model::durable::TaskId::new();
@@ -2797,7 +2795,7 @@ mod metadata_tests {
     #[test]
     fn session_metadata_filters_and_preserves_explicit_membership() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         {
             let conn = store.conn.lock().unwrap();
             for (id, title, interactive, repo, membership) in [

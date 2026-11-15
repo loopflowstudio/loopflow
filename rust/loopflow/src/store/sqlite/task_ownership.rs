@@ -1069,7 +1069,7 @@ mod tests {
 
     fn store_with_unowned_task() -> (tempfile::TempDir, SqliteStore, TaskId) {
         let dir = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&dir.path().join("db")).unwrap();
         let repo = dir.path().canonicalize().unwrap();
         let task = store
             .create_task(&NewTask {
@@ -1452,7 +1452,7 @@ mod tests {
                 PlanningDestination::new("/unused/fixture", "refs/loopflow/planning/shared/owners")
                     .unwrap();
             let side = |name: &str| {
-                let store = SqliteStore::open_ephemeral(&dir.path().join(name)).unwrap();
+                let store = crate::store::opening::open_ephemeral(&dir.path().join(name)).unwrap();
                 let repo = TestRepo::new();
                 let path = repo.path().canonicalize().unwrap();
                 let path = path.to_str().unwrap().to_owned();

@@ -1088,8 +1088,7 @@ fn wave_catalog_reads_imported_definitions_and_keeps_empty_goals() {
     std::fs::write(repo.path().join(".lf/wave/parent/child/GOAL.md"), "").unwrap();
     assert!(json_entries(repo.path(), home.path(), &["list", "wave", "--json"]).is_empty());
     assert!(!home.path().join(".lf").exists());
-    let store =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join(".lf/loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join(".lf/loopflow.db")).unwrap();
     loopflow::work::wave::bootstrap::ensure_wave(
         &store,
         repo.path().canonicalize().unwrap().to_str().unwrap(),

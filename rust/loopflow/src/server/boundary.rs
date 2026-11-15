@@ -246,7 +246,7 @@ mod tests {
         std::path::PathBuf,
     ) {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("session", &crate::session_record::new_artifact_key());
         let process = store.test_lf_process();
         let claim =

@@ -214,14 +214,14 @@ pub(super) fn move_in_flight_in(
 #[cfg(test)]
 mod tests {
     use super::MoveStage;
-    use crate::store::sqlite::SqliteStore;
+
     use crate::work::task::NewTask;
     use loopflow_model::durable::{MachineId, TaskId};
 
     #[test]
     fn a_sent_move_stays_until_it_arrives_and_then_keeps_no_payload() {
         let dir = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&dir.path().join("db")).unwrap();
         let repo = dir.path().canonicalize().unwrap();
         let task = store
             .create_task(&NewTask {

@@ -678,7 +678,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let database = home.path().join("loopflow.db");
         std::env::set_var("LF_HOME", home.path());
-        let store = crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
+        let store = crate::store::opening::open_ephemeral(&database).unwrap();
         let conn = rusqlite::Connection::open(&database).unwrap();
         let process = loopflow_model::id::LfProcessId::new();
         conn.execute(
@@ -805,7 +805,7 @@ mod tests {
             .map(crate::process::LfProcessRuntime::new)?;
             capture.claim_session_attachment()?;
             let (session, first) = capture.session_attachment().unwrap();
-            let store = crate::store::sqlite::SqliteStore::new(&home.join("loopflow.db"))?;
+            let store = crate::store::open_sqlite(&home.join("loopflow.db"))?;
             runtime.block_on(async {
                 let (tx, _rx) = mpsc::unbounded_channel();
                 let mut harness = ClaudeHarness::new(tx);
@@ -827,10 +827,9 @@ mod tests {
                 observed_input(home, "first request").await;
                 let first_pid = harness.pid().unwrap();
                 let other_home = tempfile::tempdir().unwrap();
-                let other_store = crate::store::sqlite::SqliteStore::open_ephemeral(
-                    &other_home.path().join("loopflow.db"),
-                )
-                .unwrap();
+                let other_store =
+                    crate::store::opening::open_ephemeral(&other_home.path().join("loopflow.db"))
+                        .unwrap();
                 let selection = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
                 std::env::set_var("LF_HOME", other_home.path());
                 assert!(matches!(
@@ -1002,7 +1001,7 @@ mod tests {
             std::fs::write(&claude, script).unwrap();
             std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o755)).unwrap();
             let database = home.path().join("loopflow.db");
-            let store = crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
+            let store = crate::store::opening::open_ephemeral(&database).unwrap();
             let process = loopflow_model::id::LfProcessId::new();
             rusqlite::Connection::open(&database)
                 .unwrap()

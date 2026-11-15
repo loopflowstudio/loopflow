@@ -215,7 +215,8 @@ mod tests {
     fn disconnected_planning_keeps_uncertain_and_conflicting_receipts() {
         let home = tempfile::tempdir().unwrap();
         let store = Store {
-            sqlite: SqliteStore::open_ephemeral(&home.path().join("registry.db")).unwrap(),
+            sqlite: crate::store::opening::open_ephemeral(&home.path().join("registry.db"))
+                .unwrap(),
         };
         let repo = TestRepo::new();
         let task = task(&store.sqlite, &repo);
@@ -257,7 +258,8 @@ mod tests {
     #[test]
     fn planning_receipt_queries_stay_batched_across_repositories() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("registry.db")).unwrap();
+        let store =
+            crate::store::opening::open_ephemeral(&home.path().join("registry.db")).unwrap();
         let first = task(&store, &TestRepo::new());
         let second = task(&store, &TestRepo::new());
         let single = statements(&store, || {

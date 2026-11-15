@@ -417,7 +417,7 @@ mod tests {
     fn store() -> (tempfile::TempDir, SqliteStore) {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("registry.db");
-        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let store = crate::store::opening::open_ephemeral(&path).unwrap();
         (directory, store)
     }
 

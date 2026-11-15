@@ -67,7 +67,7 @@ impl Watcher {
     /// claimed updates and confirmed steers say so.
     fn read(&mut self, path: &Path) {
         if self.store.is_none() && path.exists() {
-            self.store = SqliteStore::new(path)
+            self.store = crate::store::open_sqlite(path)
                 .inspect_err(|error| tracing::warn!(%error, "Task update watcher has no store"))
                 .ok();
         }
@@ -253,7 +253,7 @@ mod tests {
     /// conversation `native`, and its delivery file.
     fn fixture(session: &str) -> Fixture {
         let home = tempfile::tempdir_in("/tmp").unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session(session, &crate::session_record::new_artifact_key());
         let process = store.test_lf_process();
         let claim =
@@ -465,7 +465,7 @@ mod tests {
         let content = received(&listener)[1]["message"]["content"].to_string();
         assert!(content.contains("pr/1"));
         // News after the restart wakes it too.
-        let restarted = SqliteStore::new(&path).unwrap();
+        let restarted = crate::store::open_sqlite(&path).unwrap();
         fixture.stop(&restarted, &inbox);
         fixture.comment(&restarted, "c-2", "PR: https://example.test/pr/2");
         wake_idle(&restarted, None);

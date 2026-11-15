@@ -10,7 +10,7 @@ use loopflow_model::durable::RepositoryId;
 
 fn fixture() -> (tempfile::TempDir, SqliteStore, RepositoryId) {
     let dir = tempfile::tempdir().unwrap();
-    let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+    let store = crate::store::opening::open_ephemeral(&dir.path().join("db")).unwrap();
     store
         .conn
         .lock()

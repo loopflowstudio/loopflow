@@ -1035,7 +1035,7 @@ assert_eq!(retained.pm_snapshot_synced_at, expected.pm_snapshot_synced_at);
                     // Cancellation must never fall into the old sender's reopen arm.
                     assert_eq!(receipt(), saved);
                 }
-                let reopened = crate::store::sqlite::SqliteStore::open_ephemeral(&fixture.database).unwrap();
+                let reopened = crate::store::opening::open_ephemeral(&fixture.database).unwrap();
                 assert_eq!(reopened.work_status(&work).unwrap(), WorkStatus::Abandoned);
                 assert_eq!(receipt(), saved);
             });

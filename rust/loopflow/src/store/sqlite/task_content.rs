@@ -186,14 +186,14 @@ fn validate_move(
 #[cfg(test)]
 mod tests {
     use crate::session_record::new_artifact_key;
-    use crate::store::sqlite::SqliteStore;
+
     use crate::work::task::{NewTask, TaskUpdate};
     use loopflow_model::durable::TaskId;
 
     #[test]
     fn rank_edits_stay_within_repository_and_project_membership() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().canonicalize().unwrap();
         let path = path.to_str().unwrap();
@@ -271,7 +271,7 @@ mod tests {
     #[test]
     fn membership_moves_preserve_work_and_capture_owners() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         let repo = tempfile::tempdir().unwrap();
         let foreign_repo = tempfile::tempdir().unwrap();
         let canonical = repo.path().canonicalize().unwrap();

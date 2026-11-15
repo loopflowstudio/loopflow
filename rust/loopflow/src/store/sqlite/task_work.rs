@@ -1207,7 +1207,7 @@ mod tests {
     use crate::durable::GraphProcessFilter;
     use crate::process::{ProcessFilter, ProcessWorkFilter};
     use crate::session::SessionFilter;
-    use crate::store::sqlite::SqliteStore;
+
     use loopflow_model::durable::{ProjectId, TaskId};
     use loopflow_model::id::{LfProcessId, TraceId, WaveId};
 
@@ -1294,7 +1294,7 @@ mod tests {
     #[test]
     fn indexed_process_membership_keeps_lexical_paths_and_relocations() {
         let dir = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&dir.path().join("db")).unwrap();
         let conn = store.conn.lock().unwrap();
         conn.execute_batch(
             "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_11111111111111111111111111111111','/repo',1);
@@ -1445,7 +1445,7 @@ mod tests {
     #[test]
     fn reverse_session_membership_keeps_lexical_checkout_and_binding_rules() {
         let dir = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&dir.path().join("db")).unwrap();
         let repository = crate::repository::location::ensure_repository(&store, "/repo").unwrap();
         let roots = [
             Some("/"),
@@ -1552,7 +1552,7 @@ mod tests {
     fn request_stop_retains_its_person_without_an_os_process() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("db");
-        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let store = crate::store::opening::open_ephemeral(&path).unwrap();
         let task = store
             .create_task(&crate::work::task::NewTask {
                 id: TaskId::new(),
@@ -1577,7 +1577,7 @@ mod tests {
             .unwrap()
             .is_none());
         drop(store);
-        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let store = crate::store::opening::open_ephemeral(&path).unwrap();
         assert_eq!(store.task_ship_stop(&task.id).unwrap(), Some(stop));
         let count: i64 = store
             .conn
@@ -1592,7 +1592,7 @@ mod tests {
     fn defer_holds_the_lifecycle_and_a_run_with_nothing_interactive_ahead_ships() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("db");
-        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let store = crate::store::opening::open_ephemeral(&path).unwrap();
         let task = TaskId::new();
         let wave = WaveId::new();
         let project = ProjectId::new();
@@ -1664,7 +1664,7 @@ mod tests {
         let row = store.task_graph_row(&task).unwrap().unwrap();
         let start = crate::graph::runner::ExecutionCursor::default();
         drop(store);
-        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let store = crate::store::opening::open_ephemeral(&path).unwrap();
         assert_eq!(
             store.task_state(&task).unwrap(),
             crate::durable::TaskState::Idle
@@ -1758,7 +1758,7 @@ mod tests {
     fn end_request_is_atomic_and_survives_reopening_the_store() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("db");
-        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let store = crate::store::opening::open_ephemeral(&path).unwrap();
         let task = TaskId::new();
         let wave = WaveId::new();
         let project = ProjectId::new();
@@ -1811,7 +1811,7 @@ mod tests {
             .unwrap();
         let graph = crate::store::task_work::task_graph(&store, &task).unwrap();
         drop(store);
-        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let store = crate::store::opening::open_ephemeral(&path).unwrap();
         assert_eq!(
             store.task_completion_pending(&task).unwrap(),
             Some((request, "provider unavailable".into()))
@@ -1848,7 +1848,7 @@ mod tests {
     #[test]
     fn reaching_end_without_remaining_steps_approves_shipping() {
         let dir = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&dir.path().join("db")).unwrap();
         let task = TaskId::new();
         let by = LfProcessId::new();
         store
@@ -1894,7 +1894,7 @@ mod tests {
     #[test]
     fn every_task_latest_graph_matches_its_own_graphs() {
         let dir = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&dir.path().join("db")).unwrap();
         let wave = WaveId::new();
         let project = ProjectId::new();
         let (task, sibling, idle) = (TaskId::new(), TaskId::new(), TaskId::new());
@@ -1966,7 +1966,7 @@ mod tests {
     #[test]
     fn process_membership_does_not_read_events_that_name_no_process() {
         let dir = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&dir.path().join("db")).unwrap();
         let task = TaskId::new();
         let wave = WaveId::new();
         let project = ProjectId::new();
@@ -2230,7 +2230,7 @@ mod tests {
     #[test]
     fn scoped_sessions_stay_out_of_tasks_and_orphan_pages_include_only_unassociated_sessions() {
         let dir = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&dir.path().join("db")).unwrap();
         let task = TaskId::new();
         let wave = WaveId::new();
         let project = ProjectId::new();
@@ -2304,7 +2304,7 @@ mod tests {
     #[test]
     fn task_work_includes_checkout_binding_and_mechanical_history_without_granting_ownership() {
         let dir = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&dir.path().join("db")).unwrap();
         let task = TaskId::new();
         let wave = WaveId::new();
         let project = ProjectId::new();
@@ -2581,7 +2581,7 @@ mod tests {
         let (laptop_dir, mini_dir) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         let id = TaskId::new();
         let open = |dir: &tempfile::TempDir| {
-            let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+            let store = crate::store::opening::open_ephemeral(&dir.path().join("db")).unwrap();
             store
                 .create_task(&crate::work::task::NewTask {
                     id: id.clone(),
@@ -2620,7 +2620,7 @@ mod tests {
     #[test]
     fn a_ship_process_failing_all_day_keeps_its_log_short() {
         let dir = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&dir.path().join("db")).unwrap();
         let id = TaskId::new();
         store
             .create_task(&crate::work::task::NewTask {

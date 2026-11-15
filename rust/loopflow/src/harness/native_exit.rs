@@ -164,7 +164,9 @@ pub(crate) fn settle(exit: &NativeExit, status: ExitStatus) -> Settled {
 }
 
 fn open_store() -> Result<SqliteStore> {
-    Ok(SqliteStore::new(&crate::store::database_path_from_env()?)?)
+    Ok(crate::store::open_sqlite(
+        &crate::store::database_path_from_env()?,
+    )?)
 }
 
 /// Record the provider's exit under its attachment; whether an interrupt ended it.
@@ -238,7 +240,6 @@ mod tests {
     use crate::journal::{self, TestLedgerGuard};
     use crate::process::Departure;
     use crate::session_record::{SessionCaptureSpec, SessionGraphMembership};
-    use crate::store::sqlite::SqliteStore;
 
     use super::{settle, NativeExit};
 
@@ -263,7 +264,7 @@ mod tests {
                 },
             )
             .unwrap();
-            let store = SqliteStore::new(&home.join("loopflow.db")).unwrap();
+            let store = crate::store::open_sqlite(&home.join("loopflow.db")).unwrap();
             let session = store
                 .session_for_artifact(&capture.artifact_key())
                 .unwrap()
@@ -331,7 +332,7 @@ mod tests {
                     },
                 )
                 .unwrap();
-                let store = SqliteStore::new(&home.join("loopflow.db")).unwrap();
+                let store = crate::store::open_sqlite(&home.join("loopflow.db")).unwrap();
                 let session = store
                     .session_for_artifact(&capture.artifact_key())
                     .unwrap()
@@ -401,7 +402,7 @@ mod tests {
                 },
             )
             .unwrap();
-            let store = SqliteStore::new(&home.join("loopflow.db")).unwrap();
+            let store = crate::store::open_sqlite(&home.join("loopflow.db")).unwrap();
             let session = store
                 .session_for_artifact(&capture.artifact_key())
                 .unwrap()

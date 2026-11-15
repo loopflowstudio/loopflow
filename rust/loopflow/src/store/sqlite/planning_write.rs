@@ -619,8 +619,8 @@ mod tests {
     fn a_released_regression_mark_round_trips_the_plan_ref_unread() {
         let left = tempfile::tempdir().unwrap();
         let right = tempfile::tempdir().unwrap();
-        let a = SqliteStore::open_ephemeral(&left.path().join("db")).unwrap();
-        let b = SqliteStore::open_ephemeral(&right.path().join("db")).unwrap();
+        let a = crate::store::opening::open_ephemeral(&left.path().join("db")).unwrap();
+        let b = crate::store::opening::open_ephemeral(&right.path().join("db")).unwrap();
         let route =
             PlanningDestination::new("/synthetic.git", "refs/loopflow/planning/shared/test")
                 .unwrap();
@@ -669,7 +669,7 @@ mod tests {
     #[test]
     fn a_stored_released_regression_row_leaves_peer_planning_readable() {
         let dir = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&dir.path().join("db")).unwrap();
         let task = plan(&store);
         // The bytes every lf since v0.15.1 stores for a new Task.
         let stored = format!(
@@ -706,8 +706,8 @@ mod tests {
     fn standalone_task_exchange_preserves_membership_comments_and_ownership() {
         let left = tempfile::tempdir().unwrap();
         let right = tempfile::tempdir().unwrap();
-        let a = SqliteStore::open_ephemeral(&left.path().join("db")).unwrap();
-        let b = SqliteStore::open_ephemeral(&right.path().join("db")).unwrap();
+        let a = crate::store::opening::open_ephemeral(&left.path().join("db")).unwrap();
+        let b = crate::store::opening::open_ephemeral(&right.path().join("db")).unwrap();
         let repo = tempfile::tempdir().unwrap();
         let canonical = repo.path().canonicalize().unwrap();
         let path = canonical.to_str().unwrap();
@@ -809,7 +809,7 @@ mod tests {
         let left = tempfile::tempdir().unwrap();
         let right = tempfile::tempdir().unwrap();
         let path = left.path().join("db");
-        let a = SqliteStore::open_ephemeral(&path).unwrap();
+        let a = crate::store::opening::open_ephemeral(&path).unwrap();
         let task = plan(&a);
         let project = a.task(&task).unwrap().unwrap().project_id;
         let mut saved = a.project(project.as_ref().unwrap()).unwrap().unwrap();
@@ -826,12 +826,12 @@ mod tests {
         }];
         a.insert_project(&saved).unwrap();
         drop(a);
-        let a = SqliteStore::open_ephemeral(&path).unwrap();
+        let a = crate::store::opening::open_ephemeral(&path).unwrap();
         assert_eq!(
             a.project(project.as_ref().unwrap()).unwrap().unwrap(),
             saved
         );
-        let b = SqliteStore::open_ephemeral(&right.path().join("db")).unwrap();
+        let b = crate::store::opening::open_ephemeral(&right.path().join("db")).unwrap();
         let route =
             PlanningDestination::new("/synthetic.git", "refs/loopflow/planning/shared/test")
                 .unwrap();
@@ -906,8 +906,8 @@ mod tests {
     fn edits_imports_and_failed_saves_share_atomic_planning_without_execution() {
         let left = tempfile::tempdir().unwrap();
         let right = tempfile::tempdir().unwrap();
-        let a = SqliteStore::open_ephemeral(&left.path().join("db")).unwrap();
-        let b = SqliteStore::open_ephemeral(&right.path().join("db")).unwrap();
+        let a = crate::store::opening::open_ephemeral(&left.path().join("db")).unwrap();
+        let b = crate::store::opening::open_ephemeral(&right.path().join("db")).unwrap();
         let task = plan(&a);
         let route =
             PlanningDestination::new("/synthetic.git", "refs/loopflow/planning/shared/test")
@@ -1095,7 +1095,7 @@ mod tests {
     fn rejected_selection_retains_history_without_becoming_an_observed_parent() {
         use crate::planning_exchange::PlanningMutation;
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         let task = plan(&store);
         let wave = store.task(&task).unwrap().unwrap().wave_id;
         let route =

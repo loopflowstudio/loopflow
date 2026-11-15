@@ -220,11 +220,11 @@ mod tests {
 
     #[test]
     fn bootstrap_reads_use_indexes_beside_ten_thousand_tasks_and_waves() {
-        use super::{SqliteStore, WAVE_BOOTSTRAP_SELECT};
+        use super::WAVE_BOOTSTRAP_SELECT;
         use crate::store::query_plans::{growing_scans, statements};
 
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let history = crate::repository::location::ensure_repository(&store, "/history").unwrap();
         {
             let conn = store.conn.lock().unwrap();

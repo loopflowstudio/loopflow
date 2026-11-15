@@ -6,7 +6,6 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
 
-use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::ProviderAccountId;
 use loopflow_test_support::TestRepo;
 use serde_json::Value;
@@ -59,7 +58,7 @@ fn configuration_edits_reach_an_open_wave_watch_without_store_writes() {
     repo.create_file(".lf/config.yaml", "agent: claude\n");
     repo.create_file(".lf/wave/infra/GOAL.md", "Keep it boring.\n");
     repo.create_file(".git/info/exclude", "/lf.config.local.yaml\n");
-    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     loopflow::work::wave::bootstrap::ensure_wave(&store, repo.path().to_str().unwrap(), "infra")
         .unwrap();
     let mut subscription = Subscription(
@@ -277,7 +276,7 @@ fn each_wave_runs_its_own_setup_and_the_repository_is_the_default() {
     repo.stage_all();
     repo.commit("Set up three areas of work");
 
-    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let checkout = repo.path().to_str().unwrap();
     loopflow::work::wave::bootstrap::ensure_wave(&store, checkout, "infra").unwrap();
     loopflow::work::wave::bootstrap::ensure_wave(&store, checkout, "research").unwrap();
@@ -378,7 +377,7 @@ fn your_own_value_wins_for_you_until_you_unset_it() {
     repo.create_file(".lf/wave/research/config.yaml", "agent: codex:o3\n");
     repo.stage_all();
     repo.commit("Share the research agent");
-    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     loopflow::work::wave::bootstrap::ensure_wave(&store, repo.path().to_str().unwrap(), "research")
         .unwrap();
     drop(store);
@@ -429,7 +428,7 @@ fn a_wave_file_skips_repository_settings_with_a_warning() {
     );
     repo.stage_all();
     repo.commit("Misplace a repository setting");
-    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     loopflow::work::wave::bootstrap::ensure_wave(&store, repo.path().to_str().unwrap(), "infra")
         .unwrap();
     drop(store);
@@ -462,7 +461,7 @@ fn settings_scope_by_the_typed_wave_only() {
     repo.create_file(".lf/wave/research/GOAL.md", "Find out.\n");
     repo.stage_all();
     repo.commit("Add a Wave");
-    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let checkout = repo.path().canonicalize().unwrap();
     let wave = loopflow::work::wave::bootstrap::ensure_wave(
         &store,

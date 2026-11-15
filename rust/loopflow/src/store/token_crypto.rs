@@ -307,7 +307,7 @@ mod tests {
     #[test]
     fn private_file_key_survives_reload_and_invalid_bytes_are_not_replaced() {
         use std::os::unix::fs::PermissionsExt;
-        let _lock = crate::journal::test_env_lock();
+        let _lock = loopflow_test_support::env_lock();
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("key");
         let previous = std::env::var_os("LF_PROVIDER_TOKEN_KEY_PATH");
@@ -331,7 +331,7 @@ mod tests {
     #[test]
     fn locked_keychain_is_unknown_and_only_item_not_found_is_absence() {
         use std::os::unix::fs::PermissionsExt;
-        let _lock = crate::journal::test_env_lock();
+        let _lock = loopflow_test_support::env_lock();
         let directory = tempfile::tempdir().unwrap();
         let security = directory.path().join("security");
         let previous = std::env::var_os("PATH");

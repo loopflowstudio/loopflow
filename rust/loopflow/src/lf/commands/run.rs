@@ -109,7 +109,7 @@ pub fn resume(id: &str, message: &str, cli: &Cli, named_work: bool) -> Result<()
     if crate::transport::delegate_current(true, named_work)? {
         return Ok(());
     }
-    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
     let session = store
         .session(id)?
         .ok_or_else(|| anyhow!("session {id:?} was not found"))?;
@@ -1783,8 +1783,7 @@ for line in sys.stdin:
         repo.commit("committed basis");
         repo.create_file("scratch/z-untracked.md", "untracked evidence bytes");
         let store =
-            crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("loopflow.db"))
-                .unwrap();
+            crate::store::opening::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
         crate::work::wave::bootstrap::ensure_wave(&store, repo.path().to_str().unwrap(), "ship")
             .unwrap();
 
@@ -2004,8 +2003,7 @@ for line in sys.stdin:
             "## Objective\nShip a reliable release.\n\n## Bounds\nKeep rollback available.\n";
         repo.create_file(".lf/wave/release/GOAL.md", goal);
         let store =
-            crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join(".lf/loopflow.db"))
-                .unwrap();
+            crate::store::opening::open_ephemeral(&home.path().join(".lf/loopflow.db")).unwrap();
         crate::work::wave::bootstrap::ensure_wave(
             &store,
             repo.path().canonicalize().unwrap().to_str().unwrap(),

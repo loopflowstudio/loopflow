@@ -232,7 +232,7 @@ mod tests {
     #[test]
     fn a_recorded_end_closes_only_the_open_turn_with_its_id() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("conversation", &crate::session_record::new_artifact_key());
         let thread = loopflow_model::id::AgentSessionId::from("thread");
         let detail = serde_json::json!({"status":"interrupted"});

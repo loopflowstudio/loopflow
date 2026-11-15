@@ -1714,7 +1714,7 @@ mod discovery_tests {
     #[test]
     fn legacy_unknown_spawn_state_is_not_a_reservation_or_an_exit() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("session", &crate::session_record::new_artifact_key());
         let attachment = attachment::claim_session_attachment(
             &store,
@@ -1739,7 +1739,7 @@ mod discovery_tests {
     #[test]
     fn ended_agent_socket_cannot_be_adopted() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("session", &crate::session_record::new_artifact_key());
         let attachment = attachment::claim_session_attachment(
             &store,
@@ -1786,7 +1786,7 @@ mod discovery_tests {
     #[test]
     fn losing_input_claim_rolls_back_capture_and_provider_reservation() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let session =
             store.test_session("conversation", &crate::session_record::new_artifact_key());
         let first = insert_process(&store, 1, 1);
@@ -1906,7 +1906,7 @@ mod discovery_tests {
     #[test]
     fn durable_identity_keeps_reused_and_unknown_pids_distinct() {
         let dir = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&dir.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&dir.path().join("store.db")).unwrap();
         let historical = insert_process(&store, 1, 1);
         let retained = store.lf_process(&historical).unwrap().unwrap();
         assert_eq!(retained.pid, None);
@@ -1930,7 +1930,7 @@ mod discovery_tests {
     #[test]
     fn process_discovery_retains_command_evidence_without_payloads() {
         let dir = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&dir.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&dir.path().join("store.db")).unwrap();
         let parent = insert_process(&store, 1, 1);
         let direct = insert_process(&store, 2, 2);
         let agent = insert_process(&store, 3, 3);
@@ -2034,7 +2034,7 @@ mod discovery_tests {
     fn process_starter_names_the_nearest_session_else_the_root_person() {
         use crate::process::Starter;
         let dir = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&dir.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&dir.path().join("store.db")).unwrap();
         let root = insert_process(&store, 1, 1);
         let agent = insert_process(&store, 2, 2);
         let step = insert_process(&store, 3, 3);
@@ -2078,7 +2078,7 @@ mod discovery_tests {
     #[test]
     fn process_discovery_separates_literal_search_from_identity_resolution() {
         let dir = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&dir.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&dir.path().join("store.db")).unwrap();
         let first = insert_process(&store, 1, 1);
         let second = insert_process(&store, 16, 2);
         store
@@ -2176,7 +2176,7 @@ mod discovery_tests {
     #[test]
     fn process_discovery_pages_fixed_data_after_filtering_with_timestamp_ties() {
         let dir = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&dir.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&dir.path().join("store.db")).unwrap();
         let mut expected = Vec::new();
         for number in 1..=12 {
             let id = insert_process(&store, number, i64::from(number / 5));
@@ -2222,7 +2222,7 @@ mod discovery_tests {
     #[test]
     fn process_discovery_deduplicates_performed_work_without_rebinding_history() {
         let dir = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&dir.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&dir.path().join("store.db")).unwrap();
         let wave = WaveId::new();
         let project = ProjectId::new();
         let first = TaskId::new();
@@ -2374,7 +2374,7 @@ mod attachment_tests {
     use super::discovery_tests::insert_process;
     use super::SessionCaller;
     use crate::session::SessionActivity;
-    use crate::store::sqlite::SqliteStore;
+
     use crate::store::StoreError;
     use loopflow_model::id::LfProcessId;
 
@@ -2385,7 +2385,7 @@ mod attachment_tests {
         use loopflow_model::durable::TaskId;
 
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let process = insert_process(&store, 1, 1);
         let replacement = insert_process(&store, 2, 2);
         for source in [TitleSource::Generated, TitleSource::Human] {
@@ -2466,7 +2466,7 @@ mod attachment_tests {
     fn rename_refuses_a_capture_owned_by_another_callers_session() {
         use crate::process::AgentCaller;
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let session =
             store.test_session("conversation", &crate::session_record::new_artifact_key());
         let other = store.test_session("other", &crate::session_record::new_artifact_key());
@@ -2507,7 +2507,7 @@ mod attachment_tests {
     #[test]
     fn attaching_start_receipt_and_terminal_commit_only_with_the_agent() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("conversation", &crate::session_record::new_artifact_key());
         let seed = insert_process(&store, 1, 1);
         let mut process = store.lf_process(&seed).unwrap().unwrap();
@@ -2590,7 +2590,7 @@ mod attachment_tests {
         let _ambient = crate::test_ambient::EnvGuard::new();
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("store.db");
-        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let store = crate::store::opening::open_ephemeral(&path).unwrap();
         store.test_session("conversation", &crate::session_record::new_artifact_key());
         store.test_session("unrelated", &crate::session_record::new_artifact_key());
         let parent = insert_process(&store, 1, 1);
@@ -2686,7 +2686,7 @@ mod attachment_tests {
     #[test]
     fn invocation_retry_retains_history_and_refuses_failed_close_or_stale_authority() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("conversation", "run_00000000000000000000000000000001");
         let parent = insert_process(&store, 1, 1);
         let first =
@@ -2774,7 +2774,7 @@ mod attachment_tests {
     #[test]
     fn respawn_requires_positive_exit_and_preserves_uncertain_attempts() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("conversation", "run_00000000000000000000000000000001");
         let parent = insert_process(&store, 1, 1);
         let first =
@@ -2825,7 +2825,7 @@ mod attachment_tests {
     #[test]
     fn returning_to_the_same_lf_process_does_not_revive_its_previous_attachment() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("conversation", "run_00000000000000000000000000000001");
         let a = LfProcessId::new();
         let b = LfProcessId::new();
@@ -3166,7 +3166,7 @@ mod attachment_tests {
     #[test]
     fn detached_and_replaced_agents_remain_in_the_process_inventory() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         let session =
             store.test_session("conversation", &crate::session_record::new_artifact_key());
         let a = insert_process(&store, 1, 1);
@@ -3210,7 +3210,7 @@ mod attachment_tests {
     #[test]
     fn agent_spawn_lifecycle_uses_the_record_and_retains_failed_identity() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         let session =
             store.test_session("conversation", &crate::session_record::new_artifact_key());
         let parent = insert_process(&store, 1, 1);
@@ -3261,7 +3261,7 @@ mod attachment_tests {
     #[test]
     fn stale_orphan_observation_cannot_settle_a_transferred_agent() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         let session =
             store.test_session("conversation", &crate::session_record::new_artifact_key());
         let a = insert_process(&store, 1, 1);
@@ -3299,7 +3299,7 @@ mod attachment_tests {
     #[test]
     fn settling_a_dead_headless_run_moves_it_to_history() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         let mut completed = Vec::new();
         for (number, id, interactive) in [(1, "run", false), (2, "conversation", true)] {
             let session = store.test_session(id, &crate::session_record::new_artifact_key());
@@ -3336,13 +3336,12 @@ mod attachment_tests {
 mod forget_tests {
     use rusqlite::params;
 
-    use crate::store::sqlite::SqliteStore;
     use loopflow_model::id::{LfProcessId, TraceId};
 
     #[test]
     fn an_exit_forgets_the_process_unless_something_still_needs_it() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let session = store.test_session("session", &crate::session_record::new_artifact_key());
         let start = |parent: Option<&LfProcessId>, via_agent: bool| {
             let process = crate::process::LfProcess {

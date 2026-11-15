@@ -1327,8 +1327,7 @@ mod tests {
         let _binary = crate::test_ambient::EnvGuard::clear(&["LF_BIN"]);
         std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
         let store =
-            crate::store::sqlite::SqliteStore::open_ephemeral(&ledger.home().join("loopflow.db"))
-                .unwrap();
+            crate::store::opening::open_ephemeral(&ledger.home().join("loopflow.db")).unwrap();
         store.test_session("saved", &crate::session_record::new_artifact_key());
         let sql = rusqlite::Connection::open(ledger.home().join("loopflow.db")).unwrap();
         let process = loopflow_model::id::LfProcessId::new();

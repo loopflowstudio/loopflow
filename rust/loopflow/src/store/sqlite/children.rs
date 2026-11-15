@@ -2729,7 +2729,7 @@ mod local_planning_tests {
         let ledger = crate::journal::TestLedgerGuard::new();
         let _ambient = crate::test_ambient::EnvGuard::new();
         let path = ledger.home().join("loopflow.db");
-        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let store = crate::store::opening::open_ephemeral(&path).unwrap();
         let task = store
             .create_task(&NewTask {
                 repository_id: local_repository(&store),
@@ -2819,7 +2819,7 @@ mod local_planning_tests {
         use crate::session::{SessionFilter, TitleSource, WorkSource};
         use crate::work::edit::{WorkEdit, WorkValue};
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         let task = store
             .create_task(&NewTask {
                 repository_id: local_repository(&store),
@@ -2967,7 +2967,7 @@ mod local_planning_tests {
     #[test]
     fn local_labels_extend_only_for_collisions_including_completed_tasks() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         let project = local_project(&store);
         let first = TaskId::from_raw("task_abcdef10000000000000000000000001");
         let second = TaskId::from_raw("task_abcdef20000000000000000000000002");
@@ -3003,7 +3003,7 @@ mod local_planning_tests {
     #[test]
     fn task_checkout_reads_this_machines_checkout() {
         let directory = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&directory.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&directory.path().join("db")).unwrap();
         let task = store
             .create_task(&NewTask {
                 repository_id: local_repository(&store),
@@ -3043,7 +3043,7 @@ mod local_planning_tests {
         let source = tempfile::tempdir().unwrap();
         let target = tempfile::tempdir().unwrap();
         let path = source.path().join("loopflow.db");
-        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let store = crate::store::opening::open_ephemeral(&path).unwrap();
         let task = store
             .create_task(&NewTask {
                 repository_id: local_repository(&store),
@@ -3077,7 +3077,7 @@ mod local_planning_tests {
             tx.commit().unwrap();
         }
         drop(store);
-        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let store = crate::store::opening::open_ephemeral(&path).unwrap();
         let saved = store.task(&task.id).unwrap().unwrap();
         assert_eq!(saved.rank, 7);
         assert_eq!(saved.assignee.as_deref(), Some("assignee-1"));
@@ -3087,7 +3087,8 @@ mod local_planning_tests {
         assert_eq!(saved.worktree, task.worktree);
         assert_eq!(saved.branch, task.branch);
         assert_eq!(saved.parent_pr_id, task.parent_pr_id);
-        let peer = SqliteStore::open_ephemeral(&target.path().join("loopflow.db")).unwrap();
+        let peer =
+            crate::store::opening::open_ephemeral(&target.path().join("loopflow.db")).unwrap();
         let destination =
             PlanningDestination::new("/fixture.git", "refs/loopflow/planning/shared/test").unwrap();
         let wave = store
@@ -3128,7 +3129,7 @@ mod local_planning_tests {
     fn project_edits_preserve_retired_iteration_and_events() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("loopflow.db");
-        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let store = crate::store::opening::open_ephemeral(&path).unwrap();
         let id = local_project(&store);
         store
             .conn
@@ -3149,7 +3150,7 @@ mod local_planning_tests {
             .edit_project(&id, Some("Renamed body of work"), Some("New summary"), None)
             .unwrap();
         drop(store);
-        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let store = crate::store::opening::open_ephemeral(&path).unwrap();
         let project = store.project(&id).unwrap().unwrap();
         assert_eq!(project.name, "Renamed body of work");
         assert_eq!(project.summary, "New summary");
@@ -3174,7 +3175,7 @@ mod local_planning_tests {
     fn local_planning_creation_retry_keeps_identity_after_edit_and_restart() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("loopflow.db");
-        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let store = crate::store::opening::open_ephemeral(&path).unwrap();
         let input = NewTask {
             repository_id: local_repository(&store),
             due_date: None,
@@ -3213,7 +3214,7 @@ mod local_planning_tests {
             )
             .is_err());
         drop(store);
-        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let store = crate::store::opening::open_ephemeral(&path).unwrap();
         let retried = store.create_task(&input).unwrap();
         assert_eq!(retried, edited);
         let second = store
@@ -3257,7 +3258,8 @@ mod local_planning_tests {
     #[test]
     fn local_planning_provider_mapping_preserves_identity_and_creation_receipt() {
         let directory = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&directory.path().join("loopflow.db")).unwrap();
+        let store =
+            crate::store::opening::open_ephemeral(&directory.path().join("loopflow.db")).unwrap();
         let input = NewTask {
             repository_id: local_repository(&store),
             due_date: None,
@@ -3314,7 +3316,8 @@ mod local_planning_tests {
     #[test]
     fn local_planning_prefix_collision_is_explicit() {
         let directory = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&directory.path().join("loopflow.db")).unwrap();
+        let store =
+            crate::store::opening::open_ephemeral(&directory.path().join("loopflow.db")).unwrap();
         let input = NewTask {
             repository_id: local_repository(&store),
             due_date: None,

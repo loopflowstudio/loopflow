@@ -118,7 +118,7 @@ mod tests {
     use crate::process::attachment;
 
     use crate::session::{SessionActivity, SessionFilter};
-    use crate::store::sqlite::SqliteStore;
+
     use loopflow_model::id::LfProcessId;
     use loopflow_model::program_status::{Kind, Records, Report, State};
 
@@ -134,7 +134,8 @@ mod tests {
         for reading in ["approval", "quiet", "blocked"] {
             for record_exit in [false, true] {
                 let home = tempfile::tempdir().unwrap();
-                let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+                let store =
+                    crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
                 store.test_session("session", &crate::session_record::new_artifact_key());
                 let attachment = attachment::claim_session_attachment(
                     &store,
@@ -255,7 +256,7 @@ mod tests {
     #[test]
     fn program_status_overrides_inference_before_paging_and_survives_attachment_handoff() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("session", "run_00000000000000000000000000000001");
         let lf_process_id = LfProcessId::new();
         store

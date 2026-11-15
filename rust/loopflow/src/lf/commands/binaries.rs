@@ -414,7 +414,7 @@ mod tests {
     #[test]
     fn a_launcher_running_its_provider_is_no_lf_binary() {
         let directory = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&directory.path().join("lf.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&directory.path().join("lf.db")).unwrap();
         let me = crate::journal::OsProcess::read(std::process::id())
             .unwrap()
             .unwrap();

@@ -1,4 +1,3 @@
-use crate::store::sqlite::SqliteStore;
 use crate::store::{FrontierAdvance, PlanningState, Store};
 use crate::test_linear_input::SeedLinear;
 use loopflow_model::id::WaveId;
@@ -30,7 +29,7 @@ async fn migration_preserves_planning_identity_and_removes_snapshot_storage() {
         conn.execute("INSERT INTO pm_snapshots(wave_id,provider,initiative,synced_at,payload) VALUES(?1,'linear','initiative',42,?2)",params![wave,snapshot.to_string()]).unwrap();
     }
     // Upgrades of the shared store belong to the install switch.
-    let sqlite = SqliteStore::open_with(
+    let sqlite = crate::store::opening::open_with(
         &database,
         directory.path(),
         FrontierAdvance::Authorized,

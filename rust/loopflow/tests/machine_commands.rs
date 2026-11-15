@@ -1493,10 +1493,12 @@ impl SharedPlan {
     ) -> Self {
         use loopflow::durable::RepositoryId;
         use loopflow::planning_git::PlanningDestination;
-        use loopflow::store::sqlite::SqliteStore;
-        let local = SqliteStore::new(&fixture.root.path().join("local/loopflow.db")).unwrap();
+
+        let local =
+            loopflow::store::open_sqlite(&fixture.root.path().join("local/loopflow.db")).unwrap();
         let remote =
-            SqliteStore::new(&fixture.root.path().join("remote/store/loopflow.db")).unwrap();
+            loopflow::store::open_sqlite(&fixture.root.path().join("remote/store/loopflow.db"))
+                .unwrap();
         let repository = RepositoryId::new();
         loopflow::repository::location::bind_repository(
             &local,
@@ -1743,7 +1745,7 @@ fn set_machine_changes_local_preferences_without_copying_or_moving_work() {
 fn remote_file_observer_keeps_the_recorded_owner_and_streams_changes() {
     use loopflow::durable::RepositoryId;
     use loopflow::ops::task::TaskFilesFrame;
-    use loopflow::store::sqlite::SqliteStore;
+
     use std::io::{BufRead, BufReader};
     use std::sync::mpsc;
     use std::time::Duration;
@@ -1754,7 +1756,7 @@ fn remote_file_observer_keeps_the_recorded_owner_and_streams_changes() {
     let remote_home = fixture.root.path().join("remote/store");
     let registered =
         support::register_task_with_pr(&remote_home, &path, "companions", &repo.head_sha());
-    let store = SqliteStore::new(&remote_home.join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&remote_home.join("loopflow.db")).unwrap();
     let repository = RepositoryId::new();
     loopflow::repository::location::bind_repository(&store, path.to_str().unwrap(), &repository)
         .unwrap();
@@ -1857,7 +1859,6 @@ fn git(dir: &Path, args: &[&str]) -> String {
 
 #[test]
 fn resume_moves_a_session_to_another_machine() {
-    use loopflow::store::sqlite::SqliteStore;
     let fixture = preview_machines();
     let mini = fixture.json(&["machine", "list", "--json"])[0]["id"]
         .as_str()
@@ -1882,8 +1883,11 @@ fn resume_moves_a_session_to_another_machine() {
     git(&remote_checkout, &["config", "user.name", "Jack"]);
     let remote_checkout = remote_checkout.canonicalize().unwrap();
     let repository = loopflow::durable::RepositoryId::new();
-    let local = SqliteStore::new(&fixture.root.path().join("local/loopflow.db")).unwrap();
-    let remote = SqliteStore::new(&fixture.root.path().join("remote/store/loopflow.db")).unwrap();
+    let local =
+        loopflow::store::open_sqlite(&fixture.root.path().join("local/loopflow.db")).unwrap();
+    let remote =
+        loopflow::store::open_sqlite(&fixture.root.path().join("remote/store/loopflow.db"))
+            .unwrap();
     loopflow::repository::location::bind_repository(
         &local,
         repo.path().canonicalize().unwrap().to_str().unwrap(),
@@ -2032,8 +2036,7 @@ fn a_mid_merge_worktree_refuses_to_move() {
     assert!(stderr.contains("mid-merge"), "{stderr}");
     assert_eq!(git(&worktree, &["rev-parse", "HEAD"]), head);
     let local =
-        loopflow::store::sqlite::SqliteStore::new(&fixture.root.path().join("local/loopflow.db"))
-            .unwrap();
+        loopflow::store::open_sqlite(&fixture.root.path().join("local/loopflow.db")).unwrap();
     assert!(local.session_moved_to(&session).unwrap().is_none());
 }
 
@@ -3201,8 +3204,7 @@ fn task_move_to_a_mini_without_the_repository_takes_it_in_from_planning() {
     );
     assert!(stderr.contains("Arrived on mini"), "{stderr}");
 
-    let remote =
-        loopflow::store::sqlite::SqliteStore::new(&remote_home.join("loopflow.db")).unwrap();
+    let remote = loopflow::store::open_sqlite(&remote_home.join("loopflow.db")).unwrap();
     assert!(
         remote.task(&task).unwrap().is_some(),
         "mini never took the Task in"
@@ -3220,7 +3222,7 @@ fn task_move_to_a_mini_without_the_repository_takes_it_in_from_planning() {
                 .id
         )
     );
-    let local = loopflow::store::sqlite::SqliteStore::new(&local_home.join("loopflow.db")).unwrap();
+    let local = loopflow::store::open_sqlite(&local_home.join("loopflow.db")).unwrap();
     assert_eq!(
         remote.planning_user_key().unwrap(),
         local.planning_user_key().unwrap(),
@@ -3886,8 +3888,7 @@ fn a_moved_session_clones_its_repository_where_none_is_checked_out() {
         .canonicalize()
         .unwrap();
     let local =
-        loopflow::store::sqlite::SqliteStore::new(&fixture.root.path().join("local/loopflow.db"))
-            .unwrap();
+        loopflow::store::open_sqlite(&fixture.root.path().join("local/loopflow.db")).unwrap();
     loopflow::repository::location::bind_repository(
         &local,
         repo.path().canonicalize().unwrap().to_str().unwrap(),
@@ -3909,10 +3910,9 @@ fn a_moved_session_clones_its_repository_where_none_is_checked_out() {
         .output()
         .unwrap();
     assert_success(&moved);
-    let remote = loopflow::store::sqlite::SqliteStore::new(
-        &fixture.root.path().join("remote/store/loopflow.db"),
-    )
-    .unwrap();
+    let remote =
+        loopflow::store::open_sqlite(&fixture.root.path().join("remote/store/loopflow.db"))
+            .unwrap();
     let arrived = remote.session(&session).unwrap().unwrap();
     let src = fixture
         .root

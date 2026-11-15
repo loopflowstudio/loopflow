@@ -301,7 +301,7 @@ mod tests {
     #[test]
     fn persists_identity_bound_observations_idempotently() {
         let directory = tempdir().unwrap();
-        let store = SqliteStore::new(&directory.path().join("registry.db")).unwrap();
+        let store = crate::store::open_sqlite(&directory.path().join("registry.db")).unwrap();
         store
             .apply_migration_for_test("project_metric_observations")
             .unwrap();
@@ -352,7 +352,7 @@ mod tests {
     fn concurrent_idempotent_acceptance_has_one_durable_winner() {
         let directory = tempdir().unwrap();
         let path = directory.path().join("registry.db");
-        let setup = SqliteStore::new(&path).unwrap();
+        let setup = crate::store::open_sqlite(&path).unwrap();
         setup
             .apply_migration_for_test("project_metric_observations")
             .unwrap();
@@ -374,8 +374,8 @@ mod tests {
         let barrier = Arc::new(Barrier::new(2));
         let mut workers = Vec::new();
         for store in [
-            SqliteStore::new(&path).unwrap(),
-            SqliteStore::new(&path).unwrap(),
+            crate::store::open_sqlite(&path).unwrap(),
+            crate::store::open_sqlite(&path).unwrap(),
         ] {
             let barrier = barrier.clone();
             let contract = contract.clone();
@@ -404,14 +404,14 @@ mod tests {
                 .count(),
             1
         );
-        let store = SqliteStore::new(&path).unwrap();
+        let store = crate::store::open_sqlite(&path).unwrap();
         assert_eq!(store.metric_observation_count(wave.id()).unwrap(), 1);
     }
 
     #[test]
     fn portfolio_evidence_is_bounded_by_current_contracts_not_history() {
         let directory = tempdir().unwrap();
-        let store = SqliteStore::new(&directory.path().join("registry.db")).unwrap();
+        let store = crate::store::open_sqlite(&directory.path().join("registry.db")).unwrap();
         store
             .apply_migration_for_test("project_metric_observations")
             .unwrap();
@@ -452,7 +452,7 @@ mod tests {
     fn concurrent_writes_cannot_split_current_from_revision_evidence() {
         let directory = tempdir().unwrap();
         let path = directory.path().join("registry.db");
-        let setup = SqliteStore::new(&path).unwrap();
+        let setup = crate::store::open_sqlite(&path).unwrap();
         setup
             .apply_migration_for_test("project_metric_observations")
             .unwrap();
@@ -482,7 +482,7 @@ mod tests {
         let writer = {
             let barrier = barrier.clone();
             let contracts = contracts.clone();
-            let store = SqliteStore::new(&path).unwrap();
+            let store = crate::store::open_sqlite(&path).unwrap();
             std::thread::spawn(move || {
                 barrier.wait();
                 for contract in contracts {
@@ -494,7 +494,7 @@ mod tests {
                 }
             })
         };
-        let reader = SqliteStore::new(&path).unwrap();
+        let reader = crate::store::open_sqlite(&path).unwrap();
         barrier.wait();
 
         loop {
@@ -514,7 +514,7 @@ mod tests {
     #[test]
     fn current_evidence_orders_normalized_source_time_not_rfc3339_offset_text() {
         let directory = tempdir().unwrap();
-        let store = SqliteStore::new(&directory.path().join("registry.db")).unwrap();
+        let store = crate::store::open_sqlite(&directory.path().join("registry.db")).unwrap();
         store
             .apply_migration_for_test("project_metric_observations")
             .unwrap();
@@ -557,7 +557,7 @@ mod tests {
     #[test]
     fn current_evidence_orders_fractional_source_times_numerically() {
         let directory = tempdir().unwrap();
-        let store = SqliteStore::new(&directory.path().join("registry.db")).unwrap();
+        let store = crate::store::open_sqlite(&directory.path().join("registry.db")).unwrap();
         store
             .apply_migration_for_test("project_metric_observations")
             .unwrap();
@@ -600,7 +600,7 @@ mod tests {
     #[test]
     fn refuses_observation_when_registered_producer_disagrees() {
         let directory = tempdir().unwrap();
-        let store = SqliteStore::new(&directory.path().join("registry.db")).unwrap();
+        let store = crate::store::open_sqlite(&directory.path().join("registry.db")).unwrap();
         store
             .apply_migration_for_test("project_metric_observations")
             .unwrap();
@@ -627,7 +627,7 @@ mod tests {
     #[test]
     fn instrument_registration_is_idempotent_but_cannot_rebind() {
         let directory = tempdir().unwrap();
-        let store = SqliteStore::new(&directory.path().join("registry.db")).unwrap();
+        let store = crate::store::open_sqlite(&directory.path().join("registry.db")).unwrap();
         store
             .apply_migration_for_test("project_metric_observations")
             .unwrap();

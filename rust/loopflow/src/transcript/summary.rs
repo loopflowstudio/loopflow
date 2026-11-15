@@ -330,7 +330,7 @@ mod tests {
     #[test]
     fn retention_counts_what_providers_keep_and_explains_what_is_gone() {
         let root = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&root.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&root.path().join("store.db")).unwrap();
         let claude = root.path().join("claude");
         let codex = root.path().join("codex");
         account(&store, "claude", "claude", &claude);

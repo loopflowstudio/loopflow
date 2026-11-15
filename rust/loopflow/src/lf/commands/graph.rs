@@ -970,7 +970,7 @@ impl RunningGraph<'_> {
         // through an older schema.
         self.store
             .sqlite
-            .validate_current_schema()
+            .validate_current_schema(&crate::store::migrations::build())
             .with_context(|| {
                 format!(
                     "this Graph process cannot read the result of {label}; inspect its Process and effects with a compatible lf before launching further work"

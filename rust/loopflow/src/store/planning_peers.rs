@@ -1,45 +1,8 @@
-use std::collections::{BTreeMap, BTreeSet};
-
-use crate::planning_exchange::PlanningMutation;
-
 use crate::planning_git::PlanningDestination;
 
 use super::{run_sqlite, Store, StoreResult};
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-pub struct PeerProjectionConflict {
-    pub target: String,
-    pub reason: String,
-}
-
-/// Local routing and import evidence. Endpoints are deliberately not displayed:
-/// Git URLs can contain credentials. A checkpoint is not publication evidence.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-pub struct PeerPlanningStatus {
-    pub id: String,
-    pub reference: String,
-    pub active: bool,
-    pub selected_records: u64,
-    pub imported_revision: Option<String>,
-    pub fetched_revision: Option<String>,
-    pub acquisition_error: Option<String>,
-    pub publication_revision: Option<String>,
-    pub publication_state: Option<String>,
-    pub publication_error: Option<String>,
-    pub pending_local: bool,
-    pub conflicts: Vec<PeerProjectionConflict>,
-}
-
-/// `lf planning journal`: one destination's retained journal. It grows with
-/// every edit, so it is a one-shot read, not part of the status.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct PlanningJournal {
-    pub destination: String,
-    /// Retained journal entries, including losing values and rejected projections.
-    pub changes: BTreeMap<String, PlanningMutation>,
-    /// Ranked mutations, not evidence of successful projection or publication.
-    pub candidates: BTreeSet<String>,
-}
+pub use super::peer_records::{PeerPlanningStatus, PeerProjectionConflict, PlanningJournal};
 
 impl Store {
     pub async fn peer_planning_journal(
@@ -147,7 +110,7 @@ mod tests {
     use crate::repository::location::{
         bind_repository, ensure_repository, locator_directory, read_locator,
     };
-    use crate::store::sqlite::{PeerImport, SqliteStore};
+    use crate::store::sqlite::PeerImport;
     use loopflow_model::durable::RepositoryId;
     use loopflow_test_support::TestRepo;
 
@@ -157,7 +120,7 @@ mod tests {
         let repo = TestRepo::new();
         let path = repo.path().canonicalize().unwrap();
         let path = path.to_str().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let destination =
             PlanningDestination::new("/unused/fixture", "refs/loopflow/planning/shared/retry")
                 .unwrap();
@@ -194,7 +157,7 @@ mod tests {
     #[test]
     fn changed_repository_scope_reacquires_before_an_import_is_recorded() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         ensure_repository(&store, "/repo").unwrap();
         let destination =
             PlanningDestination::new("/unused/fixture", "refs/loopflow/planning/shared/scope")

@@ -15,7 +15,6 @@ use tokio_tungstenite::{tungstenite::protocol::Role, tungstenite::Message, WebSo
 use super::codex::CodexStream;
 use super::fact_writer::FactWriter;
 use crate::session::SessionEventKind;
-use crate::store::sqlite::SqliteStore;
 use crate::store::StoreError;
 use loopflow_model::id::LfProcessId;
 
@@ -60,7 +59,7 @@ fn history_and_other_writers_progress_during_stalled_dispatch() {
 async fn stalled_dispatch() {
     let home = tempfile::tempdir().unwrap();
     let path = home.path().join("history.db");
-    let store = SqliteStore::open_ephemeral(&path).unwrap();
+    let store = crate::store::opening::open_ephemeral(&path).unwrap();
     let sql = rusqlite::Connection::open(&path).unwrap();
     sql.busy_timeout(Duration::from_millis(100)).unwrap();
     let process = LfProcessId::new();
@@ -137,7 +136,7 @@ async fn stalled_dispatch() {
         [replacement.as_str()],
     )
     .unwrap();
-    let other_store = SqliteStore::open_ephemeral(&path).unwrap();
+    let other_store = crate::store::opening::open_ephemeral(&path).unwrap();
     let (entered, ready) = mpsc::channel();
     let (release, released) = mpsc::channel();
     let dispatch_store = store.clone();

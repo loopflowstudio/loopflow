@@ -742,8 +742,7 @@ mod tests {
         loopflow_model::durable::RepositoryId,
     ) {
         let home = tempfile::tempdir().unwrap();
-        let store =
-            crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         store
             .conn
             .lock()

@@ -1021,8 +1021,7 @@ pub fn save_arrangement(
                 .context("Work registry is unavailable")?;
             let repository = repository_in(selected, directory, &reader.sqlite)?;
             drop(reader);
-            let store =
-                crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
+            let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
             let task = target.strip_prefix("task:").expect("matched Task target");
             let key = work_key(&repository, target)?;
             // The shared reader checks repository ownership before the Task writer runs.
@@ -1092,7 +1091,7 @@ pub(crate) fn save_dashboard(
         .context("Work registry is unavailable")?;
     let repository = repository_in(selected, directory, &reader.sqlite)?;
     drop(reader);
-    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
     let dashboard_id = |id: &str| DashboardId(id.strip_prefix("query:").unwrap_or(id).into());
     Ok(match cmd {
         DashboardCommand::Query {
@@ -1154,7 +1153,7 @@ pub(crate) fn save_layout(
         .context("Work registry is unavailable")?;
     let repository = repository_in(selected, directory, &reader.sqlite)?;
     drop(reader);
-    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
     let layout: WorkPaneLayout = serde_json::from_reader(&mut *input)?;
     if layout.work != work_key(&repository, work)? {
         bail!("layout belongs to different Work");
@@ -2088,7 +2087,7 @@ fn edit_tiles(
         edit,
     }: &TileRequest,
 ) -> Result<DesktopTileRecord> {
-    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
     let absent = |work: &WorkWorkspaceKey| -> anyhow::Error {
         DesktopError::Target(format!("{} is not a tile here; nothing changed.", work.id)).into()
     };

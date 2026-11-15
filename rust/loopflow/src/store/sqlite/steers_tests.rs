@@ -23,7 +23,7 @@ const CLEAR: NativeBoundary<'static> = NativeBoundary::Select { source: "clear" 
 
 fn fixture() -> (tempfile::TempDir, SqliteStore, SteerAdapter) {
     let home = tempfile::tempdir().unwrap();
-    let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+    let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
     store.test_session("session", &crate::session_record::new_artifact_key());
     let process = LfProcessId::new();
     store

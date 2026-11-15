@@ -644,10 +644,7 @@ async fn worktree_reads_its_checkout_wave_memory() {
 
     fs::write(worktree.join(".lf/wave/goals/GOAL.md"), "Checkout goal.").unwrap();
     loopflow::work::wave::bootstrap::ensure_wave(
-        &loopflow::store::sqlite::SqliteStore::new(
-            &loopflow::store::database_path_from_env().unwrap(),
-        )
-        .unwrap(),
+        &loopflow::store::open_sqlite(&loopflow::store::database_path_from_env().unwrap()).unwrap(),
         origin.canonicalize().unwrap().to_str().unwrap(),
         "goals",
     )

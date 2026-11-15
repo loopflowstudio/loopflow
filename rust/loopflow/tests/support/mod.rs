@@ -296,7 +296,7 @@ pub fn register_codex_login(home: &Path, name: &str) {
     )
     .unwrap();
     seed_store(home);
-    let store = loopflow::store::sqlite::SqliteStore::new(&home.join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.join("loopflow.db")).unwrap();
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     loopflow::provider_account::catalog::upsert_provider_account(
         &store,
@@ -359,7 +359,7 @@ pub fn register_claude_login(home: &Path, name: &str) {
     fs::write(account_home.join(".credentials.json"), &credential).unwrap();
     let email = format!("{name}@example.com");
     seed_store(home);
-    let store = loopflow::store::sqlite::SqliteStore::new(&home.join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.join("loopflow.db")).unwrap();
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     loopflow::provider_account::catalog::upsert_provider_account(
         &store,
@@ -613,7 +613,7 @@ fn register_task_fixture(
     };
     let task = Task {
         repository_id: loopflow::repository::location::ensure_repository(
-            &loopflow::store::sqlite::SqliteStore::new(&home.join("loopflow.db")).unwrap(),
+            &loopflow::store::open_sqlite(&home.join("loopflow.db")).unwrap(),
             wave.repo(),
         )
         .unwrap(),
@@ -935,7 +935,7 @@ pub fn managed_codex_account(home: &Path) {
     )
     .unwrap();
     seed_store(home);
-    let store = loopflow::store::sqlite::SqliteStore::new(&home.join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.join("loopflow.db")).unwrap();
     let account_id = loopflow::store::ProviderAccountId::parse("fixture").unwrap();
     loopflow::provider_account::catalog::upsert_provider_account(
         &store,

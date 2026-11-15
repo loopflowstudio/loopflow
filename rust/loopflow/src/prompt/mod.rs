@@ -2743,8 +2743,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let _home =
             crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
-        crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("loopflow.db"))
-            .unwrap();
+        crate::store::opening::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
         let temp = loopflow_test_support::TestRepo::new();
         let repo = temp.path();
 

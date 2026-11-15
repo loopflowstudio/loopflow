@@ -374,12 +374,11 @@ fn opencode_display(
 // transcript reader (`transcript::opencode`), so the stream writes none.
 #[test]
 fn opencode_native_history_preserves_output_and_tools_and_leaves_usage_to_the_transcript() {
-    use crate::store::sqlite::SqliteStore;
     use loopflow_model::id::LfProcessId;
 
     let home = tempfile::tempdir().unwrap();
     let path = home.path().join("store.db");
-    let store = SqliteStore::open_ephemeral(&path).unwrap();
+    let store = crate::store::opening::open_ephemeral(&path).unwrap();
     let sql = rusqlite::Connection::open(&path).unwrap();
     let process = LfProcessId::new();
     sql.execute(

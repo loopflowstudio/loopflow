@@ -18,7 +18,7 @@ pub(crate) fn in_graph() -> bool {
     };
     let under_graph = || -> anyhow::Result<bool> {
         let path = crate::store::database_path_from_env()?;
-        Ok(crate::store::sqlite::SqliteStore::new(&path)?.process_under_graph(&process)?)
+        Ok(crate::store::open_sqlite(&path)?.process_under_graph(&process)?)
     };
     under_graph().unwrap_or_else(|error| {
         tracing::warn!(%error, "could not read this process's ancestry");

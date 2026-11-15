@@ -1,11 +1,12 @@
 use crate::process::attachment;
+use crate::store::migrations::apply_sqlite;
 use std::fs;
 use std::sync::{Arc, Mutex};
 
 use fs2::FileExt;
 use rusqlite::{params, Connection};
 
-use super::{_migration_transaction, apply_pending_migrations, apply_sqlite};
+use super::{_migration_transaction, apply_pending_migrations};
 use crate::journal::{ProcessIdentityEvidence, ProcessReceipt, PROCESS_RECEIPT_ROOT};
 use crate::store::canonical_ids::{preflight, session_fence_file};
 use crate::store::sqlite::SqliteStore;
@@ -23,7 +24,14 @@ fn released() -> (tempfile::TempDir, Connection) {
         .iter()
         .position(|migration| super::migration_contains(migration, "canonical_structured_ids"))
         .expect("focused tests run against the materialized release");
-    super::apply_set(&conn, &super::MIGRATIONS[..frontier], &mut Vec::new()).unwrap();
+    super::apply_set(
+        &crate::store::migrations::observers(),
+        &crate::store::migrations::build(),
+        &conn,
+        &super::MIGRATIONS[..frontier],
+        &mut Vec::new(),
+    )
+    .unwrap();
     conn.execute_batch(include_str!(
         "../../tests/fixtures/migrations/canonical_ids_authority.sql"
     ))
@@ -99,7 +107,7 @@ fn canonical_ids_retained_fence_serializes_stale_waiter_after_identity_change() 
     let (acquired, locked) = std::sync::mpsc::sync_channel(1);
     let mut caller = None;
     _migration_transaction(&conn, |conn, guards| {
-        preflight(conn, guards)?;
+        preflight(conn, guards, &crate::store::migrations::process_evidence)?;
         caller = Some(std::thread::spawn(move || {
             started.send(()).unwrap();
             waiter.lock_exclusive().unwrap();
@@ -194,7 +202,7 @@ fn canonical_ids_retained_receipt_and_trace_locator_survive_identity_change() {
     let path = receipt(home.path(), PROCESS, TRACE, std::process::id(), 1);
     let original = fs::read(&path).unwrap();
     _migration_transaction(&conn, |conn, guards| {
-        preflight(conn, guards)?;
+        preflight(conn, guards, &crate::store::migrations::process_evidence)?;
         conn.execute_batch(conversion_sql())?;
         Ok(())
     })
@@ -262,7 +270,7 @@ fn canonical_ids_pruning_uses_retained_receipt_owner_and_requires_completion() {
     let (home, conn) = released();
     let path = receipt(home.path(), PROCESS, TRACE, std::process::id(), 1);
     _migration_transaction(&conn, |conn, guards| {
-        preflight(conn, guards)?;
+        preflight(conn, guards, &crate::store::migrations::process_evidence)?;
         conn.execute_batch(conversion_sql())?;
         conn.execute("UPDATE processes SET completed_at=NULL", [])?;
         Ok(())
@@ -442,7 +450,7 @@ fn canonical_ids_partial_preflight_retains_guards_until_rollback() {
     .unwrap();
     let error = _migration_transaction(&conn, |conn, guards| {
         conn.execute("UPDATE agent_sessions SET title='rolled back'", [])?;
-        preflight(conn, guards)
+        preflight(conn, guards, &crate::store::migrations::process_evidence)
     })
     .unwrap_err();
     assert!(error.to_string().contains("Unknown ownership evidence"));
@@ -480,7 +488,7 @@ fn canonical_ids_failed_commit_retains_guards_through_rollback() {
     }))
     .unwrap();
     assert!(_migration_transaction(&conn, |conn, guards| {
-        preflight(conn, guards)?;
+        preflight(conn, guards, &crate::store::migrations::process_evidence)?;
         conn.execute_batch(conversion_sql())?;
         Ok(())
     })
@@ -571,7 +579,7 @@ fn canonical_ids_metric_upgrade_retains_evidence_and_reimport() {
         .unwrap_err()
         .to_string()
         .contains("Captured Session evidence is immutable"));
-    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = crate::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let identity = MetricIdentity::new(TRACE, "Case-Sensitive-Metric");
     assert_eq!(identity.wave_id(), TRACE.to_ascii_lowercase());
     let mut contract = MetricContract::new(MetricContractDefinition {
@@ -1077,6 +1085,31 @@ fn canonical_ids_commands_read_the_upgraded_work_and_native_history() {
                 json.contains("session_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
                 "{json}"
             );
+        }
+    }
+}
+
+#[test]
+fn canonical_ids_supplied_evidence_keeps_live_and_unknown_ownership() {
+    let (_home, conn) = released();
+    for evidence in [
+        ProcessIdentityEvidence::Live,
+        ProcessIdentityEvidence::Unknown,
+        ProcessIdentityEvidence::Dead,
+    ] {
+        let mut guards = Vec::new();
+        let result = preflight(&conn, &mut guards, &|_, process| {
+            assert!(!process.id.is_empty());
+            assert!(!process.trace.is_empty());
+            evidence
+        });
+        if evidence == ProcessIdentityEvidence::Dead {
+            result.unwrap();
+        } else {
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains(&format!("{evidence:?} ownership evidence")));
         }
     }
 }

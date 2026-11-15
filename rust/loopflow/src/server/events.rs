@@ -158,7 +158,7 @@ mod tests {
     fn fixture() -> (tempfile::TempDir, SqliteStore, TaskId) {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("db");
-        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let store = crate::store::opening::open_ephemeral(&path).unwrap();
         let conn = rusqlite::Connection::open(path).unwrap();
         conn.execute_batch(include_str!(
             "../../tests/fixtures/saved_selection_work.sql"

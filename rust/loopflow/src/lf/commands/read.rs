@@ -1108,9 +1108,7 @@ mod tests {
     #[test]
     fn session_subscription_keeps_conversations_beyond_the_first_hundred() {
         let home = tempfile::tempdir().unwrap();
-        let store =
-            crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("store.db"))
-                .unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         for index in 0..101 {
             store.test_session(
                 &format!("session-{index:03}"),
@@ -1134,9 +1132,7 @@ mod tests {
     #[test]
     fn served_session_lists_include_headless_but_never_completed() {
         let home = tempfile::tempdir().unwrap();
-        let store =
-            crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("store.db"))
-                .unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         for id in ["interactive", "headless", "closed", "closed-headless"] {
             store.test_session(id, &crate::session_record::new_artifact_key());
         }

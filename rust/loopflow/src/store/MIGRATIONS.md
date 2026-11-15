@@ -56,6 +56,12 @@ a new migration runs its own code on `~/.lf` directly. Install a main build with
 `lf install --dev`; the install switch refuses a candidate whose pending
 migrations `origin/main` does not carry.
 
+The application passes upgrade observers and its build identity to the synchronous
+migration runner. Contract exporters and process observations run inside the same
+exclusive transaction as the SQL; file guards stay held through commit or rollback.
+Preview skips preference export. Migration receipts record the application build,
+not the library that runs SQL.
+
 The runner temporarily disables foreign-key actions around the transaction so a
 SQLite table rebuild cannot cascade-delete child history. It runs
 `PRAGMA foreign_key_check` before commit and restores enforcement afterward; a

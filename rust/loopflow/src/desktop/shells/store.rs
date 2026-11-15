@@ -135,14 +135,15 @@ pub(crate) fn hosts(
 
 #[cfg(test)]
 mod tests {
-    use crate::store::sqlite::SqliteStore;
+
     use loopflow_model::durable::TaskId;
     use loopflow_model::id::TerminalId;
 
     #[test]
     fn desktop_shell_creation_is_once_even_after_lost_acknowledgement_or_exit() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
+        let store =
+            crate::store::opening::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
         let repo = crate::repository::location::ensure_repository(&store, "/repo").unwrap();
         let task = TaskId::new();
         store.conn.lock().unwrap().execute_batch(&format!(

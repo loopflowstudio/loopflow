@@ -2293,7 +2293,7 @@ fn record_relay_terminal(held: &TerminalId) -> Result<()> {
         return Ok(());
     };
     std::env::remove_var("LF_RELAY_SESSION");
-    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
     let session = session.to_string_lossy();
     if store.session_terminal(&session)?.as_ref() != Some(held) {
         return Ok(());

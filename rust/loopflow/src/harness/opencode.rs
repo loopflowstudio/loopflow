@@ -927,7 +927,7 @@ mod tests {
     async fn stop_clears_the_child_and_its_group() {
         let home = tempfile::tempdir().unwrap();
         let database = home.path().join("store.db");
-        let store = crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
+        let store = crate::store::opening::open_ephemeral(&database).unwrap();
         store.test_session("stop", &crate::session_record::new_artifact_key());
         let process = loopflow_model::id::LfProcessId::new();
         let conn = rusqlite::Connection::open(&database).unwrap();

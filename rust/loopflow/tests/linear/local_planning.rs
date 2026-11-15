@@ -566,8 +566,7 @@ fn public_task_prefixes_resolve_and_report_ambiguity() {
         home.path(),
         &["wave", "add", "inbox", "--json"],
     );
-    let store =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     let project: String = conn
         .query_row(
@@ -1016,7 +1015,7 @@ fn project_creation_binding_and_activation_save_offline() {
             );
         }
         let path = home.path().join("loopflow.db");
-        let store = loopflow::store::sqlite::SqliteStore::new(&path).unwrap();
+        let store = loopflow::store::open_sqlite(&path).unwrap();
         let canonical = loopflow::repository::CanonicalRepo::discover(repo.path()).unwrap();
         let wave = loopflow::work::wave::Wave::new(
             loopflow::id::WaveId::new(),
@@ -1222,8 +1221,7 @@ fn project_reads_keep_canonical_identity_and_authored_order_after_edits() {
             .unwrap();
         }
         let home = tempfile::tempdir().unwrap();
-        let store =
-            loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+        let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
         let canonical = loopflow::repository::CanonicalRepo::discover(repo.path()).unwrap();
         let wave = loopflow::work::wave::Wave::new(
             loopflow::id::WaveId::new(),
@@ -1388,8 +1386,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             )
             .unwrap();
         }
-        let store =
-            loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+        let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
         let canonical = loopflow::repository::CanonicalRepo::discover(repo.path()).unwrap();
         let wave = loopflow::work::wave::Wave::new(
             loopflow::id::WaveId::new(),
@@ -1517,8 +1514,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
         );
         // Repeated commands and reopened stores retain the original delivery identities.
         drop(store);
-        let store =
-            loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+        let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
         assert_eq!(store.pending_project_changes(&id).unwrap(), changes);
         if mapped {
             let mut incoming = project.clone();
@@ -1662,7 +1658,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             .unwrap();
         }
         let path = home.path().join("loopflow.db");
-        let store = loopflow::store::sqlite::SqliteStore::new(&path).unwrap();
+        let store = loopflow::store::open_sqlite(&path).unwrap();
         let canonical = loopflow::repository::CanonicalRepo::discover(repo.path()).unwrap();
         let wave = loopflow::work::wave::Wave::new(
             loopflow::id::WaveId::new(),
@@ -1981,7 +1977,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             assert_eq!(store.pending_task_changes(&second).unwrap(), changes);
         }
         lf(repo.path(), home.path(), &["task", "unassign", selector]);
-        let reopened = loopflow::store::sqlite::SqliteStore::new(&path).unwrap();
+        let reopened = loopflow::store::open_sqlite(&path).unwrap();
         assert!(reopened.task(&second).unwrap().unwrap().assignee.is_none());
         assert_eq!(reopened.task(&second).unwrap().unwrap().id, second);
         assert!(reopened
@@ -2016,7 +2012,7 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
             );
         }
         let path = home.path().join("loopflow.db");
-        let store = loopflow::store::sqlite::SqliteStore::new(&path).unwrap();
+        let store = loopflow::store::open_sqlite(&path).unwrap();
         let canonical = loopflow::repository::CanonicalRepo::discover(repo.path()).unwrap();
         let db = rusqlite::Connection::open(&path).unwrap();
         let mut projects = Vec::new();
@@ -2203,7 +2199,7 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
             [projects[2].id.as_str()],
         )
         .unwrap();
-        let reopened = loopflow::store::sqlite::SqliteStore::new(&path).unwrap();
+        let reopened = loopflow::store::open_sqlite(&path).unwrap();
         assert_eq!(
             reopened.task(&task.id).unwrap().unwrap().project_id,
             Some(projects[1].id.clone())
@@ -2401,8 +2397,7 @@ fn deletion_saves_offline_and_retains_execution_and_retry_identity() {
         )["task"]
             .clone();
         let id = task["id"].as_str().unwrap();
-        let store =
-            loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+        let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
         let task_id = loopflow::durable::TaskId::parse(id).unwrap();
         let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
         if connected {
@@ -2437,8 +2432,7 @@ fn deletion_saves_offline_and_retains_execution_and_retry_identity() {
         assert_eq!(status["plan_state"], "removed");
         assert!(store.list_tasks(None).unwrap().is_empty());
         drop(store);
-        let reopened =
-            loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+        let reopened = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
         assert_eq!(reopened.pending_task_deletion(&task_id).unwrap(), changes);
     }
 }
@@ -2812,8 +2806,7 @@ fn wave_planning_reads_current_and_historical_chapters_without_starting_work() {
     )["task"]
         .clone();
     let task_id = loopflow::durable::TaskId::parse(created["id"].as_str().unwrap()).unwrap();
-    let store =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let task = store.task(&task_id).unwrap().unwrap();
     let current = store
         .project(task.project_id.as_ref().unwrap())
@@ -3098,7 +3091,7 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
     let id = created["id"].as_str().unwrap();
     let id = TaskId::parse(id).unwrap();
     let path = home.path().join("loopflow.db");
-    let store = loopflow::store::sqlite::SqliteStore::new(&path).unwrap();
+    let store = loopflow::store::open_sqlite(&path).unwrap();
     let task = store.task(&id).unwrap().unwrap();
     let mut project = store
         .project(task.project_id.as_ref().unwrap())
@@ -3702,7 +3695,7 @@ fn task_creation_defaults_to_standalone_in_bound_contexts() {
             assert!(task["worktree"].is_null());
         }
     }
-    let store = crate::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let retained = store
         .task(&crate::durable::TaskId::parse(parent_id).unwrap())
         .unwrap()

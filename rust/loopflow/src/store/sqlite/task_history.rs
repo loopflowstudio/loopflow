@@ -259,7 +259,7 @@ mod tests {
 
     fn fixture() -> (tempfile::TempDir, SqliteStore, TaskId, RetainedFiling) {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let wave = Wave::new(WaveId::new(), "proof".into(), "/repo".into());
         crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let project = ProjectId::new();

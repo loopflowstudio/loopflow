@@ -71,7 +71,7 @@ impl Machine {
     fn at(dir: tempfile::TempDir) -> Self {
         let repo = dir.path().join("repo");
         std::fs::create_dir_all(&repo).unwrap();
-        let store = SqliteStore::new(&dir.path().join("loopflow.db")).unwrap();
+        let store = loopflow::store::open_sqlite(&dir.path().join("loopflow.db")).unwrap();
         let wave = Wave::new(
             WaveId::new(),
             "product".into(),

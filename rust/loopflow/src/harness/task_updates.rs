@@ -380,7 +380,7 @@ mod tests {
 
     fn task_session() -> (tempfile::TempDir, SqliteStore, TaskId) {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         let session = store.test_session("reader", &crate::session_record::new_artifact_key());
         let task = TaskId::new();
         store

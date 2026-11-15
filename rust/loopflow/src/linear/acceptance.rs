@@ -897,7 +897,7 @@ mod tests {
     #[test]
     fn explicit_null_detaches_but_unknown_linear_membership_retains_task() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let wave = crate::work::wave::Wave::new(WaveId::new(), "product".into(), "/repo".into());
         crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let mut snapshot: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
@@ -1066,7 +1066,7 @@ mod tests {
     #[test]
     fn ownership_reads_retained_claims_without_changing_work_or_observation_age() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let wave = crate::work::wave::Wave::new(WaveId::new(), "product".into(), "/repo".into());
         crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let mut snapshot: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
@@ -1167,7 +1167,7 @@ mod tests {
     #[test]
     fn owned_issue_import_retains_identity_across_alias_changes_without_placement() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let wave = crate::work::wave::Wave::new(WaveId::new(), "product".into(), "/repo".into());
         crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let mut snapshot: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
@@ -1275,7 +1275,7 @@ mod tests {
     #[test]
     fn team_change_at_the_stored_revision_follows_linear() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let wave = crate::work::wave::Wave::new(WaveId::new(), "product".into(), "/repo".into());
         crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let mut snapshot: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
@@ -1541,7 +1541,7 @@ mod tests {
         // Between 2026-11-06 and 2026-11-08 Linear cut `branchName` to 60
         // characters without moving `updatedAt`; LOO-403's read then wedged.
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let conn = store.conn.lock().unwrap();
         let planning: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
             "../../../../tests/fixtures/dto/task_history_planning.json"

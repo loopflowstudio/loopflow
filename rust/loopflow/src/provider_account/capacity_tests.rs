@@ -1,4 +1,3 @@
-use crate::store::sqlite::SqliteStore;
 use crate::store::{
     AccountLimitWindow, CredentialState, ProviderAccount, ProviderAccountId, RoutingState,
 };
@@ -40,7 +39,8 @@ fn window(name: &str, used: u8, model: Option<&str>) -> AccountLimitWindow {
 #[test]
 fn claude_capacity_historical_names_reconcile_and_refresh() {
     let directory = tempfile::tempdir().unwrap();
-    let store = SqliteStore::open_ephemeral(&directory.path().join("registry.db")).unwrap();
+    let store =
+        crate::store::opening::open_ephemeral(&directory.path().join("registry.db")).unwrap();
     let mut account = account();
     account.cooldown_until = None;
     crate::provider_account::catalog::upsert_provider_account(&store, &account).unwrap();
@@ -78,7 +78,8 @@ fn claude_capacity_historical_names_reconcile_and_refresh() {
 #[test]
 fn claude_capacity_historical_unknown_credit_and_mismatched_rows_stay() {
     let directory = tempfile::tempdir().unwrap();
-    let store = SqliteStore::open_ephemeral(&directory.path().join("registry.db")).unwrap();
+    let store =
+        crate::store::opening::open_ephemeral(&directory.path().join("registry.db")).unwrap();
     let account = account();
     crate::provider_account::catalog::upsert_provider_account(&store, &account).unwrap();
     for (name, model) in [
@@ -110,7 +111,8 @@ fn claude_capacity_historical_unknown_credit_and_mismatched_rows_stay() {
 #[test]
 fn claude_capacity_clear_releases_all_holds_and_supersedes_polls() {
     let directory = tempfile::tempdir().unwrap();
-    let store = SqliteStore::open_ephemeral(&directory.path().join("registry.db")).unwrap();
+    let store =
+        crate::store::opening::open_ephemeral(&directory.path().join("registry.db")).unwrap();
     let account = account();
     crate::provider_account::catalog::upsert_provider_account(&store, &account).unwrap();
     store
@@ -164,7 +166,8 @@ fn claude_capacity_clear_releases_all_holds_and_supersedes_polls() {
 #[test]
 fn claude_usage_reconciliation_keeps_only_matching_aliases_and_scopes() {
     let directory = tempfile::tempdir().unwrap();
-    let store = SqliteStore::open_ephemeral(&directory.path().join("registry.db")).unwrap();
+    let store =
+        crate::store::opening::open_ephemeral(&directory.path().join("registry.db")).unwrap();
     for (id, percent) in [("first", 11), ("second", 100)] {
         let mut account = account();
         account.account_id = ProviderAccountId::parse(id).unwrap();
@@ -242,14 +245,14 @@ fn claude_usage_reconciliation_keeps_only_matching_aliases_and_scopes() {
 fn claude_usage_reconciliation_revision_rejects_delayed_polls_and_rolls_back() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("registry.db");
-    let store = SqliteStore::open_ephemeral(&path).unwrap();
+    let store = crate::store::opening::open_ephemeral(&path).unwrap();
     let account = account();
     crate::provider_account::catalog::upsert_provider_account(&store, &account).unwrap();
     let revision = store
         .provider_account_capacity_revision("claude", &account.account_id)
         .unwrap();
     // Two independent writers can observe and write in the same second.
-    let writer = SqliteStore::open_ephemeral(&path).unwrap();
+    let writer = crate::store::opening::open_ephemeral(&path).unwrap();
     writer
         .record_provider_account_capacity(
             "claude",
@@ -332,7 +335,8 @@ fn claude_usage_reconciliation_revision_rejects_delayed_polls_and_rolls_back() {
 #[test]
 fn claude_usage_reconciliation_requires_the_cause_and_preserves_global_rejection() {
     let directory = tempfile::tempdir().unwrap();
-    let store = SqliteStore::open_ephemeral(&directory.path().join("registry.db")).unwrap();
+    let store =
+        crate::store::opening::open_ephemeral(&directory.path().join("registry.db")).unwrap();
     for (cause, polled, cleared) in [
         (
             "rejected: seven_day",
@@ -435,7 +439,8 @@ fn claude_usage_reconciliation_requires_the_cause_and_preserves_global_rejection
 #[test]
 fn claude_usage_reconciliation_missing_reset_keeps_rejection_deadline() {
     let directory = tempfile::tempdir().unwrap();
-    let store = SqliteStore::open_ephemeral(&directory.path().join("registry.db")).unwrap();
+    let store =
+        crate::store::opening::open_ephemeral(&directory.path().join("registry.db")).unwrap();
     let mut account = account();
     account.cooldown_until = None;
     crate::provider_account::catalog::upsert_provider_account(&store, &account).unwrap();
@@ -483,7 +488,8 @@ fn claude_usage_reconciliation_missing_reset_keeps_rejection_deadline() {
 #[test]
 fn claude_usage_reconciliation_legacy_precedence_and_indexed_lookups() {
     let directory = tempfile::tempdir().unwrap();
-    let store = SqliteStore::open_ephemeral(&directory.path().join("registry.db")).unwrap();
+    let store =
+        crate::store::opening::open_ephemeral(&directory.path().join("registry.db")).unwrap();
     let account = account();
     crate::provider_account::catalog::upsert_provider_account(&store, &account).unwrap();
     store
@@ -563,7 +569,8 @@ fn claude_usage_reconciliation_legacy_precedence_and_indexed_lookups() {
 #[test]
 fn a_capacity_replacement_rechecks_the_snapshot_after_a_stream_write() {
     let directory = tempfile::tempdir().unwrap();
-    let store = SqliteStore::open_ephemeral(&directory.path().join("registry.db")).unwrap();
+    let store =
+        crate::store::opening::open_ephemeral(&directory.path().join("registry.db")).unwrap();
     let account = account();
     crate::provider_account::catalog::upsert_provider_account(&store, &account).unwrap();
     store
@@ -617,7 +624,8 @@ fn a_capacity_replacement_rechecks_the_snapshot_after_a_stream_write() {
 fn account_file_edits_apply_to_single_and_filtered_reads() {
     let _env = loopflow_test_support::env_lock().lock().unwrap();
     let directory = tempfile::tempdir().unwrap();
-    let store = SqliteStore::open_ephemeral(&directory.path().join("registry.db")).unwrap();
+    let store =
+        crate::store::opening::open_ephemeral(&directory.path().join("registry.db")).unwrap();
     let mut expected = account();
     expected.login_email = Some(crate::profile::EmailAddress::parse("work@example.com").unwrap());
     expected.paid_through =
@@ -670,7 +678,8 @@ fn account_file_edits_apply_to_single_and_filtered_reads() {
 #[test]
 fn account_observations_preserve_policy_and_omitted_windows() {
     let directory = tempfile::tempdir().unwrap();
-    let store = SqliteStore::open_ephemeral(&directory.path().join("registry.db")).unwrap();
+    let store =
+        crate::store::opening::open_ephemeral(&directory.path().join("registry.db")).unwrap();
     let expected = account();
     crate::provider_account::catalog::upsert_provider_account(&store, &expected).unwrap();
     let weekly = AccountLimitWindow {
@@ -725,7 +734,8 @@ fn account_observations_preserve_policy_and_omitted_windows() {
 #[test]
 fn account_observation_batch_rolls_back_on_later_window_failure() {
     let directory = tempfile::tempdir().unwrap();
-    let store = SqliteStore::open_ephemeral(&directory.path().join("registry.db")).unwrap();
+    let store =
+        crate::store::opening::open_ephemeral(&directory.path().join("registry.db")).unwrap();
     let account = account();
     crate::provider_account::catalog::upsert_provider_account(&store, &account).unwrap();
     let session = AccountLimitWindow {

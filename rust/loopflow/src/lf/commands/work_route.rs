@@ -739,7 +739,7 @@ mod tests {
 
     use super::{launch_task, repository_path, resolve, resolve_task, without_placement};
     use crate::lf::Cli;
-    use crate::store::sqlite::SqliteStore;
+
     use crate::work::task::NewTask;
     use clap::Parser;
     use loopflow_model::durable::{RepositoryId, TaskId};
@@ -747,7 +747,7 @@ mod tests {
     #[test]
     fn routing_resolves_task_prefixes_within_historical_repository_locators() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         let first = TaskId::parse("task_abcd1234400080000000000000000001").unwrap();
         let second = TaskId::parse("task_abcd1235400080000000000000000002").unwrap();
         let selected_path = home.path().join("selected");
@@ -830,7 +830,8 @@ mod tests {
         let _restore = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("LF_HOME", home.path());
-        let store = SqliteStore::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
+        let store =
+            crate::store::opening::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
         let id =
             crate::repository::location::ensure_repository(&store, "/selected/repository").unwrap();
         assert_eq!(

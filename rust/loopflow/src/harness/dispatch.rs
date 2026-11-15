@@ -103,7 +103,7 @@ mod tests {
 
     fn fenced_session(home: &tempfile::TempDir) -> (SqliteStore, SessionAttachment) {
         let path = home.path().join("dispatch.db");
-        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let store = crate::store::opening::open_ephemeral(&path).unwrap();
         store.test_session("conversation", "run_00000000000000000000000000000001");
         let process = LfProcessId::new();
         rusqlite::Connection::open(&path)

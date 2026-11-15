@@ -703,7 +703,7 @@ fn personal_task_launch_resume_and_skill_graph_keep_native_identity() {
             [task_id],
         )
         .unwrap();
-    loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
+    loopflow::store::open_sqlite(&fixture.home.path().join("loopflow.db"))
         .unwrap()
         .observe_pm_issue_change("fixture-deleted", None, true)
         .unwrap();
@@ -1074,8 +1074,7 @@ fn public_history_discovers_unlinked_native_receipts_without_borrowing_a_later_b
         "native-history",
         &fixture.repo.head_sha(),
     );
-    let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
-        .unwrap();
+    let store = loopflow::store::open_sqlite(&fixture.home.path().join("loopflow.db")).unwrap();
     let closed = store.session(&session).unwrap().unwrap();
     loopflow::store::sessions::bind_session(&store, &session, closed.captured, &task.task.id)
         .unwrap();
@@ -1505,8 +1504,7 @@ fn provider_parentage_does_not_assign_work_outside_its_checkout() {
     assert!(fixture.run(&LAUNCH).status.success());
     let original = fixture.launches()[0].clone();
     let (session, ..) = fixture.session_row(&original);
-    let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
-        .unwrap();
+    let store = loopflow::store::open_sqlite(&fixture.home.path().join("loopflow.db")).unwrap();
     let origin: String = fixture
         .db()
         .query_row(
@@ -1680,8 +1678,7 @@ fn declared_agent_can_start_another_tasks_graph() {
         "- cmd: sync --plan\n- interactive: demo\n",
     )
     .unwrap();
-    let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
-        .unwrap();
+    let store = loopflow::store::open_sqlite(&fixture.home.path().join("loopflow.db")).unwrap();
     // X's explicit Session selection must not become Y's Graph policy.
     support::select_wave_graph(
         fixture.repo.path(),
@@ -2600,8 +2597,7 @@ fn promotion_explicit_sources_with_run_keep_the_selected_work() {
         fixture.with_attached_clients([child], || {
             let id = fixture.session_row(&capture).0;
             let store =
-                loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
-                    .unwrap();
+                loopflow::store::open_sqlite(&fixture.home.path().join("loopflow.db")).unwrap();
             let attachment = store.session_attachment(&id).unwrap().unwrap();
             let caller = serde_json::to_string(&attachment.caller(id.clone().into())).unwrap();
             let source = if select_session {
@@ -2804,9 +2800,7 @@ fn promotion_selects_session_in_owned_and_shared_checkouts() {
             fixture.session_row(&first_capture).0,
             fixture.session_row(&second_capture).0,
         ];
-        let store =
-            loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
-                .unwrap();
+        let store = loopflow::store::open_sqlite(&fixture.home.path().join("loopflow.db")).unwrap();
         let attachment = store.session_attachment(&ids[1]).unwrap().unwrap();
         let caller = serde_json::to_string(&attachment.caller(ids[1].clone().into())).unwrap();
         let caller_cwd = store.session(&ids[1]).unwrap().unwrap().cwd;

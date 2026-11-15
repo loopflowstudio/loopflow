@@ -128,8 +128,8 @@ mod tests {
     fn a_changed_other_candidate_invalidates_the_choice_and_an_empty_choice() {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("store.db");
-        let store = SqliteStore::open_ephemeral(&path).unwrap();
-        let writer = SqliteStore::open_ephemeral(&path).unwrap();
+        let store = crate::store::opening::open_ephemeral(&path).unwrap();
+        let writer = crate::store::opening::open_ephemeral(&path).unwrap();
         let first = seed(&store, "first");
         let second = seed(&store, "second");
         let candidates = [first.clone(), second.clone()];
@@ -182,8 +182,8 @@ mod tests {
     fn concurrent_launches_recompute_and_keep_selection_times_monotonic() {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("store.db");
-        let store = SqliteStore::open_ephemeral(&path).unwrap();
-        let writer = SqliteStore::open_ephemeral(&path).unwrap();
+        let store = crate::store::opening::open_ephemeral(&path).unwrap();
+        let writer = crate::store::opening::open_ephemeral(&path).unwrap();
         let first = seed(&store, "first");
         let second = seed(&store, "second");
         let candidates = [first.clone()];
@@ -218,7 +218,7 @@ mod tests {
     #[test]
     fn an_arriving_candidate_invalidates_an_empty_reading_inside_a_pinned_snapshot() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let candidate = ProviderAccountId::parse("late").unwrap();
         let reading = {
             let _snapshot = store.read_snapshot().unwrap();
@@ -239,7 +239,7 @@ mod tests {
         use crate::store::query_plans::statements;
 
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.conn.lock().unwrap().execute_batch(
             "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<10000)
              INSERT INTO provider_accounts(provider,account_id,credential_state,created_at,updated_at)
@@ -291,7 +291,7 @@ mod tests {
     #[test]
     fn a_current_empty_choice_takes_no_write_lock() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let reading = store
             .account_selection_reading(Provider::Claude, &[])
             .unwrap();

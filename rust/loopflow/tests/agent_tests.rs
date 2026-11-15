@@ -92,10 +92,9 @@ fn library_launch_records_each_provider_under_its_invocation() {
             .trim()
             .parse()
             .unwrap_or_else(|error| panic!("{error}: fixture output {:?}", result.stdout));
-        let store = loopflow::store::sqlite::SqliteStore::new(
-            &loopflow::store::database_path_from_env().unwrap(),
-        )
-        .unwrap();
+        let store =
+            loopflow::store::open_sqlite(&loopflow::store::database_path_from_env().unwrap())
+                .unwrap();
         let rows = store.processes_since(0).unwrap();
         let agent = rows
             .iter()
@@ -112,10 +111,8 @@ fn library_launch_records_each_provider_under_its_invocation() {
         assert!(parent.completed_at.is_some());
         assert!(agent.agent_session_id.is_some());
     }
-    let store = loopflow::store::sqlite::SqliteStore::new(
-        &loopflow::store::database_path_from_env().unwrap(),
-    )
-    .unwrap();
+    let store =
+        loopflow::store::open_sqlite(&loopflow::store::database_path_from_env().unwrap()).unwrap();
     let rows = store.processes_since(0).unwrap();
     assert_eq!(rows.len(), 4);
     assert_eq!(
@@ -139,8 +136,7 @@ fn library_launch_reuses_the_enclosing_invocation() {
             let result = run_agent(&launch, &base_process())?;
             assert_eq!(result.exit_code, 0);
         }
-        let store =
-            loopflow::store::sqlite::SqliteStore::new(&loopflow::store::database_path_from_env()?)?;
+        let store = loopflow::store::open_sqlite(&loopflow::store::database_path_from_env()?)?;
         let rows = store.processes_since(0)?;
         let parents = rows
             .iter()
@@ -255,8 +251,7 @@ text = 'Fable 5 is currently unavailable. Switch to another model.' if failed el
             assert_eq!(result.stdout, "finished on opus");
             assert!(reason.contains("continuing on claude:opus"), "{reason}");
         }
-        let store =
-            loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+        let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
         assert!(store
             .provider_account_limit_rows(Some("claude"))
             .unwrap()
@@ -430,8 +425,7 @@ fn pre_spawn_account_refusal_falls_through_to_codex() {
     let _lf = branch_lf();
     let _directory = support::InDirectory::enter(home.path());
     let (_runtime, _accounts, _) = two_codex_accounts(home.path(), "primary", "backup");
-    let store =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     for name in ["first", "second"] {
         support::register_claude_login(home.path(), name);
         let mut account = loopflow::provider_account::catalog::get_provider_account(

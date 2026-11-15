@@ -735,7 +735,6 @@ mod tests {
     fn uncertain_records_stay_visible_and_share_the_gate_judgment() {
         use super::{activity_state, fold_process_state, load_snapshot, ActivityState};
         use crate::journal::{recorded_process_evidence, ProcessIdentityEvidence};
-        use crate::store::sqlite::SqliteStore;
 
         let _lock = crate::journal::test_env_lock();
         let _ambient = crate::test_ambient::EnvGuard::new();
@@ -743,7 +742,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("LF_HOME", home.path());
         let path = home.path().join("loopflow.db");
-        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let store = crate::store::opening::open_ephemeral(&path).unwrap();
         let sql = rusqlite::Connection::open(path).unwrap();
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
         let parent = LfProcessId::new();
@@ -879,7 +878,7 @@ mod tests {
     #[cfg(unix)]
     fn activity_reads_only_the_receipts_of_unfinished_rows() {
         use super::{load_snapshot, ActivitySnapshot, ActivityState, ProcessReceipt};
-        use crate::store::sqlite::SqliteStore;
+
         use std::os::unix::fs::PermissionsExt;
 
         let _lock = crate::journal::test_env_lock();
@@ -888,7 +887,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("LF_HOME", home.path());
         let path = home.path().join("loopflow.db");
-        SqliteStore::open_ephemeral(&path).unwrap();
+        crate::store::opening::open_ephemeral(&path).unwrap();
         let sql = rusqlite::Connection::open(path).unwrap();
         let live = LfProcessId::new();
         let pid = std::process::id();
@@ -944,7 +943,6 @@ mod tests {
     #[cfg(unix)]
     fn a_watch_reads_each_dead_row_once() {
         use super::ActivityReader;
-        use crate::store::sqlite::SqliteStore;
 
         let _lock = crate::journal::test_env_lock();
         let _ambient = crate::test_ambient::EnvGuard::new();
@@ -952,7 +950,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("LF_HOME", home.path());
         let path = home.path().join("loopflow.db");
-        SqliteStore::open_ephemeral(&path).unwrap();
+        crate::store::opening::open_ephemeral(&path).unwrap();
         let sql = rusqlite::Connection::open(path).unwrap();
         let pid = std::process::id();
         let started = crate::journal::process_started_at(pid).unwrap().unwrap();

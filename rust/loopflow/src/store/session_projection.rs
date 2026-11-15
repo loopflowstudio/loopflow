@@ -139,12 +139,11 @@ pub(crate) fn provider_lineage(
 mod tests {
     use crate::process::attachment;
     use crate::session::{SessionActivity, SessionFilter};
-    use crate::store::sqlite::SqliteStore;
 
     #[test]
     fn available_limit_one_skips_dead_and_unknown_before_paging() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         let pid = std::process::id();
         let started = crate::journal::process_started_at(pid).unwrap().unwrap();
         for (id, identity) in [
@@ -214,7 +213,7 @@ mod tests {
     fn a_changed_identity_restarts_acquisition_before_projection() {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("db");
-        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let store = crate::store::opening::open_ephemeral(&path).unwrap();
         store.test_session("session", &crate::session_record::new_artifact_key());
         let attachment = attachment::claim_session_attachment(
             &store,
@@ -272,7 +271,7 @@ mod tests {
     fn identity_acquisition_is_batched_and_indexes_out_completed_history() {
         use crate::store::query_plans::{growing_scans, statements};
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         store.test_session("live", &crate::session_record::new_artifact_key());
         attachment::claim_session_attachment(&store, "live", None, &store.test_lf_process(), true)
             .unwrap();

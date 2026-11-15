@@ -40,7 +40,7 @@ async fn agent_settlement_on_read_reports_failed_observation_and_recovers_withou
     let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
         .await
         .unwrap();
-    let store = SqliteStore::new(&database).unwrap();
+    let store = loopflow::store::open_sqlite(&database).unwrap();
     reserve_session(&store, "orphan", repo.path());
     let sql = rusqlite::Connection::open(&database).unwrap();
     sql.execute(
@@ -205,7 +205,7 @@ fn task_checkout_blockers_are_rows_in_the_activity_list() {
     let worktree = Path::new(placed["worktree"].as_str().unwrap());
 
     let database = home.path().join("loopflow.db");
-    let store = SqliteStore::new(&database).unwrap();
+    let store = loopflow::store::open_sqlite(&database).unwrap();
     reserve_session(&store, "held", worktree);
     let attachment = attachment::claim_session_attachment(
         &store,
@@ -759,7 +759,7 @@ fn empty_release_check_returns_through_process_completion() {
     std::fs::write(&gh, "#!/bin/sh\ncase \"$1 $2\" in '--version ') exit 0;; 'pr list') echo '[]'; exit 0;; esac\nexit 1\n").unwrap();
     std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
     let database = home.path().join("loopflow.db");
-    drop(SqliteStore::new(&database).unwrap());
+    drop(loopflow::store::open_sqlite(&database).unwrap());
     let parent = RunningParent::insert(&database);
     let output = child(home.path(), repo.path(), &["release", "check"], &parent)
         .env(
@@ -994,7 +994,7 @@ async fn historical_feedback_is_not_live_availability() {
     let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
         .await
         .unwrap();
-    let store = SqliteStore::new(&database).unwrap();
+    let store = loopflow::store::open_sqlite(&database).unwrap();
     for id in ["waiting", "finished", "legacy_finished", "unobserved"] {
         reserve_session(&store, id, home.path());
     }

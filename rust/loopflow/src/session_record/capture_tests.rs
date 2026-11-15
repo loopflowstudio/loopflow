@@ -1065,7 +1065,7 @@ fn attached_session(
     loopflow_model::id::LfProcessId,
 ) {
     let path = ledger.home().join("loopflow.db");
-    let store = crate::store::sqlite::SqliteStore::open_ephemeral(&path).unwrap();
+    let store = crate::store::opening::open_ephemeral(&path).unwrap();
     store.test_session("conversation", &crate::session_record::new_artifact_key());
     let first = loopflow_model::id::LfProcessId::new();
     let second = loopflow_model::id::LfProcessId::new();

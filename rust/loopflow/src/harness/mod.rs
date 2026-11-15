@@ -368,7 +368,7 @@ pub fn default_create_harness(
 pub(crate) fn admit_for_test(config: &mut AgentConfig) -> crate::journal::TestLedgerGuard {
     let ledger = crate::journal::TestLedgerGuard::new();
     let database = ledger.home().join("loopflow.db");
-    let store = crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
+    let store = crate::store::opening::open_ephemeral(&database).unwrap();
     let process = loopflow_model::id::LfProcessId::new();
     rusqlite::Connection::open(&database)
         .unwrap()

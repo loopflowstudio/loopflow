@@ -299,7 +299,7 @@ fn classify(output: &std::process::Output) -> Outcome {
 // ─── Helpers ────────────────────────────────────────────────────────────
 
 fn open_test_store(path: &Path) -> SqliteStore {
-    SqliteStore::new(path).expect("open store")
+    loopflow::store::open_sqlite(path).expect("open store")
 }
 
 /// Seed a machine home with one registered wave ("product"), a PM snapshot,

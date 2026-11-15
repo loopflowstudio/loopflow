@@ -347,7 +347,8 @@ mod tests {
     #[test]
     fn a_write_that_changes_nothing_is_reported_and_a_read_is_not() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
+        let store =
+            crate::store::opening::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
         store
             .conn
             .lock()
@@ -388,7 +389,7 @@ mod tests {
     ) {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("loopflow.db");
-        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let store = crate::store::opening::open_ephemeral(&path).unwrap();
         let repo = crate::repository::location::ensure_repository(&store, "/repo").unwrap();
         let task = TaskId::new();
         let viewer = loopflow_model::id::TerminalId::new();
@@ -692,7 +693,8 @@ mod tests {
     #[test]
     fn local_planning_writes_take_the_clock_by_index() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
+        let store =
+            crate::store::opening::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
         let repo = store.home_dir().unwrap();
         std::fs::create_dir_all(repo.join(".git")).unwrap();
         let repository_id =
@@ -719,7 +721,8 @@ mod tests {
     #[test]
     fn a_walk_of_a_large_partial_index_is_a_scan() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
+        let store =
+            crate::store::opening::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
         let history = "SELECT session_id FROM session_events WHERE kind='observed'
              AND json_extract(payload,'$.evidence.provider_session_id')='thread'";
         let scans = growing_scans(&store, &[history.to_owned()]);
@@ -739,7 +742,8 @@ mod tests {
     #[test]
     fn every_partial_index_on_a_growing_table_is_measured() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
+        let store =
+            crate::store::opening::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
         let conn = store.conn.lock().unwrap();
         conn.execute_batch("ANALYZE; DELETE FROM sqlite_stat1;")
             .unwrap();
@@ -769,7 +773,8 @@ mod tests {
         // SQLite reads a row for a missing index as the table's row count, so a
         // dropped index's row makes its table look tiny to every plan.
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
+        let store =
+            crate::store::opening::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
         let conn = store.conn.lock().unwrap();
         conn.execute_batch("ANALYZE; DELETE FROM sqlite_stat1;")
             .unwrap();
@@ -797,7 +802,8 @@ mod tests {
     #[test]
     fn foreign_key_children_on_growing_tables_are_indexed() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
+        let store =
+            crate::store::opening::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
         let lookups = foreign_key_lookups(&store);
         assert!(lookups
             .iter()

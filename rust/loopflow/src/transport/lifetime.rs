@@ -344,8 +344,7 @@ mod tests {
     fn client_retirement_waits_for_a_readable_store_and_keeps_its_move_notice() {
         use super::{Client, ClientState};
         let home = tempfile::tempdir().unwrap();
-        let store =
-            crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         let session = store.test_session("moving", &crate::session_record::new_artifact_key());
         let attachment = attachment::claim_session_attachment(
             &store,

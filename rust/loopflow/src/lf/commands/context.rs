@@ -375,7 +375,7 @@ fn read_news(
     use crate::steer::NativeBoundary;
     let path = crate::store::default_db_path();
     anyhow::ensure!(path.exists(), "Machine registry is absent");
-    let store = crate::store::sqlite::SqliteStore::new(&path)?;
+    let store = crate::store::open_sqlite(&path)?;
     let event = input["hook_event_name"].as_str().unwrap_or("SessionStart");
     let boundary = match event {
         "SessionStart" => NativeBoundary::Select {

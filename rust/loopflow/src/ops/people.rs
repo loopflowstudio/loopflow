@@ -153,7 +153,6 @@ mod tests {
 
     use super::github_person;
     use crate::store::people::GithubPerson;
-    use crate::store::sqlite::SqliteStore;
 
     #[test]
     fn an_email_reaches_github_once() {
@@ -172,7 +171,7 @@ mod tests {
         )
         .unwrap();
         std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let store = SqliteStore::open_ephemeral(&temp.path().join("lf.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&temp.path().join("lf.db")).unwrap();
         let _env = crate::journal::test_env_lock();
         let path = std::env::var_os("PATH").unwrap_or_default();
         std::env::set_var(

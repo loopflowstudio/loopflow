@@ -509,8 +509,7 @@ fn terminal_context_refreshes_without_replacing_instructions_or_losing_failed_se
         env!("CARGO_BIN_EXE_lf"),
         &home.path().join("machine"),
     );
-    let store = loopflow::store::sqlite::SqliteStore::new(&home.path().join("machine/loopflow.db"))
-        .unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("machine/loopflow.db")).unwrap();
     loopflow::work::wave::bootstrap::upsert_wave(
         &store,
         &loopflow::work::wave::Wave::new(

@@ -78,13 +78,13 @@ fn read_task_graph(store: &SqliteStore, row: TaskGraphRow) -> TaskGraph {
 #[cfg(test)]
 mod tests {
     use super::read_task_graph;
-    use crate::store::sqlite::{task_work::TaskGraphRow, SqliteStore};
+    use crate::store::sqlite::task_work::TaskGraphRow;
     use crate::task_graph::{CapturedGraph, TaskGraphPosition};
 
     #[test]
     fn a_saved_run_without_identity_stays_potentially_running() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let process = crate::process::LfProcess {
             id: loopflow_model::id::LfProcessId::new(),
             pid: None,

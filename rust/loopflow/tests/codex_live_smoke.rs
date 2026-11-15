@@ -16,7 +16,6 @@ use loopflow::harness::codex::CodexHarness;
 use loopflow::harness::{ApprovalPolicy, Harness};
 use loopflow::id::LfProcessId;
 use loopflow::session::{LfSession, TitleSource};
-use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::{open_ephemeral_store, StorageConfig};
 use tokio::sync::mpsc;
 
@@ -33,7 +32,7 @@ async fn codex_live_one_turn_smoke() {
     let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
         .await
         .expect("store");
-    let store = SqliteStore::new(&database).expect("store");
+    let store = loopflow::store::open_sqlite(&database).expect("store");
     loopflow::store::sessions::create_session(
         &store,
         LfSession {

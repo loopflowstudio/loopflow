@@ -94,7 +94,7 @@ pub(crate) fn resume_session_with_env(
     launch_lock: Option<File>,
     named_work: bool,
 ) -> Result<()> {
-    let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
     let session = store
         .session_for_artifact(artifact_key)?
         .ok_or_else(|| anyhow!("Session input {artifact_key} is not recorded"))?;
@@ -329,7 +329,7 @@ fn record_interactive_opened(environment: &BTreeMap<String, String>) -> Result<(
     let Some(process) = crate::journal::current_lf_process_id() else {
         return Ok(());
     };
-    let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
     let session = store
         .session_for_artifact(input)?
         .ok_or_else(|| anyhow!("Session input {input} is not recorded"))?;
@@ -378,7 +378,7 @@ fn native_provider_attachment(
     {
         bail!("Session attachment differs from native launch provenance");
     }
-    let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
     store.with_session_attachment(session, attachment, || {
         if let Some(remote) = &command.remote {
             let endpoint = store
@@ -446,7 +446,7 @@ fn session_command_status_with_env(
                 environment.extend(created.environment());
                 capture = Some(created);
             }
-            let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
+            let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
             let input = environment
                 .get(crate::session_record::CAPTURE_KEY_ENV)
                 .expect("native launch has a capture");
@@ -1207,7 +1207,7 @@ mod tests {
     fn a_terminal_move_names_the_terminal_it_went_to() {
         use crate::process::Departure;
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         let notice = |to: Option<&str>| {
             departure_notice(
                 &store,
@@ -1233,7 +1233,7 @@ mod tests {
         use crate::process::Departure;
         use loopflow_model::durable::{MachineId, TaskId};
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         let repo = home.path().canonicalize().unwrap();
         let repo = repo.to_str().unwrap();
         let task = store
@@ -1496,7 +1496,7 @@ mod tests {
             .unwrap();
             // Both entry paths reuse the saved conversation and reserve exactly
             // one provider under the admitted lf invocation.
-            let store = SqliteStore::new(&temp.path().join("loopflow.db")).unwrap();
+            let store = crate::store::open_sqlite(&temp.path().join("loopflow.db")).unwrap();
             let rows = store.processes_since(0).unwrap();
             let agents = rows
                 .iter()
@@ -1608,7 +1608,7 @@ mod tests {
         let ledger = crate::journal::TestLedgerGuard::new();
         let _ambient = crate::test_ambient::EnvGuard::new();
         let home = ledger.home();
-        let store = SqliteStore::new(&home.join("loopflow.db")).unwrap();
+        let store = crate::store::open_sqlite(&home.join("loopflow.db")).unwrap();
         let stop = std::thread::spawn(move || {
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
             loop {
@@ -1692,7 +1692,7 @@ mod tests {
         .unwrap_err()
         .to_string()
         .contains("not installed"));
-        let store = SqliteStore::new(&home.join("loopflow.db")).unwrap();
+        let store = crate::store::open_sqlite(&home.join("loopflow.db")).unwrap();
         let rows = store.processes_since(0).unwrap();
         let agents = rows
             .iter()
@@ -1729,7 +1729,7 @@ mod tests {
         let _ambient = crate::test_ambient::EnvGuard::new();
         let home = ledger.home();
         crate::journal::with_runtime(home, &["lf".into(), "session".into()], || {
-            let store = SqliteStore::new(&home.join("loopflow.db"))?;
+            let store = crate::store::open_sqlite(&home.join("loopflow.db"))?;
             let session = store.test_session("remote", &crate::session_record::new_artifact_key());
             let original = attachment::claim_session_attachment(
                 &store,
@@ -1832,7 +1832,7 @@ mod tests {
             .map(crate::process::LfProcessRuntime::new)?;
             capture.claim_session_attachment()?;
             let (session, attachment) = capture.session_attachment().unwrap();
-            let store = SqliteStore::new(&home.join("loopflow.db"))?;
+            let store = crate::store::open_sqlite(&home.join("loopflow.db"))?;
             let process = crate::journal::current_lf_process_id().unwrap();
             store.retain_session_observation(
                 &store.session(&session)?.unwrap(),

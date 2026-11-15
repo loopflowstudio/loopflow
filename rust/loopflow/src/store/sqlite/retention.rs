@@ -371,13 +371,12 @@ mod tests {
     use rusqlite::Connection;
 
     use crate::store::retention::prune;
-    use crate::store::sqlite::SqliteStore;
 
     #[test]
     fn prune_merges_per_receipt_usage_while_a_live_writer_holds_the_lock() {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("store.db");
-        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let store = crate::store::opening::open_ephemeral(&path).unwrap();
         store.test_session("conversation", &crate::session_record::new_artifact_key());
         let conn = Connection::open(&path).unwrap();
         for (receipt, total) in [("r1", 10), ("r2", 20)] {
@@ -423,7 +422,7 @@ mod tests {
     fn prune_forgets_unneeded_processes_and_retires_the_capture_cursor() {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("store.db");
-        SqliteStore::open_ephemeral(&path).unwrap();
+        crate::store::opening::open_ephemeral(&path).unwrap();
         let cursor = home.path().join("store.db.retention-cursor");
         std::fs::write(&cursor, "7").unwrap();
 
@@ -478,7 +477,7 @@ mod tests {
     fn prune_closes_dead_processes_and_forgets_those_nothing_needs() {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("store.db");
-        SqliteStore::open_ephemeral(&path).unwrap();
+        crate::store::opening::open_ephemeral(&path).unwrap();
         let conn = Connection::open(&path).unwrap();
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
         crate::journal::set_test_machine_booted_at(Some(now - 3_600));
@@ -547,7 +546,7 @@ mod tests {
     fn prune_moves_a_headless_run_with_a_dead_agent_process_to_history() {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("store.db");
-        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let store = crate::store::opening::open_ephemeral(&path).unwrap();
         let conn = Connection::open(&path).unwrap();
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
         let exited = std::process::Command::new("true")
@@ -590,13 +589,12 @@ mod tests {
 #[cfg(test)]
 mod observation_tests {
     use super::{prune, unfinished_processes};
-    use crate::store::sqlite::SqliteStore;
 
     #[test]
     fn pruning_does_not_close_a_process_changed_after_observation() {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("store.db");
-        let _store = SqliteStore::open_ephemeral(&path).unwrap();
+        let _store = crate::store::opening::open_ephemeral(&path).unwrap();
         let conn = rusqlite::Connection::open(&path).unwrap();
         let id = "00000000-0000-4000-8000-000000000001";
         conn.execute(

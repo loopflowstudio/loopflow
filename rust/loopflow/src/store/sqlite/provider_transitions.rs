@@ -220,7 +220,7 @@ mod tests {
     use crate::process::attachment;
 
     use super::{observe_in, TransitionKind};
-    use crate::store::sqlite::SqliteStore;
+
     use loopflow_model::id::LfProcessId;
 
     #[test]
@@ -241,7 +241,7 @@ mod tests {
     #[test]
     fn latest_transition_reads_only_indexed_transition_rows() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let conn = store.conn.lock().unwrap();
         let mut statement = conn
             .prepare(concat!(
@@ -264,7 +264,7 @@ mod tests {
     #[test]
     fn reservations_do_not_report_success_and_observed_replacements_keep_lineage() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("conversation", &crate::session_record::new_artifact_key());
         let owner = LfProcessId::new();
         store

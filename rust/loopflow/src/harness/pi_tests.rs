@@ -65,8 +65,7 @@ async fn pi_turns_resume_the_exact_conversation_and_capture_tools_usage() {
     // input or shutdown to that Machine's store.
     let other_home = tempfile::tempdir().unwrap();
     let other_store =
-        crate::store::sqlite::SqliteStore::open_ephemeral(&other_home.path().join("loopflow.db"))
-            .unwrap();
+        crate::store::opening::open_ephemeral(&other_home.path().join("loopflow.db")).unwrap();
     let selection = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
     std::env::set_var("LF_HOME", other_home.path());
     pi.send_input("tool").await.unwrap();

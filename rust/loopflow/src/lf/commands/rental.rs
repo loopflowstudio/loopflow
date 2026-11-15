@@ -1202,7 +1202,7 @@ mod tests {
     /// A running rental of `code-1` and a provider that knows its sandbox.
     /// Created and confirmed, with no Machine yet: what a boot leaves.
     fn booting(dir: &std::path::Path) -> (SqliteStore, Rental, Sandboxes, Log) {
-        let store = SqliteStore::open_ephemeral(&dir.join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&dir.join("db")).unwrap();
         crate::store::rentals::add_ondemand(
             &store,
             &OnDemand {

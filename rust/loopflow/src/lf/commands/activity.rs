@@ -131,7 +131,10 @@ pub fn run(options: &super::history::HistoryFeed) -> Result<()> {
 /// What `lf history --json` prints for `window`.
 pub(crate) fn snapshot(window: &HistoryWindow) -> Result<WorkActivitySnapshot> {
     let path = crate::store::database_path_from_env()?;
-    let store = path.exists().then(|| SqliteStore::new(&path)).transpose()?;
+    let store = path
+        .exists()
+        .then(|| crate::store::open_sqlite(&path))
+        .transpose()?;
     read(store.as_ref(), window)
 }
 

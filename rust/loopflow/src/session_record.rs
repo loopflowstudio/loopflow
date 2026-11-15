@@ -1629,7 +1629,7 @@ impl SessionRecorder {
 
 /// The store that holds the conversation for the capture recorded at `dir`.
 pub(crate) fn row_store(dir: &Path) -> StoreResult<crate::store::sqlite::SqliteStore> {
-    crate::store::sqlite::SqliteStore::new(&row_database(dir)?)
+    crate::store::open_sqlite(&row_database(dir)?)
 }
 
 fn row_database(dir: &Path) -> StoreResult<PathBuf> {

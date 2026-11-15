@@ -259,7 +259,7 @@ pub(super) fn run(cli: &crate::lf::Cli, args: &WorkspaceArgs, host: OpenHost) ->
     }
     let (targets, unknown) = super::workspace_targets(cli, args)?;
     crate::store::read_existing_registry()?.context("Work registry is unavailable")?;
-    let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
     let mut report = OpenReport {
         receipts: Vec::new(),
         unknown,
@@ -980,7 +980,7 @@ fn follow(cli: &crate::lf::Cli, session: &str, args: &WorkspaceArgs) -> Result<(
     let target = targets
         .first()
         .context("Follower selection is unavailable")?;
-    let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
     let selected = scope(&store, target)?;
     let repository = RepositoryId::parse(
         target

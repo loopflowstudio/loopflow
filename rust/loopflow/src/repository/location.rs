@@ -354,7 +354,7 @@ pub fn reconnect_current() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{bind_repository, ensure_repository, git_locator, read_locator};
-    use crate::store::sqlite::SqliteStore;
+
     use loopflow_model::durable::RepositoryId;
     use loopflow_test_support::TestRepo;
 
@@ -364,7 +364,7 @@ mod tests {
         let repo = TestRepo::new();
         let path = repo.path().canonicalize().unwrap();
         let path = path.to_str().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         store
             .conn
             .lock()
@@ -399,7 +399,7 @@ mod tests {
         let repo = TestRepo::new();
         let path = repo.path().canonicalize().unwrap();
         let path = path.to_str().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let invalid = Wave::new(WaveId::new(), "invalid/name".into(), path.into());
         assert!(crate::work::wave::bootstrap::upsert_wave(&store, &invalid).is_err());
         assert!(store.repository_id(path).unwrap().is_none());
@@ -418,7 +418,7 @@ mod tests {
     #[test]
     fn changed_registration_inputs_cannot_replace_a_later_binding() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let inputs = store.repository_registration("/repo").unwrap();
         let later = RepositoryId::new();
         bind_repository(&store, "/repo", &later).unwrap();
@@ -433,7 +433,7 @@ mod tests {
         use crate::store::query_plans::{assert_no_empty_writes, growing_scans, statements};
 
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let id = ensure_repository(&store, "/repo").unwrap();
         let history = ensure_repository(&store, "/history").unwrap();
         store
@@ -463,8 +463,8 @@ mod tests {
         let repo = TestRepo::new();
         let path = repo.path().canonicalize().unwrap();
         let path = path.to_str().unwrap();
-        let first = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
-        let second = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let first = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let second = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let start = std::sync::Barrier::new(2);
         let ids = std::thread::scope(|scope| {
             let other = scope.spawn(|| {

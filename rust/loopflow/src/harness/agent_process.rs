@@ -27,7 +27,7 @@ pub(super) fn open_owner(
     let (session, attachment) = attachment
         .ok_or_else(|| anyhow::anyhow!("AgentProcess requires an admitted invocation"))?;
     Ok((
-        SqliteStore::new(&crate::store::database_path_from_env()?)?,
+        crate::store::open_sqlite(&crate::store::database_path_from_env()?)?,
         session.clone(),
         attachment.clone(),
     ))
@@ -508,14 +508,14 @@ pub struct AgentProcessCleanup {
 }
 
 pub fn reap_agent_processes(dry_run: bool) -> Result<AgentProcessReapReport> {
-    let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
     Ok(reap_in(&store, dry_run)?)
 }
 
 /// `lf monitor prune`'s AgentProcess pass: reap orphans, then release ancestry
 /// it can prove was never recorded. Lazy recovery only reaps.
 pub fn prune_agent_processes(dry_run: bool) -> Result<AgentProcessReapReport> {
-    let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
     let mut report = reap_in(&store, dry_run)?;
     let repaired = repair_unrecorded_ancestry_in(
         &store,
@@ -866,7 +866,7 @@ mod tests {
     fn prune_releases_unrecorded_ancestry_and_the_session_resumes() {
         let home = tempfile::tempdir().unwrap();
         let database = home.path().join("db");
-        let store = SqliteStore::open_ephemeral(&database).unwrap();
+        let store = crate::store::opening::open_ephemeral(&database).unwrap();
         let sql = rusqlite::Connection::open(&database).unwrap();
         let (session, ghost, agent) = unrecorded_ancestry_fixture(&store, &sql, "ladder");
         let events = |sql: &rusqlite::Connection| -> i64 {
@@ -944,7 +944,7 @@ mod tests {
     fn prune_leaves_pruned_parents_live_agents_and_recorded_owners_failing_doctor() {
         let home = tempfile::tempdir().unwrap();
         let database = home.path().join("db");
-        let store = SqliteStore::open_ephemeral(&database).unwrap();
+        let store = crate::store::opening::open_ephemeral(&database).unwrap();
         let sql = rusqlite::Connection::open(&database).unwrap();
         let (_, _, pruned) = unrecorded_ancestry_fixture(&store, &sql, "pruned");
         let (_, _, live) = unrecorded_ancestry_fixture(&store, &sql, "live");
@@ -978,7 +978,7 @@ mod tests {
         let home = ledger.home();
         crate::journal::with_runtime(home, &["lf".into(), "skill".into()], || {
             let process = crate::journal::current_lf_process_id().unwrap();
-            let store = SqliteStore::new(&home.join("loopflow.db"))?;
+            let store = crate::store::open_sqlite(&home.join("loopflow.db"))?;
             rusqlite::Connection::open(home.join("loopflow.db"))?
                 .execute("DELETE FROM processes WHERE id=?1", [&process])?;
             let session = store.test_session("lost", &crate::session_record::new_artifact_key());
@@ -997,7 +997,7 @@ mod tests {
     #[test]
     fn move_after_agent_death_preserves_unknown_outcome() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         let session = store.test_session("dead", &crate::session_record::new_artifact_key());
         let attachment = attachment::claim_session_attachment(
             &store,
@@ -1038,7 +1038,7 @@ mod tests {
     fn a_launcher_that_ended_before_recording_identity_never_started_its_agent() {
         let home = tempfile::tempdir().unwrap();
         let database = home.path().join("db");
-        let store = SqliteStore::open_ephemeral(&database).unwrap();
+        let store = crate::store::opening::open_ephemeral(&database).unwrap();
         let session = store.test_session("reserved", &crate::session_record::new_artifact_key());
         let sql = rusqlite::Connection::open(&database).unwrap();
         sql.execute(
@@ -1078,7 +1078,7 @@ mod tests {
         use crate::process::Departure;
         let home = tempfile::tempdir().unwrap();
         let database = home.path().join("db");
-        let store = SqliteStore::open_ephemeral(&database).unwrap();
+        let store = crate::store::opening::open_ephemeral(&database).unwrap();
         let session = store.test_session("moved", &crate::session_record::new_artifact_key());
         let sql = rusqlite::Connection::open(&database).unwrap();
         sql.execute(
@@ -1146,7 +1146,7 @@ mod tests {
     fn native_move_uses_process_identity_and_terminal_follows_attachment() {
         let home = tempfile::tempdir().unwrap();
         let database = home.path().join("db");
-        let store = SqliteStore::open_ephemeral(&database).unwrap();
+        let store = crate::store::opening::open_ephemeral(&database).unwrap();
         let session = store.test_session("move", &crate::session_record::new_artifact_key());
         let sql = rusqlite::Connection::open(&database).unwrap();
         sql.execute(
@@ -1260,7 +1260,7 @@ mod tests {
         let ledger = crate::journal::TestLedgerGuard::new();
         let _ambient = crate::test_ambient::EnvGuard::new();
         let database = ledger.home().join("loopflow.db");
-        let store = SqliteStore::open_ephemeral(&database).unwrap();
+        let store = crate::store::opening::open_ephemeral(&database).unwrap();
         let sql = rusqlite::Connection::open(database).unwrap();
         let mut expected = Vec::new();
         for (name, state, ended) in [
@@ -1335,7 +1335,7 @@ mod tests {
         let ledger = crate::journal::TestLedgerGuard::new();
         let _ambient = crate::test_ambient::EnvGuard::new();
         let database = ledger.home().join("loopflow.db");
-        let store = SqliteStore::open_ephemeral(&database).unwrap();
+        let store = crate::store::opening::open_ephemeral(&database).unwrap();
         let sql = rusqlite::Connection::open(database).unwrap();
         for ended in [false, true] {
             let session = store.test_session(
@@ -1394,7 +1394,7 @@ mod tests {
     #[test]
     fn native_cleanup_records_wait_without_touching_a_replacement_or_remote_provider() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         let session = store.test_session("cleanup", &crate::session_record::new_artifact_key());
         let parent = store.test_lf_process();
         let first =
@@ -1454,7 +1454,7 @@ mod tests {
     #[test]
     fn native_cleanup_cannot_kill_the_same_agent_after_takeover() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         let session = store.test_session("takeover", &crate::session_record::new_artifact_key());
         let first = attachment::claim_session_attachment(
             &store,
@@ -1495,7 +1495,7 @@ mod tests {
     #[test]
     fn native_cleanup_failed_wait_retains_unknown_exit() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         let session = store.test_session("failed-wait", &crate::session_record::new_artifact_key());
         let attachment = attachment::claim_session_attachment(
             &store,
@@ -1528,7 +1528,7 @@ mod tests {
     #[tokio::test]
     async fn headless_spawn_retains_attempts_and_refuses_stale_attachments() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         let session = store.test_session("spawn", &crate::session_record::new_artifact_key());
         let parent = store.test_lf_process();
         let first =
@@ -1601,7 +1601,7 @@ mod tests {
     #[test]
     fn a_bare_launch_carries_only_a_store_steer_capability() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         let capability = |holder: crate::session::Holder| {
             let id = format!("{holder:?}");
             let session = store.test_session(&id, &crate::session_record::new_artifact_key());
@@ -1641,7 +1641,7 @@ mod tests {
     #[test]
     fn native_spawn_retains_identity_and_fences_effects_after_takeover() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         let session = store.test_session("native", &crate::session_record::new_artifact_key());
         let parent = store.test_lf_process();
         let first =
@@ -1715,7 +1715,7 @@ mod tests {
 
     fn reap_detached(provider: &str, argv: &[&str]) {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         let mut child = Command::new("/bin/sh")
             .args(["-c", "sleep 60 & wait; :"])
             .args(argv)

@@ -258,7 +258,6 @@ pub fn bind_session(
 mod tests {
     use crate::repository::CanonicalRepo;
     use crate::session::{LfSession, PrimaryScope, TitleSource};
-    use crate::store::sqlite::SqliteStore;
 
     fn candidate(cwd: &std::path::Path) -> LfSession {
         LfSession {
@@ -305,7 +304,8 @@ mod tests {
         );
         let cwd = repo.join("src/nested");
         std::fs::create_dir_all(&cwd).unwrap();
-        let store = SqliteStore::open_ephemeral(&directory.path().join("registry.db")).unwrap();
+        let store =
+            crate::store::opening::open_ephemeral(&directory.path().join("registry.db")).unwrap();
         let session = super::create_session(&store, candidate(&cwd), None).unwrap();
         assert_eq!(
             session.repo,
@@ -322,7 +322,8 @@ mod tests {
         std::fs::create_dir(&checkout).unwrap();
         let repo = CanonicalRepo::discover(&checkout).unwrap();
         let scope = PrimaryScope::Repository(repo.clone());
-        let store = SqliteStore::open_ephemeral(&directory.path().join("registry.db")).unwrap();
+        let store =
+            crate::store::opening::open_ephemeral(&directory.path().join("registry.db")).unwrap();
         let session = super::ensure_primary_session(
             &store,
             &scope,

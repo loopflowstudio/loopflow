@@ -350,7 +350,7 @@ impl SqliteStore {
 
 #[cfg(test)]
 mod tests {
-    use super::SqliteStore;
+
     use loopflow_model::durable::{MachineId, TaskId};
 
     #[test]
@@ -359,7 +359,7 @@ mod tests {
         use loopflow_model::id::{LfProcessId, TraceId, WaveId};
         use rusqlite::params;
         let dir = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&dir.path().join("db")).unwrap();
         let id = crate::repository::location::ensure_repository(&store, "/before").unwrap();
         let wave = WaveId::new();
         let project = ProjectId::new();
@@ -447,7 +447,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let _home =
             crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
-        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         let repo = home.path().canonicalize().unwrap();
         let repo = repo.to_str().unwrap();
         let (mini, worker) = (MachineId::new(), MachineId::new());
@@ -544,7 +544,7 @@ mod tests {
     fn a_waves_capacity_takes_its_new_tasks_until_a_nearer_machine_does() {
         use loopflow_model::durable::{DefaultScope, MachineSetting};
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         let repo = home.path().canonicalize().unwrap();
         let repo = repo.to_str().unwrap();
         let project =
@@ -617,8 +617,8 @@ mod tests {
     fn repository_plans_are_explicit_and_do_not_depend_on_clone_names() {
         let a = tempfile::tempdir().unwrap();
         let b = tempfile::tempdir().unwrap();
-        let first = SqliteStore::open_ephemeral(&a.path().join("db")).unwrap();
-        let second = SqliteStore::open_ephemeral(&b.path().join("db")).unwrap();
+        let first = crate::store::opening::open_ephemeral(&a.path().join("db")).unwrap();
+        let second = crate::store::opening::open_ephemeral(&b.path().join("db")).unwrap();
         let id = crate::repository::location::ensure_repository(&first, "/src/same").unwrap();
         assert_eq!(
             crate::repository::location::ensure_repository(&first, "/src/same").unwrap(),

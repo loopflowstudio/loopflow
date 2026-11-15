@@ -386,14 +386,14 @@ fn readiness_in(conn: &Connection, wave: &WaveId) -> StoreResult<ProjectReadines
 #[cfg(test)]
 mod tests {
     use super::{read_project_binding, write_project_binding, ProjectReadinessState};
-    use crate::store::{sqlite::SqliteStore, PlanningLocks};
+    use crate::store::PlanningLocks;
     use crate::work::wave::Wave;
     use loopflow_model::id::WaveId;
 
     #[test]
     fn project_creation_rolls_back_and_reuses_retained_identity() {
         let dir = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&dir.path().join("loopflow.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&dir.path().join("loopflow.db")).unwrap();
         let wave = Wave::new(WaveId::new(), "product".into(), "/repo".into());
         crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let reserved = "11111111-1111-4111-8111-111111111111";
@@ -439,7 +439,7 @@ mod tests {
     #[test]
     fn selection_import_is_once_and_only_committed_selection_wakes_readers() {
         let dir = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&dir.path().join("loopflow.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&dir.path().join("loopflow.db")).unwrap();
         let wave = Wave::new(WaveId::new(), "a".into(), "/repo".into());
         crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let guard = PlanningLocks::new(tempfile::tempfile().unwrap());
@@ -506,14 +506,14 @@ mod tests {
 
 #[cfg(test)]
 mod activation_tests {
-    use crate::store::sqlite::SqliteStore;
+
     use crate::work::wave::Wave;
     use loopflow_model::id::{LfProcessId, TraceId, WaveId};
 
     #[test]
     fn readiness_retains_exact_unknown_and_failed_activation_outcomes() {
         let dir = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&dir.path().join("loopflow.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&dir.path().join("loopflow.db")).unwrap();
         let wave = Wave::new(WaveId::new(), "a".into(), "/repo".into());
         crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let process = LfProcessId::new();

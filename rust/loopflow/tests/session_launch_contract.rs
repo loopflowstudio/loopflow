@@ -128,10 +128,8 @@ elif os.path.basename(sys.argv[0]) == 'codex':
     }
 
     fn create_wave(&self) {
-        let store = loopflow::store::sqlite::SqliteStore::new(
-            &self.home.path().join("machine/loopflow.db"),
-        )
-        .unwrap();
+        let store =
+            loopflow::store::open_sqlite(&self.home.path().join("machine/loopflow.db")).unwrap();
         loopflow::work::wave::bootstrap::upsert_wave(
             &store,
             &loopflow::work::wave::Wave::new(
@@ -1165,7 +1163,7 @@ fn live_taskless_provider_switch_preserves_identity_and_accepts_terminal_input()
     .unwrap();
     let machine = fixture.home.path().join("machine");
     support::register_codex_account(&machine);
-    let store = loopflow::store::sqlite::SqliteStore::new(&machine.join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&machine.join("loopflow.db")).unwrap();
     let before = store.session(&session).unwrap().unwrap();
     assert!(before.completed_at.is_none());
     assert!(before.task_id.is_none() && before.wave_id.is_none());
@@ -1379,8 +1377,7 @@ fn wave_targets_prepare_reuse_and_open_in_the_selected_checkout_in_both_formats(
     fixture.create_wave();
     let other = TestRepo::new();
     let store =
-        loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("machine/loopflow.db"))
-            .unwrap();
+        loopflow::store::open_sqlite(&fixture.home.path().join("machine/loopflow.db")).unwrap();
     let wave = store.list_waves(None).unwrap().into_iter().next().unwrap();
     let wave_id = wave.id().as_str();
     let alias = fixture
@@ -1515,8 +1512,7 @@ fn contextual_resume_uses_scope_and_recovers_unassociated_checkouts() {
     };
     let first = prepare(fixture.repo.path(), &["resume"]);
     let store =
-        loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("machine/loopflow.db"))
-            .unwrap();
+        loopflow::store::open_sqlite(&fixture.home.path().join("machine/loopflow.db")).unwrap();
     assert_eq!(
         store
             .session(first["id"].as_str().unwrap())
@@ -1629,8 +1625,7 @@ fn missing_native_history_fails_without_replacing_the_selected_conversation() {
     fixture.run(&["-i", ":", "existing history"]);
     let id = fixture.session();
     let store =
-        loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("machine/loopflow.db"))
-            .unwrap();
+        loopflow::store::open_sqlite(&fixture.home.path().join("machine/loopflow.db")).unwrap();
     let saved = store.session(&id).unwrap().unwrap();
     let received = fixture.received();
     let native = args(&received)

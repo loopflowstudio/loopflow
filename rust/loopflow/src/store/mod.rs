@@ -3,10 +3,11 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::profile::{AccessProfile, AuthBrowserBinding, EmailAddress, ProfileId, ProviderRoute};
+use crate::profile::{AccessProfile, AuthBrowserBinding, ProfileId, ProviderRoute};
 use crate::provider_auth::Provider;
 use crate::work::wave::{Wave, WaveLocator};
 use loopflow_model::id::{AgentSessionId, WaveId};
+mod accounts;
 pub(crate) mod admission;
 mod canonical_ids;
 pub(crate) mod capacity;
@@ -16,6 +17,7 @@ pub(crate) mod ci_incidents;
 pub mod contention;
 pub(crate) mod copy;
 mod durable;
+mod error;
 pub(crate) mod instrumentation;
 pub mod linear_records;
 pub mod machines;
@@ -23,9 +25,13 @@ mod metrics;
 #[cfg(test)]
 mod migration_build;
 mod migration_catalog;
+mod migration_runner;
 mod migration_schema;
 pub mod migrations;
+pub(crate) mod opening;
+pub use opening::open_sqlite;
 pub mod ownership;
+mod peer_records;
 pub(crate) mod people;
 pub mod placement;
 pub mod planning_peers;
@@ -37,6 +43,7 @@ mod project_adoption;
 #[cfg(test)]
 pub(crate) mod query_plans;
 mod recording_gap;
+mod records;
 pub mod rentals;
 mod repositories;
 pub(crate) mod retention;
@@ -48,96 +55,12 @@ pub mod sqlite;
 pub(crate) mod steer_markers;
 pub mod task_work;
 mod token_crypto;
+mod write_holds;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ProcessIdentityEvidence {
-    Live,
-    Dead,
-    Unknown,
-}
-
+pub use error::{StoreError, StoreResult};
 pub use planning_peers::{PeerPlanningStatus, PeerProjectionConflict, PlanningJournal};
 pub use recording_gap::{GapSpan, RecordingGap};
-
-/// Availability of retained planning facts, independent of execution permission.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum PlanningState {
-    Available,
-    Invalid,
-    Removed,
-    Absent,
-    Unavailable,
-}
-
-/// Acquisition evidence is independent of saved Work and outbound delivery.
-#[derive(
-    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
-pub struct TaskAcquisition {
-    pub state: PlanningState,
-    pub observed_at: Option<i64>,
-}
-
-/// Retained Linear acquisition facts, including observations without owned Work.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LinearIssueEvidence {
-    pub issue_id: Option<String>,
-    pub revision: Option<String>,
-    pub observed_at: Option<i64>,
-    pub project_id: Option<String>,
-    pub initiative_ids: Vec<String>,
-    pub project_team_ids: Vec<String>,
-    pub team_id: Option<String>,
-    pub state: PlanningState,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct WaveLocatorUpdate {
-    pub wave_id: WaveId,
-    pub expected_repo: String,
-    pub expected_slug: String,
-    pub target: WaveLocator,
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum StoreError {
-    #[error(transparent)]
-    Selection(#[from] crate::work::selection::SelectionError),
-    #[error(transparent)]
-    Planning(#[from] crate::store::linear_records::LinearBindingError),
-    #[error(transparent)]
-    TaskData(#[from] crate::work::task::TaskDataError),
-    #[error("sqlite error: {0}")]
-    Sqlite(#[from] rusqlite::Error),
-    #[error("serialization error: {0}")]
-    Serde(#[from] serde_json::Error),
-    #[error("not found")]
-    NotFound,
-    /// A compare-and-swap named a revision that is no longer current.
-    #[error("{0}")]
-    Stale(String),
-    #[error("invalid data: {0}")]
-    InvalidData(String),
-    #[error("competing planning {effect} receipts")]
-    PlanningReceiptConflict { effect: &'static str },
-    #[error("invalid control authority: {0}")]
-    InvalidAuthority(String),
-}
-
-pub type StoreResult<T> = Result<T, StoreError>;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum TaskPrMergeEvidenceOutcome {
-    Accepted,
-    Repeated,
-    Missing,
-    Conflict { accepted_at: i64 },
-    SchemaUnavailable,
-}
+pub use records::*;
 
 /// Keep live checkpoints at one-second precision for the longest public usage
 /// window. Older Turns retain only their final or latest receipt.
@@ -911,251 +834,19 @@ impl Store {
     }
 
     pub async fn schema_version(&self) -> StoreResult<String> {
-        run_sqlite(&self.sqlite, |store| store.schema_version()).await
+        run_sqlite(&self.sqlite, |store| {
+            store.schema_version(&migrations::build())
+        })
+        .await
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum CredentialType {
-    OAuth,
-    ApiKey,
-}
-
-impl CredentialType {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::OAuth => "oauth",
-            Self::ApiKey => "apikey",
-        }
-    }
-
-    pub fn from_db(value: &str) -> Self {
-        match value {
-            "apikey" => Self::ApiKey,
-            _ => Self::OAuth,
-        }
-    }
-}
-
-impl std::fmt::Display for CredentialType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-#[derive(Debug)]
-pub(crate) enum ProviderTokenReplacement {
-    Replaced,
-    Changed(ProviderToken),
-    Missing,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProviderToken {
-    pub provider: String,
-    pub access_token: String,
-    pub refresh_token: Option<String>,
-    pub oauth_client_id: Option<String>,
-    pub expires_at: Option<i64>,
-    pub login: Option<String>,
-    pub updated_at: i64,
-    pub credential_type: CredentialType,
-}
-
-#[derive(
-    schemars::JsonSchema,
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    serde::Serialize,
-    serde::Deserialize,
-)]
-#[serde(transparent)]
-pub struct ProviderAccountId(String);
-
-impl ProviderAccountId {
-    pub fn parse(value: &str) -> Result<Self, String> {
-        let value = value.trim();
-        if value.is_empty() || value.len() > 63 {
-            return Err("account id must be 1-63 characters".to_string());
-        }
-        let mut chars = value.chars();
-        let first = chars
-            .next()
-            .expect("non-empty account id has a first character");
-        if !first.is_ascii_lowercase() && !first.is_ascii_digit() {
-            return Err("account id must start with a lowercase letter or number".to_string());
-        }
-        if !chars.all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-' || ch == '_')
-        {
-            return Err(
-                "account id may contain lowercase letters, numbers, '-' and '_'".to_string(),
-            );
-        }
-        Ok(Self(value.to_string()))
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl std::fmt::Display for ProviderAccountId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ProviderAccount {
-    pub provider: String,
-    pub account_id: ProviderAccountId,
-    pub home: Option<PathBuf>,
-    pub login_email: Option<EmailAddress>,
-    pub observed_email: Option<String>,
-    pub observed_subject: Option<String>,
-    pub observed_credential_digest: Option<String>,
-    pub observed_plan: Option<String>,
-    pub credential_state: CredentialState,
-    pub routing_state: RoutingState,
-    pub plan: Option<String>,
-    pub paid_through: Option<time::Date>,
-    pub utilization_percent: Option<u8>,
-    pub cooldown_until: Option<i64>,
-    pub cooldown_reason: Option<String>,
-    pub last_selected_at: Option<i64>,
-    pub created_at: i64,
-    pub updated_at: i64,
-}
-
-impl ProviderAccount {
-    pub fn effective_routing_state(&self, today: time::Date) -> RoutingState {
-        if self.routing_state == RoutingState::Automatic
-            && self.paid_through.is_some_and(|date| date < today)
-        {
-            RoutingState::ExplicitOnly
-        } else {
-            self.routing_state
-        }
-    }
-
-    pub fn eligible_for_automatic_routing(&self, today: time::Date) -> bool {
-        self.credential_state == CredentialState::Connected
-            && self.effective_routing_state(today) == RoutingState::Automatic
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CredentialState {
-    Connected,
-    Missing,
-}
-
-impl CredentialState {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Connected => "connected",
-            Self::Missing => "missing",
-        }
-    }
-
-    pub fn from_db(value: &str) -> Result<Self, String> {
-        match value {
-            "connected" => Ok(Self::Connected),
-            "missing" => Ok(Self::Missing),
-            other => Err(format!("unknown credential state '{other}'")),
-        }
-    }
-}
-
-#[derive(
-    schemars::JsonSchema, Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum RoutingState {
-    Automatic,
-    ExplicitOnly,
-    Disabled,
-}
-
-impl RoutingState {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Automatic => "automatic",
-            Self::ExplicitOnly => "explicit_only",
-            Self::Disabled => "disabled",
-        }
-    }
-
-    pub fn from_db(value: &str) -> Result<Self, String> {
-        match value {
-            "automatic" => Ok(Self::Automatic),
-            "explicit_only" => Ok(Self::ExplicitOnly),
-            "disabled" => Ok(Self::Disabled),
-            other => Err(format!("unknown routing state '{other}'")),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProviderAccountSelection {
-    pub account: ProviderAccount,
-}
-
-#[derive(Debug)]
-pub(crate) struct AccountCapacity {
-    pub utilization_percent: Option<u8>,
-    pub cooldown_until: Option<i64>,
-    pub cooldown_reason: Option<String>,
-    pub windows: Vec<AccountLimitWindow>,
-}
-
-/// One observed subscription rate-limit window: how much of the plan's
-/// `session`/`weekly`/`weekly:<model>` window an account has consumed.
-#[derive(
-    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
-pub struct AccountLimitWindow {
-    pub window: String,
-    pub used_percent: u8,
-    pub resets_at: Option<i64>,
-    pub plan: Option<String>,
-    /// The one model this window limits; `None` limits every model.
-    pub model: Option<String>,
-    /// Set while the window holds launches it affects back.
-    pub limited_until: Option<i64>,
-}
-
-/// A stored window observation for one managed account.
-#[derive(
-    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
-pub struct AccountLimitRow {
-    pub provider: String,
-    pub account_id: ProviderAccountId,
-    pub window: String,
-    pub used_percent: u8,
-    pub resets_at: Option<i64>,
-    pub plan: Option<String>,
-    pub observed_at: i64,
-    /// 'stream' when a running harness reported it; 'poll' when asked for.
-    pub source: String,
-    /// The one model this window limits; `None` limits every model.
-    pub model: Option<String>,
-    /// Set while the window holds launches it affects back.
-    pub limited_until: Option<i64>,
-}
+pub use accounts::*;
 
 pub async fn open_store(cfg: &StorageConfig) -> StoreResult<Store> {
     let StorageConfig::Sqlite { path } = cfg;
     Ok(Store {
-        sqlite: sqlite::SqliteStore::new(path)?,
+        sqlite: crate::store::open_sqlite(path)?,
     })
 }
 
@@ -1164,7 +855,7 @@ pub async fn open_store(cfg: &StorageConfig) -> StoreResult<Store> {
 /// long-lived reader never commits and never wakes itself.
 pub(crate) async fn open_read_only_store(cfg: &StorageConfig) -> StoreResult<Store> {
     let StorageConfig::Sqlite { path } = cfg;
-    drop(sqlite::SqliteStore::new(path)?);
+    drop(crate::store::open_sqlite(path)?);
     Ok(Store {
         sqlite: sqlite::SqliteStore::open_read_only(path)?,
     })
@@ -1174,11 +865,11 @@ pub(crate) async fn open_read_only_store(cfg: &StorageConfig) -> StoreResult<Sto
 /// [`open_store`], it consults **no** ambient env or machine identity
 /// (`LF_HOME`, install selection, shared `~/.lf`), so the schema is deterministic
 /// under parallel test execution instead of racing on the draft-application
-/// decision. See [`sqlite::SqliteStore::open_ephemeral`].
+/// decision. See [`opening::open_ephemeral`].
 pub async fn open_ephemeral_store(cfg: &StorageConfig) -> StoreResult<Store> {
     let StorageConfig::Sqlite { path } = cfg;
     Ok(Store {
-        sqlite: sqlite::SqliteStore::open_ephemeral(path)?,
+        sqlite: crate::store::opening::open_ephemeral(path)?,
     })
 }
 

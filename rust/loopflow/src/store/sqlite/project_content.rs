@@ -68,14 +68,14 @@ impl SqliteStore {
 
 #[cfg(test)]
 mod tests {
-    use crate::store::sqlite::SqliteStore;
+
     use crate::work::wave::Wave;
     use loopflow_model::id::WaveId;
 
     #[test]
     fn project_name_receipt_does_not_reconstruct_unrelated_order_evidence() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let wave = Wave::new(WaveId::new(), "product".into(), "/repo".into());
         crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let observed = serde_json::from_value(serde_json::json!({
@@ -136,7 +136,7 @@ mod tests {
     #[test]
     fn project_prose_unobserved_baseline_stays_unknown_at_the_same_revision() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let wave = Wave::new(WaveId::new(), "product".into(), "/repo".into());
         crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let mut observed: crate::store::linear_records::LinearProject = serde_json::from_value(serde_json::json!({
@@ -193,7 +193,7 @@ mod tests {
     #[test]
     fn project_prose_partial_observation_retains_its_original_baseline_and_age() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let wave = Wave::new(WaveId::new(), "product".into(), "/repo".into());
         crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let mut observed: crate::store::linear_records::LinearProject = serde_json::from_value(serde_json::json!({
@@ -270,7 +270,7 @@ mod tests {
     #[test]
     fn project_edit_failure_rolls_back_fields_definitions_and_receipts() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let wave = Wave::new(WaveId::new(), "product".into(), "/repo".into());
         crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let project = loopflow_model::durable::ProjectId::new();
@@ -298,7 +298,7 @@ mod tests {
     fn unchanged_project_content_saves_nothing_with_and_without_linear_mapping() {
         let home = tempfile::tempdir().unwrap();
         let database = home.path().join("store.db");
-        let store = SqliteStore::open_ephemeral(&database).unwrap();
+        let store = crate::store::opening::open_ephemeral(&database).unwrap();
         for (name, mapping) in [("offline", None), ("connected", Some("linear-project"))] {
             let wave = Wave::new(WaveId::new(), name.into(), "/repo".into());
             crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();

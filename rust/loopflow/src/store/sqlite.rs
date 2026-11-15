@@ -131,7 +131,7 @@ const WAL_SIZE_LIMIT_BYTES: i64 = 64 * 1024 * 1024;
 /// migration exclusion only for that transition; ordinary WAL opens stay reads.
 /// Why an ordinary open refuses a shared store this build is ahead of, and the fix.
 fn unapplied_message(path: &Path, pending: &str) -> String {
-    if super::migrations::unmerged_migrations().contains(&pending) {
+    if super::migration_runner::unmerged_migrations().contains(&pending) {
         format!(
             "shared store {} does not have this build's unmerged migration {pending}; \
              run this build with a private LF_HOME",
@@ -158,14 +158,14 @@ fn configure_write_connection(
     conn.set_transaction_behavior(TransactionBehavior::Immediate);
     let mode: String = conn.pragma_query_value(None, "journal_mode", |row| row.get(0))?;
     if mode != "wal" {
-        let _lock = super::migrations::migration_lock(path)?;
+        let _lock = super::migration_runner::migration_lock(path)?;
         let mode: String = conn.pragma_query_value(None, "journal_mode", |row| row.get(0))?;
         if mode != "wal" {
             conn.pragma_update(None, "journal_mode", "WAL")?;
         }
     }
     conn.pragma_update(None, "foreign_keys", "ON")?;
-    super::contention::watch_write_holds(conn)?;
+    super::write_holds::watch_write_holds(conn)?;
     // A WAL file never shrinks by itself: one migration or burst leaves its
     // high-water mark on disk forever. Truncate it whenever a checkpoint resets it.
     conn.pragma_update(None, "journal_size_limit", WAL_SIZE_LIMIT_BYTES)?;
@@ -581,44 +581,27 @@ impl SqliteStore {
         );
     }
 
-    /// Open the store for ordinary use. This never advances the shared release
-    /// frontier: against `~/.lf/loopflow.db` it reads and validates but leaves
-    /// the migration frontier where the installed `lf` left it. Advancing the
-    /// shared frontier is the promotion boundary's job — see
-    /// [`Self::open_as_promotion_boundary`].
-    pub fn new(path: &Path) -> StoreResult<Self> {
-        Self::open(
-            path,
-            super::FrontierAdvance::Forbidden,
-            SQLITE_WRITE_BUSY_TIMEOUT,
-        )
-    }
-
     /// Revalidate a connection after a child executable may have upgraded it.
-    pub(crate) fn validate_current_schema(&self) -> StoreResult<()> {
+    pub(crate) fn validate_current_schema(
+        &self,
+        build: &super::migration_runner::MigrationBuild,
+    ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        super::migrations::validate_sqlite_schema(&conn)
-    }
-
-    /// Open the shared store as `lf install promote` — the single authorized
-    /// owner of the migration frontier. Applies pending migrations under the
-    /// caller's exclusive promotion lock.
-    pub(crate) fn open_as_promotion_boundary(path: &Path) -> StoreResult<Self> {
-        Self::open(
-            path,
-            super::FrontierAdvance::Authorized,
-            SQLITE_WRITE_BUSY_TIMEOUT,
-        )
+        super::migration_runner::validate_sqlite_schema(build, &conn)
     }
 
     /// Open a hermetic, fully-migrated store at `path`: this build's whole
     /// migration catalog, reading **no**
     /// process- or machine-global state — no `LF_HOME`, no install selection, no
     /// shared `~/.lf` identity, no frontier authority. Tests use this so their
-    /// schema is deterministic under parallel execution; the production
-    /// [`Self::open`] path resolves real install/frontier authority and is what
+    /// schema is deterministic under parallel execution; the application
+    /// opener resolves real install/frontier authority and is what
     /// races when tests mutate ambient env concurrently.
-    pub(crate) fn open_ephemeral(path: &Path) -> StoreResult<Self> {
+    pub(crate) fn open_ephemeral_prepared(
+        path: &Path,
+        build: &super::migration_runner::MigrationBuild,
+        observers: &super::migration_runner::MigrationObservers<'_>,
+    ) -> StoreResult<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|error| {
                 StoreError::InvalidData(format!("failed to create db dir: {error}"))
@@ -629,40 +612,22 @@ impl SqliteStore {
         let mut conn = Connection::open(path)?;
         crate::store::instrumentation::observe_sqlite(&conn);
         configure_write_connection(&mut conn, path, SQLITE_WRITE_BUSY_TIMEOUT)?;
-        super::migrations::apply_sqlite(&conn)?;
+        super::migration_runner::apply_sqlite(build, &conn, observers)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
     }
 
-    fn open(path: &Path, advance: super::FrontierAdvance, busy: Duration) -> StoreResult<Self> {
-        Self::open_with(path, &super::machine_home_dir(), advance, busy)
-    }
-
-    /// Open resolving the migration decision against an explicit machine home.
-    /// Production opens pass the real one through [`Self::open`]; the
-    /// same-module shared-frontier regressions pass a temp home.
-    fn open_with(
+    /// Open with the application's selected frontier authority and upgrade observations.
+    pub(crate) fn open_prepared(
         path: &Path,
-        home: &Path,
-        advance: super::FrontierAdvance,
+        shared_database: bool,
+        may_apply_migrations: bool,
         busy: Duration,
+        build: &super::migration_runner::MigrationBuild,
+        observers: &super::migration_runner::MigrationObservers<'_>,
     ) -> StoreResult<Self> {
         let existing_database = std::fs::metadata(path).is_ok_and(|metadata| metadata.len() > 0);
-        // Resolve the frontier authority before touching the filesystem. An
-        // ordinary open of a shared store it may not initialize refuses here,
-        // before create_dir_all/Connection::open would leave an empty
-        // ~/.lf/loopflow.db behind — a file whose mere existence a liveness or
-        // bootstrap check could misread as "the shared store is initialized".
-        let may_apply_migrations =
-            super::may_apply_migrations(path, home, advance).map_err(|error| {
-                StoreError::InvalidData(format!("resolve migration authority: {error}"))
-            })?;
-        let shared_database = super::same_database_file(path, &home.join(".lf/loopflow.db"))
-            .map_err(|error| {
-                StoreError::InvalidData(format!("resolve shared store identity: {error}"))
-            })?;
-
         if !may_apply_migrations && !existing_database {
             return Err(StoreError::InvalidData(format!(
                 "shared store {} is not initialized and an ordinary lf may not create it; \
@@ -693,16 +658,17 @@ impl SqliteStore {
             // the store has not applied. An ordinary open must not hand back a store
             // whose schema is older than this binary's code, which may query the
             // columns that pending migration adds.
-            super::migrations::validate_sqlite_schema(&conn)?;
-            if let Some(pending) = super::migrations::pending_shared_migration(&conn)? {
+            super::migration_runner::validate_sqlite_schema(build, &conn)?;
+            if let Some(pending) = super::migration_runner::pending_shared_migration(build, &conn)?
+            {
                 return Err(StoreError::InvalidData(unapplied_message(path, &pending)));
             }
         } else if existing_database {
-            super::migrations::apply_sqlite_with_backup(&conn, path)?;
+            super::migration_runner::apply_sqlite_with_backup(build, &conn, path, observers)?;
             if !shared_database {
                 // A private home holds exactly this build's schema; one changed
                 // outside lf is never repaired.
-                super::migrations::validate_sqlite_schema(&conn).map_err(|error| {
+                super::migration_runner::validate_sqlite_schema(build, &conn).map_err(|error| {
                     StoreError::InvalidData(format!(
                         "{error}\nDatabase: {}\nA private LF_HOME is disposable: start a fresh one; \
                          lf will not repair it.",
@@ -711,7 +677,7 @@ impl SqliteStore {
                 })?;
             }
         } else {
-            super::migrations::apply_sqlite(&conn)?;
+            super::migration_runner::apply_sqlite(build, &conn, observers)?;
         }
         if may_apply_migrations {
             migrate_plaintext_provider_tokens(&mut conn)?;
@@ -945,17 +911,20 @@ impl SqliteStore {
     pub fn health_check(&self) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row("SELECT 1", [], |_| Ok(()))?;
-        super::migrations::validate_persisted_json(&conn)
+        super::migration_runner::validate_persisted_json(&conn)
     }
 
-    pub fn schema_version(&self) -> StoreResult<String> {
+    pub fn schema_version(
+        &self,
+        build: &super::migration_runner::MigrationBuild,
+    ) -> StoreResult<String> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        super::migrations::latest_version_sqlite(&conn)
+        super::migration_runner::latest_version_sqlite(build, &conn)
     }
 
     pub(crate) fn applied_schema_version(&self) -> StoreResult<Option<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        super::migrations::latest_applied_version_sqlite(&conn)
+        super::migration_runner::latest_applied_version_sqlite(&conn)
     }
 
     // -- Provider tokens -------------------------------------------------------
@@ -2043,7 +2012,7 @@ mod frontier_tests {
         ).unwrap();
         let directory = tempfile::tempdir().unwrap();
         let reference =
-            SqliteStore::open_ephemeral(&directory.path().join("reference.db")).unwrap();
+            crate::store::opening::open_ephemeral(&directory.path().join("reference.db")).unwrap();
         let view: String = reference
             .conn
             .lock()
@@ -2094,7 +2063,7 @@ mod frontier_tests {
         home: &Path,
         advance: FrontierAdvance,
     ) -> crate::store::StoreResult<SqliteStore> {
-        SqliteStore::open_with(path, home, advance, super::SQLITE_WRITE_BUSY_TIMEOUT)
+        crate::store::opening::open_with(path, home, advance, super::SQLITE_WRITE_BUSY_TIMEOUT)
     }
 
     fn frontier(path: &Path) -> Option<String> {
@@ -2187,7 +2156,7 @@ mod frontier_tests {
         apply_newer_migration(&conn, "ALTER TABLE waves DROP COLUMN promoted_at;").unwrap();
 
         running
-            .validate_current_schema()
+            .validate_current_schema(&crate::store::migrations::build())
             .expect("the running reader keeps its store");
         let store = open(&path, &shared.home, Forbidden).expect("a fresh open keeps working");
 
@@ -2219,7 +2188,7 @@ mod frontier_tests {
         .unwrap();
 
         running
-            .validate_current_schema()
+            .validate_current_schema(&crate::store::migrations::build())
             .expect("a newer migration keeps the running reader valid");
         let after = Wave::new(WaveId::new(), "After upgrade".into(), "/repo".into());
         crate::work::wave::bootstrap::upsert_wave(&running, &after).unwrap();
@@ -2501,13 +2470,14 @@ mod linear_oauth_tests {
     use std::sync::Arc;
     use std::time::{Duration, Instant};
 
-    use super::{SqliteStore, SQLITE_WRITE_BUSY_TIMEOUT};
+    use super::SQLITE_WRITE_BUSY_TIMEOUT;
     use crate::store::{CredentialType, ProviderToken, ProviderTokenReplacement, Store};
 
     #[tokio::test]
     async fn linear_oauth_cancelled_commit_retains_lock_until_blocking_work_settles() {
         let directory = tempfile::tempdir().unwrap();
-        let sqlite = SqliteStore::open_ephemeral(&directory.path().join("registry.db")).unwrap();
+        let sqlite =
+            crate::store::opening::open_ephemeral(&directory.path().join("registry.db")).unwrap();
         let store = Arc::new(Store::from_sqlite_for_test(sqlite.clone()));
         let original = ProviderToken {
             provider: "linear".into(),

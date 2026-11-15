@@ -651,7 +651,7 @@ mod durable_store_tests {
     fn store_with_task() -> (tempfile::TempDir, SqliteStore, TaskId) {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("loopflow.db");
-        let store = SqliteStore::open_ephemeral(&path).expect("open a fresh store");
+        let store = crate::store::opening::open_ephemeral(&path).expect("open a fresh store");
         let wave_id = WaveId::new();
         let project_id = ProjectId::new();
         let task_id = TaskId::new();

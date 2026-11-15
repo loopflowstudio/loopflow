@@ -325,7 +325,7 @@ pub(crate) fn prune_builds(
 mod tests {
     use super::{prune_builds, BuildCleanupPolicy, BuildCleanupReport, AFTER_SELECTION};
     use crate::git::{worktree_add, worktree_lease_path, WorktreeBranch};
-    use crate::store::sqlite::SqliteStore;
+
     use loopflow_test_support::TestRepo;
     use rusqlite::{params, Connection};
     use std::fs::{self, File, FileTimes};
@@ -428,7 +428,7 @@ mod tests {
         fs::write(checkout.join("target/artifact"), "old output").unwrap();
         old(&checkout.join("target"));
         let db = temp.path().join("db");
-        let store = SqliteStore::open_ephemeral(&db).unwrap();
+        let store = crate::store::opening::open_ephemeral(&db).unwrap();
         let task = loopflow_model::durable::TaskId::new();
         let wave = loopflow_model::id::WaveId::new();
         let project = crate::work::project::ProjectId::new();

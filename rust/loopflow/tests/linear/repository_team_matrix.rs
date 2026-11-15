@@ -159,7 +159,7 @@ fn repository_team_matrix() {
     seed_repository(&repo);
 
     let database = home.join("loopflow.db");
-    let store = SqliteStore::new(&database).unwrap();
+    let store = loopflow::store::open_sqlite(&database).unwrap();
     let repo_locator = WaveLocator::discover(&repo, "survival").unwrap();
     let survival = Wave::new(
         WaveId::new(),
@@ -313,7 +313,7 @@ fn repository_team_matrix() {
     assert!(roadmap.contains("LOO-2"));
 
     // Reopening the store preserves the local ancestry and foreign collision.
-    let reopened = SqliteStore::new(&database).unwrap();
+    let reopened = loopflow::store::open_sqlite(&database).unwrap();
     assert_eq!(reopened.list_waves(None).unwrap().len(), 4);
 
     // Reject ambiguous ownership before replacing accepted planning facts.

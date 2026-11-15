@@ -7,7 +7,7 @@ use loopflow_model::durable::{MachineId, OwnershipKind, TaskId};
 
 fn store() -> (tempfile::TempDir, SqliteStore) {
     let dir = tempfile::tempdir().unwrap();
-    let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+    let store = crate::store::opening::open_ephemeral(&dir.path().join("db")).unwrap();
     (dir, store)
 }
 

@@ -679,8 +679,7 @@ fn screen_reads_are_compact_passive_and_match_cli() {
     let repo = TestRepo::new();
     repo.create_file(".lf/config.yaml", "default_agent: claude\n");
     let mut registered = register_task_with_pr(home.path(), repo.path(), "main", &repo.head_sha());
-    let store =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     store
         .create_task(&loopflow::work::task::NewTask {
             id: loopflow::durable::TaskId::new(),

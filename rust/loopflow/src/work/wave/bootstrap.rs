@@ -268,7 +268,7 @@ fn seed_wave_files(directory: &Path, id: &WaveId, name: &str) -> StoreResult<()>
 
 #[cfg(test)]
 mod tests {
-    use crate::store::sqlite::SqliteStore;
+
     use crate::work::wave::{Wave, WaveLocator};
     use loopflow_model::id::WaveId;
 
@@ -276,7 +276,7 @@ mod tests {
     fn wave_files_are_created_without_overwriting_authored_content() {
         let repo = loopflow_test_support::TestRepo::new();
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let directory = repo.path().join(".lf/wave/tools/parser");
         std::fs::create_dir_all(&directory).unwrap();
         let id = WaveId::new();
@@ -310,7 +310,7 @@ mod tests {
     fn stale_checkouts_match_by_id_and_never_resurrect_a_removed_wave() {
         let repo = loopflow_test_support::TestRepo::new();
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let root = repo.path().to_str().unwrap();
         let renamed = crate::work::wave::bootstrap::ensure_wave(&store, root, "product").unwrap();
         let removed = crate::work::wave::bootstrap::ensure_wave(&store, root, "archive").unwrap();
@@ -345,7 +345,7 @@ mod tests {
     fn registering_a_clones_directories_lists_them_and_skips_a_removed_wave() {
         let repo = loopflow_test_support::TestRepo::new();
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let root = repo.path().to_str().unwrap();
         // The clone carries a removed Wave's directory and two nobody registered.
         let removed = crate::work::wave::bootstrap::ensure_wave(&store, root, "archive").unwrap();
@@ -452,7 +452,7 @@ mod tests {
     fn file_failure_registers_neither_repository_nor_part_of_the_hierarchy() {
         let repo = loopflow_test_support::TestRepo::new();
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let blocked = repo.path().join(".lf/wave/tools/parser/MEMORY.md");
         std::fs::create_dir_all(&blocked).unwrap();
         assert!(super::ensure_wave(&store, repo.path().to_str().unwrap(), "tools/parser").is_err());
@@ -478,7 +478,7 @@ mod tests {
     fn sql_rollback_retries_with_the_prepared_ids_and_later_authored_bytes() {
         let repo = loopflow_test_support::TestRepo::new();
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         store
             .conn
             .lock()
@@ -534,7 +534,8 @@ mod tests {
         ] {
             let repo = loopflow_test_support::TestRepo::new();
             let home = tempfile::tempdir().unwrap();
-            let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+            let store =
+                crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
             let path = repo.path().to_str().unwrap();
             let parent = super::ensure_wave(&store, path, "parent").unwrap();
             let id = super::ensure_wave(&store, path, "tools").unwrap();
@@ -591,7 +592,7 @@ mod tests {
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let id = super::ensure_wave(&store, checkout.to_str().unwrap(), "tools/parser").unwrap();
         assert!(checkout.join(".lf/wave/tools/parser/GOAL.md").is_file());
         assert!(!repo.path().join(".lf/wave/tools").exists());
@@ -607,7 +608,7 @@ mod tests {
     fn discovery_skips_unreadable_and_retired_subtrees_and_continues() {
         let repo = loopflow_test_support::TestRepo::new();
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let path = repo.path().to_str().unwrap();
         let removed = super::ensure_wave(&store, path, "removed").unwrap();
         store.retire_waves(&[removed], "removed").unwrap();
@@ -636,7 +637,7 @@ mod tests {
     fn authored_ids_match_earlier_prepared_prefixes_before_sql_insertion() {
         let repo = loopflow_test_support::TestRepo::new();
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let id = WaveId::new();
         for prefix in ["tools", "tools/parser"] {
             let directory = repo.path().join(".lf/wave").join(prefix);

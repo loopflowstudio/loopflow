@@ -327,8 +327,7 @@ fn same_named_repositories_need_a_qualifier_and_change_nothing() {
     let home = tempfile::tempdir().unwrap();
     let elsewhere = tempfile::tempdir().unwrap();
     let parents = [tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap()];
-    let store =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let mut ids = Vec::new();
     for parent in &parents {
         let path = parent.path().join("same");
@@ -686,7 +685,7 @@ fn live_conversation(
     open_tools: i64,
     yielded: i64,
 ) -> String {
-    let store = loopflow::store::sqlite::SqliteStore::new(&home.join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.join("loopflow.db")).unwrap();
     let input = format!("run_{}", uuid::Uuid::new_v4().simple());
     let id = format!("session_{input}");
     loopflow::store::sessions::create_session(
@@ -1378,14 +1377,13 @@ fn rex_reply(bin: &Path, method: &str, reply: Value) {
 #[test]
 fn rex_follower_places_remote_arrivals_in_one_container_per_machine() {
     use loopflow::durable::MachineId;
-    use loopflow::store::sqlite::SqliteStore;
 
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let bin = tempfile::tempdir().unwrap();
     let _env = EnvGuard::with_lf_home(&[], home.path());
     let registered = register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
-    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let peer = MachineId::new();
     loopflow::store::machines::add_machine(&store, &peer, "remote.invalid", "Remote").unwrap();
     loopflow::store::ownership::claim_task(&store, &registered.task.id).unwrap();
@@ -2420,8 +2418,7 @@ fn failed_attachment_returns_failure_and_the_same_command_can_retry() {
         [&owner],
     )
     .unwrap();
-    let store =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     attachment::claim_session_attachment(&store, &session, None, &owner, true).unwrap();
     let focus = lf(
         home.path(),

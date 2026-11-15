@@ -617,7 +617,7 @@ mod tests {
     fn replaced_attachment_stops_observing_session_names() {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("store.db");
-        let store = crate::store::sqlite::SqliteStore::open_ephemeral(&path).unwrap();
+        let store = crate::store::opening::open_ephemeral(&path).unwrap();
         let session =
             store.test_session("conversation", &crate::session_record::new_artifact_key());
         let process = loopflow_model::id::LfProcessId::new();

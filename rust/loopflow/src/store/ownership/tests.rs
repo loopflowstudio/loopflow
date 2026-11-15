@@ -8,7 +8,7 @@ use rusqlite::params;
 
 fn store() -> (tempfile::TempDir, SqliteStore) {
     let home = tempfile::tempdir().unwrap();
-    let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+    let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
     (home, store)
 }
 
@@ -362,4 +362,91 @@ fn held_scope_batches_ten_thousand_tasks_and_keys_repository_joins() {
         .collect();
     assert_eq!(repository_joins.len(), 1);
     assert!(crate::store::query_plans::growing_scans(&store, &repository_joins).is_empty());
+}
+
+#[test]
+fn promotion_refuses_a_replaced_caller_for_either_title_source() {
+    use crate::process::AgentCaller;
+    use crate::session::TitleSource;
+    use crate::store::sqlite::SessionCaller;
+    use crate::store::StoreError;
+
+    let (_home, store) = store();
+    let repo = TestRepo::new();
+    let absent = SessionCaller {
+        agent: None,
+        capture_key: None,
+    };
+    for source in [TitleSource::Generated, TitleSource::Human] {
+        let id = format!("promotion-{source:?}");
+        let session = store.test_session(&id, &crate::session_record::new_artifact_key());
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET title_source=?2 WHERE id=?1",
+                params![
+                    id,
+                    if source == TitleSource::Generated {
+                        "generated"
+                    } else {
+                        "human"
+                    }
+                ],
+            )
+            .unwrap();
+        store
+            .rename_session_prepared(&id, "Original", source, &absent)
+            .unwrap();
+        let process = store.test_lf_process();
+        let first = store
+            .attach_session(&id, None, &process, true, None, &absent)
+            .unwrap();
+        let caller = SessionCaller {
+            agent: Some(AgentCaller {
+                session_id: id.clone().into(),
+                agent_process_id: Some(first.agent_process_id.clone()),
+                origin_lf_process_id: process,
+            }),
+            capture_key: session.artifact_key.clone(),
+        };
+        let creation = input(&store, repo.path());
+        let facts = acquire(
+            &store,
+            store.new_task_scope(&creation.repository_id, None).unwrap(),
+        )
+        .unwrap();
+        let replacement = store
+            .attach_session(
+                &id,
+                Some(&first),
+                &store.test_lf_process(),
+                true,
+                None,
+                &absent,
+            )
+            .unwrap();
+        let before = store.session(&id).unwrap().unwrap();
+        assert_eq!(before.title_source, source);
+        let history = store.session_history(&id, 0, 0).unwrap();
+        let result = store.promote_task_prepared(
+            &creation.id,
+            Some(&creation),
+            None,
+            Some(&before),
+            None,
+            None,
+            &facts,
+            &caller,
+        );
+        assert!(
+            matches!(result, Err(StoreError::InvalidAuthority(ref message)) if message == "Session provider was replaced"),
+            "{result:?}"
+        );
+        assert!(store.task(&creation.id).unwrap().is_none());
+        assert_eq!(store.session(&id).unwrap(), Some(before));
+        assert_eq!(store.session_history(&id, 0, 0).unwrap(), history);
+        assert_eq!(store.session_attachment(&id).unwrap(), Some(replacement));
+    }
 }

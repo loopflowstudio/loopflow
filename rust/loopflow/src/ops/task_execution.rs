@@ -377,7 +377,6 @@ mod tests {
     use crate::journal::ProcessIdentityEvidence::{Dead, Live, Unknown};
     use crate::session::GraphProcessSummaryState;
     use crate::store::sqlite::AgentLimitRecovery;
-    use crate::store::sqlite::SqliteStore;
 
     fn snapshot(state: TaskExecutionState) -> TaskExecutionSnapshot {
         TaskExecutionSnapshot {
@@ -473,7 +472,7 @@ mod tests {
     #[test]
     fn a_graph_runs_while_its_processes_do_and_blocks_on_a_failed_step() {
         let directory = tempfile::tempdir().unwrap();
-        let store = SqliteStore::new(&directory.path().join("loopflow.db")).unwrap();
+        let store = crate::store::open_sqlite(&directory.path().join("loopflow.db")).unwrap();
         let graph = |outcome| {
             let graph_process =
                 store.test_graph("feature", "/repo", &[("implement", outcome)], None);

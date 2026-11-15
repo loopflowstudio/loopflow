@@ -435,7 +435,7 @@ mod tests {
     fn attached(interactive: bool) -> (tempfile::TempDir, SqliteStore, SessionAttachment) {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("facts.db");
-        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let store = crate::store::opening::open_ephemeral(&path).unwrap();
         store.test_session("conversation", "run_00000000000000000000000000000001");
         let conn = rusqlite::Connection::open(&path).unwrap();
         let process = LfProcessId::new();

@@ -13,7 +13,7 @@ const PROCESS: &str = "1b2c3d4e-5f60-4718-8293-a4b5c6d7e8f9";
 const ARTIFACT: &str = "64f34281b74d4594ac53ec251cb05619";
 
 fn with_task(home: &Path) -> SqliteStore {
-    let store = SqliteStore::open_ephemeral(&home.join("db")).unwrap();
+    let store = crate::store::opening::open_ephemeral(&home.join("db")).unwrap();
     let repo = home.canonicalize().unwrap();
     let repo = repo.to_str().unwrap();
     let project = crate::work::wave::bootstrap::ensure_wave_project(&store, repo, "inbox").unwrap();

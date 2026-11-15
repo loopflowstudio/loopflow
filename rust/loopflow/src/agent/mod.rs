@@ -417,10 +417,7 @@ fn _note_limit_recovery(
     };
     let noted = || -> anyhow::Result<()> {
         let path = crate::store::database_path_from_env()?;
-        Ok(note(
-            &crate::store::sqlite::SqliteStore::new(&path)?,
-            &process,
-        )?)
+        Ok(note(&crate::store::open_sqlite(&path)?, &process)?)
     };
     if let Err(error) = noted() {
         tracing::warn!(%error, "could not note limit recovery");
@@ -1428,8 +1425,7 @@ fn _climb(
 fn _history_import(process: &ProcessConfig) -> Option<String> {
     let (session_id, _) = process.runtime.as_ref()?.session_attachment()?;
     let imported = (|| -> anyhow::Result<String> {
-        let store =
-            crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
+        let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
         let session = store
             .session(&session_id)?
             .ok_or_else(|| anyhow::anyhow!("Session {session_id} is not recorded"))?;

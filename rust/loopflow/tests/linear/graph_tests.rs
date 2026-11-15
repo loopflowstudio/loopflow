@@ -8,7 +8,6 @@ use std::process::Command;
 use loopflow::graph::compile_graph;
 use loopflow::graph::load_graph;
 use loopflow::graph::{ConcreteStep, Step};
-use loopflow::store::sqlite::SqliteStore;
 use support::{codex_app_server_script, register_codex_account};
 use tempfile::TempDir;
 
@@ -76,7 +75,7 @@ fn step_fields(graph: &serde_json::Value, field: &str) -> Vec<serde_json::Value>
 }
 
 fn kill_recorded_graph(home: &Path, id: &str) {
-    let store = SqliteStore::new(&home.join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.join("loopflow.db")).unwrap();
     let pid = store
         .lf_process(&id.parse().unwrap())
         .unwrap()

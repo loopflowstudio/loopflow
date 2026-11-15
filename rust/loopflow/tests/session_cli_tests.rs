@@ -467,7 +467,7 @@ fn prepare_conversation(
     harness: &str,
     title: &str,
 ) -> (String, String, std::path::PathBuf) {
-    let store = loopflow::store::sqlite::SqliteStore::new(&home.join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.join("loopflow.db")).unwrap();
     let input = format!("run_{}", uuid::Uuid::new_v4().simple());
     let session = loopflow::store::sessions::create_session(
         &store,
@@ -541,8 +541,7 @@ fn headless_resume_preserves_a_held_owners_capture_on_both_harnesses() {
         let (id, input, dir) =
             prepare_conversation(home.path(), &cwd, harness, "Preserve this draft");
         let manifest = std::fs::read(dir.join("manifest.json")).unwrap();
-        let store =
-            loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+        let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
         let process = loopflow::id::LfProcessId::new();
         rusqlite::Connection::open(home.path().join("loopflow.db"))
             .unwrap()
@@ -650,8 +649,7 @@ for line in sys.stdin:
         )
         .unwrap();
     let original = std::fs::read(dir.join("manifest.json")).unwrap();
-    let store =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let wave = loopflow::work::wave::Wave::new(
         loopflow::id::WaveId::new(),
         "caller-wave".into(),
@@ -762,8 +760,7 @@ fn available_lists_only_conversations_ready_for_input() {
     let (working, _, _) = prepare_conversation(home.path(), &cwd, "codex", "Working");
     let (asked, _, _) = prepare_conversation(home.path(), &cwd, "codex", "Asked");
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-    let store =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let parent = loopflow::id::LfProcessId::new();
     db.execute(
         "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
@@ -1078,9 +1075,7 @@ exit 2
             }
             // A provider's start hook names its thread; these stand-ins run none.
             if first {
-                let store =
-                    loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db"))
-                        .unwrap();
+                let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
                 let input = store.session(&id).unwrap().unwrap().artifact_key.unwrap();
                 record_native(home.path(), &id, &input, &native);
             }
@@ -1392,8 +1387,7 @@ fn terminal_first_launch_and_failed_startup_reopen_the_same_conversation() {
         let result = open(&["session", "resume", &id]);
         assert!(result.status.success(), "{result:?}");
     }
-    let store =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let session = store.session(&id).unwrap().unwrap();
     assert_eq!(session.id.as_str(), id);
     let history = store.session_history(&id, 0, 1000).unwrap();
@@ -1436,8 +1430,7 @@ fn provider_switch_without_transcript_preserves_conversation_and_retries() {
         prepare_conversation(home.path(), home.path(), "claude", "Keep this conversation");
     let native = uuid::Uuid::new_v4().to_string();
     record_native(home.path(), &id, &input, &native);
-    let store =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let before = store.session(&id).unwrap().unwrap();
     let history = store.session_history(&id, 0, 1000).unwrap();
     let connect = |prepare: bool| {
@@ -1550,8 +1543,7 @@ fn session_new_restarts_the_same_conversation_on_a_seeded_thread() {
     assert_eq!(record["id"], id.as_str());
     let argv = record["open_argv"].as_array().unwrap();
     assert_eq!(argv[argv.len() - 3..], ["session", "resume", id.as_str()]);
-    let store =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let restarted = store.session(&id).unwrap().unwrap();
     assert_eq!(restarted.title, "Keep this conversation");
     assert_eq!(restarted.provider.as_deref(), Some("claude"));
@@ -1581,8 +1573,7 @@ fn resume_fork_continues_in_a_new_conversation_and_leaves_the_original() {
     assert_ne!(fork, id);
     let argv = forked["open_argv"].as_array().unwrap();
     assert_eq!(argv[argv.len() - 3..], ["session", "resume", fork]);
-    let store =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let original = store.session(&id).unwrap().unwrap();
     assert_eq!(original.artifact_key.as_ref(), Some(&input));
     assert!(original.completed_at.is_none());
@@ -1815,8 +1806,7 @@ fn program_status_cli_observes_available_without_completing_work() {
     let (id, _, _) = prepare_conversation(home.path(), home.path(), "sleep", "Status fixture");
     let mut provider = Child(Command::new("/bin/sleep").arg("60").spawn().unwrap());
     let now = time::OffsetDateTime::now_utc();
-    let store =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let lf_process_id = loopflow::id::LfProcessId::new();
     let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     conn.execute(

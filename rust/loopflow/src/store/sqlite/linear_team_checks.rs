@@ -88,12 +88,11 @@ impl SqliteStore {
 
 #[cfg(test)]
 mod tests {
-    use crate::store::sqlite::SqliteStore;
 
     #[test]
     fn finished_team_delta_answers_reads_inside_its_window() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         // 2026-10-29T00:00:00Z
         let start = 1_793_232_000;
         assert_eq!(

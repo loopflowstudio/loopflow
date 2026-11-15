@@ -148,10 +148,6 @@ struct CheckoutTree: Equatable {
         guard let selection, let index = paths.firstIndex(of: selection) else { return paths.first }
         return paths[max(0, min(paths.count - 1, index + offset))]
     }
-
-    func entry(_ path: String) -> TaskFileEntry? {
-        listings[(path as NSString).deletingLastPathComponent]?.entries.first { $0.path == path }
-    }
 }
 
 /// How a path differs from the Task's base, as one letter beside its name.

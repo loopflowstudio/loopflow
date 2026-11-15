@@ -1288,10 +1288,9 @@ public struct RegistryQuery: Sendable {
 
     /// One page of a checkout directory's immediate entries, directories first;
     /// `cursor` is the previous page's `nextCursor`. The empty path is the root.
-    public func taskFiles(issue: String, directory: String, cursor: String? = nil,
-                          showIgnored: Bool = false) async throws -> TaskDirectory {
+    public func taskFiles(issue: String, directory: String, cursor: String? = nil) async throws -> TaskDirectory {
         let stdout = try await serve(.taskFiles(issue: issue, path: directory.isEmpty ? "." : directory,
-                                                cursor: cursor, showIgnored: showIgnored))
+                                                cursor: cursor, showIgnored: false))
         return try Self.decode(TaskDirectory.self, from: stdout)
     }
 

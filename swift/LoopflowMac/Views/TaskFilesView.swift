@@ -307,7 +307,7 @@ struct TaskFilesView: View {
             .buttonStyle(.plain).help(entry.path)
             .accessibilityLabel(entry.path)
             .accessibilityValue(entry.kind == .directory ? (store.tree.isExpanded(entry.path) ? "Expanded" : "Collapsed") : "")
-        case .loading(_, _):
+        case .loading:
             ProgressView().controlSize(.mini).padding(.leading, indent + 16)
         case .more(let directory, _):
             Button("Load more") { Task { await store.readDirectory(directory, more: true) } }

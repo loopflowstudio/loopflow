@@ -1215,6 +1215,7 @@ pub(super) async fn prepare_launch(
             Some(&store),
             repo_id.as_ref(),
             provider,
+            None,
         )
         .await?
         {

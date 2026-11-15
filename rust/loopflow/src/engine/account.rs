@@ -74,7 +74,12 @@ pub fn list(target: Option<&str>, cached: bool) -> Result<AccountReport> {
 }
 
 /// Which login the next launch takes for the caller's repository.
-pub fn next(directory: &Path, repo: Option<&str>, default: bool) -> Result<Vec<NextLaunch>> {
+pub fn next(
+    directory: &Path,
+    repo: Option<&str>,
+    default: bool,
+    agent: Option<&str>,
+) -> Result<Vec<NextLaunch>> {
     let repo_id = if default {
         None
     } else {
@@ -86,7 +91,7 @@ pub fn next(directory: &Path, repo: Option<&str>, default: bool) -> Result<Vec<N
             None => crate::repository::CanonicalRepo::containing(directory).map_err(unavailable)?,
         }
     };
-    block_on(crate::lf::commands::profile::next(repo_id.as_ref())).map_err(unavailable)
+    block_on(crate::lf::commands::profile::next(repo_id.as_ref(), agent)).map_err(unavailable)
 }
 
 pub fn disconnect(provider: &str, email: Option<&str>) -> Result<Account> {
@@ -148,7 +153,7 @@ fn change(
     command: crate::lf::AccountCommand,
 ) -> Result<Account> {
     let account = account(provider, email)?;
-    block_on(handlers::run_async(&command)).map_err(|error| match command {
+    block_on(handlers::run_async(&command, None)).map_err(|error| match command {
         crate::lf::AccountCommand::Connect { .. } => Error::outcome_unknown(&error),
         _ => Error::written(&error),
     })?;
@@ -174,9 +179,12 @@ pub fn redeem_reset(
 
 /// Hold a login on this Machine, or release holds with `auto`.
 pub fn activate(login: &str) -> Result<()> {
-    block_on(handlers::run_async(&crate::lf::AccountCommand::Use {
-        login: login.to_owned(),
-    }))
+    block_on(handlers::run_async(
+        &crate::lf::AccountCommand::Use {
+            login: login.to_owned(),
+        },
+        None,
+    ))
     .map_err(|error| Error::written(&error))
 }
 
@@ -190,7 +198,7 @@ pub fn pause(login: &str, paused: bool) -> Result<()> {
             login: login.to_owned(),
         }
     };
-    block_on(handlers::run_async(&command)).map_err(|error| Error::written(&error))
+    block_on(handlers::run_async(&command, None)).map_err(|error| Error::written(&error))
 }
 
 fn account(provider: &str, email: Option<&str>) -> Result<Account> {

@@ -25,6 +25,8 @@ pub enum NextOutcome {
 #[serde(deny_unknown_fields)]
 pub struct NextLaunch {
     pub provider: Provider,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub model: Option<String>,
     /// `default`, `repository`, `wave:<id>`, or `automatic` with no order.
     pub scope: String,
     pub outcome: NextOutcome,
@@ -35,13 +37,18 @@ pub struct NextLaunch {
     pub without_order: Option<String>,
 }
 
-pub(super) async fn show_next(repo: Option<&str>, default: bool, json: bool) -> Result<()> {
+pub(super) async fn show_next(
+    repo: Option<&str>,
+    default: bool,
+    json: bool,
+    agent: Option<&str>,
+) -> Result<()> {
     let repo_id = if default {
         None
     } else {
         resolve_repo_id(repo)?
     };
-    let launches = next(repo_id.as_ref()).await?;
+    let launches = next(repo_id.as_ref(), agent).await?;
     if json {
         println!("{}", serde_json::to_string_pretty(&launches)?);
     } else {
@@ -78,11 +85,19 @@ pub(super) async fn show_next(repo: Option<&str>, default: bool, json: bool) -> 
     }
 }
 
-pub(crate) async fn next(repo_id: Option<&CanonicalRepo>) -> Result<Vec<NextLaunch>> {
+pub(crate) async fn next(
+    repo_id: Option<&CanonicalRepo>,
+    agent: Option<&str>,
+) -> Result<Vec<NextLaunch>> {
     let store = crate::provider_account::read_account_store()?;
     let mut launches = Vec::new();
+    let selected = agent.map(crate::config::parse_agent);
     for provider in [Provider::Claude, Provider::Codex] {
-        launches.push(next_launch(store.as_ref(), repo_id, provider).await?);
+        let model = selected
+            .as_ref()
+            .filter(|(harness, _)| harness == provider.as_str())
+            .and_then(|(_, model)| model.as_deref());
+        launches.push(next_launch(store.as_ref(), repo_id, provider, model).await?);
     }
     Ok(launches)
 }
@@ -91,10 +106,12 @@ async fn next_launch(
     store: Option<&SharedStore>,
     repo_id: Option<&CanonicalRepo>,
     provider: Provider,
+    model: Option<&str>,
 ) -> Result<NextLaunch> {
     let launch =
         |scope: String, outcome, account: Option<&ProviderAccount>, reason: String| NextLaunch {
             provider,
+            model: model.map(str::to_owned),
             scope,
             outcome,
             account_id: account.map(|account| account.account_id.clone()),
@@ -131,9 +148,10 @@ async fn next_launch(
         .provider_account_limits(Some(provider.as_str()))
         .await?;
     let now = now_unix();
-    let ready = crate::provider_account::inspect_provider_route(Some(store), repo_id, provider)
-        .await?
-        .unwrap_or_default();
+    let ready =
+        crate::provider_account::inspect_provider_route(Some(store), repo_id, provider, model)
+            .await?
+            .unwrap_or_default();
     let held = crate::provider_account::hold::held(provider);
     let Some(chosen) = ready.first() else {
         let candidates =
@@ -158,7 +176,9 @@ async fn next_launch(
             named
                 .iter()
                 .map(|account| {
-                    crate::provider_account::account_unavailable_reason(account, &limits, None, now)
+                    crate::provider_account::account_unavailable_reason(
+                        account, &limits, model, now,
+                    )
                 })
                 .collect::<Vec<_>>()
                 .join(", ")
@@ -201,7 +221,7 @@ async fn next_launch(
             .await?
             .is_none()
         {
-            crate::provider_account::inspect_provider_route(Some(store), None, provider)
+            crate::provider_account::inspect_provider_route(Some(store), None, provider, model)
                 .await?
                 .unwrap_or_default()
         } else {
@@ -297,7 +317,7 @@ mod tests {
         assert_eq!(launches[2].outcome, NextOutcome::LoginNeeded);
         assert!(launches[2].login.is_none());
         let mut missing: serde_json::Value = serde_json::from_str(fixture).unwrap();
-        missing[0].as_object_mut().unwrap().remove("reason");
+        missing[0].as_object_mut().unwrap().remove("model");
         assert!(serde_json::from_value::<Vec<NextLaunch>>(missing).is_err());
     }
 }

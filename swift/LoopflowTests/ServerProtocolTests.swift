@@ -360,8 +360,16 @@ struct ServerProtocolTests {
         #expect(try encoded(accounts) == value("account_list"))
         let route = ServerClientMessage.request(id: "route-1",
                                                 operation: .read(.accountNext(directory: "/repo", repo: nil,
-                                                                               default: false)), select: nil)
+                                                                               default: false, agent: nil)), select: nil)
         #expect(try encoded(route) == value("account_next_request"))
+        let fable = ServedRead.accountNext(directory: "/repo", repo: nil, default: false, agent: "claude:fable")
+        #expect(fable.argv == ["account", "next", "--agent", "claude:fable", "--json"])
+        let fableRoute = ServerClientMessage.request(id: "fable-route", operation: .read(fable), select: nil)
+        guard case .object(let request) = try encoded(fableRoute),
+              case .object(let operation) = request["operation"] else {
+            Issue.record("Missing account.next operation"); return
+        }
+        #expect(operation["agent"] == .string("claude:fable"))
         guard case .response(_, _, .object(let report)) = try answer("account_report") else {
             Issue.record("Missing account.list result"); return
         }

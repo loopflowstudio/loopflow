@@ -53,12 +53,98 @@ pub struct AccountRow {
     /// rental's access token, which the laptop renews before then.
     pub expires_at: Option<i64>,
     pub windows: Vec<AccountLimitRow>,
+    pub launches: Vec<AccountLaunch>,
     pub verified_windows: Vec<String>,
     pub reset_credits: Option<crate::subscription::RateLimitResetCredits>,
     /// Signed in to the provider's shared home.
     pub active: bool,
     /// Held there by `lf account use`.
     pub held: bool,
+}
+
+#[derive(Debug, Clone, schemars::JsonSchema, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AccountLaunch {
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub model: Option<String>,
+    pub eligible: bool,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub out_until: Option<i64>,
+    pub blockers: Vec<String>,
+}
+
+fn account_launches(
+    account: &crate::store::ProviderAccount,
+    limits: &[AccountLimitRow],
+    accounts: &[crate::store::ProviderAccount],
+    now: i64,
+) -> Vec<AccountLaunch> {
+    let models = (account.provider == "claude")
+        .then_some(crate::config::CLAUDE_MODEL_FAMILIES)
+        .into_iter()
+        .flatten()
+        .map(Some)
+        .chain(std::iter::once(None));
+    let identity_blocker =
+        crate::provider_account::identity::check_account_identity(account, accounts).err();
+    models
+        .map(|model| {
+            let mut blockers =
+                crate::provider_account::account_launch_blockers(account, limits, model, now);
+            if let Some(reason) = &identity_blocker {
+                blockers.push(reason.clone());
+            }
+            AccountLaunch {
+                model: model.map(str::to_owned),
+                eligible: blockers.is_empty(),
+                out_until: crate::provider_account::account_held_until(account, limits, model, now),
+                blockers,
+            }
+        })
+        .collect()
+}
+
+fn launch_summary(row: &AccountRow, unavailable_only: bool) -> String {
+    // Claude's model-less entry repeats every model's hold; it stands alone on Codex.
+    let named = row.launches.iter().any(|launch| launch.model.is_some());
+    let entries = || {
+        row.launches
+            .iter()
+            .filter(move |launch| launch.model.is_some() == named)
+    };
+    let mut parts = Vec::new();
+    if !unavailable_only {
+        let ready: Vec<_> = entries()
+            .filter(|launch| launch.eligible)
+            .map(|launch| launch.model.as_deref().unwrap_or("ready"))
+            .collect();
+        if !ready.is_empty() {
+            parts.push(ready.join(", "));
+        }
+    }
+    // Credential, routing and identity blockers hold every model of the login.
+    let login_wide: Vec<_> = entries()
+        .next()
+        .into_iter()
+        .flat_map(|launch| &launch.blockers)
+        .filter(|blocker| !blocker.starts_with("cooling "))
+        .cloned()
+        .collect();
+    if !login_wide.is_empty() {
+        parts.push("none".into());
+        parts.extend(login_wide);
+    }
+    for launch in entries() {
+        if let Some(until) = launch.out_until {
+            let name = launch
+                .model
+                .as_deref()
+                .map(|model| format!("{model} "))
+                .unwrap_or_default();
+            parts.push(format!("{name}out until {}", local_time(until)));
+        }
+    }
+    parts.join(" · ")
 }
 
 #[derive(Debug, Clone, schemars::JsonSchema, Serialize, Deserialize)]
@@ -284,6 +370,7 @@ async fn local_rows(
             routing: None,
             cooldown_until: None,
             expires_at: snapshot.and_then(|s| s.expires_at),
+            launches: vec![],
             windows: vec![],
             verified_windows: vec![],
             reset_credits: None,
@@ -474,10 +561,11 @@ async fn managed_rows(
         } else {
             Verification::NotChecked
         };
-        let cooldown_until = store
+        let current = store
             .get_provider_account(&account.provider, &account.account_id)
             .await?
-            .and_then(|account| account.cooldown_until);
+            .ok_or(crate::store::StoreError::NotFound)?;
+        let cooldown_until = current.cooldown_until;
         let windows: Vec<_> = store
             .provider_account_limits(Some(&account.provider))
             .await?
@@ -537,6 +625,7 @@ async fn managed_rows(
             ),
             cooldown_until,
             expires_at: access_expires_at,
+            launches: account_launches(&current, &windows, &accounts, now),
             windows,
             reset_credits: live_usage
                 .as_ref()
@@ -762,6 +851,7 @@ fn row_lines(row: &AccountRow, now: i64) -> Vec<String> {
             (None, None) => "unknown".into(),
         };
         lines.push(format!("  plan: {plan}"));
+        lines.push(format!("  launches: {}", launch_summary(row, false)));
     }
     let mut policy = Vec::new();
     if let Some(routing) = row.routing.as_ref().filter(|r| r.as_str() != "automatic") {
@@ -821,17 +911,6 @@ fn row_lines(row: &AccountRow, now: i64) -> Vec<String> {
             "  {}: {usage} · {freshness} · {reset}",
             window.window
         ));
-        if let Some(until) = window.limited_until.filter(|until| *until > now) {
-            lines.push(format!(
-                "    held{} until {}",
-                window
-                    .model
-                    .as_deref()
-                    .map(|model| format!(" for {model}"))
-                    .unwrap_or_default(),
-                timestamp(until)
-            ));
-        }
         lines.push(format!(
             "    source={} observed={} plan={}",
             window.source,
@@ -939,15 +1018,9 @@ fn render_table(report: &AccountReport, notes: &[RouteNote], now: i64) -> String
             .to_string(),
         );
         let indent = " ".repeat(10 + login_width);
-        if let Some(until) = row.cooldown_until.filter(|until| *until > now) {
-            lines.push(format!("{indent}out until {}", local_time(until)));
-        }
-        for window in &row.windows {
-            if let (Some(model), Some(until)) = (&window.model, window.limited_until) {
-                if until > now {
-                    lines.push(format!("{indent}{model} out until {}", local_time(until)));
-                }
-            }
+        let unavailable = launch_summary(row, true);
+        if !unavailable.is_empty() {
+            lines.push(format!("{indent}{unavailable}"));
         }
         if let Some(recovery) = &row.recovery {
             fixes.push((
@@ -1135,7 +1208,7 @@ mod tests {
                     "claude",
                     &account.account_id,
                     &[AccountLimitWindow {
-                        window: "seven_day_overage_included".into(),
+                        window: "rejected: seven_day_overage_included".into(),
                         used_percent: 100,
                         resets_at: Some(reset),
                         plan: None,
@@ -1160,6 +1233,30 @@ mod tests {
                 serde_json::json!({"account":{"email":login, "uuid":id}}).to_string(),
             ));
             accounts.push(account);
+        }
+        let cached = super::report(Some(super::super::Target::Provider(Provider::Claude)), true)
+            .await
+            .unwrap();
+        assert!(cached
+            .accounts
+            .iter()
+            .filter(|row| row.scope == super::Scope::Managed)
+            .all(|row| row
+                .launches
+                .iter()
+                .any(|launch| launch.model.as_deref() == Some("fable") && !launch.eligible)));
+        let blocked = crate::lf::commands::profile::next(None, Some("claude:fable"))
+            .await
+            .unwrap();
+        assert_eq!(
+            blocked[0].outcome,
+            crate::lf::commands::profile::NextOutcome::Blocked
+        );
+        assert!(blocked[0].reason.contains("for fable until"));
+        for account in &accounts {
+            assert!(blocked[0]
+                .reason
+                .contains(crate::provider_account::account_login(account)));
         }
         let (_endpoints, server) =
             crate::subscription::observation_tests::serve(responses.clone(), |_| {}).await;
@@ -1188,10 +1285,39 @@ mod tests {
                         .all(|window| window.window != "seven_day_overage_included")),
             "{managed:?}"
         );
+        for (row, held) in managed.iter().zip([false, true]) {
+            let fable = row
+                .launches
+                .iter()
+                .find(|launch| launch.model.as_deref() == Some("fable"))
+                .unwrap();
+            assert_eq!(fable.eligible, !held);
+            assert_eq!(fable.out_until, held.then_some(reset + 5));
+            let sonnet = row
+                .launches
+                .iter()
+                .find(|launch| launch.model.as_deref() == Some("sonnet"))
+                .unwrap();
+            assert!(sonnet.eligible);
+        }
         let json = serde_json::to_value(&report).unwrap();
         assert!(json.to_string().contains("seven_day_fable"));
+        let next = crate::lf::commands::profile::next(None, Some("claude:fable"))
+            .await
+            .unwrap();
+        assert_eq!(next[0].model.as_deref(), Some("fable"));
+        assert_eq!(next[0].account_id.as_ref(), Some(&accounts[0].account_id));
+        assert_eq!(next[1].model, None);
+        let unknown = crate::lf::commands::profile::next(None, Some("claude:future-sonnet"))
+            .await
+            .unwrap();
+        assert_eq!(
+            unknown[0].outcome,
+            crate::lf::commands::profile::NextOutcome::Ready
+        );
+        assert_eq!(unknown[0].model.as_deref(), Some("future-sonnet"));
         let text = super::render(&report, 100, now);
-        assert!(text.contains("held for fable until"), "{text}");
+        assert!(text.contains("fable out until"), "{text}");
         let limits = store.provider_account_limits(Some("claude")).await.unwrap();
         assert_eq!(
             account_held_until(&accounts[0], &limits, Some("fable"), now),
@@ -1222,7 +1348,9 @@ mod tests {
         )
         .await
         .unwrap();
-        let next = crate::lf::commands::profile::next(None).await.unwrap();
+        let next = crate::lf::commands::profile::next(None, None)
+            .await
+            .unwrap();
         assert_eq!(next[0].account_id.as_ref(), Some(&accounts[0].account_id));
         for model in ["fable", "sonnet"] {
             let route = resolve_provider_account_exact(
@@ -1324,7 +1452,9 @@ mod tests {
                 .used_percent,
             100
         );
-        let next = crate::lf::commands::profile::next(None).await.unwrap();
+        let next = crate::lf::commands::profile::next(None, None)
+            .await
+            .unwrap();
         assert!(next[0].reason.contains("fable"), "{:?}", next[0]);
     }
 
@@ -1370,6 +1500,10 @@ mod tests {
             .unwrap();
         assert_eq!(rows[0].verification, super::Verification::Unavailable);
         assert!(rows[0]
+            .launches
+            .iter()
+            .all(|launch| !launch.eligible && !launch.blockers.is_empty()));
+        assert!(rows[0]
             .diagnostic
             .as_deref()
             .unwrap()
@@ -1408,6 +1542,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(rows[0].verification, super::Verification::NotChecked);
+        assert!(rows[0]
+            .launches
+            .iter()
+            .all(|launch| launch.eligible && launch.blockers.is_empty()));
         assert_eq!(rows[0].login.as_deref(), Some("first@example.com"));
         assert_eq!(
             store
@@ -1426,6 +1564,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(rows[0].verification, super::Verification::Unavailable);
+        assert!(rows[0]
+            .launches
+            .iter()
+            .all(|launch| !launch.eligible && !launch.blockers.is_empty()));
         assert_eq!(
             store
                 .get_provider_account("claude", &account.account_id)
@@ -1546,6 +1688,23 @@ mod tests {
             assert!(!text.contains("cached missing · needs login"));
             println!("--- {width} columns ---\n{text}");
         }
+        for field in ["model", "eligible", "out_until", "blockers"] {
+            let mut incomplete = serde_json::to_value(&report).unwrap();
+            incomplete["accounts"][0]["launches"][0]
+                .as_object_mut()
+                .unwrap()
+                .remove(field);
+            assert!(
+                serde_json::from_value::<AccountReport>(incomplete).is_err(),
+                "{field}"
+            );
+        }
+        let mut incomplete = serde_json::to_value(&report).unwrap();
+        incomplete["accounts"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("launches");
+        assert!(serde_json::from_value::<AccountReport>(incomplete).is_err());
         let mut incomplete = serde_json::to_value(&report).unwrap();
         incomplete["accounts"][0]
             .as_object_mut()
@@ -1637,6 +1796,48 @@ mod tests {
     }
 
     #[test]
+    fn claude_capacity_summaries_show_shared_blockers_once() {
+        let fixture = include_str!("../../../../../tests/fixtures/dto/auth_status.json");
+        let mut report: AccountReport = serde_json::from_str(fixture).unwrap();
+        let row = &mut report.accounts[0];
+        assert_eq!(
+            super::launch_summary(row, false),
+            "fable, opus, sonnet, haiku"
+        );
+        assert_eq!(super::launch_summary(row, true), "");
+        let healthy: AccountReport = serde_json::from_str(fixture).unwrap();
+        let single = AccountReport {
+            accounts: vec![healthy.accounts.into_iter().next().unwrap()],
+            browser: None,
+        };
+        assert_eq!(render_table(&single, &[], 1_800_000_000).lines().count(), 1);
+        for reason in ["credential is missing", "routing is explicit_only"] {
+            for launch in &mut row.launches {
+                launch.eligible = false;
+                launch.blockers = vec![reason.into()];
+            }
+            let expected = format!("none · {reason}");
+            assert_eq!(super::launch_summary(row, false), expected);
+            assert_eq!(super::launch_summary(row, true), expected);
+        }
+        row.launches[0].out_until = Some(1_800_086_400);
+        row.launches[0].blockers.push("cooling for fable".into());
+        let summary = super::launch_summary(row, false);
+        assert!(summary.starts_with("none · routing is explicit_only · fable out until"));
+        assert_eq!(summary.matches("routing is explicit_only").count(), 1);
+
+        row.launches.retain(|launch| launch.model.is_none());
+        row.launches[0].eligible = true;
+        row.launches[0].blockers.clear();
+        assert_eq!(super::launch_summary(row, false), "ready");
+        assert_eq!(super::launch_summary(row, true), "");
+        row.launches[0].eligible = false;
+        row.launches[0].out_until = Some(1_800_086_400);
+        row.launches[0].blockers.push("cooling account-wide".into());
+        assert!(super::launch_summary(row, false).starts_with("out until "));
+    }
+
+    #[test]
     fn the_overview_is_one_row_per_login_with_fixes_under_it() {
         let fixture = include_str!("../../../../../tests/fixtures/dto/auth_status.json");
         let mut report: AccountReport = serde_json::from_str(fixture).unwrap();
@@ -1663,6 +1864,14 @@ mod tests {
             ..report.accounts[0].windows[2].clone()
         };
         report.accounts[0].windows.push(fable);
+        let launch = report.accounts[0]
+            .launches
+            .iter_mut()
+            .find(|launch| launch.model.as_deref() == Some("fable"))
+            .unwrap();
+        launch.eligible = false;
+        launch.out_until = Some(now + 86_400);
+        launch.blockers = vec!["cooling for fable".into()];
         let notes = [RouteNote {
             provider: crate::provider_auth::Provider::Codex,
             scope: crate::profile::RouteScope::Default,
@@ -1692,6 +1901,8 @@ mod tests {
         ] {
             assert!(text.contains(expected), "missing {expected}: {text}");
         }
+        assert!(!text.contains("opus, sonnet, haiku"), "{text}");
+        assert!(!text.contains("launch out until"), "{text}");
         assert!(!text.contains(" 0% left"));
         assert!(!text.contains("local credentials"));
     }

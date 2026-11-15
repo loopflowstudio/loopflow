@@ -749,6 +749,14 @@ A break no test notices is a missing row; add it, then repeat the break.
 Edit only from one shell, one cargo command at a time, so no other build
 compiles the mutated source.
 
+For a Swift-only test change, skip the wrapper's Rust rebuild: run
+`swift build --build-tests --package-path swift --jobs 4`, then
+`scripts/test_desktop.sh --skip-build --filter <Suite>/<test>`. Rebuild after
+`git checkout` restores a mutation, or the next `--skip-build` run tests the
+mutated binary. A break that leaves an unbounded Observation wait pending
+hangs until Swift Testing's 300-second limit stops the run; run that break
+in the foreground so its exit status reaches you.
+
 A Swift "passes under parallel load" check can't use two `swift test`
 processes: the second waits on the `.build` lock ("Another instance of
 SwiftPM … waiting"), even with `--skip-build`, so the runs never overlap.

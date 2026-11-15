@@ -10,10 +10,11 @@
 //! audit surface that renders "I could not look" as "nothing happened" is worse
 //! than one that says nothing at all.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
@@ -25,6 +26,7 @@ use crate::lf::commands::task_row::{TaskDetail, TaskGraphRow, TaskNames, TaskThr
 use crate::lf::output::Colors;
 use crate::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
 use crate::session_record::SessionHistory;
+use crate::store::sqlite::selections::{task_selection_states, TaskSelectionReading};
 use crate::store::{open_existing_store, SharedStore};
 use crate::work::project::Project;
 use crate::work::task::{
@@ -474,6 +476,10 @@ fn print_projects(projects: &Evidence<ProjectSummary>) {
 pub struct RoadmapTask {
     pub task: TaskSummary,
     pub reference: TaskReferenceSnapshot,
+    /// Effective lifecycle, including planning withdrawal of never-started work.
+    pub lifecycle: TaskState,
+    /// The same lifecycle, section and conversation activity states as selections.
+    pub selection_states: BTreeSet<crate::work::selection::SelectionState>,
     pub runtime: Option<TaskRuntimeSnapshot>,
     pub next_move: NextMove,
     pub condition: TaskConditionSnapshot,
@@ -1317,6 +1323,8 @@ async fn roadmap_snapshot(
 struct SharedTaskReads {
     machines: Vec<crate::durable::Machine>,
     local_machine: crate::durable::MachineId,
+    /// One bulk activity and order reading per repository, shared across Waves.
+    selections: Mutex<HashMap<crate::durable::RepositoryId, Arc<TaskSelectionReading>>>,
 }
 
 impl SharedTaskReads {
@@ -1325,7 +1333,22 @@ impl SharedTaskReads {
         Ok(Self {
             machines: store.machines().await?,
             local_machine,
+            selections: Default::default(),
         })
+    }
+
+    fn selections(
+        &self,
+        store: &SharedStore,
+        repository: &crate::durable::RepositoryId,
+    ) -> Result<Arc<TaskSelectionReading>> {
+        let mut selections = self.selections.lock().expect("selection memo poisoned");
+        match selections.entry(repository.clone()) {
+            std::collections::hash_map::Entry::Occupied(entry) => Ok(entry.get().clone()),
+            std::collections::hash_map::Entry::Vacant(entry) => Ok(entry
+                .insert(Arc::new(store.sqlite.task_selection_reading(repository)?))
+                .clone()),
+        }
     }
 }
 
@@ -1372,9 +1395,7 @@ async fn wave_tasks(
 
 /// A Task's one state; a Task with no recorded work has not started.
 pub(crate) fn task_state(task: &RoadmapTask) -> TaskState {
-    task.runtime
-        .as_ref()
-        .map_or(TaskState::Unstarted, |runtime| runtime.status)
+    task.lifecycle
 }
 
 /// The wave `lf wave status` is about: the name the caller typed, else the wave this
@@ -1568,12 +1589,20 @@ async fn snapshot_tasks(
         requests.push(task);
     }
     let mut details = snapshot_task_details(store, requests, probe_pr_empty, shared)?;
-    details.sort_by(|left, right| {
-        let done = |task: &TaskSummary| task.state.as_deref() == Some("completed");
-        done(&left.task)
-            .cmp(&done(&right.task))
-            .then(left.task.rank.cmp(&right.task.rank))
-            .then(left.task.identifier.cmp(&right.task.identifier))
+    let mut orders = HashMap::new();
+    for repository in tasks
+        .iter()
+        .map(|task| &task.repository_id)
+        .collect::<HashSet<_>>()
+    {
+        orders.insert(repository.as_str(), shared.selections(store, repository)?);
+    }
+    details.sort_by_cached_key(|task| {
+        orders[task.task.repository_id.as_str()].order.key(
+            &task.task.id,
+            task.task.rank,
+            &task.selection_states,
+        )
     });
     unavailable_tasks.sort_by(|left, right| {
         left.task_identifier
@@ -1638,6 +1667,7 @@ fn snapshot_task_details(
 /// reads, the durable facts of exactly these Tasks, and each Task's Workflow.
 struct DetailReads<'a> {
     shared: &'a SharedTaskReads,
+    selection_readings: HashMap<crate::durable::RepositoryId, Arc<TaskSelectionReading>>,
     facts: crate::store::sqlite::TaskDetailFacts,
     /// Each Task's own Workflow, else its Wave's, repository's or the builtin
     /// default, with that source; a default is resolved once per Wave and repository.
@@ -1663,6 +1693,14 @@ struct DetailReads<'a> {
 
 impl<'a> DetailReads<'a> {
     fn read(store: &SharedStore, tasks: &[&Task], shared: &'a SharedTaskReads) -> Result<Self> {
+        let mut selection_readings = HashMap::new();
+        for repository in tasks
+            .iter()
+            .map(|task| &task.repository_id)
+            .collect::<HashSet<_>>()
+        {
+            selection_readings.insert(repository.clone(), shared.selections(store, repository)?);
+        }
         let facts = store.sqlite.task_detail_facts(tasks)?;
         let graphs = store
             .sqlite
@@ -1729,6 +1767,7 @@ impl<'a> DetailReads<'a> {
         }
         Ok(Self {
             shared,
+            selection_readings,
             facts,
             selections,
             wave_names,
@@ -1984,6 +2023,17 @@ async fn snapshot_task_detail(
                 .ok_or_else(|| anyhow!("Task {} repository is unavailable", task.id))?,
         ),
         reference,
+        lifecycle: status.lifecycle(task.state.as_deref()),
+        selection_states: task_selection_states(
+            status,
+            runtime.owner.is_some(),
+            pr.as_ref().is_some_and(|pr| pr.publication.is_some()),
+            task.state.as_deref(),
+            reads.selection_readings[&task.repository_id]
+                .activity
+                .get(&task.id),
+        )
+        .0,
         runtime: Some(runtime),
         next_move,
         condition,
@@ -3054,6 +3104,266 @@ mod tests {
         MetricReadingDto, MetricStage, MetricUnknownCauseDto, Threshold,
     };
     use crate::work::wave::Wave;
+
+    #[tokio::test]
+    async fn task_concepts_share_lifecycle_activity_membership_and_order() {
+        use crate::durable::{RepositoryId, TaskId};
+        use crate::work::selection::{Selection, SelectionState};
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("registry.db");
+        let store = Arc::new(
+            crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
+                database.clone(),
+            ))
+            .await
+            .unwrap(),
+        );
+        let db = rusqlite::Connection::open(&database).unwrap();
+        db.execute_batch(include_str!(
+            "../../../tests/fixtures/saved_selection_work.sql"
+        ))
+        .unwrap();
+        let repo = RepositoryId::parse("repo_11111111111111111111111111111111").unwrap();
+        let active = "task_22222222222222222222222222222222";
+        let other = "task_11111111111111111111111111111111";
+        let graph = crate::task_graph::CapturedGraph::load("feature", directory.path())
+            .unwrap()
+            .unwrap();
+        db.execute(
+            "INSERT INTO task_graphs(task_id,graph,step,updated_at) VALUES(?1,?2,'demo',1)",
+            rusqlite::params![active, serde_json::to_string(&graph).unwrap()],
+        )
+        .unwrap();
+        db.execute_batch(
+            &std::fs::read_to_string(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests/fixtures/task_concepts.sql"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        for (id, bound, cwd, scope) in [
+            ("bound", Some(active), "/elsewhere", None),
+            ("checkout", Some(active), "/repo/fix-2/nested", None),
+            ("unknown", None, "/repo/fix-2", None),
+            (
+                "repository",
+                Some(active),
+                "/repo/fix-2",
+                Some("repository"),
+            ),
+            ("wave", Some(active), "/repo/fix-2", Some("wave")),
+        ] {
+            store
+                .sqlite
+                .test_session(id, &crate::session_record::new_artifact_key());
+            db.execute(
+                "UPDATE agent_sessions SET repo='/repo',task_id=?2,cwd=?3,primary_scope=?4,
+                wave_id='11111111-1111-1111-1111-111111111111' WHERE id=?1",
+                rusqlite::params![id, bound, cwd, scope],
+            )
+            .unwrap();
+        }
+        async fn read(store: &crate::store::SharedStore, name: &str) -> serde_json::Value {
+            let shared = super::SharedTaskReads::read(store).await.unwrap();
+            let (tasks, missing) = super::snapshot_tasks(
+                store,
+                store.list_projects(None).await.unwrap(),
+                store.list_tasks(None).await.unwrap(),
+                false,
+                true,
+                &shared,
+            )
+            .await
+            .unwrap();
+            assert!(missing.is_empty());
+            let sessions = crate::ops::human_session::list(
+                store,
+                &crate::session::SessionFilter {
+                    repo: Some("/repo".into()),
+                    limit: 0,
+                    after: Some(String::new()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+            serde_json::json!({"name":name,"tasks":tasks,"sessions":sessions})
+        }
+        let initial = read(&store, "owned_unknown").await;
+        let initial_task = initial["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["task"]["id"] == active)
+            .unwrap();
+        assert_eq!(initial_task["lifecycle"], "active");
+        assert_eq!(initial_task["section"], "working");
+        assert!(!initial_task["selection_states"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s == "busy" || s == "available"));
+        let sessions = initial["sessions"].as_array().unwrap();
+        for id in ["bound", "checkout", "unknown"] {
+            let session = sessions.iter().find(|s| s["id"] == id).unwrap();
+            assert_eq!(session["task_ids"], serde_json::json!([active]));
+        }
+        for id in ["repository", "wave"] {
+            assert_eq!(
+                sessions.iter().find(|s| s["id"] == id).unwrap()["task_ids"],
+                serde_json::json!([])
+            );
+        }
+        db.execute(
+            "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/repo/fix-1')",
+            [other],
+        )
+        .unwrap();
+        store.sqlite.reorder_task(&repo, active, other).unwrap();
+        let attachment = store
+            .sqlite
+            .claim_session_attachment("bound", None, &store.sqlite.test_lf_process(), true)
+            .unwrap();
+        store
+            .sqlite
+            .record_agent_process_identity(
+                "bound",
+                &attachment,
+                std::process::id(),
+                crate::journal::process_started_at(std::process::id())
+                    .unwrap()
+                    .unwrap(),
+            )
+            .unwrap();
+        store
+            .sqlite
+            .begin_program_status("bound", Some(&attachment.agent_process_id), "concepts")
+            .unwrap();
+        let report = |state| crate::program_status::Report {
+            state,
+            id: Some(format!("{state:?}").to_lowercase()),
+            kind: None,
+            progress: None,
+            app: None,
+            title: None,
+            msg: None,
+        };
+        store
+            .sqlite
+            .record_program_status(
+                "bound",
+                Some(&attachment.agent_process_id),
+                "concepts",
+                1,
+                &crate::program_status::Records {
+                    seen: true,
+                    records: vec![
+                        report(crate::program_status::State::Done),
+                        report(crate::program_status::State::Working),
+                    ],
+                },
+            )
+            .unwrap();
+        let owned_working = read(&store, "owned_working").await;
+        db.execute_batch(
+            &std::fs::read_to_string(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests/fixtures/task_concepts_unassigned.sql"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let working = read(&store, "unassigned_working").await;
+        let task = &working["tasks"][0];
+        assert_eq!(task["task"]["id"], active);
+        assert_eq!(task["lifecycle"], "active");
+        assert_eq!(task["section"], "backlog");
+        assert_eq!(task["runtime"]["owner"], serde_json::Value::Null);
+        assert!(task["selection_states"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s == "busy"));
+        assert_eq!(
+            store
+                .sqlite
+                .resolve_selection(&repo, &Selection::parse("state:busy", None).unwrap())
+                .unwrap()
+                .task_ids(),
+            [active]
+        );
+        db.execute("INSERT INTO task_ownership(id,task_id,kind,person,machine_id,at,ordered_at,written_here)
+            VALUES('own_55555555555555555555555555555555',?1,'recorded',NULL,NULL,3,3000,1)", [active]).unwrap();
+        store
+            .sqlite
+            .record_program_status(
+                "bound",
+                Some(&attachment.agent_process_id),
+                "concepts",
+                2,
+                &crate::program_status::Records {
+                    seen: true,
+                    records: vec![
+                        report(crate::program_status::State::Blocked),
+                        report(crate::program_status::State::Working),
+                    ],
+                },
+            )
+            .unwrap();
+        let available = read(&store, "reclaimed_available_and_busy").await;
+        let states: std::collections::BTreeSet<SelectionState> =
+            serde_json::from_value(available["tasks"][0]["selection_states"].clone()).unwrap();
+        assert!(states.contains(&SelectionState::Available));
+        assert!(states.contains(&SelectionState::Busy));
+        for query in ["state:busy", "state:available", "state:blocked"] {
+            assert_eq!(
+                store
+                    .sqlite
+                    .resolve_selection(&repo, &Selection::parse(query, None).unwrap())
+                    .unwrap()
+                    .task_ids(),
+                [active]
+            );
+        }
+        // A conflicting planning label never withdraws started execution.
+        db.execute(
+            "UPDATE tasks SET planning_state='completed' WHERE id=?1",
+            [active],
+        )
+        .unwrap();
+        let conflict = read(&store, "active_planning_completed").await;
+        assert_eq!(conflict["tasks"][0]["lifecycle"], "active");
+        assert_eq!(conflict["tasks"][0]["section"], "working");
+        assert!(!store
+            .sqlite
+            .task_state(&TaskId::parse(active).unwrap())
+            .unwrap()
+            .is_terminal());
+        let fixture = serde_json::json!([initial, owned_working, working, available, conflict]);
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/dto/task_concepts.json");
+        if std::env::var_os("UPDATE_TASK_CONCEPT_FIXTURE").is_some() {
+            std::fs::write(
+                &path,
+                format!("{}\n", serde_json::to_string_pretty(&fixture).unwrap()),
+            )
+            .unwrap();
+        }
+        let saved: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let concepts = |value: &serde_json::Value| {
+            value.as_array().unwrap().iter().map(|phase| {
+            let tasks = phase["tasks"].as_array().unwrap().iter().map(|task| {
+                serde_json::json!({"id":task["task"]["id"],"lifecycle":task["lifecycle"],"section":task["section"],
+                    "states":task["selection_states"],"runtime":task["runtime"]["status"],"owner":task["runtime"]["owner"]})
+            }).collect::<Vec<_>>();
+            let sessions = phase["sessions"].as_array().unwrap().iter().map(|s| serde_json::json!({"id":s["id"],"tasks":s["task_ids"]})).collect::<Vec<_>>();
+            serde_json::json!({"name":phase["name"],"tasks":tasks,"sessions":sessions})
+        }).collect::<Vec<_>>()
+        };
+        assert_eq!(concepts(&fixture), concepts(&saved));
+    }
 
     #[tokio::test]
     async fn task_reference_names_only_this_machines_checkout() {

@@ -1040,14 +1040,7 @@ final class WorkModel {
 
     /// A Wave view's Tasks bucketed for its board, with owners' GitHub users and Sessions.
     func standup(_ tasks: [RoadmapTask], doneDays: Int) -> WaveStandup {
-        var sessions: [String: WaveStandup.SessionAttention] = [:]
-        for task in tasks {
-            let open = taskSessions(task.id).filter { $0.state != .closed }
-            if open.contains(where: { $0.availability == .available }) { sessions[task.id] = .available }
-            else if !open.isEmpty { sessions[task.id] = .busy }
-        }
-        return WaveStandup(tasks: tasks, closed: tasks, doneDays: doneDays, now: .now, github: githubPeople,
-                           sessions: sessions)
+        WaveStandup(tasks: tasks, closed: tasks, doneDays: doneDays, now: .now, github: githubPeople)
     }
 
     func boardSection(_ view: WorkNavigation.Board) -> WaveBoardSection {
@@ -2137,8 +2130,7 @@ final class WorkModel {
     }
 
     func taskSessions(_ id: String) -> [SessionRecord] {
-        let runtimeID = task(id: id)?.task.runtime?.workId ?? id
-        return (sessions.value ?? []).filter { $0.names(task: runtimeID) }
+        return (sessions.value ?? []).filter { $0.names(task: id) }
     }
 
     /// ⌘N: the Nth Task row on screen.
@@ -2722,7 +2714,7 @@ final class WorkModel {
     /// Current repository inventory only; retained navigation evidence is display-only.
     var visibleTasks: [RoadmapTask] { taskIndex.tasks }
 
-    /// The repository's Tasks with lookups by ID, Work ID and identifier. Every
+    /// The repository's Tasks with lookups by ID and identifier. Every
     /// sidebar row looks Tasks up on each update; a filtered scan per lookup made
     /// returning to a long list take over a second.
     private struct TaskIndex {
@@ -2744,7 +2736,7 @@ final class WorkModel {
         // The first Task matching any of its keys wins, as a scan in order would.
         var positions: [String: Int] = [:]
         for (index, task) in visible.enumerated() {
-            for name in [task.id, task.runtime?.workId, task.task.identifier].compactMap({ $0 }) where positions[name] == nil {
+            for name in [task.id, task.task.identifier] where positions[name] == nil {
                 positions[name] = index
             }
         }

@@ -69,7 +69,12 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "unstarted",
+    "selection_states": [
+      "unstarted",
+      "backlog"
+    ]
   },
   "completed": {
     "task": {
@@ -109,7 +114,7 @@
       }
     },
     "runtime": {
-      "work_id": "ts_completed",
+      "work_id": "completed",
       "status": "done",
       "completion_pending": null,
       "reason": "done",
@@ -355,7 +360,11 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "done",
+    "selection_states": [
+      "done"
+    ]
   },
   "stale": {
     "task": {
@@ -395,7 +404,7 @@
       }
     },
     "runtime": {
-      "work_id": "ts_stale",
+      "work_id": "stale",
       "status": "moving",
       "completion_pending": "Linear calls Task LOO-1 complete while it is active on its workflow; `lf task move LOO-1 end --force` completes it here",
       "reason": "ready",
@@ -615,7 +624,13 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "moving",
+    "selection_states": [
+      "open",
+      "moving",
+      "working"
+    ]
   },
   "unavailable": {
     "task": {
@@ -655,7 +670,7 @@
       }
     },
     "runtime": {
-      "work_id": "ts_unavailable",
+      "work_id": "unavailable",
       "status": "unstarted",
       "completion_pending": null,
       "reason": "ready",
@@ -711,7 +726,13 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "unstarted",
+    "selection_states": [
+      "open",
+      "unstarted",
+      "backlog"
+    ]
   },
   "user_wait": {
     "task": {
@@ -751,7 +772,7 @@
       }
     },
     "runtime": {
-      "work_id": "task-user",
+      "work_id": "user",
       "status": "unstarted",
       "completion_pending": null,
       "reason": "ready",
@@ -972,7 +993,13 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "unstarted",
+    "selection_states": [
+      "open",
+      "unstarted",
+      "backlog"
+    ]
   },
   "dirty": {
     "task": {
@@ -1012,7 +1039,7 @@
       }
     },
     "runtime": {
-      "work_id": "ts_dirty",
+      "work_id": "dirty",
       "status": "unstarted",
       "completion_pending": null,
       "reason": "ready",
@@ -1068,7 +1095,13 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "unstarted",
+    "selection_states": [
+      "open",
+      "unstarted",
+      "backlog"
+    ]
   },
   "authored_commits": {
     "task": {
@@ -1108,7 +1141,7 @@
       }
     },
     "runtime": {
-      "work_id": "ts_commits",
+      "work_id": "commits",
       "status": "unstarted",
       "completion_pending": null,
       "reason": "ready",
@@ -1354,6 +1387,12 @@
       "merge_commit": null,
       "abandoned_at": null
     },
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "unstarted",
+    "selection_states": [
+      "open",
+      "unstarted",
+      "backlog"
+    ]
   }
 }

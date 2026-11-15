@@ -928,6 +928,7 @@ private actor Source {
             row["task"] = task
             var runtime = row["runtime"] as! [String: Any]
             runtime["work_id"] = "prefetch-\(index)"
+            row["lifecycle"] = state
             runtime["status"] = state
             runtime["updated_at"] = String(format: "2026-11-04T10:00:%02dZ", index)
             runtime["owner"] = index == states.count - 1 ? NSNull() : [

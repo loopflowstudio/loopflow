@@ -496,7 +496,8 @@ struct WorkNavigationTests {
         let original = try session("independent", work: .task(id: "another-task"))
         var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
         json["workspace"] = ["machine_id": "local", "worktree": "/src/loopflow.review",
-                             "task_id": "ts_review00000000000000000000000000"]
+                             "task_id": "issue-review"]
+        json["task_ids"] = ["issue-review"]
         let associated = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: json))
         let projection = WorkProjection(roadmaps: roadmap.waves, inventory: roadmap.tasks.items, sessions: [associated])
         let task = try #require(projection.waves.flatMap(\.tasks).first { !$0.sessions.isEmpty })
@@ -514,7 +515,7 @@ struct WorkNavigationTests {
         for work in bindings {
             let original = try session("manual", work: work)
             var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
-            json["task_ids"] = ["ts_review00000000000000000000000000"]
+            json["task_ids"] = ["issue-review"]
             let record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: json))
             let projection = WorkProjection(roadmaps: roadmap.waves, inventory: roadmap.tasks.items, sessions: [record])
             #expect(record.work == work)
@@ -525,13 +526,14 @@ struct WorkNavigationTests {
         }
     }
 
-    @Test("Repo and Wave Sessions cannot join a Task through checkout or stored associations")
+    @Test("Rust excludes Repo and Wave primary Sessions from Task memberships")
     func explicitScopesStaySeparate() throws {
         let snapshot = try roadmap()
-        let original = try session("scoped", work: .task(id: "ts_review00000000000000000000000000"))
+        let original = try session("scoped", work: .task(id: "issue-review"))
         for scope in ["repository", "wave"] {
             var value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
             value["primary_scope"] = scope
+            value["task_ids"] = []
             let record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
             let projection = WorkProjection(roadmaps: snapshot.waves, inventory: snapshot.tasks.items, sessions: [record])
             #expect(projection.waves.flatMap(\.tasks).allSatisfy { $0.sessions.isEmpty })
@@ -543,7 +545,7 @@ struct WorkNavigationTests {
 
     @Test("Unscoped Sessions remain in history without navigation entries")
     func orphansStayOutOfTheTree() async throws {
-        let attached = try session("human", work: .task(id: "ts_review00000000000000000000000000"))
+        let attached = try session("human", work: .task(id: "issue-review"))
         let orphan = try session("demo", work: nil)
         let stray = try session("stray", work: .task(id: "absent"))
         let projection = WorkProjection(roadmaps: try roadmap().waves, inventory: try roadmap().tasks.items, sessions: [attached, orphan, stray])
@@ -574,21 +576,21 @@ struct WorkNavigationTests {
         model.select(.wave(id: "wave-1"))
     }
 
-    @Test("Autonomous, upcoming and human work share stable ranked planning rows")
+    @Test("Autonomous, upcoming and human work keep server order without Sessions")
     func workDoesNotRequireSessions() throws {
         let roadmap = try roadmap()
         let empty = WorkProjection(roadmaps: roadmap.waves, inventory: roadmap.tasks.items, sessions: [])
-        let interactive = try session("human", work: .task(id: "ts_review00000000000000000000000000"))
+        let interactive = try session("human", work: .task(id: "issue-review"))
         let joined = WorkProjection(roadmaps: roadmap.waves, inventory: roadmap.tasks.items, sessions: [interactive])
         let before = empty.waves[0].tasks
         let after = joined.waves[0].tasks
 
         #expect(before.map(\.id) == after.map(\.id))
-        #expect(after.map(\.task.id) == ["issue-later", "issue-review", "issue-now", "issue-available"])
-        #expect(after[2].task.condition.state == .clear)
-        #expect(after[3].task.runtime == nil)
+        #expect(after.map(\.task.id) == roadmap.tasks.items.map(\.id))
+        #expect(after[0].task.condition.state == .clear)
+        #expect(after[2].task.runtime == nil)
         #expect(after[1].sessions.map(\.id) == ["human"])
-        #expect(after[3].sessions.isEmpty)
+        #expect(after[2].sessions.isEmpty)
         #expect(joined.subject(for: "human") == .task(id: "issue-review"))
     }
 
@@ -598,17 +600,18 @@ struct WorkNavigationTests {
             session("repo", work: nil),
             session("wave", work: .wave(id: "wave-1")),
             session("project", work: .project(id: "ps_11111111111111111111111111111111")),
-            session("completed", work: .task(id: "ts_later000000000000000000000000000")),
-            session("another", work: .task(id: "ts_later000000000000000000000000000")),
-            session("wrong-kind", work: .project(id: "ts_review00000000000000000000000000")),
-            session("planning-id-is-not-work", work: .task(id: "issue-review")),
+            session("completed", work: .task(id: "issue-later")),
+            session("another", work: .task(id: "issue-later")),
+            session("wrong-kind", work: .project(id: "issue-review")),
+            session("task-membership", work: .task(id: "issue-review")),
         ]
         let projection = WorkProjection(roadmaps: try roadmap().waves, inventory: try roadmap().tasks.items, sessions: records)
         #expect(projection.waves[0].sessions.map(\.id) == ["wave", "project"])
-        let completed = try #require(projection.waves[0].tasks.first)
-        #expect(completed.task.task.isSuccessful)
+        let completed = try #require(projection.waves[0].tasks.first { $0.task.id == "issue-later" })
+        #expect(completed.task.isCompleted)
         #expect(completed.sessions.map(\.id) == ["completed", "another"])
-        #expect(projection.unmatchedSessions.map(\.id) == ["repo", "wrong-kind", "planning-id-is-not-work"])
+        #expect(projection.waves[0].tasks.first { $0.task.id == "issue-review" }?.sessions.map(\.id) == ["task-membership"])
+        #expect(projection.unmatchedSessions.map(\.id) == ["repo", "wrong-kind"])
         let missing = WorkProjection(roadmaps: [], inventory: [], sessions: records)
         #expect(missing.unmatchedSessions == records)
     }
@@ -852,7 +855,7 @@ struct WorkNavigationTests {
     @Test("Bound Sessions retain ancestry and panes across planning loss and return",
           arguments: ["absent-task", "no-current-project", "no-waves"])
     func boundSessionRetainsAncestry(planning: String) async throws {
-        let work = WorkReference.task(id: "ts_review00000000000000000000000000")
+        let work = WorkReference.task(id: "issue-review")
         let records = try [session("first", work: work, waveId: "wave-1"),
                            session("second", work: work, waveId: "wave-1")]
         let original = try roadmapJSON()
@@ -942,7 +945,7 @@ struct WorkNavigationTests {
     func sessionActionSheetKeepsTarget() async throws {
         let model = try model()
         await model.refresh()
-        let record = try session("secondary", work: .task(id: "ts_review00000000000000000000000000"))
+        let record = try session("secondary", work: .task(id: "issue-review"))
         model.select(.wave(id: "wave-1"))
         model.beginSessionRename(record)
         #expect(model.selection == .wave(id: "wave-1"))
@@ -958,7 +961,7 @@ struct WorkNavigationTests {
         let record = try session("unbound", work: nil)
         var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any])
         json["work_path"] = "wave-1/issue-review"
-        json["title"] = "Task ts_review00000000000000000000000000"
+        json["title"] = "Task issue-review"
         let unbound = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: json))
         let projection = WorkProjection(roadmaps: try roadmap().waves, inventory: try roadmap().tasks.items, sessions: [unbound])
         let crumb = try #require(projection.breadcrumb(selection: nil, sessionId: unbound.id))
@@ -970,7 +973,7 @@ struct WorkNavigationTests {
 
     @Test("Attention opens the exact retained conversation and Back returns to interrupted Work", arguments: [false, true])
     func attentionNavigation(alreadyRetained: Bool) async throws {
-        let record = try session("needs-answer", work: .task(id: "ts_review00000000000000000000000000"))
+        let record = try session("needs-answer", work: .task(id: "issue-review"))
         var wire = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any])
         wire["availability"] = "available"
         let source = try ReadingSource(roadmap: navigatorRoadmapJSON(),
@@ -1194,7 +1197,7 @@ struct WorkNavigationTests {
         return try String(contentsOf: root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json"), encoding: .utf8)
     }
     private func sessionsJSON() throws -> String {
-        let records = [try session("human", work: .task(id: "ts_review00000000000000000000000000"))]
+        let records = [try session("human", work: .task(id: "issue-review"))]
         return String(decoding: try JSONEncoder().encode(records), as: UTF8.self)
     }
     private func session(_ id: String, work: WorkReference?, state: SessionState = .active, waveId: String? = nil) throws -> SessionRecord {

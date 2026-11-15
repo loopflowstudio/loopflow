@@ -221,9 +221,9 @@ struct TaskRowMetadataTests {
         value["id"] = id
         value["title"] = id
         value["state"] = state.rawValue
-        value["task_ids"] = ["ts_review00000000000000000000000000"]
+        value["task_ids"] = ["issue-review"]
         var workspace = try #require(value["workspace"] as? [String: Any])
-        workspace["task_id"] = "ts_review00000000000000000000000000"
+        workspace["task_id"] = "issue-review"
         value["workspace"] = workspace
         value["availability"] = availability?.rawValue ?? NSNull() as Any
         value["program_status"] = try status.map { try JSONSerialization.jsonObject(with: JSONEncoder().encode($0)) } ?? NSNull()

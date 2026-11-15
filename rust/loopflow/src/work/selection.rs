@@ -110,12 +110,12 @@ pub enum SelectionFilter {
 #[serde(rename_all = "snake_case")]
 pub enum SelectionState {
     Open,
-    /// Session axis: a Task Session's turn ended and it is ready for the person.
+    /// Session axis: a Task conversation is available for the person's next turn.
     Available,
-    /// Session axis: a Task Session is mid-turn.
+    /// Session axis: a current Task Session report says it is working.
     Busy,
     Blocked,
-    /// Task axis: the Task's own state, as `TaskState` derives it.
+    /// Task axis: effective lifecycle, including withdrawal of never-started work.
     Unstarted,
     Idle,
     Active,

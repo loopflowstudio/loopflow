@@ -191,7 +191,7 @@
           }
         },
         "runtime": {
-          "work_id": "ts_now00000000000000000000000000000",
+          "work_id": "issue-now",
           "status": "shipping",
           "completion_pending": null,
           "reason": "ready",
@@ -406,7 +406,12 @@
           "reason": "CI running on #1650"
         },
         "pr": null,
-        "graph_source": null
+        "graph_source": null,
+        "lifecycle": "shipping",
+        "selection_states": [
+          "shipping",
+          "backlog"
+        ]
       },
       {
         "task": {
@@ -446,7 +451,7 @@
           }
         },
         "runtime": {
-          "work_id": "ts_review00000000000000000000000000",
+          "work_id": "issue-review",
           "status": "unstarted",
           "completion_pending": null,
           "reason": "ready",
@@ -694,7 +699,13 @@
           "merge_commit": null,
           "abandoned_at": null
         },
-        "graph_source": null
+        "graph_source": null,
+        "lifecycle": "unstarted",
+        "selection_states": [
+          "open",
+          "unstarted",
+          "backlog"
+        ]
       },
       {
         "task": {
@@ -766,7 +777,12 @@
         },
         "shipping": null,
         "pr": null,
-        "graph_source": null
+        "graph_source": null,
+        "lifecycle": "unstarted",
+        "selection_states": [
+          "unstarted",
+          "backlog"
+        ]
       },
       {
         "task": {
@@ -806,7 +822,7 @@
           }
         },
         "runtime": {
-          "work_id": "ts_later000000000000000000000000000",
+          "work_id": "issue-later",
           "status": "done",
           "completion_pending": null,
           "reason": "done",
@@ -862,7 +878,11 @@
         },
         "shipping": null,
         "pr": null,
-        "graph_source": null
+        "graph_source": null,
+        "lifecycle": "done",
+        "selection_states": [
+          "done"
+        ]
       }
     ],
     "truncated": false

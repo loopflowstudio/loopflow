@@ -421,7 +421,7 @@ struct TaskGraphProofTests {
         let shells = workspace.multiplexer.layout.allPanes.map(\.id)
         let layout = workspace.multiplexer.layout
 
-        let reviewed = WorkReference.task(id: "ts_review00000000000000000000000000")
+        let reviewed = WorkReference.task(id: "issue-review")
         var session = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(
             renameFixtureRecord("design", title: "review-design", work: reviewed)
         )) as? [String: Any])

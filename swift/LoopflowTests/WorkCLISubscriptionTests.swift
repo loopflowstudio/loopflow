@@ -154,7 +154,7 @@ struct WorkCLISubscriptionTests {
         try await eventually { model.task(id: id) != nil }
         // An unstarted Task waits in the board's Backlog, where it offers Start; the strip lists Working Tasks.
         try await eventually {
-            WaveStandup(tasks: model.visibleTasks, closed: [], doneDays: 0, now: .now, github: [:], sessions: [:])
+            WaveStandup(tasks: model.visibleTasks, closed: [], doneDays: 0, now: .now, github: [:])
                 .backlog.contains { $0.id == id }
         }
         #expect(!selectedPlanMembers(model).contains { $0.work.id == id })

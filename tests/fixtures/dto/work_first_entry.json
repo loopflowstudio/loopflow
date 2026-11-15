@@ -286,7 +286,13 @@
             "wave_id": "d1b09180-31e8-4cee-b058-413a3fd52616"
           },
           "graph_name": "feature",
-          "graph_source": null
+          "graph_source": null,
+          "lifecycle": "unstarted",
+          "selection_states": [
+            "open",
+            "unstarted",
+            "backlog"
+          ]
         }
       ],
       "truncated": false

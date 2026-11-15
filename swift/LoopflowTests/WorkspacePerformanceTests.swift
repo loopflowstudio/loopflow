@@ -26,7 +26,7 @@ struct WorkspacePerformanceTests {
                 planning["rank"] = Double(index)
                 task["task"] = planning
                 var runtime = try #require(task["runtime"] as? [String: Any])
-                runtime["work_id"] = "work-\(index)"
+                runtime["work_id"] = "task-\(index)"
                 task["runtime"] = runtime
                 return task
             }
@@ -37,13 +37,13 @@ struct WorkspacePerformanceTests {
             let sessions = try (0..<count).map { index in
                 try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: [
                     "id": "session-\(index)", "run_id": "run-\(index)", "interactive": true,
-                    "work": ["kind": "task", "id": "work-\(index)"],
+                    "work": ["kind": "task", "id": "task-\(index)"],
                     "title": "Session \(index)", "detail": "fixture", "cwd": "/src/loopflow",
                     "wave_id": "wave-1", "state": "active", "ready_summary": NSNull(),
                     "work_path": NSNull(), "blocked": false, "title_source": "generated", "task_primary": false,
                     "actions": sessionActionFixture(state: "active"),
                     "graph_membership": ["kind": "independent"],
-                    "task_ids": ["work-\(index)"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "turn": NSNull(), "raw": false, "terminal_ids": [], "open_argv": ["must-not-launch"],
+                    "task_ids": ["task-\(index)"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "turn": NSNull(), "raw": false, "terminal_ids": [], "open_argv": ["must-not-launch"],
                 ]))
             }
             for attempt in 0..<21 {

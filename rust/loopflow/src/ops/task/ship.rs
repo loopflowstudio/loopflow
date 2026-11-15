@@ -775,6 +775,25 @@ mod tests {
             ShippingState::Unassigned
         );
 
+        // The handoff remains stoppable between runs and after unassignment.
+        assert_eq!(
+            read(TaskState::Idle, ProcessIdentityEvidence::Dead, None).state,
+            ShippingState::Restarting
+        );
+        assert_eq!(
+            shipping_snapshot(
+                Some(&graph),
+                &handoff,
+                (TaskState::Active, false),
+                ProcessIdentityEvidence::Dead,
+                None,
+                None
+            )
+            .unwrap()
+            .state,
+            ShippingState::Unassigned
+        );
+
         let mut landing = PrLanding::new(
             NewPrLanding {
                 repo: "loopflowstudio/loopflow".into(),

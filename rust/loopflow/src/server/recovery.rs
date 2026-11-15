@@ -9,7 +9,6 @@ use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 
-use crate::session_recovery::RecoveryState;
 use crate::steer::SteerAdapter;
 use crate::store::sqlite::SqliteStore;
 
@@ -100,7 +99,7 @@ struct Reader {
     seen: Option<(i64, i64, i64)>,
     failure: crate::store::RecordingGap,
     next: Option<SystemTime>,
-    capacity: HashMap<crate::id::AgentProcessId, (String, i64, SystemTime)>,
+    checks: HashMap<crate::id::AgentProcessId, (String, i64, SystemTime)>,
 }
 
 impl Reader {
@@ -127,33 +126,26 @@ impl Reader {
             .iter()
             .map(|client| client.adapter.agent_process_id.clone())
             .collect();
-        self.capacity.retain(|id, _| active.contains(id));
+        self.checks.retain(|id, _| active.contains(id));
         for client in clients {
             let Some(recovery) = store.session_recovery(&client.adapter.session)? else {
                 continue;
             };
-            if recovery.state == RecoveryState::Continued
-                || (!recovery.can_retry() && recovery.request.is_none())
+            let requested = store.recovery_request_revision(&client.adapter.session)?;
+            let key = recovery.key();
+            if self
+                .checks
+                .get(&client.adapter.agent_process_id)
+                .is_some_and(|(prior, revision, until)| {
+                    prior == &key && *revision == requested && now < *until
+                })
             {
                 continue;
             }
-            if recovery.can_retry() {
-                let requested = store.recovery_request_revision(&client.adapter.session)?;
-                let key = recovery.key();
-                if self
-                    .capacity
-                    .get(&client.adapter.agent_process_id)
-                    .is_some_and(|(prior, revision, until)| {
-                        prior == &key && *revision == requested && now < *until
-                    })
-                {
-                    continue;
-                }
-                self.capacity.insert(
-                    client.adapter.agent_process_id.clone(),
-                    (key, requested, now + Duration::from_secs(60)),
-                );
-            }
+            self.checks.insert(
+                client.adapter.agent_process_id.clone(),
+                (key, requested, now + Duration::from_secs(60)),
+            );
             ready.push((store.clone(), client));
         }
         Ok(ready)
@@ -331,5 +323,23 @@ mod tests {
             )
             .unwrap();
         assert_eq!(rows, 1, "repeated native boundaries keep one launch record");
+        drop(conn);
+        for state in [RecoveryState::Continued, RecoveryState::Uncertain] {
+            let mut fact = recovery.clone();
+            fact.failed_turn = format!("later-{state:?}");
+            fact.state = state;
+            store
+                .record_session_recovery("limited", &fact, "rejected")
+                .unwrap();
+            assert_eq!(
+                reader.read().unwrap().len(),
+                1,
+                "{state:?} still checks for later input"
+            );
+            store
+                .record_session_recovery("limited", &fact, "ended")
+                .unwrap();
+            assert!(reader.read().unwrap().is_empty());
+        }
     }
 }

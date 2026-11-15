@@ -130,6 +130,35 @@ pub(crate) fn check(store: &SqliteStore, client: &Client) -> Result<()> {
         return Ok(());
     };
     let rows = read_transcript(path)?;
+    if let Some(start) = rows
+        .iter()
+        .position(|row| row["type"] == "user" && row["promptId"] == recovery.failed_turn)
+    {
+        let newer = rows[start + 1..].iter().any(|row| {
+            crate::transcript::is_user_input(row)
+                && row["promptId"] != recovery.failed_turn
+                && !row["promptId"]
+                    .as_str()
+                    .is_some_and(|prompt| Some(prompt) == recovery.retry_turn.as_deref())
+                && !row["uuid"]
+                    .as_str()
+                    .is_some_and(|uuid| Some(uuid) == recovery.request.as_deref())
+                && !super::recovery_gate::matches_content(
+                    &row["message"]["content"],
+                    &adapter.session,
+                    &recovery,
+                )
+        });
+        if newer {
+            store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
+                store.record_session_recovery(&adapter.session, &recovery, "ended")
+            })?;
+            return Ok(());
+        }
+    }
+    if recovery.state == RecoveryState::Continued {
+        return Ok(());
+    }
     let Some(request) = &recovery.request else {
         if recovery.can_retry() {
             check_capacity(store, client, &rows, recovery)?;
@@ -171,8 +200,7 @@ fn check_capacity(
         .filter(|model| Some(model) == recovery.model.as_ref())
     else {
         recovery.state = RecoveryState::Uncertain;
-        recovery.reason =
-            "Newer input or incomplete history; continue from the conversation".into();
+        recovery.reason = "Incomplete history; continue from the conversation".into();
         store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
             store.record_session_recovery(&adapter.session, &recovery, "uncertain")
         })?;
@@ -365,6 +393,7 @@ mod tests {
     use crate::session_recovery::{RecoveryState, SessionRecovery};
     use crate::store::sqlite::SqliteStore;
     use serde_json::json;
+    use std::io::Write;
 
     #[test]
     fn recovery_classifies_the_rejection_without_waiting_for_capacity() {
@@ -456,7 +485,7 @@ mod tests {
                         RecoveryState::ManualRetry
                     );
                     rows.push(
-                        json!({"type":"user","isSidechain":false,"uuid":"new","promptId":"new"}),
+                        json!({"type":"user","userType":"external","isSidechain":false,"uuid":"new","promptId":"new","message":{"content":"next"}}),
                     );
                     std::fs::write(
                         client.native.transcript.as_ref().unwrap(),
@@ -467,10 +496,7 @@ mod tests {
                     )
                     .unwrap();
                     check(&store, &client).unwrap();
-                    assert_eq!(
-                        store.session_recovery("reader").unwrap().unwrap().state,
-                        RecoveryState::Uncertain
-                    );
+                    assert!(store.session_recovery("reader").unwrap().is_none());
                 }
             }
         }
@@ -527,13 +553,19 @@ mod tests {
             .record_session_recovery("reader", &fact, "admitted")
             .unwrap();
         fact.retry_turn = Some("retry".into());
-        store
-            .record_session_recovery("reader", &fact, "reply")
-            .unwrap();
         let path = home.path().join("transcript");
         std::fs::write(
             &path,
-            json!({"type":"user","uuid":"inbox-uuid","promptId":"retry"}).to_string(),
+            [
+                json!({"type":"user","uuid":"original","promptId":"rejected"}),
+                json!({"type":"user","userType":"external","uuid":"inbox-uuid","promptId":"retry","message":{"content":"retry"}}),
+                json!({"type":"user","userType":"external","uuid":"result","message":{"content":[{"type":"tool_result","tool_use_id":"tool","content":"done"}]}}),
+                json!({"type":"user","userType":"external","uuid":"meta","isMeta":true,"message":{"content":"injected"}}),
+            ]
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n"),
         )
         .unwrap();
         store
@@ -556,8 +588,14 @@ mod tests {
         check(&reconnected, &client).unwrap();
         assert_eq!(
             reconnected.session_recovery("reader").unwrap(),
-            Some(fact.clone())
+            Some(SessionRecovery {
+                retry_turn: None,
+                ..fact.clone()
+            })
         );
+        store
+            .record_session_recovery("reader", &fact, "reply")
+            .unwrap();
         store
             .record_recovery_boundary("reader", "thread", "retry", "stopped", None)
             .unwrap();
@@ -573,5 +611,18 @@ mod tests {
             reconnected.session_recovery("reader").unwrap(),
             Some(completed)
         );
+        let path = client.native.transcript.as_ref().unwrap();
+        writeln!(
+            std::fs::OpenOptions::new().append(true).open(path).unwrap(),
+            "\n{}",
+            json!({"type":"user","userType":"external","uuid":"typed","promptId":"next","message":{"content":"next"}})
+        )
+        .unwrap();
+        check(&reconnected, &client).unwrap();
+        assert!(reconnected.session_recovery("reader").unwrap().is_none());
+        store
+            .record_session_recovery("reader", &late, "wait:after-input")
+            .unwrap();
+        assert!(reconnected.session_recovery("reader").unwrap().is_none());
     }
 }

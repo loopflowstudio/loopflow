@@ -114,6 +114,10 @@ resend an attempt already dispatched. Temporary waits project `waiting`; a
 complete rejection without a managed login or a client able to take the resend
 projects `manual_retry` before capacity selection. Both accept recheck requests;
 Codex reads its hook list live so a later check can find the client ready.
+The row ends when the next person-started turn follows the rejection; native
+history supplies the fallback for clients with no recorded start. The correlated
+resend never ends its own row, including after an unconfirmed dispatch. Dispatch
+facts remain in history after the row ends.
 
 A recovery envelope binds the Session, native thread, rejected turn and one-use
 attempt. The recovery-only shell wrapper blocks failures and beats Codex's native

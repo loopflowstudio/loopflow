@@ -156,18 +156,25 @@ impl Admission {
 }
 
 pub(super) fn matches_input(item: &Value, session: &str, recovery: &SessionRecovery) -> bool {
-    if item["type"] != "userMessage" {
-        return false;
+    item["type"] == "userMessage" && matches_content(&item["content"], session, recovery)
+}
+
+pub(super) fn matches_content(content: &Value, session: &str, recovery: &SessionRecovery) -> bool {
+    if let Some(prompt) = content.as_str() {
+        return matches_prompt(prompt, session, recovery);
     }
-    let Some(content) = item["content"].as_array() else {
+    let Some(content) = content.as_array() else {
         return false;
     };
     let [text] = content.as_slice() else {
         return false;
     };
-    let Some(encoded) = text["text"]
-        .as_str()
-        .and_then(|text| text.strip_prefix(PREFIX))
+    matches_prompt(text["text"].as_str().unwrap_or(""), session, recovery)
+}
+
+fn matches_prompt(prompt: &str, session: &str, recovery: &SessionRecovery) -> bool {
+    let Some(encoded) = prompt
+        .strip_prefix(PREFIX)
         .and_then(|text| text.strip_suffix(SUFFIX))
     else {
         return false;
@@ -366,6 +373,11 @@ mod tests {
         };
         let input = json!({"type":"userMessage","content":[{"type":"text","text":gate.prompt()}]});
         assert!(super::matches_input(&input, "session", &recovery));
+        assert!(super::matches_content(
+            &json!(gate.prompt()),
+            "session",
+            &recovery
+        ));
         assert!(!super::matches_input(&input, "other-session", &recovery));
         recovery.request = Some("earlier-attempt".into());
         assert!(!super::matches_input(&input, "session", &recovery));

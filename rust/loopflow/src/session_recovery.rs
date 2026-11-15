@@ -239,6 +239,96 @@ mod tests {
     }
 
     #[test]
+    fn recovery_ends_on_the_next_person_turn_in_every_state() {
+        use rusqlite::params;
+        for state in [
+            RecoveryState::Waiting,
+            RecoveryState::ManualRetry,
+            RecoveryState::Recovering,
+            RecoveryState::Continued,
+            RecoveryState::Uncertain,
+        ] {
+            let home = tempfile::tempdir().unwrap();
+            let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+            store.test_session("reader", &crate::session_record::new_artifact_key());
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "UPDATE agent_sessions SET provider_thread='thread' WHERE id='reader'",
+                    [],
+                )
+                .unwrap();
+            let mut recovery = SessionRecovery {
+                agent_process_id: crate::id::AgentProcessId::new(),
+                thread: "thread".into(),
+                failed_turn: "failed".into(),
+                model: None,
+                account: None,
+                state,
+                reason: "fixture".into(),
+                retry_at: None,
+                request: None,
+                retry_turn: None,
+            };
+            store
+                .record_session_recovery("reader", &recovery, "rejected")
+                .unwrap();
+            if matches!(
+                state,
+                RecoveryState::Recovering | RecoveryState::Continued | RecoveryState::Uncertain
+            ) {
+                recovery.request = Some("attempt".into());
+                recovery.retry_turn = Some("retry".into());
+                store
+                    .record_session_recovery("reader", &recovery, "dispatch")
+                    .unwrap();
+            }
+            let start = |turn: &str| {
+                store.conn.lock().unwrap().execute(
+                    "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,provider_thread,provider_turn)
+                     VALUES('reader','started',?1,1,'{}','thread',?1)", params![turn]).unwrap();
+            };
+            let traced = crate::store::query_plans::statements(&store, || {
+                assert_eq!(
+                    store.session_recovery("reader").unwrap(),
+                    Some(recovery.clone())
+                );
+            });
+            let scans = crate::store::query_plans::growing_scans(&store, &traced);
+            assert!(scans.is_empty(), "{}", scans.join("\n"));
+            if recovery.request.is_some() {
+                start("retry");
+                assert_eq!(
+                    store.session_recovery("reader").unwrap(),
+                    Some(recovery.clone())
+                );
+            }
+            // A queued message is absent until it starts after the running retry.
+            start("typed");
+            assert!(
+                store.session_recovery("reader").unwrap().is_none(),
+                "{state:?}"
+            );
+            store.request_session_recovery("reader").unwrap();
+            assert_eq!(store.recovery_request_revision("reader").unwrap(), 0);
+            store
+                .record_session_recovery("reader", &recovery, "wait:late")
+                .unwrap();
+            assert!(store.session_recovery("reader").unwrap().is_none());
+            recovery.failed_turn = "typed".into();
+            recovery.request = None;
+            recovery.retry_turn = None;
+            recovery.state = RecoveryState::ManualRetry;
+            store
+                .record_session_recovery("reader", &recovery, "rejected")
+                .unwrap();
+            assert_eq!(store.session_recovery("reader").unwrap(), Some(recovery));
+        }
+    }
+
+    #[test]
     fn lost_reply_reconnect_and_bulk_retry_cannot_dispatch_the_same_turn_twice() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
@@ -324,6 +414,17 @@ mod tests {
         recovery.reason = "Reply lost".into();
         store
             .record_session_recovery("reader", &recovery, "unconfirmed")
+            .unwrap();
+        // A native start can arrive before the reply identifies the resend.
+        // It is not yet evidence that the person sent another message.
+        store
+            .record_session_event(
+                "reader",
+                &"thread".into(),
+                "native-retry",
+                crate::session::SessionEventKind::Started,
+                &json!({}),
+            )
             .unwrap();
         store
             .record_session_recovery("reader", &late, "wait:later")

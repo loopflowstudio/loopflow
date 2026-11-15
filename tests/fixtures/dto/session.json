@@ -18,7 +18,7 @@
     "model": "gpt-5",
     "account": "work",
     "state": "waiting",
-    "reason": "No eligible login has capacity for this model",
+    "reason": "No eligible login is ready for this model",
     "retry_at": 1794270600,
     "request": null,
     "retry_turn": null

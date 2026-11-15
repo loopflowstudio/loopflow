@@ -513,7 +513,7 @@ each conversation:
 
 ```text
 Waiting
-No eligible login has capacity for this model
+No eligible login is ready for this model
 Capacity reset: in 2 hours                      [Recover affected sessions]
 ```
 
@@ -537,6 +537,8 @@ or change a route. No CLI command is needed.
 | **Recovering** | The stopped turn is being sent again, or is running. | Nothing. Checking again does not send it twice. |
 | **Continued** | The retried turn finished. | Carry on. |
 | **Review conversation** | Loopflow cannot tell whether the stopped turn reached the provider, or a tool may already have acted. It also appears when a switch was cancelled or timed out partway. | Read the end of the conversation and continue from what happened. Nothing is resent for you. |
+
+The row goes away at your next message in that conversation.
 
 A stopped turn is sent again once at most. If you type something new before
 recovery starts, your message wins and the old turn is dropped. A message you

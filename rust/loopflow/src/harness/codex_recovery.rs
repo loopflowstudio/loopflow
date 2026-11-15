@@ -549,9 +549,7 @@ impl Connection {
             return Ok(());
         }
         self.recovery.check_at = SystemTime::now() + Duration::from_secs(60);
-        if let Some(recovery) = recovery
-            .filter(|r| r.thread == self.client.thread && (r.can_retry() || r.request.is_some()))
-        {
+        if let Some(recovery) = recovery.filter(|r| r.thread == self.client.thread) {
             self.read_recovery(&recovery.failed_turn, writer).await?;
         }
         Ok(())
@@ -629,11 +627,35 @@ impl Connection {
             return Ok(());
         };
         let session = self.client.adapter.session.clone();
-        let retained = self.store.session_recovery(&session)?;
-        if let Some(mut recovery) = retained
-            .clone()
-            .filter(|r| r.failed_turn == failed && r.request.is_some())
-        {
+        let Some(retained) = self
+            .store
+            .session_recovery(&session)?
+            .filter(|r| r.failed_turn == failed)
+        else {
+            // A late history reply cannot recreate a row that has ended.
+            return Ok(());
+        };
+        if let Some(start) = turns.iter().position(|turn| turn["id"] == failed) {
+            if turns[start + 1..].iter().any(|turn| {
+                turn["id"]
+                    .as_str()
+                    .is_some_and(|id| Some(id) != retained.retry_turn.as_deref())
+                    && turn["items"].as_array().is_some_and(|items| {
+                        items.iter().any(|item| item["type"] == "userMessage")
+                            && !items.iter().any(|item| {
+                                super::recovery_gate::matches_input(item, &session, &retained)
+                            })
+                    })
+            }) {
+                self.save_recovery(&retained, "ended")?;
+                return Ok(());
+            }
+        }
+        if retained.state == RecoveryState::Continued {
+            return Ok(());
+        }
+        if retained.request.is_some() {
+            let mut recovery = retained;
             if let Some(turn) = turns
                 .iter()
                 .find(|turn| turn["id"].as_str() == recovery.retry_turn.as_deref())
@@ -653,6 +675,9 @@ impl Connection {
             }
             return Ok(());
         }
+        if !retained.can_retry() {
+            return Ok(());
+        }
         let Some(turn) = turns.iter().find(|turn| turn["id"] == failed) else {
             return Ok(());
         };
@@ -669,7 +694,6 @@ impl Connection {
             retry_turn: None,
         };
         if !codex_rejected_turn(turn)
-            || turns.last() != Some(turn)
             || !matches!(
                 thread["status"]["type"].as_str(),
                 Some("idle" | "systemError")
@@ -677,8 +701,7 @@ impl Connection {
         {
             recovery.state = RecoveryState::Uncertain;
             recovery.reason =
-                "Newer input, earlier work, or incomplete history; continue from the conversation"
-                    .into();
+                "Earlier work or incomplete history; continue from the conversation".into();
             self.save_recovery(&recovery, "uncertain")?;
             return Ok(());
         }
@@ -689,9 +712,7 @@ impl Connection {
             return Ok(());
         };
         // The login that received the rejected turn outlives later switches.
-        if let Some(previous) = retained.filter(|old| old.key() == recovery.key()) {
-            recovery.account = previous.account.or(recovery.account);
-        }
+        recovery.account = retained.account.or(recovery.account);
         let Some(account) = recovery.account.clone() else {
             recovery.state = RecoveryState::ManualRetry;
             recovery.reason = "This Session’s login is not one Loopflow manages".into();
@@ -777,7 +798,7 @@ impl Connection {
                 return Ok(());
             }
             result => {
-                recovery.reason = "No eligible login has capacity for this model".into();
+                recovery.reason = "No eligible login is ready for this model".into();
                 if let Err(provider_account::ProviderAccountError::NoEligibleAccount {
                     retry_at,
                     ..
@@ -900,27 +921,27 @@ mod tests {
                     home.path().join("login"),
                     false,
                 ));
-                // Spent-limit recording has already settled; no capacity exists
-                // in this fixture and a missing hook must still read manual.
-                store
-                    .record_session_recovery(
-                        "conversation",
-                        &SessionRecovery {
-                            agent_process_id: connection.client.adapter.agent_process_id.clone(),
-                            thread: "thread".into(),
-                            failed_turn: "failed".into(),
-                            model: Some("model".into()),
-                            account: Some(account),
-                            state: RecoveryState::Waiting,
-                            reason: "Spent quota".into(),
-                            retry_at: None,
-                            request: None,
-                            retry_turn: None,
-                        },
-                        "limited",
-                    )
-                    .unwrap();
             }
+            // Spent-limit recording has already settled; no capacity exists
+            // in this fixture and a missing hook must still read manual.
+            store
+                .record_session_recovery(
+                    "conversation",
+                    &SessionRecovery {
+                        agent_process_id: connection.client.adapter.agent_process_id.clone(),
+                        thread: "thread".into(),
+                        failed_turn: "failed".into(),
+                        model: Some("model".into()),
+                        account: managed.then_some(account),
+                        state: RecoveryState::Waiting,
+                        reason: "Spent quota".into(),
+                        retry_at: None,
+                        request: None,
+                        retry_turn: None,
+                    },
+                    "limited",
+                )
+                .unwrap();
             let hooks = hooks_available.then(|| {
                 let listener =
                     tokio::net::UnixListener::bind(home.path().join("native.sock")).unwrap();
@@ -976,20 +997,72 @@ mod tests {
             rpc["result"]["thread"]["turns"]
                 .as_array_mut()
                 .unwrap()
-                .push(json!({"id":"newer","status":"completed","itemsView":"full","items":[]}));
+                .push(json!({"id":"newer","status":"completed","itemsView":"full","items":[{"type":"userMessage","content":[{"type":"text","text":"next"}]}]}));
             connection
                 .recovery_reply("failed".into(), &rpc, &mut writer)
                 .await
                 .unwrap();
-            assert_eq!(
-                store
-                    .session_recovery("conversation")
-                    .unwrap()
-                    .unwrap()
-                    .state,
-                RecoveryState::Uncertain
-            );
+            assert!(store.session_recovery("conversation").unwrap().is_none());
         }
+    }
+
+    #[tokio::test]
+    async fn recovery_late_resend_keeps_uncertainty_until_a_person_continues() {
+        let home = tempfile::tempdir().unwrap();
+        let (store, mut connection) = super::recovery_fixture(home.path()).await;
+        let mut recovery = SessionRecovery {
+            agent_process_id: connection.client.adapter.agent_process_id.clone(),
+            thread: "thread".into(),
+            failed_turn: "failed".into(),
+            model: Some("model".into()),
+            account: None,
+            state: RecoveryState::Waiting,
+            reason: "waiting".into(),
+            retry_at: None,
+            request: None,
+            retry_turn: None,
+        };
+        store
+            .record_session_recovery("conversation", &recovery, "rejected")
+            .unwrap();
+        let gate =
+            crate::harness::recovery_gate::RecoveryGate::new("conversation", &recovery).unwrap();
+        recovery.request = Some(gate.attempt().into());
+        recovery.state = RecoveryState::Uncertain;
+        store
+            .record_session_recovery("conversation", &recovery, "dispatch")
+            .unwrap();
+        let (client, server) = tokio::net::UnixStream::pair().unwrap();
+        let (mut writer, _) = WebSocketStream::from_raw_socket(client, Role::Client, None)
+            .await
+            .split();
+        let _native = WebSocketStream::from_raw_socket(server, Role::Server, None).await;
+        let mut rpc = json!({"result":{"thread":{"turns":[
+            {"id":"failed","itemsView":"full","items":[{"type":"userMessage"}]},
+            {"id":"late-retry","status":"completed","itemsView":"full","items":[{"type":"userMessage","content":[{"type":"text","text":gate.prompt()}]}]}
+        ]}}});
+        connection
+            .recovery_reply("failed".into(), &rpc, &mut writer)
+            .await
+            .unwrap();
+        assert_eq!(
+            store.session_recovery("conversation").unwrap(),
+            Some(recovery.clone())
+        );
+        rpc["result"]["thread"]["turns"].as_array_mut().unwrap().push(json!({"id":"typed","items":[{"type":"userMessage","content":[{"type":"text","text":"next"}]}]}));
+        connection
+            .recovery_reply("failed".into(), &rpc, &mut writer)
+            .await
+            .unwrap();
+        assert!(store.session_recovery("conversation").unwrap().is_none());
+        connection
+            .recovery_reply("failed".into(), &rpc, &mut writer)
+            .await
+            .unwrap();
+        store
+            .record_session_recovery("conversation", &recovery, "unconfirmed")
+            .unwrap();
+        assert!(store.session_recovery("conversation").unwrap().is_none());
     }
 
     #[tokio::test]

@@ -90,13 +90,13 @@ impl SqliteStore {
         &self,
         session: &str,
     ) -> StoreResult<Option<crate::session_recovery::SessionRecovery>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut connection = self.conn.lock().expect("store mutex poisoned");
+        let conn = connection.savepoint()?;
         // Select the latest failed turn by its first observation, not its last
         // worker. Late facts for an older attempt cannot replace a new rejection.
         // Writer fences still belong to the current owner; replacing that owner
         // cannot erase dispatch for the same native conversation.
-        // One statement also keeps the selected attempt and its facts in the
-        // same snapshot when this reader runs outside a Work read transaction.
+        // The savepoint also pins subsequent turn starts to this reading.
         let mut query = conn.prepare(
             "WITH facts AS (
                 SELECT e.seq,e.receipt_key,e.payload,
@@ -107,12 +107,14 @@ impl SqliteStore {
              ), latest AS (
                 SELECT failed_turn FROM facts GROUP BY failed_turn ORDER BY MIN(seq) DESC LIMIT 1
              )
-             SELECT receipt_key,payload FROM facts
+             SELECT receipt_key,payload,seq FROM facts
              WHERE failed_turn=(SELECT failed_turn FROM latest) ORDER BY seq",
         )?;
         let mut rows = query.query([crate::id::canonical_session(session)])?;
+        let mut first_seq = None;
         let mut recovery: Option<crate::session_recovery::SessionRecovery> = None;
         while let Some(row) = rows.next()? {
+            first_seq.get_or_insert(row.get::<_, i64>(2)?);
             let key: String = row.get(0)?;
             let observation: crate::session_recovery::SessionRecovery =
                 serde_json::from_str(&row.get::<_, String>(1)?)?;
@@ -120,9 +122,35 @@ impl SqliteStore {
             let Some(phase) = key.strip_prefix(&prefix) else {
                 continue;
             };
+            if phase == "ended" {
+                return Ok(None);
+            }
             match &mut recovery {
                 Some(recovery) => recovery.observe(phase, observation),
                 None => recovery = Some(observation),
+            }
+        }
+        if let Some(recovery) = &recovery {
+            // An unconfirmed dispatch may have started without reporting its ID.
+            // Only native history can distinguish that resend from later input.
+            if recovery.request.is_none() || recovery.retry_turn.is_some() {
+                let newer: bool = conn.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM session_events
+                     WHERE session_id=?1 AND kind='started' AND provider_thread=?2
+                       AND provider_turn!=?3 AND provider_turn!=COALESCE(?4,?3)
+                       AND seq>?5)",
+                    params![
+                        crate::id::canonical_session(session),
+                        recovery.thread,
+                        recovery.failed_turn,
+                        recovery.retry_turn,
+                        first_seq
+                    ],
+                    |row| row.get(0),
+                )?;
+                if newer {
+                    return Ok(None);
+                }
             }
         }
         Ok(recovery)

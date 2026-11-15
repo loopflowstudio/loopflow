@@ -63,3 +63,10 @@ them. Direction: interactive-limit-recovery.md, "Concept review — November 14"
 only a successful read showing no recovery hook establishes `manual_retry`.
 The failure is a temporary inability to check, so it must not claim that the
 conversation cannot take a resend. Both states retain bulk rechecks.
+
+2026-11-14 concept review, second pass: the recovery row ends at the person's
+next message in that conversation; newer input no longer turns a row into
+"Review conversation". Agent-written, reversible: the alternative is a row that
+stays until the next limit. One reason string, "No eligible login is ready for
+this model", for both providers. Direction: interactive-limit-recovery.md,
+"Concept review — November 14, second pass".

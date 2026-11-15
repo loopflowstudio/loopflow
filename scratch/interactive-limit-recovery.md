@@ -151,6 +151,82 @@ Sessions it has loaded with its own copy of `can_retry`. The served request
 could own "every waiting conversation"; no failure was observed, so this
 review does not direct it.
 
+### Concept review — November 14, second pass (implemented)
+
+Read against `3b96422baa..0db7a9ea5d`. The five states hold. The row has no
+end: `session_recovery` returns the conversation's latest failed turn for as
+long as the native thread lives, and Desktop shows a row whenever it is there.
+
+- A person who does what **Send it again yourself** asks gets, within a minute,
+  **Review conversation** · "Newer input or incomplete history; continue from
+  the conversation", and it stays. Claude's `check_capacity` and Codex's
+  `turns.last() != Some(turn)` branch both record `uncertain` for newer input;
+  `claude_recovery`'s classification test asserts ManualRetry → Uncertain after
+  a new user row. Every conversation open at install is unguarded, so this is
+  the first thing the row does.
+- Typing over a **Waiting** row does the same. `docs/sessions.md` says "your
+  message wins and the old turn is dropped".
+- **Continued** stays above the pane through every later turn.
+- **Review conversation** after a lost reply stays after the person has read
+  the end and carried on.
+
+Direction (agent-written; nobody chose it): the row ends at the person's next
+message in that conversation. Each state names one thing to do, and a later
+message is that thing done.
+
+- The reading is absent once a turn the person started follows the failed turn.
+  Loopflow's own resend (the recovery envelope the gate already classifies, or
+  `retry_turn`) is not the person's message.
+- Newer input stops being a reason for `uncertain`. That state keeps earlier
+  work, incomplete history, and unconfirmed or cancelled dispatch. Split the
+  two reasons that currently say "Newer input or …".
+- A row that ended is not requested or checked again; nothing is resent for it.
+  Dispatch stays in Session history as today.
+- `docs/sessions.md` (proposed): after the table, "The row goes away at your
+  next message in that conversation." The "old turn is dropped" sentence then
+  matches what Desktop shows. `swift/README.md` follows.
+
+Counterexamples to hold:
+
+- An unconfirmed resend that arrives late must not clear its own **Review
+  conversation** row; only a turn that is not this attempt's resend does.
+- A message queued behind a running resend ("runs after the retried turn")
+  starts after `retry_turn`: the row reads Recovering until the resend ends,
+  then ends with the queued turn. It must not end while the resend runs.
+- A hand resend that is rejected again is a new failed turn with its own row
+  (unchanged).
+- An older Claude client may report no `started` boundary; the transcript's
+  newer user row is the fallback already read by `claude_rejected_model`.
+
+Also settled: one wording for one condition. Claude says "No eligible login is
+ready for this model", Codex and `docs/sessions.md` say "has capacity". Use
+"is ready" for both: a model resting after its failure has capacity by the
+poll and is still not selectable. Update the docs example and `session.json`.
+
+Left alone: the button on a `manual_retry` row, and Desktop's own copy of
+`can_retry`, as in the first pass.
+
+### Delete — do not maintain
+
+- Delete both provider branches that classify newer input as uncertain. Keep
+  incomplete-history and earlier-work uncertainty; keep dispatch and correlation.
+- Delete the server reader's exclusion of continued/undispatched uncertain rows:
+  native-history fallback must still notice the next message. All row states
+  share the existing check backoff; absent rows schedule no further checks.
+- Replace Codex's capacity wording and its fixture. No state alias or migration.
+
+The projection ends rows on a recorded later start when the resend ID is known
+(or no dispatch exists). Unconfirmed dispatch without an ID waits for native
+history, where the exact envelope or Claude inbox UUID identifies the resend.
+A native-history end marker outlives late worker observations. A new failed turn
+still owns a new row.
+
+Compression keeps envelope matching on native message content: Claude needs no
+synthetic Codex item to identify its resend. The projection returns at an end
+marker instead of folding later facts into a hidden row. A recorded start with
+an unconfirmed resend ID still retains uncertainty until native history can
+identify the input.
+
 ### Holder adaptation — November 14 (implementation)
 
 Integrated pinned main `114ff621767dea4525c9f89d638f82567ccab33e`, then
@@ -213,19 +289,14 @@ success from LOO-813 still establish no cause or physical-keyboard repair.
 
 Current focused checks (inherited LF_* unset, closed stdin):
 
-- `cargo test -p loopflow --lib recovery --jobs 4` — 37 passed; classification rechecked after the final hook-error and fixture-isolation changes with the command below. Existing large `__eh_frame` linker warning.
-- `cargo test -p loopflow --lib recovery_classifies --jobs 4` — 2 passed on the final tree with fixture executable and Machine isolation; `.lf/tmp/loo-811-state-recovery.log`.
-- After compress: `cargo test -p loopflow --lib -- harness::claude_recovery harness::codex_recovery session_recovery server::recovery harness::recovery_gate` — 13 passed; `cargo clippy -p loopflow --all-targets -- -D warnings` clean.
-- `CARGO_BUILD_JOBS=4 scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter 'sessionRecoveryControlKeepsUncertaintyVisible|manualRetryRecoveryFixture|sessionRecoveryFixture|uncertainRecoveryDoesNotOfferRetry'` — candidate CLI and Desktop/tests built; 4 passed headlessly, including the manual retry button and disabled dispatched retry; `.lf/tmp/loo-811-state-desktop.log`. Existing Swift warnings remain.
-- `target/debug/lf server describe --json` compared with `tests/fixtures/dto/server_schema.json` — identical; generated copy `.lf/tmp/loo-811-state-schema.json`.
+- `cargo test -p loopflow --lib --jobs 4 -- harness::claude_recovery harness::codex_recovery session_recovery server::recovery harness::recovery_gate` — 15 passed on the final compress tree, including the five-state lifecycle, later rejection, queued-turn ordering, native-history fallback, an unconfirmed resend start, late dispatch and indexed plans with Machine statistics. Existing large `__eh_frame` linker warning.
+- `cargo test -p loopflow --lib --jobs 4 -- harness::claude_recovery harness::codex_recovery` — 6 passed on the final provider tree, including Claude tool-result/meta rows. Continued rows check for later input without repeated settlement writes. Existing large `__eh_frame` linker warning.
 
-Earlier holder-adaptation and compression check detail remains at
-`3b96422baa6acbe9899cfe350c8e12b4997f9df7:scratch/interactive-limit-recovery.md`,
-“Remaining verification”. Its clippy result predates the state replacement;
-gate owns current static analysis, Rust/served/DTO/schema/documentation suites,
-and broader Swift/iOS checks. The served bulk fixture now includes a manual
-retry row beside dispatched work. The shared manual-retry DTO fixture is read
-by both Rust and Swift.
+Earlier state/Swift/schema checks remain at
+`0db7a9ea5dc8801b6c72f9a33f5ee9561a8b6e99:scratch/interactive-limit-recovery.md`,
+“Remaining verification”. Gate owns current static analysis, served/DTO/schema,
+documentation and broader Swift/iOS checks. The served bulk fixture includes a
+manual retry row beside dispatched work; both languages read its DTO fixture.
 
 The gate selection reaches the recovery modules, provider-account/auth, native
 hook/context and fact writer, server boundary/wake/recovery, Session projection,

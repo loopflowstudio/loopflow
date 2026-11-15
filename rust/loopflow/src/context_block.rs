@@ -35,8 +35,7 @@ pub enum ContextMoment {
     Stop,
     /// A native turn ended on a usage limit: start `RecordLimit` and return.
     Limit,
-    /// Started by a limit hook: record the limit and move the shared login to
-    /// an account with capacity.
+    /// Started by a limit hook: retain the failed turn for recovery.
     RecordLimit,
     /// Native recovery prompt admission, independent of ordinary hooks.
     Recovery,

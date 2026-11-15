@@ -276,6 +276,7 @@ pane: **Waiting**, **Send it again yourself**, **Recovering**, **Continued**, or
 message yourself when the row says **Send it again yourself**. **Recover affected
 sessions** rechecks the affected conversations at once. Desktop requests the check
 and shows the result; drafts and pending approvals stay in the native client.
+The row goes away at your next message in that conversation.
 States and what to do:
 [Recover after a usage limit](../docs/sessions.md#recover-after-a-usage-limit).
 

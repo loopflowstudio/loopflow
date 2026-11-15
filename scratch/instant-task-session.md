@@ -1,6 +1,7 @@
 # LOO-906: immediate interactions across Desktop and mobile
 
-Concept review revised the admission contract, 2026-11-14; next step is implement. Supersedes the Desktop-only delivery
+Realigned 2026-11-14 after the receipt-cut checkpoint (`d4ecbd8a6b`), synced onto
+origin/main `42b31bc791`; next step is implement. Supersedes the Desktop-only delivery
 boundary. No shipping or merge decision is recorded. Placement remains this Task;
 no Wave is selected.
 
@@ -442,19 +443,10 @@ separately. Neither that target nor a SQL bottleneck has been measured here.
 
 ## Implement direction
 
-Use confirmed cache plus ordered operation overlays as the next implementation
-path. This is a headless engineering choice, not a recorded product preference:
-it meets the stated immediate-interaction requirements while keeping execution
-and derived status with the Machine. Full offline authoring of arbitrary domain
-state has not been requested. A mutable replica remains the evaluated alternative
-above; it must not silently add different conflict or execution semantics.
-
-Query membership and GRDB/toolchain cost are implementation investigations, not
-questions requiring a person. Prove one membership vocabulary across Rust and
-both clients before migration. If the declarative plan cannot express it, use the
-shared pure projection core described above. Check GRDB on both app toolchains
-before adopting it; the transactional cache/outbox contract is required regardless
-of library. No new product choice is needed to start this work.
+Cache plus overlays is a headless engineering choice, not a recorded product
+preference (see `questions.md`). Prove one membership vocabulary across Rust and
+both clients before migration; check GRDB on both app toolchains before adopting
+it. The transactional cache/outbox contract holds regardless of library.
 
 Preserve the launch counterexamples in the shared tests: pre-admission cached
 Task data, a fresh unrelated planning frame, unavailable or missing Task rows,
@@ -485,8 +477,6 @@ Proposed usage text for the affected Desktop/mobile docs:
 
 Keep this text marked proposed until each client uses the shared owner. Existing
 creation-recovery instructions remain valid; no skill workflow change is needed.
-Show the same journeys with held network replies next, including overlap and
-restart recovery; demo still owns native latency samples.
 
 Additional held-response counterexamples for the shared owner: a list at planning
 revision 12 arrives before a detail response at revision 11 for the same Task;
@@ -496,11 +486,6 @@ leaves a filtered list but remains open elsewhere; retain its entity/workspace.
 After an epoch change, an old frame and a lost-write recovery reply arrive; neither
 may restore the old base or trigger a second submission. These refine the existing
 cache/overlay design and require no new product choice.
-
-Headless concept-review outcome: design changed; iterate to implement the shared
-client store and cross-platform cut. Completion follows the quoted 1b choice.
-The prior launch-only feedback is retained as regression requirements, rather
-than the final scope. That concept review changed the design without changing production code.
 
 The launch checkpoint and its earlier 23-case result are recorded at
 `9387f63e59ee91e8496e64b9304c73f152da589e:scratch/instant-task-session.md`.
@@ -611,12 +596,10 @@ Required counterexamples before dependent work:
    revision update the client; admission never enables input or retires overlays.
 
 These are engineering consequences of immediate admission and lossless recovery,
-not a new product choice. Headless concept-review outcome: **design changed →
-iterate to implement**, beginning with admission identity, then domain recovery,
-transactional cache/outbox, query membership and both-client migration. The launch
-regression cases above remain mandatory. No production changes or checks were run
-by this review; native sampling remains for demo, with baseline collection still
-part of implementation.
+not a new product choice. Order of remaining work: admission identity, domain
+recovery and all-writer fences, transactional cache/outbox, query membership,
+both-client migration with the launch exception deleted. The launch regression
+cases above remain mandatory.
 
 The new Swift mirror and exact-query fence comparison are shared with iOS; live
 clients still use their existing creation/mutation owners. No client projection
@@ -634,6 +617,18 @@ coverage of that query, not complete external membership or native readiness.
 Previous 50-Desktop/15-Rust/one-iOS read-contract checks are recoverable at
 `950b83a138e2c3894f58ad260cad4bfd9d3fe839:scratch/instant-task-session.md`.
 They do not cover the new receipt cut.
+
+## Upstream since the last pass (origin/main `42b31bc791`)
+
+- #1943 (LOO-905) added a third Desktop freshness owner: `WorkModel.taskPresentation`
+  / `TaskPresentation` prefers current names over retained ones per source and keeps
+  planning rows until the Task list answers. The shared normalized store absorbs it;
+  its cases (fresh roadmap before list, empty list answer, failed refresh keeps
+  names, one combined read-failure notice with Retry) join the shared tests.
+- #1942 (LOO-910) forwards terminal visibility to Ghostty, so hidden retained
+  surfaces pause rendering. A healthy revisit must unhide the retained surface,
+  not reattach it; click-to-cached-content timing includes that resume.
+- #1945 bounds the Desktop New session recovery test per attempt (3 s). Test-only.
 
 ## Benchmark implementation and observations (2026-11-14)
 

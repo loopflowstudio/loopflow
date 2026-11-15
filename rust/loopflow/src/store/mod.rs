@@ -22,7 +22,7 @@ mod migration_catalog;
 mod migration_schema;
 pub mod migrations;
 pub(crate) mod people;
-mod planning_peers;
+pub mod planning_peers;
 mod planning_reads;
 pub mod planning_sync;
 mod pr_landings;
@@ -1332,7 +1332,11 @@ mod tests {
             .expect("current unix time");
         let id = TaskId::new();
         Task {
-            repository_id: store.sqlite.ensure_repository(wave.repo()).unwrap(),
+            repository_id: crate::repository::location::ensure_repository(
+                &store.sqlite,
+                wave.repo(),
+            )
+            .unwrap(),
             id: id.clone(),
 
             revision: 0,
@@ -1925,12 +1929,11 @@ mod tests {
                 store
                     .sqlite
                     .create_task(&crate::work::task::NewTask {
-                        repository_id: store
-                            .sqlite
-                            .ensure_repository(
-                                directory.path().canonicalize().unwrap().to_str().unwrap(),
-                            )
-                            .unwrap(),
+                        repository_id: crate::repository::location::ensure_repository(
+                            &store.sqlite,
+                            directory.path().canonicalize().unwrap().to_str().unwrap(),
+                        )
+                        .unwrap(),
                         due_date: None,
                         id: TaskId::new(),
                         project_id: Some(project.id),

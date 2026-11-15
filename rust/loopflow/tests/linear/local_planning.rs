@@ -579,9 +579,11 @@ fn public_task_prefixes_resolve_and_report_ambiguity() {
     for (id, title) in [(first, "First"), (second, "Second")] {
         store
             .create_task(&loopflow::work::task::NewTask {
-                repository_id: store
-                    .ensure_repository(repo.path().canonicalize().unwrap().to_str().unwrap())
-                    .unwrap(),
+                repository_id: crate::repository::location::ensure_repository(
+                    &store,
+                    repo.path().canonicalize().unwrap().to_str().unwrap(),
+                )
+                .unwrap(),
                 due_date: None,
                 id: loopflow::durable::TaskId::parse(id).unwrap(),
                 project_id: Some(loopflow::durable::ProjectId::parse(&project).unwrap()),
@@ -2060,9 +2062,11 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
         }
         let task = store
             .create_task(&NewTask {
-                repository_id: store
-                    .ensure_repository(repo.path().canonicalize().unwrap().to_str().unwrap())
-                    .unwrap(),
+                repository_id: crate::repository::location::ensure_repository(
+                    &store,
+                    repo.path().canonicalize().unwrap().to_str().unwrap(),
+                )
+                .unwrap(),
                 due_date: None,
                 id: TaskId::new(),
                 project_id: Some(projects[0].id.clone()),

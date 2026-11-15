@@ -2668,7 +2668,7 @@ mod metadata_tests {
     fn task_history_reads_every_row_naming_the_task() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
-        let repository = store.ensure_repository("/repo").unwrap();
+        let repository = crate::repository::location::ensure_repository(&store, "/repo").unwrap();
         let [task, other] = [0, 1].map(|_| {
             let id = loopflow_model::durable::TaskId::new();
             store

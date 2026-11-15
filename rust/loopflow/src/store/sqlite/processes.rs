@@ -3234,7 +3234,8 @@ mod forget_tests {
         let task = loopflow_model::durable::TaskId::new();
         store
             .create_task(&crate::work::task::NewTask {
-                repository_id: store.ensure_repository("/repo").unwrap(),
+                repository_id: crate::repository::location::ensure_repository(&store, "/repo")
+                    .unwrap(),
                 id: task.clone(),
                 project_id: None,
                 title: "Shipped Task".into(),

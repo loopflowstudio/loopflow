@@ -1465,7 +1465,7 @@ mod tests {
     fn reverse_session_membership_keeps_lexical_checkout_and_binding_rules() {
         let dir = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
-        let repository = store.ensure_repository("/repo").unwrap();
+        let repository = crate::repository::location::ensure_repository(&store, "/repo").unwrap();
         let roots = [
             Some("/"),
             Some("/repo"),
@@ -1575,7 +1575,11 @@ mod tests {
         let task = store
             .create_task(&crate::work::task::NewTask {
                 id: TaskId::new(),
-                repository_id: store.ensure_repository("/request-stop").unwrap(),
+                repository_id: crate::repository::location::ensure_repository(
+                    &store,
+                    "/request-stop",
+                )
+                .unwrap(),
                 project_id: None,
                 title: "Stop".into(),
                 description: String::new(),
@@ -1641,7 +1645,8 @@ mod tests {
             .unwrap();
         store
             .create_task(&crate::work::task::NewTask {
-                repository_id: store.ensure_repository("/repo").unwrap(),
+                repository_id: crate::repository::location::ensure_repository(&store, "/repo")
+                    .unwrap(),
                 id: task.clone(),
                 project_id: Some(project),
                 title: "Retained Task".into(),
@@ -1854,7 +1859,8 @@ mod tests {
         let by = LfProcessId::new();
         store
             .create_task(&crate::work::task::NewTask {
-                repository_id: store.ensure_repository("/repo").unwrap(),
+                repository_id: crate::repository::location::ensure_repository(&store, "/repo")
+                    .unwrap(),
                 id: task.clone(),
                 project_id: None,
                 title: "Finish review".into(),
@@ -2587,7 +2593,10 @@ mod tests {
             store
                 .create_task(&crate::work::task::NewTask {
                     id: id.clone(),
-                    repository_id: store.ensure_repository("/moving").unwrap(),
+                    repository_id: crate::repository::location::ensure_repository(
+                        &store, "/moving",
+                    )
+                    .unwrap(),
                     project_id: None,
                     title: "Move".into(),
                     description: String::new(),
@@ -2624,7 +2633,8 @@ mod tests {
         store
             .create_task(&crate::work::task::NewTask {
                 id: id.clone(),
-                repository_id: store.ensure_repository("/shipping").unwrap(),
+                repository_id: crate::repository::location::ensure_repository(&store, "/shipping")
+                    .unwrap(),
                 project_id: None,
                 title: "Ship".into(),
                 description: String::new(),

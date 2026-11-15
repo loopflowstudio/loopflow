@@ -757,9 +757,11 @@ pub(crate) fn checkout_of(
     );
     fs::create_dir_all(&root)?;
     crate::git::git_stdout(&root, &["clone", "-q", origin, &path.to_string_lossy()])?;
-    store
-        .sqlite
-        .bind_repository(&path.canonicalize()?.to_string_lossy(), repository)?;
+    crate::repository::location::bind_repository(
+        &store.sqlite,
+        &path.canonicalize()?.to_string_lossy(),
+        repository,
+    )?;
     Ok(path.canonicalize()?)
 }
 

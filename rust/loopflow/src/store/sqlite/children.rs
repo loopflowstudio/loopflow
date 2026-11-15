@@ -2626,7 +2626,7 @@ mod local_planning_tests {
         let repo = store.home_dir().unwrap();
         // Fence Git discovery before registering the fixture repository.
         std::fs::create_dir_all(repo.join(".git")).unwrap();
-        store.ensure_repository(repo.to_str().unwrap()).unwrap()
+        crate::repository::location::ensure_repository(store, repo.to_str().unwrap()).unwrap()
     }
 
     fn local_project(store: &SqliteStore) -> ProjectId {
@@ -2989,8 +2989,14 @@ mod local_planning_tests {
         peer.bind_peer_planning(target_repo, &destination).unwrap();
         let snapshot = store.export_peer_planning(repo, &destination_id).unwrap();
         for _ in 0..2 {
-            peer.import_peer_planning(target_repo, &destination_id, "fixture", &snapshot)
-                .unwrap();
+            crate::store::planning_peers::import_peer_planning(
+                &peer,
+                target_repo,
+                &destination_id,
+                "fixture",
+                &snapshot,
+            )
+            .unwrap();
             let imported = peer.task(&task.id).unwrap().unwrap();
             assert_eq!(imported.id, saved.id);
             assert_eq!(imported.project_id, saved.project_id);

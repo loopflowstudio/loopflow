@@ -2748,9 +2748,11 @@ mod tests {
             let task = loopflow_model::durable::TaskId::new();
             store
                 .create_task(&crate::work::task::NewTask {
-                    repository_id: store
-                        .ensure_repository(repo.path().to_str().unwrap())
-                        .unwrap(),
+                    repository_id: crate::repository::location::ensure_repository(
+                        &store,
+                        repo.path().to_str().unwrap(),
+                    )
+                    .unwrap(),
                     id: task.clone(),
                     project_id: None,
                     title: "Completed wait".into(),
@@ -3121,7 +3123,11 @@ mod tests {
         let path = repo.path().canonicalize().unwrap();
         let task = store
             .create_task(&crate::work::task::NewTask {
-                repository_id: store.ensure_repository(path.to_str().unwrap()).unwrap(),
+                repository_id: crate::repository::location::ensure_repository(
+                    store,
+                    path.to_str().unwrap(),
+                )
+                .unwrap(),
                 id: loopflow_model::durable::TaskId::new(),
                 project_id: None,
                 title: title.into(),

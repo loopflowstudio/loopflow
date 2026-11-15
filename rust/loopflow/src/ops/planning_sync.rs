@@ -347,9 +347,14 @@ fn acquire_destination(
         .map_err(message)?;
     let imported = if let Some(document) = remote {
         let snapshot = PlanningSnapshot::from_bytes(&document.bytes).map_err(message)?;
-        store
-            .import_peer_planning(repo, destination, document.revision.as_str(), &snapshot)
-            .map_err(message)?;
+        crate::store::planning_peers::import_peer_planning(
+            store,
+            repo,
+            destination,
+            document.revision.as_str(),
+            &snapshot,
+        )
+        .map_err(message)?;
         Some((document.revision, snapshot))
     } else {
         None

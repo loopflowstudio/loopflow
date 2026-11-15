@@ -226,7 +226,11 @@ mod tests {
         let task = store
             .create_task(&NewTask {
                 id: TaskId::new(),
-                repository_id: store.ensure_repository(repo.to_str().unwrap()).unwrap(),
+                repository_id: crate::repository::location::ensure_repository(
+                    &store,
+                    repo.to_str().unwrap(),
+                )
+                .unwrap(),
                 project_id: None,
                 title: "Moving".into(),
                 description: String::new(),

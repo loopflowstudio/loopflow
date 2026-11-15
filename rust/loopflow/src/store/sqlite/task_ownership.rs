@@ -1121,7 +1121,11 @@ mod tests {
         let task = store
             .create_task(&NewTask {
                 id: TaskId::new(),
-                repository_id: store.ensure_repository(repo.to_str().unwrap()).unwrap(),
+                repository_id: crate::repository::location::ensure_repository(
+                    &store,
+                    repo.to_str().unwrap(),
+                )
+                .unwrap(),
                 project_id: None,
                 title: "Private Machines".into(),
                 description: String::new(),
@@ -1471,7 +1475,7 @@ mod tests {
                 let repo = TestRepo::new();
                 let path = repo.path().canonicalize().unwrap();
                 let path = path.to_str().unwrap().to_owned();
-                store.bind_repository(&path, &repository).unwrap();
+                crate::repository::location::bind_repository(&store, &path, &repository).unwrap();
                 store.bind_peer_planning(&path, &destination).unwrap();
                 Side { store, repo, path }
             };
@@ -1483,7 +1487,11 @@ mod tests {
             let task = mini
                 .store
                 .create_task(&NewTask {
-                    repository_id: mini.store.ensure_repository(&mini.path).unwrap(),
+                    repository_id: crate::repository::location::ensure_repository(
+                        &mini.store,
+                        &mini.path,
+                    )
+                    .unwrap(),
                     id: TaskId::new(),
                     project_id: Some(project.id),
                     title: "Ownership demo".into(),
@@ -1507,14 +1515,14 @@ mod tests {
                 .store
                 .export_peer_planning(&from.path, &destination)
                 .unwrap();
-            to.store
-                .import_peer_planning(
-                    &to.path,
-                    &destination,
-                    &uuid::Uuid::new_v4().to_string(),
-                    &journal,
-                )
-                .unwrap();
+            crate::store::planning_peers::import_peer_planning(
+                &to.store,
+                &to.path,
+                &destination,
+                &uuid::Uuid::new_v4().to_string(),
+                &journal,
+            )
+            .unwrap();
         }
 
         fn to_laptop(&self) {

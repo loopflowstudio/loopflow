@@ -69,7 +69,8 @@ fn seed(home: &Path, pid: u32) {
         .success());
     let repo = repo.canonicalize().unwrap();
     let store = SqliteStore::open_ephemeral(&home.join("loopflow.db")).unwrap();
-    let repository_id = store.ensure_repository(repo.to_str().unwrap()).unwrap();
+    let repository_id =
+        crate::repository::location::ensure_repository(&store, repo.to_str().unwrap()).unwrap();
     for i in 0..64 {
         store
             .create_task(&crate::work::task::NewTask {

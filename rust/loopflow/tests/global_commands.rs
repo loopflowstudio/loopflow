@@ -713,9 +713,11 @@ fn repo_selection_carries_scoped_task_prefix_through_reads_and_writes() {
             .unwrap();
         store
             .create_task(&loopflow::work::task::NewTask {
-                repository_id: store
-                    .ensure_repository(repo.canonicalize().unwrap().to_str().unwrap())
-                    .unwrap(),
+                repository_id: loopflow::repository::location::ensure_repository(
+                    &store,
+                    repo.canonicalize().unwrap().to_str().unwrap(),
+                )
+                .unwrap(),
                 due_date: None,
                 id: loopflow::durable::TaskId::parse(id).unwrap(),
                 project_id: Some(loopflow::durable::ProjectId::parse(&project).unwrap()),
@@ -742,9 +744,11 @@ fn repo_selection_carries_scoped_task_prefix_through_reads_and_writes() {
         .unwrap_err()
         .to_string()
         .contains("multiple stable Tasks"));
-    let repository = store
-        .ensure_repository(selected.path().canonicalize().unwrap().to_str().unwrap())
-        .unwrap();
+    let repository = loopflow::repository::location::ensure_repository(
+        &store,
+        selected.path().canonicalize().unwrap().to_str().unwrap(),
+    )
+    .unwrap();
     for (flag, value) in [
         ("--repo", selected.path().to_str().unwrap()),
         ("--repo-id", repository.as_str()),
@@ -1729,7 +1733,8 @@ fn repository_recovery_refuses_copies_and_reuses_verified_legacy_identity() {
     let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let store = SqliteStore::new(&home.path().join(".lf/loopflow.db")).unwrap();
     let old = original.path().canonicalize().unwrap();
-    let id = store.ensure_repository(old.to_str().unwrap()).unwrap();
+    let id =
+        loopflow::repository::location::ensure_repository(&store, old.to_str().unwrap()).unwrap();
     let root = tempfile::tempdir().unwrap();
     let copy = root.path().join("copy");
     success(
@@ -2357,9 +2362,11 @@ fn task_planning_explain_move_resolves_destination_and_retains_recorded_work() {
     let destination = project("destination");
     let task = store
         .create_task(&loopflow::work::task::NewTask {
-            repository_id: store
-                .ensure_repository(repo.path().canonicalize().unwrap().to_str().unwrap())
-                .unwrap(),
+            repository_id: loopflow::repository::location::ensure_repository(
+                &store,
+                repo.path().canonicalize().unwrap().to_str().unwrap(),
+            )
+            .unwrap(),
             due_date: None,
             id: loopflow::durable::TaskId::new(),
             project_id: Some(loopflow::durable::ProjectId::parse(&source).unwrap()),
@@ -2429,9 +2436,11 @@ fn task_planning_explain_move_resolves_destination_and_retains_recorded_work() {
     // Execution addresses the same durable destination, not a new Wave named after its ID.
     let second = store
         .create_task(&loopflow::work::task::NewTask {
-            repository_id: store
-                .ensure_repository(repo.path().canonicalize().unwrap().to_str().unwrap())
-                .unwrap(),
+            repository_id: loopflow::repository::location::ensure_repository(
+                &store,
+                repo.path().canonicalize().unwrap().to_str().unwrap(),
+            )
+            .unwrap(),
             due_date: None,
             id: loopflow::durable::TaskId::new(),
             project_id: task.project_id.clone(),

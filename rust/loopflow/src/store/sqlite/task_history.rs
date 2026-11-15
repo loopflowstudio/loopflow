@@ -225,14 +225,15 @@ fn recover_filing_in(conn: &Connection, intent: &RetainedFiling) -> StoreResult<
         conn,
         &crate::work::task::NewTask {
             id,
-            repository_id: super::repositories::ensure_repository_in(
+            repository_id: super::repositories::repository_id_in(
                 conn,
                 &conn.query_row(
                     "SELECT w.repo FROM projects p JOIN waves w ON w.id=p.wave_id WHERE p.id=?1",
                     [&project_id],
                     |row| row.get::<_, String>(0),
                 )?,
-            )?,
+            )?
+            .ok_or(StoreError::NotFound)?,
             project_id: Some(loopflow_model::durable::ProjectId::from_raw(project_id)),
             title: intent.title.clone(),
             description: intent.notes.clone(),

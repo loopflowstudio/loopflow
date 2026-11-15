@@ -635,9 +635,11 @@ mod tests {
         let task = store
             .create_task(&crate::work::task::NewTask {
                 id: loopflow_model::durable::TaskId::new(),
-                repository_id: store
-                    .ensure_repository(home.path().to_str().unwrap())
-                    .unwrap(),
+                repository_id: crate::repository::location::ensure_repository(
+                    &store,
+                    home.path().to_str().unwrap(),
+                )
+                .unwrap(),
                 project_id: None,
                 title: "Retain Session work".into(),
                 description: "Existing work before owner replacement".into(),

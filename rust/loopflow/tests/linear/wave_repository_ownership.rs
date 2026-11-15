@@ -90,7 +90,8 @@ fn task(
     let now = OffsetDateTime::now_utc();
     let id = TaskId::new();
     let task = Task {
-        repository_id: store.sqlite.ensure_repository(wave.repo()).unwrap(),
+        repository_id: crate::repository::location::ensure_repository(&store.sqlite, wave.repo())
+            .unwrap(),
         id: id.clone(),
 
         revision: 0,

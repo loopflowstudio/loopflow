@@ -389,7 +389,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("loopflow.db");
         let store = SqliteStore::open_ephemeral(&path).unwrap();
-        let repo = store.ensure_repository("/repo").unwrap();
+        let repo = crate::repository::location::ensure_repository(&store, "/repo").unwrap();
         let task = TaskId::new();
         let viewer = loopflow_model::id::TerminalId::new();
         store.create_terminal(&viewer, "build").unwrap();
@@ -537,7 +537,8 @@ mod tests {
         store
             .create_task(&crate::work::task::NewTask {
                 id: task.clone(),
-                repository_id: store.ensure_repository("/repo").unwrap(),
+                repository_id: crate::repository::location::ensure_repository(&store, "/repo")
+                    .unwrap(),
                 project_id: None,
                 title: "Ship".into(),
                 description: String::new(),
@@ -694,7 +695,8 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
         let repo = store.home_dir().unwrap();
         std::fs::create_dir_all(repo.join(".git")).unwrap();
-        let repository_id = store.ensure_repository(repo.to_str().unwrap()).unwrap();
+        let repository_id =
+            crate::repository::location::ensure_repository(&store, repo.to_str().unwrap()).unwrap();
         let traced = statements(&store, || {
             store
                 .create_task(&crate::work::task::NewTask {

@@ -356,8 +356,7 @@ fn same_named_repositories_need_a_qualifier_and_change_nothing() {
         }
         ids.push((
             path.clone(),
-            store
-                .ensure_repository(&path.display().to_string())
+            loopflow::repository::location::ensure_repository(&store, &path.display().to_string())
                 .unwrap(),
         ));
     }

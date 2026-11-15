@@ -764,7 +764,8 @@ mod tests {
             let project = store.ensure_wave_project(repo, "inbox").unwrap();
             store
                 .create_task(&NewTask {
-                    repository_id: store.ensure_repository(repo).unwrap(),
+                    repository_id: crate::repository::location::ensure_repository(&store, repo)
+                        .unwrap(),
                     due_date: None,
                     id: id.clone(),
                     project_id: Some(project.id),
@@ -775,7 +776,7 @@ mod tests {
         }
         let prior = store.repository_id(selected_repo).unwrap().unwrap();
         let selected = RepositoryId::new();
-        store.bind_repository(selected_repo, &selected).unwrap();
+        crate::repository::location::bind_repository(&store, selected_repo, &selected).unwrap();
         let cli = Cli::try_parse_from(["lf", "--repo-id", prior.as_str()]).unwrap();
         assert_eq!(
             resolve_task(&store, &cli, "abcd", Path::new("/")).unwrap(),
@@ -829,7 +830,8 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("LF_HOME", home.path());
         let store = SqliteStore::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
-        let id = store.ensure_repository("/selected/repository").unwrap();
+        let id =
+            crate::repository::location::ensure_repository(&store, "/selected/repository").unwrap();
         assert_eq!(
             repository_path(&id).unwrap(),
             std::path::Path::new("/selected/repository")

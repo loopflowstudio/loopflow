@@ -386,16 +386,12 @@ pub(crate) fn observe<'a>(
     Ok(())
 }
 
-/// The repository's planning identity. Registering one reads its Git
-/// locator, so only an unregistered repository pays that under the lock.
+/// Registration is acquired by the application before the command transaction.
 fn registered_repository_in(
     conn: &Connection,
     repo: &str,
 ) -> StoreResult<loopflow_model::durable::RepositoryId> {
-    match super::repositories::repository_id_in(conn, repo)? {
-        Some(id) => Ok(id),
-        None => super::repositories::ensure_repository_in(conn, repo),
-    }
+    super::repositories::repository_id_in(conn, repo)?.ok_or(StoreError::NotFound)
 }
 
 pub(crate) fn ensure_record(
@@ -607,7 +603,8 @@ mod tests {
         let id = TaskId::new();
         store
             .create_task(&NewTask {
-                repository_id: store.ensure_repository("/repo").unwrap(),
+                repository_id: crate::repository::location::ensure_repository(store, "/repo")
+                    .unwrap(),
                 id: id.clone(),
                 project_id: Some(project),
                 title: "Original".into(),
@@ -656,8 +653,14 @@ mod tests {
             tx.commit().unwrap();
         }
         let journal = a.export_peer_planning("/repo", &route.id()).unwrap();
-        b.import_peer_planning("/repo", &route.id(), "first", &journal)
-            .unwrap();
+        crate::store::planning_peers::import_peer_planning(
+            &b,
+            "/repo",
+            &route.id(),
+            "first",
+            &journal,
+        )
+        .unwrap();
 
         assert_eq!(b.task(&task).unwrap().unwrap().title, "Original");
         assert!(exchanged(&b).contains(&released));
@@ -716,7 +719,7 @@ mod tests {
         let task = a
             .create_task(&NewTask {
                 id: TaskId::new(),
-                repository_id: a.ensure_repository(path).unwrap(),
+                repository_id: crate::repository::location::ensure_repository(&a, path).unwrap(),
                 project_id: None,
                 title: "Before filing".into(),
                 description: "Keep the same Work".into(),
@@ -735,8 +738,14 @@ mod tests {
         .unwrap();
         let claim = a.claim_task(&task.id).unwrap().unwrap();
         let journal = a.export_peer_planning(path, &route.id()).unwrap();
-        b.import_peer_planning(path, &route.id(), "first", &journal)
-            .unwrap();
+        crate::store::planning_peers::import_peer_planning(
+            &b,
+            path,
+            &route.id(),
+            "first",
+            &journal,
+        )
+        .unwrap();
         let imported = b.task(&task.id).unwrap().unwrap();
         assert!(imported.project_id.is_none());
         assert_ne!(imported.repository_id, task.repository_id);
@@ -756,8 +765,14 @@ mod tests {
         let project = b.ensure_wave_project(path, "product").unwrap();
         b.move_task(&task.id, None, Some(&project.id)).unwrap();
         let journal = b.export_peer_planning(path, &route.id()).unwrap();
-        a.import_peer_planning(path, &route.id(), "attached", &journal)
-            .unwrap();
+        crate::store::planning_peers::import_peer_planning(
+            &a,
+            path,
+            &route.id(),
+            "attached",
+            &journal,
+        )
+        .unwrap();
         assert_eq!(
             a.task(&task.id).unwrap().unwrap().project_id,
             Some(project.id.clone())
@@ -765,8 +780,14 @@ mod tests {
         a.move_task(&task.id, Some(&project.id), None).unwrap();
         a.delete_task(&task.id).unwrap();
         let journal = a.export_peer_planning(path, &route.id()).unwrap();
-        b.import_peer_planning(path, &route.id(), "detached", &journal)
-            .unwrap();
+        crate::store::planning_peers::import_peer_planning(
+            &b,
+            path,
+            &route.id(),
+            "detached",
+            &journal,
+        )
+        .unwrap();
         assert!(b.task(&task.id).unwrap().unwrap().project_id.is_none());
         assert!(b.list_tasks(None).unwrap().is_empty());
         let conn = b.conn.lock().unwrap();
@@ -829,8 +850,14 @@ mod tests {
             .unwrap();
         }
         let journal = a.export_peer_planning("/repo", &route.id()).unwrap();
-        b.import_peer_planning("/repo", &route.id(), "revision", &journal)
-            .unwrap();
+        crate::store::planning_peers::import_peer_planning(
+            &b,
+            "/repo",
+            &route.id(),
+            "revision",
+            &journal,
+        )
+        .unwrap();
         let received = b.project(project.as_ref().unwrap()).unwrap().unwrap();
         assert_eq!(received.description, saved.description);
         assert_eq!(received.krs, saved.krs);
@@ -886,7 +913,7 @@ mod tests {
             store.bind_peer_planning("/repo", &route).unwrap();
         }
         let base = a.export_peer_planning("/repo", &route.id()).unwrap();
-        b.import_peer_planning("/repo", &route.id(), "base", &base)
+        crate::store::planning_peers::import_peer_planning(&b, "/repo", &route.id(), "base", &base)
             .unwrap();
         {
             let conn = b.conn.lock().unwrap();
@@ -974,11 +1001,23 @@ mod tests {
             snapshot,
             a.export_peer_planning("/repo", &route.id()).unwrap()
         );
-        b.import_peer_planning("/repo", &route.id(), "next", &snapshot)
-            .unwrap();
+        crate::store::planning_peers::import_peer_planning(
+            &b,
+            "/repo",
+            &route.id(),
+            "next",
+            &snapshot,
+        )
+        .unwrap();
         let revision = b.revisions().unwrap();
-        b.import_peer_planning("/repo", &route.id(), "next", &snapshot)
-            .unwrap();
+        crate::store::planning_peers::import_peer_planning(
+            &b,
+            "/repo",
+            &route.id(),
+            "next",
+            &snapshot,
+        )
+        .unwrap();
         assert_eq!(revision, b.revisions().unwrap());
         assert_eq!(execution(), retained_execution);
         let received = b.task(&task).unwrap().unwrap();
@@ -1102,9 +1141,14 @@ mod tests {
                 },
             );
         }
-        store
-            .import_peer_planning("/repo", &route.id(), "rejected", &incoming)
-            .unwrap();
+        crate::store::planning_peers::import_peer_planning(
+            &store,
+            "/repo",
+            &route.id(),
+            "rejected",
+            &incoming,
+        )
+        .unwrap();
         let exported = store.export_peer_planning("/repo", &route.id()).unwrap();
         assert_eq!(exported.changes["rejected"], incoming.changes["rejected"]);
         let status = store.peer_planning_status("/repo", None).unwrap().remove(0);
@@ -1156,9 +1200,14 @@ mod tests {
         let mut reused = incoming;
         reused.changes.get_mut("rename").unwrap().edit.change =
             WorkValue::WaveName("Reused identity".into());
-        assert!(store
-            .import_peer_planning("/repo", &route.id(), "invalid", &reused)
-            .is_err());
+        assert!(crate::store::planning_peers::import_peer_planning(
+            &store,
+            "/repo",
+            &route.id(),
+            "invalid",
+            &reused
+        )
+        .is_err());
         assert_eq!(
             store.export_peer_planning("/repo", &route.id()).unwrap(),
             before

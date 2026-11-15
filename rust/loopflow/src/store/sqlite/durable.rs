@@ -767,7 +767,7 @@ mod durable_store_tests {
         )
         .unwrap();
         let task = Task {
-            repository_id: store.ensure_repository("/repo").unwrap(),
+            repository_id: crate::repository::location::ensure_repository(&store, "/repo").unwrap(),
             id: task_id.clone(),
 
             revision: 0,

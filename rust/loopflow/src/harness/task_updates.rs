@@ -385,7 +385,11 @@ mod tests {
         let task = TaskId::new();
         store
             .create_task(&crate::work::task::NewTask {
-                repository_id: store.ensure_repository("/task-updates").unwrap(),
+                repository_id: crate::repository::location::ensure_repository(
+                    &store,
+                    "/task-updates",
+                )
+                .unwrap(),
                 id: task.clone(),
                 project_id: None,
                 title: "Updates".into(),

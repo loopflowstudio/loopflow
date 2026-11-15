@@ -369,7 +369,7 @@ mod tests {
     #[test]
     fn planning_moves_for_changes_not_reading_times() {
         let (_dir, store) = store();
-        let repo = store.ensure_repository("/repo").unwrap();
+        let repo = crate::repository::location::ensure_repository(&store, "/repo").unwrap();
         let task = TaskId::new();
         let issue = uuid::Uuid::new_v4().to_string();
         let delivery = uuid::Uuid::new_v4().to_string();

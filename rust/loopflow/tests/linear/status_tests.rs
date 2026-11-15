@@ -247,7 +247,7 @@ fn seed_stale_project_work(
     store.insert_project(&stale).expect("seed stale Project");
     select_project(home, &wave, stale.linear_id.as_ref().unwrap().as_str());
     let stale_task = Task {
-        repository_id: store.ensure_repository(wave.repo()).unwrap(),
+        repository_id: crate::repository::location::ensure_repository(&store, wave.repo()).unwrap(),
         id: TaskId::parse(STALE_TASK_WORK_ID).expect("recorded Task Work id"),
 
         revision: 0,

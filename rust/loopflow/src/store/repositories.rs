@@ -10,7 +10,10 @@ impl Store {
 
     pub async fn ensure_repository(&self, repo: &str) -> StoreResult<RepositoryId> {
         let repo = repo.to_string();
-        run_sqlite(&self.sqlite, move |store| store.ensure_repository(&repo)).await
+        run_sqlite(&self.sqlite, move |store| {
+            crate::repository::location::ensure_repository(&store, &repo)
+        })
+        .await
     }
 
     pub async fn repository_id(&self, repo: &str) -> StoreResult<Option<RepositoryId>> {

@@ -327,7 +327,8 @@ mod tests {
 
         let task = store
             .create_task(&crate::work::task::NewTask {
-                repository_id: store.ensure_repository("/repo").unwrap(),
+                repository_id: crate::repository::location::ensure_repository(&store, "/repo")
+                    .unwrap(),
                 due_date: None,
                 id: loopflow_model::durable::TaskId::new(),
                 project_id: None,
@@ -386,7 +387,8 @@ mod tests {
     fn a_moved_checkouts_delivery_follows_the_repository() {
         let (home, store, adapter, delivery) = fixture();
         let old = home.path().join("repo");
-        let id = store.ensure_repository(old.to_str().unwrap()).unwrap();
+        let id =
+            crate::repository::location::ensure_repository(&store, old.to_str().unwrap()).unwrap();
         let mut saved = ContextDelivery::load(&delivery).unwrap();
         saved.repository = Some((id.clone(), old.clone()));
         saved.skill_file = Some(old.join("active.md"));

@@ -180,7 +180,7 @@ fn open_task(store: &SqliteStore) -> TaskId {
         pm_snapshot_synced_at: None,
         pm_writeback: LinearWritebackState::Current,
         wave_id: None,
-        repository_id: store.ensure_repository("/repo").unwrap(),
+        repository_id: crate::repository::location::ensure_repository(store, "/repo").unwrap(),
         project_id: None,
         worktree: None,
         workspace_slug: String::new(),

@@ -194,43 +194,25 @@ impl SqliteStore {
         };
         decode_snapshot(rows)
     }
-    pub fn import_peer_planning(
+    pub(crate) fn peer_import_current(
         &self,
         repo: &str,
         destination: &str,
         revision: &str,
-        incoming: &PlanningSnapshot,
-    ) -> StoreResult<()> {
+    ) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM planning_peer_imports WHERE repo=?1 AND destination=?2 AND revision=?3)
+                AND NOT EXISTS(SELECT 1 FROM planning_peer_conflicts WHERE repo=?1 AND active=1)",
+            params![repo, destination, revision], |row| row.get(0),
+        )?)
+    }
+
+    pub(crate) fn import_prepared_peer_planning(
+        &self,
+        import: &PeerImport<'_>,
+    ) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        // Every running agent acquires each second and the remote rarely
-        // moves. A revision already imported with nothing left in conflict
-        // would merge to what is stored; skip it before taking the write lock.
-        let (imported, in_conflict): (bool, bool) = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM planning_peer_imports WHERE repo=?1 AND destination=?2 AND revision=?3),
-                    EXISTS(SELECT 1 FROM planning_peer_conflicts WHERE repo=?1 AND active=1)",
-            params![repo, destination, revision],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )?;
-        if imported && !in_conflict {
-            return Ok(());
-        }
-        let incoming = incoming.canonicalized().map_err(invalid)?;
-        incoming.validate().map_err(invalid)?;
-        // Registering a repository reads its Git locator; do it before the lock.
-        if super::repositories::repository_id_in(&conn, repo)?.is_none() {
-            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-            super::repositories::ensure_repository_in(&tx, repo)?;
-            tx.commit()?;
-        }
-        let import = Import {
-            repo,
-            destination,
-            revision,
-            incoming: &incoming,
-            // Reasserting a claim needs the repository's planning configuration.
-            planning_connected: crate::ops::planning_client::connected(repo),
-            machine_names: super::task_ownership::machine_names_in(&conn)?,
-        };
         let plan = import.read(&mut conn)?;
         import.write(&mut conn, plan)
     }
@@ -332,13 +314,15 @@ impl SqliteStore {
 
 /// One peer planning import. Reading and merging the local history takes no
 /// write lock; only `write` does, and it plans again only if planning moved.
-struct Import<'a> {
-    repo: &'a str,
-    destination: &'a str,
-    revision: &'a str,
-    incoming: &'a PlanningSnapshot,
-    planning_connected: bool,
-    machine_names: std::collections::HashMap<loopflow_model::durable::MachineId, String>,
+#[derive(Debug)]
+pub(crate) struct PeerImport<'a> {
+    pub inputs: &'a super::repositories::RepositoryRegistration,
+    pub repo: &'a str,
+    pub destination: &'a str,
+    pub revision: &'a str,
+    pub incoming: &'a PlanningSnapshot,
+    pub planning_connected: bool,
+    pub machine_names: std::collections::HashMap<loopflow_model::durable::MachineId, String>,
 }
 
 /// What an import writes, read from one snapshot of the store at `revision`.
@@ -361,7 +345,7 @@ fn planning_revision(conn: &Connection) -> StoreResult<Option<i64>> {
         .optional()?)
 }
 
-impl Import<'_> {
+impl PeerImport<'_> {
     /// Plans in a read transaction, which never takes the write lock.
     fn read(&self, conn: &mut Connection) -> StoreResult<ImportPlan> {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Deferred)?;
@@ -413,10 +397,13 @@ impl Import<'_> {
         Ok(())
     }
 
-    fn write(&self, conn: &mut Connection, mut plan: ImportPlan) -> StoreResult<()> {
+    fn write(&self, conn: &mut Connection, mut plan: ImportPlan) -> StoreResult<bool> {
         let (repo, destination) = (self.repo, self.destination);
         let mut tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         require_destination(&tx, repo, destination)?;
+        if super::repositories::registration_in(&tx, repo)? != *self.inputs {
+            return Ok(false);
+        }
         // Every table the plan read advances the planning revision, and local
         // changes are captured with the record write that moves it.
         if planning_revision(&tx)? != plan.revision {
@@ -427,7 +414,7 @@ impl Import<'_> {
         if unseen.changes.is_empty() {
             self.record_revision(&tx)?;
             tx.commit()?;
-            return Ok(());
+            return Ok(true);
         }
         let records = touched_records(&unseen);
         for (id, change) in &unseen.changes {
@@ -592,7 +579,7 @@ impl Import<'_> {
         }
         self.record_revision(&tx)?;
         tx.commit()?;
-        Ok(())
+        Ok(true)
     }
 }
 
@@ -787,7 +774,7 @@ fn decode_snapshot(rows: Vec<(String, String)>) -> StoreResult<PlanningSnapshot>
 mod tests {
     use std::collections::BTreeSet;
 
-    use super::Import;
+    use super::PeerImport;
     use crate::planning_exchange::{PlanningMutation, PlanningSnapshot};
     use crate::planning_git::PlanningDestination;
     use crate::store::query_plans::{assert_no_empty_writes, growing_scans, statements};
@@ -913,16 +900,27 @@ mod tests {
         // The clone registers the authored identity before fetching planning.
         peer.create_wave(&wave).unwrap();
         let peer_route = destination(&peer, "/repo", "shared");
-        peer.import_peer_planning("/repo", &peer_route, "one", &original)
-            .unwrap();
+        crate::store::planning_peers::import_peer_planning(
+            &peer,
+            "/repo",
+            &peer_route,
+            "one",
+            &original,
+        )
+        .unwrap();
         assert_eq!(
             peer.selected_project(wave.id()).unwrap().unwrap().id,
             project
         );
         let returned = peer.export_peer_planning("/repo", &peer_route).unwrap();
-        author
-            .import_peer_planning("/repo", &author_route, "two", &returned)
-            .unwrap();
+        crate::store::planning_peers::import_peer_planning(
+            &author,
+            "/repo",
+            &author_route,
+            "two",
+            &returned,
+        )
+        .unwrap();
         assert_eq!(
             author.selected_project(wave.id()).unwrap().unwrap().id,
             project
@@ -940,7 +938,8 @@ mod tests {
         author.create_wave(&removed).unwrap();
         let route = destination(&author, "/repo", "shared");
         let before = author.export_peer_planning("/repo", &route).unwrap();
-        peer.import_peer_planning(
+        crate::store::planning_peers::import_peer_planning(
+            &peer,
             "/repo",
             &destination(&peer, "/repo", "shared"),
             "one",
@@ -964,7 +963,8 @@ mod tests {
             "only the removed Wave exchanges a retirement"
         );
         assert_eq!(retired[0].edit.target, removed.id().as_str());
-        peer.import_peer_planning(
+        crate::store::planning_peers::import_peer_planning(
+            &peer,
             "/repo",
             &destination(&peer, "/repo", "shared"),
             "two",
@@ -995,9 +995,10 @@ mod tests {
             .into(),
         };
         for _ in 0..2 {
-            store
-                .import_peer_planning("/repo", &route, "revision", &incoming)
-                .unwrap();
+            crate::store::planning_peers::import_peer_planning(
+                &store, "/repo", &route, "revision", &incoming,
+            )
+            .unwrap();
             assert_eq!(
                 store.export_peer_planning("/repo", &route).unwrap(),
                 incoming
@@ -1094,13 +1095,20 @@ mod tests {
         let (first, first_route) = peer("first");
         let incoming = renamed(&first, &first_route, &wave, "remote");
         rename_locally(&first, &wave, "local");
-        first
-            .import_peer_planning("/repo", &first_route, "two", &incoming)
-            .unwrap();
+        crate::store::planning_peers::import_peer_planning(
+            &first,
+            "/repo",
+            &first_route,
+            "two",
+            &incoming,
+        )
+        .unwrap();
 
         let (between, route) = peer("between");
         let incoming = renamed(&between, &route, &wave, "remote");
-        let import = Import {
+        let inputs = between.repository_registration("/repo").unwrap();
+        let import = PeerImport {
+            inputs: &inputs,
             repo: "/repo",
             destination: &route,
             revision: "two",
@@ -1110,9 +1118,9 @@ mod tests {
         };
         let plan = import.read(&mut between.conn.lock().unwrap()).unwrap();
         rename_locally(&between, &wave, "local");
-        import
+        assert!(import
             .write(&mut between.conn.lock().unwrap(), plan)
-            .unwrap();
+            .unwrap());
 
         assert_eq!(
             between.get_wave(wave.id()).unwrap().unwrap().name(),
@@ -1129,14 +1137,16 @@ mod tests {
         store.create_wave(&wave).unwrap();
         let route = destination(&store, "/repo", "shared");
         let history = store.export_peer_planning("/repo", &route).unwrap();
-        store
-            .import_peer_planning("/repo", &route, "one", &history)
-            .unwrap();
+        crate::store::planning_peers::import_peer_planning(
+            &store, "/repo", &route, "one", &history,
+        )
+        .unwrap();
         let before = store.revisions().unwrap().planning;
         assert_no_empty_writes(&store, || {
-            store
-                .import_peer_planning("/repo", &route, "two", &history)
-                .unwrap()
+            crate::store::planning_peers::import_peer_planning(
+                &store, "/repo", &route, "two", &history,
+            )
+            .unwrap()
         });
         assert_eq!(store.revisions().unwrap().planning, before + 1);
         let status = store.peer_planning_status("/repo", None).unwrap().remove(0);
@@ -1152,9 +1162,10 @@ mod tests {
         let route = destination(&store, "/repo", "shared");
         let incoming = renamed(&store, &route, &wave, "remote");
         let traced = statements(&store, || {
-            store
-                .import_peer_planning("/repo", &route, "two", &incoming)
-                .unwrap()
+            crate::store::planning_peers::import_peer_planning(
+                &store, "/repo", &route, "two", &incoming,
+            )
+            .unwrap()
         });
         assert_eq!(store.get_wave(wave.id()).unwrap().unwrap().name(), "remote");
         let scans: Vec<_> = growing_scans(&store, &traced)

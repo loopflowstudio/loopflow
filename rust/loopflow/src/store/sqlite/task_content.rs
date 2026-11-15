@@ -197,10 +197,10 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().canonicalize().unwrap();
         let path = path.to_str().unwrap();
-        let repo = store.ensure_repository(path).unwrap();
-        let other_repo = store
-            .ensure_repository(home.path().to_str().unwrap())
-            .unwrap();
+        let repo = crate::repository::location::ensure_repository(&store, path).unwrap();
+        let other_repo =
+            crate::repository::location::ensure_repository(&store, home.path().to_str().unwrap())
+                .unwrap();
         let project = store.ensure_wave_project(path, "product").unwrap();
         let groups: Vec<Vec<_>> = [
             (repo.clone(), None),
@@ -275,7 +275,7 @@ mod tests {
         let foreign_repo = tempfile::tempdir().unwrap();
         let canonical = repo.path().canonicalize().unwrap();
         let path = canonical.to_str().unwrap();
-        let repository = store.ensure_repository(path).unwrap();
+        let repository = crate::repository::location::ensure_repository(&store, path).unwrap();
         let product = store.ensure_wave_project(path, "product").unwrap();
         let other = store.ensure_wave_project(path, "other").unwrap();
         let foreign = store

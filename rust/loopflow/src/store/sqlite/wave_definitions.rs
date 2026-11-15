@@ -30,91 +30,111 @@ impl SqliteStore {
         let canonical = crate::repository::CanonicalRepo::discover(checkout)
             .map_err(|error| StoreError::InvalidData(error.to_string()))?;
         let repo = canonical.to_string();
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let mut parent: Option<WaveId> = None;
-        let mut prefix = String::new();
-        for part in name.split('/') {
-            if !prefix.is_empty() {
-                prefix.push('/');
-            }
-            prefix.push_str(part);
-            let directory = checkout.join(".lf/wave").join(&prefix);
-            let mut authored_id =
-                crate::work::wave::config::try_read_wave_config(checkout, &prefix)
-                    .map_err(|error| StoreError::InvalidData(error.to_string()))?
-                    .and_then(|config| config.id);
-            // Authored directories match by id first: a checkout that has not yet
-            // rebased past a rename or removal neither renames the Wave back nor
-            // resurrects a removed identity.
-            if let Some(id) = authored_id.clone() {
-                let live: Option<bool> = tx
-                    .query_row(
-                        "SELECT retired_at IS NULL FROM waves WHERE id=?1",
-                        [&id],
-                        |row| row.get(0),
-                    )
-                    .optional()?;
-                match live {
-                    Some(true) => {
-                        seed_wave_files(&directory, &id, &prefix)?;
-                        parent = Some(id);
-                        continue;
-                    }
-                    Some(false) => {
-                        tracing::info!(
-                            directory = %directory.display(),
-                            "skipping authored Wave directory whose Wave was removed"
-                        );
-                        authored_id = None;
-                    }
-                    None => {}
+        loop {
+            let registration = self
+                .repository_id(&repo)?
+                .is_none()
+                .then(|| {
+                    crate::repository::location::prepare_registration(self, &repo, None, false)
+                })
+                .transpose()?;
+            let mut conn = self.conn.lock().expect("store mutex poisoned");
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            if let Some(registration) = &registration {
+                if !super::repositories::register_in(
+                    &tx,
+                    &repo,
+                    &registration.inputs,
+                    &registration.id,
+                    false,
+                )? {
+                    continue;
                 }
             }
-            let existing: Option<WaveId> = tx.query_row(
+            let mut parent: Option<WaveId> = None;
+            let mut prefix = String::new();
+            for part in name.split('/') {
+                if !prefix.is_empty() {
+                    prefix.push('/');
+                }
+                prefix.push_str(part);
+                let directory = checkout.join(".lf/wave").join(&prefix);
+                let mut authored_id =
+                    crate::work::wave::config::try_read_wave_config(checkout, &prefix)
+                        .map_err(|error| StoreError::InvalidData(error.to_string()))?
+                        .and_then(|config| config.id);
+                // Authored directories match by id first: a checkout that has not yet
+                // rebased past a rename or removal neither renames the Wave back nor
+                // resurrects a removed identity.
+                if let Some(id) = authored_id.clone() {
+                    let live: Option<bool> = tx
+                        .query_row(
+                            "SELECT retired_at IS NULL FROM waves WHERE id=?1",
+                            [&id],
+                            |row| row.get(0),
+                        )
+                        .optional()?;
+                    match live {
+                        Some(true) => {
+                            seed_wave_files(&directory, &id, &prefix)?;
+                            parent = Some(id);
+                            continue;
+                        }
+                        Some(false) => {
+                            tracing::info!(
+                                directory = %directory.display(),
+                                "skipping authored Wave directory whose Wave was removed"
+                            );
+                            authored_id = None;
+                        }
+                        None => {}
+                    }
+                }
+                let existing: Option<WaveId> = tx.query_row(
                 "SELECT id FROM waves WHERE repo=?1 AND name=?2 AND parent_wave_id IS ?3 AND retired_at IS NULL",
                 params![repo, part, parent], |row| row.get(0)).optional()?;
-            let wave = match existing {
-                Some(wave) => {
-                    if authored_id.as_ref().is_some_and(|id| id != &wave) {
-                        return Err(StoreError::InvalidData(format!(
-                            "Wave {prefix} is already registered with another id"
-                        )));
+                let wave = match existing {
+                    Some(wave) => {
+                        if authored_id.as_ref().is_some_and(|id| id != &wave) {
+                            return Err(StoreError::InvalidData(format!(
+                                "Wave {prefix} is already registered with another id"
+                            )));
+                        }
+                        wave
                     }
-                    wave
+                    None => {
+                        let wave = authored_id.unwrap_or_default();
+                        planning_write::create(
+                            &tx,
+                            &repo,
+                            &crate::work::edit::WorkEdit::for_target(
+                                wave.as_str(),
+                                &[
+                                    Edit::WaveName(part.into()),
+                                    Edit::WaveParent(parent.as_ref().map(ToString::to_string)),
+                                ],
+                            ),
+                        )?;
+                        wave
+                    }
+                };
+                seed_wave_files(&directory, &wave, &prefix)?;
+                if crate::work::wave::config::try_read_wave_config(checkout, &prefix)
+                    .map_err(|error| StoreError::InvalidData(error.to_string()))?
+                    .and_then(|config| config.id)
+                    .is_none()
+                {
+                    crate::work::wave::config::update_wave_config(checkout, &prefix, |values| {
+                        values.insert("id".into(), wave.to_string().into());
+                        Ok(())
+                    })
+                    .map_err(StoreError::InvalidData)?;
                 }
-                None => {
-                    let wave = authored_id.unwrap_or_default();
-                    planning_write::create(
-                        &tx,
-                        &repo,
-                        &crate::work::edit::WorkEdit::for_target(
-                            wave.as_str(),
-                            &[
-                                Edit::WaveName(part.into()),
-                                Edit::WaveParent(parent.as_ref().map(ToString::to_string)),
-                            ],
-                        ),
-                    )?;
-                    wave
-                }
-            };
-            seed_wave_files(&directory, &wave, &prefix)?;
-            if crate::work::wave::config::try_read_wave_config(checkout, &prefix)
-                .map_err(|error| StoreError::InvalidData(error.to_string()))?
-                .and_then(|config| config.id)
-                .is_none()
-            {
-                crate::work::wave::config::update_wave_config(checkout, &prefix, |values| {
-                    values.insert("id".into(), wave.to_string().into());
-                    Ok(())
-                })
-                .map_err(StoreError::InvalidData)?;
+                parent = Some(wave);
             }
-            parent = Some(wave);
+            tx.commit()?;
+            return Ok(parent.expect("validated Wave has at least one component"));
         }
-        tx.commit()?;
-        Ok(parent.expect("validated Wave has at least one component"))
     }
 
     /// Register every authored Wave directory under `<checkout>/.lf/wave/`, matching

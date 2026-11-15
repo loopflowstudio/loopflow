@@ -352,7 +352,7 @@ mod tests {
     fn fixture() -> (tempfile::TempDir, SqliteStore, TaskId) {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
-        let repo = store.ensure_repository("/repo").unwrap();
+        let repo = crate::repository::location::ensure_repository(&store, "/repo").unwrap();
         let task = TaskId::new();
         store.conn.lock().unwrap().execute_batch(&format!("INSERT INTO tasks(id,repository_id,issue_identifier,created_at,planning_completed,planning_completed_at) VALUES('{task}','{repo}','SHELL-1',1,1,'completion-1');
             INSERT INTO task_checkouts(task_id,worktree,branch) VALUES('{task}','/repo.task','task');", task=task.as_str(), repo=repo.as_str())).unwrap();
@@ -538,7 +538,7 @@ mod tests {
         let (_home, store, task) = fixture();
         let viewer = session_terminal(&store, &task, "viewed");
         store.reconcile_task_retirement(&task, 100, None).unwrap();
-        let repo = store.ensure_repository("/repo").unwrap();
+        let repo = crate::repository::location::ensure_repository(&store, "/repo").unwrap();
         for n in 0..32 {
             let other = TaskId::new();
             let conn = store.conn.lock().unwrap();

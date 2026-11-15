@@ -1849,10 +1849,9 @@ pub fn task_create(
             }
             None => (None, None),
         };
-        let repository_id = store
-            .sqlite
-            .ensure_repository(&main.to_string_lossy())
-            .map_err(task_error)?;
+        let repository_id =
+            crate::repository::location::ensure_repository(&store.sqlite, &main.to_string_lossy())
+                .map_err(task_error)?;
         let creation = crate::work::task::NewTask {
             due_date: None,
             id: loopflow_model::durable::TaskId::new(),

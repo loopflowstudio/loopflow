@@ -1712,9 +1712,11 @@ impl Fixture {
         let store =
             loopflow::store::sqlite::SqliteStore::new(&self.home.path().join("loopflow.db"))
                 .unwrap();
-        let repo = store
-            .ensure_repository(self.repo.path().to_str().unwrap())
-            .unwrap();
+        let repo = loopflow::repository::location::ensure_repository(
+            &store,
+            self.repo.path().to_str().unwrap(),
+        )
+        .unwrap();
         let machine = store.local_machine().unwrap().id;
         self.sql()
             .execute(

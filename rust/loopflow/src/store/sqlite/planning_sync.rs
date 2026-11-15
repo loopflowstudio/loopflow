@@ -197,9 +197,11 @@ mod tests {
     fn task(store: &SqliteStore, repo: &TestRepo) -> Task {
         store
             .create_task(&NewTask {
-                repository_id: store
-                    .ensure_repository(repo.path().to_str().unwrap())
-                    .unwrap(),
+                repository_id: crate::repository::location::ensure_repository(
+                    store,
+                    repo.path().to_str().unwrap(),
+                )
+                .unwrap(),
                 id: TaskId::new(),
                 project_id: None,
                 title: "Saved task".into(),

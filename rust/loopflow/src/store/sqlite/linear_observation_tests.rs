@@ -23,9 +23,11 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
         .unwrap();
     let task = store
         .create_task(&NewTask {
-            repository_id: store
-                .ensure_repository(home.path().canonicalize().unwrap().to_str().unwrap())
-                .unwrap(),
+            repository_id: crate::repository::location::ensure_repository(
+                &store,
+                home.path().canonicalize().unwrap().to_str().unwrap(),
+            )
+            .unwrap(),
             id: TaskId::new(),
             project_id: Some(project.id),
             title: "Original title".into(),

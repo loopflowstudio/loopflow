@@ -143,7 +143,7 @@ mod tests {
     fn desktop_shell_creation_is_once_even_after_lost_acknowledgement_or_exit() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
-        let repo = store.ensure_repository("/repo").unwrap();
+        let repo = crate::repository::location::ensure_repository(&store, "/repo").unwrap();
         let task = TaskId::new();
         store.conn.lock().unwrap().execute_batch(&format!(
             "INSERT INTO tasks(id,repository_id,issue_identifier,created_at) VALUES('{task}','{repo}','SHELL-1',1);

@@ -1,6 +1,6 @@
 //! Selected planning identity, separate from a machine's local repository path.
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::durable::TaskExecutionRoute;
 use crate::store::{StoreError, StoreResult};
@@ -8,115 +8,82 @@ use loopflow_model::durable::{RepositoryId, RepositoryIdentity, TaskId};
 
 use super::SqliteStore;
 
-fn git_locator_in(conn: &Connection, repo: &str) -> StoreResult<Option<PathBuf>> {
-    let root = Path::new(repo);
-    // Historical symlink spellings never replace the canonical Git locator.
-    if root.canonicalize().ok().as_deref() != Some(root) {
-        return Ok(None);
-    }
-    let common = root.join(".git");
-    let common = if common.is_dir() {
-        common
-    } else if common.is_file() {
-        // Legacy registrations may name a linked checkout. Its shared Git
-        // directory belongs to the main repository, never that local alias.
-        let canonical = crate::repository::CanonicalRepo::discover(root)
-            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-        if canonical.as_path() != root {
-            return Ok(None);
-        }
-        crate::git::worktrees::git_common_dir(root)
-            .map_err(|error| StoreError::InvalidData(error.to_string()))?
-    } else {
-        return Ok(None);
-    };
-    Ok(Some(crate::repository::location::locator_directory(
-        &common,
-        &super::durable::map_local_machine(conn)?.id,
-    )))
+/// Saved inputs used to discover a repository outside the connection lock.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RepositoryRegistration {
+    pub machine: loopflow_model::durable::MachineId,
+    pub selected: Option<RepositoryId>,
+    pub identities: Vec<RepositoryId>,
+    pub checkouts: Vec<(String, String)>,
 }
 
-// A retained linked Task checkout witnesses this physical Git directory even
-// before locators existed. A remote, basename, or main checkout path cannot.
-fn retained_checkout_matches(conn: &Connection, repo: &str) -> StoreResult<bool> {
-    let mut statement = conn.prepare(
-        "SELECT c.worktree,c.branch FROM task_checkouts c JOIN tasks t ON t.id=c.task_id
-         JOIN repository_plans w ON w.id=t.repository_id
+pub(super) fn registration_in(
+    conn: &Connection,
+    repo: &str,
+) -> StoreResult<RepositoryRegistration> {
+    let mut identities =
+        conn.prepare("SELECT id FROM repository_plans WHERE repo=?1 ORDER BY id")?;
+    let identities = identities
+        .query_map([repo], |row| row.get::<_, String>(0))?
+        .map(|row| {
+            RepositoryId::parse(&row?).map_err(|error| StoreError::InvalidData(error.to_string()))
+        })
+        .collect::<StoreResult<Vec<_>>>()?;
+    // Start from the bounded repository aliases even when measured history
+    // makes the planner prefer scanning Tasks or checkouts.
+    let mut checkouts = conn.prepare(
+        "SELECT c.worktree,c.branch FROM repository_plans w
+         CROSS JOIN tasks t ON t.repository_id=w.id
+         CROSS JOIN task_checkouts c ON c.task_id=t.id
          WHERE w.repo=?1 AND c.worktree<>?1",
     )?;
-    let retained = statement
-        .query_map([repo], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?
+    let mut checkouts = checkouts
+        .query_map([repo], |row| Ok((row.get(0)?, row.get(1)?)))?
         .collect::<Result<Vec<_>, _>>()?;
-    if retained.is_empty() {
-        return Ok(false);
-    }
-    let Ok(observed) = crate::git::worktrees::list_porcelain(Path::new(repo)) else {
-        return Ok(false);
-    };
-    let canonical = crate::repository::CanonicalRepo::discover(Path::new(repo))
-        .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-    Ok(retained.iter().any(|(path, branch)| {
-        let Ok(path) = Path::new(path).canonicalize() else {
-            return false;
-        };
-        path.join(".git").is_file()
-            && canonical.contains(&path)
-            && observed.iter().any(|(checkout, observed_branch)| {
-                checkout.canonicalize().ok().as_ref() == Some(&path)
-                    && observed_branch.as_deref() == Some(branch.as_str())
-            })
-    }))
+    checkouts.sort_unstable();
+    Ok(RepositoryRegistration {
+        machine: super::task_ownership::local_machine_in(conn)?,
+        selected: repository_id_in(conn, repo)?,
+        identities,
+        checkouts,
+    })
 }
 
-pub(super) fn ensure_repository_in(conn: &Connection, repo: &str) -> StoreResult<RepositoryId> {
-    let common = git_locator_in(conn, repo)?;
-    let locator = if let Some(common) = &common {
-        crate::repository::location::read_locator(common)
-            .map_err(|error| StoreError::InvalidData(error.to_string()))?
-    } else {
-        None
-    };
-    if let Some(id) = repository_id_in(conn, repo)? {
-        if let Some(common) = common.as_ref().filter(|_| locator.is_none()) {
-            if !retained_checkout_matches(conn, repo)? {
-                return Err(StoreError::InvalidData(format!(
-                "{repo} retains repository {id} but has no Git locator; establish the original checkout with `lf config repo --bind {id}`, or recover the moved checkout with `lf config repo --relocate {id}`"
-                )));
-            }
-            crate::repository::location::write_locator(common, &id)
-                .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-        }
-        if let Some(locator) = &locator {
-            let path: Option<String> = conn
-                .query_row(
-                    "SELECT repo FROM repository_plans WHERE id=?1",
-                    [locator.as_str()],
-                    |row| row.get(0),
-                )
-                .optional()?;
-            if path.as_deref() != Some(repo) {
-                return Err(StoreError::InvalidData(
-                    "Git locator conflicts with retained Work; reconcile with `lf repo`".into(),
-                ));
-            }
-        }
-        return Ok(id);
+pub(super) fn register_in(
+    conn: &Connection,
+    repo: &str,
+    inputs: &RepositoryRegistration,
+    id: &RepositoryId,
+    bind: bool,
+) -> StoreResult<bool> {
+    if registration_in(conn, repo)? != *inputs {
+        return Ok(false);
     }
-    let id = locator.unwrap_or_else(RepositoryId::new);
-    // The Git locator may precede a rolled-back transaction. Reuse it on retry;
-    // an identity already registered elsewhere must be reconciled, not copied.
+    let bound: Option<String> = conn
+        .query_row(
+            "SELECT repo FROM repository_plans WHERE id=?1",
+            [id.as_str()],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if bound.as_deref().is_some_and(|other| other != repo) {
+        return Err(StoreError::InvalidData(format!(
+                "repository identity {id} already locates {}; cannot associate another local checkout {repo}",
+                bound.expect("conflicting path is present")
+            )));
+    }
+    if bind {
+        conn.execute(
+            "UPDATE repository_plans SET selected=0 WHERE repo=?1 AND selected=1 AND id!=?2",
+            params![repo, id.as_str()],
+        )?;
+    }
     conn.execute(
-        "INSERT INTO repository_plans(repo,id,selected)
-         SELECT ?1,?2,1 WHERE NOT EXISTS(SELECT 1 FROM repository_plans WHERE repo=?1)",
+        "INSERT INTO repository_plans(repo,id,selected) VALUES(?1,?2,1)
+             ON CONFLICT(id) DO UPDATE SET selected=1 WHERE selected=0",
         params![repo, id.as_str()],
     )?;
-    if let Some(common) = &common {
-        crate::repository::location::write_locator(common, &id)
-            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-    }
-    repository_id_in(conn, repo)?.ok_or(StoreError::NotFound)
+    Ok(true)
 }
 
 pub(super) fn repository_id_in(conn: &Connection, repo: &str) -> StoreResult<Option<RepositoryId>> {
@@ -281,12 +248,34 @@ impl SqliteStore {
         })
     }
 
-    pub fn ensure_repository(&self, repo: &str) -> StoreResult<RepositoryId> {
+    pub(crate) fn repository_registration(
+        &self,
+        repo: &str,
+    ) -> StoreResult<RepositoryRegistration> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let snapshot = conn.savepoint()?;
+        registration_in(&snapshot, repo)
+    }
+
+    /// Recheck saved acquisition inputs and select the supplied identity atomically.
+    pub(crate) fn register_repository(
+        &self,
+        repo: &str,
+        inputs: &RepositoryRegistration,
+        id: &RepositoryId,
+        bind: bool,
+    ) -> StoreResult<bool> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        if inputs.selected.as_ref() == Some(id) {
+            let snapshot = conn.savepoint()?;
+            return Ok(registration_in(&snapshot, repo)? == *inputs);
+        }
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let id = ensure_repository_in(&tx, repo)?;
+        if !register_in(&tx, repo, inputs, id, bind)? {
+            return Ok(false);
+        }
         tx.commit()?;
-        Ok(id)
+        Ok(true)
     }
 
     pub fn repository_id(&self, repo: &str) -> StoreResult<Option<RepositoryId>> {
@@ -344,43 +333,6 @@ impl SqliteStore {
         .optional()
         .map_err(Into::into)
     }
-
-    /// Explicitly associate this checkout with a selected repository identity.
-    /// Retain prior IDs as local locators; Work, provider mappings, journals and
-    /// execution belong to the repository path and are never rewritten here.
-    pub fn bind_repository(&self, repo: &str, id: &RepositoryId) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let bound: Option<String> = tx
-            .query_row(
-                "SELECT repo FROM repository_plans WHERE id=?1",
-                [id.as_str()],
-                |row| row.get(0),
-            )
-            .optional()?;
-        if let Some(other) = bound.as_deref() {
-            if other != repo {
-                return Err(StoreError::InvalidData(format!(
-                    "repository identity {id} already locates {other}; cannot associate another local checkout {repo}"
-                )));
-            }
-        }
-        tx.execute(
-            "UPDATE repository_plans SET selected=0 WHERE repo=?1 AND selected=1 AND id!=?2",
-            params![repo, id.as_str()],
-        )?;
-        tx.execute(
-            "INSERT INTO repository_plans(repo,id,selected) VALUES(?1,?2,1)
-             ON CONFLICT(id) DO UPDATE SET selected=1 WHERE selected=0",
-            params![repo, id.as_str()],
-        )?;
-        if let Some(common) = git_locator_in(&tx, repo)? {
-            crate::repository::location::write_locator(&common, id)
-                .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-        }
-        tx.commit()?;
-        Ok(())
-    }
 }
 
 #[cfg(test)]
@@ -395,7 +347,7 @@ mod tests {
         use rusqlite::params;
         let dir = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
-        let id = store.ensure_repository("/before").unwrap();
+        let id = crate::repository::location::ensure_repository(&store, "/before").unwrap();
         let wave = WaveId::new();
         let project = ProjectId::new();
         let task = TaskId::new();
@@ -485,7 +437,7 @@ mod tests {
         let (mini, worker) = (MachineId::new(), MachineId::new());
         let project = store.ensure_wave_project(repo, "work").unwrap();
         let wave = project.wave_id.clone();
-        let repository = store.ensure_repository(repo).unwrap();
+        let repository = crate::repository::location::ensure_repository(&store, repo).unwrap();
         let new_task = |title: &str| {
             store
                 .create_task(&crate::work::task::NewTask {
@@ -569,7 +521,7 @@ mod tests {
         let repo = repo.to_str().unwrap();
         let project = store.ensure_wave_project(repo, "infrastructure").unwrap();
         let wave = DefaultScope::Wave(project.wave_id.clone());
-        let repository = store.ensure_repository(repo).unwrap();
+        let repository = crate::repository::location::ensure_repository(&store, repo).unwrap();
         let task = store
             .create_task(&crate::work::task::NewTask {
                 repository_id: repository.clone(),
@@ -620,18 +572,24 @@ mod tests {
         let b = tempfile::tempdir().unwrap();
         let first = SqliteStore::open_ephemeral(&a.path().join("db")).unwrap();
         let second = SqliteStore::open_ephemeral(&b.path().join("db")).unwrap();
-        let id = first.ensure_repository("/src/same").unwrap();
-        assert_eq!(first.ensure_repository("/src/same").unwrap(), id);
-        let other = second.ensure_repository("/src/same").unwrap();
+        let id = crate::repository::location::ensure_repository(&first, "/src/same").unwrap();
+        assert_eq!(
+            crate::repository::location::ensure_repository(&first, "/src/same").unwrap(),
+            id
+        );
+        let other = crate::repository::location::ensure_repository(&second, "/src/same").unwrap();
         assert_ne!(id, other);
-        second.bind_repository("/src/same", &id).unwrap();
+        crate::repository::location::bind_repository(&second, "/src/same", &id).unwrap();
         assert_eq!(second.repository_id("/src/same").unwrap(), Some(id.clone()));
         assert_eq!(
             second.repository_path(&other).unwrap().as_deref(),
             Some("/src/same")
         );
-        assert_eq!(second.ensure_repository("/src/same").unwrap(), id);
-        second.bind_repository("/src/same", &id).unwrap();
+        assert_eq!(
+            crate::repository::location::ensure_repository(&second, "/src/same").unwrap(),
+            id
+        );
+        crate::repository::location::bind_repository(&second, "/src/same", &id).unwrap();
         assert_eq!(
             second.repository_path(&id).unwrap().as_deref(),
             Some("/src/same")
@@ -640,13 +598,16 @@ mod tests {
             first.repository_path(&id).unwrap().as_deref(),
             Some("/src/same")
         );
-        let unrelated = second.ensure_repository("/another/clone").unwrap();
-        assert!(second.bind_repository("/another/clone", &id).is_err());
+        let unrelated =
+            crate::repository::location::ensure_repository(&second, "/another/clone").unwrap();
+        assert!(
+            crate::repository::location::bind_repository(&second, "/another/clone", &id).is_err()
+        );
         assert_eq!(
             second.repository_id("/another/clone").unwrap(),
             Some(unrelated)
         );
-        second.bind_repository("/src/same", &other).unwrap();
+        crate::repository::location::bind_repository(&second, "/src/same", &other).unwrap();
         assert_eq!(second.repository_id("/src/same").unwrap(), Some(other));
         assert_eq!(
             second.repository_path(&id).unwrap().as_deref(),

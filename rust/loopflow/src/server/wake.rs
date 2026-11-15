@@ -279,7 +279,8 @@ mod tests {
         let task = loopflow_model::durable::TaskId::new();
         store
             .create_task(&crate::work::task::NewTask {
-                repository_id: store.ensure_repository("/wake").unwrap(),
+                repository_id: crate::repository::location::ensure_repository(&store, "/wake")
+                    .unwrap(),
                 id: task.clone(),
                 project_id: None,
                 title: "Wake".into(),

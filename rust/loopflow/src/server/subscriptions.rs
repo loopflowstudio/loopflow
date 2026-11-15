@@ -1244,9 +1244,11 @@ mod tests {
                 let repo = loopflow_test_support::TestRepo::new();
                 store
                     .create_task(&crate::work::task::NewTask {
-                        repository_id: store
-                            .ensure_repository(repo.path().to_str().unwrap())
-                            .unwrap(),
+                        repository_id: crate::repository::location::ensure_repository(
+                            &store,
+                            repo.path().to_str().unwrap(),
+                        )
+                        .unwrap(),
                         id: id.clone(),
                         project_id: None,
                         title: "Recovered".into(),

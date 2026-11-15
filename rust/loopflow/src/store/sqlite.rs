@@ -74,6 +74,7 @@ pub(crate) mod planning_changes;
 pub(crate) mod planning_export;
 pub(crate) mod planning_order;
 mod planning_peers;
+pub(crate) use planning_peers::PeerImport;
 mod planning_sync;
 pub(crate) mod planning_write;
 mod pr_landings;
@@ -84,7 +85,7 @@ pub(crate) mod project_content;
 pub(crate) mod project_selection;
 pub mod provider_transitions;
 mod rentals;
-mod repositories;
+pub(crate) mod repositories;
 pub(crate) mod retention;
 mod revisions;
 mod scope_defaults;
@@ -825,56 +826,81 @@ impl SqliteStore {
     }
 
     fn upsert_wave(&self, wave: &Wave) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let created_at = wave
-            .created_at()
-            .map(|dt| dt.unix_timestamp())
-            .unwrap_or_else(now_unix);
+        loop {
+            let registration = self
+                .repository_id(wave.repo())?
+                .is_none()
+                .then(|| {
+                    crate::repository::location::prepare_registration(
+                        self,
+                        wave.repo(),
+                        None,
+                        false,
+                    )
+                })
+                .transpose()?;
+            let mut conn = self.conn.lock().expect("store mutex poisoned");
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            if let Some(registration) = &registration {
+                if !repositories::register_in(
+                    &tx,
+                    wave.repo(),
+                    &registration.inputs,
+                    &registration.id,
+                    false,
+                )? {
+                    continue;
+                }
+            }
+            let created_at = wave
+                .created_at()
+                .map(|dt| dt.unix_timestamp())
+                .unwrap_or_else(now_unix);
 
-        validate_wave_parent(
-            &tx,
-            wave.id(),
-            wave.name(),
-            wave.repo(),
-            wave.parent_wave_id(),
-        )?;
-        let parent: Option<Option<String>> = tx
-            .query_row(
-                "SELECT parent_wave_id FROM waves WHERE id=?1",
-                [wave.id()],
-                |r| r.get(0),
-            )
-            .optional()?;
-        let saved = parent.is_some();
-        let edits = if saved {
-            vec![crate::work::edit::WorkValue::WaveParent(
-                parent
-                    .flatten()
-                    .or_else(|| wave.parent_wave_id().map(ToString::to_string)),
-            )]
-        } else {
-            vec![
-                crate::work::edit::WorkValue::WaveName(wave.name().into()),
-                crate::work::edit::WorkValue::WaveParent(
-                    wave.parent_wave_id().map(ToString::to_string),
-                ),
-            ]
-        };
-        planning_write::create(
-            &tx,
-            wave.repo(),
-            &crate::work::edit::WorkEdit::for_target(wave.id().as_str(), &edits),
-        )?;
-        if !saved {
-            tx.execute("UPDATE waves SET created_at=?2,retired_at=?3,superseded_by_wave_id=?4,retirement_reason=?5 WHERE id=?1",params![wave.id(),created_at,wave.retired_at().map(|at|at.unix_timestamp()),wave.superseded_by_wave_id(),wave.retirement_reason()])?;
+            validate_wave_parent(
+                &tx,
+                wave.id(),
+                wave.name(),
+                wave.repo(),
+                wave.parent_wave_id(),
+            )?;
+            let parent: Option<Option<String>> = tx
+                .query_row(
+                    "SELECT parent_wave_id FROM waves WHERE id=?1",
+                    [wave.id()],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            let saved = parent.is_some();
+            let edits = if saved {
+                vec![crate::work::edit::WorkValue::WaveParent(
+                    parent
+                        .flatten()
+                        .or_else(|| wave.parent_wave_id().map(ToString::to_string)),
+                )]
+            } else {
+                vec![
+                    crate::work::edit::WorkValue::WaveName(wave.name().into()),
+                    crate::work::edit::WorkValue::WaveParent(
+                        wave.parent_wave_id().map(ToString::to_string),
+                    ),
+                ]
+            };
+            planning_write::create(
+                &tx,
+                wave.repo(),
+                &crate::work::edit::WorkEdit::for_target(wave.id().as_str(), &edits),
+            )?;
+            if !saved {
+                tx.execute("UPDATE waves SET created_at=?2,retired_at=?3,superseded_by_wave_id=?4,retirement_reason=?5 WHERE id=?1",params![wave.id(),created_at,wave.retired_at().map(|at|at.unix_timestamp()),wave.superseded_by_wave_id(),wave.retirement_reason()])?;
+            }
+            tx.execute(
+                "UPDATE waves SET promoted_at=COALESCE(promoted_at,?2) WHERE id=?1",
+                params![wave.id(), wave.promoted_at().map(|at| at.unix_timestamp())],
+            )?;
+            tx.commit()?;
+            return Ok(());
         }
-        tx.execute(
-            "UPDATE waves SET promoted_at=COALESCE(promoted_at,?2) WHERE id=?1",
-            params![wave.id(), wave.promoted_at().map(|at| at.unix_timestamp())],
-        )?;
-        tx.commit()?;
-        Ok(())
     }
 }
 

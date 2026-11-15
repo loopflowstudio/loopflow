@@ -336,7 +336,8 @@ fn fixture(
         updated_at: now,
     };
     let task = Task {
-        repository_id: store.sqlite.ensure_repository(wave.repo()).unwrap(),
+        repository_id: crate::repository::location::ensure_repository(&store.sqlite, wave.repo())
+            .unwrap(),
         id: TaskId::new(),
 
         linear_id: Some(LinearIssueId::new("source-issue").unwrap()),

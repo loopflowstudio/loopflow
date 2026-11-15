@@ -35,6 +35,170 @@ pub(crate) fn write_locator(common: &Path, id: &RepositoryId) -> Result<()> {
     Ok(())
 }
 
+fn invalid(error: impl std::fmt::Display) -> crate::store::StoreError {
+    crate::store::StoreError::InvalidData(error.to_string())
+}
+
+fn git_locator(repo: &str, machine: &MachineId) -> crate::store::StoreResult<Option<PathBuf>> {
+    let root = Path::new(repo);
+    // Historical symlink spellings never replace the canonical Git locator.
+    if root.canonicalize().ok().as_deref() != Some(root) {
+        return Ok(None);
+    }
+    let common = root.join(".git");
+    let common = if common.is_dir() {
+        common
+    } else if common.is_file() {
+        let canonical = CanonicalRepo::discover(root).map_err(invalid)?;
+        if canonical.as_path() != root {
+            return Ok(None);
+        }
+        crate::git::worktrees::git_common_dir(root).map_err(invalid)?
+    } else {
+        return Ok(None);
+    };
+    Ok(Some(locator_directory(&common, machine)))
+}
+
+fn retained_checkout_matches(
+    repo: &str,
+    retained: &[(String, String)],
+) -> crate::store::StoreResult<bool> {
+    if retained.is_empty() {
+        return Ok(false);
+    }
+    let Ok(observed) = crate::git::worktrees::list_porcelain(Path::new(repo)) else {
+        return Ok(false);
+    };
+    let canonical = CanonicalRepo::discover(Path::new(repo)).map_err(invalid)?;
+    Ok(retained.iter().any(|(path, branch)| {
+        let Ok(path) = Path::new(path).canonicalize() else {
+            return false;
+        };
+        path.join(".git").is_file()
+            && canonical.contains(&path)
+            && observed.iter().any(|(checkout, observed_branch)| {
+                checkout.canonicalize().ok().as_ref() == Some(&path)
+                    && observed_branch.as_deref() == Some(branch.as_str())
+            })
+    }))
+}
+
+fn lock_locator(common: &Path) -> Result<fs::File> {
+    fs::create_dir_all(common)?;
+    let lock = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(common.join("loopflow-repository.lock"))?;
+    fs2::FileExt::lock_exclusive(&lock)?;
+    Ok(lock)
+}
+
+/// Discover and publish the Git locator outside SQL, then conditionally register it.
+/// A locator survives a failed commit so retry retains the same identity.
+pub fn ensure_repository(
+    store: &SqliteStore,
+    repo: &str,
+) -> crate::store::StoreResult<RepositoryId> {
+    register(store, repo, None, false)
+}
+
+/// Explicitly select a repository identity, retaining prior IDs as local locators.
+pub fn bind_repository(
+    store: &SqliteStore,
+    repo: &str,
+    id: &RepositoryId,
+) -> crate::store::StoreResult<()> {
+    register(store, repo, Some(id), false).map(|_| ())
+}
+
+#[derive(Debug)]
+pub(crate) struct PreparedRegistration {
+    pub inputs: crate::store::sqlite::repositories::RepositoryRegistration,
+    pub id: RepositoryId,
+    _lock: Option<fs::File>,
+}
+
+fn register(
+    store: &SqliteStore,
+    repo: &str,
+    bind: Option<&RepositoryId>,
+    locked: bool,
+) -> crate::store::StoreResult<RepositoryId> {
+    loop {
+        let prepared = prepare_registration(store, repo, bind, locked)?;
+        if store.register_repository(repo, &prepared.inputs, &prepared.id, bind.is_some())? {
+            return Ok(prepared.id);
+        }
+    }
+}
+
+/// Acquire the locator without committing a row: Wave creation keeps registration
+/// in its own transaction. The locator and its lock survive until that write ends.
+pub(crate) fn prepare_registration(
+    store: &SqliteStore,
+    repo: &str,
+    bind: Option<&RepositoryId>,
+    locked: bool,
+) -> crate::store::StoreResult<PreparedRegistration> {
+    loop {
+        let inputs = store.repository_registration(repo)?;
+        let common = git_locator(repo, &inputs.machine)?;
+        let _lock = common
+            .as_deref()
+            .filter(|_| !locked)
+            .map(lock_locator)
+            .transpose()
+            .map_err(invalid)?;
+        if store.repository_registration(repo)? != inputs {
+            continue;
+        }
+        let locator = common
+            .as_deref()
+            .map(read_locator)
+            .transpose()
+            .map_err(invalid)?
+            .flatten();
+        let id = match bind {
+            Some(id) => id.clone(),
+            None => {
+                match &inputs.selected {
+                    Some(id) => {
+                        if common.is_some()
+                            && locator.is_none()
+                            && !retained_checkout_matches(repo, &inputs.checkouts)?
+                        {
+                            return Err(invalid(format!(
+                            "{repo} retains repository {id} but has no Git locator; establish the original checkout with `lf config repo --bind {id}`, or recover the moved checkout with `lf config repo --relocate {id}`"
+                        )));
+                        }
+                        if locator
+                            .as_ref()
+                            .is_some_and(|id| !inputs.identities.contains(id))
+                        {
+                            return Err(invalid("Git locator conflicts with retained Work; reconcile with `lf repo`"));
+                        }
+                        id.clone()
+                    }
+                    None => locator.clone().unwrap_or_else(RepositoryId::new),
+                }
+            }
+        };
+        // Check a locator registered at another address before publishing anything.
+        if store.repository_path(&id)?.is_some_and(|path| path != repo) {
+            return Err(invalid(format!("repository identity {id} already locates another local checkout; reconcile with `lf config repo`")));
+        }
+        if let Some(common) = &common {
+            // A selected identity can retain an older, valid local locator.
+            if bind.is_some() || locator.is_none() {
+                write_locator(common, &id).map_err(invalid)?;
+            }
+        }
+        return Ok(PreparedRegistration { inputs, id, _lock });
+    }
+}
+
 /// Register or reconnect a repository. `relocate` is explicit recovery for a
 /// directory moved before its locator was recorded.
 pub fn reconcile(
@@ -46,13 +210,7 @@ pub fn reconcile(
     let common = crate::git::worktrees::git_common_dir(repo.as_path())?;
     let machine = store.local_machine()?.id;
     let common = locator_directory(&common, &machine);
-    fs::create_dir_all(&common)?;
-    let lock = OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .write(true)
-        .open(common.join("loopflow-repository.lock"))?;
-    fs2::FileExt::lock_exclusive(&lock)?;
+    let _lock = lock_locator(&common)?;
     let locator = read_locator(&common)?;
     let destination = repo.to_string();
     if locator.is_none()
@@ -60,7 +218,7 @@ pub fn reconcile(
         && relocate.is_none()
         && store.repository_id(&destination)?.is_some()
     {
-        return Ok(store.ensure_repository(&destination)?);
+        return Ok(register(store, &destination, None, true)?);
     }
     if let Some(id) = relocate.or(locator.as_ref()).filter(|_| bind.is_none()) {
         if relocate.is_some() && locator.as_ref().is_some_and(|other| other != id) {
@@ -118,15 +276,15 @@ pub fn reconcile(
             if let Some(existing) = store.repository_id(&destination)? {
                 return Err(anyhow!("Git locator {id} conflicts with retained repository {existing}; use `lf config repo --bind {existing}` only after checking this checkout"));
             }
-            store.bind_repository(&destination, id)?;
+            register(store, &destination, Some(id), true)?;
         }
     }
     if let Some(id) = bind {
-        store.bind_repository(&destination, id)?;
+        register(store, &destination, Some(id), true)?;
     }
     let selected = match store.repository_id(&destination)? {
         Some(id) => id,
-        None => store.ensure_repository(&destination)?,
+        None => register(store, &destination, None, true)?,
     };
     if locator.as_ref() != Some(&selected) {
         write_locator(&common, &selected)?;
@@ -188,4 +346,134 @@ pub fn reconnect_current() -> Result<()> {
         reconcile(&store.sqlite, &repo, None, None)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{bind_repository, ensure_repository, git_locator, read_locator};
+    use crate::store::sqlite::SqliteStore;
+    use loopflow_model::durable::RepositoryId;
+    use loopflow_test_support::TestRepo;
+
+    #[test]
+    fn registration_retry_reuses_the_locator_published_before_a_failed_commit() {
+        let home = tempfile::tempdir().unwrap();
+        let repo = TestRepo::new();
+        let path = repo.path().canonicalize().unwrap();
+        let path = path.to_str().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute_batch(
+                "CREATE TEMP TRIGGER fail_registration BEFORE INSERT ON repository_plans
+             BEGIN SELECT RAISE(ABORT,'registration failed'); END;",
+            )
+            .unwrap();
+        assert!(ensure_repository(&store, path).is_err());
+        assert!(store.repository_id(path).unwrap().is_none());
+        let directory = git_locator(path, &store.repository_registration(path).unwrap().machine)
+            .unwrap()
+            .unwrap();
+        let original = read_locator(&directory).unwrap().unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute_batch("DROP TRIGGER fail_registration")
+            .unwrap();
+        assert_eq!(ensure_repository(&store, path).unwrap(), original);
+        assert_eq!(read_locator(&directory).unwrap(), Some(original));
+    }
+
+    #[test]
+    fn failed_wave_creation_keeps_registration_in_the_wave_transaction() {
+        use crate::work::wave::Wave;
+        use loopflow_model::id::WaveId;
+
+        let home = tempfile::tempdir().unwrap();
+        let repo = TestRepo::new();
+        let path = repo.path().canonicalize().unwrap();
+        let path = path.to_str().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let invalid = Wave::new(WaveId::new(), "invalid/name".into(), path.into());
+        assert!(store.create_wave(&invalid).is_err());
+        assert!(store.repository_id(path).unwrap().is_none());
+        let directory = git_locator(path, &store.repository_registration(path).unwrap().machine)
+            .unwrap()
+            .unwrap();
+        let original = read_locator(&directory).unwrap().unwrap();
+        store
+            .create_wave(&Wave::new(WaveId::new(), "valid".into(), path.into()))
+            .unwrap();
+        assert_eq!(store.repository_id(path).unwrap(), Some(original));
+    }
+
+    #[test]
+    fn changed_registration_inputs_cannot_replace_a_later_binding() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let inputs = store.repository_registration("/repo").unwrap();
+        let later = RepositoryId::new();
+        bind_repository(&store, "/repo", &later).unwrap();
+        assert!(!store
+            .register_repository("/repo", &inputs, &RepositoryId::new(), false)
+            .unwrap());
+        assert_eq!(ensure_repository(&store, "/repo").unwrap(), later);
+    }
+
+    #[test]
+    fn registration_uses_indexed_checkout_evidence_and_an_unchanged_identity_only_reads() {
+        use crate::store::query_plans::{assert_no_empty_writes, growing_scans, statements};
+
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let id = ensure_repository(&store, "/repo").unwrap();
+        let history = ensure_repository(&store, "/history").unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute_batch(&format!(
+                "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000)
+             INSERT INTO tasks(id,repository_id,issue_identifier,created_at)
+             SELECT printf('task_%032x',x),'{history}',printf('H-%d',x),1 FROM n;
+             INSERT INTO task_checkouts(task_id,worktree,branch)
+             SELECT id,'/history/' || id,'main' FROM tasks;"
+            ))
+            .unwrap();
+        let traced = statements(&store, || {
+            assert_no_empty_writes(&store, || {
+                assert_eq!(ensure_repository(&store, "/repo").unwrap(), id);
+            });
+        });
+        let scans = growing_scans(&store, &traced);
+        assert!(scans.is_empty(), "{}", scans.join("\n"));
+    }
+
+    #[test]
+    fn concurrent_registration_retains_one_locator_and_one_identity() {
+        let home = tempfile::tempdir().unwrap();
+        let repo = TestRepo::new();
+        let path = repo.path().canonicalize().unwrap();
+        let path = path.to_str().unwrap();
+        let first = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let second = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let start = std::sync::Barrier::new(2);
+        let ids = std::thread::scope(|scope| {
+            let other = scope.spawn(|| {
+                start.wait();
+                ensure_repository(&second, path).unwrap()
+            });
+            start.wait();
+            let id = ensure_repository(&first, path).unwrap();
+            (id, other.join().unwrap())
+        });
+        assert_eq!(ids.0, ids.1);
+        let directory = git_locator(path, &first.repository_registration(path).unwrap().machine)
+            .unwrap()
+            .unwrap();
+        assert_eq!(read_locator(&directory).unwrap(), Some(ids.0));
+    }
 }

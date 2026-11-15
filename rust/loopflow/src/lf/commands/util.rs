@@ -1239,7 +1239,8 @@ mod tests {
         let repo = repo.to_str().unwrap();
         let task = store
             .create_task(&crate::work::task::NewTask {
-                repository_id: store.ensure_repository(repo).unwrap(),
+                repository_id: crate::repository::location::ensure_repository(&store, repo)
+                    .unwrap(),
                 due_date: None,
                 id: TaskId::new(),
                 project_id: Some(store.ensure_wave_project(repo, "inbox").unwrap().id),

@@ -996,11 +996,11 @@ async fn task_detail_reads_capacity_once_for_all_sessions() {
         .store
         .sqlite
         .create_task(&crate::work::task::NewTask {
-            repository_id: logins
-                .store
-                .sqlite
-                .ensure_repository(repo.path().to_str().unwrap())
-                .unwrap(),
+            repository_id: crate::repository::location::ensure_repository(
+                &logins.store.sqlite,
+                repo.path().to_str().unwrap(),
+            )
+            .unwrap(),
             id: loopflow_model::durable::TaskId::new(),
             project_id: None,
             title: "Many Sessions".into(),
@@ -1802,7 +1802,11 @@ async fn a_held_task_conversation_without_a_view_offers_attach() {
         .store
         .sqlite
         .create_task(&crate::work::task::NewTask {
-            repository_id: logins.store.sqlite.ensure_repository("/fixture").unwrap(),
+            repository_id: crate::repository::location::ensure_repository(
+                &logins.store.sqlite,
+                "/fixture",
+            )
+            .unwrap(),
             id: task.clone(),
             project_id: None,
             title: "Held".into(),

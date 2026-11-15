@@ -644,7 +644,7 @@ mod tests {
     fn a_task_past_its_limit_wait_is_found_once_and_only_when_due() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
-        let repository = store.ensure_repository("/repo").unwrap();
+        let repository = crate::repository::location::ensure_repository(&store, "/repo").unwrap();
         let task = loopflow_model::durable::TaskId::new();
         store
             .conn

@@ -394,7 +394,11 @@ mod tests {
     async fn task(store: &SharedStore, wave: &Wave, project: &Project, worktree: PathBuf) -> Task {
         let now = OffsetDateTime::now_utc();
         let task = Task {
-            repository_id: store.sqlite.ensure_repository(wave.repo()).unwrap(),
+            repository_id: crate::repository::location::ensure_repository(
+                &store.sqlite,
+                wave.repo(),
+            )
+            .unwrap(),
             id: TaskId::new(),
 
             revision: 0,
@@ -475,7 +479,11 @@ mod tests {
         let task = store
             .sqlite
             .create_task(&crate::work::task::NewTask {
-                repository_id: store.sqlite.ensure_repository(wave.repo()).unwrap(),
+                repository_id: crate::repository::location::ensure_repository(
+                    &store.sqlite,
+                    wave.repo(),
+                )
+                .unwrap(),
                 due_date: None,
                 id: TaskId::new(),
                 project_id: Some(project.id),

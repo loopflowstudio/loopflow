@@ -1498,12 +1498,18 @@ impl SharedPlan {
         let remote =
             SqliteStore::new(&fixture.root.path().join("remote/store/loopflow.db")).unwrap();
         let repository = RepositoryId::new();
-        local
-            .bind_repository(local_path.to_str().unwrap(), &repository)
-            .unwrap();
-        remote
-            .bind_repository(remote_path.to_str().unwrap(), &repository)
-            .unwrap();
+        loopflow::repository::location::bind_repository(
+            &local,
+            local_path.to_str().unwrap(),
+            &repository,
+        )
+        .unwrap();
+        loopflow::repository::location::bind_repository(
+            &remote,
+            remote_path.to_str().unwrap(),
+            &repository,
+        )
+        .unwrap();
         let destination =
             PlanningDestination::new("/unused/fixture", "refs/loopflow/planning/shared/owners")
                 .unwrap();
@@ -1528,14 +1534,14 @@ impl SharedPlan {
             .remote
             .export_peer_planning(self.remote_path.to_str().unwrap(), &self.destination.id())
             .unwrap();
-        self.local
-            .import_peer_planning(
-                self.local_path.to_str().unwrap(),
-                &self.destination.id(),
-                &uuid::Uuid::new_v4().to_string(),
-                &journal,
-            )
-            .unwrap();
+        loopflow::store::planning_peers::import_peer_planning(
+            &self.local,
+            self.local_path.to_str().unwrap(),
+            &self.destination.id(),
+            &uuid::Uuid::new_v4().to_string(),
+            &journal,
+        )
+        .unwrap();
     }
 
     fn to_remote(&self) {
@@ -1543,14 +1549,14 @@ impl SharedPlan {
             .local
             .export_peer_planning(self.local_path.to_str().unwrap(), &self.destination.id())
             .unwrap();
-        self.remote
-            .import_peer_planning(
-                self.remote_path.to_str().unwrap(),
-                &self.destination.id(),
-                &uuid::Uuid::new_v4().to_string(),
-                &journal,
-            )
-            .unwrap();
+        loopflow::store::planning_peers::import_peer_planning(
+            &self.remote,
+            self.remote_path.to_str().unwrap(),
+            &self.destination.id(),
+            &uuid::Uuid::new_v4().to_string(),
+            &journal,
+        )
+        .unwrap();
     }
 
     fn task(&self) -> loopflow::durable::TaskId {
@@ -1571,7 +1577,11 @@ impl SharedPlan {
             .unwrap();
         store
             .create_task(&loopflow::work::task::NewTask {
-                repository_id: store.ensure_repository(path.to_str().unwrap()).unwrap(),
+                repository_id: loopflow::repository::location::ensure_repository(
+                    store,
+                    path.to_str().unwrap(),
+                )
+                .unwrap(),
                 id: loopflow::durable::TaskId::new(),
                 project_id: Some(project.id),
                 title: "Ownership demo".into(),
@@ -1721,8 +1731,7 @@ fn remote_file_observer_keeps_the_recorded_owner_and_streams_changes() {
         support::register_task_with_pr(&remote_home, &path, "companions", &repo.head_sha());
     let store = SqliteStore::new(&remote_home.join("loopflow.db")).unwrap();
     let repository = RepositoryId::new();
-    store
-        .bind_repository(path.to_str().unwrap(), &repository)
+    loopflow::repository::location::bind_repository(&store, path.to_str().unwrap(), &repository)
         .unwrap();
     let owner = store.local_machine().unwrap().id;
     fs::write(path.join(".gitignore"), "target/\n").unwrap();
@@ -1850,15 +1859,18 @@ fn resume_moves_a_session_to_another_machine() {
     let repository = loopflow::durable::RepositoryId::new();
     let local = SqliteStore::new(&fixture.root.path().join("local/loopflow.db")).unwrap();
     let remote = SqliteStore::new(&fixture.root.path().join("remote/store/loopflow.db")).unwrap();
-    local
-        .bind_repository(
-            repo.path().canonicalize().unwrap().to_str().unwrap(),
-            &repository,
-        )
-        .unwrap();
-    remote
-        .bind_repository(remote_checkout.to_str().unwrap(), &repository)
-        .unwrap();
+    loopflow::repository::location::bind_repository(
+        &local,
+        repo.path().canonicalize().unwrap().to_str().unwrap(),
+        &repository,
+    )
+    .unwrap();
+    loopflow::repository::location::bind_repository(
+        &remote,
+        remote_checkout.to_str().unwrap(),
+        &repository,
+    )
+    .unwrap();
 
     // A Claude conversation in the worktree, admitted the way connecting admits it.
     let conversation = "0199a213-81c0-7800-8aa1-bbab2a035a53";
@@ -3731,12 +3743,12 @@ fn a_moved_session_clones_its_repository_where_none_is_checked_out() {
     let local =
         loopflow::store::sqlite::SqliteStore::new(&fixture.root.path().join("local/loopflow.db"))
             .unwrap();
-    local
-        .bind_repository(
-            repo.path().canonicalize().unwrap().to_str().unwrap(),
-            &loopflow::durable::RepositoryId::new(),
-        )
-        .unwrap();
+    loopflow::repository::location::bind_repository(
+        &local,
+        repo.path().canonicalize().unwrap().to_str().unwrap(),
+        &loopflow::durable::RepositoryId::new(),
+    )
+    .unwrap();
     let session = claude_conversation(&fixture, &worktree, "0199a213-81c0-7800-8aa1-bbab2a035a57");
 
     let moved = fixture

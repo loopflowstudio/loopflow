@@ -722,9 +722,14 @@ fn public_wave_reads_imported_planning_without_placing_or_changing_execution() {
     let snapshot = source_store
         .export_peer_planning(source_key, &binding.id())
         .unwrap();
-    worker
-        .import_peer_planning(target_key, &binding.id(), "fixture", &snapshot)
-        .unwrap();
+    loopflow::store::planning_peers::import_peer_planning(
+        &worker,
+        target_key,
+        &binding.id(),
+        "fixture",
+        &snapshot,
+    )
+    .unwrap();
     assert!(worker.peer_planning_status(target_key, None).unwrap()[0]
         .conflicts
         .is_empty());

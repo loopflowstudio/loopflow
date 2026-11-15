@@ -2460,11 +2460,11 @@ fi
                 .unwrap()
                 .unwrap();
             let mut task = Task {
-                repository_id: fixture
-                    .store
-                    .sqlite
-                    .ensure_repository(repo.to_str().unwrap())
-                    .unwrap(),
+                repository_id: crate::repository::location::ensure_repository(
+                    &fixture.store.sqlite,
+                    repo.to_str().unwrap(),
+                )
+                .unwrap(),
                 id: runtime
                     .block_on(fixture.store.get_task_by_issue(&item.id))
                     .unwrap()
@@ -2720,11 +2720,11 @@ esac
                 .find(|project| project.linear_id.as_ref().unwrap().as_str() == "project-1")
                 .unwrap();
             let task = Task {
-                repository_id: fixture
-                    .store
-                    .sqlite
-                    .ensure_repository(repo.to_str().unwrap())
-                    .unwrap(),
+                repository_id: crate::repository::location::ensure_repository(
+                    &fixture.store.sqlite,
+                    repo.to_str().unwrap(),
+                )
+                .unwrap(),
                 id: runtime
                     .block_on(fixture.store.get_task_by_issue(&item.id))
                     .unwrap()
@@ -3737,11 +3737,11 @@ fn with_export_plan(
         .store
         .sqlite
         .create_task(&crate::work::task::NewTask {
-            repository_id: fixture
-                .store
-                .sqlite
-                .ensure_repository(repo.to_str().unwrap())
-                .unwrap(),
+            repository_id: crate::repository::location::ensure_repository(
+                &fixture.store.sqlite,
+                repo.to_str().unwrap(),
+            )
+            .unwrap(),
             due_date: None,
             id: loopflow_model::durable::TaskId::new(),
             project_id: Some(project),
@@ -5791,11 +5791,11 @@ fn linear_scope_reads_each_repository_once_and_refreshes_next_check() {
             for (index, path) in paths.iter().enumerate() {
                 std::fs::create_dir_all(path.join(".lf")).unwrap();
                 std::fs::write(path.join(".lf/config.yaml"), configs[index]).unwrap();
-                let repository_id = fixture
-                    .store
-                    .sqlite
-                    .ensure_repository(path.to_str().unwrap())
-                    .unwrap();
+                let repository_id = crate::repository::location::ensure_repository(
+                    &fixture.store.sqlite,
+                    path.to_str().unwrap(),
+                )
+                .unwrap();
                 // Both loops encounter every repository more than once, including failures.
                 for row in 0..2 {
                     let wave = crate::work::wave::Wave::new(

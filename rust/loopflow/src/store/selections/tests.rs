@@ -555,7 +555,7 @@ fn selection_pane_ownership_is_repository_scoped_for_every_work_kind() {
     use crate::store::StoreError;
     use crate::work::selection::{WorkPaneLayout, WorkWorkspaceKey};
     let (_dir, store, repo) = fixture();
-    let other = store.ensure_repository("/other").unwrap();
+    let other = crate::repository::location::ensure_repository(&store, "/other").unwrap();
     for (kind, id) in [
         (WorkWorkspaceKind::Repository, repo.to_string()),
         (

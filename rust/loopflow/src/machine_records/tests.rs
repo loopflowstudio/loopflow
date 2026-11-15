@@ -19,7 +19,7 @@ fn with_task(home: &Path) -> SqliteStore {
     let project = store.ensure_wave_project(repo, "inbox").unwrap();
     store
         .create_task(&NewTask {
-            repository_id: store.ensure_repository(repo).unwrap(),
+            repository_id: crate::repository::location::ensure_repository(&store, repo).unwrap(),
             due_date: None,
             id: TaskId::parse(TASK).unwrap(),
             project_id: Some(project.id),

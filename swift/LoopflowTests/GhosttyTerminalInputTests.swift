@@ -307,6 +307,49 @@ struct GhosttyShellBlockTests {
 struct GhosttyTerminalInputTests {
     // SwiftPM links GhosttyKit; the Xcode compile-check target builds the fallback.
 #if canImport(GhosttyKit)
+    @Test("Off-window retained terminals report invisibility and keep their children alive")
+    @MainActor
+    func retainedTerminalVisibility() async throws {
+        _ = NSApplication.shared
+        let manager = GhosttyManager.shared
+        manager.initialize()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let reports = directory.appendingPathComponent("visibility")
+        let view = GhosttyMetalView(terminal: .shell("visibility-proof", machineId: fixtureMachineId),
+                                   frame: CGRect(x: 0, y: 0, width: 400, height: 200))
+        view.workingDirectory = directory.path
+        view.command = "/bin/sh -c " + shellEscape(
+            "stty raw -echo; printf '\\033[?2033hvisibility-ready'; exec /bin/cat > " + shellEscape(reports.path))
+        defer { view.destroySurface() }
+        view.createSurface(manager: manager)
+        let surface = try #require(view.surface)
+
+        func waitFor(_ state: String, _ ready: () -> Bool) async throws {
+            let deadline = ContinuousClock.now + .seconds(5)
+            while true {
+                manager.tick()
+                if ready() { return }
+                try #require(ContinuousClock.now < deadline, "Missing \(state)")
+                try await Task.sleep(for: .milliseconds(20))
+            }
+        }
+        try await waitFor("child readiness") { terminalText(view).contains("visibility-ready") }
+        // Mode 2033 reports the terminal's actual visibility to its child,
+        // including surfaces prepared before they are mounted in a window.
+        try await waitFor("hidden report") {
+            (try? String(contentsOf: reports, encoding: .utf8))?.contains("\u{1b}[?999;2n") == true
+        }
+        let marker = "child-still-running"
+        marker.withCString { ghostty_surface_text(surface, $0, UInt(marker.utf8.count)) }
+        try await waitFor("child input") {
+            (try? String(contentsOf: reports, encoding: .utf8))?.contains(marker) == true
+        }
+        #expect(view.surface == surface)
+        #expect(!ghostty_surface_process_exited(surface))
+    }
+
     @Test("Find reserves space and survives a resize without replacing the terminal")
     @MainActor
     func retainedSearchViewport() throws {

@@ -1909,6 +1909,37 @@
         }
       ]
     },
+    "Close": {
+      "description": "The last frame before an orderly terminal disconnect. No stream offset or\ncontrol claim transfers to a replacement terminal.",
+      "properties": {
+        "reason": {
+          "$ref": "#/$defs/CloseReason"
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "type": "object"
+    },
+    "CloseReason": {
+      "oneOf": [
+        {
+          "const": "replaced",
+          "description": "The terminal attachment moved to a replacement. Reattach by Session.",
+          "type": "string"
+        },
+        {
+          "const": "finished",
+          "description": "Execution finished. Stop automatic reattachment.",
+          "type": "string"
+        },
+        {
+          "const": "retired",
+          "description": "Cleanup ended this terminal. Deliberate resume remains available.",
+          "type": "string"
+        }
+      ]
+    },
     "ClosedTaskPageSnapshot": {
       "description": "`lf task list --closed --json`: one page of closed Tasks.",
       "properties": {
@@ -10289,7 +10320,7 @@
       "oneOf": [
         {
           "additionalProperties": false,
-          "description": "A ticket for the Session's held terminal, answered `{ticket,\nterminal_id, expires_in_ms}`. A new connection presents the ticket as\nits first message (`attach`) and becomes the bridge; this connection\nstays a client. When the terminal ends, the bridge closes; attaching\nagain by the same Session reaches its next one. A Session no terminal\nruns is `not_found`; attaching never starts a provider.",
+          "description": "A ticket for the Session's held terminal, answered `{ticket,\nterminal_id, expires_in_ms}`. A new connection presents the ticket as\nits first message (`attach`) and becomes the bridge; this connection\nstays a client. An orderly terminal sends a final `0x07` frame with\nJSON `{reason: replaced|finished|retired}` (see `x-terminal-close`).\nAfter `replaced`, attaching by the same Session reaches its next terminal.\nBare EOF leaves the reason unknown. A Session no terminal\nruns is `not_found`; attaching never starts a provider.",
           "examples": [
             {
               "kind": "session.attach",
@@ -19520,5 +19551,11 @@
   ],
   "title": "Loopflow server protocol",
   "x-min-revision": 5,
-  "x-revision": 5
+  "x-revision": 5,
+  "x-terminal-close": {
+    "payload": {
+      "$ref": "#/$defs/Close"
+    },
+    "tag": 7
+  }
 }

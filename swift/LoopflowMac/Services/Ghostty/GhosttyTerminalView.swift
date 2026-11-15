@@ -624,7 +624,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }
 
     private func restoreInputFocus() {
-        guard focusRequested, inputEnabled, !childExited, !detaching,
+        guard focusRequested, acceptsFirstResponder,
               !isHiddenOrHasHiddenAncestor, retainedSearchBar?.isHidden != false,
               !hasMarkedText(), let window,
               window.firstResponder == nil || window.firstResponder === window || window.firstResponder === self else { return }

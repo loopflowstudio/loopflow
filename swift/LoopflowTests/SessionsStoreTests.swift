@@ -120,6 +120,10 @@ struct SessionsStoreTests {
         #expect(item(store, "main")?.launchId != previous.launchId)
         #expect(item(store, "main")?.record.id == original.id)
         #expect(item(store, "main")?.agentOverride == nil)
+        store.recordPaneFailure(previous, reason: "Retired viewer failed")
+        #expect(item(store, "main")?.state == .prepared)
+        store.recordPaneFailure(try #require(item(store, "main")), reason: "Current viewer failed")
+        #expect(item(store, "main")?.state == .failed("Current viewer failed"))
     }
 
     @Test("A Task workspace reopens its Session by id with the Task beside it, so it resumes managed")
@@ -610,7 +614,7 @@ struct WorkspaceSessionLifecycleTests {
         #expect(store.sessions.first?.state == .prepared)
         store.reconcile([active])
         #expect(store.sessions.first?.launchArguments.contains("--start-if-free") == true)
-        store.recordPaneFailure(missing.id, reason: "Input was acquired elsewhere")
+        store.recordPaneFailure(try #require(item(store, missing.id)), reason: "Input was acquired elsewhere")
         store.reconcile([active])
         #expect(store.sessions.first?.state == .elsewhere)
         await store.moveHere(missing.id)

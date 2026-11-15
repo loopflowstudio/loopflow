@@ -63,6 +63,39 @@ struct WarmPaneMountTests {
         #expect(store.sessions.first?.state == .prepared)
         #expect(store.attachment(record.id) == .opening)
     }
+
+    @Test("Take back replaces a viewer another client ended")
+    func takeBackReplacesEndedViewer() async throws {
+        _ = NSApplication.shared
+        let pool = GhosttySurfacePool(runtime: .shared)
+        let ended = #"{"generation":1,"state":"ended","input":false,"native_ready":false,"message":null}"#
+        let record = try warmSession(id: "displaced", argv: ["/bin/sh", "-c",
+            "(printf '%s\\n' '\(ended)'; sleep 30) | nc -U \"$LF_SERVER_STATUS\" & exec cat"])
+        let terminal = TerminalIdentity.session(record.id, machineId: fixtureMachineId)
+        let store = SessionsStore(repoPath: NSTemporaryDirectory(), query: RegistryQuery { args, _ in
+            guard !args.contains("--reveal-existing") else { throw RegistryQueryError("Take back must resume") }
+            return String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        }, surfaces: pool)
+        store.reconcile([record])
+        store.adoptPreparation(record, intent: .start)
+        let old = pool.view(for: terminal)
+        defer {
+            pool.view(for: terminal).destroySurface()
+            pool.release(terminal)
+            old.destroySurface()
+        }
+        store.recordPaneLive(record.id)
+        let deadline = ContinuousClock.now + .seconds(10)
+        while store.attachment(record.id) != .failed, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        try #require(store.attachment(record.id) == .failed)
+        #expect(store.sessions.first?.state == .live)
+        await store.moveHere(record.id)
+        #expect(old.surface == nil)
+        #expect(pool.view(for: terminal) !== old)
+        #expect(store.sessions.first?.state == .prepared)
+    }
     #endif
 
     @Test("A store without a runtime prepares and shows but launches nothing")

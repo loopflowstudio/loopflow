@@ -80,7 +80,14 @@ stale surface-failure callbacks. Their required behavior survives on addressed
 repository routing, pool-owned retirement and current-`launchId` callbacks; no
 parallel resolver, lifetime owner or compatibility path remains.
 
-Source defects found and fixed, each with a headless regression that failed first:
+The compression pass removes caller-owned generation checks: both surface-failure
+callbacks pass their `SessionItem` to `SessionsStore.recordPaneFailure`, which
+checks `launchId` once beside the state transition. Focus recovery reuses
+`acceptsFirstResponder` for enabled/exited/detaching state. No deletion targets
+remain; retirement ordering and addressed-store routing still earn their place.
+
+Source defects found and fixed; routing and retirement regressions failed on the
+prior code:
 
 - **Routing.** `refresh-session` / `take-back-session` acted on the last-warmed
   store, not the addressed Work. They now resolve the addressed workspace's
@@ -103,12 +110,31 @@ Docs: `docs/sessions.md#when-desktop-loses-its-connection`,
 `docs/troubleshooting.md#desktop-reopened-but-the-session-will-not-accept-typing`,
 `swift/README.md`.
 
-Which of these defects, if any, produced the reported failure is not established.
+- **Held conversations had no reveal action (found in QA).** Since #1887 a held
+  Task conversation listed only `open`. Desktop restores panes and refreshes with
+  reveal intent, and `adoptPreparation` fails a reveal without a `reveal` action:
+  a live QA Desktop, killed and relaunched on a private world, showed "Session
+  failed to open · Reveal preparation is unavailable" over a running provider.
+  `held_actions` now offers `reveal` too, which also gives prepare's reason an
+  action to carry. Regression: `a_held_task_conversation_without_a_view_offers_attach`.
+
+- **Take back ignored a displaced viewer (found in QA).** A terminal `lf session
+  resume` ends Desktop's view of a held conversation; the pane's relay reads
+  `ended` while the store item stays `.live`, so `moveHere` → `prepare` returned
+  early. `moveHere` now releases a failed attachment (awaiting retirement) first.
+  Regression `WarmPaneMountTests/takeBackReplacesEndedViewer` failed three
+  expectations without it.
+
+This held-reveal defect reproduces the reported shape (reopened pane refuses
+input, Refresh repeats the same reveal). Whether it was the incident's cause is
+not established.
 The routing bug matches "Refresh did not help" only when the last-warmed store
 differed from the LOO-906 workspace; the focus gap matches "navigation fixed it".
 
 ## Checks
 
+- `scripts/test_desktop.sh --filter 'SessionsStoreTests|WorkDestinationTests|WarmPaneMountTests|WorkspacePanesTests|GhosttyTerminalMountTests'` — compression pass: CLI and Swift built; 125 tests passed, four display diagnostics skipped; Refresh rejects stale failures and reports current ones. Mounted checks remain for demo.
+- `scripts/test_desktop.sh --skip-build --filter startThenCompetingHolder` — one passed after the failure-callback API cutover.
 - `scripts/test_desktop.sh --filter 'ServerConnectionTests|SessionsStoreTests|WorkspacePanesTests'`
   — 51 passed; new action test failed both cases on original routing.
 - `scripts/test_desktop.sh --filter refreshWaitsForPausedViewerRetirement` — failed
@@ -130,9 +156,25 @@ differed from the LOO-906 workspace; the focus gap matches "navigation fixed it"
 `lf open --host desktop --file docs/sessions.md --file docs/troubleshooting.md`
 returned `task_7c45fd8c99864a9cbec4fbda9b652429 has no workspace in this Desktop window; nothing changed.`
 
+## QA (November 14, `scratch/qa.html`)
+
+Live QA bundle (`com.loopflow.mac.qa907`, branch Desktop + bundled `lf`) on an
+lf-world one-task Machine, driven with `lf desktop send/send-key/capture/do`:
+Desktop SIGKILLed three times with the Task open; after the fixes it reopened onto
+the same provider (one PID throughout) with the unsent draft, which completed and
+submitted once. Refresh repaired an ended pane; Take back after a terminal
+takeover moved input back and the terminal said so. Not reached: screenshots
+after the first (display stopped returning images), mounted focus/typing through
+AppKit, a real provider. Observed for LOO-911: Desktop main thread hung 65 s on
+first Task open and 61 s on one Refresh, at load average 160–240; a sampled repeat
+did not hang.
+
+Open: with held terminals another viewer displaces Desktop's view (pane reads
+failed) rather than leaving it read-only/Busy; Take back and Refresh both recover.
+
 ## Remaining
 
-- Gate checks above, then the mounted demo walkthrough.
+- Gate checks above (add `cargo test -p loopflow --lib a_held_task_conversation_without_a_view_offers_attach` and `scripts/test_desktop.sh --filter WarmPaneMountTests`), then the mounted demo walkthrough.
 - Overlap: #1861 (LOO-774, open at `07a21c5956`: transport endings,
   `connection.rs`, `ServerConnection.swift`) and #1862 (LOO-811, open at
   `753d49e7e2`: provider recovery, Session DTOs, pane presentation), unchanged as of

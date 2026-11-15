@@ -988,8 +988,7 @@ struct SessionPaneView: View {
                     sessions.beginPaneLoad(item.id)
                 },
                 onSurfaceFailed: { reason in
-                    guard sessions.sessions.first(where: { $0.id == item.id })?.launchId == item.launchId else { return }
-                    sessions.recordPaneFailure(item.id, reason: reason)
+                    sessions.recordPaneFailure(item, reason: reason)
                 },
                 onFocus: focusPane
             )

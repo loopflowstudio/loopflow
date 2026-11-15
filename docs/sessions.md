@@ -273,12 +273,11 @@ If the provider has ended, use the offered resume action to continue the same
 Session from history; an ended provider's unsent editor contents cannot be
 restored from history.
 
-Desktop reconnects to the same running conversation automatically and shows connection
-status outside the terminal. Typing pauses while the screen remains available.
-**Retry connection** retries a failed connection. If it is unavailable or the
-pane remains paused, **Refresh session** reopens the view. An unavailable server
-shows its recovery action; follow [Desktop connection diagnosis](troubleshooting.md#desktop-cannot-connect)
-if it still cannot connect.
+During a connection loss, typing pauses while the screen remains available.
+Desktop reconnects automatically; **Retry connection** retries a failed connection.
+If it is unavailable or input stays paused, use **Refresh session**.
+Follow [Desktop connection diagnosis](troubleshooting.md#desktop-cannot-connect)
+if the server still cannot connect.
 [Connect clients](server.md) covers server updates and connection diagnosis.
 
 A view of a Task, Wave or shell conversation continues from its place in the

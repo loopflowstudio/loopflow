@@ -1302,8 +1302,7 @@ final class SessionsStore {
                 self?.beginPaneLoad(id)
             },
             onSurfaceFailed: { [weak self] reason in
-                guard let self, self.sessions.first(where: { $0.id == id })?.launchId == item.launchId else { return }
-                self.recordPaneFailure(id, reason: reason)
+                self?.recordPaneFailure(item, reason: reason)
             })
     }
 
@@ -1336,6 +1335,9 @@ final class SessionsStore {
     }
 
     func moveHere(_ id: String) async {
+        // A viewer another client displaced still reads live; Take back replaces it.
+        guard let index = _index(id) else { return }
+        if sessions[index].state != .pending, attachment(id) == .failed { await release(id)?.value }
         await prepare(id, intent: .resume)
     }
 
@@ -1425,8 +1427,9 @@ final class SessionsStore {
         }
     }
 
-    func recordPaneFailure(_ id: String, reason: String) {
-        guard let index = _index(id), sessions[index].state == .prepared else { return }
+    func recordPaneFailure(_ item: SessionItem, reason: String) {
+        guard let index = _index(item.id), sessions[index].launchId == item.launchId,
+              sessions[index].state == .prepared else { return }
         sessions[index].state = .failed(reason)
     }
 

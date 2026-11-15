@@ -6,7 +6,8 @@ observation source `86f99e3315`, typed field support `f9a8da8ae9`. SQL-only and 
 normalization, field-stage incorporation and derived membership answers now
 share the client owner. Dynamic membership, disconnected Move and the projected
 surface cut (boards, portfolio Roadmap/Now, trails, No Wave grouping, counts) use
-that same owner. Wave detail/history now joins those fields too; the remaining
+that same owner. Wave detail/history joins those fields, and board/detail dated
+Done ranges use one correlated lifecycle/completion-time fact; the remaining
 responsibility inventory below keeps the full rewrite open. No shipping or merge decision; no Wave selected.
 
 ## Direction
@@ -423,8 +424,7 @@ acquire a No Wave label.
 Unanswered, numbered in `scratch/concept-review.html`: (1) queue Abandon offline
 or require a reachable Machine; (2) Cancel before first send or none; (3) phone
 shows Task titles or shows/renames Session names. Built provisional behavior is
-in `questions.md`. These do not prevent the engineering cut above, but remain
-open product choices for this concept-review's Blocked outcome; (3) decides
+in `questions.md`. They do not block the engineering cuts; (3) decides
 whether phone rename exists. No answer is inferred in a headless run.
 
 ### Correlated lifecycle and completion time · 2026-11-15
@@ -451,8 +451,8 @@ an old page cannot supply D1 to a newer lifecycle. Held confirmation withholds a
 dated answer without withholding All ages. Refusal restores the latest base,
 not a saved page; restart retains the supported pair and original request.
 The existing Desktop/iOS/Rust logs listed below were inspected, not rerun.
-`scratch/concept-review.html` now shows this as built. Loop-or-next outcome:
-Blocked on the three open product choices above; none is answered by this cut.
+`scratch/concept-review.html` now shows this as built. None of the three open
+product choices is answered by this cut.
 
 Acceptance: shared `testDatedHistory…` cases cover D1→Reopen→D2, stale
 arrivals/pages, two clients/restart, held local completion, refusal and changed
@@ -602,7 +602,7 @@ New findings join their responsibility; repairs are marked separately.
 | Field capture and ingestion, both transports | Independent supported fields, receiving-link attribution | Historical restoration epoch reset; all-writer declaration audit |
 | Dynamic queries and Move, both hosts | Shared field/effect evaluator; fixed membership removed | Real 10k payload/cache/fan-out profiling |
 | Boards, portfolio, trails, No Wave | Query-owned parent/lifecycle; old planning membership removed | Native acceptance; surface commands at `09ab7e7ab2:scratch/instant-task-session.md` |
-| Wave detail/history/inspector | Shared projected join; DTO membership merge removed | Correlated lifecycle/time now supplies dated answers; unavailable dates stay incomplete |
+| Wave detail/history/inspector, dated Done | Shared projected join; correlated lifecycle/time; DTO membership merge and page-date filters removed | Native acceptance; unavailable dates stay incomplete |
 | Complete/Abandon, both hosts | Synchronous shared projection/navigation and outbox | Three product questions above; other command families below |
 | Other edits and command recovery | Session rename migrated | Claim/unassign/Reopen, Wave/Dashboard edits, bind/new/move, settings, file/layout and delivery/Graph actions: migrate real consumers and remove refresh barriers/duplicate policy |
 | Native ownership, navigation | Desktop pool retained; shared synchronous selection | Retained mobile SessionLink, cached revisit/disclosure input and paint measurements |

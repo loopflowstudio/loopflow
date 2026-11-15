@@ -337,16 +337,31 @@ final class WorkModel {
     private(set) var taskLinkReading: WorkReading<RoadmapSnapshot> = .loading
     var showsTaskLink = false
     private(set) var linkedTaskPage: LinkedTaskPage?
-    private(set) var taskOpening: DesktopOpening?
+    private(set) var taskOpening: DesktopOpening? {
+        didSet {
+            guard let launch = navigation.startingTask, let receipt = launch.receipt else { return }
+            switch taskOpening?.status {
+            case .usable:
+                Perf.$inputTrace.withValue(launch.id) {
+                    Perf.agentInput("creation_input_ready", task: receipt.task.id,
+                                    session: receipt.sessionId ?? "")
+                }
+                navigation.startingTask = nil
+            case .failed, .elsewhere: launch.error = taskOpening?.reason
+            default: break
+            }
+        }
+    }
     @ObservationIgnored private var destinationGeneration = 0
 
     @ObservationIgnored private var taskLinkExpectedID: String?
     @ObservationIgnored private var taskLinkConversation = false
 
     /// Without an intent, the opening follows the Task's own.
-    func openTaskLink(_ link: TaskLink, expectedTaskID: String? = nil, intent: SessionOpenIntent? = nil) async {
+    func openTaskLink(_ link: TaskLink, expectedTaskID: String? = nil, intent: SessionOpenIntent? = nil, preservingCreation: Bool = false) async {
         guard !Task.isCancelled else { return }
-        dismissTaskLink()
+        let creation = preservingCreation ? navigation.startingTask : nil
+        dismissTaskLink(preservingCreation: preservingCreation)
         let generation = destinationGeneration
         taskOpening = DesktopOpening(revision: UUID().uuidString, url: link.address, status: .opening, reason: nil)
         defer {
@@ -367,7 +382,8 @@ final class WorkModel {
             }
             taskLinkReading = .loading
             let result = try await query.taskDestination(issue: link.issue, repo: link.repo)
-            guard !Task.isCancelled, destinationGeneration == generation else { return }
+            guard !Task.isCancelled, destinationGeneration == generation,
+                  creation == nil || navigation.startingTask === creation else { return }
             let matches = result.tasks.items.map { task in (result.waves.first { $0.wave.id == task.task.waveId }, task) }
             let unavailable = result.tasks.unavailableReason != nil
             if let expectedTaskID {
@@ -386,13 +402,15 @@ final class WorkModel {
                 showsTaskLink = true
             }
         } catch {
+            guard creation == nil || navigation.startingTask === creation else { return }
             Perf.agentInput("opening_failed", task: expectedTaskID ?? "")
             failTaskLink(error, link: link, generation: generation)
         }
     }
 
-    func dismissTaskLink() {
-        if let opening = taskOpening, opening.status == .opening {
+    func dismissTaskLink(preservingCreation: Bool = false) {
+        if !preservingCreation { navigation.startingTask = nil }
+        if !preservingCreation, let opening = taskOpening, opening.status == .opening {
             taskOpening = DesktopOpening(revision: UUID().uuidString, url: opening.url, status: .failed, reason: "Opening canceled by navigation or a newer request.")
         }
         destinationGeneration &+= 1
@@ -470,8 +488,12 @@ final class WorkModel {
     }
 
     private func prepareLinkedTask(wave: WaveRoadmap?, task: RoadmapTask, link: TaskLink, generation: Int, workspace: SessionsWorkspace?, request: UUID, intent: SessionOpenIntent) async throws {
+        let creation = navigation.startingTask
+        func stillSelected() -> Bool {
+            destinationGeneration == generation && (creation == nil || navigation.startingTask === creation)
+        }
         try Task.checkCancellation()
-        guard destinationGeneration == generation else { return }
+        guard stillSelected() else { return }
         var task = task
         if let openRepository, repoPath?.normalizedFilePath != task.task.repo.normalizedFilePath {
             openRepository(task.task.repo, taskLink.map(LinkedWork.task))
@@ -490,7 +512,7 @@ final class WorkModel {
             }
             executionQuery = query.onMachine(machine, repository: repository)
             let reading = try await executionQuery.taskLocation(task: executionTask, repository: repository, machine: machine)
-            guard !Task.isCancelled, destinationGeneration == generation else { return }
+            guard !Task.isCancelled, stillSelected() else { return }
             guard case .recorded(let remoteTask, let checkout) = reading.location, let checkout else {
                 throw RegistryQueryError("The execution owner has no available recorded checkout; nothing was prepared or opened.")
             }
@@ -506,12 +528,12 @@ final class WorkModel {
             linkedTaskPage = LinkedTaskPage(generation: generation, taskID: task.id, repo: task.task.repo.normalizedFilePath)
             return
         }
-        let sameRepo = repoPath?.normalizedFilePath == task.task.repo.normalizedFilePath
-        let retainedRecords = sameRepo && location == nil ? sessions.value ?? [] : []
         let sessionID: String
-        var preparation: SessionRecord?
+        let preparation: SessionRecord
         if let selected = link.session {
             sessionID = selected
+            preparation = try await executionQuery.prepareSession(id: selected, work: .task(id: executionTask), cwd: task.task.repo, intent: intent)
+            guard !Task.isCancelled, stillSelected() else { return }
         } else {
             // Reuse the primary-Session owner rather than creating another
             // conversation or replaying a retained terminal's launch command.
@@ -521,21 +543,21 @@ final class WorkModel {
                 record = try await executionQuery.prepareTaskSession(issue: executionTask, cwd: task.task.repo, intent: intent)
             } catch {
                 let action = await executionQuery.startOffer(refused: intent, issue: executionTask, cwd: task.task.repo)
-                if !Task.isCancelled, destinationGeneration == generation, workspace?.conversationRequest == request,
+                if !Task.isCancelled, stillSelected(), workspace?.conversationRequest == request,
                    workspace?.conversationIntent == intent {
                     workspace?.conversationStart = action
                 }
                 throw error
             }
             Perf.agentInput("primary_returned", task: task.id, session: record.id, detail: "provider=\(record.provider ?? "unknown")")
-            guard !Task.isCancelled, destinationGeneration == generation else { return }
+            guard !Task.isCancelled, stillSelected() else { return }
             sessionID = record.id
             preparation = record
             // Preparation may have supplied a checkout/runtime absent from the
             // planning read. Refresh this exact Task, never the current selection.
             if location == nil {
                 let refreshed = try await query.taskDestination(issue: task.task.identifier, repo: task.task.repo)
-                guard !Task.isCancelled, destinationGeneration == generation else { return }
+                guard !Task.isCancelled, stillSelected() else { return }
                 guard let current = refreshed.tasks.items.first(where: { $0.id == task.id }) else {
                     throw RegistryQueryError("The prepared Task is no longer available; its Session was not retargeted.")
                 }
@@ -544,25 +566,8 @@ final class WorkModel {
                 executionIdentity = navigation.preparedTaskWorktrees[task.id] ?? task.reference.workspace?.identity
             }
         }
-        var records: [SessionRecord] = []
-        if let preparation {
-            // Preparation already returned this Session's authoritative reading.
-            // Opening one Task must not wait for every repository Session.
-            records = [preparation]
-        } else if link.session != nil, retainedRecords.contains(where: { $0.id == sessionID }) {
-            records = retainedRecords
-        } else {
-            // Find the addressed conversation without waiting for unrelated history.
-            // This lookup contributes only that record to the current inventory.
-            var after: String?
-            repeat {
-                let page = try await executionQuery.sessionPage(includingHeadless: true, after: after, cwd: task.task.repo)
-                guard !Task.isCancelled, destinationGeneration == generation else { return }
-                records += page.entries
-                after = page.next
-            } while after != nil && !records.contains(where: { $0.id == sessionID })
-        }
-        guard let record = records.first(where: { $0.id == sessionID }), record.names(task: executionTask) else {
+        let record = preparation
+        guard record.id == sessionID, record.names(task: executionTask) else {
             throw RegistryQueryError("Session \(sessionID) was not found in Task \(task.task.identifier). Retry after its Session is available.")
         }
         if location != nil {
@@ -576,7 +581,7 @@ final class WorkModel {
                 throw RegistryQueryError("The Session and Task do not share a recorded checkout; no Changes pane was opened.")
             }
         }
-        guard !Task.isCancelled, destinationGeneration == generation else { return }
+        guard !Task.isCancelled, stillSelected() else { return }
         if let workspace {
             guard workspace.conversationRequest == request, !workspace.conversationClosed else {
                 taskOpening = DesktopOpening(revision: UUID().uuidString, url: link.address, status: .failed, reason: "Opening was closed or released.")
@@ -586,11 +591,8 @@ final class WorkModel {
         if location != nil, let executionIdentity { navigation.preparedTaskWorktrees[task.id] = executionIdentity }
         openTaskDestination(wave: wave, task: task, preservingOpening: true)
         supersedeSessions()
-        if location != nil || preparation != nil || link.session != nil {
-            // One explicitly opened Session updates its own reading. Merge the
-            // latest inventory: it may have refreshed during preparation.
-            records = [record] + (sessions.value ?? []).filter { $0.id != record.id }
-        }
+        // Merge this exact Session without waiting for the repository inventory.
+        let records = [record] + (sessions.value ?? []).filter { $0.id != record.id }
         if let reason = sessions.errorMessage {
             // One successful acquisition does not repair an unrelated inventory failure.
             sessions = .unavailable(lastGood: records, reason: reason)
@@ -598,7 +600,7 @@ final class WorkModel {
             sessions = .available(records)
         }
         workspace?.conversationStart = nil
-        let destination = LinkedSession(generation: generation, record: record, task: task, showsChanges: link.diff, location: location, preparedIntent: preparation == nil ? nil : intent)
+        let destination = LinkedSession(generation: generation, record: record, task: task, showsChanges: link.diff, location: location, preparedIntent: intent)
         try await installConversation(destination, repository: task.task.repo)
     }
 
@@ -761,7 +763,7 @@ final class WorkModel {
                 reason: store.connectionReading(record.id)?.message ?? "Conversation attachment failed or ended.")
         case .elsewhere:
             taskOpening = DesktopOpening(revision: UUID().uuidString, url: opening.url, status: .elsewhere, reason: "Conversation input is held by another client.")
-        case .usable where !showsChanges || (files?.changes != nil && files?.isRefreshingChanges == false):
+        case .usable where !workspace.isRestoringIntent && (!showsChanges || (files?.changes != nil && files?.isRefreshingChanges == false)):
             taskOpening = DesktopOpening(revision: UUID().uuidString, url: opening.url, status: .usable, reason: nil)
         default: break
         }
@@ -2419,30 +2421,63 @@ final class WorkModel {
         graphDefaults[key] = reading(from: result, lastGood: previous)
     }
 
-    /// New Task: one `lf task create REQUEST --run` files it in `wave` (nil: the
-    /// repository), starts its workflow and admits its conversation with the
-    /// request as the first turn; this window then shows that conversation.
-    /// Storage failure keeps the sheet; a submitted request hands uncertainty to recovery.
-    func createTask(request: String, wave: WaveSnapshot?, graph: String?) async throws {
-        let requestID = UUID().uuidString
+    /// Install the submitted conversation before any storage or network wait.
+    @discardableResult
+    func beginTask(request: String, wave: WaveSnapshot?, graph: String?) -> Task<Void, Never> {
+        guard navigation.startingTask == nil else { return Task {} }
+        dismissTaskLink()
         let owner = navigation
-        let presentation = owner.paletteGeneration
+        let launch = WorkNavigation.StartingTask(request: request, directory: repoPath, wave: wave, graph: graph)
+        owner.palette = nil
+        owner.startingTask = launch
+        Perf.$inputTrace.withValue(launch.id) { Perf.agentInput("creation_start") }
+        return Task { await submitTask(launch, owner: owner) }
+    }
+
+    private func submitTask(_ launch: WorkNavigation.StartingTask, owner: WorkNavigation) async {
         let destination = destinationGeneration
         do {
-            let receipt = try await query.createTask(request: request, wave: wave?.name, graph: graph, cwd: repoPath, requestID: requestID)
-            CreationRecovery.shared.awaitingPresentation(requestID, of: .task(receipt.task.id))
-            if owner.paletteGeneration == presentation {
-                owner.palette = nil
-                if navigation === owner, destinationGeneration == destination {
-                    await openTaskConversation(receipt.task.id)
-                }
+            let receipt = try await query.createTask(request: launch.request, wave: launch.wave?.name,
+                graph: launch.graph, cwd: launch.directory, requestID: launch.id)
+            Perf.$inputTrace.withValue(launch.id) {
+                Perf.agentInput("creation_admitted", task: receipt.task.id, session: receipt.sessionId ?? "")
             }
+            launch.receipt = receipt
+            owner.createdTaskIDs.insert(receipt.task.id)
+            CreationRecovery.shared.awaitingPresentation(launch.id, of: .task(receipt.task.id))
+            guard navigation === owner, owner.startingTask === launch,
+                  destinationGeneration == destination else { return }
+            await openCreatedTask(launch)
             try? await confirmWorkUpdate()
-        } catch is SubmittedCreationError {
-            // The saved submission owns recovery. Keeping a submit button here
-            // would turn a lost answer into another creation identity.
-            if owner.paletteGeneration == presentation { owner.palette = nil }
+        } catch {
+            launch.error = error.localizedDescription
+            launch.canEdit = !(error is SubmittedCreationError)
         }
+    }
+
+    func openCreatedTask(_ launch: WorkNavigation.StartingTask) async {
+        guard navigation.startingTask === launch, let receipt = launch.receipt else { return }
+        guard let session = receipt.sessionId else {
+            launch.error = "The Task was filed, but its conversation was not admitted. Inspect its creation receipt."
+            return
+        }
+        launch.error = nil
+        await Perf.$inputTrace.withValue(launch.id) {
+            await openTaskLink(TaskLink(issue: receipt.task.id, repo: launch.directory, session: session, conversation: true),
+                               expectedTaskID: receipt.task.id, intent: .start, preservingCreation: true)
+        }
+        // The native owner completes presentation after its surface is usable.
+        if navigation.startingTask === launch {
+            if taskOpening?.status == .opening { launch.error = nil }
+            showsTaskLink = false
+        }
+    }
+
+    func editStartingTask(_ launch: WorkNavigation.StartingTask) {
+        guard navigation.startingTask === launch, launch.canEdit else { return }
+        navigation.newTaskDraft = launch
+        navigation.startingTask = nil
+        navigation.palette = .newTask
     }
 
     /// Ship the Task, then confirm its subscription update; it moves to Shipping

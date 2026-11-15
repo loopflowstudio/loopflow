@@ -13,14 +13,18 @@ struct NewTaskSheet: View {
     @State private var waveID: String?
     /// A graph other than the scope's default; nil takes up the default.
     @State private var graph: String?
-    @State private var creating = false
-    @State private var error: String?
     @State private var choosingWorkflow = false
     @FocusState private var focused: Bool
 
     init(model: WorkModel) {
         self.model = model
-        _waveID = State(initialValue: model.sidebarWave?.wave.id)
+        if let draft = model.navigation.newTaskDraft {
+            _waveID = State(initialValue: draft.wave?.id)
+            _request = State(initialValue: draft.request)
+            _graph = State(initialValue: draft.graph)
+        } else {
+            _waveID = State(initialValue: model.sidebarWave?.wave.id)
+        }
     }
 
     private var wave: WaveSnapshot? {
@@ -58,10 +62,7 @@ struct NewTaskSheet: View {
                 if let workflow {
                     WorkflowSteps(workflow: workflow).accessibilityIdentifier("new-task-steps")
                 }
-                if let error {
-                    Text(error).font(Typography.body(12)).foregroundStyle(palette.warning)
-                        .textSelection(.enabled).accessibilityIdentifier("new-task-error")
-                }
+
             }
             .padding(22)
             Divider()
@@ -71,7 +72,7 @@ struct NewTaskSheet: View {
                     .buttonStyle(.plain).foregroundStyle(palette.textSecondary)
                     .keyboardShortcut(.cancelAction)
                 Button { create() } label: {
-                    Text(creating ? "Starting…" : "Start  ⌘↩")
+                    Text("Start  ⌘↩")
                         .font(Typography.strong(13))
                         .padding(.horizontal, 15).padding(.vertical, 7)
                         .foregroundStyle(palette.accentText)
@@ -79,8 +80,8 @@ struct NewTaskSheet: View {
                 }
                 .buttonStyle(.plain)
                 .keyboardShortcut(.return, modifiers: .command)
-                .disabled(trimmed.isEmpty || creating)
-                .opacity(trimmed.isEmpty || creating ? 0.45 : 1)
+                .disabled(trimmed.isEmpty)
+                .opacity(trimmed.isEmpty ? 0.45 : 1)
                 .accessibilityIdentifier("new-task-create")
             }
             .padding(.horizontal, 22).padding(.vertical, 12)
@@ -150,14 +151,8 @@ struct NewTaskSheet: View {
     private var scopeName: String { wave?.displayName ?? repositoryName }
 
     private func create() {
-        creating = true
-        error = nil
-        let (request, wave, graph) = (trimmed, wave, graph)
-        Task {
-            defer { creating = false }
-            do { try await model.createTask(request: request, wave: wave, graph: graph) }
-            catch { self.error = error.localizedDescription }
-        }
+        model.navigation.newTaskDraft = nil
+        model.beginTask(request: trimmed, wave: wave, graph: graph)
     }
 
     /// Whose default the reported workflow is, named for the scope it follows.
@@ -289,6 +284,45 @@ private struct WorkflowChooser: View {
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("new-task-workflow-\(entry.name)")
             }
+        }
+    }
+}
+
+/// The submitted words remain visible until the real native conversation attaches.
+struct StartingTaskView: View {
+    let model: WorkModel
+    let launch: WorkNavigation.StartingTask
+    @Environment(\.palette) private var palette
+
+    private var hasRecovery: Bool { CreationRecovery.shared.items.contains { $0.id == launch.id } }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            ScrollView {
+                Text(launch.request)
+                    .font(Typography.body(15))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if let error = launch.error, !hasRecovery {
+                Text(error).foregroundStyle(palette.warning).textSelection(.enabled)
+                if launch.canEdit {
+                    Button("Edit request") { model.editStartingTask(launch) }
+                } else if launch.receipt?.sessionId != nil {
+                    Button("Retry opening") { Task { await model.openCreatedTask(launch) } }
+                }
+            } else if !hasRecovery {
+                Text("Starting conversation…").foregroundStyle(palette.textSecondary)
+            }
+            CreationRecoveryView(only: launch.id)
+            Spacer(minLength: 0)
+        }
+        .padding(28)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(palette.background)
+        .accessibilityIdentifier("starting-task-conversation")
+        .onAppear {
+            Perf.$inputTrace.withValue(launch.id) { Perf.agentInput("creation_surface") }
         }
     }
 }

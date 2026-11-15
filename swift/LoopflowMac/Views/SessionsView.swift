@@ -1619,7 +1619,8 @@ struct SessionsContentView: View {
 
     private var navigation: WorkNavigation { model.navigation }
     private var terminalsVisible: Bool {
-        !navigation.showsSelection && workspaces.selectedWork != nil && fileTask?.task.awaitsStart != true
+        navigation.startingTask == nil && !navigation.showsSelection && workspaces.selectedWork != nil
+            && (fileTask?.task.awaitsStart != true || fileTask.map { navigation.createdTaskIDs.contains($0.task.id) } == true)
             && showsTerminals(currentKey, fileTask?.task, workspace)
     }
 
@@ -1638,7 +1639,9 @@ struct SessionsContentView: View {
 
     private var mainPane: some View {
         ZStack {
-            if navigation.showsSelection {
+            if navigation.startingTask?.receipt == nil, navigation.startingTask != nil {
+                Color.clear
+            } else if navigation.showsSelection {
                 DashboardView(model: model, workspaces: workspaces, sessions: store)
             } else if let key = workspaces.selectedWork {
                 VStack(spacing: 0) {
@@ -1651,6 +1654,13 @@ struct SessionsContentView: View {
             } else {
                 ContentUnavailableView("No Work open", systemImage: "rectangle.on.rectangle",
                     description: Text("Open a repository, Wave or Task from the sidebar."))
+            }
+        }
+        .allowsHitTesting(navigation.startingTask == nil)
+        .accessibilityHidden(navigation.startingTask != nil)
+        .overlay {
+            if let launch = navigation.startingTask {
+                StartingTaskView(model: model, launch: launch)
             }
         }
         .coordinateSpace(.named(ZoomFromTile.space))
@@ -1670,14 +1680,15 @@ struct SessionsContentView: View {
                 }
                 VStack(spacing: 0) {
                     // The main pane alone: the sidebar stays put when a Task opens.
-                    if let task = model.breadcrumb?.task?.task {
+                    if navigation.startingTask == nil, let task = model.breadcrumb?.task?.task,
+                       !navigation.createdTaskIDs.contains(task.id) || model.taskWork[task.id].value?.graph != nil {
                         TaskWorkflowBar(model: model, task: task, work: model.taskWork[task.id])
                     }
-                    if let transition = model.visibleSessions.first(where: { $0.id == navigation.selectedSessionId })?.transition {
+                    if navigation.startingTask == nil, let transition = model.visibleSessions.first(where: { $0.id == navigation.selectedSessionId })?.transition {
                         ProviderTransitionRow(transition: transition)
                     }
                     mainPane
-                    CreationRecoveryView()
+                    CreationRecoveryView(excluding: navigation.startingTask?.id)
                 }
             }
         }
@@ -1811,7 +1822,7 @@ struct SessionsContentView: View {
         let active = currentKey == key
         let terminals = showsTerminals(key, task?.task, entry)
         return VStack(spacing: 0) {
-            if entry.isRestoringIntent { ProgressView("Restoring workspace") }
+            if entry.isRestoringIntent, navigation.startingTask == nil { ProgressView("Restoring workspace") }
             if let error = entry.persistenceError {
                 HStack {
                     Text("Layout not saved: " + error).foregroundStyle(palette.warning).textSelection(.enabled)
@@ -1827,7 +1838,7 @@ struct SessionsContentView: View {
                         }
                     }
             }
-            if let task, task.task.awaitsStart, active {
+            if let task, task.task.awaitsStart, active, navigation.startingTask == nil, !navigation.createdTaskIDs.contains(task.task.id) {
                 // The Session slot offers Start; its brief stays beside it.
                 GeometryReader { geometry in
                     HStack(spacing: 0) {
@@ -1850,7 +1861,7 @@ struct SessionsContentView: View {
                     WaveTiles(model: model, workspaces: workspaces, sessions: store, view: view)
                 }
             } else if terminals {
-                conversationPanes(key, entry, isFocused: active && navigation.palette == nil)
+                conversationPanes(key, entry, isFocused: active && navigation.palette == nil && navigation.startingTask == nil)
             } else if active {
                 HSplitView {
                     WorkSurfaceView(model: model, onOpenSession: openSession,
@@ -1865,7 +1876,7 @@ struct SessionsContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipShape(PaneGeometry.workspaceShape)
         .accessibilityIdentifier("work-workspace-\(key.id)")
-        .modifier(CreationPresentation(recovery: .shared, resource: .task(key.id), visible: active && task != nil))
+        .modifier(CreationPresentation(recovery: .shared, resource: .task(key.id), visible: active && task != nil && navigation.startingTask == nil))
         .onChange(of: task.map { $0.task.isCompleted }, initial: true) { _, completed in
             if let completed { workspaces.updateCompletion(key, completed: completed) }
         }

@@ -229,6 +229,28 @@ struct WaveViewRatios: Equatable {
 @MainActor
 @Observable
 final class WorkNavigation {
+    @MainActor @Observable
+    final class StartingTask: Identifiable {
+        let id = UUID().uuidString
+        let request: String
+        let directory: String?
+        let wave: WaveSnapshot?
+        let graph: String?
+        var receipt: TaskCreateReceipt?
+        var error: String?
+        var canEdit = false
+
+        init(request: String, directory: String?, wave: WaveSnapshot?, graph: String?) {
+            self.request = request
+            self.directory = directory
+            self.wave = wave
+            self.graph = graph
+        }
+    }
+    var startingTask: StartingTask?
+    var newTaskDraft: StartingTask?
+    var createdTaskIDs: Set<String> = []
+
     enum SidebarFilter: String, CaseIterable {
         case working = "Working tasks"
         case available = "Available"
@@ -282,12 +304,12 @@ final class WorkNavigation {
     }
     var palette: Palette? {
         didSet {
-            if oldValue != palette { paletteGeneration &+= 1 }
+            if oldValue != palette {
+                if palette != nil { startingTask = nil }
+            }
             if oldValue == nil, palette != nil { restorePaletteFocus = true }
         }
     }
-    /// A dismissed and reopened sheet is a different presentation, even at the same Work.
-    @ObservationIgnored private(set) var paletteGeneration = 0
     var restorePaletteFocus = true
     var recentDestinations: [WorkPaletteRow] = []
     /// Source revisions isolate disclosure from changed definitions and repositories.

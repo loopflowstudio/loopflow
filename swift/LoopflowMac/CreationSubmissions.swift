@@ -113,18 +113,23 @@ final class CreationRecovery {
 }
 
 struct CreationRecoveryView: View {
+    var excluding: String? = nil
+    var only: String? = nil
+    private var items: [CreationRecovery.Item] {
+        recovery.items.filter { $0.id != excluding && (only == nil || $0.id == only) }
+    }
     private let recovery = CreationRecovery.shared
     @State private var inspecting: CreationRecovery.Item?
     var body: some View {
         VStack(alignment: .leading) {
-            ForEach(recovery.items) { item in
+            ForEach(items) { item in
                 HStack {
                     Text(item.text).textSelection(.enabled)
                     if item.resource != nil { Button(item.complete ? "Show result" : "Inspect") { inspecting = item } }
                 }
             }
         }
-        .padding(recovery.items.isEmpty ? 0 : 12)
+        .padding(items.isEmpty ? 0 : 12)
         .sheet(item: $inspecting) { item in
             if let resource = item.resource { RecoveredCreationInspector(resource: resource, presented: {
                 if item.complete { await recovery.presented([item.id]) }

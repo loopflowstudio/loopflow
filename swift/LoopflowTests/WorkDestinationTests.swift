@@ -182,37 +182,150 @@ struct WorkDestinationTests {
         return try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: wire))
     }
 
-    @Test("New Task creates through one lf command, then shows its conversation")
-    func newTaskSelectsTheTaskAndOpensItsConversation() async throws {
+    @Test("Start enters its conversation before saving, without a second submission")
+    func newTaskPresentsBeforeSubmission() async throws {
+        let barrier = LinkedDestinationBarrier()
+        let submissions = OSAllocatedUnfairLock(initialState: 0)
+        let query = RegistryQuery { args, _ in
+            guard args.starts(with: ["task", "create"]) else { throw RegistryQueryError("No workspace reading") }
+            submissions.withLock { $0 += 1 }
+            await barrier.wait("save")
+            throw RegistryQueryError("Storage unavailable")
+        }
+        let (model, _) = destinationModel(query: query, repoPath: "/original")
+        model.navigation.palette = .newTask
+        let creating = model.beginTask(request: "Keep these words", wave: nil, graph: nil)
+        let launch = try #require(model.navigation.startingTask)
+        #expect(model.navigation.palette == nil)
+        #expect(launch.directory == "/original")
+        let view = try StartingTaskView(model: model, launch: launch).inspect()
+        _ = try view.find(text: "Keep these words")
+        _ = try view.find(text: "Starting conversation…")
+        #expect(throws: (any Error).self) { try view.find(text: "Reading workflow…") }
+        #expect(throws: (any Error).self) { try view.find(text: "Restoring workspace") }
+        #expect(throws: (any Error).self) { try view.find(button: "Start") }
+        await model.beginTask(request: "Repeated gesture", wave: nil, graph: nil).value
+        while !(await barrier.contains("save")) { await Task.yield() }
+        #expect(submissions.withLock { $0 } == 1)
+        await barrier.release("save")
+        await creating.value
+        #expect(launch.canEdit)
+        #expect(launch.error == "Storage unavailable")
+    }
+
+    @Test("Two windows retain distinct creation requests and captured repositories")
+    func creationWindowsStayIndependent() async throws {
+        let barrier = LinkedDestinationBarrier()
+        let requests = OSAllocatedUnfairLock<[String: String]>(initialState: [:])
+        let query = RegistryQuery { args, cwd in
+            guard args.starts(with: ["task", "create"]) else { throw RegistryQueryError("No workspace reading") }
+            let directory = cwd ?? "missing"
+            requests.withLock { $0[directory] = args[3] }
+            await barrier.wait(directory)
+            throw SubmittedCreationError(requestID: args[3], cause: RegistryQueryError("Reply lost"))
+        }
+        let (first, _) = destinationModel(query: query, repoPath: "/first")
+        let (second, _) = destinationModel(query: query, repoPath: "/second")
+        let one = first.beginTask(request: "First request", wave: nil, graph: nil)
+        let two = second.beginTask(request: "Second request", wave: nil, graph: nil)
+        let launch = try #require(second.navigation.startingTask)
+        while true {
+            let firstWaiting = await barrier.contains("/first")
+            let secondWaiting = await barrier.contains("/second")
+            if firstWaiting && secondWaiting { break }
+            await Task.yield()
+        }
+        first.select(nil)
+        await barrier.release("/first")
+        await barrier.release("/second")
+        await one.value
+        await two.value
+        #expect(first.navigation.startingTask == nil)
+        #expect(second.navigation.startingTask === launch)
+        #expect(launch.error?.contains("Reply lost") == true)
+        #expect(!launch.canEdit)
+        let ids = requests.withLock { $0 }
+        #expect(ids.count == 2)
+        #expect(ids["/first"] != ids["/second"])
+        #expect(ids["/second"] == launch.id)
+    }
+
+    @Test("New Task waits for attachment and retries the admitted Session", arguments: [false, true])
+    func newTaskSelectsTheTaskAndOpensItsConversation(attachmentFails: Bool) async throws {
         let planning = try fixture()
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(planning.utf8))
         let task = try #require(snapshot.tasks.items.first)
-        let record = try renameFixtureRecord("primary", title: "Task conversation", work: .task(id: #require(task.runtime?.workId)))
+        let record = try revealedConversation(task)
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let receipt = """
         {"task": {"id": "\(task.task.id)", "identifier": "\(task.task.identifier)", "title": "\(task.task.name)"},
          "graph": "code", "session_id": "\(record.id)", "milestone": "admitted"}
         """
+        let destination = try oneTask(planning, taskId: task.id)
+        let barrier = LinkedDestinationBarrier()
+        let holdDestination = OSAllocatedUnfairLock(initialState: true)
         let created = OSAllocatedUnfairLock<[[String]]>(initialState: [])
         let query = RegistryQuery { args, _ in
+            if args.count == 3, args.starts(with: ["desktop", "layout"]) {
+                if args[2].hasPrefix("task:") { await barrier.wait("layout") }
+                return "null"
+            }
             if args.starts(with: ["task", "create"]) {
                 created.withLock { $0.append(args) }
                 return receipt
             }
-            if args.prefix(2) == ["session", "resume"] { return encoded }
-            if args.starts(with: ["plan", "list"]) { return planning }
+            if args.prefix(2) == ["session", "resume"], args.contains(record.id), args.contains("--task") {
+                return encoded
+            }
+            if args.starts(with: ["plan", "list"]) {
+                if args.contains("--task") {
+                    if holdDestination.withLock({ $0 }) { await barrier.wait("destination") }
+                    return destination
+                }
+                return planning
+            }
             throw RegistryQueryError("New Task runs no separate start or connect sequence")
         }
         let (model, registry) = destinationModel(query: query, repoPath: task.task.repo)
-        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
         model.navigation.palette = .newTask
-        try await model.createTask(request: "fix the flaky retry test", wave: nil, graph: nil)
+        let creating = model.beginTask(request: "fix the flaky retry test", wave: nil, graph: nil)
+        while !(await barrier.contains("destination")) { await Task.yield() }
+        #expect(model.navigation.startingTask?.request == "fix the flaky retry test")
+        #expect(model.selection == nil)
+        holdDestination.withLock { $0 = false }
+        await barrier.release("destination")
+        await creating.value
         let submitted = try #require(created.withLock { $0 }.first)
         #expect(UUID(uuidString: submitted[3]) != nil)
         #expect(Array(submitted.dropFirst(4)) == ["--run", "--json", "--", "fix the flaky retry test"])
         #expect(model.navigation.palette == nil)
         #expect(model.selection == .task(id: task.id))
         #expect(installedSession(model, registry)?.id == record.id)
+        #expect(model.navigation.startingTask?.id == submitted[3])
+        let store = registry.sessionStore(repository: "repo", repoPath: task.task.repo, query: query)
+        while !(await barrier.contains("layout")) { await Task.yield() }
+        if attachmentFails {
+            let launch = try #require(model.navigation.startingTask)
+            store.recordPaneFailure(record.id, reason: "Temporary attachment failure")
+            try await waitForOpening(model)
+            #expect(launch.error == "Temporary attachment failure")
+            #expect(!launch.canEdit)
+            await model.openCreatedTask(launch)
+            #expect(created.withLock { $0.count } == 1)
+            #expect(installedSession(model, registry)?.id == record.id)
+        }
+        let launch = try #require(model.navigation.startingTask)
+        store.recordPaneLive(record.id)
+        // Drain the native-ready callback before releasing the layout response.
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+        #expect(store.attachment(record.id) == .usable)
+        #expect(model.taskOpening?.status == .opening)
+        #expect(model.navigation.startingTask === launch)
+        await barrier.release("layout")
+        try await waitForOpening(model)
+        #expect(model.navigation.startingTask == nil)
         #expect(CreationRecovery.shared.requests(for: .task(task.task.id)).contains(submitted[3]))
         await CreationRecovery.shared.presented([submitted[3]])
     }
@@ -241,18 +354,18 @@ struct WorkDestinationTests {
         }
         let (model, _) = destinationModel(query: query, repoPath: task.task.repo)
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
-        let creating = Task { try await model.createTask(request: "fix the flaky retry test", wave: nil, graph: nil) }
+        let creating = Task { await model.beginTask(request: "fix the flaky retry test", wave: nil, graph: nil).value }
         let deadline = ContinuousClock.now + .seconds(3)
         while !(await barrier.contains("planning")), ContinuousClock.now < deadline { await Task.yield() }
         #expect(model.selection == .task(id: task.id))
         held.withLock { $0 = false }
         await barrier.release("planning")
-        try await creating.value
+        await creating.value
     }
 
     enum CreationDeparture: CaseIterable {
         case newerTaskSheet, newerSheetSameDestination, newerRepositorySheet
-        case navigationAway, navigationRoundTrip, dismissed, repositoryRoundTrip
+        case navigationAway, navigationRoundTrip, windowClosed, repositoryRoundTrip
     }
 
     @Test("An earlier creation reply keeps later navigation and a newer New Task sheet",
@@ -287,7 +400,7 @@ struct WorkDestinationTests {
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
         let originalNavigation = model.navigation
         model.navigation.palette = .newTask
-        let creating = Task { try await model.createTask(request: "earlier request", wave: nil, graph: nil) }
+        let creating = Task { await model.beginTask(request: "earlier request", wave: nil, graph: nil).value }
         let deadline = ContinuousClock.now + .seconds(3)
         while !(await barrier.contains("creation")), ContinuousClock.now < deadline { await Task.yield() }
         try #require(await barrier.contains("creation"))
@@ -302,20 +415,20 @@ struct WorkDestinationTests {
         case .newerRepositorySheet:
             model.setRepoPath("/another-repository")
             model.navigation.palette = .newTask
+        case .windowClosed:
+            model.dismissTaskLink()
         case .navigationAway:
             model.select(.task(id: other.id))
         case .navigationRoundTrip:
             model.select(.task(id: other.id))
             model.select(nil)
-        case .dismissed:
-            model.navigation.palette = nil
         case .repositoryRoundTrip:
             model.setRepoPath("/another-repository")
             model.setRepoPath(task.task.repo)
         }
         let selection = model.selection
         await barrier.release("creation")
-        try await creating.value
+        await creating.value
         #expect(model.selection == selection)
         let newerSheets: [CreationDeparture] = [.newerTaskSheet, .newerSheetSameDestination, .newerRepositorySheet]
         #expect(model.navigation.palette == (newerSheets.contains(departure) ? .newTask : nil))
@@ -326,28 +439,36 @@ struct WorkDestinationTests {
         }
     }
 
-    @Test("A submitted creation with an uncertain answer leaves the sheet for recovery")
+    @Test("An uncertain submission stays inline without a second submit button")
     func submittedCreationHasNoSecondSubmitButton() async throws {
         let query = RegistryQuery { _, _ in
             throw SubmittedCreationError(requestID: "original", cause: RegistryQueryError("Outcome unknown"))
         }
         let (model, _) = destinationModel(query: query, repoPath: "/repo")
         model.navigation.palette = .newTask
-        try await model.createTask(request: "fix it", wave: nil, graph: nil)
+        await model.beginTask(request: "fix it", wave: nil, graph: nil).value
         #expect(model.navigation.palette == nil)
+        let launch = try #require(model.navigation.startingTask)
+        #expect(launch.error?.contains("Outcome unknown") == true)
+        #expect(!launch.canEdit)
     }
 
-    @Test("New Task keeps the sheet when nothing was filed")
+    @Test("An unsaved request stays editable in its conversation")
     func newTaskFailureBeforeFilingKeepsTheSheet() async throws {
         let query = RegistryQuery { args, _ in
             throw RegistryQueryError("not a repository")
         }
         let (model, _) = destinationModel(query: query, repoPath: "/repo")
         model.navigation.palette = .newTask
-        await #expect(throws: RegistryQueryError.self) {
-            try await model.createTask(request: "fix it", wave: nil, graph: nil)
-        }
+        await model.beginTask(request: "fix it", wave: nil, graph: nil).value
+        #expect(model.navigation.palette == nil)
+        let launch = try #require(model.navigation.startingTask)
+        #expect(launch.request == "fix it")
+        #expect(launch.error == "not a repository")
+        #expect(launch.canEdit)
+        model.editStartingTask(launch)
         #expect(model.navigation.palette == .newTask)
+        #expect(model.navigation.newTaskDraft?.request == "fix it")
     }
 
     /// A Dashboard whose one tile is `task`, retained at `location`, with the
@@ -1050,7 +1171,7 @@ struct WorkDestinationTests {
         #expect(model.taskLinkReading.value?.waves.flatMap { $0.tasks.items }.isEmpty == true)
     }
 
-    @Test func taskLinkReusesConversationAfterInventoryLoadsLaterPages() async throws {
+    @Test func taskLinkPreparesExactConversationBesidePagedInventory() async throws {
         let data = try fixture()
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
         let wave = try #require(snapshot.waves.first)
@@ -1060,6 +1181,7 @@ struct WorkDestinationTests {
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let otherEncoded = String(decoding: try JSONEncoder().encode(other), as: UTF8.self)
         let (model, workspaceRegistry) = destinationModel(query: RegistryQuery { args, _ in
+            if args.starts(with: ["session", "resume"]), args.contains(record.id) { return encoded }
             guard args.prefix(2) == ["session", "list"] else {
                 throw RegistryQueryError("Planning is already available")
             }
@@ -1091,9 +1213,12 @@ struct WorkDestinationTests {
             "task_id": try #require(task.runtime?.workId)
         ]))
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        let sessionID = record.id
         let query = RegistryQuery { args, _ in
-            guard args.starts(with: ["session", "list"]) else { throw RegistryQueryError("No launch or planning mutation permitted") }
-            return #"{"entries":[\#(encoded)],"next":null}"#
+            guard args.starts(with: ["session", "resume"]), args.contains(sessionID) else {
+                throw RegistryQueryError("Only the addressed Session is prepared")
+            }
+            return encoded
         }
         let model = WorkModel(query: query, repoPath: wave.wave.repo)
         let workspaceRegistry = SessionsWorkspaceRegistry(localMachineId: identity.machineId)
@@ -1350,7 +1475,7 @@ struct WorkDestinationTests {
         }
     }
 
-    @Test func taskLinkOpensExactSessionFromLaterPage() async throws {
+    @Test func taskLinkOpensExactSessionAndRejectsOtherTask() async throws {
         let data = try fixture()
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
         let wave = try #require(snapshot.waves.first)
@@ -1360,13 +1485,14 @@ struct WorkDestinationTests {
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let unrelated = try renameFixtureRecord("unrelated", title: "Other work", work: .task(id: "other-task"))
         let otherEncoded = String(decoding: try JSONEncoder().encode(unrelated), as: UTF8.self)
-        let (model, workspaceRegistry) = destinationModel(query: RegistryQuery { args, cwd in
-            if args.contains("--task") { return exact }
-            if args.prefix(2) == ["session", "list"], cwd == wave.wave.repo {
-                if args.contains("--after") { return #"{"entries":[\#(encoded),\#(otherEncoded)],"next":null}"# }
-                return #"{"entries":[],"next":"page-two"}"#
+        let (model, workspaceRegistry) = destinationModel(query: RegistryQuery { args, _ in
+            if args.starts(with: ["plan", "list"]) { return exact }
+            if args.starts(with: ["session", "resume"]) {
+                if args.contains(record.id) { return encoded }
+                if args.contains(unrelated.id) { return otherEncoded }
+                throw RegistryQueryError("Session missing was not found")
             }
-            throw RegistryQueryError("No mutation permitted")
+            throw RegistryQueryError("Only the addressed conversation is read")
         })
         let url = TaskLink(issue: task.task.identifier, repo: wave.wave.repo, session: record.id)
         await model.openTaskLink(url)
@@ -1392,14 +1518,13 @@ struct WorkDestinationTests {
         let retained = try renameFixtureRecord("retained", title: "Draft elsewhere", work: nil)
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let other = String(decoding: try JSONEncoder().encode(retained), as: UTF8.self)
-        let reads = DestinationReadCounter()
         let (model, registry) = destinationModel(query: RegistryQuery { args, _ in
+            if args.starts(with: ["session", "resume"]), args.contains(record.id) { return encoded }
             if args.starts(with: ["session", "list"]) {
                 if args.contains("--after") { throw RegistryQueryError("Unrelated history unavailable") }
-                if await reads.next() == 1 { return #"{"entries":[\#(other)],"next":null}"# }
-                return #"{"entries":[\#(encoded)],"next":"unrelated-history"}"#
+                return #"{"entries":[\#(other)],"next":null}"#
             }
-            throw RegistryQueryError("No mutation permitted")
+            throw RegistryQueryError("Only the addressed conversation is prepared")
         }, repoPath: task.task.repo)
         await model.refreshSessions()
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])

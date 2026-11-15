@@ -57,6 +57,24 @@ open their brief beside **Start**, which runs the Task's Workflow; opening alone
 starts nothing. Waves follow Tasks in the same scrolling sidebar, with counts
 from the planning inventory.
 
+Press **⌘N**, describe the work—for example, “Fix the sidebar search”—and press
+**⌘Return** or **Start**. Keep the Task in the current repository or choose a
+Wave and, optionally, a different Workflow before starting. The sheet initially
+follows the selected Wave and the displayed scope default. Start is disabled
+until the request has text.
+
+The sheet closes immediately into the new conversation, with your request and
+**Starting conversation…** visible while its workspace and provider prepare.
+The live conversation replaces that status in place; typing becomes available
+when it is connected and ready. You can navigate elsewhere while it starts;
+completion leaves your newer selection alone.
+
+Launch errors appear in the conversation. If the request could not be saved,
+return to the New Task editor to edit and submit it. If the Task exists but its
+conversation could not open, retry opening that conversation. For an unanswered
+submission, use [creation recovery](../docs/server.md#recover-a-submitted-creation)
+before creating another Task with the same request.
+
 Click a row to select its retained workspace. The title-bar **Repo › Wave › Task**
 path follows hierarchy: click a name to go there, or the **›** after it to list and
 search what it contains; Back and **⌘[ / ⌘]** follow visits. **⌘K** searches Work
@@ -834,9 +852,10 @@ its Task or Session view mounts, including promotion. Cold recovery's Show resul
 uses the same completion owner after displaying the resource; Inspect retains
 unconfirmed launches or conversation changes. Failed removal repeats lookup and
 presentation. No local milestone ledger is stored.
+New Task presents the submitted request before saving or sending it. That starting
+view does not retire the saved submission; the actual result must mount first.
 An earlier New Task reply leaves later navigation and a newer New Task sheet
-alone. Its result stays registered for recovery until presented; only the
-originating sheet can close, and opening the result requires unchanged navigation.
+alone. Its result stays registered for recovery until presented.
 See the [creation contract](../rust/loopflow/src/server/README.md#creation-receipts).
 
 The parts: the plan, the repository's Dashboard plans

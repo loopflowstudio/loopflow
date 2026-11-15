@@ -1,0 +1,12 @@
+{
+  "agent_process_id": "44444444-4444-4444-8444-444444444444",
+  "thread": "native-quota-thread",
+  "failed_turn": "rejected-turn",
+  "model": "gpt-5",
+  "account": "work",
+  "state": "manual_retry",
+  "reason": "This conversation was opened before Loopflow could resend for it",
+  "retry_at": null,
+  "request": null,
+  "retry_turn": null
+}

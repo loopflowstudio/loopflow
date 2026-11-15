@@ -333,8 +333,7 @@ impl Connection {
             {
                 recovery.state = RecoveryState::Uncertain;
                 recovery.reason =
-                    "Native account installation was not confirmed; inspect the conversation"
-                        .into();
+                    "The login change was not confirmed; inspect the conversation".into();
                 self.save_recovery(&recovery, "unconfirmed")?;
                 return Ok(());
             }
@@ -347,12 +346,12 @@ impl Connection {
             self.pin_route().await;
             if recovery.thread != self.client.thread || prepared.admission.check().is_err() {
                 recovery.state = RecoveryState::Uncertain;
-                recovery.reason = "The login changed but native retry admission ended; continue from the conversation".into();
+                recovery.reason = "The login changed but the resend was cancelled; continue from the conversation".into();
                 self.save_recovery(&recovery, "unconfirmed")?;
                 return Ok(());
             }
             recovery.state = RecoveryState::Recovering;
-            recovery.reason = "The admitted native retry is running".into();
+            recovery.reason = "The resent turn is running".into();
             self.save_recovery(&recovery, "reply")?;
             prepared.admission.finish()?;
             return Ok(());
@@ -419,8 +418,8 @@ impl Connection {
                     failed_turn: id.into(),
                     model: None,
                     account: self.route.as_ref().map(|route| route.account_id().clone()),
-                    state: RecoveryState::WaitingNative,
-                    reason: "Reading the rejected turn's native history".into(),
+                    state: RecoveryState::Waiting,
+                    reason: "Reading what the stopped turn did".into(),
                     retry_at: None,
                     request: None,
                     retry_turn: None,
@@ -481,7 +480,9 @@ impl Connection {
                 && prepared.admission.check().is_err()
             {
                 prepared.recovery.state = RecoveryState::Uncertain;
-                prepared.recovery.reason = "Native installation or admission did not finish; continue from the conversation".into();
+                prepared.recovery.reason =
+                    "The login change or resend did not finish; continue from the conversation"
+                        .into();
                 let recovery = prepared.recovery.clone();
                 // A late successful installation reply still updates the broker's
                 // route for subsequent typing, but can never release this gate.
@@ -517,7 +518,7 @@ impl Connection {
                 && self.recovery.installing.is_none()
             {
                 recovery.state = RecoveryState::Uncertain;
-                recovery.reason = "The server reconnected without a native retry reply; inspect the conversation before continuing".into();
+                recovery.reason = "The server reconnected without a resend reply; inspect the conversation before continuing".into();
                 self.save_recovery(recovery, "unconfirmed")?;
             }
             if let Some(turn) = &recovery.retry_turn {
@@ -532,7 +533,7 @@ impl Connection {
                         RecoveryState::Uncertain
                     };
                     recovery.reason = if recovery.state == RecoveryState::Continued {
-                        "The native retry completed"
+                        "The resent turn completed"
                     } else {
                         "The retry stopped; inspect its history before continuing"
                     }
@@ -646,7 +647,7 @@ impl Connection {
                     })
                 {
                     recovery.state = RecoveryState::Continued;
-                    recovery.reason = "The admitted native retry completed".into();
+                    recovery.reason = "The resent turn completed".into();
                     self.save_recovery(&recovery, "settled")?;
                 }
             }
@@ -661,7 +662,7 @@ impl Connection {
             failed_turn: failed,
             model: thread["model"].as_str().map(str::to_owned),
             account: self.route.as_ref().map(|route| route.account_id().clone()),
-            state: RecoveryState::WaitingCapacity,
+            state: RecoveryState::Waiting,
             reason: "Checking eligible logins for this model".into(),
             retry_at: None,
             request: None,
@@ -675,13 +676,15 @@ impl Connection {
             )
         {
             recovery.state = RecoveryState::Uncertain;
-            recovery.reason = "Newer input, earlier work, or incomplete native history; continue from the conversation".into();
+            recovery.reason =
+                "Newer input, earlier work, or incomplete history; continue from the conversation"
+                    .into();
             self.save_recovery(&recovery, "uncertain")?;
             return Ok(());
         }
         let Some(model) = recovery.model.clone() else {
-            recovery.state = RecoveryState::WaitingNative;
-            recovery.reason = "The native thread has not reported its selected model".into();
+            recovery.state = RecoveryState::Waiting;
+            recovery.reason = "The conversation has not reported its selected model".into();
             self.save_recovery(&recovery, "model")?;
             return Ok(());
         };
@@ -690,9 +693,25 @@ impl Connection {
             recovery.account = previous.account.or(recovery.account);
         }
         let Some(account) = recovery.account.clone() else {
-            recovery.reason = "This Session has no managed login to recover".into();
+            recovery.state = RecoveryState::ManualRetry;
+            recovery.reason = "This Session’s login is not one Loopflow manages".into();
             self.save_recovery(&recovery, "unmanaged")?;
             return Ok(());
+        };
+        let ready = match self.has_recovery_guard().await {
+            Ok(true) => true,
+            Ok(false) => {
+                recovery.state = RecoveryState::ManualRetry;
+                recovery.reason =
+                    "This conversation was opened before Loopflow could resend for it".into();
+                false
+            }
+            // A failed read cannot say the client lacks the hook; keep waiting.
+            Err(_) => {
+                recovery.reason =
+                    "Checking whether this conversation can receive the stopped turn again".into();
+                false
+            }
         };
         self.save_recovery(&recovery, "rejected")?;
         let limited = self
@@ -714,6 +733,10 @@ impl Connection {
                 .await?;
             self.save_recovery(&recovery, "limited")?;
         }
+        if !ready {
+            self.save_recovery(&recovery, &format!("wait:{}", uuid::Uuid::new_v4()))?;
+            return Ok(());
+        }
         let wave = self
             .store
             .session(&session)?
@@ -726,11 +749,11 @@ impl Connection {
             &self.client.native.selection,
         )
         .await;
-        let phase = match route {
-            Ok(Some(route)) if self.has_recovery_guard().await.unwrap_or(false) => {
+        match route {
+            Ok(Some(route)) => {
                 if self.recovery.preparing.is_some() || self.recovery.installing.is_some() {
-                    recovery.state = RecoveryState::WaitingNative;
-                    recovery.reason = "The earlier native recovery attempt is settling".into();
+                    recovery.state = RecoveryState::Waiting;
+                    recovery.reason = "The earlier resend attempt is settling".into();
                     self.save_recovery(&recovery, &format!("wait:{}", uuid::Uuid::new_v4()))?;
                     return Ok(());
                 }
@@ -738,7 +761,7 @@ impl Connection {
                 let prompt = gate.prompt();
                 recovery.request = Some(gate.attempt().into());
                 recovery.state = RecoveryState::Recovering;
-                recovery.reason = "Waiting for native submission to admit recovery".into();
+                recovery.reason = "Preparing to resend the stopped turn".into();
                 if !self.save_recovery(&recovery, "dispatch")? {
                     return Ok(());
                 }
@@ -753,11 +776,6 @@ impl Connection {
                 writer.send(Message::Text(rpc.to_string().into())).await?;
                 return Ok(());
             }
-            Ok(Some(_)) => {
-                recovery.state = RecoveryState::WaitingNative;
-                recovery.reason = "This open Codex has no enabled native recovery guard; continue from the conversation".into();
-                "admission"
-            }
             result => {
                 recovery.reason = "No eligible login has capacity for this model".into();
                 if let Err(provider_account::ProviderAccountError::NoEligibleAccount {
@@ -767,10 +785,9 @@ impl Connection {
                 {
                     recovery.retry_at = retry_at;
                 }
-                "wait"
             }
-        };
-        self.save_recovery(&recovery, &format!("{phase}:{}", uuid::Uuid::new_v4()))?;
+        }
+        self.save_recovery(&recovery, &format!("wait:{}", uuid::Uuid::new_v4()))?;
         self.recovery.check_at = SystemTime::now() + Duration::from_secs(60);
         Ok(())
     }
@@ -856,6 +873,125 @@ mod tests {
     use std::time::Duration;
     use tokio_tungstenite::{tungstenite::protocol::Role, WebSocketStream};
 
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn recovery_classifies_manual_retry_before_capacity_and_keeps_newer_input() {
+        let _lock = crate::journal::test_env_lock();
+        let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
+        let machine = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", machine.path());
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+        for (managed, hooks_available, expected) in [
+            (false, false, RecoveryState::ManualRetry),
+            (true, true, RecoveryState::ManualRetry),
+            (true, false, RecoveryState::Waiting),
+        ] {
+            let home = tempfile::Builder::new()
+                .prefix("lf-retry-")
+                .tempdir_in("/tmp")
+                .unwrap();
+            let (store, mut connection) = recovery_fixture(home.path()).await;
+            let account = parse_account_id("spent").unwrap();
+            if managed {
+                connection.route = Some(ProviderAccountRoute::shared(
+                    Provider::Codex,
+                    account.clone(),
+                    Arc::new(Store::from_sqlite_for_test(store.clone())),
+                    home.path().join("login"),
+                    false,
+                ));
+                // Spent-limit recording has already settled; no capacity exists
+                // in this fixture and a missing hook must still read manual.
+                store
+                    .record_session_recovery(
+                        "conversation",
+                        &SessionRecovery {
+                            agent_process_id: connection.client.adapter.agent_process_id.clone(),
+                            thread: "thread".into(),
+                            failed_turn: "failed".into(),
+                            model: Some("model".into()),
+                            account: Some(account),
+                            state: RecoveryState::Waiting,
+                            reason: "Spent quota".into(),
+                            retry_at: None,
+                            request: None,
+                            retry_turn: None,
+                        },
+                        "limited",
+                    )
+                    .unwrap();
+            }
+            let hooks = hooks_available.then(|| {
+                let listener =
+                    tokio::net::UnixListener::bind(home.path().join("native.sock")).unwrap();
+                tokio::spawn(async move {
+                    let (socket, _) = listener.accept().await.unwrap();
+                    let mut native = tokio_tungstenite::accept_async(socket).await.unwrap();
+                    while let Some(Ok(message)) = native.next().await {
+                        let rpc: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
+                        if rpc.get("id").is_none() {
+                            continue;
+                        }
+                        let result = if rpc["method"] == "hooks/list" {
+                            json!({"data":[]})
+                        } else {
+                            json!({})
+                        };
+                        futures_util::SinkExt::send(
+                            &mut native,
+                            tokio_tungstenite::tungstenite::Message::Text(
+                                json!({"id":rpc["id"],"result":result}).to_string().into(),
+                            ),
+                        )
+                        .await
+                        .unwrap();
+                        if rpc["method"] == "hooks/list" {
+                            break;
+                        }
+                    }
+                })
+            });
+            let (client, server) = tokio::net::UnixStream::pair().unwrap();
+            let (mut writer, _) = WebSocketStream::from_raw_socket(client, Role::Client, None)
+                .await
+                .split();
+            let _native = WebSocketStream::from_raw_socket(server, Role::Server, None).await;
+            let mut rpc = json!({"result":{"thread":{"model":"model","status":{"type":"idle"},"turns":[{
+                "id":"failed","status":"failed","itemsView":"full",
+                "error":{"codexErrorInfo":"usageLimitExceeded"},
+                "items":[{"type":"userMessage","content":[{"type":"text","text":"work"}]}]
+            }]}}});
+            connection
+                .recovery_reply("failed".into(), &rpc, &mut writer)
+                .await
+                .unwrap();
+            if let Some(hooks) = hooks {
+                hooks.await.unwrap();
+            }
+            let manual = store.session_recovery("conversation").unwrap().unwrap();
+            assert_eq!(manual.state, expected);
+            assert!(manual.can_retry());
+            assert!(manual.retry_at.is_none());
+            assert!(manual.request.is_none());
+            rpc["result"]["thread"]["turns"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!({"id":"newer","status":"completed","itemsView":"full","items":[]}));
+            connection
+                .recovery_reply("failed".into(), &rpc, &mut writer)
+                .await
+                .unwrap();
+            assert_eq!(
+                store
+                    .session_recovery("conversation")
+                    .unwrap()
+                    .unwrap()
+                    .state,
+                RecoveryState::Uncertain
+            );
+        }
+    }
+
     #[tokio::test]
     async fn recovery_keeps_login_callbacks_after_a_native_thread_change() {
         let home = tempfile::tempdir().unwrap();
@@ -930,7 +1066,7 @@ mod tests {
                 failed_turn: "rejected".into(),
                 model: Some("model".into()),
                 account: None,
-                state: RecoveryState::WaitingNative,
+                state: RecoveryState::Waiting,
                 reason: "waiting".into(),
                 retry_at: None,
                 request: None,

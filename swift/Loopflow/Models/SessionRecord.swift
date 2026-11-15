@@ -485,14 +485,14 @@ extension SessionRecord {
 public struct SessionRecovery: Codable, Sendable, Hashable {
     public let agentProcessId: AgentProcessId
     public enum State: String, Codable, Sendable {
-        case waitingCapacity = "waiting_capacity"
-        case waitingNative = "waiting_native"
+        case waiting = "waiting"
+        case manualRetry = "manual_retry"
         case uncertain, recovering, continued
 
         public var label: String {
             switch self {
-            case .waitingCapacity: "Waiting for capacity"
-            case .waitingNative: "Waiting for native conversation"
+            case .waiting: "Waiting"
+            case .manualRetry: "Send it again yourself"
             case .uncertain: "Review conversation"
             case .recovering: "Recovering"
             case .continued: "Continued"
@@ -509,7 +509,7 @@ public struct SessionRecovery: Codable, Sendable, Hashable {
     public let request: String?
     public let retryTurn: String?
 
-    public var canRetry: Bool { request == nil && (state == .waitingCapacity || state == .waitingNative) }
+    public var canRetry: Bool { request == nil && (state == .waiting || state == .manualRetry) }
 
     enum CodingKeys: String, CodingKey {
         case agentProcessId = "agent_process_id"

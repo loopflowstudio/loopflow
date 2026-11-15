@@ -17,7 +17,7 @@
     "failed_turn": "rejected-turn",
     "model": "gpt-5",
     "account": "work",
-    "state": "waiting_capacity",
+    "state": "waiting",
     "reason": "No eligible login has capacity for this model",
     "retry_at": 1794270600,
     "request": null,

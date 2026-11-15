@@ -486,8 +486,8 @@ Bare `claude` uses the saved Claude model, or Fable by default. With no saved
 model or other configured entry behind it, a Fable limit lets the step go on
 with Opus on the same account, in the same conversation, if Opus has capacity.
 
-Open Claude and Codex Sessions need nothing either. When one hits a limit and
-another eligible login has room for its model, the stopped turn continues on
+Open Claude and Codex Sessions can continue automatically too. When one hits a
+limit and another eligible login has room for its model, the stopped turn continues on
 that login in the same conversation, with its history, draft and pending
 approval intact. A model that just failed rests briefly on that login even
 when a usage poll shows room. A turn that may already have reached the
@@ -495,7 +495,10 @@ provider is never sent again.
 
 When nothing has room, the conversations wait, and Desktop's **Recover
 affected sessions** checks them all again in one click. A client opened by an
-older `lf` keeps waiting and is not restarted. What each state means:
+older `lf`, or using a login Loopflow does not manage, instead shows **Send it
+again yourself** as soon as the rejection is confirmed. Send that message again
+in the conversation; Loopflow does not restart it. The button still rechecks
+these and the waiting conversations. What each state means:
 [Recover after a usage limit](sessions.md#recover-after-a-usage-limit).
 
 To see what would fail next, and move it in one go:

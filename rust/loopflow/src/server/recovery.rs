@@ -286,7 +286,7 @@ mod tests {
             failed_turn: "failed".into(),
             model: Some("model".into()),
             account: None,
-            state: RecoveryState::WaitingCapacity,
+            state: RecoveryState::Waiting,
             reason: "quota".into(),
             retry_at: None,
             request: None,

@@ -77,13 +77,38 @@ pub(crate) fn record_limit(input: &Value) -> Result<()> {
         .or(store.recovery_boundary(&adapter.session, thread, prompt, "started")?)
         .and_then(|value| serde_json::from_value(value["account"].clone()).ok())
         .flatten();
-    let safe = model.is_some() && account.is_some();
+    let (state, reason) = if model.is_none() {
+        (
+            RecoveryState::Uncertain,
+            "The stopped turn's model or complete history is unavailable; inspect the conversation",
+        )
+    } else if account.is_none() {
+        (
+            RecoveryState::ManualRetry,
+            "This Session’s login is not one Loopflow manages",
+        )
+    } else if std::env::var("LF_RECOVERY_GUARD").as_deref() != Ok("1") {
+        (
+            RecoveryState::ManualRetry,
+            "This conversation was opened before Loopflow could resend for it",
+        )
+    } else {
+        (
+            RecoveryState::Waiting,
+            "Checking eligible logins for this model",
+        )
+    };
     let recovery = SessionRecovery {
         agent_process_id: adapter.agent_process_id.clone(),
-        thread: thread.into(), failed_turn: prompt.into(), model, account,
-        state: if safe { RecoveryState::WaitingCapacity } else { RecoveryState::Uncertain },
-        reason: if safe { input["last_assistant_message"].as_str().unwrap_or("Usage limit reached") } else { "The failed turn's model, login, or complete history is unavailable; inspect the conversation" }.into(),
-        retry_at: None, request: None, retry_turn: None,
+        thread: thread.into(),
+        failed_turn: prompt.into(),
+        model,
+        account,
+        state,
+        reason: reason.into(),
+        retry_at: None,
+        request: None,
+        retry_turn: None,
     };
     store.with_provider_context(&adapter, thread, NativeBoundary::Turn, || {
         store.record_session_recovery(&adapter.session, &recovery, "rejected")
@@ -125,7 +150,7 @@ pub(crate) fn check(store: &SqliteStore, client: &Client) -> Result<()> {
             .is_some()
     {
         recovery.state = RecoveryState::Continued;
-        recovery.reason = "The native retry completed".into();
+        recovery.reason = "The resent turn completed".into();
         store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
             store.record_session_recovery(&adapter.session, &recovery, "settled")
         })?;
@@ -147,79 +172,74 @@ fn check_capacity(
     else {
         recovery.state = RecoveryState::Uncertain;
         recovery.reason =
-            "Newer input or incomplete native history; continue from the conversation".into();
+            "Newer input or incomplete history; continue from the conversation".into();
         store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
             store.record_session_recovery(&adapter.session, &recovery, "uncertain")
         })?;
         return Ok(());
     };
+    // `record_limit` already classified a turn with no managed login.
     let Some(account) = &recovery.account else {
         return Ok(());
     };
-    let session = store
-        .session(&adapter.session)?
-        .ok_or(StoreError::NotFound)?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
-    let route = runtime.block_on(async {
-        // Each observer attributes its rejection to the login captured at
-        // prompt submission, even if another Session switched it meanwhile.
-        if !store.has_recovery_phase(&adapter.session, &recovery, "limited")? {
-            if let Some(limit) = crate::agent::subscription_limit_text(&recovery.reason) {
-                provider_account::record_session_limit(Provider::Claude, account, &model, limit)
-                    .await?;
-                store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
-                    store.record_session_recovery(&adapter.session, &recovery, "limited")
-                })?;
-            }
-        }
-        Ok::<_, anyhow::Error>(
-            provider_account::session_recovery_route(
+    // Each observer attributes its rejection to the login captured at
+    // prompt submission, even if another Session switched it meanwhile.
+    if !store.has_recovery_phase(&adapter.session, &recovery, "limited")? {
+        if let Some(limit) = rows.iter().rev().find_map(|row| {
+            let text = row
+                .pointer("/message/content")?
+                .as_array()?
+                .iter()
+                .filter_map(|item| item["text"].as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            crate::agent::subscription_limit_text(&text)
+        }) {
+            runtime.block_on(provider_account::record_session_limit(
                 Provider::Claude,
+                account,
                 &model,
-                Path::new(&session.cwd),
-                session.wave_id.as_ref(),
-                &client.native.selection,
-            )
-            .await?,
-        )
-    });
+                limit,
+            ))?;
+            store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
+                store.record_session_recovery(&adapter.session, &recovery, "limited")
+            })?;
+        }
+    }
+    // The guard is a launch fact, so the rejection's classification stands:
+    // the spent limit still routes other Sessions, and nothing is resent here.
+    if recovery.state == RecoveryState::ManualRetry {
+        return Ok(());
+    }
+    let session = store
+        .session(&adapter.session)?
+        .ok_or(StoreError::NotFound)?;
     recovery.retry_at = None;
-    let phase = match route {
-        Ok(Some(route)) if client.native.guarded && client.native.claude_home.is_some() => {
-            return dispatch_recovery(store, client, recovery, &route, &runtime);
-        }
-        Ok(Some(_)) => {
-            recovery.state = RecoveryState::WaitingNative;
-            recovery.reason =
-                "This open Claude has no native recovery guard or native home; continue from the conversation"
-                    .into();
-            "admission"
-        }
-        result => {
-            recovery.state = RecoveryState::WaitingCapacity;
+    match runtime.block_on(provider_account::session_recovery_route(
+        Provider::Claude,
+        &model,
+        Path::new(&session.cwd),
+        session.wave_id.as_ref(),
+        &client.native.selection,
+    )) {
+        Ok(Some(route)) => return dispatch_recovery(store, client, recovery, &route, &runtime),
+        Ok(None) => recovery.reason = "No eligible login is ready for this model".into(),
+        Err(provider_account::ProviderAccountError::NoEligibleAccount { retry_at, .. }) => {
             recovery.reason = "No eligible login is ready for this model".into();
-            if let Err(error) = result {
-                if let Some(provider_account::ProviderAccountError::NoEligibleAccount {
-                    retry_at,
-                    ..
-                }) = error.downcast_ref()
-                {
-                    recovery.retry_at = *retry_at;
-                } else {
-                    recovery.state = RecoveryState::WaitingNative;
-                    recovery.reason = "The selected login could not prepare native credentials; recovery will check again".into();
-                }
-            }
-            "wait"
+            recovery.retry_at = retry_at;
         }
-    };
+        Err(_) => {
+            recovery.reason = "The chosen login could not be signed in; checking again".into();
+        }
+    }
     store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
         store.record_session_recovery(
             &adapter.session,
             &recovery,
-            &format!("{phase}:{}", uuid::Uuid::new_v4()),
+            &format!("wait:{}", uuid::Uuid::new_v4()),
         )
     })?;
     Ok(())
@@ -238,7 +258,7 @@ fn dispatch_recovery(
     let thread = client.thread.as_str();
     let gate = RecoveryGate::new(&adapter.session, &recovery)?;
     let prompt = gate.prompt();
-    let Some(key) = &client.inbox else {
+    let (Some(key), Some(native)) = (&client.inbox, &client.native.claude_home) else {
         return Ok(());
     };
     let Some((mut socket, token)) = crate::server::wake::open_inbox(key, thread)? else {
@@ -246,7 +266,7 @@ fn dispatch_recovery(
     };
     recovery.request = Some(gate.attempt().into());
     recovery.state = RecoveryState::Recovering;
-    recovery.reason = "Waiting for native submission to admit recovery".into();
+    recovery.reason = "Preparing to resend the stopped turn".into();
     let dispatched = store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
         store.record_session_recovery(&adapter.session, &recovery, "dispatch")
     })?;
@@ -297,11 +317,6 @@ fn dispatch_recovery(
             admission.check()?;
             std::thread::sleep(Duration::from_millis(100));
         }
-        let native = client
-            .native
-            .claude_home
-            .as_ref()
-            .expect("checked native home");
         let guard = runtime.block_on(route.activate_recovery(native, &|| {
             admission
                 .check()
@@ -322,7 +337,7 @@ fn dispatch_recovery(
             )
         })?;
         recovery.retry_turn = Some(prompt.into());
-        recovery.reason = "The admitted native retry is running".into();
+        recovery.reason = "The resent turn is running".into();
         store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
             store.record_session_recovery(&adapter.session, &recovery, "reply")
         })?;
@@ -333,7 +348,7 @@ fn dispatch_recovery(
     if let Err(error) = admitted {
         recovery.state = RecoveryState::Uncertain;
         recovery.reason =
-            "Native recovery was not confirmed; inspect the conversation before continuing".into();
+            "The resend was not confirmed; inspect the conversation before continuing".into();
         store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
             store.record_session_recovery(&adapter.session, &recovery, "unconfirmed")
         })?;
@@ -350,6 +365,116 @@ mod tests {
     use crate::session_recovery::{RecoveryState, SessionRecovery};
     use crate::store::sqlite::SqliteStore;
     use serde_json::json;
+
+    #[test]
+    fn recovery_classifies_the_rejection_without_waiting_for_capacity() {
+        let _lock = crate::journal::test_env_lock();
+        let _env = crate::test_ambient::EnvGuard::clear(&[
+            "LF_HOME",
+            crate::steer::PROVIDER_CONTEXT_ENV,
+            "LF_RECOVERY_GUARD",
+        ]);
+        for (managed, guarded, complete, expected) in [
+            (true, true, true, RecoveryState::Waiting),
+            (true, false, true, RecoveryState::ManualRetry),
+            (false, true, true, RecoveryState::ManualRetry),
+            (false, false, false, RecoveryState::Uncertain),
+        ] {
+            let home = tempfile::tempdir().unwrap();
+            std::env::set_var("LF_HOME", home.path());
+            std::env::set_var("LF_RECOVERY_GUARD", if guarded { "1" } else { "0" });
+            let store = SqliteStore::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
+            store.test_session("reader", &crate::session_record::new_artifact_key());
+            let process = store.test_lf_process();
+            let attachment = store
+                .claim_session_attachment("reader", None, &process, true)
+                .unwrap();
+            store
+                .record_session_connection("reader", &attachment, "fixture", &"thread".into())
+                .unwrap();
+            let adapter = store.reserve_steer_adapter("reader", &attachment).unwrap();
+            std::env::set_var(
+                crate::steer::PROVIDER_CONTEXT_ENV,
+                serde_json::to_string(&adapter).unwrap(),
+            );
+            let account =
+                managed.then(|| crate::provider_account::parse_account_id("spent").unwrap());
+            store
+                .record_recovery_boundary("reader", "thread", "prompt", "started", account.as_ref())
+                .unwrap();
+            let mut rows = vec![
+                json!({"type":"user","isSidechain":false,"uuid":"user","promptId":"prompt"}),
+                json!({"type":"api-request","params":{"model":"sonnet"}}),
+                json!({"type":"assistant","isSidechain":false,"parentUuid":"user",
+                    "isApiErrorMessage":true,"failedResponseHadNoToolCall":true,"error":"rate_limit",
+                    "message":{"content":[{"type":"text","text":"You've hit your limit"}]}}),
+            ];
+            if !complete {
+                rows[1]["params"] = json!({});
+            }
+            let transcript = home.path().join("transcript");
+            std::fs::write(
+                &transcript,
+                rows.iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            )
+            .unwrap();
+            super::record_limit(
+                &json!({"session_id":"thread","prompt_id":"prompt","transcript_path":transcript}),
+            )
+            .unwrap();
+            let recovery = store.session_recovery("reader").unwrap().unwrap();
+            assert_eq!(recovery.state, expected);
+            assert_eq!(recovery.can_retry(), complete);
+            assert!(recovery.request.is_none());
+            assert!(recovery.retry_at.is_none());
+            if complete {
+                let client = Client {
+                    adapter,
+                    thread: "thread".into(),
+                    cwd: home.path().into(),
+                    endpoint: None,
+                    inbox: None,
+                    native: NativeRecovery {
+                        selection: Default::default(),
+                        guarded,
+                        claude_home: Some(home.path().into()),
+                        transcript: Some(transcript),
+                    },
+                };
+                // Isolate the classification from the broker: its spent-limit
+                // receipt already exists and this fixture has no eligible login.
+                store
+                    .record_session_recovery("reader", &recovery, "limited")
+                    .unwrap();
+                if !guarded || !managed {
+                    check(&store, &client).unwrap();
+                    assert_eq!(
+                        store.session_recovery("reader").unwrap().unwrap().state,
+                        RecoveryState::ManualRetry
+                    );
+                    rows.push(
+                        json!({"type":"user","isSidechain":false,"uuid":"new","promptId":"new"}),
+                    );
+                    std::fs::write(
+                        client.native.transcript.as_ref().unwrap(),
+                        rows.iter()
+                            .map(ToString::to_string)
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                    )
+                    .unwrap();
+                    check(&store, &client).unwrap();
+                    assert_eq!(
+                        store.session_recovery("reader").unwrap().unwrap().state,
+                        RecoveryState::Uncertain
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn reconnect_settles_the_dispatched_prompt_despite_a_late_wait() {
@@ -380,7 +505,7 @@ mod tests {
             failed_turn: "rejected".into(),
             model: Some("sonnet".into()),
             account: None,
-            state: RecoveryState::WaitingCapacity,
+            state: RecoveryState::Waiting,
             reason: "waiting".into(),
             retry_at: None,
             request: None,

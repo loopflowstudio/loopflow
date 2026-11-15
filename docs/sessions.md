@@ -512,26 +512,28 @@ turn stops with the provider's limit message, and Desktop shows a row above
 each conversation:
 
 ```text
-Waiting for capacity
+Waiting
 No eligible login has capacity for this model
 Capacity reset: in 2 hours                      [Recover affected sessions]
 ```
 
-Leave them open. When another eligible login has room for a conversation's
+Leave **Waiting** conversations open. If the row says **Send it again yourself**,
+send the stopped message again in that conversation; Loopflow cannot resend it
+for this client. When another eligible login has room for a conversation's
 model, Loopflow switches to it and sends the stopped turn again in the same
 conversation. The row reads **Recovering** while that turn runs, then
 **Continued**. History, the selected model, a draft you were typing and an
 approval waiting for your answer are all where you left them, and your next
 message goes through as usual.
 
-**Recover affected sessions** checks every waiting conversation now. One
+**Recover affected sessions** checks every affected conversation now. One
 click covers all of them, Claude and Codex. Use it after you connect a login
 or change a route. No CLI command is needed.
 
 | The row says | What it means | What to do |
 |---|---|---|
-| **Waiting for capacity** | No eligible login has room for this model. The reset time shows when the provider gave one. | Wait, or [connect a login or change the route](subscriptions.md#route-a-repository), then **Recover affected sessions**. |
-| **Waiting for native conversation** | The open client cannot take the retry yet. The line below says why: it was opened by an older `lf`, it has not reported its model or native home, or the chosen login could not be prepared. | For an older client, send your next message yourself; Loopflow does not restart it. Otherwise **Recover affected sessions** checks again. |
+| **Waiting** | The reason says what is pending: capacity (with a reset time when available), reading the stopped turn, its selected model, an earlier resend, or signing in the chosen login. | Leave it open, or [connect a login or change the route](subscriptions.md#route-a-repository), then **Recover affected sessions**. |
+| **Send it again yourself** | The turn was rejected before any work. This conversation was opened before Loopflow could resend for it, or its login is not one Loopflow manages. | Send the stopped message again yourself. Loopflow does not restart the client. **Recover affected sessions** can still recheck this and the other affected conversations. |
 | **Recovering** | The stopped turn is being sent again, or is running. | Nothing. Checking again does not send it twice. |
 | **Continued** | The retried turn finished. | Carry on. |
 | **Review conversation** | Loopflow cannot tell whether the stopped turn reached the provider, or a tool may already have acted. It also appears when a switch was cancelled or timed out partway. | Read the end of the conversation and continue from what happened. Nothing is resent for you. |

@@ -10,8 +10,8 @@ use crate::store::ProviderAccountId;
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum RecoveryState {
-    WaitingCapacity,
-    WaitingNative,
+    Waiting,
+    ManualRetry,
     Uncertain,
     Recovering,
     Continued,
@@ -53,7 +53,7 @@ impl SessionRecovery {
                 || !matches!(phase, "reply" | "unconfirmed" | "settled")
                 || matches!(
                     observation.state,
-                    RecoveryState::WaitingCapacity | RecoveryState::WaitingNative
+                    RecoveryState::Waiting | RecoveryState::ManualRetry
                 )
             {
                 return;
@@ -78,7 +78,7 @@ impl SessionRecovery {
         self.request.is_none()
             && matches!(
                 self.state,
-                RecoveryState::WaitingCapacity | RecoveryState::WaitingNative
+                RecoveryState::Waiting | RecoveryState::ManualRetry
             )
     }
 
@@ -265,7 +265,7 @@ mod tests {
             failed_turn: "failed".into(),
             model: Some("model".into()),
             account: None,
-            state: RecoveryState::WaitingCapacity,
+            state: RecoveryState::Waiting,
             reason: "waiting".into(),
             retry_at: None,
             request: None,
@@ -285,12 +285,15 @@ mod tests {
             .unwrap());
         let mut late = recovery.clone();
         late.request = None;
-        late.state = RecoveryState::WaitingCapacity;
+        late.state = RecoveryState::Waiting;
         late.reason = "No capacity".into();
         late.retry_at = Some(1234);
-        store
-            .record_session_recovery("reader", &late, "wait:late")
-            .unwrap();
+        for state in [RecoveryState::Waiting, RecoveryState::ManualRetry] {
+            late.state = state;
+            store
+                .record_session_recovery("reader", &late, &format!("wait:{state:?}"))
+                .unwrap();
+        }
         // Reopening the store models a disconnected reader, with no in-memory
         // worker state available to reconstruct dispatch.
         let reader = SqliteStore::new(&home.path().join("db")).unwrap();

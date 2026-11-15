@@ -271,8 +271,10 @@ stays visible when the Session is the only pane. The same action is available
 through `lf desktop do refresh-session -p session`.
 
 A conversation stopped by a usage limit shows its recovery state above the
-pane: waiting, recovering, continued, or needing review. **Recover affected
-sessions** checks every waiting conversation at once. Desktop requests the check
+pane: **Waiting**, **Send it again yourself**, **Recovering**, **Continued**, or
+**Review conversation**. Leave waiting conversations open; send the stopped
+message yourself when the row says **Send it again yourself**. **Recover affected
+sessions** rechecks the affected conversations at once. Desktop requests the check
 and shows the result; drafts and pending approvals stay in the native client.
 States and what to do:
 [Recover after a usage limit](../docs/sessions.md#recover-after-a-usage-limit).

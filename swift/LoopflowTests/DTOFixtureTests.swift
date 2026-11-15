@@ -1177,7 +1177,7 @@ struct TaskLifecycleCapture {
 func sessionRecoveryFixture() throws {
     let session = try JSONDecoder().decode(SessionRecord.self, from: loadFixtureData("session.json"))
     let recovery = try #require(session.recovery)
-    #expect(recovery.state == .waitingCapacity)
+    #expect(recovery.state == .waiting)
     #expect(recovery.failedTurn == "rejected-turn")
     #expect(recovery.canRetry)
     #expect(recovery.retryAt == 1794270600)
@@ -1205,4 +1205,13 @@ func uncertainRecoveryDoesNotOfferRetry() throws {
     value["recovery"] = recovery
     let session = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
     #expect(session.recovery?.canRetry == false)
+}
+
+@Test func manualRetryRecoveryFixture() throws {
+    let data = try loadFixtureData("session_manual_retry.json")
+    let recovery = try JSONDecoder().decode(SessionRecovery.self, from: data)
+    #expect(recovery.state == .manualRetry)
+    #expect(recovery.canRetry)
+    #expect(recovery.state.label == "Send it again yourself")
+    #expect(try JSONDecoder().decode(SessionRecovery.self, from: JSONEncoder().encode(recovery)) == recovery)
 }

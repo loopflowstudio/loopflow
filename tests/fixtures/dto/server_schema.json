@@ -9118,8 +9118,8 @@
     },
     "RecoveryState": {
       "enum": [
-        "waiting_capacity",
-        "waiting_native",
+        "waiting",
+        "manual_retry",
         "uncertain",
         "recovering",
         "continued"

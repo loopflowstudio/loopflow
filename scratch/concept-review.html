@@ -2,71 +2,85 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-811 · Keep the conversation open</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LOO-811 · What the recovery row asks of you</title>
 <style>
-:root { color-scheme:light dark; --ink:#202b31; --paper:#faf9f5; --line:#a2acac; --accent:#795718; }
-* { box-sizing:border-box; }
-body { margin:0; background:var(--paper); color:var(--ink); font:16px/1.45 system-ui,sans-serif; }
-main { max-width:850px; margin:auto; padding:24px 24px 36px; }
-header { font-size:12px; overflow-wrap:anywhere; }
-h1 { font-size:clamp(26px,4vw,34px); line-height:1.15; margin:18px 0 12px; }
-h2 { font-size:18px; margin:20px 0 8px; }
-p { margin:8px 0; }
-.decision { border-left:3px solid var(--accent); padding-left:15px; }
-code { font-size:.88em; overflow-wrap:anywhere; }
-table { width:100%; border-collapse:collapse; font-size:14px; }
-th,td { text-align:left; vertical-align:top; padding:7px 9px 7px 0; border-bottom:1px solid var(--line); }
-ol { padding-left:22px; } li { margin:7px 0; }
-a { color:inherit; text-underline-offset:3px; }
-@media (prefers-color-scheme:dark) { :root { --ink:#e7e9e5; --paper:#182126; --line:#617276; --accent:#e6bd7c; } }
-@media (max-width:560px) { main { padding:20px 16px; } table,tbody,tr,td { display:block; } thead { display:none; } tr { margin-bottom:12px; } td { border:0; padding:3px 0; } td:first-child { font-weight:600; } }
+:root{color-scheme:light dark;--fg:#1c1c1c;--bg:#fbfaf7;--mute:#666;--line:#d9d6cf;--new:#0b6b3a;--old:#8a3b12;--code:#f0ede6}
+@media(prefers-color-scheme:dark){:root{--fg:#e8e6e1;--bg:#161616;--mute:#9a978f;--line:#333;--new:#6fd09a;--old:#e0a07a;--code:#222}}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 -apple-system,system-ui,sans-serif}
+main{max-width:44rem;margin:0 auto;padding:2rem 1.1rem 4rem}
+h1{font-size:1.5rem;line-height:1.25;margin:.2rem 0 1rem}
+h2{font-size:1.1rem;margin:2.2rem 0 .6rem}
+p.meta{color:var(--mute);font-size:.85rem;margin:0}
+code,pre{font:.85rem/1.5 ui-monospace,Menlo,monospace;background:var(--code);border-radius:4px}
+code{padding:.05rem .3rem}
+pre{padding:.8rem;overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:.92rem;display:block;overflow-x:auto}
+th,td{text-align:left;vertical-align:top;padding:.45rem .6rem .45rem 0;border-bottom:1px solid var(--line)}
+.new{color:var(--new)} .old{color:var(--old)}
+.lead{border-left:3px solid var(--new);padding:.1rem 0 .1rem .9rem;margin:1rem 0}
 </style>
 </head>
-<body><main>
-<header>LOO-811 · concept-review · November 9, 2026<br>
-Sources: scratch/{interactive-limit-recovery,live-recovery}.md; docs/sessions.md;
-session_recovery.rs; harness/{recovery_gate,codex_recovery,claude_recovery}.rs;
-store/sqlite/session_events.rs; WorkspacePanesView.swift; SessionRecoveryView.swift</header>
-<h1>Keep the conversation open</h1>
-<div class="decision"><p><strong>Graph decision: advance.</strong> No design change or open product choice.
-The prior review’s retained-progress and native-admission repairs are built.
-The complete Desktop and real-login outcome remains unverified.</p></div>
+<body>
+<main>
+<p class="meta">LOO-811 · concept-review · November 14, 2026 · headless</p>
+<p class="meta">Built from scratch/interactive-limit-recovery.md, docs/sessions.md, session_recovery.rs, server/recovery.rs, harness/{claude,codex}_recovery.rs, SessionRecord.swift, SessionRecoveryView.swift at 3b96422baa</p>
+<h1>What the recovery row asks of you</h1>
+
+<div class="lead">
+<p><strong>Outcome: the design changed; iterate to implement.</strong> One state says "waiting" for a turn Loopflow will never resend, and says it only after capacity returns. Each state becomes one thing the person does. No open product choice.</p>
+</div>
+
 <h2>Actions → concepts → APIs</h2>
-<table><thead><tr><th>Action</th><th>Concept</th><th>State change</th></tr></thead><tbody>
-<tr><td>Leave limited Sessions open</td><td>Existing conversation + rejected turn</td><td>Native observer → eligible login → guarded submission → same-thread continuation.</td></tr>
-<tr><td>Recover affected sessions</td><td>Check waiting conversations together</td><td><code>session.recover</code> → <code>request_session_recovery</code>. No new owner or Graph step.</td></tr>
-<tr><td>Keep typing or answer an approval</td><td>Native input order</td><td>Newer work supersedes the old rejection; input after admission follows recovery. Approvals stay native.</td></tr>
-<tr><td>Read progress</td><td>One retained attempt</td><td><code>session_recovery</code> → Desktop: waiting, recovering, review conversation, or continued.</td></tr>
-</tbody></table>
-<h2>Before → built now</h2>
-<p><strong>Earlier review:</strong> a delayed wait could hide dispatch; reading history
-before sending left newer input exposed. <strong>Built:</strong> retained facts keep
-one attempt across reconnect, and the native submission hook holds admission through
-credential preparation. Only its correlated completion establishes “Continued”.</p>
-<p><strong>Current usage:</strong> “Checking again does not resend a dispatched retry.
-Its progress follows the original attempt, even after a reconnect.”
-See <a href="../docs/sessions.md#recover-after-a-usage-limit">Session usage</a>.
-No new usage or skill workflow is proposed.</p>
+<table>
+<tr><th>You</th><th>Concept</th><th>What changes state</th></tr>
+<tr><td>Leave limited conversations open</td><td>The conversation, its failed turn, one recovery reading</td><td>Machine server reads live interactive clients, asks the account broker for a login, resends once through the client's own submission hook</td></tr>
+<tr><td>Click Recover affected sessions</td><td>"Check now"</td><td><code>session.recover</code> → <code>request_session_recovery</code>; skips the 60-second backoff, never resends dispatched input</td></tr>
+<tr><td>Read the row above the pane</td><td>The same reading</td><td><code>session_recovery</code> folded from Session history → <code>SessionRecord.recovery</code></td></tr>
+</table>
+<p>These hold. The holder adaptation added no concept and removed the per-Session watchers.</p>
+
+<h2>The mismatch</h2>
+<p class="old"><strong>Built now.</strong> A conversation opened before the recovery hook existed, with no login free:</p>
+<pre>Waiting for capacity
+No eligible login has capacity for this model
+Capacity reset: in 2 hours                      [Recover affected sessions]</pre>
+<p class="old">Two hours later, when a login frees up:</p>
+<pre>Waiting for native conversation
+This open Claude has no native recovery guard or native home; continue from the conversation
+                                                [Recover affected sessions]</pre>
+<p>The guide says "Leave them open". This one was never going to continue. The same label also covers waits that do end by themselves (reading history, model not reported, a login that could not be prepared). Codex's unmanaged login stays "Waiting for capacity" forever; Claude files the same case under "Review conversation".</p>
+
+<p class="new"><strong>Proposed.</strong> At the rejection:</p>
+<pre>Send it again yourself
+This conversation was opened before Loopflow could resend for it
+                                                [Recover affected sessions]</pre>
+
+<h2>States, before and after</h2>
+<table>
+<tr><th class="old">Built</th><th class="new">Proposed</th><th>You</th></tr>
+<tr><td><code>waiting_capacity</code><br>Waiting for capacity</td><td class="new"><code>waiting</code><br>Waiting</td><td>Leave it open. The reason says for what. Takes the short waits below.</td></tr>
+<tr><td><code>waiting_native</code><br>Waiting for native conversation<br>(short waits <em>and</em> no guard)</td><td class="new"><code>manual_retry</code><br>Send it again yourself<br>(no guard, unmanaged login)</td><td>Send the message again. The turn was rejected before any work.</td></tr>
+<tr><td><code>recovering</code></td><td>unchanged</td><td>Nothing.</td></tr>
+<tr><td><code>continued</code></td><td>unchanged</td><td>Carry on.</td></tr>
+<tr><td><code>uncertain</code><br>Review conversation</td><td>unchanged</td><td>Read the end, continue from what happened.</td></tr>
+</table>
+<p>Still five. The requirement "Distinguish rejected turns from uncertain delivery/completed effects" is why the no-guard case does not fold into Review conversation: there the turn is known rejected and safe to send again.</p>
+
 <h2>Normal, failure, recovery</h2>
-<p>Two limited Task conversations continue on eligible logins, retaining their models,
-history and drafts. No capacity: keep waiting and show a known reset. A client without
-the guard stays open with an explanation. Cancelled or unconfirmed dispatch: keep the
-attempt and show “Review conversation”; a late correlated completion can settle it.
-An already-sent login change may take effect after cancellation without releasing the retry.</p>
-<p><strong>Remaining mismatch:</strong> served native fixtures establish continuation,
-drafts and selected approval/cancellation cases. They do not establish the rendered
-Desktop experience, physical typing after reopen, or installed real-login behavior.
-Neither account adoption nor an unrelated completed turn closes that gap.</p>
-<h2>Questions for the remaining checks</h2>
+<p><strong>Normal:</strong> guarded conversations read Waiting → Recovering → Continued, as built.</p>
+<p><strong>Failure:</strong> an unguarded conversation with no capacity anywhere is resent by hand and rejected again. That is a new failed turn with its own row.</p>
+<p><strong>Recovery:</strong> Codex reads its hooks live, so a later check may find the guard and take the turn if nothing newer was typed. The server therefore keeps checking <code>manual_retry</code> rows and the button stays. A late wait still cannot replace dispatch.</p>
+
+<h2>Not directed</h2>
+<p>Desktop picks the affected Sessions from the ones it has loaded, with its own copy of <code>can_retry</code>; the served request could own "every waiting conversation". No failure observed.</p>
+
+<h2>Questions</h2>
+<p>None blocks the loop. For whoever reads the row at demo:</p>
 <ol>
-<li><strong>Gate:</strong> do restricted routes, distinct models, later capacity,
-repeated limits, lost/late installation replies and cancellation after installation
-retain truthful progress and effects? Use the <a href="interactive-limit-recovery.md">working design’s matrix</a>.</li>
-<li><strong>Demo:</strong> do the visible controls explain every wait, and does physical
-keyboard input work after reopen? The ordinary-typing incident remains unresolved.</li>
-<li><strong>Configured review:</strong> do real refresh/rotation and installed two-item
-Keychain behavior match the disposable checks? Retain the limits in
-<a href="live-recovery.md">live recovery</a>.</li>
+<li>"Send it again yourself": (a) this label, (b) another wording.</li>
+<li>The button on a <code>manual_retry</code> row: (a) keep, since it also checks the others, (b) hide.</li>
 </ol>
-</main></body></html>
+</main>
+</body>
+</html>

@@ -17,6 +17,20 @@ import ViewInspector
     try waiting.inspect().find(button: "Recover affected sessions").tap()
     #expect(requested)
     var payload = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(recovery)) as? [String: Any])
+    payload["state"] = "manual_retry"
+    payload["retry_at"] = NSNull()
+    payload["reason"] = "This conversation was opened before Loopflow could resend for it"
+    let manual = try JSONDecoder().decode(SessionRecovery.self, from: JSONSerialization.data(withJSONObject: payload))
+    let manualView = SessionRecoveryView(recovery: manual) { requested = false }
+    #expect(try manualView.inspect().find(text: "Send it again yourself").string() == "Send it again yourself")
+    #expect(try manualView.inspect().find(text: manual.reason).string() == manual.reason)
+    try manualView.inspect().find(button: "Recover affected sessions").tap()
+    #expect(!requested)
+    payload["request"] = "dispatched-attempt"
+    let dispatched = try JSONDecoder().decode(SessionRecovery.self, from: JSONSerialization.data(withJSONObject: payload))
+    #expect(throws: (any Error).self) {
+        try SessionRecoveryView(recovery: dispatched) {}.inspect().find(button: "Recover affected sessions")
+    }
     payload["state"] = "uncertain"
     payload["request"] = "unconfirmed-attempt"
     let uncertain = try JSONDecoder().decode(SessionRecovery.self, from: JSONSerialization.data(withJSONObject: payload))

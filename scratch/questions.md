@@ -51,3 +51,15 @@ conversation. It checks the other affected conversations too; the reason and
 sessions guide explain that an older client needs manual continuation. No client
 is restarted to install its guard. Recovery belongs in the Machine server,
 without restoring the deleted Task-update hooks or per-Session observer processes.
+
+2026-11-14 concept review: the recovery row's states are named for what the
+person does. `waiting_native` splits: its short waits join `waiting`; a rejected
+turn the client cannot take becomes `manual_retry` ("Send it again yourself"),
+decided at the rejection instead of after capacity returns. The button stays on
+both, per the choice above. Labels and reasons were agent-written; nobody chose
+them. Direction: interactive-limit-recovery.md, "Concept review — November 14".
+
+2026-11-14 state implementation: a failed Codex `hooks/list` read stays `waiting`;
+only a successful read showing no recovery hook establishes `manual_retry`.
+The failure is a temporary inability to check, so it must not claim that the
+conversation cannot take a resend. Both states retain bulk rechecks.

@@ -1358,7 +1358,7 @@ fn session_recovery_round_trips_the_failed_turn_and_wait() {
         serde_json::from_value(raw["recovery"].clone()).unwrap();
     assert_eq!(
         recovery.state,
-        loopflow::session_recovery::RecoveryState::WaitingCapacity
+        loopflow::session_recovery::RecoveryState::Waiting
     );
     assert_eq!(recovery.failed_turn, "rejected-turn");
     assert_eq!(serde_json::to_value(recovery).unwrap(), raw["recovery"]);
@@ -1406,4 +1406,19 @@ fn opening_receipts_distinguish_focus_from_attachment() {
         serde_json::to_value(receipts).unwrap(),
         serde_json::from_str::<serde_json::Value>(json).unwrap()
     );
+}
+
+#[test]
+fn manual_retry_recovery_round_trips() {
+    let raw: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/session_manual_retry.json"
+    ))
+    .unwrap();
+    let recovery: loopflow::session_recovery::SessionRecovery =
+        serde_json::from_value(raw.clone()).unwrap();
+    assert_eq!(
+        recovery.state,
+        loopflow::session_recovery::RecoveryState::ManualRetry
+    );
+    assert_eq!(serde_json::to_value(recovery).unwrap(), raw);
 }

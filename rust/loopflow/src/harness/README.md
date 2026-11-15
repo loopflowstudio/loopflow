@@ -110,7 +110,10 @@ credential work uses that home rather than the Machine server's environment.
 
 The projection folds each failed turn's dispatch and correlated result; a late
 wait cannot replace them or hide a subsequent rejection. Checking again cannot
-resend an attempt already dispatched.
+resend an attempt already dispatched. Temporary waits project `waiting`; a
+complete rejection without a managed login or a client able to take the resend
+projects `manual_retry` before capacity selection. Both accept recheck requests;
+Codex reads its hook list live so a later check can find the client ready.
 
 A recovery envelope binds the Session, native thread, rejected turn and one-use
 attempt. The recovery-only shell wrapper blocks failures and beats Codex's native

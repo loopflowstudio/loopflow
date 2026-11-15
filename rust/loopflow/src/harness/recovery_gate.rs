@@ -300,7 +300,7 @@ mod tests {
                 failed_turn: "failed".into(),
                 model: None,
                 account: None,
-                state: RecoveryState::WaitingNative,
+                state: RecoveryState::Waiting,
                 reason: String::new(),
                 retry_at: None,
                 request: None,

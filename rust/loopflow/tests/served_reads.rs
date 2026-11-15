@@ -370,8 +370,13 @@ fn served_bulk_recovery_keeps_task_identity_and_dispatched_attempts() {
         )
         .unwrap();
         let mut fact = json!({"agent_process_id":agent,"thread":"thread","failed_turn":"failed",
-            "model":"fixture","account":null,"state":"waiting_capacity","reason":"No capacity",
+            "model":"fixture","account":null,"state":"waiting","reason":"No capacity",
             "retry_at":null,"request":null,"retry_turn":null});
+        if index == 1 {
+            fact["state"] = json!("manual_retry");
+            fact["reason"] =
+                json!("This conversation was opened before Loopflow could resend for it");
+        }
         append(id, "rejected", &fact);
         if index == 0 {
             let wait = fact.clone();

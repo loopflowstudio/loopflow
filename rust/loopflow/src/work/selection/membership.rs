@@ -1,9 +1,8 @@
 //! Rust resolves identity, scope and order; clients evaluate this finite program
 //! over selection states without reconstructing Task lifecycle rules.
 use super::{
-    wave_descendants, DashboardId, MemberRef, Selection, SelectionError, SelectionExpression,
-    SelectionId, SelectionResolution, SelectionState, SelectionWork, WorkWorkspaceKey,
-    WorkWorkspaceKind,
+    DashboardId, MemberRef, Selection, SelectionError, SelectionExpression, SelectionId,
+    SelectionResolution, SelectionState, SelectionWork, WorkWorkspaceKey, WorkWorkspaceKind,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -76,15 +75,34 @@ pub struct MembershipSupport {
     pub activity: FieldSupport,
 }
 
+/// Authored membership predicates over the captured repository manifest.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum MembershipPredicate {
+    Default {
+        #[serde(deserialize_with = "Option::deserialize")]
+        wave: Option<crate::id::WaveId>,
+    },
+    Descendants {
+        wave: String,
+    },
+    Kind {
+        work_kind: WorkWorkspaceKind,
+    },
+    State {
+        state: SelectionState,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MembershipNode {
     Members {
         members: Vec<MemberRef>,
     },
-    State {
-        state: SelectionState,
-        members: Vec<MemberRef>,
+    Select {
+        source: Vec<SelectionId>,
+        predicate: MembershipPredicate,
     },
     Compose {
         items: Vec<MembershipNode>,
@@ -114,9 +132,19 @@ pub struct MembershipStateEffect {
 
 impl MembershipPlan {
     pub fn resolve(&self) -> SelectionResolution {
-        let facts = self.facts.iter().map(|fact| (&fact.work, fact)).collect();
         let mut unavailable = self.unavailable.clone();
-        let members = self.root.evaluate(&facts, &mut unavailable);
+        let parents = self
+            .facts
+            .iter()
+            .filter(|fact| fact.work.kind == WorkWorkspaceKind::Wave)
+            .map(|fact| {
+                (
+                    fact.work.id.as_str(),
+                    fact.parent.wave.as_ref().map(crate::id::WaveId::as_str),
+                )
+            })
+            .collect();
+        let members = self.root.evaluate(&self.facts, &parents, &mut unavailable);
         let selected: BTreeSet<_> = members.iter().map(|member| &member.work).collect();
         let attention = self
             .facts
@@ -137,58 +165,86 @@ impl MembershipPlan {
 }
 
 impl MembershipNode {
-    fn keys(&self, keys: &mut BTreeSet<WorkWorkspaceKey>) {
+    fn keys(&self, keys: &mut BTreeSet<WorkWorkspaceKey>) -> bool {
         match self {
-            Self::Members { members } | Self::State { members, .. } => {
+            Self::Members { members } => {
                 keys.extend(members.iter().map(|member| member.work.clone()));
+                false
             }
+            Self::Select { .. } => true,
             Self::Compose { items } | Self::Intersect { items } => {
+                let mut dynamic = false;
                 for item in items {
-                    item.keys(keys);
+                    dynamic |= item.keys(keys);
                 }
+                dynamic
             }
         }
     }
 
     fn evaluate(
         &self,
-        facts: &BTreeMap<&WorkWorkspaceKey, &MembershipFacts>,
+        facts: &[MembershipFacts],
+        parents: &BTreeMap<&str, Option<&str>>,
         unavailable: &mut Vec<String>,
     ) -> Vec<MemberRef> {
         match self {
             Self::Members { members } => members.clone(),
-            Self::State { state, members } => members
+            Self::Select { source, predicate } => facts
                 .iter()
-                .filter(|member| {
-                    let Some(fact) = facts.get(&member.work) else {
-                        unavailable.push(format!("Work {} facts are unavailable", member.work.id));
-                        return false;
+                .filter(|fact| {
+                    let state = match predicate {
+                        MembershipPredicate::State { state } => Some(*state),
+                        MembershipPredicate::Default { .. }
+                            if fact.work.kind == WorkWorkspaceKind::Task =>
+                        {
+                            Some(SelectionState::Working)
+                        }
+                        _ => None,
                     };
-                    if fact.contains(state) {
+                    let included = match predicate {
+                        MembershipPredicate::State { .. } => {
+                            fact.work.kind == WorkWorkspaceKind::Task
+                        }
+                        MembershipPredicate::Kind { work_kind } => fact.work.kind == *work_kind,
+                        MembershipPredicate::Descendants { wave } => {
+                            is_descendant(fact, wave.as_str(), parents, unavailable)
+                        }
+                        MembershipPredicate::Default { wave } => match fact.work.kind {
+                            WorkWorkspaceKind::Repository => false,
+                            WorkWorkspaceKind::Wave => fact.parent.wave == *wave,
+                            WorkWorkspaceKind::Task => wave.as_ref().is_none_or(|wave| {
+                                is_descendant(fact, wave.as_str(), parents, unavailable)
+                            }),
+                        },
+                    };
+                    if !included {
+                        return false;
+                    }
+                    let Some(state) = state else {
+                        return true;
+                    };
+                    if fact.contains(&state) {
                         return true;
                     }
-                    if !fact.activity.known
-                        && matches!(
-                            state,
-                            SelectionState::Available
-                                | SelectionState::Busy
-                                | SelectionState::Blocked
-                        )
-                    {
+                    if state.is_activity() && !fact.activity.known {
                         unavailable.push(format!("Task {} activity is unavailable", fact.name));
                     }
                     false
                 })
-                .cloned()
+                .map(|fact| MemberRef {
+                    source: source.clone(),
+                    work: fact.work.clone(),
+                })
                 .collect(),
             Self::Compose { items } => items
                 .iter()
-                .flat_map(|item| item.evaluate(facts, unavailable))
+                .flat_map(|item| item.evaluate(facts, parents, unavailable))
                 .collect(),
             Self::Intersect { items } => {
                 let mut result = None::<Vec<MemberRef>>;
                 for item in items {
-                    let members = item.evaluate(facts, unavailable);
+                    let members = item.evaluate(facts, parents, unavailable);
                     if let Some(result) = &mut result {
                         let keys: BTreeSet<_> = members.iter().map(|member| &member.work).collect();
                         result.retain(|member| keys.contains(&member.work));
@@ -200,6 +256,31 @@ impl MembershipNode {
             }
         }
     }
+}
+
+fn is_descendant(
+    fact: &MembershipFacts,
+    wave: &str,
+    parents: &BTreeMap<&str, Option<&str>>,
+    unavailable: &mut Vec<String>,
+) -> bool {
+    let mut parent = fact.parent.wave.as_ref().map(crate::id::WaveId::as_str);
+    let mut seen = BTreeSet::new();
+    while let Some(id) = parent {
+        if id == wave {
+            return true;
+        }
+        if !seen.insert(id) {
+            unavailable.push(format!("Wave {id} ancestry is cyclic"));
+            return false;
+        }
+        let Some(next) = parents.get(id) else {
+            unavailable.push(format!("Wave {id} ancestry is unavailable"));
+            return false;
+        };
+        parent = *next;
+    }
+    false
 }
 
 impl Selection {
@@ -220,7 +301,7 @@ impl Selection {
             &mut unavailable,
         )?;
         let mut keys = BTreeSet::new();
-        root.keys(&mut keys);
+        let dynamic = root.keys(&mut keys);
         Ok(MembershipPlan {
             // Work display facts have no usage dependency. External/native
             // readiness remains outside the SQLite revision contract.
@@ -231,7 +312,9 @@ impl Selection {
             root,
             facts: work
                 .iter()
-                .filter(|item| keys.contains(&item.key))
+                .filter(|item| {
+                    item.key.repository == repository && (dynamic || keys.contains(&item.key))
+                })
                 .map(|item| MembershipFacts {
                     work: item.key.clone(),
                     name: item.name.clone(),
@@ -269,6 +352,15 @@ impl Selection {
                 .collect(),
             unavailable,
             effects: BTreeMap::from([
+                (
+                    "task.move".into(),
+                    MembershipStateEffect {
+                        stage: "task.membership_changed".into(),
+                        domains: BTreeSet::from(["planning".into()]),
+                        remove: BTreeSet::new(),
+                        insert: BTreeSet::new(),
+                    },
+                ),
                 (
                     "task.complete".into(),
                     MembershipStateEffect {
@@ -328,10 +420,6 @@ impl Selection {
         unavailable: &mut Vec<String>,
     ) -> Result<MembershipNode, SelectionError> {
         path.push(self.id.clone());
-        let member = |item: &SelectionWork| MemberRef {
-            source: path.clone(),
-            work: item.key.clone(),
-        };
         let node = match &self.expression {
             SelectionExpression::Compose { items } | SelectionExpression::Intersect { items } => {
                 let nodes = items
@@ -408,35 +496,12 @@ impl Selection {
                         unavailable.push(format!("Wave {wave} is unavailable"));
                     }
                 }
-                let descendants = wave.map_or_else(BTreeSet::new, |wave| {
-                    wave_descendants(repository, wave.as_str(), work)
-                });
-                // Preserve the server's interleaved Wave/Task order.
-                let items = work
-                    .iter()
-                    .filter(|item| item.key.repository == repository)
-                    .filter_map(|item| match item.key.kind {
-                        WorkWorkspaceKind::Repository => None,
-                        WorkWorkspaceKind::Wave if item.parent_wave.as_ref() == wave => {
-                            Some(MembershipNode::Members {
-                                members: vec![member(item)],
-                            })
-                        }
-                        WorkWorkspaceKind::Task
-                            if wave.is_none()
-                                || item.parent_wave.as_ref().is_some_and(|parent| {
-                                    descendants.contains(parent.as_str())
-                                }) =>
-                        {
-                            Some(MembershipNode::State {
-                                state: SelectionState::Working,
-                                members: vec![member(item)],
-                            })
-                        }
-                        _ => None,
-                    })
-                    .collect();
-                MembershipNode::Compose { items }
+                MembershipNode::Select {
+                    source: path.clone(),
+                    predicate: MembershipPredicate::Default {
+                        wave: wave.cloned(),
+                    },
+                }
             }
         };
         path.pop();

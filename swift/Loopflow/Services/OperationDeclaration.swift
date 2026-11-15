@@ -37,7 +37,7 @@ public struct OperationDeclaration {
         }
     }
 
-    var changesMembership: Bool { kind == .complete || kind == .abandon }
+    var changesMembership: Bool { kind == .complete || kind == .abandon || kind == .move }
 
     /// The field written by the semantic stage, independent of query scope.
     var field: WorkField? {
@@ -48,9 +48,9 @@ public struct OperationDeclaration {
         }
     }
 
-    func effect(id: String, sequence: Int64, directory: String, issue: String, receipt: OperationReceipt?) -> WorkQueryEffect? {
+    func effect(id: String, sequence: Int64, directory: String, issue: String, wave: String? = nil, work: WorkWorkspaceKey? = nil, receipt: OperationReceipt?) -> WorkQueryEffect? {
         guard changesMembership else { return nil }
-        return WorkQueryEffect(operationID: id, sequence: sequence, directory: directory, kind: kind.rawValue, issue: issue,
+        return WorkQueryEffect(operationID: id, sequence: sequence, directory: directory, kind: kind.rawValue, issue: issue, wave: wave, work: work,
             resolution: receipt?.commits.first { stages.contains($0.stage) })
     }
 

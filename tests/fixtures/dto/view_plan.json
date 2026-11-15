@@ -179,21 +179,15 @@
       "kind": "compose",
       "items": [
         {
-          "kind": "state",
-          "state": "backlog",
-          "members": [
-            {
-              "source": [
-                "root",
-                "first"
-              ],
-              "work": {
-                "repository": "repo_11111111111111111111111111111111",
-                "kind": "task",
-                "id": "task_33333333333333333333333333333333"
-              }
-            }
-          ]
+          "kind": "select",
+          "source": [
+            "root",
+            "first"
+          ],
+          "predicate": {
+            "kind": "state",
+            "state": "backlog"
+          }
         },
         {
           "kind": "members",
@@ -284,6 +278,14 @@
           "autonomous",
           "done"
         ],
+        "insert": []
+      },
+      "task.move": {
+        "stage": "task.membership_changed",
+        "domains": [
+          "planning"
+        ],
+        "remove": [],
         "insert": []
       }
     },

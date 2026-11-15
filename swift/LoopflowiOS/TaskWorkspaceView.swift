@@ -10,6 +10,8 @@ struct TaskWorkspaceView: View {
     @Binding var draft: String
     var complete: (() -> Void)? = nil
     var abandon: (() -> Void)? = nil
+    var move: ((String?) -> Void)? = nil
+    var waves: [Wave] = []
     var completionDirectory: String? = nil
 
     private var completionPending: Bool {
@@ -49,7 +51,12 @@ struct TaskWorkspaceView: View {
         .toolbar {
             if abandon != nil {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Menu { Button("Abandon", role: .destructive) { confirmingAbandon = true } } label: {
+                    Menu {
+                        if let move {
+                            TaskMoveMenu(waves: waves, move: move)
+                        }
+                        Button("Abandon", role: .destructive) { confirmingAbandon = true }
+                    } label: {
                         Image(systemName: "ellipsis")
                     }.accessibilityLabel("Task actions")
                 }
@@ -69,6 +76,17 @@ struct TaskWorkspaceView: View {
             try? await client.interaction.presented(.task(task.work.id))
         }
         .onAppear { PerfClock.interaction(.taskSelect, .contentMounted, id: task.work.id) }
+    }
+}
+
+struct TaskMoveMenu: View {
+    let waves: [Wave]
+    let move: (String?) -> Void
+    var body: some View {
+        Menu("Move to Wave") {
+            Button("No Wave") { move(nil) }
+            ForEach(waves) { wave in Button(wave.displayName) { move(wave.id) } }
+        }
     }
 }
 

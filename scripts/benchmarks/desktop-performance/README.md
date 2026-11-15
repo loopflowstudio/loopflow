@@ -92,6 +92,9 @@ uv run python scripts/desktop_performance.py preflight --output /tmp/lf-prefligh
 # Record host preflight and build mode beside this output.
 swift build --package-path swift --build-tests --jobs 4
 uv run python scripts/test_network.py --desktop env LF_WORKSPACE_PERF_OUTPUT=/tmp/lf-projection.json swift test --skip-build --disable-sandbox --package-path swift --filter WorkspacePerformanceTests
+
+# Prepared dynamic membership: one Move in a 10,000-Task manifest, 21 samples.
+uv run python scripts/test_network.py --desktop env LF_MEMBERSHIP_PERF_OUTPUT=/tmp/lf-membership.json swift test --skip-build --disable-sandbox --package-path swift --filter ClientWorkQueryTests/testDynamicManifestMeasurements
 ```
 
 The minimum inventory follows [ADEMark's methodology](https://github.com/zqkra/ademark/blob/main/METHODOLOGY.md)

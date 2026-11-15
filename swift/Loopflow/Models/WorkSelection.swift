@@ -175,7 +175,7 @@ public struct WorkViewPlan: Codable, Equatable, Sendable {
         public let face: WorkPaneIntent?
         public let work: WorkWorkspaceKey
         public let title: String
-        public let states: [WorkSelectionState]
+        public var states: [WorkSelectionState]
         /// A Task's short name, as people say it: `LOO-809`.
         public let identifier: String?
         public let primarySession: String?

@@ -2,6 +2,10 @@ import Foundation
 
 /// The immutable command and its original Machine, saved before admission.
 /// The shape also reads the released creation journal without rewriting its words.
+public enum OperationResource: Codable, Equatable, Sendable {
+    case task(WorkWorkspaceKey), session(String)
+}
+
 public struct SubmittedOperation: Codable, Sendable, Identifiable {
     public let requestID: String
     public let destination: String
@@ -9,13 +13,15 @@ public struct SubmittedOperation: Codable, Sendable, Identifiable {
     public let version: Int
     public let submittedAt: Date
     public let draftID: String?
-    public init(requestID: String, destination: String, payload: Data, version: Int, submittedAt: Date, draftID: String? = nil) {
+    public let resource: OperationResource?
+    public init(requestID: String, destination: String, payload: Data, version: Int, submittedAt: Date, draftID: String? = nil, resource: OperationResource? = nil) {
         self.requestID = requestID
         self.destination = destination
         self.payload = payload
         self.version = version
         self.submittedAt = submittedAt
         self.draftID = draftID
+        self.resource = resource
     }
     public var id: String { requestID }
 
@@ -352,7 +358,7 @@ public actor ClientWorkStore {
         try await verify(record)
         for await _ in changes() {
             try Task.checkCancellation()
-            if try !disk().earlierRenamePending(record) { break }
+            if try !disk().earlierResourcePending(record) { break }
         }
         let watch = observe(record.id)
         defer { watch.cancel() }

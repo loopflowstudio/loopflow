@@ -56,20 +56,6 @@ final class ClientWorkDatabase {
         var current: String
         var departed: Set<String>
     }
-    private struct QueryRequirement: Codable {
-        var fence: CommitFence
-        let directory: String?
-        let kind: String?
-
-        func requiredFence(in reading: ClientWorkQuery) -> CommitFence? {
-            guard let directory, let kind else { return fence }
-            let declarations = reading.plans.filter { $0.repositoryPath == directory }.compactMap { $0.membership.effects[kind] }
-            guard !declarations.isEmpty else { return nil }
-            let domains = Array(Set(declarations.flatMap(\.domains)))
-            // A missing domain cannot weaken the stored requirement.
-            return fence.requiring(domains) ?? fence
-        }
-    }
     static let retainedEffectLimit = 64
     private var retainedQueries: [String: Set<String>] = [:]
     // Coverage is connection-local. Reopening SQLite or reconnecting, even to
@@ -114,6 +100,7 @@ final class ClientWorkDatabase {
         try execute("CREATE INDEX IF NOT EXISTS session_names_machine ON session_names(json_extract(CAST(state AS TEXT),'$.fence.machine'))")
         try execute("CREATE TABLE IF NOT EXISTS work_epochs (id TEXT PRIMARY KEY, state BLOB NOT NULL)")
         try execute("CREATE TABLE IF NOT EXISTS work_requirements (id TEXT PRIMARY KEY, state BLOB NOT NULL)")
+        try execute("CREATE TABLE IF NOT EXISTS work_contents (id TEXT PRIMARY KEY, state BLOB NOT NULL)")
         try execute("CREATE TABLE IF NOT EXISTS work_fields (id TEXT PRIMARY KEY, state BLOB NOT NULL)")
         try execute("CREATE INDEX IF NOT EXISTS work_fields_resource ON work_fields(json_extract(CAST(state AS TEXT),'$.work.id'))")
         // Confirmed caches are replaceable. The outbox and its reload floors
@@ -131,6 +118,8 @@ final class ClientWorkDatabase {
                     OR json_type(fact.value,'$.lifecycle') IS NOT 'object'
                     OR json_type(fact.value,'$.activity') IS NOT 'object')
             """)
+        // Fixed-candidate programs cannot support arrivals or acquire new proof.
+        try execute("DELETE FROM work_queries WHERE EXISTS (SELECT 1 FROM json_tree(CAST(state AS TEXT),'$.plans') WHERE key='kind' AND value='state' AND json_type(CAST(state AS TEXT),substr(fullkey,1,length(fullkey)-5) || '.members') IS NOT NULL)")
         let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "json" }
         let records = try files.map { try JSONDecoder().decode(SubmittedOperation.self, from: Data(contentsOf: $0)) }
@@ -295,20 +284,26 @@ final class ClientWorkDatabase {
         }
     }
 
-    func earlierRenamePending(_ record: SubmittedOperation) throws -> Bool {
+    func earlierResourcePending(_ record: SubmittedOperation) throws -> Bool {
         let command = try JSONDecoder().decode(JSONValue.self, from: record.payload)
-        guard command["kind"] == .string("session.rename") else { return false }
-        let session = command["id"]
+        let rename = command["kind"] == .string("session.rename")
+        guard case .string(let resource) = command[rename ? "id" : "issue"] else { return false }
         let epoch = try activeEpoch(machine: record.destination)
         for earlier in try pending() {
             if earlier.id == record.id { break }
             guard earlier.destination == record.destination else { continue }
             let prior = try JSONDecoder().decode(JSONValue.self, from: earlier.payload)
-            guard prior["kind"] == .string("session.rename"), prior["id"] == session,
-                  let state = try state(earlier.id) else { continue }
+            let sameResource: Bool
+            if let resource = record.resource, let previous = earlier.resource { sameResource = resource == previous }
+            else {
+                sameResource = rename
+                    ? prior["kind"] == .string("session.rename") && prior["id"] == .string(resource)
+                    : prior["directory"] == command["directory"] && prior["issue"] == .string(resource)
+            }
+            guard sameResource, let state = try state(earlier.id) else { continue }
             if state.receiptUnavailable == true || state.receiptEpoch != epoch { return true }
             guard let receipt = state.receipt, receipt.validation == .bound,
-                  OperationDeclaration(kind: "session.rename")?.resolutions(in: receipt) != nil else { return true }
+                  OperationDeclaration(kind: receipt.kind)?.resolutions(in: receipt) != nil else { return true }
         }
         return false
     }
@@ -374,22 +369,29 @@ final class ClientWorkDatabase {
                 guard reading.stamp.machine == state.record.destination,
                       reading.stamp.epoch == epoch,
                       reading.plans.contains(where: { $0.repositoryPath == effect.directory && $0.membership.effects[effect.kind] != nil }),
-                      !effect.covered(by: reading.stamp, plans: reading.plans) else { continue }
+                      !reading.plans.isEmpty else { continue }
                 guard try usable(reading), (reading.effects ?? []).count < Self.retainedEffectLimit else {
                     try execute("DELETE FROM work_queries WHERE id=?", id: key)
                     continue
                 }
                 var effects = reading.effects ?? []
                 effects.removeAll { $0.operationID == effect.operationID }
-                effects.append(effect)
+                if try !incorporated(effect, machine: state.record.destination) { effects.append(effect) }
                 reading.effects = effects
+                var acknowledged = reading.reconciledRequirements ?? []
+                for resolution in resolutions {
+                    let requirement = WorkQueryRequirement(fence: resolution.fence, directory: effect.directory, kind: effect.kind)
+                    acknowledged.removeAll { requirement.covers($0) }
+                    acknowledged.append(requirement)
+                }
+                reading.reconciledRequirements = acknowledged
                 try execute("UPDATE work_queries SET state=?2 WHERE id=?1", id: key, data: JSONEncoder().encode(reading))
             }
         }
         var requirements = try requirements(state.record.destination)
         // Session names have one normalized field owner; the committed result
         // already joined it in the receipt transaction. No membership reload.
-        for resolution in resolutions where receipt.kind != "session.rename" {
+        for resolution in resolutions where receipt.kind != "session.rename" && resolution.resolution != .definitelyRefused {
             let fence = resolution.fence
             // Bound requirements by lifetime, repository and effect declaration,
             // independent of the number of completed commands.
@@ -401,7 +403,7 @@ final class ClientWorkDatabase {
                 for (domain, revision) in fence.revisions { revisions[domain] = max(revisions[domain] ?? 0, revision) }
                 requirements[index].fence = CommitFence(machine: fence.machine, epoch: fence.epoch,
                     schema: fence.schema, revisions: revisions)
-            } else { requirements.append(QueryRequirement(fence: fence, directory: membershipEffect?.directory, kind: membershipEffect?.kind)) }
+            } else { requirements.append(WorkQueryRequirement(fence: fence, directory: membershipEffect?.directory, kind: membershipEffect?.kind)) }
         }
         try execute("INSERT OR REPLACE INTO work_requirements(id,state) VALUES(?,?)",
             id: state.record.destination, data: JSONEncoder().encode(requirements))
@@ -436,14 +438,14 @@ final class ClientWorkDatabase {
         return reading
     }
 
-    private func requirements(_ machine: String) throws -> [QueryRequirement] {
+    private func requirements(_ machine: String) throws -> [WorkQueryRequirement] {
         guard let data = try rows("SELECT state FROM work_requirements WHERE id=?", id: machine).first else { return [] }
         // Upgrade the previous Machine-wide floors in place. Missing scope
         // retains its conservative meaning until a new epoch replaces it.
         if let previous = try? JSONDecoder().decode([CommitFence].self, from: data) {
-            return previous.map { QueryRequirement(fence: $0, directory: nil, kind: nil) }
+            return previous.map { WorkQueryRequirement(fence: $0, directory: nil, kind: nil) }
         }
-        return try JSONDecoder().decode([QueryRequirement].self, from: data)
+        return try JSONDecoder().decode([WorkQueryRequirement].self, from: data)
     }
 
     func cache(_ reading: ClientWorkQuery, key: String,
@@ -455,6 +457,9 @@ final class ClientWorkDatabase {
         return try transaction {
             guard try observeMachineEpoch(stamp.epoch, machine: stamp.machine) else {
                 return try cached(machine: stamp.machine, key: key, observation: observation)
+            }
+            if stamp.complete {
+                for content in reading.plans.flatMap(\.contents) { try receiveContent(content, stamp: stamp) }
             }
             let stages = try fieldStages(machine: stamp.machine)
             for fact in reading.plans.flatMap({ $0.membership.facts }) {
@@ -471,7 +476,8 @@ final class ClientWorkDatabase {
             }
             var reading = reading
             if previous?.stamp.epoch == stamp.epoch {
-                reading.effects = previous?.effects?.filter { !$0.covered(by: stamp, plans: reading.plans) }
+                reading.effects = try previous?.effects?.filter { try !incorporated($0, machine: stamp.machine) }
+                reading.reconciledRequirements = previous?.reconciledRequirements
             }
             try execute("INSERT OR REPLACE INTO work_queries(id,state) VALUES(?,?)", id: id,
                 data: JSONEncoder().encode(reading))
@@ -520,12 +526,26 @@ final class ClientWorkDatabase {
             if case .captured(let evidence) = support.observations,
                evidence.source != observation?.source { return previous }
         }
+        if support == nil, let previous, previous.support.machine == stamp.machine,
+           previous.support.epoch == stamp.epoch, previous.support.schema == stamp.schema,
+           previous.support.observations == .sqlite {
+            let incoming = stamp.fieldFence.revisions
+            let older = previous.support.revisions.allSatisfy { domain, revision in incoming[domain].map { $0 <= revision } == true }
+                && previous.support.revisions.contains { domain, revision in incoming[domain].map { $0 < revision } == true }
+            if older { return previous }
+        }
         guard let support, support.belongs(to: stamp), support.isAvailable(on: observation) else {
             fieldConnections[key] = nil
             guard var previous else { return nil }
             previous.needsReconciliation = true
             return previous
         }
+        return joinConfirmed(value, support: support, previous: previous, observation: observation, key: key)
+    }
+
+    private func joinConfirmed<Value>(_ value: Value, support: WorkMembershipPlan.FieldSupport,
+                                      previous: WorkFieldFact<Value>?,
+                                      observation: MachineConnection.ObservationConnection?, key: String) -> WorkFieldFact<Value>? {
         if var previous, previous.support.epoch == support.epoch, previous.support.schema == support.schema {
             guard support.covers(previous.support) else {
                 // An ordered older reply cannot revoke newer coverage. Crossed
@@ -561,8 +581,17 @@ final class ClientWorkDatabase {
         for resource in Set(commit.resources) {
             for data in try rows("SELECT state FROM work_fields WHERE json_extract(CAST(state AS TEXT),'$.work.id')=?", id: resource) {
                 var facts = try JSONDecoder().decode(WorkFieldFacts.self, from: data)
-                guard facts.machine == machine else { continue }
+                guard facts.machine == machine, facts.work.kind == .task else { continue }
                 let previous = facts
+                if field == .parent, commit.resolution == .committed, case .object(let result) = commit.result,
+                   let actual = result["wave_id"], actual == .null || { if case .string = actual { return true }; return false }() {
+                    let support = WorkMembershipPlan.FieldSupport(machine: machine, epoch: commit.fence.epoch,
+                        schema: commit.fence.schema, derivation: "work.parent/1", revisions: commit.fence.revisions,
+                        observations: .sqlite)
+                    let parent: String? = { if case .string(let value) = actual { return value }; return nil }()
+                    facts.parent = joinConfirmed(parent, support: support, previous: facts.parent,
+                        observation: nil, key: try fieldID(machine: machine, work: facts.work) + "/parent")
+                }
                 facts.incorporate(commit, field: field)
                 if facts != previous {
                     try execute("UPDATE work_fields SET state=?2 WHERE id=?1",
@@ -633,17 +662,24 @@ final class ClientWorkDatabase {
         let previous = reading.answer
         var effects = reading.effects ?? []
         for record in try pending() where record.destination == machine {
-            guard let state = try state(record.id), let effect = try membershipEffect(state),
-                  !effect.covered(by: reading.stamp, plans: reading.plans) else { continue }
+            guard let state = try state(record.id), let effect = try membershipEffect(state) else { continue }
             effects.removeAll { $0.operationID == effect.operationID }
             effects.append(effect)
         }
-        reading.effects = effects
+        reading.effects = try effects.filter { try !incorporated($0, machine: machine) }
         var fields: [WorkWorkspaceKey: WorkFieldReading] = [:]
         for work in Set(reading.plans.flatMap { $0.membership.facts.map(\.work) }) {
             fields[work] = try fieldReading(machine: machine, work: work, observation: observation)
         }
-        reading.prepareProjection(fields: fields)
+        var contents: [WorkWorkspaceKey: WorkViewPlan.Content] = [:]
+        var unavailableContent = Set<WorkWorkspaceKey>()
+        for key in Set(reading.plans.flatMap { $0.membership.facts.map(\.work) }) {
+            if let fact = try content(machine: machine, work: key, epoch: reading.stamp.epoch) {
+                contents[key] = fact.value
+                if !fact.conflicts.isEmpty { unavailableContent.insert(key) }
+            }
+        }
+        reading.prepareProjection(fields: fields, contents: contents, unavailableContent: unavailableContent)
         // Rows and their consumed coverage are one replaceable cache value.
         // Recompute after restart and on connection changes; a persisted capture
         // never becomes current merely because its observer returned.
@@ -657,9 +693,10 @@ final class ClientWorkDatabase {
     private func usable(_ reading: ClientWorkQuery) throws -> Bool {
         guard let query = reading.stamp.query,
               try machineEpochs(reading.stamp.machine)?.current == reading.stamp.epoch else { return false }
-        return try requirements(reading.stamp.machine).filter { $0.fence.epoch == reading.stamp.epoch }.allSatisfy {
-            guard let fence = $0.requiredFence(in: reading) else { return true }
-            return fence.isCovered(by: reading.stamp, query: query) || effectsCover(fence, in: reading)
+        return try requirements(reading.stamp.machine).filter { $0.fence.epoch == reading.stamp.epoch }.allSatisfy { requirement in
+            guard let fence = requirement.requiredFence(in: reading) else { return true }
+            return fence.isCovered(by: reading.stamp, query: query)
+                || (reading.reconciledRequirements ?? []).contains(where: { $0.covers(requirement) })
         }
     }
 
@@ -669,26 +706,70 @@ final class ClientWorkDatabase {
               let declaration = OperationDeclaration(kind: kind), declaration.changesMembership,
               case .string(let directory) = fields["directory"],
               case .string(let issue) = fields["issue"] else { return nil }
+        if kind == "task.move", let machine = fields["machine"], machine != .null { return nil }
         let sequence = try rows("SELECT CAST(sequence AS BLOB) FROM operations WHERE id=?", id: state.record.id).first
             .flatMap { Int64(String(decoding: $0, as: UTF8.self)) }
         guard let sequence else { return nil }
         let receipt = state.receiptEpoch == (try activeEpoch(machine: state.record.destination)) ? state.receipt : nil
-        return declaration.effect(id: state.record.id, sequence: sequence, directory: directory, issue: issue, receipt: receipt)
+        let work: WorkWorkspaceKey? = { if case .task(let key) = state.record.resource { return key }; return nil }()
+        return declaration.effect(id: state.record.id, sequence: sequence, directory: directory, issue: issue, wave: { if case .string(let wave) = fields["wave"] { return wave }; return nil }(), work: work, receipt: receipt)
     }
 
-    private func effectsCover(_ fence: CommitFence, in reading: ClientWorkQuery) -> Bool {
-        // Every domain in the reload floor must be covered by this base or an
-        // effect with its exact semantic resolution. A pending request is not
-        // evidence that an arbitrary later frontier is safe.
-        fence.revisions.allSatisfy { domain, revision in
-            let single = CommitFence(machine: fence.machine, epoch: fence.epoch, schema: fence.schema, revisions: [domain: revision])
-            if let query = reading.stamp.query, single.isCovered(by: reading.stamp, query: query) { return true }
-            return (reading.effects ?? []).contains {
-                guard let resolution = $0.resolution else { return false }
-                return resolution.fence.machine == fence.machine && resolution.fence.epoch == fence.epoch
-                    && resolution.fence.schema == fence.schema && (resolution.fence.revisions[domain] ?? -1) >= revision
+    private func incorporated(_ effect: WorkQueryEffect, machine: String) throws -> Bool {
+        guard let commit = effect.resolution else { return false }
+        if commit.resolution == .definitelyRefused { return true }
+        guard let field = OperationDeclaration(kind: effect.kind)?.field, !commit.resources.isEmpty else { return false }
+        for resource in commit.resources {
+            let records = try rows("SELECT state FROM work_fields WHERE json_extract(CAST(state AS TEXT),'$.work.id')=?", id: resource)
+                .map { try JSONDecoder().decode(WorkFieldFacts.self, from: $0) }.filter { $0.machine == machine }
+            if !records.contains(where: { $0.incorporates(commit, field: field) }) { return false }
+        }
+        return true
+    }
+
+    private struct ContentFact: Codable {
+        let stamp: ReadingStamp
+        let value: WorkViewPlan.Content
+        var conflicts: [CommitFence]
+    }
+
+    private func sameContent(_ first: WorkViewPlan.Content, _ second: WorkViewPlan.Content) -> Bool {
+        // Membership fields have their own provenance. Native diagnostics and
+        // attachment locations cannot make real Task content disappear.
+        first.work == second.work && first.title == second.title && first.identifier == second.identifier
+            && first.primarySession == second.primarySession && first.paneRevision == second.paneRevision && first.face == second.face
+    }
+
+    private func receiveContent(_ content: WorkViewPlan.Content, stamp: ReadingStamp) throws {
+        let id = try fieldID(machine: stamp.machine, work: content.work)
+        if let data = try rows("SELECT state FROM work_contents WHERE id=?", id: id).first {
+            let previous = try JSONDecoder().decode(ContentFact.self, from: data)
+            if previous.stamp.epoch == stamp.epoch {
+                let incoming = stamp.fieldFence
+                let current = previous.stamp.fieldFence
+                let newer = incoming.covers(current)
+                let older = current.covers(incoming)
+                if !newer && older { return }
+                if !newer || (older && !sameContent(previous.value, content))
+                    || (!previous.conflicts.isEmpty && (older || !previous.conflicts.allSatisfy { incoming.covers($0) && !$0.covers(incoming) })) {
+                    var conflict = previous
+                    if !conflict.conflicts.contains(where: { $0.covers(incoming) }) {
+                        conflict.conflicts.removeAll { incoming.covers($0) }
+                        conflict.conflicts.append(incoming)
+                    }
+                    try execute("UPDATE work_contents SET state=?2 WHERE id=?1", id: id, data: JSONEncoder().encode(conflict))
+                    return
+                }
             }
         }
+        try execute("INSERT OR REPLACE INTO work_contents(id,state) VALUES(?,?)", id: id,
+            data: JSONEncoder().encode(ContentFact(stamp: stamp, value: content, conflicts: [])))
+    }
+
+    private func content(machine: String, work: WorkWorkspaceKey, epoch: String) throws -> ContentFact? {
+        guard let data = try rows("SELECT state FROM work_contents WHERE id=?", id: fieldID(machine: machine, work: work)).first else { return nil }
+        let fact = try JSONDecoder().decode(ContentFact.self, from: data)
+        return fact.stamp.epoch == epoch ? fact : nil
     }
 
     func forgetQueries(machine: String) throws {

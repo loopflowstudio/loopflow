@@ -8,20 +8,53 @@ public struct ClientWorkQuery: Codable, Sendable {
     // Retired effects and derived answers belong to this cache entry, never its
     // immutable Machine body. Recompute coverage after every field/link change.
     var effects: [WorkQueryEffect]? { didSet { answer = nil } }
+    var reconciledRequirements: [WorkQueryRequirement]?
     var answer: WorkQueryAnswer? { didSet { rendered = nil } }
     private var fields: [WorkWorkspaceKey: WorkFieldReading] = [:]
+    private var contents: [WorkWorkspaceKey: WorkViewPlan.Content] = [:]
+    private var unavailableContent: Set<WorkWorkspaceKey> = []
     private var rendered: [ProjectedWorkPlan]?
-    private enum CodingKeys: String, CodingKey { case stamp, plans, effects, answer }
+    private struct PreparedPlan: Sendable {
+        let facts: [WorkWorkspaceKey: WorkMembershipPlan.Facts]
+        let positions: [WorkWorkspaceKey: Int]
+        let targets: [String: Set<WorkWorkspaceKey>]
+        let contents: [WorkWorkspaceKey: WorkViewPlan.Content]
+        let ranks: [WorkMemberRef: Int]
+        let resolution: WorkSelectionResolution
+    }
+    private var prepared: [PreparedPlan]?
+    private enum CodingKeys: String, CodingKey { case stamp, plans, effects, answer, reconciledRequirements }
 
     init(stamp: ReadingStamp, plans: [WorkViewPlan]) {
         self.stamp = stamp
         self.plans = plans
     }
 
-    mutating func prepareProjection(fields: [WorkWorkspaceKey: WorkFieldReading] = [:]) {
+    mutating func prepareProjection(fields: [WorkWorkspaceKey: WorkFieldReading] = [:], contents: [WorkWorkspaceKey: WorkViewPlan.Content] = [:], unavailableContent: Set<WorkWorkspaceKey> = []) {
+        self.contents = contents
+        self.unavailableContent = unavailableContent
         self.fields = fields
-        answer = deriveAnswer()
+        let answer = deriveAnswer()
+        self.answer = answer
         rendered = projection
+        prepared = zip(plans, answer.plans).map { plan, answer in
+            let facts = answer.membership.facts
+            var targets: [String: Set<WorkWorkspaceKey>] = [:]
+            for fact in facts {
+                targets[fact.work.id, default: []].insert(fact.work)
+                targets[fact.name, default: []].insert(fact.work)
+            }
+            let contents = availableContents(for: plan)
+            for content in contents {
+                if let identifier = content.identifier { targets[identifier, default: []].insert(content.work) }
+            }
+            let potential = answer.membership.root.potentialMembers(facts: facts)
+            return PreparedPlan(facts: Dictionary(facts.map { ($0.work, $0) }, uniquingKeysWith: { first, _ in first }),
+                positions: Dictionary(facts.enumerated().map { ($0.element.work, $0.offset) }, uniquingKeysWith: { first, _ in first }),
+                targets: targets, contents: Dictionary(contents.map { ($0.work, $0) }, uniquingKeysWith: { first, _ in first }),
+                ranks: Dictionary(potential.enumerated().map { ($0.element, $0.offset) }, uniquingKeysWith: min),
+                resolution: answer.membership.resolve(knownAbsent: answer.knownAbsent))
+        }
     }
 
     public var projection: [ProjectedWorkPlan] {
@@ -29,7 +62,18 @@ public struct ClientWorkQuery: Codable, Sendable {
         let answer = answer ?? deriveAnswer()
         return zip(plans, answer.plans).map { plan, derived in
             ProjectedWorkPlan(plan, membership: derived.membership,
-                knownAbsent: derived.knownAbsent, coverage: derived.coverage)
+                knownAbsent: derived.knownAbsent, coverage: derived.coverage, contents: availableContents(for: plan))
+        }
+    }
+
+    private func availableContents(for plan: WorkViewPlan) -> [WorkViewPlan.Content] {
+        var available = Dictionary(plan.contents.map { ($0.work, $0) }, uniquingKeysWith: { first, _ in first })
+        for fact in plan.membership.facts {
+            if let content = contents[fact.work] { available[fact.work] = content }
+        }
+        var seen = Set<WorkWorkspaceKey>()
+        return (plan.contents.map(\.work) + plan.membership.facts.map(\.work)).compactMap {
+            seen.insert($0).inserted ? available[$0] : nil
         }
     }
 
@@ -41,10 +85,129 @@ public struct ClientWorkQuery: Codable, Sendable {
         for intent in intents where !layers.contains(where: { $0.operationID == intent.operationID }) {
             sequence += 1
             layers.append(WorkQueryEffect(operationID: intent.operationID, sequence: sequence,
-                directory: intent.directory, kind: intent.kind, issue: intent.issue, resolution: intent.resolution))
+                directory: intent.directory, kind: intent.kind, issue: intent.issue, wave: intent.wave, work: intent.work, resolution: intent.resolution))
         }
         result.effects = layers
+        if let prepared, let answer, let rendered,
+           let changed = project(intents.filter { intent in !(effects ?? []).contains { $0.operationID == intent.operationID } },
+                                 prepared: prepared, answer: answer, rendered: rendered) {
+            result.answer = changed.answer
+            result.rendered = changed.rendered
+        }
+        result.prepared = nil
         return result
+    }
+
+    private func apply(_ effect: WorkQueryEffect, to fact: inout WorkMembershipPlan.Facts,
+                       change: WorkMembershipPlan.StateEffect?, absent: inout Set<WorkSelectionState>, projected: inout Set<WorkField>) {
+        guard fact.work.kind == .task, effect.resolution?.resolution != .definitelyRefused,
+              let declaration = OperationDeclaration(kind: effect.kind) else { return }
+        if let commit = effect.resolution, let field = declaration.field,
+           fields[fact.work]?.facts.incorporates(commit, field: field) == true { return }
+        if declaration.kind == .move {
+            var wave = effect.wave
+            if let commit = effect.resolution, commit.resolution == .committed,
+               case .object(let result) = commit.result, let actual = result["wave_id"] {
+                if case .string(let id) = actual { wave = id }
+                else if actual == .null { wave = nil }
+                else { return }
+            }
+            fact.parent = .init(wave: wave, support: nil)
+            projected.insert(.parent)
+            return
+        }
+        guard let change else { return }
+        fact.lifecycle = .init(states: Set(fact.lifecycle.states).subtracting(change.remove)
+            .union(change.insert.filter { !$0.isActivity }).sorted { $0.rawValue < $1.rawValue }, known: true, support: nil)
+        fact.activity = .init(states: Set(fact.activity.states).subtracting(change.remove)
+            .union(change.insert.filter(\.isActivity)).sorted { $0.rawValue < $1.rawValue }, known: fact.activity.known, support: nil)
+        projected.insert(.lifecycle)
+        absent = absent.union(change.remove).subtracting(change.insert)
+    }
+
+    private func dependency(_ key: WorkWorkspaceKey, field: WorkField, fact: WorkMembershipPlan.Facts?,
+                            projected: Set<WorkField>, absent: Set<WorkSelectionState>) -> WorkAnswerDependency {
+        let reading = fields[key]
+        let support = field == .parent ? fact?.parent.support : field == .lifecycle ? fact?.lifecycle.support : fact?.activity.support
+        let current = field == .parent ? reading?.parentCurrent : field == .lifecycle ? reading?.lifecycleCurrent : reading?.activityCurrent
+        let exact = support == nil && stamp.complete
+            && (field == .parent || (field == .lifecycle && fact?.lifecycle.known == true))
+        let local = projected.contains(field)
+            || (field == .activity && absent.isSuperset(of: [.available, .busy, .blocked]))
+        return .init(work: key, field: field, support: support, current: local || current == true || exact, projected: local)
+    }
+
+    /// Prepared indexes keep gesture work on the changed resources. Full reads,
+    /// normalization and program compilation stay on the store actor.
+    private func project(_ effects: [WorkQueryEffect], prepared: [PreparedPlan], answer: WorkQueryAnswer,
+                         rendered: [ProjectedWorkPlan]) -> (answer: WorkQueryAnswer, rendered: [ProjectedWorkPlan])? {
+        var answers = answer.plans
+        var renderings = rendered
+        for index in plans.indices {
+            let plan = plans[index]
+            let cached = prepared[index]
+            guard cached.resolution.unavailable.isEmpty else { return nil }
+            var derived = answers[index]
+            var membership = derived.membership
+            var facts = cached.facts
+            var absent = derived.knownAbsent
+            var projected: [WorkWorkspaceKey: Set<WorkField>] = [:]
+            var changed = Set<WorkWorkspaceKey>()
+            for effect in effects where effect.directory == plan.repositoryPath {
+                let keys = effect.work.map { Set([$0]) } ?? cached.targets[effect.issue] ?? []
+                for key in keys {
+                    guard var fact = facts[key], let position = cached.positions[key] else { continue }
+                    var missing = absent[key] ?? []
+                    var local = projected[key] ?? []
+                    apply(effect, to: &fact, change: membership.effects[effect.kind], absent: &missing, projected: &local)
+                    guard !local.isEmpty else { continue }
+                    facts[key] = fact
+                    membership.facts[position] = fact
+                    if !missing.isEmpty { absent[key] = missing }
+                    projected[key] = local
+                    changed.insert(key)
+                }
+            }
+            guard !changed.isEmpty else { continue }
+            var members = cached.resolution.members.filter { !changed.contains($0.work) }
+            var attention = Set(cached.resolution.attention).subtracting(changed)
+            var dependencies = derived.coverage.dependencies.filter { !changed.contains($0.work) }
+            var states = rendered[index].states
+            for key in changed {
+                guard let fact = facts[key] else { continue }
+                let result = membership.root.resolveMember(key, facts: facts, knownAbsent: absent)
+                guard result.unavailable.isEmpty else { return nil }
+                for member in result.members {
+                    let rank = cached.ranks[member] ?? Int.max
+                    var lower = 0
+                    var upper = members.count
+                    while lower < upper {
+                        let middle = (lower + upper) / 2
+                        if (cached.ranks[members[middle]] ?? Int.max) < rank { lower = middle + 1 }
+                        else { upper = middle }
+                    }
+                    members.insert(member, at: lower)
+                }
+                if !result.members.isEmpty && (fact.states.contains(.available) || fact.states.contains(.blocked)) { attention.insert(key) }
+                states[key] = fact.states
+                for field in membership.root.fields(for: fact, manifest: facts).sorted(by: { $0.rawValue < $1.rawValue }) {
+                    dependencies.append(dependency(key, field: field, fact: fact, projected: projected[key] ?? [], absent: absent[key] ?? []))
+                }
+            }
+            let selected = Set(members.map(\.work))
+            let previous = derived.coverage
+            let coverage = WorkAnswerCoverage(program: previous.program, definitionRevision: previous.definitionRevision,
+                root: previous.root, candidates: previous.candidates, content: previous.content, dependencies: dependencies,
+                candidatesCurrent: previous.candidatesCurrent,
+                contentCurrent: selected.allSatisfy { cached.contents[$0] != nil } && selected.isDisjoint(with: unavailableContent))
+            derived = .init(membership: membership, knownAbsent: absent, coverage: coverage)
+            answers[index] = derived
+            let resolution = WorkSelectionResolution(attention: attention.sorted { ($0.repository, $0.kind.rawValue, $0.id) < ($1.repository, $1.kind.rawValue, $1.id) },
+                members: members, unavailable: [])
+            renderings[index] = ProjectedWorkPlan(plan, membership: membership, knownAbsent: absent, coverage: coverage,
+                contents: rendered[index].contents, resolution: resolution, states: states)
+        }
+        return (WorkQueryAnswer(plans: answers), renderings)
     }
 
     private func deriveAnswer() -> WorkQueryAnswer {
@@ -71,59 +234,41 @@ public struct ClientWorkQuery: Codable, Sendable {
             for effect in (effects ?? []).sorted(by: { $0.sequence < $1.sequence }) {
                 if effect.resolution?.resolution == .definitelyRefused { continue }
                 guard effect.directory == plan.repositoryPath,
-                      let change = membership.effects[effect.kind] else { continue }
-                let keys = Set(plan.contents.filter {
+                      OperationDeclaration(kind: effect.kind) != nil else { continue }
+                let keys = effect.work.map { Set([$0]) } ?? Set(plan.contents.filter {
                     $0.work.id == effect.issue || $0.identifier == effect.issue
                 }.map(\.work))
                 for index in membership.facts.indices where keys.contains(membership.facts[index].work)
-                    || membership.facts[index].work.id == effect.issue || membership.facts[index].name == effect.issue {
+                    || (effect.work == nil && (membership.facts[index].work.id == effect.issue || membership.facts[index].name == effect.issue)) {
                     let key = membership.facts[index].work
-                    // Incorporation is permanent for this field/stage. A stale
-                    // query or unavailable activity cannot resurrect the intent.
-                    if let commit = effect.resolution,
-                       let field = OperationDeclaration(kind: effect.kind)?.field,
-                       fields[key]?.facts.incorporates(commit, field: field) == true { continue }
-                    // Effects declare canonical state changes; Swift partitions
-                    // fields, without deriving Task lifecycle a second time.
-                    let fact = membership.facts[index]
-                    membership.facts[index].lifecycle = .init(states: Set(fact.lifecycle.states).subtracting(change.remove)
-                        .union(change.insert.filter { !$0.isActivity }).sorted { $0.rawValue < $1.rawValue }, known: true, support: nil)
-                    membership.facts[index].activity = .init(states: Set(fact.activity.states).subtracting(change.remove)
-                        .union(change.insert.filter(\.isActivity)).sorted { $0.rawValue < $1.rawValue }, known: fact.activity.known, support: nil)
-                    projected[key, default: []].insert(.lifecycle)
-                    knownAbsent[key] = (knownAbsent[key] ?? []).union(change.remove).subtracting(change.insert)
+                    var fact = membership.facts[index]
+                    var absent = knownAbsent[key] ?? []
+                    var changed = projected[key] ?? []
+                    apply(effect, to: &fact, change: membership.effects[effect.kind], absent: &absent, projected: &changed)
+                    membership.facts[index] = fact
+                    if !absent.isEmpty { knownAbsent[key] = absent }
+                    if !changed.isEmpty { projected[key] = changed }
                 }
             }
-            let dependencies = membership.root.fieldDependencies
+            let dependencies = membership.root.fieldDependencies(facts: membership.facts)
             let facts = Dictionary(membership.facts.map { ($0.work, $0) }, uniquingKeysWith: { first, _ in first })
             var consumed: [WorkAnswerDependency] = []
-            for key in dependencies.keys.sorted(by: { ($0.repository, $0.kind.rawValue, $0.id) < ($1.repository, $1.kind.rawValue, $1.id) }) {
+            for key in membership.facts.map(\.work) where dependencies[key] != nil {
                 for field in (dependencies[key] ?? []).sorted(by: { $0.rawValue < $1.rawValue }) {
-                    let reading = fields[key]
-                    let support = field == .lifecycle ? facts[key]?.lifecycle.support : facts[key]?.activity.support
-                    let current = field == .lifecycle ? reading?.lifecycleCurrent : reading?.activityCurrent
-                    // A pure exact-query lifecycle answer can still use its own
-                    // snapshot. This grants no cross-query field support and
-                    // never certifies externally derived activity.
-                    let exact = field == .lifecycle && support == nil
-                        && facts[key]?.lifecycle.known == true && stamp.complete
-                    let local = projected[key]?.contains(field) == true
-                        || (field == .activity && knownAbsent[key]?.isSuperset(of: [.available, .busy, .blocked]) == true)
-                    consumed.append(.init(work: key, field: field, support: support, current: local || current == true || exact,
-                        projected: local))
+                    consumed.append(dependency(key, field: field, fact: facts[key], projected: projected[key] ?? [], absent: knownAbsent[key] ?? []))
                 }
             }
             let resolution = membership.resolve(knownAbsent: knownAbsent)
             let selected = Set(resolution.members.map(\.work))
-            let content = Set(plan.contents.map(\.work))
+            let content = Set(availableContents(for: plan).map(\.work))
             let missing = selected.subtracting(content)
             let coverage = WorkAnswerCoverage(program: plan.selection, definitionRevision: plan.savedRevision,
                 root: plan.membership.root, candidates: stamp,
-                content: content.sorted { ($0.repository, $0.kind.rawValue, $0.id) < ($1.repository, $1.kind.rawValue, $1.id) },
+                content: availableContents(for: plan).map(\.work),
                 dependencies: consumed, candidatesCurrent: stamp.complete && membership.unavailable.isEmpty,
                 // Missing native input/location readiness is not missing Task
                 // content and cannot invalidate an otherwise exact list/count.
-                contentCurrent: missing.isEmpty)
+                contentCurrent: missing.isEmpty && selected.isDisjoint(with: unavailableContent))
             return WorkQueryAnswer.Plan(membership: membership, knownAbsent: knownAbsent, coverage: coverage)
         })
     }
@@ -137,16 +282,13 @@ struct WorkQueryEffect: Codable, Sendable {
     let kind: String
     let issue: String
     let resolution: OperationCommit?
+    let wave: String?
+    let work: WorkWorkspaceKey?
 
-    func covered(by stamp: ReadingStamp, plans: [WorkViewPlan]) -> Bool {
-        let declarations = plans.filter { $0.repositoryPath == directory }.compactMap { $0.membership.effects[kind] }
-        // Changing a query to an unrelated scope removes its old obligation.
-        guard !declarations.isEmpty else { return true }
-        guard let resolution, let query = stamp.query else { return false }
-        return declarations.allSatisfy {
-            guard $0.stage == resolution.stage, let fence = resolution.fence.requiring($0.domains) else { return false }
-            return fence.isCovered(by: stamp, query: query)
-        }
+    init(operationID: String, sequence: Int64, directory: String, kind: String, issue: String,
+         wave: String? = nil, work: WorkWorkspaceKey? = nil, resolution: OperationCommit?) {
+        self.operationID = operationID; self.sequence = sequence; self.directory = directory
+        self.kind = kind; self.issue = issue; self.wave = wave; self.work = work; self.resolution = resolution
     }
 }
 
@@ -228,16 +370,45 @@ extension WorkSelectionState {
 }
 
 extension WorkMembershipPlan.Node {
-    var fieldDependencies: [WorkWorkspaceKey: Set<WorkField>] {
+    func fields(for fact: WorkMembershipPlan.Facts, manifest: [WorkWorkspaceKey: WorkMembershipPlan.Facts]) -> Set<WorkField> {
         switch self {
-        case .members: return [:]
-        case .state(let state, let members):
-            return Dictionary(members.map { ($0.work, Set([state.isActivity ? WorkField.activity : .lifecycle])) },
-                uniquingKeysWith: { $0.union($1) })
-        case .compose(let nodes), .intersect(let nodes):
-            return nodes.reduce(into: [:]) { result, node in
-                result.merge(node.fieldDependencies, uniquingKeysWith: { $0.union($1) })
+        case .members: return []
+        case .select(_, let predicate):
+            switch predicate {
+            case .default:
+                return fact.work.kind == .task && predicate.includes(fact, facts: manifest) ? [.parent, .lifecycle] : [.parent]
+            case .descendants: return [.parent]
+            case .state(let state) where fact.work.kind == .task: return [state.isActivity ? .activity : .lifecycle]
+            default: return []
             }
+        case .compose(let nodes), .intersect(let nodes):
+            return nodes.reduce(into: []) { $0.formUnion($1.fields(for: fact, manifest: manifest)) }
         }
+    }
+    func fieldDependencies(facts: [WorkMembershipPlan.Facts]) -> [WorkWorkspaceKey: Set<WorkField>] {
+        let manifest = Dictionary(facts.map { ($0.work, $0) }, uniquingKeysWith: { first, _ in first })
+        return Dictionary(facts.compactMap { fact in
+            let fields = fields(for: fact, manifest: manifest)
+            return fields.isEmpty ? nil : (fact.work, fields)
+        }, uniquingKeysWith: { $0.union($1) })
+    }
+}
+
+/// Acknowledged local invalidations, scoped to one retained base. This never
+/// advances the base's manifest stamp or certifies unrelated repository changes.
+struct WorkQueryRequirement: Codable {
+    var fence: CommitFence
+    let directory: String?
+    let kind: String?
+
+    func requiredFence(in reading: ClientWorkQuery) -> CommitFence? {
+        guard let directory, let kind else { return fence }
+        let declarations = reading.plans.filter { $0.repositoryPath == directory }.compactMap { $0.membership.effects[kind] }
+        guard !declarations.isEmpty else { return nil }
+        return fence.requiring(Array(Set(declarations.flatMap(\.domains)))) ?? fence
+    }
+
+    func covers(_ other: WorkQueryRequirement) -> Bool {
+        directory == other.directory && kind == other.kind && fence.covers(other.fence)
     }
 }

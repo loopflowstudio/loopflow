@@ -1,23 +1,22 @@
 # Working assumptions
 
-- Field incorporation persists per resource/field/stage in the existing fact
-  owner, compacting comparable commit fences. Derived membership answers now
-  consume it and publish membership dependencies beside rows on both hosts;
-  disconnect/reconnect changes flow through existing Machine/query owners.
-  Native-readiness diagnostics do not imply missing Task content. Dynamic
-  membership/Move and stamp-only retention/reload removal remain open. This
-  prerequisite follows the latest iteration order; no product answer is inferred.
+- Dynamic membership uses the existing query's ordered repository manifest and
+  prepared indexes; explicit-only programs stay small. Normalized fields, real
+  content, incorporation, derived coverage and requests share one SQLite owner.
+  Query-specific acknowledgments replace stamp-only retirement shortcuts. These
+  are engineering choices, not new product answers. Native latency, remaining
+  planning-backed surfaces and the full acceptance cut remain open.
 
 - Receiving-link attribution is local transport metadata on each reading, captured
   before buffering and checked against the shared Machine owner at ingestion.
   Live external normalization now uses only that validated link; SQL-only fields
-  remain independent. Field/answer separation and the remaining incorporation,
-  dynamic membership and Move cut are in the design. No product answer inferred.
+  remain independent. Field/answer separation and dynamic membership consume this attribution. No product answer inferred.
 
 - Jack Heart replied “1a” to the 2026-11-15 conversation review's disconnected-edit
   question: save and project Complete/rename/move locally, show “Waiting for
   connection,” and deliver on reconnect to the original Machine. Retain across
-  restart; recover uncertain sends without duplicate execution. Disconnected Move and the remaining cross-platform cutover are unbuilt.
+  restart; recover uncertain sends without duplicate execution. Disconnected Move is built on the typed query path; the remaining cross-platform
+  surface cutover is open.
 
 - Scope now covers Desktop and mobile interaction state throughout the app;
   launch, completion, cached/recent Task selection and Wave disclosure are

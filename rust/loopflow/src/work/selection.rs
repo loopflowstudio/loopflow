@@ -7,7 +7,7 @@ mod membership;
 mod panes;
 pub use membership::{
     FieldObservations, FieldSupport, MembershipFacts, MembershipNode, MembershipPlan,
-    MembershipStateEffect, MembershipSupport, ParentFact, StateFact,
+    MembershipPredicate, MembershipStateEffect, MembershipSupport, ParentFact, StateFact,
 };
 mod query;
 pub use panes::{
@@ -179,31 +179,6 @@ pub struct SelectionWork {
     /// An unobservable process is different from a complete read with no current reports.
     pub activity_known: bool,
     pub support: Option<MembershipSupport>,
-}
-
-fn wave_descendants<'a>(
-    repository: &str,
-    wave: &'a str,
-    work: &'a [SelectionWork],
-) -> BTreeSet<&'a str> {
-    let mut descendants = BTreeSet::from([wave]);
-    loop {
-        let before = descendants.len();
-        for item in work {
-            if item.key.repository == repository
-                && item.key.kind == WorkWorkspaceKind::Wave
-                && item
-                    .parent_wave
-                    .as_ref()
-                    .is_some_and(|parent| descendants.contains(parent.as_str()))
-            {
-                descendants.insert(item.key.id.as_str());
-            }
-        }
-        if descendants.len() == before {
-            return descendants;
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

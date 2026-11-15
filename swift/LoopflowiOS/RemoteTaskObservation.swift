@@ -21,9 +21,10 @@ func mobileTasks(_ plan: ProjectedWorkPlan) throws -> [WorkViewPlan.Content] {
     }
     let contents = Dictionary(plan.contents.map { ($0.work, $0) }, uniquingKeysWith: { first, _ in first })
     return try plan.projection.visible.filter { $0.work.kind == .task }.map { member in
-        guard let task = contents[member.work] else {
+        guard var task = contents[member.work] else {
             throw RegistryQueryError("The Machine returned an incomplete Task reading")
         }
+        task.states = plan.states[member.work] ?? task.states
         return task
     }
 }

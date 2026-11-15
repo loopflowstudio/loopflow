@@ -256,44 +256,68 @@ struct WorkCLISubscriptionTests {
         let created = try await fixture.json(["task", "create", "--no-wave", "--title", "Before filing", "--json"])["task"] as! [String: Any]
         let id = try #require(created["id"] as? String)
         _ = try await fixture.run(["checkout", id, "--json"])
-        let query = fixture.lf.query
-        let model = WorkModel(query: query, repoPath: fixture.repo.path)
-        let keeping = Task { await model.keepWorkCurrent() }
-        defer { keeping.cancel() }
-        try await eventually { model.visibleWork.standaloneTasks.count == 1 }
+        let server = LocalServerFixture(fixture.lf)
+        let location = server.location()
+        let query = fixture.lf.query(location: location)
         let machine = try await fixture.json(["machine", "self", "--json"])
         let machineId = try #require(machine["id"] as? String)
-        let registry = SessionsWorkspaceRegistry(localMachineId: machineId)
-        model.confirmMachine(machineId)
-        let repository = try await query.repositoryIdentity(cwd: fixture.repo.path)
-        model.bindWorkspaces(registry, repository: repository.id)
-        model.select(.task(id: id))
-        let key = try #require(registry.selectedWork)
-        let workspace = try #require(registry.retained(key))
-        let location = try #require(workspace.location)
-        let draft = workspace.files(issue: id, cwd: location.worktree).document("notes.txt")
-        draft.editor.string = "Unsent direction"
-        // Moving must preserve the conversation the working Task already opened.
-        try await eventually { workspace.multiplexer.sessionPane?.sessionId != nil }
-        let layout = workspace.multiplexer.layout
-        _ = try await fixture.run(["wave", "create", "product", "--json"])
-        let before = try #require(model.task(id: id)?.task)
-        await model.moveTask(before, toWave: "product")
-        #expect(model.navigation.taskRunDrafts[id]?.error == nil,
-                "\(model.peerPlanning.errorMessage ?? "") · \(model.workActivity.errorMessage ?? "")")
-        try await eventually { model.task(id: id)?.task.task.waveId != nil }
-        #expect(model.visibleWork.standaloneTasks.isEmpty)
-        await model.moveTask(try #require(model.task(id: id)?.task), toWave: nil)
-        #expect(model.navigation.taskRunDrafts[id]?.error == nil,
-                "\(model.peerPlanning.errorMessage ?? "") · \(model.workActivity.errorMessage ?? "")")
-        try await eventually { model.visibleWork.standaloneTasks.count == 1 }
-        #expect(model.selection == .task(id: id))
-        #expect(registry.selectedWork == key)
-        #expect(registry.retained(key) === workspace)
-        #expect(workspace.multiplexer.layout == layout)
-        #expect(draft.editor.string == "Unsent direction")
+        let outbox = ClientWorkStore(directory: fixture.root.appendingPathComponent("outbox"), connection: location.connection,
+            machine: { machineId }, read: { try await ServerClient.read($0, location: location) },
+            observe: { id in
+                ServerLink.subscribe(.operationGet(requestID: id), reconnect: true, connection: location.connection) { update in
+                    guard case .reading(let frame) = update else { return nil }
+                    return try frame.decode(SubscriptionReading<OperationReceipt>.self)
+                }
+            }, send: { payload in
+                let command = try JSONDecoder().decode(JSONValue.self, from: payload)
+                let link = try await location.connection.link()
+                _ = try await link.request(.submittedOperation(command))
+            })
+        let interaction = WorkInteraction(machine: machineId, store: outbox)
+        let model = WorkModel(query: query, repoPath: fixture.repo.path)
+        model.useInteractionForTesting(interaction)
+        let keeping = Task { await model.keepWorkCurrent() }
+        do {
+            try await eventually { model.visibleWork.standaloneTasks.count == 1 }
+            let registry = SessionsWorkspaceRegistry(localMachineId: machineId)
+            model.confirmMachine(machineId)
+            let repository = try await query.repositoryIdentity(cwd: fixture.repo.path)
+            model.bindWorkspaces(registry, repository: repository.id)
+            model.select(.task(id: id))
+            let key = try #require(registry.selectedWork)
+            let workspace = try #require(registry.retained(key))
+            let location = try #require(workspace.location)
+            let draft = workspace.files(issue: id, cwd: location.worktree).document("notes.txt")
+            draft.editor.string = "Unsent direction"
+            // Moving must preserve the conversation the working Task already opened.
+            try await eventually { workspace.multiplexer.sessionPane?.sessionId != nil }
+            let layout = workspace.multiplexer.layout
+            let destination = try await fixture.json(["wave", "create", "product", "--json"])
+            let waveID = try #require(destination["id"] as? String)
+            let before = try #require(model.task(id: id)?.task)
+            model.moveTask(before, toWave: waveID)
+            try await eventually { model.task(id: id)?.task.task.waveId != nil }
+            #expect(model.visibleWork.standaloneTasks.isEmpty)
+            model.moveTask(try #require(model.task(id: id)?.task), toWave: nil)
+            try await eventually { model.visibleWork.standaloneTasks.count == 1 }
+            #expect(model.selection == .task(id: id))
+            #expect(registry.selectedWork == key)
+            #expect(registry.retained(key) === workspace)
+            #expect(workspace.multiplexer.layout == layout)
+            #expect(draft.editor.string == "Unsent direction")
+        } catch {
+            keeping.cancel()
+            await keeping.value
+            await interaction.shutdown().value
+            await outbox.close()
+            await server.stop()
+            throw error
+        }
         keeping.cancel()
         await keeping.value
+        await interaction.shutdown().value
+        await outbox.close()
+        await server.stop()
     }
 
     @Test func canonical_ids_desktop_cli_transport_accepts_any_casing() async throws {

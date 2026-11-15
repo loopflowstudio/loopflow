@@ -119,7 +119,12 @@ With sidebar focus, **⌘F** searches its visible Tasks and Waves; **Search all 
 widens the same navigator. **Shift-F10** opens the focused Task's actions without
 changing the open workspace.
 
-The Task action menu moves work into a Wave or back to **No Wave** through the shared planning operation, retaining its workspace and drafts.
+Move a Task to a Wave or **No Wave** from its action menu. Cached lists and
+counts change immediately; its conversation and drafts stay open. While
+disconnected, the change waits for its original Machine and survives restart.
+A refusal restores only that change, leaving later edits and navigation alone.
+Incomplete cached destinations wait for their missing data before showing an
+exact count.
 
 Open an active Task whose planning state is **Todo**: wherever its lifecycle
 appears in the page, sidebar, board or breadcrumb picker, it shows **Active**.
@@ -1202,8 +1207,15 @@ count; a current-link capture must revalidate its activity. Losing coverage
 retains the last evaluated membership rather than reviving old Machine rows.
 A query from a replacement epoch also invalidates outstanding receipt evidence
 for that Machine; recovery never replays an uncertain command. Rust compiles a
-finite membership program over selection states, preserving scope, source paths
-and order. The shared Swift projection derives members, attention, arrangement,
+finite membership program over a repository manifest, preserving scope, source
+paths and order. Dynamic Wave ancestry, kind and state predicates reevaluate
+against normalized fields; explicit Work leaves retain fixed identities.
+Real content is cached separately by identity and provenance. Move publishes
+parent intent to source and destination queries, including an omitted destination,
+and keeps its original Machine and Task resource lane across restart.
+A retired command acknowledges only its own invalidation on each retained query;
+an unrelated receipt revision cannot clear another query's reload requirement.
+The shared Swift projection derives members, attention, arrangement,
 visible/suppressed occurrences and unique Task counts together; unknown membership
 has no exact total. Both clients consume these projected query results through
 `WorkInteraction`, one main-actor presentation owner per Machine. Its query leases
@@ -1213,8 +1225,9 @@ publications replace transient effects by ID and revision, including when a fast
 receipt has already retired the operation. Disk, receipt and cache changes repaint
 mounted queries without another server frame. Save failure retains the original
 command for retry. Shared query tests run on both targets, including held disk,
-reply permutations, restart and replacement epochs. Cross-query Task membership
-provenance and the remaining mutation families are unfinished.
+reply permutations, restart and replacement epochs. Planning-backed boards,
+hierarchy labels and their counts still await the remaining projection migration;
+exhaustive mutation policies and native acceptance are unfinished.
 SQLite fixtures await `WorkInteraction.shutdown().value` and any direct query
 reader's close before calling `ClientWorkStore.close()` and removing temporary
 directories. Cancellation alone can leave a reader holding SQLite after its

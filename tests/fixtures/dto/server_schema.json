@@ -4963,23 +4963,23 @@
         {
           "properties": {
             "kind": {
-              "const": "state",
+              "const": "select",
               "type": "string"
             },
-            "members": {
+            "predicate": {
+              "$ref": "#/$defs/MembershipPredicate"
+            },
+            "source": {
               "items": {
-                "$ref": "#/$defs/MemberRef"
+                "$ref": "#/$defs/SelectionId"
               },
               "type": "array"
-            },
-            "state": {
-              "$ref": "#/$defs/SelectionState"
             }
           },
           "required": [
             "kind",
-            "state",
-            "members"
+            "source",
+            "predicate"
           ],
           "type": "object"
         },
@@ -5062,6 +5062,82 @@
         "effects"
       ],
       "type": "object"
+    },
+    "MembershipPredicate": {
+      "description": "Authored membership predicates over the captured repository manifest.",
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "const": "default",
+              "type": "string"
+            },
+            "wave": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/WaveId"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "wave"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "descendants",
+              "type": "string"
+            },
+            "wave": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "wave"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "kind",
+              "type": "string"
+            },
+            "work_kind": {
+              "$ref": "#/$defs/WorkWorkspaceKind"
+            }
+          },
+          "required": [
+            "kind",
+            "work_kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "state",
+              "type": "string"
+            },
+            "state": {
+              "$ref": "#/$defs/SelectionState"
+            }
+          },
+          "required": [
+            "kind",
+            "state"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "MembershipStateEffect": {
       "description": "Predicted display-state changes. These never establish execution readiness.",

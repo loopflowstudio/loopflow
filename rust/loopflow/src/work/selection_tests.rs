@@ -702,3 +702,53 @@ fn typed_fields_keep_sqlite_support_when_activity_is_unavailable() {
         assert!(serde_json::from_value::<MembershipFacts>(selected).is_err());
     }
 }
+
+#[test]
+fn dynamic_wave_membership_consumes_moves_without_recompiling_candidates() {
+    let a = WaveId::new();
+    let b = WaveId::new();
+    let child = WaveId::new();
+    let work: Vec<_> = [
+        (key(a.as_str(), WorkWorkspaceKind::Wave), None),
+        (key(b.as_str(), WorkWorkspaceKind::Wave), None),
+        (
+            key(child.as_str(), WorkWorkspaceKind::Wave),
+            Some(b.clone()),
+        ),
+        (key("task", WorkWorkspaceKind::Task), Some(a.clone())),
+    ]
+    .into_iter()
+    .map(|(key, parent_wave)| SelectionWork {
+        name: key.id.clone(),
+        key,
+        parent_wave,
+        states: BTreeSet::from([SelectionState::Working]),
+        activity_known: true,
+        support: None,
+    })
+    .collect();
+    let selection = node("destination", SelectionExpression::Wave { wave: b.clone() });
+    let mut plan = selection
+        .membership_plan("repo", &work, &BTreeMap::new())
+        .unwrap();
+    assert!(plan.resolve().task_ids().is_empty());
+    plan.facts
+        .iter_mut()
+        .find(|fact| fact.work.id == "task")
+        .unwrap()
+        .parent
+        .wave = Some(child);
+    let resolution = plan.resolve();
+    assert_eq!(resolution.task_ids(), ["task"]);
+    assert_eq!(
+        resolution.members.last().unwrap().source,
+        [SelectionId("destination".into())]
+    );
+    plan.facts
+        .iter_mut()
+        .find(|fact| fact.work.id == "task")
+        .unwrap()
+        .parent
+        .wave = None;
+    assert!(plan.resolve().task_ids().is_empty());
+}

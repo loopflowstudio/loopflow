@@ -77,3 +77,11 @@ public struct SubscriptionReading<Body: Decodable>: Decodable {
 }
 
 extension SubscriptionReading: Sendable where Body: Sendable {}
+
+extension ReadingStamp {
+    var fieldFence: CommitFence {
+        CommitFence(machine: machine, epoch: epoch, schema: schema, revisions: [
+            "planning": revisions.planning, "sessions": revisions.sessions,
+            "graphs": revisions.graphs, "processes": revisions.processes])
+    }
+}

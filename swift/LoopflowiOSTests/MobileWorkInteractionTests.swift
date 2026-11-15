@@ -57,7 +57,11 @@ extension ClientWorkQueryTests {
         XCTAssertTrue(connection.isWaiting, "Refresh observes the existing reconnect, without waiting for it")
     }
 
-    private func leaveBothFeeds(abandon: Bool) async throws {
+    func testPhoneMoveMenuKeepsBothRoutesBeforeDiskWhileDisconnected() async throws {
+        try await leaveBothFeeds(abandon: false, move: true)
+    }
+
+    private func leaveBothFeeds(abandon: Bool, move: Bool = false) async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         let query = ServedRead.viewSelect(expression: TaskList.started.expression(wave: nil))
@@ -86,6 +90,19 @@ extension ClientWorkQueryTests {
         _ = await entered.next()
         var route: WorkWorkspaceKey? = base.contents[0].work
         let otherRoute = route
+        if move {
+            let menu = TaskMoveMenu(waves: []) { first.move(base.contents[0], to: $0) }
+            try menu.inspect().find(button: "No Wave").tap()
+            XCTAssertEqual(route?.id, "a")
+            XCTAssertEqual(otherRoute?.id, "a")
+            hold.release()
+            await owner.persistPending()
+            let records = try await disk.pending()
+            XCTAssertEqual(records.count, 1)
+            XCTAssertEqual(records.first?.destination, "machine")
+            first.stop(); second.stop()
+            return
+        }
         if abandon {
             first.abandon(base.contents[0], selected: route, visible: base.contents.map(\.work)) { route = $0 }
         } else {

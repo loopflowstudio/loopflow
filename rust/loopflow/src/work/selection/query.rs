@@ -1,6 +1,6 @@
 //! The bounded query syntax compiles to the same authored selections as defaults.
 use super::{
-    wave_descendants, DashboardId, MemberRef, MembershipNode, Selection, SelectionError,
+    DashboardId, MemberRef, MembershipNode, MembershipPredicate, Selection, SelectionError,
     SelectionExpression, SelectionFilter, SelectionId, SelectionState, SelectionWork,
     WorkWorkspaceKind,
 };
@@ -122,36 +122,26 @@ impl Selection {
             }
             _ => None,
         };
-        let descendants = match (filter, target) {
-            (SelectionFilter::Wave(_), Some(wave)) => {
-                wave_descendants(repository, &wave.key.id, work)
+        let predicate = match filter {
+            SelectionFilter::Task(_) => {
+                return Ok(MembershipNode::Members {
+                    members: vec![MemberRef {
+                        source: path.to_vec(),
+                        work: target.expect("Task target resolved").key.clone(),
+                    }],
+                })
             }
-            _ => BTreeSet::new(),
-        };
-        let mut members = Vec::new();
-        for item in scoped {
-            let included = match filter {
-                SelectionFilter::Task(_) => item.key == target.expect("Task target resolved").key,
-                SelectionFilter::Wave(_) => item
-                    .parent_wave
-                    .as_ref()
-                    .is_some_and(|parent| descendants.contains(parent.as_str())),
-                SelectionFilter::Kind(kind) => &item.key.kind == kind,
-                SelectionFilter::State(_) => item.key.kind == WorkWorkspaceKind::Task,
-            };
-            if included {
-                members.push(MemberRef {
-                    source: path.to_vec(),
-                    work: item.key.clone(),
-                });
-            }
-        }
-        Ok(match filter {
-            SelectionFilter::State(state) => MembershipNode::State {
-                state: *state,
-                members,
+            SelectionFilter::Wave(_) => MembershipPredicate::Descendants {
+                wave: target.expect("Wave target resolved").key.id.clone(),
             },
-            _ => MembershipNode::Members { members },
+            SelectionFilter::Kind(kind) => MembershipPredicate::Kind {
+                work_kind: kind.clone(),
+            },
+            SelectionFilter::State(state) => MembershipPredicate::State { state: *state },
+        };
+        Ok(MembershipNode::Select {
+            source: path.to_vec(),
+            predicate,
         })
     }
 }

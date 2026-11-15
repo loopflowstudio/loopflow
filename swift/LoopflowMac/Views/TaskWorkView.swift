@@ -620,14 +620,13 @@ struct TaskActionItems: View {
     var body: some View {
         Button("New conversation") { newConversation?() }.disabled(newConversation == nil || unavailable)
         Menu("Move to Wave") {
-            Button("No Wave") { Task { await model.moveTask(task, toWave: nil) } }
-                .disabled(task.task.waveId == nil)
+            Button("No Wave") { model.moveTask(task, toWave: nil) }
             ForEach(model.visibleRoadmaps.filter { $0.wave.repo == task.task.repo }, id: \.wave.id) { destination in
                 Button(destination.wave.displayName) {
-                    Task { await model.moveTask(task, toWave: destination.wave.id) }
-                }.disabled(destination.wave.id == task.task.waveId)
+                    model.moveTask(task, toWave: destination.wave.id)
+                }
             }
-        }.disabled(unavailable).accessibilityIdentifier("task-move-wave")
+        }.disabled(acting).accessibilityIdentifier("task-move-wave")
         if task.isCompleted {
             Button("Reopen Task") { Task { await model.reopenTask(task) } }.disabled(unavailable)
         } else {

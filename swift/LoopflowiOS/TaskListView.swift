@@ -83,6 +83,11 @@ final class TaskFeed {
         }
     }
 
+    func move(_ task: WorkViewPlan.Content, to wave: String?) {
+        guard let directory = repositories.first(where: { $0.repository == task.work.repository })?.path else { return }
+        client.interaction.moveTask(task.work, issue: task.identifier ?? task.work.id, directory: directory, wave: wave)
+    }
+
     func complete(_ task: WorkViewPlan.Content, selected: WorkWorkspaceKey?, visible: [WorkWorkspaceKey],
                   select: (WorkWorkspaceKey?) -> Void) {
         leave(task, abandoning: false, selected: selected, visible: visible, select: select)
@@ -358,6 +363,9 @@ struct TaskListView: View {
             get: { drafts[task.work] ?? "" },
             set: { drafts[task.work] = $0 }), complete: { leave(task, abandoning: false) },
             abandon: { leave(task, abandoning: true) },
+            move: { wave in
+                feed.move(task, to: wave)
+            }, waves: feed.waves.filter { wave in feed.repositories.contains { $0.repository == task.work.repository && $0.path == wave.repo } },
             completionDirectory: feed.repositories.first { $0.repository == task.work.repository }?.path)
     }
 

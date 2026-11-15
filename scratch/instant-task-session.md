@@ -4,8 +4,8 @@ Built on origin/main `9cafc410ee`: conversation/Machine link `a2a0a0fb33`,
 unreachable Machine and Desktop rename `35e2835de1`, fixture teardown `5231746858`,
 observation source `86f99e3315`, typed field support `f9a8da8ae9`. SQL-only and attributed external
 normalization, field-stage incorporation and derived membership answers now
-share the client owner. Dynamic membership with disconnected Move remains the
-next replacement cut. No shipping or merge decision; no Wave selected.
+share the client owner. Dynamic membership and disconnected Move now use that
+same owner; acceptance and remaining work are recorded below. No shipping or merge decision; no Wave selected.
 
 ## Direction
 
@@ -114,10 +114,10 @@ under Proposed contracts through Opening another query. Live requirements:
   `task.completion_requested` confirms intent; only `task.completed` confirms
   removal. `task.filed` binds Task/Session without proving admission or input.
   Provider/filesystem/planning readiness cannot borrow a SQLite fence.
-- Field incorporation and derived answers (below) now decide visible membership
-  for fixed programs; stamp-only effect retention (`WorkQueryEffect.covered`,
-  `effectsCover`) still survives for retirement/reload and goes with the dynamic
-  membership cut. A covering count cannot discharge
+- Field incorporation and derived answers decide visible membership for dynamic
+  programs. Retirement acknowledges only each retained query's own invalidation;
+  query stamps and unrelated effect revisions cannot substitute for field support.
+  A covering count cannot discharge
   a held list; a fresh query cannot subtract twice while another remains behind.
   Partial pages, unrelated domains, native mounts and command return don't
   establish incorporation. Query identity/plan changes invalidate prior coverage.
@@ -234,19 +234,19 @@ and the phone query-before-opening path. The pending-command cut also removes
 retired-source release APIs/index and the rest of `CreationRecovery`. `LegacyTaskDraft` reads released files
 only; SQLite commits precede rewrites.
 
+Removed in the dynamic cut: `WorkQueryEffect.covered`,
+`ClientWorkDatabase.effectsCover`, `MembershipNode::State`, Swift's fixed state
+node, Rust's prefiltered scope/filter compiler and `wave_descendants`. Required
+explicit leaves, authored occurrence paths, descendant scopes, interleaved order,
+intersections, hidden/suppressed occurrences and unknown/partial reads remain on
+the typed program and its shared evaluator. Desktop Move no longer uses
+`performTaskAction` or its post-write refresh barrier.
+
 Still remove, with their consumers:
 
 - Desktop `TaskRunDraft.phase`, other mutation refresh barriers
   (`performTaskAction`) and bind replacement bookkeeping (`replaceSession`,
   `supersedeSessions`).
-- Query-local `WorkQueryEffect.covered`, `ClientWorkDatabase.effectsCover`,
-  `ClientWorkQuery.deriveAnswer`'s fixed-candidate state overlay and dynamic prefiltering
-  in Rust `Selection::compile_membership` / `compile_filter`, in one replacement
-  cut. Keep explicit Work leaves, stable authored occurrence paths, descendant
-  scopes, interleaved order, intersections, hidden/suppressed occurrences and
-  unknown/partial reads covered on the surviving program. Existing tests of these
-  behaviors remain requirements; only assertions exclusive to stamp-only
-  incorporation disappear.
 - View-owned mobile `SessionLink` teardown on ordinary Task switching; keep
   explicit Close, background policy and memory-pressure eviction.
 - WorkCache/TaskFeed duplicate authoritative caches and duplicate freshness
@@ -330,19 +330,17 @@ Earlier handoff and reordered-reading detail:
 Built at `6e944e73b5a`; earlier ownership/checks at `9fbc729a63`. Claim,
 Wave/Dashboard rename and other mutations remain unmigrated.
 
-### Why Move cannot use the current reducer
+### Dynamic membership replacement
 
-Full account: `5d0187746f:scratch/instant-task-session.md`. `compile_membership`
-prefilters Wave descendants into fixed leaves; `ClientWorkQuery.deriveAnswer`
-can only select facts already present in the compiled program, so a destination that omitted Task
-A cannot acquire it. `WorkQueryEffect.covered` decides by the held query's own
-`ReadingStamp`; projection now also consumes independent field incorporation,
-but dynamic parent predicates for Move A→B→C remain unbuilt. Acceptance: Required counterexamples below.
+The fixed-candidate counterexample and prior design are retained at
+`5c958398a6de:scratch/instant-task-session.md`. The dynamic predicate, field and
+retirement contracts below remain the acceptance contract.
 
 ### Next implement direction: facts absorb effects; queries prove their answers
 
 Headless concept review, 2026-11-15, against `5d0187746f`. Field incorporation
-and fixed-program answer coverage are built; dynamic membership/Move remain unbuilt.
+and derived answer coverage are built. The dynamic/Move replacement is now
+implemented; the validation and outstanding surface migration are below.
 The correction above becomes two contracts rather than one larger query stamp:
 
 1. **Field incorporation.** Each confirmed value identifies its Machine, epoch,
@@ -500,6 +498,51 @@ nor sends a command or changes later selection. Retain Complete→newer Reopen
 coverage on the replacement program. The detailed required counterexamples and
 proposed README text above remain the acceptance contract; no builtin changes.
 
+### Concept review: one Task location across surfaces · 2026-11-15
+
+Reviewed HEAD `5c958398a6de` plus the uncommitted dynamic/Move cut. Dynamic
+predicates, omitted destinations, persisted incorporation and query-specific
+retirement are built on the typed query path. The prior fixed-candidate review
+page no longer describes this workspace. Recorded focused checks below are not
+new native acceptance or latency measurements.
+
+The remaining mismatch is two visible locations for one Task: projected query
+rows move to B immediately, while `WorkProjection` groups roadmap Tasks by the
+old Wave and `standupTasks` reads the old Wave's board membership. Breadcrumbs
+also prefer a Session's recorded Wave. A Task move must change its displayed
+location everywhere without moving or recreating its Session. Session attribution
+and the Task's current parent are separate facts; the former cannot override the
+latter in a Task trail.
+
+Next implement direction, already implied by the shared-owner design: expose the
+projected parent/lifecycle alongside real content from the existing query owner;
+make boards, hierarchy labels, No Wave grouping and their counts consume that
+same answer and its coverage. Keep planning details as content, not a second
+membership decision. Preserve authored order and occurrence identity. Distinguish
+a complete empty destination from missing content/ancestry, and show no exact
+count for incomplete coverage. Remove the superseded roadmap membership joins
+with their callers; add no view-local move map or fabricated confirmed DTO.
+
+Acceptance: offline A→B changes the source/destination rows, boards, breadcrumb,
+No Wave grouping and counts together on both hosts wherever those surfaces exist.
+Keep the selected Task, Session, panes and draft. Refusal restores only that
+intent; an older save failure/retry cannot overwrite a later move. A newer C
+reading survives delayed A/B readings, retirement and offline restart. Include
+descendants and changed saved definitions, incomplete destinations and unknown
+activity; reconnect cannot change later navigation or replay uncertain delivery.
+Retain Complete→Reopen coverage. Native reaction/input latency still needs its
+own baseline; reducer samples cannot substitute for it.
+
+Proposed usage after this surface cut: “Move changes the Task's location across
+cached lists, boards and its trail immediately. Its conversation stays open.
+Incomplete destinations remain marked until their missing data arrives.” The
+existing offline/recovery contract above still applies. No builtin changes.
+
+Loop-or-next outcome: **Blocked — the three open product choices below remain
+unanswered.** The engineering direction changed to the remaining surface cut;
+those choices do not prevent that implementation work. This review starts no
+execution and changes no production code.
+
 ### Open product choices
 
 Unanswered, numbered in `scratch/concept-review.html`: (1) queue Abandon offline
@@ -521,12 +564,9 @@ fences compact comparable commits without keeping request IDs or command bodies;
 retained query effects supply still-needed stages after retirement. Resource and
 bound-receipt lookups use indexes, with stage fan-out grouped by resource.
 
-Field incorporation now feeds the derived-answer path below. The remaining
-deletion cut removes `WorkQueryEffect.covered`, `effectsCover` and fixed-candidate
-state projection together with dynamic membership/Move. Full Move A→B→C
-presentation acceptance remains open, including two clients and incomplete destinations.
+Field incorporation now feeds the derived-answer path below. The dynamic cut removes stamp-only retirement and fixed candidates. Native
+presentation and the remaining inventory surfaces still need acceptance.
 
-Checks: `scripts/test_desktop.sh --skip-build --filter 'ClientWorkQueryTests/testField|SessionRenameTests'` passes 14 XCTest + 6 Swift Testing cases after a fresh `swift build --build-tests --package-path swift`; `scripts/test_ios.py` with six explicit `testFieldIncorporation…` selections passes all 6; `check_swift_multiplatform_boundaries.py` passes. Resource/receipt EXPLAIN checks use indexes at 10k rows. Logs: `/tmp/loo-906-field-{build,tests,ios}.log`. Gate owns broader suites and the prior nextest LEAK.
 
 ### Derived membership answers · 2026-11-15
 
@@ -548,14 +588,9 @@ Native attachment/location diagnostics do not mean missing content or invalidate
 an exact count. Prepared renderings stay off the main actor for cached reads.
 
 The latest iteration calls for this prerequisite before the dynamic/Move cut;
-fixed candidates and stamp-based effect retention are still deletion targets, not
-new membership authority. No Move usage claim changes. The three product choices,
+the dynamic cut below supersedes fixed candidates and stamp-based retention. The three product choices,
 valid native latency baseline and gate-owned nextest LEAK remain open.
 
-Checks: `scripts/test_desktop.sh --skip-build --filter 'ClientWorkQueryTests/testDerived|ClientWorkQueryTests/testField|ClientWorkQueryTests/testCompletionRetainsExplicit|ClientWorkQueryTests/testCompletionProjects'` passes 18 tests after `swift build --build-tests --package-path swift`; `scripts/test_ios.py` with the three explicit `testDerived…` selections passes 3; multiplatform check passes. `cargo test -p loopflow --test integration documented_commands::` passes 4 tests (linker unwind-size warning only). An initial check
-exposed native-readiness diagnostics being counted as missing content; the held
-publication check was stopped and that condition removed. Logs:
-`/tmp/loo-906-answer-{build,tests,ios}.log`.
 
 ## Current implementation cut
 
@@ -584,12 +619,68 @@ including without a network event. Retirement cancels its receipt observer and
 transfers lagging effects or scoped reload floors. The complete prior contracts and
 query checks remain at `6e944e73b5a:scratch/instant-task-session.md`.
 
-Remaining: dynamic membership and disconnected Move, including replacement of
-stamp-only effect retirement and reload shortcuts; effect-policy duplication; cross-client closed-query convergence; exhaustive
+Remaining: ordinary planning-backed boards, breadcrumb/No Wave grouping and
+counts must consume the shared projection rather than stale roadmap membership;
+Move save-failure/retry supersession, changed-definition/descendant presentation
+and native acceptance still need coverage. The typed query path has dynamic
+membership and disconnected Move; full interaction cutover is not claimed.
+Other remaining work: effect-policy duplication; exhaustive
 effect/dependency declarations and cross-query provenance; other mutation recovery
 and resource lanes; retained mobile `SessionLink`; projected inspection;
 historical-restoration epoch reset; valid native benchmark baseline. One cross-platform PR; no shipping decision. SQLite
 fences cannot certify filesystem/provider readiness.
+
+### Dynamic membership and disconnected Move · 2026-11-15
+
+Rust emits fixed explicit leaves plus `select` predicates for default scopes,
+Wave descendants, kind and state, over an ordered repository manifest. An explicit
+leaf-only program retains its small candidate set. Both hosts use the same
+program and effect mutation. Prepared query indexes locate affected Tasks and
+occurrence ranks; local changes evaluate those resources without recompiling or
+sorting the manifest. Full preparation, field ingestion and persistence remain
+on the store actor. Queries with unresolved membership currently use the full
+reducer; that fallback, real supported-manifest payload/fan-out and prepared-cache
+memory still need profiling. Missing ancestry is unavailable, never an exact empty result.
+
+Move freezes its original Machine, canonical Task resource, destination Wave/No
+Wave and request ID; publishes before disk; saves before send; and shares a
+resource lane with conflicting Task edits. Both action menus call this owner.
+Desktop's stale-planning Move guard and obsolete post-command barrier are gone.
+The domain transaction records actual Wave and Project with its semantic result.
+A newer C field absorbs older A→B in either receipt/reading order; missing content
+or activity cannot revive it. Real content joins separately in the same database;
+crossed/equal-conflicting content retains reconciliation requirements. Membership
+states and native attachment diagnostics are not content identity conflicts.
+
+Retirement transfers unresolved effects or acknowledges this specific invalidation
+on an already-usable retained base, then saves scoped floors. It never treats an
+unrelated effect revision as a replacement manifest. Old fixed programs are
+invalidated without changing requests/receipts. Recovered commands keep original
+IDs, destination and canonical resource lanes. No shipping decision.
+
+Diagnostic, SwiftPM debug, 21 samples each (20 warm): 10k synthetic manifest
+2,849,209 bytes; warm reducer P95 338.859291 ms before cleanup, 201.556583 ms
+without repeated sorting, 8.638542 ms with prepared indexes. The first manifest
+was 2,848,480 bytes before ancestor fixtures were added. These are CPU/wall reducer
+measurements on the active host, not native paint/input latency or a valid quiet-host
+baseline. Raw samples: `scratch/dynamic-manifest-measurements.json`.
+
+Prior prerequisite runs and the native-diagnostic counterexample remain at
+`5c958398a6de:scratch/instant-task-session.md`.
+
+- `swift build --build-tests --package-path swift --jobs 4`: passes; gate owns the wider app matrix.
+- `scripts/test_desktop.sh --skip-build --filter 'ClientWorkQueryTests/testDynamic|ClientWorkQueryTests/testField|ClientWorkQueryTests/testDerived|ClientWorkQueryTests/testDesktopMove|ClientWorkQueryTests/testLaterSettlement|ClientWorkQueryTests/testCompletionIncorporation|ClientWorkQueryTests/testDefiniteRefusal|ClientWorkQueryTests/testProductionIntent|ClientWorkQueryTests/testHeldList'`: 31 pass, 1 opt-in measurement skipped; that measurement ran separately with 21 recorded samples. Content/field EXPLAIN checks use indexes at 10k rows.
+- `scripts/test_desktop.sh --skip-build --filter WorkCLISubscriptionTests/standaloneMovesKeepWorkspace`: 1 passes through real admission/receipt streams; retains selection, Session, panes and file draft, then awaits private server shutdown.
+- `uv run python scripts/test_ios.py` with 10 explicit shared/phone selections: 10 pass (two clients, migration, omitted destination, held disk, missing/conflicting content, restored/indexed agreement, phone Move, Busy and newer Reopen). Gate owns remaining iOS cases.
+- `cargo test -p loopflow --lib work::selection_tests::`: 21 pass.
+- `cargo test -p loopflow --lib store::sqlite::task_content::tests::membership_moves_preserve_work_and_capture_owners`: 1 passes, including actual Wave/Project stage result.
+- `cargo test -p loopflow --lib server::schema::tests:: -- --skip bare_time_serializes_as_its_described_tuple`: 7 pass; generated schema fixture matches. Gate owns the skipped case and recorded nextest LEAK.
+- `cargo test -p loopflow --test integration documented_commands::`: 4 pass. Rust links emitted the existing unwind-size warning.
+- `uv run python scripts/check_swift_multiplatform_boundaries.py`: passes.
+
+Current logs: `/tmp/loo-906-dynamic-{build,final-tests,cli-workspace,ios,rust,domain,wire,docs}.log`.
+Native usability/latency, broader suites and lint remain with implementation/demo
+and gate as previously assigned.
 
 ### Admission identity and recovery contract
 

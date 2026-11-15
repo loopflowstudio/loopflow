@@ -1,7 +1,6 @@
 import Foundation
 
-/// A finite program compiled by Rust: identity, scope, occurrence paths and
-/// ordering are already resolved. Only selection-state predicates remain.
+/// Authored predicates and occurrence paths over a captured repository manifest.
 public struct WorkMembershipPlan: Codable, Equatable, Sendable {
     public struct FieldSupport: Codable, Equatable, Sendable {
         public enum Observations: Codable, Equatable, Sendable {
@@ -76,7 +75,7 @@ public struct WorkMembershipPlan: Codable, Equatable, Sendable {
     public struct Facts: Codable, Equatable, Sendable {
         public let work: WorkWorkspaceKey
         public let name: String
-        public let parent: ParentFact
+        public var parent: ParentFact
         public var lifecycle: StateFact
         public var activity: StateFact
         public var activityKnown: Bool { activity.known }
@@ -84,19 +83,86 @@ public struct WorkMembershipPlan: Codable, Equatable, Sendable {
             (lifecycle.states + activity.states).sorted { $0.rawValue < $1.rawValue }
         }
     }
+    public enum Predicate: Codable, Equatable, Sendable {
+        case `default`(wave: String?)
+        case descendants(wave: String)
+        case kind(WorkWorkspaceKey.Kind)
+        case state(WorkSelectionState)
+        private enum Keys: String, CodingKey { case kind, wave, workKind = "work_kind", state }
+        private enum Kind: String, Codable { case `default`, descendants, kind, state }
+        public init(from decoder: any Decoder) throws {
+            let c = try decoder.container(keyedBy: Keys.self)
+            switch try c.decode(Kind.self, forKey: .kind) {
+            case .default: self = .default(wave: try c.decode(String?.self, forKey: .wave))
+            case .descendants: self = .descendants(wave: try c.decode(String.self, forKey: .wave))
+            case .kind: self = .kind(try c.decode(WorkWorkspaceKey.Kind.self, forKey: .workKind))
+            case .state: self = .state(try c.decode(WorkSelectionState.self, forKey: .state))
+            }
+        }
+        public func encode(to encoder: any Encoder) throws {
+            var c = encoder.container(keyedBy: Keys.self)
+            switch self {
+            case .default(let wave): try c.encode(Kind.default, forKey: .kind); try c.encode(wave, forKey: .wave)
+            case .descendants(let wave): try c.encode(Kind.descendants, forKey: .kind); try c.encode(wave, forKey: .wave)
+            case .kind(let kind): try c.encode(Kind.kind, forKey: .kind); try c.encode(kind, forKey: .workKind)
+            case .state(let state): try c.encode(Kind.state, forKey: .kind); try c.encode(state, forKey: .state)
+            }
+        }
+
+        func includes(_ fact: Facts, facts: [WorkWorkspaceKey: Facts]) -> Bool {
+            var unavailable: [String] = []
+            return includes(fact, facts: facts, unavailable: &unavailable)
+        }
+
+        fileprivate func includes(_ fact: Facts, facts: [WorkWorkspaceKey: Facts], unavailable: inout [String]) -> Bool {
+            func descendant(_ wave: String) -> Bool {
+                var parent = fact.parent.wave
+                var seen = Set<String>()
+                while let id = parent {
+                    if id == wave { return true }
+                    guard seen.insert(id).inserted else {
+                        unavailable.append("Wave \(id) ancestry is cyclic"); return false
+                    }
+                    guard let ancestor = facts[WorkWorkspaceKey(repository: fact.work.repository, kind: .wave, id: id)] else {
+                        unavailable.append("Wave \(id) ancestry is unavailable"); return false
+                    }
+                    parent = ancestor.parent.wave
+                }
+                return false
+            }
+            switch self {
+            case .default(let wave):
+                switch fact.work.kind {
+                case .repository: return false
+                case .wave: return fact.parent.wave == wave
+                case .task: return wave.map(descendant) ?? true
+                }
+            case .descendants(let wave): return descendant(wave)
+            case .kind(let kind): return fact.work.kind == kind
+            case .state: return fact.work.kind == .task
+            }
+        }
+        fileprivate func state(for fact: Facts) -> WorkSelectionState? {
+            switch self {
+            case .state(let state): state
+            case .default where fact.work.kind == .task: .working
+            default: nil
+            }
+        }
+    }
     public indirect enum Node: Codable, Equatable, Sendable {
         case members([WorkMemberRef])
-        case state(WorkSelectionState, [WorkMemberRef])
+        case select(source: [String], predicate: Predicate)
         case compose([Node])
         case intersect([Node])
 
-        private enum Keys: String, CodingKey { case kind, members, state, items }
-        private enum Kind: String, Codable { case members, state, compose, intersect }
+        private enum Keys: String, CodingKey { case kind, members, source, predicate, items }
+        private enum Kind: String, Codable { case members, select, compose, intersect }
         public init(from decoder: any Decoder) throws {
             let c = try decoder.container(keyedBy: Keys.self)
             switch try c.decode(Kind.self, forKey: .kind) {
             case .members: self = .members(try c.decode([WorkMemberRef].self, forKey: .members))
-            case .state: self = .state(try c.decode(WorkSelectionState.self, forKey: .state), try c.decode([WorkMemberRef].self, forKey: .members))
+            case .select: self = .select(source: try c.decode([String].self, forKey: .source), predicate: try c.decode(Predicate.self, forKey: .predicate))
             case .compose: self = .compose(try c.decode([Node].self, forKey: .items))
             case .intersect: self = .intersect(try c.decode([Node].self, forKey: .items))
             }
@@ -106,8 +172,8 @@ public struct WorkMembershipPlan: Codable, Equatable, Sendable {
             switch self {
             case .members(let members):
                 try c.encode(Kind.members, forKey: .kind); try c.encode(members, forKey: .members)
-            case .state(let state, let members):
-                try c.encode(Kind.state, forKey: .kind); try c.encode(state, forKey: .state); try c.encode(members, forKey: .members)
+            case .select(let source, let predicate):
+                try c.encode(Kind.select, forKey: .kind); try c.encode(source, forKey: .source); try c.encode(predicate, forKey: .predicate)
             case .compose(let items):
                 try c.encode(Kind.compose, forKey: .kind); try c.encode(items, forKey: .items)
             case .intersect(let items):
@@ -115,33 +181,48 @@ public struct WorkMembershipPlan: Codable, Equatable, Sendable {
             }
         }
 
-        fileprivate func evaluate(_ facts: [WorkWorkspaceKey: Facts], knownAbsent: [WorkWorkspaceKey: Set<WorkSelectionState>], includeUnknown: Bool = false, unavailable: inout [String]) -> [WorkMemberRef] {
+        fileprivate func evaluate(_ facts: [WorkWorkspaceKey: Facts], order: [WorkWorkspaceKey], knownAbsent: [WorkWorkspaceKey: Set<WorkSelectionState>], includeUnknown: Bool = false, only: WorkWorkspaceKey? = nil, unavailable: inout [String]) -> [WorkMemberRef] {
             switch self {
-            case .members(let members): return members
-            case .state(let state, let members):
-                return members.filter { member in
-                    guard let fact = facts[member.work] else {
-                        unavailable.append("Work \(member.work.id) facts are unavailable"); return includeUnknown
-                    }
-                    if fact.states.contains(state) { return true }
-                    if knownAbsent[member.work]?.contains(state) == true { return false }
-                    if !fact.activityKnown && [.available, .busy, .blocked].contains(state) {
+            case .members(let members): return only.map { key in members.filter { $0.work == key } } ?? members
+            case .select(let source, let predicate):
+                return order.compactMap { key in
+                    guard let fact = facts[key], predicate.includes(fact, facts: facts, unavailable: &unavailable) else { return nil }
+                    let member = WorkMemberRef(source: source, work: key)
+                    guard let state = predicate.state(for: fact) else { return member }
+                    if fact.states.contains(state) { return member }
+                    if knownAbsent[key]?.contains(state) == true { return nil }
+                    if !fact.activityKnown && state.isActivity {
                         unavailable.append("Task \(fact.name) activity is unavailable")
-                        return includeUnknown
+                        return includeUnknown ? member : nil
                     }
-                    return false
+                    return nil
                 }
-            case .compose(let items): return items.flatMap { $0.evaluate(facts, knownAbsent: knownAbsent, includeUnknown: includeUnknown, unavailable: &unavailable) }
+            case .compose(let items): return items.flatMap { $0.evaluate(facts, order: order, knownAbsent: knownAbsent, includeUnknown: includeUnknown, only: only, unavailable: &unavailable) }
             case .intersect(let items):
                 var result: [WorkMemberRef]?
                 for item in items {
-                    let members = item.evaluate(facts, knownAbsent: knownAbsent, includeUnknown: includeUnknown, unavailable: &unavailable)
+                    let members = item.evaluate(facts, order: order, knownAbsent: knownAbsent, includeUnknown: includeUnknown, only: only, unavailable: &unavailable)
                     if let previous = result {
                         let keys = Set(members.map(\.work))
                         result = previous.filter { keys.contains($0.work) }
                     } else { result = members }
                 }
                 return result ?? []
+            }
+        }
+        func resolveMember(_ key: WorkWorkspaceKey, facts: [WorkWorkspaceKey: Facts],
+                           knownAbsent: [WorkWorkspaceKey: Set<WorkSelectionState>]) -> WorkSelectionResolution {
+            var unavailable: [String] = []
+            let members = evaluate(facts, order: [key], knownAbsent: knownAbsent, only: key, unavailable: &unavailable)
+            return .init(attention: [], members: members, unavailable: unavailable)
+        }
+
+        func potentialMembers(facts: [Facts]) -> [WorkMemberRef] {
+            switch self {
+            case .members(let members): members
+            case .select(let source, _): facts.map { .init(source: source, work: $0.work) }
+            case .compose(let nodes): nodes.flatMap { $0.potentialMembers(facts: facts) }
+            case .intersect(let nodes): nodes.first?.potentialMembers(facts: facts) ?? []
             }
         }
     }
@@ -162,13 +243,14 @@ public struct WorkMembershipPlan: Codable, Equatable, Sendable {
         // inside a compiled node still has finite, identifiable candidates.
         guard unavailable.isEmpty else { return nil }
         var reasons: [String] = []
+        let order = facts.map(\.work)
         let facts = Dictionary(facts.map { ($0.work, $0) }, uniquingKeysWith: { first, _ in first })
-        return Set(root.evaluate(facts, knownAbsent: knownAbsent, includeUnknown: true, unavailable: &reasons))
+        return Set(root.evaluate(facts, order: order, knownAbsent: knownAbsent, includeUnknown: true, unavailable: &reasons))
     }
 
     public func resolve(knownAbsent: [WorkWorkspaceKey: Set<WorkSelectionState>] = [:]) -> WorkSelectionResolution {
         var unavailable = unavailable
-        let members = root.evaluate(Dictionary(facts.map { ($0.work, $0) }, uniquingKeysWith: { first, _ in first }), knownAbsent: knownAbsent, unavailable: &unavailable)
+        let members = root.evaluate(Dictionary(facts.map { ($0.work, $0) }, uniquingKeysWith: { first, _ in first }), order: facts.map(\.work), knownAbsent: knownAbsent, unavailable: &unavailable)
         let selected = Set(members.map(\.work))
         let attention = facts.filter { selected.contains($0.work) && ($0.states.contains(.available) || $0.states.contains(.blocked)) }.map(\.work)
         return WorkSelectionResolution(attention: attention.sorted { ($0.repository, $0.kind.rawValue, $0.id) < ($1.repository, $1.kind.rawValue, $1.id) }, members: members, unavailable: unavailable)
@@ -180,6 +262,7 @@ public struct WorkMembershipPlan: Codable, Equatable, Sendable {
 public struct ProjectedWorkPlan: Equatable, Sendable {
     private let membership: WorkMembershipPlan
     private let knownAbsent: [WorkWorkspaceKey: Set<WorkSelectionState>]
+    public let contents: [WorkViewPlan.Content]
     public let confirmed: WorkViewPlan
     public let resolution: WorkSelectionResolution
     public let arrangement: WorkArrangement
@@ -199,20 +282,22 @@ public struct ProjectedWorkPlan: Equatable, Sendable {
         guard let from = members.firstIndex(where: { $0.work.kind == .task && $0.work.id == task }),
               let to = members.firstIndex(where: { $0.work.kind == .task && $0.work.id == target }) else { return self }
         members.insert(members.remove(at: from), at: to)
-        return Self(confirmed, membership: membership, knownAbsent: knownAbsent, memberOrder: members, coverage: coverage)
+        return Self(confirmed, membership: membership, knownAbsent: knownAbsent, memberOrder: members, coverage: coverage, contents: contents)
     }
 
     public init(_ confirmed: WorkViewPlan, membership: WorkMembershipPlan? = nil, knownAbsent: [WorkWorkspaceKey: Set<WorkSelectionState>] = [:], memberOrder: [WorkMemberRef]? = nil) {
         self.init(confirmed, membership: membership, knownAbsent: knownAbsent, memberOrder: memberOrder, coverage: nil)
     }
 
-    init(_ confirmed: WorkViewPlan, membership: WorkMembershipPlan? = nil, knownAbsent: [WorkWorkspaceKey: Set<WorkSelectionState>] = [:], memberOrder: [WorkMemberRef]? = nil, coverage: WorkAnswerCoverage?) {
+    init(_ confirmed: WorkViewPlan, membership: WorkMembershipPlan? = nil, knownAbsent: [WorkWorkspaceKey: Set<WorkSelectionState>] = [:], memberOrder: [WorkMemberRef]? = nil, coverage: WorkAnswerCoverage?, contents: [WorkViewPlan.Content]? = nil,
+         resolution: WorkSelectionResolution? = nil, states: [WorkWorkspaceKey: [WorkSelectionState]]? = nil) {
         self.confirmed = confirmed
+        self.contents = contents ?? confirmed.contents
         let membership = membership ?? confirmed.membership
         self.membership = membership
         self.knownAbsent = knownAbsent
         self.coverage = coverage
-        var resolution = membership.resolve(knownAbsent: knownAbsent)
+        var resolution = resolution ?? membership.resolve(knownAbsent: knownAbsent)
         let membershipIncomplete = !resolution.unavailable.isEmpty
         if let coverage, !coverage.current {
             var reasons = coverage.dependencies.filter { !$0.current }.map {
@@ -223,7 +308,7 @@ public struct ProjectedWorkPlan: Equatable, Sendable {
             resolution = WorkSelectionResolution(attention: resolution.attention, members: resolution.members,
                 unavailable: resolution.unavailable + reasons)
         }
-        let contentKeys = Set(confirmed.contents.map(\.work))
+        let contentKeys = Set(self.contents.map(\.work))
         let missing = Set(resolution.members.map(\.work)).subtracting(contentKeys)
         if !missing.isEmpty {
             resolution = WorkSelectionResolution(attention: resolution.attention, members: resolution.members,
@@ -237,7 +322,7 @@ public struct ProjectedWorkPlan: Equatable, Sendable {
             resolution.members = ordered
         }
         self.resolution = resolution
-        states = Dictionary(membership.facts.map { ($0.work, $0.states) }, uniquingKeysWith: { first, _ in first })
+        self.states = states ?? Dictionary(membership.facts.map { ($0.work, $0.states) }, uniquingKeysWith: { first, _ in first })
         let selected = Set(resolution.members)
         let departures: Set<WorkMemberRef>
         if !resolution.unavailable.isEmpty, !knownAbsent.isEmpty,

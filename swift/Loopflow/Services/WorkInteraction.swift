@@ -17,9 +17,10 @@ public final class WorkInteraction {
         var destination: String?
         var record: SubmittedOperation? {
             destination.map { SubmittedOperation(requestID: id, destination: $0, payload: payload,
-                version: ServerProtocol.revision, submittedAt: submittedAt, draftID: draftID) }
+                version: ServerProtocol.revision, submittedAt: submittedAt, draftID: draftID, resource: resource) }
         }
         let effect: WorkQueryEffect?
+        var resource: OperationResource?
         var savedRevision: UInt64?
     }
     public private(set) var operations: [PendingOperation] = []
@@ -209,7 +210,7 @@ public final class WorkInteraction {
         let id = UUID().uuidString.lowercased()
         let command = ServedWrite.sessionRename(directory: directory, id: session, name: name)
         let payload = try! JSONEncoder().encode(command)
-        let intent = Intent(id: id, payload: payload, submittedAt: Date(), draftID: nil, destination: machine, effect: nil)
+        let intent = Intent(id: id, payload: payload, submittedAt: Date(), draftID: nil, destination: machine, effect: nil, resource: .session(session))
         operations.append(PendingOperation(id: id, payload: payload, kind: "session.rename", request: name,
             directory: directory, wave: nil, graph: nil, submittedAt: intent.submittedAt, destination: machine))
         intents.append(intent)
@@ -236,6 +237,24 @@ public final class WorkInteraction {
             issue: issue, directory: directory, selected: selected, visible: visible, select: select)
     }
 
+    /// Parent intent changes every cached membership without changing navigation.
+    @discardableResult
+    public func moveTask(_ work: WorkWorkspaceKey, issue: String, directory: String, wave: String?) -> String {
+        let id = UUID().uuidString.lowercased()
+        let command = ServedWrite.taskMove(directory: directory, issue: issue, wave: wave, machine: nil)
+        let payload = try! JSONEncoder().encode(command)
+        let effect = WorkQueryEffect(operationID: id, sequence: 0, directory: directory,
+            kind: "task.move", issue: issue, wave: wave, work: work, resolution: nil)
+        let intent = Intent(id: id, payload: payload, submittedAt: Date(), draftID: nil, destination: machine, effect: effect, resource: .task(work))
+        operations.append(PendingOperation(id: id, payload: payload, kind: "task.move", request: "",
+            directory: directory, wave: wave, graph: nil, submittedAt: intent.submittedAt, destination: machine))
+        intents.append(intent)
+        publish()
+        start()
+        enqueue(intent)
+        return id
+    }
+
     private func leave(_ work: WorkWorkspaceKey, command: ServedWrite, kind: String, issue: String, directory: String,
                        selected: WorkWorkspaceKey?, visible: [WorkWorkspaceKey], select: (WorkWorkspaceKey?) -> Void) -> String {
         let id = UUID().uuidString.lowercased()
@@ -244,8 +263,8 @@ public final class WorkInteraction {
         // ServedWrite's finite strings/enums cannot fail encoding.
         let payload = try! JSONEncoder().encode(command)
         let effect = WorkQueryEffect(operationID: id, sequence: 0, directory: directory,
-            kind: kind, issue: issue, resolution: nil)
-        let intent = Intent(id: id, payload: payload, submittedAt: Date(), draftID: nil, destination: machine, effect: effect)
+            kind: kind, issue: issue, work: work, resolution: nil)
+        let intent = Intent(id: id, payload: payload, submittedAt: Date(), draftID: nil, destination: machine, effect: effect, resource: .task(work))
         operations.append(PendingOperation(id: id, payload: payload, kind: kind, request: "",
             directory: directory, wave: nil, graph: nil, submittedAt: intent.submittedAt, destination: machine))
         intents.append(intent)
@@ -376,9 +395,11 @@ public final class WorkInteraction {
     }
 
     private func project(_ base: ClientWorkQuery) -> [ProjectedWorkPlan] {
-        base.applying(intents.filter { intent in
+        let effects = intents.filter { intent in
             operations.first(where: { $0.id == intent.id })?.error == nil
-        }.compactMap(\.effect)).projection
+        }.compactMap(\.effect)
+        guard !effects.isEmpty else { return base.projection }
+        return base.applying(effects).projection
     }
 
     public func isCompleting(issue: String, directory: String) -> Bool {

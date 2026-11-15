@@ -15,7 +15,11 @@ extension ClientWorkQueryTests {
         try await leaveBothWindows(abandon: true)
     }
 
-    private func leaveBothWindows(abandon: Bool) async throws {
+    func testDesktopMoveRemainsAvailableOfflineAndKeepsBothSelections() async throws {
+        try await leaveBothWindows(abandon: false, move: true)
+    }
+
+    private func leaveBothWindows(abandon: Bool, move: Bool = false) async throws {
         let fixture = try WorkTestFixture.load()
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -56,6 +60,19 @@ extension ClientWorkQueryTests {
         let task = try XCTUnwrap(first.task(id: "issue-now")?.task)
         let controls = TaskWorkflowHeader(model: first, task: task,
             work: .unavailable(lastGood: nil, reason: "Machine offline"))
+        if move {
+            let menu = TaskActionItems(model: first, task: task, wave: nil)
+            XCTAssertFalse(try menu.inspect().find(viewWithAccessibilityIdentifier: "task-move-wave").isDisabled())
+            try menu.inspect().find(button: "No Wave").tap()
+            XCTAssertEqual(first.selection, .task(id: "issue-now"))
+            XCTAssertEqual(second.selection, .task(id: "issue-now"))
+            hold.release()
+            await owner.persistPending()
+            let records = try await disk.pending()
+            XCTAssertEqual(records.count, 1)
+            XCTAssertEqual(records.first?.destination, "machine")
+            return
+        }
         if abandon {
             XCTAssertFalse(try controls.inspect().find(viewWithAccessibilityIdentifier: "task-abandon").button().isDisabled())
             await first.abandonTask(task)

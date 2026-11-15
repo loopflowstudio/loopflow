@@ -87,6 +87,12 @@ A retained Task shows **Completing…** while
 its command remains pending. These local changes work while the network is waiting;
 provider readiness still comes from the Session connection.
 
+**Task actions → Move to Wave** moves a Task to a Wave or **No Wave**. Cached
+lists and counts change immediately; its conversation and drafts stay open.
+While disconnected, the change waits for its original Machine and survives
+restart. A refusal restores only that change, leaving later edits and navigation
+alone. Incomplete cached destinations wait for their missing data.
+
 The device touched last has the terminal. When another device takes it, the
 phone stops drawing and offers **Continue here**.
 

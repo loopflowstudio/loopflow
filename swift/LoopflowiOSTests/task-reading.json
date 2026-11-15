@@ -227,40 +227,14 @@
     "repo_path": "/Users/dev/src/loopflow",
     "membership": {
       "root": {
-        "kind": "state",
-        "state": "open",
-        "members": [
-          {
-            "source": [
-              "working"
-            ],
-            "work": {
-              "repository": "repo_fixture",
-              "kind": "task",
-              "id": "task_fixture_1"
-            }
-          },
-          {
-            "source": [
-              "working"
-            ],
-            "work": {
-              "repository": "repo_fixture",
-              "kind": "task",
-              "id": "task_fixture_2"
-            }
-          },
-          {
-            "source": [
-              "working"
-            ],
-            "work": {
-              "repository": "repo_fixture",
-              "kind": "task",
-              "id": "task_fixture_3"
-            }
-          }
-        ]
+        "kind": "select",
+        "source": [
+          "working"
+        ],
+        "predicate": {
+          "kind": "state",
+          "state": "open"
+        }
       },
       "facts": [
         {
@@ -366,6 +340,14 @@
           "insert": [
             "done"
           ]
+        },
+        "task.move": {
+          "stage": "task.membership_changed",
+          "domains": [
+            "planning"
+          ],
+          "remove": [],
+          "insert": []
         }
       },
       "domains": [

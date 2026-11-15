@@ -192,7 +192,7 @@ final class ClientWorkQueryTests: XCTestCase {
         func key(_ id: String) -> [String: String] { ["repository": repository, "kind": "task", "id": id] }
         func member(_ id: String, _ source: String) -> [String: Any] { ["source": ["root", source], "work": key(id)] }
         var nodes: [[String: Any]] = ["first", "second"].map { source in
-            ["kind": "state", "state": "working", "members": ids.map { member($0, source) }]
+            ["kind": "select", "source": ["root", source], "predicate": ["kind": "state", "state": "working"]]
         }
         if explicit { nodes.append(["kind": "members", "members": [member("a", "retained")]]) }
         var membership = try XCTUnwrap(body["membership"] as? [String: Any])
@@ -221,6 +221,26 @@ final class ClientWorkQueryTests: XCTestCase {
             version: ServerProtocol.revision, submittedAt: Date()))
         XCTAssertTrue(try database.observeEpoch("epoch", id: "saved"))
         return database
+    }
+
+    private func confirmedWorkingPlan(_ ids: [String], stamp: ReadingStamp, completed: Set<String> = []) throws -> WorkViewPlan {
+        let original = try workingPlan(ids)
+        var membership = original.membership
+        membership.facts = membership.facts.map { fact in
+            func support(_ derivation: String, _ revisions: [String: Int64]) -> WorkMembershipPlan.FieldSupport {
+                .init(machine: stamp.machine, epoch: stamp.epoch, schema: stamp.schema, derivation: derivation,
+                    revisions: revisions, observations: .sqlite)
+            }
+            return .init(work: fact.work, name: fact.name,
+                parent: .init(wave: fact.parent.wave, support: support("work.parent/1", ["planning": stamp.revisions.planning])),
+                lifecycle: .init(states: completed.contains(fact.work.id) ? [.done] : fact.lifecycle.states, known: true,
+                    support: support("work.lifecycle/1", ["planning": stamp.revisions.planning,
+                        "graphs": stamp.revisions.graphs, "processes": stamp.revisions.processes])),
+                activity: fact.activity)
+        }
+        var wire = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
+        wire["membership"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(membership))
+        return try JSONDecoder().decode(WorkViewPlan.self, from: JSONSerialization.data(withJSONObject: wire))
     }
 
     private func fieldStamp(_ query: String = "fields", planning: Int64 = 7, sessions: Int64 = 7,
@@ -253,6 +273,10 @@ final class ClientWorkQueryTests: XCTestCase {
                 ["planning": stamp.revisions.planning, "sessions": stamp.revisions.sessions, "graphs": 7, "processes": 7], observations)))]
         var wire = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(plan)) as? [String: Any])
         wire["membership"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(membership))
+        var contents = try XCTUnwrap(wire["contents"] as? [[String: Any]])
+        contents[0]["states"] = (lifecycle + activity).map(\.rawValue)
+        contents[0]["unavailable"] = clock == nil ? ["Native attachment awaits confirmation"] : []
+        wire["contents"] = contents
         return try JSONDecoder().decode(WorkViewPlan.self, from: JSONSerialization.data(withJSONObject: wire))
     }
 
@@ -272,8 +296,15 @@ final class ClientWorkQueryTests: XCTestCase {
     private func selecting(_ plan: WorkViewPlan, _ state: WorkSelectionState) throws -> WorkViewPlan {
         var wire = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(plan)) as? [String: Any])
         var membership = try XCTUnwrap(wire["membership"] as? [String: Any])
-        membership["root"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(
-            WorkMembershipPlan.Node.state(state, plan.membership.resolve().members)))
+        func selecting(_ node: WorkMembershipPlan.Node) -> WorkMembershipPlan.Node {
+            switch node {
+            case .select(let source, _): .select(source: source, predicate: .state(state))
+            case .members: node
+            case .compose(let nodes): .compose(nodes.map(selecting))
+            case .intersect(let nodes): .intersect(nodes.map(selecting))
+            }
+        }
+        membership["root"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(selecting(plan.membership.root)))
         wire["membership"] = membership
         return try JSONDecoder().decode(WorkViewPlan.self, from: JSONSerialization.data(withJSONObject: wire))
     }
@@ -405,6 +436,296 @@ final class ClientWorkQueryTests: XCTestCase {
         _ = try await awaitCount(1, &windowB)
         let pending = try await disk.pending()
         XCTAssertTrue(pending.isEmpty)
+    }
+
+    private func scoped(_ plan: WorkViewPlan, wave: String?, content: Bool = true) throws -> WorkViewPlan {
+        var wire = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(plan)) as? [String: Any])
+        var membership = try XCTUnwrap(wire["membership"] as? [String: Any])
+        var manifest = plan.membership.facts
+        if let template = manifest.first {
+            for wave in ["a", "b", "c"] where !manifest.contains(where: { $0.work.kind == .wave && $0.work.id == wave }) {
+                manifest.append(.init(work: WorkWorkspaceKey(repository: template.work.repository, kind: .wave, id: wave), name: wave,
+                    parent: .init(wave: nil, support: template.parent.support),
+                    lifecycle: .init(states: [], known: true, support: template.lifecycle.support),
+                    activity: .init(states: [], known: true, support: nil)))
+            }
+        }
+        membership["facts"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(manifest))
+        membership["root"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(
+            WorkMembershipPlan.Node.select(source: ["scope"], predicate: .default(wave: wave))))
+        wire["membership"] = membership
+        if !content { wire["contents"] = [] }
+        return try JSONDecoder().decode(WorkViewPlan.self, from: JSONSerialization.data(withJSONObject: wire))
+    }
+
+    func testDynamicMoveIntoOmittedDestinationAndNewerParentSurviveRetirementAndRestart() throws {
+        for newerFirst in [false, true] {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+            let database = try ClientWorkDatabase(directory: directory)
+            let old = fieldStamp()
+            let plan = try fieldPlan(old, wave: "a")
+            for wave in ["a", "b", "c"] {
+                _ = try database.cache(ClientWorkQuery(stamp: old,
+                    plans: [scoped(plan, wave: wave, content: wave == "a")]), key: wave)
+            }
+            try database.retainQueries(machine: "machine", keys: ["a", "b", "c"])
+            try database.save(SubmittedOperation(requestID: "saved", destination: "machine",
+                payload: JSONEncoder().encode(ServedWrite.taskMove(directory: "/repo", issue: "a", wave: "b", machine: nil)),
+                version: ServerProtocol.revision, submittedAt: Date()))
+            XCTAssertTrue(try database.observeEpoch("epoch", id: "saved"))
+            XCTAssertEqual(try database.cached(machine: "machine", key: "a")?.projection.first?.taskCount, 0)
+            let destination = try XCTUnwrap(database.cached(machine: "machine", key: "b")?.projection.first)
+            XCTAssertEqual(destination.taskCount, 1)
+            XCTAssertEqual(destination.contents.map(\.work.id), ["a"], "Use real source content, never a fabricated Task")
+            let commit = try fieldReceipt(kind: "task.move", stage: "task.membership_changed")
+            func newer() throws {
+                let fresh = fieldStamp("other", planning: 9, complete: false)
+                _ = try database.cache(ClientWorkQuery(stamp: fresh, plans: [fieldPlan(fresh, wave: "c", clock: nil)]), key: "other")
+            }
+            if newerFirst { try newer() }
+            try database.receive(commit, epoch: "epoch", id: "saved")
+            if !newerFirst { try newer() }
+            try database.retireIfConverged("saved")
+            XCTAssertTrue(try database.pending().isEmpty)
+            let restored = try ClientWorkDatabase(directory: directory)
+            for wave in ["a", "b", "c"] {
+                _ = try restored.cache(ClientWorkQuery(stamp: old,
+                    plans: [scoped(plan, wave: wave, content: wave == "a")]), key: wave)
+                let projected = try XCTUnwrap(restored.cached(machine: "machine", key: wave)?.projection.first)
+                XCTAssertEqual(projected.taskCount, wave == "c" ? 1 : 0)
+            }
+            XCTAssertTrue(try restored.pending().isEmpty)
+        }
+    }
+
+    func testDynamicMovePublishesBothWindowsBeforeDiskAndRetainsLaterNavigationOffline() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let source = ServedRead.viewSelect(expression: "wave:a")
+        let destination = ServedRead.viewSelect(expression: "wave:b")
+        let old = fieldStamp()
+        let plan = try fieldPlan(old, wave: "a")
+        let seed = store(directory)
+        _ = try await seed.receivePlans([scoped(plan, wave: "a")], stamp: old, for: source)
+        _ = try await seed.receivePlans([scoped(plan, wave: "b", content: false)], stamp: old, for: destination)
+        let prepared = try await seed.presentation(machine: "machine", queries: [key(source): source, key(destination): destination])
+        let hold = HeldIntentDisk()
+        let disk = ClientWorkStore(directory: directory, prepareDirectory: { _ in hold.enter() }, machine: { "machine" },
+            read: { _ in "null" }, observe: { _ in ServerWatch(updates: AsyncThrowingStream { _ in }, checkpoint: { _ in }, cancel: {}) },
+            send: { _ in XCTFail("A disconnected move cannot send") })
+        addTeardownBlock { await disk.close() }
+        let owner = WorkInteraction(machine: "machine", store: disk)
+        defer { hold.release(); stop(owner) }
+        var first: ProjectedWorkPlan?
+        var second: ProjectedWorkPlan?
+        _ = owner.open(source) { first = $0?.first }
+        _ = owner.open(destination) { second = $0?.first }
+        owner.apply(prepared)
+        var entered = hold.entered.makeAsyncIterator()
+        _ = await entered.next()
+        let work = try XCTUnwrap(plan.contents.first?.work)
+        let id = owner.moveTask(work, issue: "a", directory: "/repo", wave: "b")
+        XCTAssertEqual(first?.taskCount, 0)
+        XCTAssertEqual(second?.taskCount, 1)
+        XCTAssertEqual(second?.projection.visible.map(\.work.id), ["a"])
+        hold.release()
+        await owner.persistPending()
+        await owner.refreshFromStore()
+        XCTAssertEqual(second?.taskCount, 1)
+        let records = try await disk.pending()
+        XCTAssertEqual(records.map(\.id), [id])
+        XCTAssertEqual(records.first?.destination, "machine")
+        let restarted = store(directory)
+        let restored = try await restarted.cachedPlans(machine: "machine", for: destination)
+        XCTAssertEqual(restored?.projection.first?.taskCount, 1)
+    }
+
+    func testDynamicMoveResourceLaneUsesCanonicalTaskAcrossAliasesAndReleasesOnDomainOutcome() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let database = try ClientWorkDatabase(directory: directory)
+        let work = WorkWorkspaceKey(repository: "repo", kind: .task, id: "a")
+        func record(_ id: String, _ issue: String, _ wave: String) throws -> SubmittedOperation {
+            SubmittedOperation(requestID: id, destination: "machine",
+                payload: try JSONEncoder().encode(ServedWrite.taskMove(directory: "/repo", issue: issue, wave: wave, machine: nil)),
+                version: ServerProtocol.revision, submittedAt: Date(), resource: .task(work))
+        }
+        let first = try record("saved", "LOO-12", "b")
+        let next = try record("next", "a", "c")
+        try database.save(first)
+        try database.save(next)
+        XCTAssertTrue(try database.observeEpoch("epoch", id: "saved"))
+        XCTAssertTrue(try database.earlierResourcePending(next))
+        try database.markSent("saved", epoch: "epoch")
+        let restored = try ClientWorkDatabase(directory: directory)
+        XCTAssertTrue(try restored.earlierResourcePending(next), "An uncertain send still owns its resource lane")
+        try restored.receive(fieldReceipt(kind: "task.move", stage: "task.membership_changed"), epoch: "epoch", id: "saved")
+        XCTAssertFalse(try restored.earlierResourcePending(next), "The domain result orders edits independently of query or planning-sync coverage")
+    }
+
+    func testDynamicMissingContentCannotReactivateAnIncorporatedParentOrProduceAnExactCount() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let database = try ClientWorkDatabase(directory: directory)
+        let old = fieldStamp()
+        let base = try scoped(fieldPlan(old), wave: "c", content: false)
+        _ = try database.cache(ClientWorkQuery(stamp: old, plans: [base]), key: "destination")
+        try database.retainQueries(machine: "machine", keys: ["destination"])
+        try database.save(SubmittedOperation(requestID: "saved", destination: "machine",
+            payload: JSONEncoder().encode(ServedWrite.taskMove(directory: "/repo", issue: "a", wave: "b", machine: nil)),
+            version: ServerProtocol.revision, submittedAt: Date()))
+        XCTAssertTrue(try database.observeEpoch("epoch", id: "saved"))
+        let commit = try fieldReceipt(kind: "task.move", stage: "task.membership_changed")
+        try database.receive(commit, epoch: "epoch", id: "saved")
+        let fresh = fieldStamp("elsewhere", planning: 9, complete: false)
+        _ = try database.cache(ClientWorkQuery(stamp: fresh,
+            plans: [scoped(fieldPlan(fresh, wave: "c", clock: nil), wave: "c", content: false)]), key: "elsewhere")
+        try database.retireIfConverged("saved")
+        let restored = try ClientWorkDatabase(directory: directory)
+        let answer = try XCTUnwrap(restored.cached(machine: "machine", key: "destination")?.projection.first)
+        XCTAssertEqual(answer.resolution.members.map(\.work.id), ["a"])
+        XCTAssertNil(answer.taskCount)
+        XCTAssertTrue(answer.contents.isEmpty)
+        XCTAssertTrue(answer.resolution.unavailable.contains("Work a content awaits confirmation"))
+        XCTAssertTrue(try restored.pending().isEmpty, "Missing content retains no full command")
+    }
+
+    func testDynamicContentKeepsIncomparableEvidenceAndLabelsHeldDestinationsUntilReconciled() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let database = try ClientWorkDatabase(directory: directory)
+        func plan(_ title: String) throws -> WorkViewPlan {
+            var wire = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(workingPlan(["a"]))) as? [String: Any])
+            var contents = try XCTUnwrap(wire["contents"] as? [[String: Any]])
+            contents[0]["title"] = title
+            wire["contents"] = contents
+            return try JSONDecoder().decode(WorkViewPlan.self, from: JSONSerialization.data(withJSONObject: wire))
+        }
+        _ = try database.cache(ClientWorkQuery(stamp: fieldStamp("held"), plans: [plan("First")]), key: "held")
+        _ = try database.cache(ClientWorkQuery(stamp: fieldStamp("crossed", planning: 9, sessions: 6), plans: [plan("Crossed")]), key: "crossed")
+        let restored = try ClientWorkDatabase(directory: directory)
+        _ = try restored.cache(ClientWorkQuery(stamp: fieldStamp("partial", planning: 8, sessions: 8), plans: [plan("Incomplete reconciliation")]), key: "partial")
+        var held = try XCTUnwrap(restored.cached(machine: "machine", key: "held")?.projection.first)
+        XCTAssertEqual(held.contents.first?.title, "First")
+        XCTAssertNil(held.taskCount, "Covering only the original capture cannot resolve a crossed content capture")
+        _ = try restored.cache(ClientWorkQuery(stamp: fieldStamp("resolved", planning: 10, sessions: 9), plans: [plan("Resolved")]), key: "resolved")
+        held = try XCTUnwrap(restored.cached(machine: "machine", key: "held")?.projection.first)
+        XCTAssertEqual(held.contents.first?.title, "Resolved")
+        XCTAssertEqual(held.taskCount, 1)
+    }
+
+    func testDynamicIndexedAndRestoredQueriesAgreeForOverlappingMovesCompletionAndNoWave() throws {
+        let original = try scoped(workingPlan(["a", "b", "c"]), wave: "b")
+        let stamp = stamp("dynamic", revision: 7)
+        var prepared = ClientWorkQuery(stamp: stamp, plans: [original])
+        prepared.prepareProjection()
+        let restored = try JSONDecoder().decode(ClientWorkQuery.self, from: JSONEncoder().encode(prepared))
+        let moves: [WorkQueryEffect] = [
+            .init(operationID: "first", sequence: 1, directory: "/repo", kind: "task.move", issue: "a", wave: "b", resolution: nil),
+            .init(operationID: "second", sequence: 2, directory: "/repo", kind: "task.move", issue: "a", wave: "c", resolution: nil),
+            .init(operationID: "third", sequence: 3, directory: "/repo", kind: "task.move", issue: "b", wave: "b", resolution: nil),
+            .init(operationID: "complete", sequence: 4, directory: "/repo", kind: "task.complete", issue: "b", resolution: nil),
+            .init(operationID: "no-wave", sequence: 5, directory: "/repo", kind: "task.move", issue: "c", wave: nil, resolution: nil),
+        ]
+        for count in 1...moves.count {
+            let effects = Array(moves.prefix(count))
+            let live = try XCTUnwrap(prepared.applying(effects).projection.first)
+            let offline = try XCTUnwrap(restored.applying(effects).projection.first)
+            XCTAssertEqual(live.resolution, offline.resolution)
+            XCTAssertEqual(live.projection, offline.projection)
+            XCTAssertEqual(live.arrangement, offline.arrangement)
+            XCTAssertEqual(live.taskCount, offline.taskCount)
+            XCTAssertEqual(live.states, offline.states)
+        }
+    }
+
+    func testDynamicTwoClientsConvergeFromMoveBToCWithStaleReadingsAndOfflineRestart() throws {
+        let directories = (0..<2).map { _ in FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString) }
+        addTeardownBlock { for directory in directories { try? FileManager.default.removeItem(at: directory) } }
+        let clients = try directories.map { try ClientWorkDatabase(directory: $0) }
+        let old = fieldStamp()
+        let original = try fieldPlan(old, wave: "a")
+        for (index, client) in clients.enumerated() {
+            for wave in ["a", "b", "c"] {
+                _ = try client.cache(ClientWorkQuery(stamp: old,
+                    plans: [scoped(original, wave: wave, content: wave == "a")]), key: wave)
+            }
+            try client.retainQueries(machine: "machine", keys: ["a", "b", "c"])
+            let id = index == 0 ? "move-b" : "move-c"
+            try client.save(SubmittedOperation(requestID: id, destination: "machine",
+                payload: JSONEncoder().encode(ServedWrite.taskMove(directory: "/repo", issue: "a", wave: index == 0 ? "b" : "c", machine: nil)),
+                version: ServerProtocol.revision, submittedAt: Date()))
+            XCTAssertTrue(try client.observeEpoch("epoch", id: id))
+        }
+        func result(_ id: String, wave: String, revision: Int64, diagnostic: Bool = false) throws -> OperationReceipt {
+            var wire = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(
+                fieldReceipt(kind: "task.move", stage: "task.membership_changed", revision: revision))) as? [String: Any])
+            wire["request_id"] = id
+            wire["error"] = diagnostic ? "Planning refresh failed after the domain commit" : NSNull()
+            wire["revision"] = diagnostic ? 2 : 3
+            var commits = try XCTUnwrap(wire["commits"] as? [[String: Any]])
+            commits[0]["result"] = ["id": "a", "wave_id": wave, "project_id": "project-" + wave]
+            wire["commits"] = commits
+            return try JSONDecoder().decode(OperationReceipt.self, from: JSONSerialization.data(withJSONObject: wire))
+        }
+        // C's own domain result and the other client's reading arrive before
+        // the delayed B receipt. Neither a generic error nor arrival order rolls back C.
+        try clients[1].receive(result("move-c", wave: "c", revision: 9, diagnostic: true), epoch: "epoch", id: "move-c")
+        let fresh = fieldStamp("other-client", planning: 9, complete: false)
+        _ = try clients[0].cache(ClientWorkQuery(stamp: fresh, plans: [fieldPlan(fresh, wave: "c", clock: nil)]), key: "other")
+        try clients[0].receive(result("move-b", wave: "b", revision: 8, diagnostic: true), epoch: "epoch", id: "move-b")
+        let stale = fieldStamp("b", planning: 8)
+        for (index, client) in clients.enumerated() {
+            _ = try client.cache(ClientWorkQuery(stamp: stale,
+                plans: [scoped(fieldPlan(stale, wave: "b"), wave: "b")]), key: "b")
+            let id = index == 0 ? "move-b" : "move-c"
+            try client.retireIfConverged(id)
+            XCTAssertFalse(try client.pending().isEmpty, "A failed refresh remains inspectable without rolling back the committed parent")
+            XCTAssertEqual(try client.cached(machine: "machine", key: "c")?.projection.first?.taskCount, 1)
+            try client.receive(result(id, wave: index == 0 ? "b" : "c", revision: index == 0 ? 8 : 9), epoch: "epoch", id: id)
+            try client.retireIfConverged(id)
+            XCTAssertTrue(try client.pending().isEmpty)
+        }
+        for directory in directories {
+            let offline = try ClientWorkDatabase(directory: directory)
+            XCTAssertEqual(try offline.cached(machine: "machine", key: "a")?.projection.first?.taskCount, 0)
+            XCTAssertEqual(try offline.cached(machine: "machine", key: "b")?.projection.first?.taskCount, 0)
+            XCTAssertEqual(try offline.cached(machine: "machine", key: "c")?.projection.first?.taskCount, 1)
+            XCTAssertTrue(try offline.pending().isEmpty)
+        }
+    }
+
+    func testDynamicManifestMeasurements() throws {
+        guard let output = ProcessInfo.processInfo.environment["LF_MEMBERSHIP_PERF_OUTPUT"] else {
+            throw XCTSkip("Set LF_MEMBERSHIP_PERF_OUTPUT for diagnostic manifest measurements")
+        }
+        let ids = (0..<10_000).map { "task-\($0)" }
+        let original = try workingPlan(ids)
+        var wire = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
+        var membership = original.membership
+        membership.facts = membership.facts.map {
+            .init(work: $0.work, name: $0.name, parent: .init(wave: "a", support: nil), lifecycle: $0.lifecycle, activity: $0.activity)
+        }
+        wire["membership"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(membership))
+        let source = try JSONDecoder().decode(WorkViewPlan.self, from: JSONSerialization.data(withJSONObject: wire))
+        let destination = try scoped(source, wave: "b", content: false)
+        var base = ClientWorkQuery(stamp: stamp("destination", revision: 7), plans: [destination])
+        base.prepareProjection(contents: Dictionary(source.contents.map { ($0.work, $0) }, uniquingKeysWith: { first, _ in first }))
+        var samples: [[String: Any]] = []
+        for sample in 0..<21 {
+            let start = ContinuousClock.now
+            let changed = base.applying([WorkQueryEffect(operationID: "move", sequence: 1, directory: "/repo", kind: "task.move",
+                issue: ids[sample], wave: "b", work: source.contents[sample].work, resolution: nil)]).projection
+            let elapsed = start.duration(to: .now)
+            XCTAssertEqual(changed.first?.projection.visible.map(\.work.id), [ids[sample]])
+            samples.append(["tasks": ids.count, "sample": sample,
+                "duration_ms": Double(elapsed.components.seconds) * 1000 + Double(elapsed.components.attoseconds) / 1e15,
+                "manifest_bytes": try JSONEncoder().encode(destination.membership).count,
+                "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views", "build": "SwiftPM debug"])
+        }
+        try JSONSerialization.data(withJSONObject: samples, options: [.prettyPrinted, .sortedKeys])
+            .write(to: URL(fileURLWithPath: output), options: .withoutOverwriting)
     }
 
     func testFieldIncorporationJoinsReceiptAndNewerReopenInEitherOrderWithoutSettlingDelivery() throws {
@@ -873,9 +1194,12 @@ final class ClientWorkQueryTests: XCTestCase {
         XCTAssertTrue(fields.parentCurrent)
         XCTAssertTrue(fields.activityCurrent, "Rollback retains only the previously committed revalidation proof")
         XCTAssertNil(try database.cached(machine: "machine", key: "failed"))
-        XCTAssertEqual(sqlite3_exec(sqlite, "WITH RECURSIVE ids(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM ids WHERE n<10000) INSERT INTO work_fields(id,state) SELECT 'fixture-'||n,'{}' FROM ids", nil, nil, nil), SQLITE_OK)
+        for table in ["work_fields", "work_contents"] {
+            XCTAssertEqual(sqlite3_exec(sqlite, "WITH RECURSIVE ids(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM ids WHERE n<10000) INSERT INTO \(table)(id,state) SELECT 'fixture-'||n,'{}' FROM ids", nil, nil, nil), SQLITE_OK)
+        }
         for (query, index) in [
             ("SELECT state FROM work_fields WHERE id=?", "SEARCH work_fields USING INDEX"),
+            ("SELECT state FROM work_contents WHERE id=?", "SEARCH work_contents USING INDEX"),
             ("SELECT state FROM work_fields WHERE json_extract(CAST(state AS TEXT),'$.work.id')=?", "USING INDEX work_fields_resource"),
             ("SELECT state FROM operations WHERE json_extract(CAST(state AS TEXT),'$.record.destination')=? AND json_extract(CAST(state AS TEXT),'$.receipt.validation')='bound'", "USING INDEX operations_field_stages")
         ] {
@@ -925,15 +1249,15 @@ final class ClientWorkQueryTests: XCTestCase {
             XCTAssertEqual(pending?.projection.first?.resolution.attention.map(\.id), ["b"])
             XCTAssertEqual(pending?.projection.first?.taskCount, 1)
             if countFirst {
-                _ = try await client.receivePlans([workingPlan(["b"])], stamp: stamp("count", revision: 7), for: count)
+                _ = try await client.receivePlans([confirmedWorkingPlan(["a", "b"], stamp: stamp("fresh", revision: 7), completed: ["a"])], stamp: stamp("count", revision: 7), for: count)
             }
             try database.retainQueries(machine: "machine", keys: [key(list), key(count)])
-            try database.receive(receipt(kind: "task.complete", stage: "task.completed"), epoch: "epoch", id: "saved")
+            try database.receive(fieldReceipt(revision: 7), epoch: "epoch", id: "saved")
             try database.retireIfConverged("saved")
             XCTAssertTrue(try database.pending().isEmpty)
             let restarted = store(directory)
             if !countFirst {
-                _ = try await restarted.receivePlans([workingPlan(["b"])], stamp: stamp("count", revision: 7), for: count)
+                _ = try await restarted.receivePlans([confirmedWorkingPlan(["a", "b"], stamp: stamp("fresh", revision: 7), completed: ["a"])], stamp: stamp("count", revision: 7), for: count)
             }
             let lagging = try await restarted.cachedPlans(machine: "machine", for: list)
             let counted = try await restarted.cachedPlans(machine: "machine", for: count)
@@ -941,7 +1265,7 @@ final class ClientWorkQueryTests: XCTestCase {
             XCTAssertEqual(lagging?.projection.first?.projection.visible.map(\.work.id), ["b"])
             XCTAssertEqual(lagging?.projection.first?.taskCount, 1)
             XCTAssertEqual(counted?.projection.first?.taskCount, 1)
-            let covering = try await restarted.receivePlans([workingPlan(["b"])], stamp: stamp("list", revision: 7), for: list)
+            let covering = try await restarted.receivePlans([confirmedWorkingPlan(["a", "b"], stamp: stamp("fresh", revision: 7), completed: ["a"])], stamp: stamp("list", revision: 7), for: list)
             XCTAssertEqual(covering?.projection.first?.taskCount, 1)
             XCTAssertTrue(covering?.effects?.isEmpty != false)
             let delayed = try await restarted.receivePlans([base], stamp: stamp("list", revision: 6), for: list)
@@ -1065,7 +1389,7 @@ final class ClientWorkQueryTests: XCTestCase {
         facts[1]["activity"] = ["states": [], "known": false, "support": NSNull()]
         membership["facts"] = facts
         let members = try XCTUnwrap((body["resolution"] as? [String: Any])?["members"] as? [[String: Any]])
-        membership["root"] = ["kind": "state", "state": "available", "members": members]
+        membership["root"] = ["kind": "select", "source": members.first?["source"] ?? [], "predicate": ["kind": "state", "state": "available"]]
         body["membership"] = membership
         let compiled = try JSONDecoder().decode(WorkMembershipPlan.self, from: JSONSerialization.data(withJSONObject: membership))
         body["resolution"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(compiled.resolve()))
@@ -1089,14 +1413,14 @@ final class ClientWorkQueryTests: XCTestCase {
         let query = ServedRead.viewSelect(expression: "state:working")
         _ = try await client.receivePlans([workingPlan(["a", "b"])], stamp: stamp("list", revision: 6), for: query)
         let database = try complete(directory)
-        try database.receive(receipt(kind: "task.complete", stage: "task.completed"), epoch: "epoch", id: "saved")
+        try database.receive(fieldReceipt(revision: 7), epoch: "epoch", id: "saved")
         try database.retireIfConverged("saved")
         var wire = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(stamp("list", revision: 6))) as? [String: Any])
         var revisions = try XCTUnwrap(wire["revisions"] as? [String: Any])
         revisions["planning"] = 7 // Session revision remains below the receipt's unrelated counter.
         wire["revisions"] = revisions
         let covering = try JSONDecoder().decode(ReadingStamp.self, from: JSONSerialization.data(withJSONObject: wire))
-        let result = try await client.receivePlans([workingPlan(["b"])], stamp: covering, for: query)
+        let result = try await client.receivePlans([confirmedWorkingPlan(["a", "b"], stamp: covering, completed: ["a"])], stamp: covering, for: query)
         XCTAssertEqual(result?.projection.first?.taskCount, 1)
         XCTAssertTrue(result?.effects?.isEmpty != false)
     }
@@ -1122,8 +1446,7 @@ final class ClientWorkQueryTests: XCTestCase {
         addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         var body = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(workingPlan(["a", "b"]))) as? [String: Any])
         var membership = try XCTUnwrap(body["membership"] as? [String: Any])
-        let refs = try XCTUnwrap((body["resolution"] as? [String: Any])?["members"])
-        membership["root"] = ["kind": "state", "state": "done", "members": refs]
+        membership["root"] = ["kind": "select", "source": ["dynamic"], "predicate": ["kind": "state", "state": "done"]]
         body["membership"] = membership
         body["contents"] = []
         body["resolution"] = ["members": [], "attention": [], "unavailable": []]
@@ -1341,7 +1664,7 @@ final class ClientWorkQueryTests: XCTestCase {
                 received.insert(step)
                 if step == 0 {
                     var result = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(
-                        receipt(kind: "task.complete", stage: "task.completed", resolution: disposition))) as? [String: Any])
+                        fieldReceipt(revision: 7, resolution: disposition))) as? [String: Any])
                     result["request_id"] = id
                     let resolved = try JSONDecoder().decode(OperationReceipt.self, from: JSONSerialization.data(withJSONObject: result))
                     server.publish(try completionFrame(resolved, epoch: "epoch"))
@@ -1351,18 +1674,21 @@ final class ClientWorkQueryTests: XCTestCase {
                     await owner.refreshFromStore()
                 } else {
                     let query = step == 1 ? list : count
-                    try await owner.receive([disposition == .committed ? workingPlan(["b"]) : base], stamp: stamp(step == 1 ? "list" : "count", revision: 7), for: query)
+                    let reading = stamp(step == 1 ? "list" : "count", revision: 7)
+                    let fresh = try confirmedWorkingPlan(["a", "b"], stamp: reading,
+                        completed: disposition == .committed ? ["a"] : [])
+                    try await owner.receive([fresh], stamp: reading, for: query)
                 }
-                func expected(_ queryStep: Int) -> Int {
+                func expected() -> Int {
                     disposition != .committed && received.contains(0)
-                        && (disposition == .definitelyRefused || received.contains(queryStep)) ? 2 : 1
+                        && (disposition == .definitelyRefused || !received.isDisjoint(with: [1, 2])) ? 2 : 1
                 }
-                XCTAssertEqual(shown.first?.taskCount, expected(1), "\(disposition), order \(order), step \(step)")
-                XCTAssertEqual(counted.first?.taskCount, expected(2))
+                XCTAssertEqual(shown.first?.taskCount, expected(), "\(disposition), order \(order), step \(step)")
+                XCTAssertEqual(counted.first?.taskCount, expected())
                 XCTAssertEqual(selection?.id, "b")
                 XCTAssertEqual(navigations, 1)
                 let restored = try await store(directory).cachedPlans(machine: "machine", for: list)
-                XCTAssertEqual(restored?.projection.first?.taskCount, expected(1))
+                XCTAssertEqual(restored?.projection.first?.taskCount, expected())
             }
             XCTAssertEqual(server.submissions.count, 1)
         }
@@ -1583,6 +1909,28 @@ final class ClientWorkQueryTests: XCTestCase {
         // The compact frontier applies even to expressions created after retirement.
         let future = try restarted.cache(ClientWorkQuery(stamp: stamp("future", revision: 6), plans: [base]), key: "future")
         XCTAssertNil(future)
+    }
+
+    func testDynamicUpgradeDropsFixedCandidateCachesAndRetainsOriginalRequests() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let database = try complete(directory)
+        _ = try database.cache(ClientWorkQuery(stamp: stamp("old", revision: 6), plans: [workingPlan(["a", "b"])]), key: "old")
+        let original = try XCTUnwrap(database.state("saved")?.record)
+        var sqlite: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(directory.appendingPathComponent("work.sqlite").path, &sqlite), SQLITE_OK)
+        defer { sqlite3_close(sqlite) }
+        XCTAssertEqual(sqlite3_exec(sqlite, """
+            UPDATE work_queries SET state=CAST(json_set(CAST(state AS TEXT),'$.plans[0].membership.root',
+                json_object('kind','state','state','working','members',json_array())) AS BLOB)
+            """, nil, nil, nil), SQLITE_OK)
+        let restored = try ClientWorkDatabase(directory: directory)
+        XCTAssertNil(try restored.cached(machine: "machine", key: "old"))
+        let retained = try XCTUnwrap(restored.state("saved")?.record)
+        XCTAssertEqual(retained.id, original.id)
+        XCTAssertEqual(retained.destination, original.destination)
+        XCTAssertEqual(retained.payload, original.payload)
+        XCTAssertNil(try restored.state("saved")?.sentEpoch, "Invalidating a cache never submits its original request")
     }
 
     func testObservationAndFieldUpgradeDropOldBasesAndRetainSavedCommands() throws {

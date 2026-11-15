@@ -173,7 +173,7 @@ struct SessionRenameDraft: Equatable {
     var text: String
 }
 
-/// One Task's in-flight `lf task run` or `lf task move` and its refusal.
+/// One Task's in-flight execution command and its refusal.
 struct TaskRunDraft: Equatable {
     enum Phase { case runningCommand, awaitingObservation }
     var phase: Phase?

@@ -2859,11 +2859,12 @@ final class WorkModel {
         }
     }
 
-    func moveTask(_ task: RoadmapTask, toWave wave: String?) async {
-        await performTaskAction(task.id) {
-            try await query.moveTask(issue: task.task.identifier, wave: wave,
-                                    cwd: WaveOrigin.resolve(task.task.repo))
-        }
+    func moveTask(_ task: RoadmapTask, toWave wave: String?) {
+        if interaction == nil { interaction = .local(observingMachineId) }
+        guard let interaction else { return }
+        let repository = selectedViewPlan?.repository ?? taskList?.repository ?? selectionPlans.value?.first?.repository ?? ""
+        interaction.moveTask(WorkWorkspaceKey(repository: repository, kind: .task, id: task.runtime?.workId ?? task.id),
+            issue: task.task.identifier, directory: WaveOrigin.cached(task.task.repo), wave: wave)
     }
 
     private var completionOrder: [WorkWorkspaceKey]? {

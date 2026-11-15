@@ -168,16 +168,22 @@ fn commit_edit_in(
         let sync = super::planning_sync::task_planning_syncs_in(conn, std::slice::from_ref(id))?
             .remove(id)
             .ok_or(StoreError::NotFound)?;
+        let mut result = serde_json::to_value(crate::ops::task::TaskEdit {
+            id: id.to_string(),
+            sync,
+        })?;
+        if stage == "task.membership_changed" {
+            let task = super::children::task_on(conn, id)?.ok_or(StoreError::NotFound)?;
+            result["wave_id"] = serde_json::to_value(task.wave_id)?;
+            result["project_id"] = serde_json::to_value(task.project_id)?;
+        }
         super::operations::commit_planning_edit_in(
             conn,
             &operation,
             stage,
             id.as_str(),
             changes,
-            &serde_json::to_value(crate::ops::task::TaskEdit {
-                id: id.to_string(),
-                sync,
-            })?,
+            &result,
         )?;
     }
     Ok(())
@@ -814,7 +820,27 @@ mod tests {
                 .unwrap();
             assert!(store.task(&task.id).unwrap().unwrap().project_id.is_none());
         }
-        store.move_task(&task.id, None, Some(&product.id)).unwrap();
+        store
+            .admit_operation(
+                &store.reading_identity().unwrap().1,
+                "move",
+                "task.move",
+                "hash",
+                &serde_json::json!({}),
+            )
+            .unwrap();
+        crate::journal::request::with_operation(Some("move".into()), || {
+            store.move_task(&task.id, None, Some(&product.id)).unwrap();
+        });
+        let committed = store.operation_receipt("move").unwrap().unwrap();
+        assert_eq!(
+            committed.commits[0].result["wave_id"],
+            serde_json::json!(product.wave_id)
+        );
+        assert_eq!(
+            committed.commits[0].result["project_id"],
+            serde_json::json!(product.id)
+        );
         assert_eq!(store.session_history(&session.id, 0, 0).unwrap(), before);
         assert_eq!(
             store.session(&session.id).unwrap().unwrap().wave_id,

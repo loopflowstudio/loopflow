@@ -90,12 +90,12 @@ struct TaskRowMetadataTests {
             let status = SessionProgramStatus(sessions: records, unavailable: nil)
             #expect(status.label == nil)
             #expect(status.tone == nil)
-            let view = TaskRowMetadata(task: task, status: status)
+            let view = TaskRowMetadata(id: task.id, task: task, status: status)
             #expect(throws: (any Error).self) {
                 try view.inspect().find(viewWithAccessibilityIdentifier: "work-program-status-\(task.id)")
             }
         }
-        let unavailable = TaskRowMetadata(task: task, status: .unavailable("Offline"))
+        let unavailable = TaskRowMetadata(id: task.id, task: task, status: .unavailable("Offline"))
         let icon = try unavailable.inspect().find(viewWithAccessibilityIdentifier: "work-program-status-unavailable-\(task.id)")
         #expect(try icon.accessibilityLabel().string().contains("Offline"))
     }
@@ -107,7 +107,7 @@ struct TaskRowMetadataTests {
                                        app: nil, title: nil, msg: "Build failed")
         let reported = SessionProgramStatus(sessions: [try session("failed", status: .init(seen: true, records: [error]))], unavailable: nil)
         #expect(reported.tone == .failure)
-        let selected = TaskRowMetadata(task: task, status: reported).workSelection(true)
+        let selected = TaskRowMetadata(id: task.id, task: task, status: reported).workSelection(true)
         #expect(try selected.inspect().find(text: "Error").string() == "Error")
         let available = SessionProgramStatus(sessions: [try session("available", availability: .available)], unavailable: nil)
         #expect(available.tone == .available)
@@ -121,10 +121,10 @@ struct TaskRowMetadataTests {
     func ownerLine() throws {
         let tasks = try roadmap().waves.flatMap(\.tasks.items)
         let owned = try #require(tasks.first { $0.runtime?.owner != nil })
-        let view = TaskRowMetadata(task: owned, status: .unknown)
+        let view = TaskRowMetadata(id: owned.id, task: owned, status: .unknown)
         #expect(try view.inspect().find(text: "Jack Heart on mini").string() == "Jack Heart on mini")
         let unowned = try #require(tasks.first { $0.runtime != nil && $0.runtime?.owner == nil })
-        #expect(try TaskRowMetadata(task: unowned, status: .unknown).inspect().find(text: "Unowned").string() == "Unowned")
+        #expect(try TaskRowMetadata(id: unowned.id, task: unowned, status: .unknown).inspect().find(text: "Unowned").string() == "Unowned")
         let unknown = try JSONDecoder().decode(TaskOwner.self, from: Data("""
         {"person":null,"person_id":null,"person_key":null,"machine":{"id":null,"label":null}}
         """.utf8))
@@ -138,7 +138,7 @@ struct TaskRowMetadataTests {
     @Test("Task identifiers remain visible without an external issue URL")
     func identifierWithoutLink() throws {
         let task = try #require(roadmap().waves.flatMap(\.tasks.items).first { $0.reference.issueUrl == nil })
-        let view = TaskRowMetadata(task: task, status: .unknown)
+        let view = TaskRowMetadata(id: task.id, task: task, status: .unknown)
         #expect(try view.inspect().find(text: task.task.identifier).string() == task.task.identifier)
         #expect(throws: (any Error).self) {
             try view.inspect().find(viewWithAccessibilityIdentifier: "work-task-link-\(task.id)")

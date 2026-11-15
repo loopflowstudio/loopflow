@@ -2036,6 +2036,36 @@
       ],
       "type": "string"
     },
+    "CommitFence": {
+      "description": "A domain writer captures this inside the transaction that changes its facts.\nOnly named domains can acknowledge the commit; unrelated counters do not.",
+      "properties": {
+        "epoch": {
+          "type": "string"
+        },
+        "machine": {
+          "type": "string"
+        },
+        "revisions": {
+          "additionalProperties": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "type": "object"
+        },
+        "schema": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "machine",
+        "epoch",
+        "schema",
+        "revisions"
+      ],
+      "type": "object"
+    },
     "Committed": {
       "additionalProperties": false,
       "description": "What `checkout.commit` left.",
@@ -5884,6 +5914,97 @@
       ],
       "description": "What a request asks for, named by its `kind`: a dotted resource and verb\n(`task.complete`, `plan.list`). `desktop.*` kinds are Desktop's own\narrangement state, not part of what other clients are offered."
     },
+    "OperationCommit": {
+      "properties": {
+        "fence": {
+          "$ref": "#/$defs/CommitFence"
+        },
+        "resources": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "result": true,
+        "stage": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "stage",
+        "resources",
+        "fence",
+        "result"
+      ],
+      "type": "object"
+    },
+    "OperationDelivery": {
+      "description": "Dispatch state is not a prediction about a provider, Graph or native surface.",
+      "enum": [
+        "untracked",
+        "queued",
+        "dispatched",
+        "finished",
+        "uncertain"
+      ],
+      "type": "string"
+    },
+    "OperationReceipt": {
+      "description": "Creation recovery and general commands read the same row. Command output\nstays separate from the domain results that committed with displayed facts.",
+      "properties": {
+        "commits": {
+          "items": {
+            "$ref": "#/$defs/OperationCommit"
+          },
+          "type": "array"
+        },
+        "created_at": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "delivery": {
+          "$ref": "#/$defs/OperationDelivery"
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fingerprint": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "result": true,
+        "revision": {
+          "description": "Orders receipt updates within one database epoch, including same-second stages.",
+          "format": "int64",
+          "type": "integer"
+        },
+        "updated_at": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "request_id",
+        "kind",
+        "fingerprint",
+        "delivery",
+        "revision",
+        "result",
+        "error",
+        "commits",
+        "created_at",
+        "updated_at"
+      ],
+      "type": "object"
+    },
     "OwnershipKind": {
       "oneOf": [
         {
@@ -7529,6 +7650,70 @@
                 "type": "null"
               }
             ]
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "A durable command and its committed domain stages; never dispatches it.",
+          "examples": [
+            {
+              "kind": "operation.get",
+              "request_id": "operation_fixture"
+            }
+          ],
+          "properties": {
+            "kind": {
+              "const": "operation.get",
+              "type": "string"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "request_id"
+          ],
+          "type": "object",
+          "x-result": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/OperationReceipt"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "x-result-example": {
+            "commits": [
+              {
+                "fence": {
+                  "epoch": "ab0123456789ab0123456789ab01234567",
+                  "machine": "machine_fixture",
+                  "revisions": {
+                    "planning": 7
+                  },
+                  "schema": 6
+                },
+                "resources": [
+                  "task_fixture"
+                ],
+                "result": {
+                  "request": 42
+                },
+                "stage": "task.completion_requested"
+              }
+            ],
+            "created_at": 1,
+            "delivery": "uncertain",
+            "error": "Task requires a verified merge",
+            "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "kind": "task.complete",
+            "request_id": "operation_fixture",
+            "result": null,
+            "revision": 3,
+            "updated_at": 2
           }
         },
         {
@@ -10312,6 +10497,54 @@
     "ServerOperation": {
       "description": "Operations the server owns rather than a shared read or write.",
       "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Durably admit a command, returning its receipt before domain execution.",
+          "examples": [
+            {
+              "command": {
+                "directory": "/repo",
+                "issue": "LOO-1",
+                "kind": "task.complete"
+              },
+              "kind": "operation.submit",
+              "request_id": "operation_fixture"
+            }
+          ],
+          "properties": {
+            "command": {
+              "$ref": "#/$defs/Write"
+            },
+            "kind": {
+              "const": "operation.submit",
+              "type": "string"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "request_id",
+            "command"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/OperationReceipt"
+          },
+          "x-result-example": {
+            "commits": [],
+            "created_at": 1,
+            "delivery": "queued",
+            "error": null,
+            "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "kind": "task.complete",
+            "request_id": "operation_fixture",
+            "result": null,
+            "revision": 0,
+            "updated_at": 1
+          }
+        },
         {
           "additionalProperties": false,
           "description": "A ticket for the Session's held terminal, answered `{ticket,\nterminal_id, expires_in_ms}`. A new connection presents the ticket as\nits first message (`attach`) and becomes the bridge; this connection\nstays a client. When the terminal ends, the bridge closes; attaching\nagain by the same Session reaches its next one. A Session no terminal\nruns is `not_found`; attaching never starts a provider.",

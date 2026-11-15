@@ -1547,6 +1547,14 @@ impl SqliteStore {
                     "new thread receipt does not match its reserved input".into(),
                 ));
             }
+            super::operations::commit_in(
+                &tx,
+                id,
+                "session.input_replaced",
+                &[session.id.as_str()],
+                &["sessions"],
+                &serde_json::to_value(&session)?,
+            )?;
         }
         tx.commit()?;
         Ok(session)

@@ -1000,6 +1000,7 @@ fn server_operations_match_their_lf_commands() {
     let (reads, subscriptions) = match task_diff(None, None) {
         Read::ProcessHistory { .. }
         | Read::CreationGet { .. }
+        | Read::OperationGet { .. }
         | Read::ProcessList
         | Read::DesktopViewList { .. }
         | Read::ViewSelect { .. }
@@ -1124,6 +1125,9 @@ fn server_operations_match_their_lf_commands() {
                 Read::ProcessHistory { id: graph.clone() },
                 Read::CreationGet {
                     request_id: "absent-creation".into(),
+                },
+                Read::OperationGet {
+                    request_id: "absent-operation".into(),
                 },
                 Read::ProcessGet { id: graph },
                 Read::SessionUsage {

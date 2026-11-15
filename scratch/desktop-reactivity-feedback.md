@@ -41,3 +41,17 @@ Jack Heart:
 
 Wave disclosure must react before loading children. Include local navigation and
 disclosure state in the responsiveness audit, alongside synchronized mutations.
+
+Jack Heart, 2026-11-14, comment `25b9206c-8fa8-4be9-aa7e-a69c3daa8eee`:
+> “Have we learned anything about what’s going on? Also should we add some benchmarking?”
+
+Host direction, forwarded in comment `7a62299f-7430-4c8a-89ad-a398766ca0a7`:
+> “I think doing it on my machine under load is probably somewhat problematic. We can probably do it on the mini as long as the mini isn’t loaded and I think that’s fine basically”
+> “You can also use this machine if the load is not too high”
+> “Or even theoretically, you could rent a Mac from AWS if you want”
+
+Jack Heart, comment `35145bd7-dbd3-40db-9081-d75844fb0f40`:
+> “Agreed. Yeah prefer the quiet mini if that’s an option”
+
+Benchmarking now belongs to implementation as well as demo. ADEMark coverage and
+workflow-specific journeys are mapped in the existing performance harness docs.

@@ -1,0 +1,9 @@
+{
+  "type": "request",
+  "id": "receipt",
+  "operation": {
+    "kind": "operation.get",
+    "request_id": "operation_fixture"
+  },
+  "select": null
+}

@@ -1,0 +1,17 @@
+{
+  "type": "response",
+  "id": "admit",
+  "trace_id": "trace_fixture",
+  "result": {
+    "request_id": "operation_fixture",
+    "kind": "task.complete",
+    "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "delivery": "queued",
+    "result": null,
+    "error": null,
+    "commits": [],
+    "created_at": 1,
+    "updated_at": 1,
+    "revision": 0
+  }
+}

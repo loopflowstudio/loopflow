@@ -10,6 +10,42 @@ struct ServerProtocolTests {
         try Data(contentsOf: root.appendingPathComponent("rust/loopflow/tests/fixtures/dto/server/\(name).json"))
     }
 
+    @Test func operationAdmissionAndRecoveryUseDurableIdentity() throws {
+        let change = ServedWrite.taskComplete(directory: "/repo", issue: "LOO-1")
+        #expect(try encoded(.request(id: "admit", operation: .operationSubmit(requestID: "operation_fixture", command: change), select: nil)) == value("operation_submit"))
+        #expect(try encoded(.request(id: "receipt", operation: .read(.operationGet(requestID: "operation_fixture")), select: nil)) == value("operation_get"))
+        for name in ["operation_admitted", "operation_receipt"] {
+            guard case .response(_, _, let result) = try message(name) else { Issue.record("Expected receipt"); return }
+            let receipt = try result.decode(OperationReceipt.self)
+            #expect(receipt.requestID == "operation_fixture")
+            #expect(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(receipt)) == result.decode(JSONValue.self))
+            for key in ["request_id", "kind", "fingerprint", "delivery", "revision", "result", "error", "commits", "created_at", "updated_at"] {
+                var missing = try #require(JSONSerialization.jsonObject(with: result.bytes) as? [String: Any])
+                missing.removeValue(forKey: key)
+                #expect(throws: DecodingError.self) { try JSONDecoder().decode(OperationReceipt.self, from: JSONSerialization.data(withJSONObject: missing)) }
+            }
+        }
+    }
+
+    @Test func commitFencesRequireCausalCoverageOfTheExactQuery() throws {
+        guard case .response(_, _, let result) = try message("operation_receipt") else { Issue.record("Expected receipt"); return }
+        let fence = try #require(try result.decode(OperationReceipt.self).commits.first?.fence)
+        let fields = try RawJSON(fixture("reading_stamped")).fields()
+        let frame = try #require(fields["frame"])
+        let stamp = try #require(try frame.decode(SubscriptionReading<[JSONValue]>.self).stamp)
+        let query = try #require(stamp.query)
+        #expect(fence.isCovered(by: stamp, query: query))
+        #expect(!fence.isCovered(by: stamp, query: "different"))
+        let wire = try #require(try frame.fields()["stamp"])
+        let staleFields: [(String, Any)] = [("complete", false), ("epoch", "old-epoch"), ("machine", "other-machine"), ("schema", 0), ("query", NSNull()), ("revisions", ["planning": 6, "sessions": 999, "graphs": 999, "processes": 999, "usage": 0])]
+        for (key, value) in staleFields {
+            var object = try #require(JSONSerialization.jsonObject(with: wire.bytes) as? [String: Any])
+            object[key] = value
+            let stale = try JSONDecoder().decode(ReadingStamp.self, from: JSONSerialization.data(withJSONObject: object))
+            #expect(!fence.isCovered(by: stale, query: query))
+        }
+    }
+
     @Test func readingStampsRequireEveryFieldAndRoundTrip() throws {
         let message = try fixture("reading_stamped")
         let fields = try RawJSON(message).fields()

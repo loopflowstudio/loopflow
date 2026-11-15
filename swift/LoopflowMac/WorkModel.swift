@@ -2200,6 +2200,10 @@ final class WorkModel {
     }
 
     private func select(_ requested: WorkReference?, preservingOpening: Bool, recordingHistory: Bool = true) {
+        let interaction = UUID().uuidString
+        let journey: PerfClock.Journey? = requested?.kind == .wave ? .waveSelect
+            : requested?.kind == .task ? .taskSelect : nil
+        if let journey { PerfClock.interaction(journey, .gesture, id: interaction) }
         if navigation.palette == .search || navigation.palette == .sidebarSearch { navigation.palette = nil }
         if !preservingOpening { dismissTaskLink() }
         historyLookup?.cancel()
@@ -2229,6 +2233,7 @@ final class WorkModel {
         }
         if navigation.showsSelection { workspaceRegistry?.clearPresentation() }
         setSelection(selection)
+        if let journey { PerfClock.interaction(journey, .statePublished, id: interaction) }
         if selection == nil { navigation.sidebarWaveID = nil }
         if let selection, selection.kind == .wave {
             navigation.sidebarWaveID = selection.id
@@ -2604,7 +2609,10 @@ final class WorkModel {
     }
 
     func completeTask(_ task: RoadmapTask) async {
+        let interaction = UUID().uuidString
+        PerfClock.interaction(.taskComplete, .gesture, id: interaction)
         await performTaskAction(task.id) {
+            defer { PerfClock.interaction(.taskComplete, .commandReturned, id: interaction) }
             try await query.completeTask(issue: task.task.identifier, cwd: WaveOrigin.resolve(task.task.repo))
         }
     }

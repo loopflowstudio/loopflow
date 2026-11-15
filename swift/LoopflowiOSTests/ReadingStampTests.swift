@@ -4,6 +4,16 @@ import Loopflow
 @testable import LoopflowiOS
 
 final class ReadingStampTests: XCTestCase {
+    func testOperationReceiptUsesTheSharedDecoderOnPhone() throws {
+        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "operation_receipt", withExtension: "json", subdirectory: "server"))
+        let result = try XCTUnwrap(try RawJSON(Data(contentsOf: url)).fields()["result"])
+        let receipt = try result.decode(OperationReceipt.self)
+        XCTAssertEqual(receipt.delivery, .uncertain)
+        XCTAssertEqual(receipt.commits.first?.fence.revisions["planning"], 7)
+        XCTAssertNil(receipt.result)
+        XCTAssertNotNil(receipt.error)
+    }
+
     func testStampedFrameUsesTheSharedDecoderOnPhone() throws {
         let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "reading_stamped", withExtension: "json", subdirectory: "server"))
         let message = RawJSON(try Data(contentsOf: url))

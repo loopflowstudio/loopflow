@@ -1787,7 +1787,7 @@ pub fn task_create(
     title: Option<String>,
     report: Option<String>,
     adoption: TaskAdoptionOptions,
-    receipt: Option<crate::store::sqlite::creation::CreationIdentity>,
+    receipt: Option<crate::store::sqlite::operations::CreationIdentity>,
 ) -> OpsResult<Task> {
     let input = resolve_task_create_input(title.as_deref(), report.as_deref())?;
     let main = crate::git::worktrees::main_repo_root(repo).map_err(task_error)?;

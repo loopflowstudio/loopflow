@@ -11,30 +11,33 @@ struct TaskWorkspaceView: View {
     @State private var showsChanges = false
 
     var body: some View {
-        if task.primarySession == nil {
-            TaskChangesView(client: client, task: task, theme: theme)
-                .navigationTitle(task.title)
-                .navigationBarTitleDisplayMode(.inline)
-        } else {
-            SessionView(client: client, task: task, theme: theme, draft: $draft)
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button("Changes", systemImage: "plusminus") { showsChanges = true }
+        Group {
+            if task.primarySession == nil {
+                TaskChangesView(client: client, task: task, theme: theme)
+                    .navigationTitle(task.title)
+                    .navigationBarTitleDisplayMode(.inline)
+            } else {
+                SessionView(client: client, task: task, theme: theme, draft: $draft)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Changes", systemImage: "plusminus") { showsChanges = true }
+                        }
                     }
-                }
-                .sheet(isPresented: $showsChanges) {
-                    NavigationStack {
-                        TaskChangesView(client: client, task: task, theme: theme)
-                            .navigationTitle("Changes")
-                            .navigationBarTitleDisplayMode(.inline)
-                            .toolbar {
-                                ToolbarItem(placement: .confirmationAction) { Button("Done") { showsChanges = false } }
-                            }
+                    .sheet(isPresented: $showsChanges) {
+                        NavigationStack {
+                            TaskChangesView(client: client, task: task, theme: theme)
+                                .navigationTitle("Changes")
+                                .navigationBarTitleDisplayMode(.inline)
+                                .toolbar {
+                                    ToolbarItem(placement: .confirmationAction) { Button("Done") { showsChanges = false } }
+                                }
+                        }
+                        .tint(theme.palette.accentInk)
+                        .presentationDetents([.medium, .large])
                     }
-                    .tint(theme.palette.accentInk)
-                    .presentationDetents([.medium, .large])
-                }
+            }
         }
+        .onAppear { PerfClock.interaction(.taskSelect, .contentMounted, id: task.work.id) }
     }
 }
 

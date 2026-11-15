@@ -26,3 +26,22 @@ extension ContinuousClock.Instant {
         return Double(elapsed.components.seconds) * 1000 + Double(elapsed.components.attoseconds) / 1e15
     }
 }
+
+extension PerfClock {
+    public enum Journey: String, Sendable {
+        case taskCreate = "task_create", taskComplete = "task_complete", taskSelect = "task_select"
+        case waveSelect = "wave_select"
+    }
+
+    public enum Phase: String, Sendable {
+        case gesture, statePublished = "state_published", commandReturned = "command_returned"
+        case contentMounted = "content_mounted", subscriptionApplied = "subscription_applied"
+    }
+
+    /// Correlation only: mounted content is not visible pixels, and a returned
+    /// command is not native input readiness. No authored content enters logs.
+    public static func interaction(_ journey: Journey, _ phase: Phase, id: String) {
+        signposter.emitEvent("interaction",
+            "journey=\(journey.rawValue, privacy: .public) phase=\(phase.rawValue, privacy: .public) id=\(id, privacy: .public) wall=\(Date().timeIntervalSince1970, privacy: .public)")
+    }
+}

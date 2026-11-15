@@ -815,7 +815,11 @@ pub(super) async fn session<C: Carrier>(
                 }
             }
             Start::Request(operation, select) => {
-                let write = if matches!(operation, Operation::Write(_)) {
+                let write = if matches!(
+                    operation,
+                    Operation::Write(_)
+                        | Operation::Server(ServerOperation::OperationSubmit { .. })
+                ) {
                     let Ok(write) = writes.clone().try_acquire_owned() else {
                         send(lines, &busy(&id, "writes", MAX_WRITES)).await?;
                         continue;
@@ -1189,7 +1193,10 @@ async fn request(
 ) {
     #[cfg(test)]
     let completion = tests::take_request_completion(&id);
-    let write = matches!(operation, Operation::Write(_));
+    let write = matches!(
+        operation,
+        Operation::Write(_) | Operation::Server(ServerOperation::OperationSubmit { .. })
+    );
     let started = Instant::now();
     let trace_id = crate::id::TraceId::default();
     let result = match operation {
@@ -1288,6 +1295,32 @@ async fn operate(
         .await
         .map_err(unavailable)?
         .map_err(unavailable),
+        Operation::Server(ServerOperation::OperationSubmit {
+            request_id,
+            command,
+        }) => {
+            // The request worker only waits for the local admission transaction.
+            // Its continuation retains the existing admission slots and is not
+            // cancelled with the connection or its transport request.
+            let trace = trace_id.clone();
+            tokio::task::spawn_blocking(move || {
+                crate::journal::request::isolate(|| {
+                    let (store,receipt) = crate::engine::operation::admit(&request_id,&command)?;
+                    let target = serde_json::json!({"kind":"operation.submit","request_id":request_id,"command_kind":receipt.kind});
+                    tokio::task::spawn_blocking(move || {
+                        let _held = reservation;
+                        let result = crate::journal::request::run(&trace,&target, || {
+                            crate::engine::operation::execute(&store,&request_id,&command)
+                        });
+                        if let Err(error) = result {
+                            tracing::error!(%error,"operation execution recording failed; inspect its receipt");
+                        }
+                    });
+                    Ok(serde_json::to_value(receipt)?)
+                })
+            }).await.map_err(|join| Error::outcome_unknown(&join.into()))?
+              .map_err(|failure: anyhow::Error| Error::written(&failure))
+        }
         Operation::Write(change) => {
             let mut target = serde_json::to_value(&change).map_err(unavailable)?;
             if let Some(fields) = target.as_object_mut() {
@@ -1631,6 +1664,104 @@ mod tests {
             .build()
             .unwrap()
             .block_on(body);
+    }
+
+    #[test]
+    fn operation_admission_answers_while_creation_is_held_and_survives_disconnect() {
+        with_empty_home(async {
+            let repo = loopflow_test_support::TestRepo::new();
+            let path = crate::store::default_db_path();
+            let store = crate::store::sqlite::SqliteStore::new(&path).unwrap();
+            let id = "held-creation";
+            let held = crate::engine::creation::lock(id).unwrap();
+            let mut client = Client::connect();
+            client.hello(REVISION, REVISION).await;
+            let command = crate::lf::commands::write::Write::TaskCreate {
+                directory: repo.path().to_owned(),
+                request_id: id.into(),
+                title: Some("Receipt fixture".into()),
+                request: None,
+                wave: None,
+                graph: None,
+                session: None,
+                run: false,
+            };
+            client
+                .send(&ClientMessage::Request {
+                    id: "admit".into(),
+                    operation: Operation::Server(ServerOperation::OperationSubmit {
+                        request_id: id.into(),
+                        command: command.clone(),
+                    }),
+                    select: None,
+                })
+                .await;
+            let ServerMessage::Response { result, .. } = client.receive().await.unwrap() else {
+                panic!("expected durable admission")
+            };
+            assert_eq!(result["delivery"], "queued");
+            assert!(
+                store.creation_receipt(id).unwrap().is_none(),
+                "the domain writer is still held"
+            );
+            drop(client.writer);
+            drop(client.reader);
+            client.server.await.unwrap().unwrap();
+            // Observe on a new connection before releasing the domain writer.
+            let mut observer = Client::connect();
+            observer.hello(REVISION, REVISION).await;
+            observer
+                .send(&ClientMessage::Subscribe {
+                    id: "receipt".into(),
+                    operation: Read::OperationGet {
+                        request_id: id.into(),
+                    },
+                    select: None,
+                    resume: None,
+                })
+                .await;
+            assert!(matches!(
+                observer.receive().await,
+                Some(ServerMessage::Response { .. })
+            ));
+            drop(held);
+            let final_receipt = tokio::time::timeout(Duration::from_secs(20), async {
+                loop {
+                    let ServerMessage::Reading { frame, .. } = observer.receive().await.unwrap()
+                    else {
+                        panic!("expected operation reading")
+                    };
+                    let receipt: crate::store::sqlite::operations::OperationReceipt =
+                        serde_json::from_value(frame["body"].clone()).unwrap();
+                    if matches!(
+                        receipt.delivery,
+                        crate::store::sqlite::operations::OperationDelivery::Finished
+                            | crate::store::sqlite::operations::OperationDelivery::Uncertain
+                    ) {
+                        break receipt;
+                    }
+                }
+            })
+            .await
+            .unwrap();
+            assert_eq!(
+                final_receipt.delivery,
+                crate::store::sqlite::operations::OperationDelivery::Finished,
+                "{final_receipt:?}"
+            );
+            assert_eq!(final_receipt.commits[0].stage, "task.filed");
+            let task = final_receipt.result.as_ref().unwrap()["task"]["id"].clone();
+            let (reopened, duplicate) = crate::engine::operation::admit(id, &command).unwrap();
+            crate::engine::operation::execute(&reopened, id, &command).unwrap();
+            assert_eq!(duplicate.result.as_ref().unwrap()["task"]["id"], task);
+            assert_eq!(
+                reopened.operation_receipt(id).unwrap().unwrap().commits,
+                final_receipt.commits
+            );
+            drop(observer.writer);
+            drop(observer.reader);
+            observer.server.await.unwrap().unwrap();
+        });
     }
 
     #[test]

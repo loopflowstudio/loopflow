@@ -15,6 +15,7 @@ pub mod config;
 pub mod creation;
 pub mod graph;
 pub mod launch;
+pub mod operation;
 pub mod pr;
 pub mod repo;
 pub mod select;

@@ -112,12 +112,12 @@ fn write_account_windows(
 mod admission;
 mod children;
 pub(crate) mod ci_incidents;
-pub mod creation;
 mod durable;
 mod github_people;
 mod graph_inventory;
 #[cfg(test)]
 mod linear_migration_tests;
+pub mod operations;
 mod project_adoption;
 mod subscription_events;
 

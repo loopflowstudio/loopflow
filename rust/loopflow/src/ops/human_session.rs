@@ -1566,14 +1566,14 @@ pub(crate) async fn new_thread(
     let launch_lock =
         crate::journal::request::spawn_blocking(move || lock_session_process(&lock_id)).await??;
     if let Some(receipt) = store.sqlite.creation_receipt(request_id)? {
-        if receipt.disposition == crate::store::sqlite::creation::RecoveryDisposition::Inspect {
+        if receipt.disposition == crate::store::sqlite::operations::RecoveryDisposition::Inspect {
             return Err(crate::engine::creation::unknown(&receipt).into());
         }
         let next = store
             .session(id)
             .await?
             .ok_or_else(|| session_not_found(id))?;
-        if receipt.disposition == crate::store::sqlite::creation::RecoveryDisposition::Continue {
+        if receipt.disposition == crate::store::sqlite::operations::RecoveryDisposition::Continue {
             // The input and receipt committed together, before filesystem publication.
             // Only that exact input may finish publishing; never replace a newer one.
             if next.artifact_key != receipt.artifact_key {

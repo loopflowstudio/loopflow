@@ -158,6 +158,16 @@ where
     F: FnMut(Option<SharedStore>, A) -> Fut,
     Fut: std::future::Future<Output = Result<T>>,
 {
+    run_with_interest(args, read, false)
+}
+
+fn run_with_interest<A, T, F, Fut>(args: A, read: F, operations: bool) -> Result<()>
+where
+    A: DeserializeOwned + Clone + Send + 'static,
+    T: Serialize,
+    F: FnMut(Option<SharedStore>, A) -> Fut,
+    Fut: std::future::Future<Output = Result<T>>,
+{
     // Read before anything can be scheduled: a parent that exits after this
     // is noticed even if it exits before the observer starts.
     let parent = parent_process();
@@ -165,6 +175,7 @@ where
     let input = shared.clone();
     std::thread::spawn(move || read_requests(&input));
     let mut reader = Reader::new(shared.clone(), parent, args, read, selected())?;
+    reader.operation_updates = operations;
     let mut stdout = std::io::stdout().lock();
     loop {
         let step = reader.step()?;
@@ -223,13 +234,42 @@ where
     F: FnMut(Option<SharedStore>, A) -> Fut + Send + 'static,
     Fut: std::future::Future<Output = Result<T>>,
 {
+    start_with_interest(args, read, transport, false)
+}
+
+pub(crate) fn start_receipts<A, T, F, Fut>(
+    args: A,
+    read: F,
+    transport: Transport,
+) -> Result<Option<Subscription>>
+where
+    A: DeserializeOwned + Clone + Send + 'static,
+    T: Serialize,
+    F: FnMut(Option<SharedStore>, A) -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = Result<T>>,
+{
+    start_with_interest(args, read, transport, true)
+}
+
+fn start_with_interest<A, T, F, Fut>(
+    args: A,
+    read: F,
+    transport: Transport,
+    operations: bool,
+) -> Result<Option<Subscription>>
+where
+    A: DeserializeOwned + Clone + Send + 'static,
+    T: Serialize,
+    F: FnMut(Option<SharedStore>, A) -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = Result<T>>,
+{
     match transport {
-        Transport::Stdio => run(args, read).map(|()| None),
+        Transport::Stdio => run_with_interest(args, read, operations).map(|()| None),
         Transport::Pull {
             wake,
             select,
             events,
-        } => start_pull(args, read, wake, select, events).map(Some),
+        } => start_pull(args, read, wake, select, events, operations).map(Some),
     }
 }
 
@@ -323,6 +363,7 @@ fn start_pull<A, T, F, Fut>(
     wake: Box<dyn Fn() + Send + Sync>,
     select: Option<Vec<String>>,
     events: bool,
+    operations: bool,
 ) -> Result<Subscription>
 where
     A: DeserializeOwned + Clone + Send + 'static,
@@ -333,6 +374,7 @@ where
     let shared = mailbox();
     let inbox: Arc<dyn Inbox> = shared.clone();
     let mut reader = Reader::new(shared.clone(), None, args, read, select)?;
+    reader.operation_updates = operations;
     reader.observer = events.then(crate::server::events::Observer::default);
     lock(&shared).pull_at = Some(Instant::now());
     let waker = shared.clone();
@@ -467,6 +509,8 @@ struct Reader<A, F> {
     answers: Option<u64>,
     force: bool,
     read_at: Option<StoreRevisions>,
+    operation_at: Option<i64>,
+    operation_updates: bool,
     read_on: Option<Instant>,
     cost: Duration,
     failures: u32,
@@ -510,6 +554,8 @@ where
             answers: None,
             force: true,
             read_at: None,
+            operation_at: None,
+            operation_updates: false,
             read_on: None,
             cost: Duration::ZERO,
             failures: 0,
@@ -559,14 +605,25 @@ where
             .and_then(|store| store.sqlite.revisions().ok());
         let now = Instant::now();
         let observed_changes = self.dependencies.changed();
+        let operation_revision = if self.operation_updates {
+            self.store
+                .as_ref()
+                .and_then(|store| store.sqlite.operation_revision().ok())
+        } else {
+            None
+        };
         let due = self.force
             || match self.read_on {
                 None => true,
                 Some(read_on) => {
-                    let changed = match (self.read_at, revisions) {
-                        (Some(old), Some(new)) => changed(old, new),
-                        (None, None) => false,
-                        _ => true,
+                    let changed = if self.operation_updates {
+                        self.operation_at != operation_revision
+                    } else {
+                        match (self.read_at, revisions) {
+                            (Some(old), Some(new)) => changed(old, new),
+                            (None, None) => false,
+                            _ => true,
+                        }
                     };
                     retry_due(self.failures, read_on, now)
                         || (now - read_on >= self.cost.saturating_mul(BUSY_SHARE)
@@ -651,6 +708,7 @@ where
             };
             self.sent = Some(identity);
             self.read_at = revisions;
+            self.operation_at = operation_revision;
             self.read_on = Some(began);
             self.force = false;
         }
@@ -923,6 +981,7 @@ mod tests {
             }),
             None,
             false,
+            false,
         )
         .unwrap();
         let first = next_frame(&subscription, &wakes);
@@ -959,6 +1018,7 @@ mod tests {
                     let _ = sender.send(());
                 }),
                 None,
+                false,
                 false,
             )
             .unwrap();
@@ -1033,6 +1093,7 @@ mod tests {
                 let _ = sender.send(());
             }),
             None,
+            false,
             false,
         )
         .unwrap();
@@ -1134,6 +1195,7 @@ mod tests {
                 let _ = sender.send(());
             }),
             None,
+            false,
             false,
         )
         .unwrap();

@@ -11,6 +11,24 @@ use crate::id::TraceId;
 thread_local! {
     static ACTIVE: Cell<bool> = const { Cell::new(false) };
     static DIAGNOSTICS: RefCell<Option<Diagnostics>> = const { RefCell::new(None) };
+    static OPERATION: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+pub(crate) fn operation_id() -> Option<String> {
+    OPERATION.with(|slot| slot.borrow().clone())
+}
+
+/// Only synchronous request workers install an operation. Nested workers carry
+/// it, while detached execution retains its own domain owners.
+pub(crate) fn with_operation<T>(id: Option<String>, run: impl FnOnce() -> T) -> T {
+    struct Restore(Option<String>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            OPERATION.with(|slot| *slot.borrow_mut() = self.0.take());
+        }
+    }
+    let _restore = Restore(OPERATION.with(|slot| slot.replace(id)));
+    run()
 }
 
 pub(crate) fn active() -> bool {
@@ -100,12 +118,13 @@ where
     let active = active();
     let diagnostics = DIAGNOSTICS.with(|sink| sink.borrow().clone());
     let settings = crate::config::settings::invocation_values();
+    let operation = operation_id();
     let span = tracing::Span::current();
     tokio::task::spawn_blocking(crate::observe::inherit(move || {
         let _entered = span.enter();
         scope(active, diagnostics, || {
             let _settings = crate::config::settings::replace_invocation(settings);
-            run()
+            with_operation(operation, run)
         })
     }))
 }

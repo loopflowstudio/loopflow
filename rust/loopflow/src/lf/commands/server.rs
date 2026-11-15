@@ -3,7 +3,34 @@ use crate::lf::ServerCommand;
 
 pub fn run(command: &ServerCommand) -> anyhow::Result<()> {
     match command {
-        ServerCommand::Receipt { request_id, .. } => {
+        ServerCommand::Receipt {
+            request_id,
+            operation: true,
+            subscribe: true,
+            ..
+        } => {
+            crate::engine::operation::subscribe(
+                request_id.clone(),
+                super::subscribe::Transport::Stdio,
+            )?;
+            Ok(())
+        }
+        ServerCommand::Receipt {
+            request_id,
+            operation: true,
+            ..
+        } => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&crate::engine::operation::lookup(request_id)?)?
+            );
+            Ok(())
+        }
+        ServerCommand::Receipt {
+            request_id,
+            operation: false,
+            ..
+        } => {
             println!(
                 "{}",
                 serde_json::to_string_pretty(&crate::engine::creation::lookup(request_id)?)?

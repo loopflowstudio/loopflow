@@ -1,6 +1,6 @@
 # LOO-906: immediate interactions across Desktop and mobile
 
-Implementation in progress, 2026-11-14. Supersedes the Desktop-only delivery
+Concept review revised the admission contract, 2026-11-14; next step is implement. Supersedes the Desktop-only delivery
 boundary. No shipping or merge decision is recorded. Placement remains this Task;
 no Wave is selected.
 
@@ -60,9 +60,9 @@ when an interaction has happened:
 | Mobile creation | `MobileTaskDraft.submission/outcome/savedRequests` plus a separate `CreationSubmissions` journal; sheet owns/cancels async work, then opens a Task | One durable submitted-operation owner; draft stores editable text only |
 | Read freshness | Desktop part sequence/floors and checkpoint waiters; mobile `RemoteTaskObservation` refresh/coalescing; saved Work and list files | One stamped read/reconciliation engine, platform-specific transport only |
 | Task selection | Desktop `select` sets selection synchronously but continues through `openSelectedWorkspace`/warm conversation reconciliation; mobile pushes `NavigationLink` content and creates/closes a view-owned `SessionLink` | Small immediate navigation reducer; cached content/native occurrence retention independent of refresh |
-| Wave navigation/disclosure | `WorkNavigator.waveRow` stages `pressedScope`, sleeps 120 ms, then selects without a newer-selection token | Delete delayed selection; disclosure/route changes happen locally before loading children |
+| Wave navigation/disclosure | `WorkNavigator.waveRow` now selects synchronously; the delayed `pressedScope` path is deleted | Keep disclosure/route changes local before loading children |
 | Shared commands | Typed `ServedWrite`/Rust `Write`; creations alone have durable request receipts | Stable operation IDs and outcomes for every UI command |
-| Backend reads | SQLite domain revisions and pinned read snapshots already exist; subscription wire exposes `answers`, unavailable and body | Expose causal stamps, including complete query scope; do not compare unrelated checkpoints |
+| Backend reads | SQLite domain revisions and pinned snapshots now reach revision-6 stamped subscriptions with exact query scope | Use shared causal reconciliation; do not compare unrelated checkpoints |
 
 `task_complete` already saves a completion request, checks PR/execution conditions,
 settles state, syncs planning and schedules retirement. Creation already performs
@@ -390,8 +390,9 @@ and their consumers must converge together.
    membership and persistence dependencies before cutting consumers over.
    Completion navigation is specified above.
 2. Extend receipt/commit-stamp contracts and domain recovery; migrate saved data.
-   Done: stamped subscription readings (revision 6). Remaining: commit fences,
-   generalized operation receipts and recovery in `client_operations.sql`.
+   Done: stamped subscription readings (revision 6). In progress: generalized
+   admission/receipts and transactional stage fences in `client_operations.sql`;
+   domain continuation and all-writer coverage remain.
 3. Build shared transactional client store and projection reducer; cut both
    transports over, including query membership. Delete predecessor owners.
 4. Move selection, disclosure, launch, completion and every mutation family through
@@ -400,7 +401,8 @@ and their consumers must converge together.
 5. Measure actual latency and remove demonstrated backend waits independently of
    presentation; run the full acceptance matrix and native demo.
 
-Slices 3–5 have not started. The Desktop launch checkpoint and synchronous Wave
+Slices 3–4 have not started. Slice 5 now includes instrumentation and benchmark
+coverage/preflight work before native demo. The Desktop launch checkpoint and synchronous Wave
 selection are interim; slice 3 deletes the launch exception.
 
 Headless acceptance uses deterministic held/reordered replies, not timing sleeps:
@@ -505,42 +507,210 @@ The launch checkpoint and its earlier 23-case result are recorded at
 
 ## Current implementation cut
 
-Shared subscriptions now carry `ReadingStamp` (protocol revision 6): Machine,
-persisted database epoch, schema, exact served-query/selection hash, whole-body
-coverage and SQLite revisions captured with the body in its pinned snapshot.
-Failed frames carry null; selected fragments cannot claim whole-query coverage.
-CLI streams have no served-query identity. Desktop and mobile use the same strict
-`SubscriptionReading` decoder; Desktop retains the stamp when re-answering a
-cached frame. Existing revision-5 creation payloads remain readable/recoverable
-because their write shape did not change. `client_operations.sql` is this Task's
-one draft migration; receipt work extends it in place.
+Stamped subscriptions (protocol revision 6) and synchronous Wave selection remain
+intact. The single receipt owner moved from `store/sqlite/creation.rs` to
+`operations.rs`; creation recovery is a projection of the same physical row.
+`operation.submit` durably admits a typed command before its bounded worker runs;
+`operation.get` reads/subscribes without dispatch. Duplicate admission retains
+immutable content and dispatch state. A per-receipt revision orders held replies
+within the active database epoch; second-resolution timestamps cannot. A sent command never takes the generic execution path again; a panic/restart leaves it for domain recovery.
 
-The navigator's delayed Wave/repository click task is also deleted; its real
-button action now selects before returning, with rapid-return coverage.
+Domain stages carry Machine/epoch/schema/revision fences and results inside the
+writer's transaction. Current stages: Task filing, completion request/settlement,
+reopen and Session input replacement. Command output stays separate, and a failed
+command retains committed stages as uncertain. The Task's single migration is
+extended in place, preserving creation IDs/fingerprints/results/launches. General
+commands reuse the canonical result column, and uncertain failures retain a
+creation's partial domain result; no parallel result column or ledger exists.
+Historical rows get no invented fences. Receipt-only revisions wake receipt subscriptions
+without invalidating Work; native and `--operation --subscribe` CLI consumers use
+one receipt read owner, with revision interest outside the transport. New Rust tests specify transaction rollback, duplicate/restart,
+held creation admission/disconnect, per-operation completion/reopen results,
+10k-Task point-query plans and migration preservation. These Rust behavior tests still need execution; production library compilation and the Swift contract checks are separate results.
 
-This is the read-contract cut, not the shared state architecture's completion.
-Remaining: domain commit fences and generalized receipt admission/recovery;
-transactional confirmed cache/outbox and normalized membership projection;
-Desktop/mobile mutation, navigation and retained-occurrence migration; removal
-of the launch reconciliation exception and other owners in the delete list;
-held-response/overlap/crash acceptance and native latency sampling. `complete`
-currently describes transport coverage of the exact scoped query, not a claim
-that external dependencies or native input are ready. Membership projection must
-also retain the query's unavailable/unknown membership before retiring effects.
-A fresh database gets a fresh epoch; restoring a historical database backup into
-an existing store still needs epoch-reset handling before durable cache rollout.
+Admission counterexample found in review: `engine::operation::admit` calls
+`require_repo_root` for Task creation, which runs `git rev-parse`, before the SQL
+admission. This preserves existing canonical creation fingerprints but fails the
+proposed no-Git-before-admission contract. The safe interim keeps identity checks;
+removing this wait needs a single submitted-command identity with deferred domain
+normalization and a lossless path for legacy fingerprints. A raw-directory hash
+must not silently replace the existing canonical identity. Dependent client
+cutover is not complete against this contract. No SQL-duration diagnosis follows
+from this code-established wait; the admission span currently includes it.
 
-A distinct-epoch check initially exposed that prepared fixture databases copied
-one epoch. Fresh-file copies now reseed it beside the local Machine; concurrent
-first opens and subsequent reopens retain both identities.
 
-Checks (2026-11-14):
+### Revised admission identity contract (proposed)
 
-- `scripts/test_desktop.sh --jobs 4 --no-parallel --filter 'ServerProtocolTests|DTOFixtureTests.subscribeFramesDecode|CreationSubmissionTests|WorkNavigationTests.waveClickSelectsBeforeReturningFromTheGesture|WorkObservationTransportTests|WorkModelStreamTests.launchReconciliation|WorkDestinationTests.newTask|WorkDestinationTests.lateCreationReply|WorkDestinationTests.failedAutomatic'`: 50 tests passed.
-- `cargo nextest run -p loopflow --lib -E 'test(reading_stamp) | test(a_commit_during_projection) | test(a_read_snapshot_keeps_joined) | test(server::schema::tests::) | test(store_revisions_cover_every_table) | test(concurrent_copies_share_one_initialized_machine) | test(test_store_image_matches_migrations_and_copies_are_independent)'`: 15 passed.
+Admission means the submitted envelope is saved, not that repository identity,
+legacy compatibility or execution has been established. No repository discovery,
+Git, planning, creation lock or provider call precedes the acknowledgment. Local
+schema/ID checks and the receipt transaction remain necessary. Domain validation
+and its wait are visible through receipt observation in the same destination;
+there is no new screen or second submission.
+
+Keep two meanings separate in the single receipt owner:
+
+- **Submitted content:** a versioned deterministic encoding of the typed command,
+  preserving authored values and path spelling. It excludes transport IDs and
+  incidental JSON key order. Persist both content and its digest; a digest alone
+  cannot recover the command. New operations bind this content at admission.
+  Same ID/content returns the existing receipt without changing dispatch state;
+  changed content is a conflict. Retrying uses the saved envelope, not rebuilt
+  fields from a current form or a newly resolved directory.
+- **Creation identity:** the existing canonical domain fingerprint, computed by
+  the worker using the released normalization rules. Preserve it independently;
+  never put a raw-envelope digest into the legacy fingerprint field. New creation
+  rows need an explicitly unresolved domain identity until the worker establishes
+  it. Direct CLI creation and served envelopes must use the same atomic domain
+  claim, so a CLI attempt racing normalization cannot create a second Task.
+
+Released creation rows have canonical identity but no submitted envelope. Preserve
+all their IDs, results, launch data, milestones and recovery dispositions. For
+first envelope adoption, durably reserve one candidate in that same row before
+acknowledgment; this is pending validation, not a replacement command or permission
+to execute. Existing creation lookup remains usable while validation is held.
+The worker resolves its directory, compares the legacy fingerprint and atomically
+binds the **first verified** envelope. A symlink/subdirectory spelling that resolves
+to the old canonical payload can adopt it. A mismatch reports a candidate content
+conflict and releases only that reservation; it must not reject, overwrite or
+strand the previously successful creation. Unavailable normalization retains the
+candidate for recovery, without classifying it as a mismatch. Concurrent identical
+candidates share validation; a different candidate conflicts while reserved.
+Candidate finalization/release must compare its saved identity so a held worker
+cannot overwrite a newer reservation. After successful adoption, submitted content
+is immutable; subsequent envelope retries use that saved spelling. Legacy CLI
+recovery continues to compare canonical identity, including equivalent paths.
+
+Keep candidate validation and command dispatch distinct. Validation can repeat
+after restart because it has no domain effect. A new operation dispatches only
+after validation and an atomic claim. An adopted released row always consults its
+existing domain recovery disposition: Complete returns its saved result, Continue
+uses only the domain-proven continuation, Inspect remains inspectable. It never
+becomes generically queued. A crash after claim remains uncertain until domain
+recovery proves what happened. No invented commit fence certifies historical
+results; obtain current covering facts without replaying the creation.
+
+Extend the one draft migration in place. Represent submitted and canonical identity
+explicitly, including their absence; do not infer identity mode from a hash or
+reuse `queued` to mean adoption of a completed creation. Expose admission versus
+validation outcome in Rust/Swift fixtures and protocol docs before client cutover.
+Keep the existing Graph-admitted creation milestone distinct from envelope receipt.
+
+Required counterexamples before dependent work:
+
+1. Hold Git before repository discovery completes: admission and receipt lookup
+   return, disconnect does not cancel the saved submission, no effect dispatches.
+2. Upgrade released complete/Continue/Inspect rows, adopt equivalent root,
+   subdirectory and symlink spellings, and retain the original Session/result.
+3. Wrong candidate then correct candidate: the old receipt is unchanged and the
+   valid retry is possible; hold the wrong reply across reservation replacement.
+4. Restart before/after validation, race direct CLI creation with an envelope,
+   and duplicate submission after dispatch: at most one domain effect, saved
+   identity survives, no uncertain command is replayed.
+5. Reorder receipt validation replies: only the active epoch and newer receipt
+   revision update the client; admission never enables input or retires overlays.
+
+These are engineering consequences of immediate admission and lossless recovery,
+not a new product choice. Headless concept-review outcome: **design changed →
+iterate to implement**, beginning with admission identity, then domain recovery,
+transactional cache/outbox, query membership and both-client migration. The launch
+regression cases above remain mandatory. No production changes or checks were run
+by this review; native sampling remains for demo, with baseline collection still
+part of implementation.
+
+The new Swift mirror and exact-query fence comparison are shared with iOS; live
+clients still use their existing creation/mutation owners. No client projection
+cutover is claimed. Remaining: domain recovery continuations, definite-refusal
+classification and terminal fences
+for every mutation family (including remote/detached and external file/config
+confirmation). Dispatched errors currently remain uncertain. SQLite fences cannot
+certify filesystem/provider effects. Also remaining: transactional
+confirmed cache/outbox and normalized query membership; both clients' interaction
+and retained-occurrence migration; deletion of launch checkpoint exceptions and
+other predecessors; epoch reset on historical restoration; full held/reordered/
+crash and native acceptance. `complete` in a read stamp still means transport
+coverage of that query, not complete external membership or native readiness.
+
+Previous 50-Desktop/15-Rust/one-iOS read-contract checks are recoverable at
+`950b83a138e2c3894f58ad260cad4bfd9d3fe839:scratch/instant-task-session.md`.
+They do not cover the new receipt cut.
+
+## Benchmark implementation and observations (2026-11-14)
+
+Exact feedback and host preferences are in `desktop-reactivity-feedback.md`.
+The existing performance harness README now maps ADEMark A1–A12/B1–B4/C1–C6 and
+LF workflow journeys to endpoints, fixtures, platforms, coverage and remaining
+work. Sources read: https://ademark.dev/ and https://github.com/zqkra/ademark,
+source HEAD `119a5f7b99247cffbe7f96bb2c36c03496cf3018`, retrieved 2026-11-14.
+The site's C2–C6 reliability methods are written but not run; no borrowed result
+is a Loopflow measurement. Web-reader access failed; a direct HTTP fetch succeeded.
+
+`desktop_performance.py preflight` retains host CPU/load and rejects contamination
+without stopping other work. Quiet-host native probes inspect display/capture/input
+access without prompting. These probes do not yet establish thermal/swap or
+whole-trial load. Shared `PerfClock.interaction` marks distinguish Desktop
+selection publication/completion return and phone tap/workspace mount from pixels.
+Rust CLI volume adds aggregate SQLite profile time without SQL text/values;
+mutex/planning/provider attribution remains incomplete. The existing headless
+projection measurement now includes 10,000 Tasks/Sessions, preserves each sample
+with an atomic checkpoint outside the interval and refuses to overwrite an old
+result. The rebuilt diagnostic ran; the quiet-host baseline remains missing. Native display/input benchmarks remain unmeasured.
+
+Owned observations, preserved here because a fresh run cannot reproduce them:
+
+- Current Mac, macOS 26.0.1, 16 logical CPUs, 2026-11-15 04:56:49 UTC:
+  aggregate process CPU 634.6%; load 217.00/222.38/182.45. Rejected.
+  Raw `/tmp/loo-906-host-20261114-current/preflight.json`.
+- `mini-heart`, macOS 15.5, 8 logical CPUs, 04:59:16 UTC: CPU 336.3%;
+  load 4.49/4.61/5.44. Rejected; three Python processes each used about a core.
+  Desktop also requires macOS 26, so this mini cannot run the present app target.
+  Console account was signed in; capture/input capability was not probed after
+  load rejection. Raw `/tmp/loo-906-host-20261114-mini/preflight.json` on mini;
+  local copy `/tmp/loo-906-host-20261114-mini.json`.
+- Existing debug test binary SHA256
+  `e0d99f8a4993a7cc19d923e2ece97fbe25c1e093c76bc9c4548649ca70df9b2a`:
+  WorkProjection constructor only, 21 observations/population at 21:10 local.
+  256 Tasks/Sessions: first 10.65 ms, warm n=20 median 32.57 ms/P95 63.70 ms.
+  2,048: first 340.15 ms, warm n=20 median 287.11 ms/P95 523.89 ms.
+  Raw and report `/tmp/loo-906-projection-existing-build-20261114/`.
+  Invalid for regression comparison: host rejected, build source provenance was
+  not recorded. No gesture, native paint, input or server endpoint was measured.
+  These distributions do not establish a SQL bottleneck or the >10-second cause.
+
+- Rebuilt current debug test binary SHA256
+  `6547da6b33e05fb2914a44e6d54161ea8775360882ae9e5ba11de64664e2254d`,
+  Swift/fixture/harness source digest
+  `1b938dface06ba3093c792f27f87762e4e87d4a257b2ff31d60f3374befaaf45`
+  unchanged before/after. At 22:12 local, constructor-only first / warm n=20
+  median / P95: 256 Tasks/Sessions 4.10 / 3.72 / 4.57 ms; 2,048
+  31.00 / 29.46 / 31.77 ms; 10,000 144.71 / 142.08 / 235.92 ms
+  (maximum 296.58 ms). Raw samples, metadata and log:
+  `/tmp/loo-906-projection-current-20261114/`. Preflight at 06:12:26 UTC
+  measured CPU 1018.4%, rejected; raw
+  `/tmp/loo-906-host-20261114-current-rebuilt/preflight.json`.
+  Invalid as a regression baseline; no comparison against the earlier binary.
+  This still measures neither native paint/input nor SQL/planning/provider time.
+- The first projection invocation skipped because the network runner cleared its
+  `LF_*` output variable. The corrected invocation places `env` inside that
+  boundary; the convention is now in AGENTS.md and the harness docs.
+- `measureWriteToVisible` still names removed `pm_items.body` in its old native
+  fixture. That journey needs migration to current authoritative planning facts;
+  it is not live coverage of the new store.
+
+Checks:
+
 - `uv run python scripts/check_migrations.py`: passed; one draft migration.
+- `uv run pytest python/tests/test_desktop_performance.py -q -k 'host_load or preflight or sql_profile_time or native_runner or sandbox_paths_do_not_change'`: 5 passed; `ruff check` passed.
 - `uv run python scripts/check_swift_multiplatform_boundaries.py`: passed.
-- `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/ReadingStampTests`: 1 passed; app and test targets compiled; disposable Simulator removed.
+- `cargo check -p loopflow --lib --jobs 2`: passed after the final shared receipt-stream change (1m31s); `cargo fmt --all` passed. The filtered Rust test build and subsequent test-target compile check were stopped after >15 and 24 minutes under host load, with no test result; gate owns `store::sqlite::operations::tests::`, the held service fixture and schema equality.
+- `swift build --package-path swift --build-tests --jobs 2`: passed. `scripts/test_desktop.sh --skip-build --no-parallel --filter 'ServerProtocolTests|CreationSubmissionTests|WorkModelStreamTests.launchReconciliation|WorkDestinationTests.newTask|WorkDestinationTests.lateCreationReply|WorkDestinationTests.failedAutomatic|WorkNavigationTests.waveClickSelectsBeforeReturningFromTheGesture'`: 43 passed. `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/ReadingStampTests`: 2 passed; app/test targets built and the disposable Simulator was removed.
+- `uv run python /tmp/loo-906-receipt-sql-smoke.py`: passed against the finished migration and actual finish SQL, including recursive triggers, revision rollback and retention of a failed creation's canonical result.
+- `uv run python scripts/check_architecture.py`: passed, 89/89 SQLite owners.
+
+New receipt schema definitions were derived from their canonical Rust declarations
+with the cached schemars library. Full `server::schema::tests::` equality against
+the complete server generator still needs the Rust test build.
 
 Gate owns wider store/transport/lifecycle, DTO integration, documented-command,
-packaging and clippy checks. Demo owns native latency sampling.
+packaging and clippy checks. Implementation still owns a valid benchmark baseline
+and near-term measurements; demo owns native usability judgment, not all timing.

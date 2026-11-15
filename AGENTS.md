@@ -416,6 +416,10 @@ Swift async process fixtures install `terminationHandler` before `run()` and
 await its completion. Don't call blocking `waitUntilExit()` on a cooperative
 executor; it can stay in Foundation's run loop after the child has exited.
 
+Opt-in benchmark `LF_*` variables are cleared by the network boundary. Set them
+on its child command: `uv run python scripts/test_network.py --desktop env LF_WORKSPACE_PERF_OUTPUT=/tmp/projection.json swift test --skip-build --disable-sandbox --package-path swift --filter WorkspacePerformanceTests`.
+A skipped benchmark is unmeasured, even when its test run exits successfully.
+
 Headless Swift view tests inspect production leaf views directly when a parent
 needs `@Environment` Observation objects, which ViewInspector can't inject.
 Keep those views internal for `@testable` access. Mounted terminal frame checks

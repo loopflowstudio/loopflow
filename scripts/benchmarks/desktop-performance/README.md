@@ -80,3 +80,71 @@ fixture on both sides of a comparison. Build and disk capacity are prerequisites
 for the native test runners, not performance results.
 
 For focused input profiling, see [agent-input.md](agent-input.md).
+
+## LOO-906 measurement coverage
+
+```sh
+# Run on the measured host before collecting a comparison. Retains a rejection;
+# never stops unrelated work or requests native permissions.
+uv run python scripts/desktop_performance.py preflight --output /tmp/lf-preflight
+
+# Headless supporting measurement; includes 10,000 synthetic Tasks and Sessions.
+# Record host preflight and build mode beside this output.
+swift build --package-path swift --build-tests --jobs 4
+uv run python scripts/test_network.py --desktop env LF_WORKSPACE_PERF_OUTPUT=/tmp/lf-projection.json swift test --skip-build --disable-sandbox --package-path swift --filter WorkspacePerformanceTests
+```
+
+The minimum inventory follows [ADEMark's methodology](https://github.com/zqkra/ademark/blob/main/METHODOLOGY.md)
+and [test procedures](https://github.com/zqkra/ademark/blob/main/TESTS.md), retrieved
+2026-11-14. Borrowed procedures are coverage requirements, not Loopflow results.
+ADEMark's published v1 excludes C2–C6; its reliability methods are not published
+passing results. The public site was unreachable from the research reader;
+the public source supplied the methods. A subsequent direct HTTP fetch read the
+site successfully. Source HEAD was `119a5f7b99247cffbe7f96bb2c36c03496cf3018`.
+
+Use one pinned build/helper/provider/fixture per comparison, at least 20 successful
+native observations per latency journey, plus every failed, interrupted or rejected
+attempt. Keep warm/cold, deliberate five-agent load/idle, and foreground/background
+separate. A quiet preflight observes 60 seconds below 0.1 core of pre-existing
+process CPU, then checks display/capture/input access without prompting. It is a
+host screen, not a whole-trial thermal/swap or contamination measurement. Retain
+background CPU throughout native trials. Do not turn unrelated host load into the
+five-stream fixture. Prefer a quiet mini that can run the app's deployment target.
+
+| ID | Workflow and endpoint | Fixture/platform | Existing instrument; remaining gap |
+|---|---|---|---|
+| A1/A2 | Cold start/relaunch → visible accepted typing | Empty/saved owned workspace; Desktop, mobile launch/background return | `startup.py`, launch timings, input recorder; phone visible-input driver pending |
+| A3/LF1 | New Task/thread → state, visible submitted text, input ready separately | Owned disposable request; both | Creation signposts/input recorder; mobile immediate destination pending |
+| A4 | Submit → first visible word | Fixed replay bytes and cadence; both | Owned provider stub exists; replay-to-first-word driver pending |
+| A5/A6 | Five idle threads: footprint, foreground/background CPU and power | Owned five-thread fixture; both | `record_live.py` process/CPU; coalition footprint/power and phone attribution pending |
+| A7/A8 | Five streams: memory and key → visible echo P50/P95 | Fixed simultaneous replay streams; both | Native PTY echo/input recorder; five-stream fixture and hitch driver pending |
+| A9/A10 | Quit +60 s processes/memory; five → twenty-thread cost | Same owned process tree; Desktop/mobile lifecycle policy | Process ancestry recorder; exit/scale sampling pending |
+| A11/A12 | Open/scroll/switch 2,000 messages; memory slope | Pinned synthetic transcript, 30-minute soak; both | Native scroll/soak recorder; 2,000-message fixture pending |
+| B1–B4 | Hello, request anatomy, fixed code question, repo-rule canary | Same model/config as bare CLI control; Desktop/helper/mobile | Usage/context fixtures; side-call token capture/redacted categorization pending |
+| C1 | Orchestrated build → correctness, elapsed time, tokens | Pinned four-work-item repository; helper/Desktop | Graph fixtures; scored benchmark workload pending |
+| C2–C6 | Follow-up delivery, composer lock, killed agent, network loss, restart | Owned replay processes and fault points; both | Transport/creation/recovery tests; native fault journeys pending |
+| LF2 | Complete/reopen/move/claim → state, membership/count pixels, committed reconciliation | 10k Tasks, held/reordered responses; both | Domain receipts and model tests; shared projection/phone actions and native driver pending |
+| LF3 | Cached/recent A→B→A → highlight, retained content, validated input | Retained/cold/evicted workspace; both | Native `session_return`, input recorder, shared interaction marks; phone retention pending |
+| LF4 | Wave disclosure → local route/arrow, visible children | Warm/cold/held child reads; Desktop, phone picker | Hierarchy native journeys, synchronous selection marks; actual disclosure/pixel correlation pending |
+| LF5 | File/layout save, review/delivery → local feedback and confirmed result | Base-revision conflict, held writer; both where supported | `file_edit_refresh`, layout/PR fixtures; generalized operation projection pending |
+| LF6 | Multi-window consistency; remote background/reconnect | Two windows/devices, epoch reset and lost reply; both | Stamped-read/transport fixtures; shared cache and native journey pending |
+
+The proposed budget is P95 <100 ms for local reaction, separately from visible
+pixels and input readiness. Other regression budgets await a valid baseline;
+never substitute a time limit on the runner. Correctness gates require local
+selection/disclosure before held I/O, exact-identity attachment, no duplicate send,
+and operation-local rollback. Headless projection time is not gesture or paint time.
+
+`PerfClock` emits shared `interaction` marks for Desktop selection/completion and
+phone Task tap/workspace mount. Marks name the phase; `state_published` and
+`content_mounted` do not mean pixels appeared. Phone marks currently correlate by
+Task identity, so repeated same-Task occurrences require native capture rather than
+pairing ambiguous marks. Creation/input-ready signposts retain their request UUIDs.
+`LF_PERF_OUTPUT` adds aggregate SQLite profile milliseconds, without SQL text or
+values. SQLite profile time may include waits inside SQLite and overlap nested
+statements; it excludes Rust mutex wait and planning/Git/provider time. It does
+not diagnose a lock bottleneck. Git Trace2 and provider milestones remain separate.
+
+The current creation admission span includes Git repository discovery for legacy
+fingerprint equivalence. It is not a pure SQL-admission interval yet. Separate
+that lookup from SQL lock/query time when collecting backend traces.

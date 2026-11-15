@@ -85,8 +85,12 @@ pub enum Read {
     ProcessHistory { id: String },
     /// Look up a creation without starting or retrying it. Null confirms absence.
     #[serde(rename = "creation.get")]
-    #[schemars(extend("x-result" = generator.subschema_for::<Option<crate::store::sqlite::creation::CreationReceipt>>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<Option<crate::store::sqlite::operations::CreationReceipt>>()))]
     CreationGet { request_id: String },
+    /// A durable command and its committed domain stages; never dispatches it.
+    #[serde(rename = "operation.get")]
+    #[schemars(extend("x-result" = generator.subschema_for::<Option<crate::store::sqlite::operations::OperationReceipt>>()))]
+    OperationGet { request_id: String },
     /// `lf process list`: live Loopflow call trees.
     #[serde(rename = "process.list")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::top::ActivitySnapshot>()))]
@@ -387,6 +391,9 @@ impl Read {
         match self {
             Self::ProcessHistory { id } => words(&["session", "history", "show", id]),
             Self::CreationGet { request_id } => words(&["server", "receipt", request_id, "--json"]),
+            Self::OperationGet { request_id } => {
+                words(&["server", "receipt", request_id, "--operation", "--json"])
+            }
             Self::ProcessList => words(&["process", "list", "--json"]),
             Self::DesktopViewList { directory } => {
                 at(directory, &["desktop", "view", "list", "--json"])
@@ -674,6 +681,9 @@ impl Read {
             Self::CreationGet { request_id } => {
                 value(&crate::engine::creation::lookup(request_id)?)
             }
+            Self::OperationGet { request_id } => {
+                value(&crate::engine::operation::lookup(request_id)?)
+            }
             Self::PlanBoard {
                 directory,
                 wave,
@@ -935,6 +945,9 @@ impl Read {
             events,
         };
         let subscription = match self {
+            Self::OperationGet { request_id } => {
+                crate::engine::operation::subscribe(request_id, transport)
+            }
             Self::ProcessList => super::top::subscribe_ps(transport),
             Self::DesktopViewList { directory } => {
                 super::desktop::subscribe_plans(None, directory, transport)

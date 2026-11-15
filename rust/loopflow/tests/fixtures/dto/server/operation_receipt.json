@@ -1,0 +1,35 @@
+{
+  "type": "response",
+  "id": "receipt",
+  "trace_id": "trace_fixture",
+  "result": {
+    "request_id": "operation_fixture",
+    "kind": "task.complete",
+    "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "delivery": "uncertain",
+    "result": null,
+    "error": "Task requires a verified merge",
+    "commits": [
+      {
+        "stage": "task.completion_requested",
+        "resources": [
+          "task_fixture"
+        ],
+        "fence": {
+          "machine": "machine_fixture",
+          "epoch": "ab0123456789ab0123456789ab01234567",
+          "schema": 6,
+          "revisions": {
+            "planning": 7
+          }
+        },
+        "result": {
+          "request": 42
+        }
+      }
+    ],
+    "created_at": 1,
+    "updated_at": 2,
+    "revision": 3
+  }
+}

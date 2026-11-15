@@ -37,7 +37,8 @@ Retired history stores and intermediate branch schemas have no runtime readers.
 | The provider's OS process, its served Session, original parent and current attachment | AgentProcess rows in `processes` |
 | Agent conversation, title, feedback and native identity | `agent_sessions` |
 | Native starts, outcomes, retries, provider transitions and usage | LfSession history, correlated to native turn and driving Process |
-| Submitted creation identity and outcome | `creation_receipts`, shared by CLI and server; retained independently of the created resource |
+| Submitted command identity and outcome | `creation_receipts`, shared by creation recovery and durable native commands; transactional domain commit fences and command delivery are separate |
+| Confirmed database lifetime | `client_store_epoch`; stamps and commit fences compare only within the same Machine/epoch/schema |
 | Desktop submissions awaiting reconciliation | Versioned immutable request payloads in the device's Work cache; outcomes come from server receipts |
 | A Graph's identity, state and step results | Its Graph process and child step processes in `processes` |
 | A Graph's name, launched graph, the Task it started for and each step's node | GraphProcess: `graph_processes` and `graph_process_steps`, appended by the Graph process |

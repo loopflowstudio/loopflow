@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 
 use super::{Error, ErrorCode};
 use crate::id::LfSessionId;
-use crate::store::sqlite::creation::{CreationIdentity, CreationReceipt, RecoveryDisposition};
+use crate::store::sqlite::operations::{CreationIdentity, CreationReceipt, RecoveryDisposition};
 use crate::store::{open_store, storage_config_from_env};
 use crate::work::task::Task;
 

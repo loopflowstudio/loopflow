@@ -185,3 +185,9 @@ node, user and endpoint saved in the Machine's `mobile.yaml`. This service state
 is separate from the typed preferences in `config.yaml`. The
 [protocol README](../../rust/loopflow/src/server/README.md) owns operation
 shapes, bounds and the ticket flow shared by both carriers.
+
+Durable native command admission uses `operation.submit` and `operation.get`.
+The single [receipt owner](../../rust/loopflow/src/store/sqlite/operations.rs)
+keeps admission, command output and transactional domain commit fences separate;
+[the server protocol](../../rust/loopflow/src/server/README.md#durable-command-admission)
+describes the contract. Client projection migration remains in progress.

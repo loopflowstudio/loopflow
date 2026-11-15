@@ -1354,7 +1354,7 @@ fn session_open_intents_distinguish_explicit_resume_from_passive_reveal() {
 #[test]
 fn creation_recovery_dispositions_round_trip() {
     let json = include_str!("../../../tests/fixtures/dto/creation_lookup.json");
-    let receipts: Vec<loopflow::store::sqlite::creation::CreationReceipt> =
+    let receipts: Vec<loopflow::store::sqlite::operations::CreationReceipt> =
         serde_json::from_str(json).unwrap();
     assert_eq!(
         serde_json::to_value(receipts).unwrap(),

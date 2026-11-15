@@ -152,6 +152,8 @@ public struct MachineMobileStatus: Codable, Sendable {
 public enum ServerOperation: Encodable, Sendable {
     case read(ServedRead)
     case command(ServedWrite)
+    /// Durable admission; the receipt is available before command execution.
+    case operationSubmit(requestID: String, command: ServedWrite)
     case config(ConfigOperation)
     /// The unchanged payload of a submitted creation; never arbitrary command replay.
     case submittedCreation(JSONValue)
@@ -173,12 +175,17 @@ public enum ServerOperation: Encodable, Sendable {
 
     private enum Keys: String, CodingKey {
         case kind, bytes, session, request, argv, cwd, env, rows, cols, placement, terminalID = "terminal_id"
-        case moment, delivery, adapter, callback, gap, printed, inbox
+        case moment, delivery, adapter, callback, gap, printed, inbox, command, requestID = "request_id"
     }
     public func encode(to encoder: Encoder) throws {
         switch self {
         case .read(let query): try query.encode(to: encoder)
         case .command(let change): try change.encode(to: encoder)
+        case .operationSubmit(let requestID, let command):
+            var box = encoder.container(keyedBy: Keys.self)
+            try box.encode("operation.submit", forKey: .kind)
+            try box.encode(requestID, forKey: .requestID)
+            try box.encode(command, forKey: .command)
         case .requestUpload(let bytes):
             var box = encoder.container(keyedBy: Keys.self)
             try box.encode("request.upload", forKey: .kind)

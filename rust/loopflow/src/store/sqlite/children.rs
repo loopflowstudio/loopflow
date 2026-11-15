@@ -268,7 +268,7 @@ impl SqliteStore {
         placement: Option<&(PathBuf, TaskPr)>,
         session: Option<&crate::session::LfSession>,
         destination: Option<&Path>,
-        receipt: Option<&super::creation::CreationIdentity>,
+        receipt: Option<&super::operations::CreationIdentity>,
     ) -> StoreResult<Task> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let me = match creation {
@@ -354,7 +354,7 @@ impl SqliteStore {
                 session_id: session.map(|s| s.id.clone()),
                 milestone: "filed".into(),
             })?;
-            super::creation::insert_in(
+            super::operations::insert_in(
                 &tx,
                 identity,
                 Some(task_id.as_str()),
@@ -406,6 +406,27 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let request = request_completion_in(&tx, task, note)?;
+        if request.is_some() {
+            super::operations::commit_current_in(
+                &tx,
+                "task.completion_requested",
+                &[task.as_str()],
+                &["planning"],
+                || Ok(serde_json::json!({"request":request})),
+            )?;
+        } else {
+            super::operations::commit_current_in(
+                &tx,
+                "task.completed",
+                &[task.as_str()],
+                &["planning"],
+                || {
+                    Ok(serde_json::to_value(
+                        task_on(&tx, task)?.ok_or(StoreError::NotFound)?,
+                    )?)
+                },
+            )?;
+        }
         tx.commit()?;
         Ok(request)
     }
@@ -454,6 +475,18 @@ impl SqliteStore {
         validate_task_project(&transaction, task)?;
         let state = super::durable::task_state_in(&transaction, &task.id)?;
         if state == TaskState::Done {
+            super::operations::commit_current_in(
+                &transaction,
+                "task.completed",
+                &[task.id.as_str()],
+                &["planning"],
+                || {
+                    Ok(serde_json::to_value(
+                        task_on(&transaction, &task.id)?.ok_or(StoreError::NotFound)?,
+                    )?)
+                },
+            )?;
+            transaction.commit()?;
             return Ok(true);
         }
         let current_request: Option<i64> = transaction.query_row(
@@ -486,6 +519,17 @@ impl SqliteStore {
             &task.id,
             &TaskEventKind::Completed {
                 summary: "Task completed".into(),
+            },
+        )?;
+        super::operations::commit_current_in(
+            &transaction,
+            "task.completed",
+            &[task.id.as_str()],
+            &["planning"],
+            || {
+                Ok(serde_json::to_value(
+                    task_on(&transaction, &task.id)?.ok_or(StoreError::NotFound)?,
+                )?)
             },
         )?;
         transaction.commit()?;
@@ -528,6 +572,13 @@ impl SqliteStore {
             )?;
         }
         let task = task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
+        super::operations::commit_current_in(
+            &tx,
+            "task.reopened",
+            &[id.as_str()],
+            &["planning", "graphs"],
+            || Ok(serde_json::to_value(&task)?),
+        )?;
         tx.commit()?;
         Ok(task)
     }

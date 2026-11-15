@@ -120,7 +120,7 @@ two. A revision-1 client's four-byte length prefix starts below `0x20`; the
 server answers it a revision-1 framed `incompatible` error carrying `instance`
 and closes. That sniff is the whole compatibility layer and goes with revision 1.
 
-Revision 6 adds snapshot stamps to the shared subscription readers and typed
+Revision 6 adds durable command admission/receipt reads and snapshot stamps to the shared subscription readers and typed
 events, alongside bulk/upload tickets and mobile access. Control messages are limited to 1 MiB; ticketed
 messages retain the shared engine's 32 MiB response limit and 64 MiB per-client
 budget, leaving headroom for other reads during one large transfer. Older
@@ -203,6 +203,38 @@ itself, without a separate clock, checkout or probe policy for each operation.
 Database-derived joins retain their transactional snapshot; external
 observations do not share that transaction.
 
+### Durable command admission
+
+`operation.submit {request_id, command}` accepts any typed `Write` and returns
+its durable `OperationReceipt` before domain execution. Creation admission still
+resolves its Git repository to preserve canonical existing fingerprints; removing
+that pre-admission wait is unfinished. Planning, checkout creation and provider
+startup run in the admitted worker.
+`operation.get {request_id}` reads or subscribes to that same receipt. Null means
+confirmed absence; an unavailable read says nothing about whether it ran.
+The command and its ID are immutable. Reusing the ID with different content is
+`conflict`. Creations use their existing request ID and receipt row.
+
+Delivery is `queued`, `dispatched`, `finished` or `uncertain`; historical creation
+rows without an envelope are `untracked`. A duplicate reads the same outcome and
+never dispatches a sent command again. Server exit after dispatch leaves the
+operation for domain inspection. There is no generic retry of uncertain effects.
+
+`commits` contains semantic stages with resource IDs, an authoritative result and
+Machine/epoch/schema/domain revision fences written in the domain transaction.
+Each receipt's monotonic `revision` orders updates within its database epoch;
+a held admission reply cannot supersede a newer receipt. Command output is
+separate: `finished` alone cannot retire an optimistic layer or
+certify provider/input readiness. Completion request, completion settlement,
+reopen, Task filing and Session input replacement currently emit stages. Other
+writers still require their domain commits before client projection cutover.
+Receipt changes wake receipt subscriptions without changing Work revisions.
+
+```sh
+lf server receipt operation-id --operation --json
+lf server receipt operation-id --operation --subscribe --json
+```
+
 Every operation names its `kind` as a dotted resource and verb, beside its
 fields. `lf/commands/read.rs` (`Read`) and `lf/commands/write.rs` (`Write`) own
 the shared kinds; `wire::ServerOperation` owns the server's own.
@@ -222,6 +254,8 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `task.runs` | `lf task runs <issue>` | read |
 | `task.wait` | `lf task wait <issue> --until <state>` | `engine::task` |
 | `task.create` | `lf task create [--session <id>] [--run] --request-id <id>` | write |
+| `operation.submit` | native command envelope | server admission, then shared write |
+| `operation.get` | `lf server receipt <request-id> --operation --json` | read/subscribe; never dispatches |
 | `creation.get` | `lf server receipt <request-id> --json` | read; no creation or launch |
 | `task.run` | `lf task run <issue>` | `engine::task` |
 | `task.ship` | `lf ship` | `engine::task` |

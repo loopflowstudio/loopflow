@@ -52,6 +52,7 @@ public typealias RegistryRunner = @Sendable (_ lfArgs: [String], _ cwd: String?)
 public enum ServedRead: Equatable, Sendable, Encodable {
     case processHistory(id: String)
     case creationGet(requestID: String)
+    case operationGet(requestID: String)
     case processList
     case desktopViewList(directory: String)
     case sessionList(directory: String, headless: Bool, after: String?, limit: Int?, task: String?)
@@ -111,6 +112,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     public var argv: [String] {
         switch self {
         case .processHistory(let id): return ["session", "history", "show", id]
+        case .operationGet(let requestID): return ["server", "receipt", requestID, "--operation", "--json"]
         case .creationGet(let requestID): return ["server", "receipt", requestID, "--json"]
         case .processList:
             return ["process", "list", "--json"]
@@ -230,6 +232,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     private var tagged: TaggedFields {
         switch self {
         case .processHistory(let id): TaggedFields("process.history", ["id": id])
+        case .operationGet(let requestID): TaggedFields("operation.get", ["request_id": requestID])
         case .creationGet(let requestID): TaggedFields("creation.get", ["request_id": requestID])
         case .processList: TaggedFields("process.list")
         case .desktopViewList(let directory): TaggedFields("desktop.view.list", ["directory": directory])

@@ -1,0 +1,14 @@
+{
+  "type": "request",
+  "id": "admit",
+  "operation": {
+    "kind": "operation.submit",
+    "request_id": "operation_fixture",
+    "command": {
+      "kind": "task.complete",
+      "directory": "/repo",
+      "issue": "LOO-1"
+    }
+  },
+  "select": null
+}

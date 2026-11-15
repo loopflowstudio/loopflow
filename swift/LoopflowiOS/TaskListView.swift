@@ -300,6 +300,9 @@ struct TaskListView: View {
 
     private func link(_ task: WorkViewPlan.Content) -> some View {
         NavigationLink { workspace(task) } label: { row(task) }
+            .simultaneousGesture(TapGesture().onEnded {
+                PerfClock.interaction(.taskSelect, .gesture, id: task.work.id)
+            })
             .listRowInsets(EdgeInsets(top: 12, leading: 20, bottom: 12, trailing: 16))
             .listRowBackground(theme.palette.background)
     }

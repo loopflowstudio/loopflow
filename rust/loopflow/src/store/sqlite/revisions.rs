@@ -51,6 +51,14 @@ impl SqliteStore {
         )?)
     }
 
+    pub(crate) fn operation_revision(&self) -> StoreResult<i64> {
+        Ok(self.conn.lock().expect("store mutex poisoned").query_row(
+            "SELECT revision FROM store_revisions WHERE domain='operations'",
+            [],
+            |row| row.get(0),
+        )?)
+    }
+
     /// Workflow observation excludes transcript, usage and ordinary tool traffic.
     pub(crate) fn task_update_revision(&self) -> StoreResult<i64> {
         Ok(self.conn.lock().expect("store mutex poisoned").query_row(
@@ -114,7 +122,6 @@ mod tests {
     /// Tables no workspace surface reads. A new table belongs here or in a
     /// domain; `session_events` is covered except for transcript and usage rows.
     const NEVER_DISPLAYED: &[&str] = &[
-        "creation_receipts",
         "client_store_epoch",
         "access_profiles",
         "pm_project_name_cutover",

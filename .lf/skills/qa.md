@@ -158,11 +158,17 @@ Run the app's bundled `lf` with the world's `env.json` variables and
   `reason` are the window's work status and `list` the sidebar rows.
 - To run beside another QA app, copy the installed bundle, set its own
   `CFBundleIdentifier` with `plutil -replace`, `codesign -f --deep -s -`, and
-  `open -n --env …` it with `LF_DESKTOP` set to that ID. Desktop then registers
-  the world's server under real launchd with the login `PATH`, so its holder runs
-  the account's real `claude`, not the world's stand-in. OSC 7501 reports
-  written to the conversation's tty still drive activity; avoid Graph runs there.
-  Unregister the copy with `lsregister -u` afterwards.
+  `open -n --env …` it with `LF_DESKTOP` set to that ID. Conversations the app
+  opens run the account's real `claude` (with the world's `CLAUDE_CONFIG_DIR`, so
+  at sign-in) even when you start the copy's bundled `lf server run` first; a CLI
+  `lf checkout` keeps the world's stand-in. OSC 7501 reports written to the
+  conversation's tty still drive activity; avoid Graph runs there. Stop the
+  holder's children by the holder's PID, then unregister the copy with `lsregister -u`.
+- On the Working Tasks Dashboard (`lf desktop working-tasks`),
+  `lf desktop move -p <task> --destination <task>` moves a tile and writes the
+  shared `task_orders`; Wave tiles are not enterable there, so the Wave board has
+  no socket route. A locked screen also denies accessibility reads
+  (`AXIsProcessTrusted` false), so header text is left to headless view tests.
 - To delay or break Work reads, SIGSTOP the private server. Desktop registers
   it under launchd, so `kill -9` restarts it within seconds; for a sustained
   outage boot out the `server.plist` label, then `lf server run` to recover.

@@ -8,6 +8,65 @@ table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:4p
 img{max-width:100%;border:1px solid #ccc;margin:.5em 0}.ok{color:#176b2c}.warn{color:#9a5b00}
 </style></head><body>
 <h1>LOO-696 QA: one Rust source per Task concept</h1>
+<h2>Round 3 (November 14, merged HEAD <code>5266e24ac</code>, after main #1861/#1945)</h2>
+<p>Dev app installed from this checkout and copied to its own bundle ID (<code>com.loopflow.mac.qa696</code>); its bundled
+<code>lf 0.16.0+5266e24ac</code> ran every command and the private <code>lf server run</code>. An <code>lf-world one-task</code> world
+plus two Tasks moved into its Wave. The screen was locked (<code>CGSSessionScreenIsLocked</code>), so <b>no screenshots</b> and no
+accessibility reads (<code>AXIsProcessTrusted</code> false): the window was read through <code>lf desktop state/ls --json</code> only.</p>
+
+<h3>A. Lifecycle across unassign, reclaim and planning completion</h3>
+<table><tr><th>step</th><th>Task</th><th>planning</th><th>lifecycle</th><th>section</th><th>selection_states</th></tr>
+<tr><td>start</td><td>Alpha 002131 (Graph at demo)</td><td>unstarted</td><td>active</td><td>working</td><td>open, active, working</td></tr>
+<tr><td><code>lf checkout</code></td><td>Bravo afa1c6</td><td>unstarted</td><td>idle</td><td>working</td><td>open, idle, working</td></tr>
+<tr><td><code>lf task unassign</code> Alpha</td><td>Alpha</td><td>unstarted</td><td>active</td><td>backlog</td><td>active, backlog</td></tr>
+<tr><td><code>lf task complete</code>, never started</td><td>Charlie cf3dfe</td><td>completed</td><td>done</td><td>—</td><td>done (in <code>state:done</code>)</td></tr>
+</table>
+<p>Alpha's page was showing when it was unassigned. The window stayed on it, refreshed its reading (<code>roadmap_generated_at</code>
+moved past the unassign), and the page's action stayed <code>run</code>, not Start. The sidebar dropped Alpha to <code>[afa1c6]</code>;
+<code>lf task claim</code> put it back in its saved place. The header text itself was not readable here.</p>
+
+<h3>B. Shared order: sidebar, Working Tasks tiles, Wave board, CLI, server</h3>
+<pre>lf desktop move -p afa1c6 --destination 002131          (sidebar)
+  task_orders  [afa1c6, 002131]   sidebar [afa1c6, 002131]   lf task list [afa1c6, 002131, cf3dfe]
+  plan board search: afa1c6 idle working, 002131 active working, cf3dfe unstarted backlog
+lf desktop working-tasks; lf desktop move -p 002131 --destination afa1c6   (Dashboard tile)
+  tiles [002131, afa1c6, wave]   sidebar [002131, afa1c6]   task_orders, plan board, lf task list: 002131 first</pre>
+<p>A tile drag on the Working Tasks Dashboard moves the shared order, and every ordinary list follows. Server <code>plan.list</code> over the
+socket (desktop hello) returned the same rows in the same order with <code>lifecycle</code> and <code>selection_states</code>.
+Quitting and relaunching the app kept the order, the selected Task and both states.</p>
+
+<h3>C. Activity reports, including a server outage</h3>
+<table><tr><th>report on Bravo's tty</th><th>Bravo selection_states</th><th><code>state:busy</code></th><th><code>state:available</code></th></tr>
+<tr><td>none (Alpha's open conversation has none either)</td><td>open, idle, working</td><td>—</td><td>—</td></tr>
+<tr><td>working</td><td>+ busy</td><td>Bravo</td><td>—</td></tr>
+<tr><td>idle</td><td>+ available</td><td>—</td><td>Bravo</td></tr>
+<tr><td>idle written while the server was SIGSTOPped 25 s</td><td>+ available after SIGCONT</td><td>—</td><td>Bravo</td></tr>
+</table>
+<p>During the outage the window kept its rows (sidebar <code>[002131, afa1c6]</code>, nothing emptied). It still reported
+<code>reading: current</code> after 25 s of a frozen server: it has no way to tell a frozen server from a quiet one that soon. That
+freshness rule is not this branch's; noted, not changed.</p>
+
+<h3>D. Headless production-view checks</h3>
+<pre>scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter 'TaskConceptTests|WorkNavigationTests|WaveStandupTests|
+  TaskRowMetadataTests|ProgramStatusTests|TaskHistoryFilterTests|TaskStatusTests|NowProjectionTests|DesktopHeadlessTests'
+✔ Test run with 117 tests in 9 suites passed after 15.220 seconds.</pre>
+
+<h3>Fixed</h3>
+<p>No product code. <code>.lf/skills/qa.md</code>: the app-copy note wrongly blamed launchd for the real <code>claude</code>; here the server was
+started first and Desktop-opened conversations still ran the account's <code>claude</code> 2.1.325 on the world's private config (at sign-in),
+while a CLI <code>lf checkout</code> used the stand-in. It now says so, and records the Working Tasks tile move, the missing Wave-board route
+and the locked-screen accessibility limit.</p>
+
+<h3>Round 3 result</h3>
+<p><b>Works</b> on the merged HEAD: lifecycle survives unassign/reclaim and conflicting planning text in CLI, server and the window's Task reading;
+a never-started completed Task is Done; one order moves the sidebar, Working Tasks tiles, Wave board and CLI together and survives relaunch;
+Busy/Available follow reports, including a report sent during an outage.</p>
+<p><b>Not reached:</b> any visible text (locked screen, no accessibility): the header label, the Backlog page's offers and the row/pane wording
+rest on the headless suites above and round 2's screenshots. The Wave board view in the window (no socket route). Two Sessions on one Task
+reporting Busy and Available at once (the shared fixture covers it). Auto-Ship Restarting/Unassigned live.</p>
+<p><b>Still wrong, worst first:</b> nothing in this branch's scope. Outside it: Desktop launches the account's real <code>claude</code> from a
+world app; <code>reading: current</code> holds through a short frozen-server outage.</p>
+
 <h2>Round 2 (November 14, after the wording correction and the <code>state:open</code> compression)</h2>
 <p>Branch build with the uncommitted compression (<code>SelectionWork.open</code> → shared state set). An <code>lf-world one-task</code>
 world plus one added Task, opened in a copy of the Dev app under its own bundle ID (<code>com.loopflow.mac.qa696</code>), so it could not

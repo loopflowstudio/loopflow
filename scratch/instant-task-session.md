@@ -1,7 +1,7 @@
 # LOO-906: immediate interactions across Desktop and mobile
 
-Implementation continues 2026-11-15 from checkpoint `aeb4ed3b2b` on origin/main
-`19872301e3`. Supersedes the Desktop-only delivery
+Implementation continues 2026-11-15 from checkpoint `a5fb642205`, merged with
+origin/main `9cafc410ee`. Supersedes the Desktop-only delivery
 boundary. No shipping or merge decision is recorded. Placement remains this Task;
 no Wave is selected.
 
@@ -622,9 +622,6 @@ After an epoch change, an old frame and a lost-write recovery reply arrive; neit
 may restore the old base or trigger a second submission. These refine the existing
 cache/overlay design and require no new product choice.
 
-The launch checkpoint and its earlier 23-case result are recorded at
-`9387f63e59ee91e8496e64b9304c73f152da589e:scratch/instant-task-session.md`.
-
 ## Current implementation cut
 
 Protocol revision 6 provides stamped subscriptions, Git-free admission and one
@@ -652,8 +649,8 @@ Client recovery still specializes creation; this server slice does not establish
 both clients' completion presentation or effect acknowledgment.
 
 Remaining, in order: all mutation-family recovery and fences (remote/detached and
-external file/config confirmation included); exhaustive effect/stage registry and
-membership vocabulary; transactional confirmed cache and ordered effect/query
+external file/config confirmation included); exhaustive effect/stage registry and a
+declarative membership plan over #1947's `selection_states`; transactional confirmed cache and ordered effect/query
 projection; both clients' interaction/retained-occurrence migration and deletion
 of checkpoint/presentation exceptions; epoch reset on historical restoration;
 held/reordered/crash and native acceptance. Dispatched errors remain uncertain;
@@ -738,11 +735,18 @@ remains open. The
 Swift receipt mirror and exact-query fence comparison are shared with iOS; no
 client projection cutover is claimed.
 
-Previous 50-Desktop/15-Rust/one-iOS read-contract checks are recoverable at
-`950b83a138e2c3894f58ad260cad4bfd9d3fe839:scratch/instant-task-session.md`.
-They do not cover the new receipt cut.
+## Upstream absorbed (origin/main `9cafc410ee`)
 
-## Upstream absorbed (origin/main `19872301e3`)
+- #1947 (LOO-696) supplies the Rust-derived Task membership vocabulary. Every Task
+  row requires `lifecycle` and `selection_states`
+  (`work::selection::SelectionState`: Open/Available/Busy/Blocked, lifecycle
+  Unstarted…Shipping, section Backlog/Working/Autonomous/Done), computed by
+  `store::sqlite::selections::task_selection_states` and decoded as
+  `WaveWorkMap.selectionStates`. Projected effects transition these states (Complete:
+  Working→Done) instead of a Swift status resolver. Still missing: the declarative
+  selection/group/sort plan over them, and each state's fact domains for coverage.
+  Sidebar drag order now carries through ordinary lists; Dashboard arrangements,
+  search and Done keep their own order, so projected removal keeps that order.
 
 - #1944 (LOO-912) closes an unfinished terminal paste when an input view detaches,
   is replaced or loses control. Retained-occurrence navigation must not detach
@@ -801,6 +805,14 @@ been established. No leaked-handle diagnosis or repair is claimed here.
 - `cargo fmt` and `git diff --check`: passed for the recovery cut.
 - `cargo nextest run -p loopflow --lib --build-jobs 4 --success-output immediate -E 'test(engine::operation::tests::completion_recovery_never_reissues) | test(store::sqlite::operations::tests::periodic_settlement) | test(store::sqlite::operations::tests::completion_and_reopen) | test(store::sqlite::operations::tests::receipt_reads_and_duplicate_admission)'`: 4 passed on final sources; `/tmp/loo-906-completion-final.log`. Restart/real continuation, lost output, no-request uncertainty, withdrawn/newer requests and reopen recovery pass. No LEAK reported. At 10k Tasks/receipts, all traced queries/updates avoid table scans (only per-receipt JSON iteration); 20-sample diagnostic P95 0.062 ms for lookup/admission and 0.098 ms for exact-request settlement. These loaded-host timings are not native baselines; macOS ld still warns about large `__eh_frame`.
 - `uv run python scripts/desktop_performance.py preflight --output /tmp/loo-906-recovery-preflight`: rejected at 2026-11-15T08:46:01Z, background CPU 826.5%, one-minute load 44.25; raw `/tmp/loo-906-recovery-preflight/preflight.json`. Native trials remain unavailable on this host.
+
+Realign after merging `9cafc410ee`: #1947 moved `recordPaneFailure` to take a
+`SessionItem`; the one stale branch test call is repaired. `swift build
+--build-tests --package-path swift -Xswiftc -gnone` passed;
+`scripts/test_desktop.sh --skip-build -Xswiftc -gnone --filter
+'WorkDestinationTests|ClientWorkStoreTests|WorkNavigationTests|TaskConceptTests'`
+passed 144; `cargo nextest run -p loopflow --test integration --lib -E
+'test(dto_fixtures::) | test(ops::human_session::)'` passed 103, no LEAK.
 
 Gate owns wider store/transport/lifecycle, DTO integration, documented-command,
 packaging and clippy checks. Implementation still owns a valid benchmark baseline

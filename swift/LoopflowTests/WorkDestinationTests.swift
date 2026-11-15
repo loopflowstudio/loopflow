@@ -306,7 +306,7 @@ struct WorkDestinationTests {
         while !(await barrier.contains("layout")) { await Task.yield() }
         if attachmentFails {
             let launch = try #require(model.navigation.startingTask)
-            store.recordPaneFailure(record.id, reason: "Temporary attachment failure")
+            store.recordPaneFailure(try #require(store.sessions.first { $0.id == record.id }), reason: "Temporary attachment failure")
             try await waitForOpening(model)
             #expect(launch.error == "Temporary attachment failure")
             #expect(!launch.canEdit)

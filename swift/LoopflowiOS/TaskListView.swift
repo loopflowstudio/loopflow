@@ -185,17 +185,15 @@ struct TaskListView: View {
     var body: some View {
         NavigationStack(path: $path) {
             List {
-                ForEach(client.interaction.creations) { operation in
+                ForEach(client.interaction.listedCreations) { operation in
                     Button { selectedOperation = operation; path = [.operation(operation.id)] } label: {
                         VStack(alignment: .leading) {
                             Text(operation.request).lineLimit(2)
-                            Text(operation.error ?? (operation.saved ? "Saved request" : "Saving request…")).font(Typography.caption(13))
+                            Text(operation.presentation().status).font(Typography.caption(13))
                         }
                     }
                 }
-                ForEach(client.interaction.failures.filter { failure in
-                    !client.interaction.creations.contains { $0.id == failure.id }
-                }) { failure in
+                ForEach(client.interaction.failures) { failure in
                     VStack(alignment: .leading) {
                         Text(failure.message)
                         Button("Retry Complete") { client.interaction.retry(failure.id) }

@@ -117,6 +117,23 @@ final class RemoteMobileClient: MobileTaskCreationClient {
             })
     }
 
+    func retainCreationSource(draftID: String?, before: Date) async throws {
+        try await journal.retainCreationSource(draftID: draftID, before: before)
+    }
+
+    func releaseCreationSources(requests: [String], draftID: String?, machine: String?) async throws {
+        guard let machine, machine != savedMachine.machineID else {
+            try await journal.releaseCreationSources(requests: requests, draftID: draftID)
+            return
+        }
+        try await ClientWorkStore.releaseCreationSources(requests: requests, draftID: draftID,
+            directory: URL.applicationSupportDirectory.appending(path: "submissions-\(machine)"),
+            prepareDirectory: { directory in
+                try FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+                    ofItemAtPath: directory.path)
+            })
+    }
+
     func importLegacyCreations(_ values: [LegacyOperation]) async throws {
         for (machine, records) in Dictionary(grouping: values, by: { $0.record.destination }) {
             if machine == savedMachine.machineID { try await journal.importLegacy(records) }

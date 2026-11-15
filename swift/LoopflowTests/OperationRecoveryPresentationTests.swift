@@ -71,16 +71,18 @@ struct OperationRecoveryPresentationTests {
         let record = try await submissions.record(.taskCreate(directory: "/repo", requestID: "same", title: nil,
             request: "Original request", wave: nil, graph: nil, session: nil, run: true), requestID: "same")
         _ = try await submissions.reconcile(record)
-        let recovery = CreationRecovery(submissions: submissions)
-        await recovery.refresh()
-        #expect(recovery.items.first?.complete == true)
-        #expect(recovery.items.first?.text.contains("Planning confirmation unavailable") == false)
-        await recovery.presented([record.id])
+        let owner = WorkInteraction(machine: "machine", store: submissions)
+        defer { owner.shutdown() }
+        owner.start()
+        await owner.refreshFromStore()
+        #expect(owner.listedCreations.count == 1)
+        // Acknowledge by the actual bound resource; fixtures own their identity.
+        if let id = owner.creations.first?.taskID { try await owner.presented(.task(id)) }
         for await _ in await submissions.changes() {
             if await !submissions.isRecovering(record.id) { break }
         }
-        await recovery.refresh()
-        #expect(recovery.items.isEmpty)
+        await owner.refreshFromStore()
+        #expect(owner.listedCreations.isEmpty)
         #expect(try await submissions.pending().isEmpty)
         #expect(server.watchCount == 0)
         #expect(server.submissions.isEmpty)

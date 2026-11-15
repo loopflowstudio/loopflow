@@ -100,9 +100,7 @@ import ViewInspector
             #expect(promoted.taskPrimary)
             #expect(await source.bindCount == (existing ? 1 : 0))
             if !existing {
-                let requestID = try #require(await source.creationID)
-                #expect(CreationRecovery.shared.requests(for: .task("task-exact")).contains(requestID))
-                await CreationRecovery.shared.presented([requestID])
+                #expect(await source.creationID != nil)
             }
         }
     }

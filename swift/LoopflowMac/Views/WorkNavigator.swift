@@ -67,13 +67,7 @@ struct WorkNavigator: View {
                 Text(error).font(Typography.body(11)).foregroundStyle(palette.warning).padding(10)
             }
             ForEach(model.pendingCreations) { operation in
-                Button { model.selectCreation(operation) } label: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(operation.receipt?.task.title ?? operation.request).lineLimit(2)
-                        Text(operation.error ?? (operation.saved ? "Saved request" : "Saving request…")).font(Typography.body(11))
-                            .foregroundStyle(palette.textSecondary)
-                    }
-                }.buttonStyle(.plain).padding(10)
+                PendingCreationRow(model: model, operation: operation)
             }
             ForEach(model.completionFailures) { failure in
                 VStack(alignment: .leading, spacing: 4) {
@@ -928,5 +922,30 @@ struct WorkReadStatus: View {
                     .accessibilityIdentifier("work-retry")
             }
         }.font(Typography.body(11)).padding(10).accessibilityIdentifier("work-status")
+    }
+}
+
+/// The request retains its recovery controls even after native input is ready.
+struct PendingCreationRow: View {
+    let model: WorkModel
+    let operation: CreationOperation
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Button { model.selectCreation(operation) } label: {
+                Text(operation.receipt?.task.title ?? operation.request).lineLimit(2)
+            }.buttonStyle(.plain)
+            let presentation = operation.presentation()
+            Text(presentation.status).font(Typography.body(11)).foregroundStyle(palette.textSecondary)
+            CreationRequestActions(presentation: presentation) { action in
+                switch action {
+                case .edit: model.editCreation(operation.id)
+                case .tryAgain, .check: model.retryCreation(operation.id)
+                case .open: Task { await model.openCreatedTask(operation) }
+                case .inspect: Task { await model.inspectedCreation(operation.id) }
+                }
+            }.controlSize(.small)
+        }.padding(10)
     }
 }

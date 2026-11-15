@@ -1720,7 +1720,7 @@ struct SessionsContentView: View {
                     // The main pane alone: the sidebar stays put when a Task opens.
                     mainPaneHeader
                     mainPane
-                    CreationRecoveryView(excluding: navigation.startingTask?.id)
+                    CreationRecoveryView()
                 }
             }
         }
@@ -1908,7 +1908,9 @@ struct SessionsContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipShape(PaneGeometry.workspaceShape)
         .accessibilityIdentifier("work-workspace-\(key.id)")
-        .modifier(CreationPresentation(recovery: .shared, resource: .task(key.id), visible: active && task != nil && navigation.startingTask == nil))
+        .task(id: active && task != nil && navigation.startingTask == nil ? model.creationPresentationRequests(taskID: key.id) : []) {
+            if active && task != nil && navigation.startingTask == nil { await model.presentedTaskResult(key.id) }
+        }
         .task(id: active && !model.preparingCreation ? navigation.startingTask?.id : nil) {
             if active { await model.mountedCreation(taskID: key.id) }
         }

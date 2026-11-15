@@ -235,7 +235,14 @@ struct WorkDestinationTests {
         #expect(model.taskOpening?.status == .usable)
         #expect(!model.preparingCreation)
         #expect(model.navigation.startingTask === operation, "Native readiness does not replace the operation route")
+        server.publish(try creationFrame(id: operation.id, delivery: "finished", revision: 3,
+            session: record.id, diagnostic: "Planning sync failed", taskID: task.id, identifier: task.task.identifier))
+        await waitForCreation(operation) { operation.error != nil }
         await model.mountedCreation(taskID: task.id)
+        let recoveryRow = try PendingCreationRow(model: model, operation: operation).inspect()
+        _ = try recoveryRow.find(button: "Check request")
+        _ = try recoveryRow.find(button: "Inspect")
+        #expect(model.completionFailures.isEmpty)
         #expect(server.submissions.isEmpty)
         let pending = try await disk.pending()
         let recovery = try await disk.recovery(operation.id)

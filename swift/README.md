@@ -78,7 +78,7 @@ Press **⌘N**, describe the work—for example, “Fix the sidebar search”—
 **⌘Return** or **Start**. Keep the Task in the current repository or choose a
 Wave and, optionally, a different Workflow before starting. The sheet initially
 follows the selected Wave and the displayed scope default. Start is disabled
-until the request has text.
+until the request has text and a repository is resolved.
 
 The sheet closes immediately into the new conversation, with your request and
 **Starting conversation…** visible while its workspace and provider prepare.
@@ -88,10 +88,12 @@ completion leaves your newer selection alone. Filed identity, Graph admission,
 native attachment and Work query freshness remain separate facts. A stale query
 cannot replace the operation's saved outcome.
 
-Launch errors appear in the conversation. **Retry recovery** uses the original
-request ID, including after a local save failure. **Edit request** returns unsaved
-words to the editor. If the Task exists but its
-conversation could not open, retry opening that conversation. For an unanswered
+Launch errors appear in the conversation. After a local save failure, **Try again**
+retries the same request ID and **Edit request** returns its words to the editor.
+Once saved, **Check request** recovers the original result. **Inspect** shows its
+receipt when recovery needs attention. **Retry opening** reopens the recorded
+Session after attachment fails. Opening the result from its ordinary Task row also
+clears the redundant request row; unresolved recovery stays visible. For an unanswered
 submission, use [creation recovery](../docs/server.md#recover-a-submitted-creation)
 before creating another Task with the same request.
 

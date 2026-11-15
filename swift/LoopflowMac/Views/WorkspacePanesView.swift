@@ -433,6 +433,16 @@ struct SessionPaneView: View {
 
     private var showsStrip: Bool { item != nil || (store.visibleLayout?.allPanes.count ?? 0) > 1 }
 
+    private var creationRequests: [String] {
+        guard model.navigation.startingTask == nil, let item else { return [] }
+        return model.creationPresentationRequests(sessionID: item.id)
+    }
+
+    private func presentCreationResult() async {
+        guard model.navigation.startingTask == nil, let item else { return }
+        await model.presentedSessionResult(item.id)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             if showsStrip {
@@ -466,6 +476,7 @@ struct SessionPaneView: View {
         .accessibilityLabel("\(_title), \(isFocused ? "active" : "open")")
         .accessibilityIdentifier(item.map { "session-pane-\($0.id)" } ?? "session-pane-empty")
         .modifier(CreationPresentation(recovery: .shared, resource: .session(item?.id ?? ""), visible: item != nil))
+        .task(id: creationRequests) { await presentCreationResult() }
         .alert("Could not change pane", isPresented: Binding(
             get: { shellError != nil }, set: { if !$0 { shellError = nil } }
         )) {

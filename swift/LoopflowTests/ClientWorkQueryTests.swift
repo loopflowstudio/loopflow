@@ -927,7 +927,7 @@ final class HeldIntentDisk: @unchecked Sendable {
     func release() { semaphore.signal() }
 }
 
-private final class IntentDiskFault: @unchecked Sendable {
+final class IntentDiskFault: @unchecked Sendable {
     private let lock = NSLock()
     private var failing = true
     func check() throws {

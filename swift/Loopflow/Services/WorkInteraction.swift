@@ -45,6 +45,8 @@ public final class WorkInteraction {
     @ObservationIgnored private var reads: [String: ServedRead] = [:]
     @ObservationIgnored private var bases: [String: ClientWorkQuery] = [:]
     @ObservationIgnored private var intents: [Intent] = []
+    @ObservationIgnored private var failedDeliveries: Set<String> = []
+    @ObservationIgnored private var failedCreations: [String: Intent] = [:]
     @ObservationIgnored private var revision: UInt64 = 0
     @ObservationIgnored private var changes: Task<Void, Never>?
     @ObservationIgnored private var saving: Task<Void, Never>?
@@ -127,7 +129,27 @@ public final class WorkInteraction {
         return operation
     }
 
-    public func presented(_ id: String) async throws { try await store.presented(id) }
+    public var listedCreations: [CreationOperation] { creations.filter(\.isListed) }
+
+    public enum Resource: Hashable {
+        case task(String), session(String)
+    }
+
+    public func presented(_ id: String) async throws {
+        try await store.presented(id)
+        await refreshFromStore()
+    }
+
+    /// Every mounted route acknowledges the same result, including ordinary rows.
+    public func presented(_ resource: Resource) async throws {
+        let ids = creations.filter { operation in
+            switch resource {
+            case .task(let id): operation.taskID == id
+            case .session(let id): operation.sessionID == id
+            }
+        }.map(\.id)
+        for id in ids { try await presented(id) }
+    }
 
     private func prune() {
         let pinned = Set(leases.values.map(\.key))
@@ -173,17 +195,26 @@ public final class WorkInteraction {
     }
 
     public func canEditCreation(_ id: String) -> Bool {
-        failures.contains { $0.id == id && !$0.saved } && creations.contains { $0.id == id }
+        creations.first { $0.id == id }?.presentation().actions.contains(.edit) == true
     }
 
     public func editCreation(_ id: String, edit: (CreationOperation) -> Void) {
         guard canEditCreation(id), let operation = creations.first(where: { $0.id == id }) else { return }
-        failures.removeAll { $0.id == id }
+        failedCreations[id] = nil
         creations.removeAll { $0.id == id }
         edit(operation)
     }
 
     public func retry(_ id: String) {
+        if let operation = creations.first(where: { $0.id == id }) {
+            operation.clearFailure()
+            failedDeliveries.remove(id)
+            if let intent = failedCreations.removeValue(forKey: id) {
+                intents.append(intent)
+                enqueue(intent)
+            } else if let record = saved.first(where: { $0.id == id }) { deliver(record) }
+            return
+        }
         guard let failure = failures.first(where: { $0.id == id }) else { return }
         if failure.saved, let record = failure.record {
             failures.removeAll { $0.id == id }
@@ -224,8 +255,12 @@ public final class WorkInteraction {
                 deliver(record)
             } catch {
                 intents.removeAll { $0.id == intent.id }
-                failures.append(Failure(record: intent.record, message: error.localizedDescription, saved: false, id: intent.id, intent: intent))
-                creations.first { $0.id == intent.id }?.fail(error.localizedDescription)
+                if let operation = creations.first(where: { $0.id == intent.id }) {
+                    failedCreations[intent.id] = intent
+                    operation.fail(error.localizedDescription)
+                } else {
+                    failures.append(Failure(record: intent.record, message: error.localizedDescription, saved: false, id: intent.id, intent: intent))
+                }
                 publish()
             }
         }
@@ -235,6 +270,7 @@ public final class WorkInteraction {
         guard machine != nil, let records = try? await store.pending() else { return }
         for record in records where record.destination == machine {
             guard deliveries[record.id] == nil, !failures.contains(where: { $0.id == record.id }),
+                  !failedDeliveries.contains(record.id),
                   let command = try? JSONDecoder().decode(JSONValue.self, from: record.payload),
                   case .object(let fields) = command, (fields["kind"] == .string("task.complete") || fields["kind"] == .string("task.create")) else { continue }
             deliver(record)
@@ -253,8 +289,11 @@ public final class WorkInteraction {
                 try await store.observeSaved(record)
             } catch {
                 guard !Task.isCancelled else { return }
-                self?.creations.first { $0.id == record.id }?.fail(error.localizedDescription)
-                self?.failures.append(Failure(record: record, message: error.localizedDescription, saved: true, id: record.id, intent: nil))
+                if let operation = self?.creations.first(where: { $0.id == record.id }) {
+                    self?.failedDeliveries.insert(record.id)
+                    operation.fail(error.localizedDescription)
+                }
+                else { self?.failures.append(Failure(record: record, message: error.localizedDescription, saved: true, id: record.id, intent: nil)) }
             }
         }
     }
@@ -306,6 +345,7 @@ public final class WorkInteraction {
         }
         intents.removeAll { savedIDs.contains($0.id) || $0.savedRevision.map { $0 <= update.revision } == true }
         saved = update.records
+        failedDeliveries.formIntersection(savedIDs)
         for value in update.creations {
             let operation: CreationOperation
             if let existing = creations.first(where: { $0.id == value.record.id }) { operation = existing }
@@ -317,7 +357,7 @@ public final class WorkInteraction {
         }
         creations.removeAll { operation in
             !savedIDs.contains(operation.id) && !intents.contains(where: { $0.id == operation.id })
-                && !failures.contains(where: { $0.id == operation.id })
+                && failedCreations[operation.id] == nil
         }
         for key in update.requested where reads[key] != nil {
             bases[key] = update.queries[key]

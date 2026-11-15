@@ -108,7 +108,7 @@ extension ClientWorkQueryTests {
         try database.presented(original.id)
         try database.importLegacy([LegacyOperation(record: original, outcome: outcome)])
         XCTAssertTrue(try database.pending().isEmpty, "Repeating import after retirement cannot resurrect a request")
-        XCTAssertEqual(try database.state(original.id)?.receipt, receipt)
+        XCTAssertNil(try database.state(original.id), "A retired identity carries no receipt or authored payload")
         let imported = try record("legacy")
         try database.importLegacy([LegacyOperation(record: imported, outcome: outcome)])
         XCTAssertEqual(try ClientWorkDatabase(directory: directory).state(imported.id)?.sentEpoch, "")
@@ -190,6 +190,8 @@ extension ClientWorkQueryTests {
         let operation = owner.createTask(request: "Exact unsaved words", directory: "/original") { _ in }
         await owner.persistPending()
         XCTAssertFalse(operation.saved)
+        XCTAssertEqual(operation.presentation().actions, [.tryAgain, .edit])
+        XCTAssertTrue(owner.failures.isEmpty, "A creation has one failure presentation")
         XCTAssertTrue(owner.canEditCreation(operation.id))
         var edited: CreationOperation?
         owner.editCreation(operation.id) { edited = $0 }
@@ -198,6 +200,57 @@ extension ClientWorkQueryTests {
         XCTAssertEqual(edited?.destination, "machine")
         XCTAssertTrue(owner.creations.isEmpty)
         XCTAssertTrue(owner.failures.isEmpty)
+    }
+
+    func testShownFiledResultHidesNormalPreparationAndReappearsIfAdmissionFails() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let server = CreationMachine()
+        let disk = ClientWorkStore(directory: root, machine: { "machine" }, read: { _ in "null" },
+            observe: { server.observe($0) }, send: { server.send($0) })
+        let owner = WorkInteraction(machine: "machine", store: disk)
+        defer { owner.shutdown(); server.finish() }
+        let operation = owner.createTask(request: "Original words", directory: "/repo") { _ in }
+        await owner.persistPending()
+        var observations = server.observations.makeAsyncIterator()
+        _ = await observations.next()
+        server.publish(try creationFrame(id: operation.id))
+        await waitForCreation(operation) { operation.receipt != nil }
+        XCTAssertTrue(operation.presentation().actions.isEmpty, "Normal Graph preparation needs no recovery controls")
+        try await owner.presented(.task("created"))
+        XCTAssertTrue(owner.listedCreations.isEmpty)
+        let pending = try await disk.pending()
+        XCTAssertFalse(pending.isEmpty, "The domain observer outlives its redundant prompt")
+        server.publish(try creationFrame(id: operation.id, delivery: "uncertain", revision: 2, diagnostic: "Admission failed"))
+        await waitForCreation(operation) { operation.error != nil }
+        XCTAssertEqual(owner.listedCreations.map(\.id), [operation.id])
+        XCTAssertEqual(operation.presentation().actions, [.check, .inspect])
+        XCTAssertTrue(server.submissions.isEmpty)
+    }
+
+    func testOrdinaryTaskPresentationHidesRequestAcrossRestartWithoutResolvingPreparation() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let server = CreationMachine()
+        let disk = ClientWorkStore(directory: root, machine: { "machine" }, read: { _ in "null" },
+            observe: { server.observe($0) }, send: { server.send($0) })
+        let owner = WorkInteraction(machine: "machine", store: disk)
+        defer { owner.shutdown(); server.finish() }
+        let operation = owner.createTask(request: "Original words", directory: "/repo") { _ in }
+        await owner.persistPending()
+        var observations = server.observations.makeAsyncIterator()
+        _ = await observations.next()
+        server.publish(try creationFrame(id: operation.id, delivery: "finished", session: "original-session"))
+        await waitForCreation(operation) { operation.receipt != nil }
+        XCTAssertEqual(owner.listedCreations.count, 1)
+        try await owner.presented(.task("created"))
+        XCTAssertTrue(owner.listedCreations.isEmpty)
+        let restarted = WorkInteraction(machine: "machine", store: disk)
+        defer { restarted.shutdown() }
+        restarted.start()
+        await restarted.refreshFromStore()
+        XCTAssertTrue(restarted.listedCreations.isEmpty)
+        XCTAssertTrue(server.submissions.isEmpty)
     }
 
     func testSubmittedDraftIdentitySurvivesRetirementAndRejectsASecondCommand() throws {
@@ -219,6 +272,11 @@ extension ClientWorkQueryTests {
         XCTAssertTrue(try restarted.draftSubmitted("original-editor-version"))
         XCTAssertThrowsError(try restarted.save(record("duplicate")))
         XCTAssertTrue(try restarted.pending().isEmpty)
+        XCTAssertNil(try restarted.state("original"), "Retirement removes the authored payload")
+        try restarted.save(record("original"))
+        XCTAssertTrue(try restarted.pending().isEmpty, "A surviving source cannot replay the retired identity")
+        try restarted.retainCreationSource(draftID: "new-editor-version", before: Date())
+        XCTAssertFalse(try restarted.draftSubmitted("original-editor-version"), "Rewritten sources release their compact identity")
     }
 
 }

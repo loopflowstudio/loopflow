@@ -145,68 +145,49 @@ struct MobileCreationConversation: View {
     let operation: CreationOperation
     let theme: ThemeDefinition
     let onEdit: (CreationOperation) -> Void
-    @State private var task: WorkViewPlan.Content?
-    @State private var error: String?
     @State private var reply = ""
-    @State private var attempt = 0
 
     var body: some View {
         Group {
-            if let task {
-                TaskWorkspaceView(client: client, task: task, theme: theme, draft: $reply)
-                    .task { try? await client.interaction.presented(operation.id) }
+            if let session = operation.sessionID, operation.destination == client.savedMachine.machineID {
+                VStack(spacing: 0) {
+                    SessionView(client: client, sessionID: session,
+                        title: operation.receipt?.task.title ?? "New Task", theme: theme, draft: $reply)
+                        .id(session)
+                        .task { try? await client.interaction.presented(.session(session)) }
+                    if operation.presentation().status != "Starting conversation…" {
+                        recoveryControls.padding()
+                    }
+                }
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
                         Text(operation.request).textSelection(.enabled)
-                        if let receipt = operation.receipt {
-                            Text("\(receipt.task.identifier) · \(receipt.task.title)")
-                        }
-                        Text(error ?? operation.error ?? "Starting conversation…")
-                        if let evidence = operation.evidence {
-                            DisclosureGroup("Receipt") {
-                                Text(String(decoding: (try? JSONEncoder().encode(evidence)) ?? Data(), as: UTF8.self))
-                                    .textSelection(.enabled)
-                            }
-                        } else if let legacy = operation.legacyOutcome {
-                            DisclosureGroup("Saved outcome") {
-                                Text(String(decoding: (try? JSONEncoder().encode(legacy)) ?? Data(), as: UTF8.self))
-                                    .textSelection(.enabled)
-                            }
-                        }
-                        ForEach(operation.recovery?.messages ?? [], id: \.self) { Text($0) }
-                        if client.interaction.canEditCreation(operation.id) {
-                            Button("Edit request") { onEdit(operation) }
-                        }
-                        if operation.sessionID != nil {
-                            Button("Retry opening") { attempt += 1 }
-                        }
-                        Button("Check status") { client.interaction.retry(operation.id) }
+                        recoveryControls
                     }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .navigationTitle("New Task")
             }
         }
         .onAppear { PerfClock.interaction(.taskCreate, .contentMounted, id: operation.id) }
-        .task(id: "\(operation.sessionID ?? ""):\(operation.taskID ?? ""):\(attempt)") { await open() }
     }
 
-    private func open() async {
-        guard let id = operation.taskID, let session = operation.sessionID else { return }
-        do {
-            guard operation.destination == client.savedMachine.machineID else {
-                throw RegistryQueryError("Reconnect the original Machine to open this request")
+    private var recoveryControls: some View {
+        VStack(alignment: .leading) {
+            let presentation = operation.presentation()
+            if operation.destination != client.savedMachine.machineID {
+                Text("Reconnect the original Machine to open this request")
             }
-            let plan = try await client.query.viewPlan(expression: "task:\(id)", repoPath: operation.directory)
-            guard let content = try mobileTasks(ProjectedWorkPlan(plan)).first(where: { $0.work.id == id }) else {
-                throw RegistryQueryError("The filed Task is not available yet")
+            Text(presentation.status)
+            CreationRequestActions(presentation: presentation) { action in
+                switch action {
+                case .edit: onEdit(operation)
+                case .tryAgain, .check: client.interaction.retry(operation.id)
+                case .inspect: Task { try? await client.interaction.presented(operation.id) }
+                case .open: break
+                }
             }
-            if content.primarySession != session {
-                throw RegistryQueryError("The original conversation is not available yet")
-            }
-            try Task.checkCancellation()
-            task = content
-            error = nil
-        } catch { if !Task.isCancelled { self.error = error.localizedDescription } }
+        }
     }
+
 }

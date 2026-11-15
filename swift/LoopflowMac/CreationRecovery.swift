@@ -51,12 +51,10 @@ final class CreationRecovery {
     struct Resource {
         let destination: String
         let directory: String
-        let task: String?
         let session: String?
         let receipt: String
     }
     enum Presentation: Hashable {
-        case task(String)
         case session(String)
     }
     private let submissions: ClientWorkStore
@@ -95,7 +93,6 @@ final class CreationRecovery {
         }
         await refresh()
     }
-    @ObservationIgnored private var interactions: [String: WorkInteraction] = [:]
     private var recoveryErrors: [String: String] = [:]
     @ObservationIgnored private var recoveryTasks: [String: Task<Void, Never>] = [:]
     private var refreshing = false
@@ -113,10 +110,6 @@ final class CreationRecovery {
     }
 
     func retry(_ id: String) async {
-        if let owner = interactions.values.first(where: { $0.creations.contains { $0.id == id } }) {
-            owner.retry(id)
-            return
-        }
         let previous = recoveryTasks[id]
         previous?.cancel()
         await previous?.value
@@ -131,7 +124,9 @@ final class CreationRecovery {
         refreshing = true
         defer { refreshing = false }
         do {
-            let records = try await submissions.pending()
+            let records = try await submissions.pending().filter {
+                (try? JSONDecoder().decode(JSONValue.self, from: $0.payload))?["kind"] != .string("task.create")
+            }
             let retained = Set(records.map(\.id))
             for (id, task) in recoveryTasks where !retained.contains(id) {
                 task.cancel()
@@ -139,14 +134,6 @@ final class CreationRecovery {
                 recoveryErrors.removeValue(forKey: id)
             }
             for record in records where recoveryTasks[record.id] == nil {
-                if let command = try? JSONDecoder().decode(JSONValue.self, from: record.payload),
-                   command["kind"] == .string("task.create") {
-                    let owner = interactions[record.destination] ?? (submissions === ClientWorkStore.shared
-                        ? WorkInteraction.local(record.destination) : WorkInteraction(machine: record.destination, store: submissions))
-                    interactions[record.destination] = owner
-                    owner.start()
-                    continue
-                }
                 if await submissions.isRecovering(record.id) { continue }
                 recoveryTasks[record.id] = Task { [weak self, submissions] in
                     do {
@@ -164,20 +151,15 @@ final class CreationRecovery {
             for record in records {
                 do {
                     guard let operation = try await submissions.receipt(record.id) else {
-                        let error = recoveryErrors[record.id] ?? interactions[record.destination]?.creations.first(where: { $0.id == record.id })?.error
+                        let error = recoveryErrors[record.id]
                         current.append(Item(id: record.id, text: error ?? "Request saved; checking its original result", complete: false, resource: nil))
                         continue
                     }
                     let result = operation.result ?? operation.commits.last(where: { $0.stage == "task.filed" })?.result
-                    var task: String?
                     var session: String?
                     if let result {
                         let data = try JSONEncoder().encode(result)
-                        if operation.kind == "task.create" {
-                            let receipt = try JSONDecoder().decode(TaskCreateReceipt.self, from: data)
-                            task = receipt.task.id
-                            session = receipt.sessionId
-                        } else if operation.kind == "session.new" {
+                        if operation.kind == "session.new" {
                             session = try JSONDecoder().decode(SessionRecord.self, from: data).id
                         }
                     }
@@ -188,7 +170,7 @@ final class CreationRecovery {
                     let encoder = JSONEncoder()
                     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
                     let resource = Resource(destination: record.destination, directory: directory,
-                        task: task, session: session,
+                        session: session,
                         receipt: String(decoding: try encoder.encode(operation), as: UTF8.self))
                     guard let recovery = try await submissions.recovery(record.id) else { continue }
                     let lookupError = recoveryErrors[record.id]
@@ -215,11 +197,7 @@ final class CreationRecovery {
 }
 
 struct CreationRecoveryView: View {
-    var excluding: String? = nil
-    var only: String? = nil
-    private var items: [CreationRecovery.Item] {
-        recovery.items.filter { $0.id != excluding && (only == nil || $0.id == only) }
-    }
+    private var items: [CreationRecovery.Item] { recovery.items }
     var recovery: CreationRecovery = .shared
     @State private var inspecting: CreationRecovery.Item?
     var body: some View {
@@ -250,7 +228,7 @@ private struct RecoveredCreationInspector: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(resource.task == nil ? "Recovered Session" : "Recovered Task").font(.headline)
+            Text("Recovered Session").font(.headline)
             ScrollView {
                 Group {
                     switch detail {
@@ -273,22 +251,7 @@ private struct RecoveredCreationInspector: View {
                 guard try await ClientWorkStore.localMachine() == resource.destination else {
                     throw RegistryQueryError("The original Machine is unavailable; this request has not moved.")
                 }
-                if let task = resource.task {
-                    let value = try await ServerClient.read(.taskGet(directory: resource.directory, issue: task))
-                    let reading = try JSONDecoder().decode(WorkFrame.TaskStatusReading.self, from: Data(value.utf8))
-                    guard let row = reading.row else {
-                        throw RegistryQueryError("The recovered Task is no longer available on its original Machine.")
-                    }
-                    var lines = ["\(row.task.identifier) · \(row.task.name)", row.section.rawValue.capitalized, row.task.description]
-                    if let graph = reading.overview?.graph {
-                        lines.append("Graph \(graph.name): \(graph.position.step)")
-                    }
-                    if let overview = reading.overview {
-                        lines.append(contentsOf: overview.sessions.map { "Conversation: \($0.title) (\($0.id))" })
-                        lines.append(contentsOf: overview.graphProcesses.map { "Graph \($0.name): \($0.state.rawValue)" })
-                    }
-                    detail = .success(lines.filter { !$0.isEmpty }.joined(separator: "\n\n"))
-                } else if let session = resource.session {
+                if let session = resource.session {
                     detail = .success(try JSONDecoder().decode(String.self, from: Data(try await ServerClient.read(.processHistory(id: session)).utf8)))
                 } else {
                     detail = .success(resource.receipt)

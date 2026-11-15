@@ -67,16 +67,28 @@
   64 retired effects per retained base; exceeding that budget makes the base cold
   under its reload floor. These are internal cache sizes, not product preferences.
 
-- Creation keeps retired imported/editor-linked identities in the same SQLite
-  owner to prevent source-file resurrection after a crash. Indexed pending reads
-  exclude them. Editor revision IDs distinguish a newer unsent draft. Legacy
-  files have no submission time; their modification date seeds the retained record.
-  These are internal migration choices, not product preferences.
+- Retired imported/editor-linked creations keep only request/draft identities,
+  a canonical command digest and retirement time in the same SQLite owner. Source
+  rewrites release them; indexed pending reads exclude them. Legacy files use
+  their modification date as submission time. These are internal migration choices.
+  Phone source cleanup considers only records older than its saved editor snapshot,
+  so delayed housekeeping cannot release a later submission's source identity.
 
 - Creation action labels, headless reversible choice from the 2026-11-15
   concept-review: one vocabulary on both hosts, replacing Desktop "Retry
-  recovery" and phone "Check status" for the same call. Proposed: **Try again**
+  recovery" and phone "Check status" for the same call. Built: **Try again**
   (never saved), **Edit request**, **Check request** (saved, outcome unknown),
-  **Retry opening** (Session recorded, not attached). Copy only; nobody has
+  **Retry opening** (Session recorded, attachment failed). Copy only; nobody has
   stated a preference. Request rows currently sit above the Task list on both
   hosts; their position has not been discussed.
+
+- Phone reopen label, noticed in the 2026-11-15 headless concept review: the
+  creation cut changed the phone Session's disconnected card from "Reconnect" to
+  "Retry opening" for every Session by reusing the creation action's label. Next
+  cut restores "Reconnect" there (existing copy) and keeps Desktop's "Retry
+  opening". Whether both hosts should use one word, and which, is undiscussed.
+
+- Retired source identities, headless reversible choice from the same review:
+  keep the compact row (IDs, digest, time; no words) instead of releasing it when
+  the editor file is rewritten. Trades about 200 bytes per phone-created Task for
+  deleting the cross-file release path. Not a recorded preference.

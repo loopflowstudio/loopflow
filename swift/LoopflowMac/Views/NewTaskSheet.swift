@@ -38,6 +38,7 @@ struct NewTaskSheet: View {
     private var workflow: WorkflowDefinition? {
         chosen.flatMap { name in catalog.first { $0.name == name }?.workflow }
     }
+    private var canStart: Bool { !trimmed.isEmpty && model.repoPath?.isEmpty == false }
     private var trimmed: String { request.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
@@ -78,8 +79,8 @@ struct NewTaskSheet: View {
                 }
                 .buttonStyle(.plain)
                 .keyboardShortcut(.return, modifiers: .command)
-                .disabled(trimmed.isEmpty)
-                .opacity(trimmed.isEmpty ? 0.45 : 1)
+                .disabled(!canStart)
+                .opacity(canStart ? 1 : 0.45)
                 .accessibilityIdentifier("new-task-create")
             }
             .padding(.horizontal, 22).padding(.vertical, 12)
@@ -149,8 +150,9 @@ struct NewTaskSheet: View {
     private var scopeName: String { wave?.displayName ?? repositoryName }
 
     private func create() {
-        model.navigation.newTaskDraft = nil
-        model.beginTask(request: trimmed, wave: wave, graph: graph)
+        if model.beginTask(request: trimmed, wave: wave, graph: graph) != nil {
+            model.navigation.newTaskDraft = nil
+        }
     }
 
     /// Whose default the reported workflow is, named for the scope it follows.
@@ -292,12 +294,6 @@ struct StartingTaskView: View {
     let launch: CreationOperation
     @Environment(\.palette) private var palette
 
-    var recovery: CreationRecovery = .shared
-
-    private var hasRecovery: Bool { recovery.items.contains { $0.id == launch.id } }
-    /// Recovery describes the submission; once admitted, attachment errors are a separate fact.
-    private var showsLaunchStatus: Bool { launch.receipt != nil || !hasRecovery }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             ScrollView {
@@ -306,20 +302,16 @@ struct StartingTaskView: View {
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            if let error = model.taskOpening?.reason ?? launch.error, showsLaunchStatus {
-                Text(error).foregroundStyle(palette.warning).textSelection(.enabled)
-                if model.canEditCreation(launch.id) {
-                    Button("Edit request") { model.editCreation(launch.id) }
+            let presentation = launch.presentation(openingError: model.taskOpening?.reason)
+            Text(presentation.status).foregroundStyle(palette.textSecondary).textSelection(.enabled)
+            CreationRequestActions(presentation: presentation) { action in
+                switch action {
+                case .edit: model.editCreation(launch.id)
+                case .open: Task { await model.openCreatedTask(launch) }
+                case .tryAgain, .check: model.retryCreation(launch.id)
+                case .inspect: Task { await model.inspectedCreation(launch.id) }
                 }
-                if launch.receipt?.sessionId != nil {
-                    Button("Retry opening") { Task { await model.openCreatedTask(launch) } }
-                } else {
-                    Button("Retry recovery") { model.retryCreation(launch.id) }
-                }
-            } else if showsLaunchStatus {
-                Text("Starting conversation…").foregroundStyle(palette.textSecondary)
             }
-            CreationRecoveryView(only: launch.id, recovery: recovery)
             Spacer(minLength: 0)
         }
         .padding(28)

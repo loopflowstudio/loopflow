@@ -32,8 +32,13 @@ path. Pull to refresh. **+** opens New Task: describe the work, pick a
 repository, **Create & start**. The editor closes immediately into the submitted
 conversation. Its words remain visible while the Machine prepares the Task and
 Session; native attachment controls input. Leaving for another Task keeps that
-selection when a receipt arrives. Saved requests stay in the list for recovery;
-**Retry opening** opens the same result without creating again.
+selection when a receipt arrives. The recorded Session opens without waiting for
+its Task to appear in the feed. Opening the result, including from an ordinary
+Task row, clears the redundant request row; unresolved recovery stays visible.
+After a local save failure, **Try again** retries the same ID and **Edit request**
+returns the words to the editor. Once saved, **Check request** recovers the original
+result and **Inspect** shows its receipt when recovery needs attention.
+**Retry opening** reopens the same Session after attachment fails.
 
 The shared SQLite outbox saves the original request
 before `operation.submit` admits it. Receipt subscriptions observe preparation;
@@ -43,7 +48,9 @@ Released phone submission files import to each request's original Machine store,
 including exact words, request IDs and saved outcomes. Matching outbox records keep
 their receipt and send history. Conflicting or unreadable files remain intact;
 missing historical receipts require inspection rather than another submission.
-Unsent editor text remains a draft.
+Unsent editor text remains a draft. Retired requests keep only a command digest
+and source identity while a surviving editor file could submit again; a rewritten
+source releases that identity.
 
 The Task feed restores confirmed query bases from that same SQLite store. Older
 replies cannot replace newer saved bases; a retired command leaves a required

@@ -7,6 +7,34 @@ import XCTest
 
 @MainActor
 final class MobileTaskCreationTests: XCTestCase {
+    func testUnsavedConversationActionsRetryTheSameIdentityOrReturnWordsToEditor() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fault = IntentDiskFault()
+        let disk = ClientWorkStore(directory: root, prepareDirectory: { _ in try fault.check() }, machine: { "machine" },
+            read: { _ in "null" }, observe: { _ in ServerWatch(updates: AsyncThrowingStream { _ in }, checkpoint: { _ in }, cancel: {}) },
+            send: { _ in XCTFail("No admission evidence yet") })
+        let owner = WorkInteraction(machine: "machine", store: disk)
+        defer { owner.shutdown() }
+        let client = RemoteMobileClient(savedMachine: SavedMachine(endpoint: URL(string: "https://original.invalid")!, machineID: "machine"))
+        client.journal = disk
+        client.interaction = owner
+        let operation = owner.createTask(request: "Keep these words", directory: "/repo") { _ in }
+        await owner.persistPending()
+        var edited: CreationOperation?
+        let view = MobileCreationConversation(client: client, operation: operation, theme: .light, onEdit: { edited = $0 })
+        try view.inspect().find(button: "Edit request").tap()
+        XCTAssertTrue(edited === operation)
+        XCTAssertTrue(owner.failures.isEmpty)
+        fault.recover()
+        try view.inspect().find(button: "Try again").tap()
+        await owner.persistPending()
+        let pending = try await disk.pending()
+        XCTAssertEqual(pending.map(\.id), [operation.id])
+        XCTAssertThrowsError(try view.inspect().find(button: "Edit request"))
+        _ = try view.inspect().find(button: "Check request")
+    }
+
     func testCreateButtonSelectsSubmittedWordsBeforeHeldSaveAndClosesEditor() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -108,6 +136,41 @@ final class MobileTaskCreationTests: XCTestCase {
         XCTAssertEqual(pending.map(\.id), ["original-operation"])
     }
 
+    func testRetiredCreationCannotResubmitASurvivingEditorAfterRestart() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let outbox = root.appendingPathComponent("outbox")
+        let source = MobileTaskDraftStore(url: root.appendingPathComponent("draft.json"))
+        var draft = MobileTaskDraft()
+        draft.text = "Original submitted words"
+        draft.directory = "/repo"
+        draft.machineID = "machine"
+        try source.save(draft)
+        let record = SubmittedOperation(requestID: "original", destination: "machine", payload: try JSONEncoder().encode(
+            ServedWrite.taskCreate(directory: "/repo", requestID: "original", title: nil, request: draft.text,
+                wave: nil, graph: nil, session: nil, run: true)), version: ServerProtocol.revision, submittedAt: Date(), draftID: draft.id)
+        let database = try ClientWorkDatabase(directory: outbox)
+        try database.save(record)
+        _ = try database.observeEpoch("epoch", id: record.id)
+        try database.receive(XCTUnwrap(creationFrame(id: record.id, delivery: "finished", session: "original-session").body), epoch: "epoch", id: record.id)
+        try database.presented(record.id)
+        XCTAssertNil(try database.state(record.id), "The authored payload is gone before editor cleanup")
+        XCTAssertTrue(try database.draftSubmitted(XCTUnwrap(draft.id)))
+        let disk = ClientWorkStore(directory: outbox, machine: { "machine" }, read: { _ in "null" },
+            observe: { _ in XCTFail("A retired creation must not be recovered"); return ServerWatch(updates: AsyncThrowingStream { $0.finish() }, checkpoint: { _ in }, cancel: {}) },
+            send: { _ in XCTFail("A retired creation must not send again") })
+        let owner = WorkInteraction(machine: "machine", store: disk)
+        defer { owner.shutdown() }
+        let restored = MobileTaskCreation(client: EditorClient(interaction: owner, disk: disk), store: source)
+        await restored.prepare()
+        XCTAssertEqual(restored.draft.text, "")
+        XCTAssertNotEqual(restored.draft.id, draft.id)
+        XCTAssertEqual(try source.load().text, "")
+        XCTAssertFalse(restored.canCreate)
+        let pending = try await disk.pending()
+        XCTAssertTrue(pending.isEmpty)
+    }
+
     func testImportDoesNotRewriteAnEditorSavedWhileItWaited() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -174,7 +237,11 @@ final class MobileTaskCreationTests: XCTestCase {
             }
             throw RegistryQueryError("Attachment failed")
         }
-        let link = SessionLink(client: client, task: task)
+        let view = MobileCreationConversation(client: client, operation: operation, theme: .light, onEdit: { _ in XCTFail() })
+        let mounted = try view.inspect().find(SessionView.self)
+        let conversation = try mounted.actualView()
+        // The production conversation resolves without consulting the Work query.
+        let link = try conversation.inspect().find(SessionTerminal.self).actualView().link
         defer { release?.resume(); entered.finish(); link.close() }
         link.fit(columns: 80, rows: 24)
         var pending = attaching.makeAsyncIterator()
@@ -195,6 +262,11 @@ final class MobileTaskCreationTests: XCTestCase {
         XCTAssertTrue(server.submissions.isEmpty)
         let recovery = try await disk.recovery(operation.id)
         XCTAssertEqual(recovery?.resultPresented, false)
+        let ordinary = TaskWorkspaceView(client: client, task: task, theme: .light, draft: .constant(""))
+        try await ordinary.inspect().group().callTask(id: [String]())
+        XCTAssertTrue(owner.listedCreations.isEmpty, "Ordinary Task presentation uses the same acknowledgment")
+        try await mounted.callTask()
+        XCTAssertTrue(owner.listedCreations.isEmpty, "The production conversation uses the same acknowledgment")
     }
 
     func testConflictingLegacyOutboxRetainsTheCompleteSourceFile() async throws {
@@ -252,6 +324,12 @@ private final class EditorClient: MobileTaskCreationClient {
     var importFailure = false
     var beforeImport: (() throws -> Void)?
     init(interaction: WorkInteraction, disk: ClientWorkStore) { self.interaction = interaction; self.disk = disk }
+    func retainCreationSource(draftID: String?, before: Date) async throws {
+        try await disk.retainCreationSource(draftID: draftID, before: before)
+    }
+    func releaseCreationSources(requests: [String], draftID: String?, machine: String?) async throws {
+        try await disk.releaseCreationSources(requests: requests, draftID: draftID)
+    }
     func creationContext() async throws -> MobileCreationContext {
         MobileCreationContext(machineID: "machine", name: "Original Mac", repositories: [PortfolioRepo(path: "/repo", error: nil)])
     }

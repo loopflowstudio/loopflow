@@ -51,6 +51,9 @@ struct TaskWorkspaceView: View {
                 }
             }
         }
+        .task(id: client.interaction.creations.map { "\($0.id):\($0.taskID ?? "")" }) {
+            try? await client.interaction.presented(.task(task.work.id))
+        }
         .onAppear { PerfClock.interaction(.taskSelect, .contentMounted, id: task.work.id) }
     }
 }

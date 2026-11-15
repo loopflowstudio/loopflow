@@ -463,13 +463,12 @@ in `operation::admit`/`check_creation`; `waveRow`'s delayed selection;
 `CreationSubmissions` and `CreationRecovery`'s poll; Desktop `StartingTask`/
 `pendingTaskReconciliations`; mobile `MobileTaskOutcome`, draft-file submission
 writers, sheet-owned sends and the Open Task gate. `LegacyTaskDraft` reads released
-files only; SQLite commits precede rewrites.
+files only; SQLite commits precede rewrites. Creation in `CreationRecovery`, its
+Task presentation map, host request filters and the phone query-before-opening
+path are removed by the current creation cut.
 
 Still remove, with their consumers:
 
-- Creation in `CreationRecovery` (`interactions`, delegated `retry`, receipt-less
-  item, Task presentation map), `WorkModel.pendingCreations`' filter and the hosts'
-  `failures`/`creations` cross-filters (next section).
 - Desktop `TaskRunDraft.phase`, `abandoningTaskIDs`, other mutation refresh
   barriers and rename/bind replacement bookkeeping.
 - View-owned mobile `SessionLink` teardown on ordinary Task switching; keep
@@ -586,84 +585,107 @@ host-specific labels the next section replaces.
 
 ### A submitted conversation is one thing on both hosts
 
-Headless concept-review of the creation cut (committed at `5ccc4563bd`),
-2026-11-15. Next implement direction. No product choice is open: each item follows
-from "hosts render it" and "once its result is shown, remove the redundant
-recovery prompt" above. Synchronous publication, save-before-send, departure and
-import are built and stay as they are.
+2026-11-15 creation presentation cut. The inspected predecessor map and complete
+acceptance direction are at `908e317e4f3605766b6dc67c0a4be87ce32eb19f:scratch/instant-task-session.md`
+under this heading. Shared `CreationOperation.presentation` now supplies status,
+actions and inspection text. `CreationRequestActions` renders the same controls
+in both conversations and Desktop's pending row, including after native readiness.
+Both hosts list `WorkInteraction.listedCreations`;
+ordinary Task and Session mounts acknowledge by resource. Inspect acknowledges
+only when its receipt sheet mounts. A shown filed result hides normal Graph
+preparation; a later admission failure restores its request row without navigation.
+Creation failures no longer appear
+in the general failure list. `CreationRecovery` retains other command families,
+not Task creation or its presentation map.
 
-The shared owner holds the operation but each host still decides what it means.
-Seen at `5ccc4563bd`; every item rechecked in code during realign and still present:
+The phone binds `SessionView` directly to the receipt's Session without a Work
+query or fabricated Task DTO. Native attachment owns input and Retry opening;
+command recovery remains visible alongside a recorded conversation. Desktop Start
+requires a repository and keeps the editor words when none is resolved.
 
-- **Which requests are listed.** Desktop `WorkModel.pendingCreations` hides a
-  presented creation unless it needs inspection. `TaskListView` lists every
-  `interaction.creations` entry, so the phone keeps a "Saved request" row for a
-  conversation already opened, until query coverage retires the command.
-- **What shows a result.** Desktop acknowledges by resource through
-  `CreationPresentation`: opening the filed Task from its ordinary row counts.
-  On the phone only `MobileCreationConversation` acknowledges, so opening the same
-  Task from the list leaves its request row behind.
-- **What to do next.** Both call `interaction.retry(id)`; Desktop labels it
-  **Retry recovery** and shows it only beside an error, the phone labels it
-  **Check status** and always shows it. For an unsaved request that call saves and
-  sends for the first time; neither label says so. Desktop reads
-  `receipt?.sessionId` for **Retry opening**, the phone `operation.sessionID`.
-- **Row text.** "Saving request…" / "Saved request" name storage. A filed Task
-  whose conversation is starting reads "Saved request".
-- **Two failure lists.** A creation failure is in `WorkInteraction.failures` and
-  in `CreationOperation.error`; both hosts filter `failures` against `creations`,
-  and `canEditCreation` looks the ID up in `failures`.
-- **Two Desktop owners.** `CreationRecovery` builds its own `interactions` map,
-  delegates `retry`, and now lists every receipt-less creation as "Request saved;
-  checking its original result" while the sidebar lists the same operation.
-- **Opening on the phone needs a query answer.** `MobileCreationConversation.open`
-  runs one `viewPlan` read when the receipt binds. A lagging read shows "The filed
-  Task is not available yet" and waits for a tap on **Retry opening**: the removed
-  Open Task gate, back as an error.
-- **A made-up repository.** Desktop `beginTask` freezes `repoPath ?? "/"` into the
-  immutable command.
-- **Retired phone requests keep their words.** Every editor-linked creation
-  (`draftID`) and every import stays in `operations` with its full payload after
-  retirement; one row per phone creation, never removed.
+Retirement removes authored payloads and receipts. A compact identity in the same
+SQLite owner retains request ID, draft ID, command digest and retirement time only
+while a source could resurrect it. Source rewrites release that identity. Opening
+an older branch-format database compacts its retired payloads before file import.
+An editor cleanup crash must still prevent duplicate creation.
 
-Build:
+Headless production-path acceptance: Start A, leave, A files, open its ordinary
+row; no redundant request after restart. Held query never delays conversation
+opening. Failed save offers same-ID retry and editable words, neither after save.
+Attachment retry opens the recorded Session. Hold Graph admission after filing;
+restart after uncertain send; retire before editor cleanup. Native display and
+input latency remain demo/benchmark work, separate from these deterministic checks.
 
-- `CreationOperation` derives its own state once, in the shared owner, from the
-  saved command, receipt stages, recovery and failure: one status line and the
-  applicable actions. Unsaved: retry the save, or return the words to the editor.
-  Saved with no bound outcome: look up the original request. Session recorded but
-  not attached: Retry opening. Needs inspection: show the receipt. No status line
-  while preparation proceeds normally beyond the existing "Starting
-  conversation…". Hosts render that state; neither reads `failures`, `receipt` or
-  `legacyOutcome` to choose a button. Same labels on both (see `questions.md`).
-- `WorkInteraction` exposes the listed requests (unpresented, or needing
-  inspection) and takes acknowledgment by resource: a mounted Task or Session
-  acknowledges every operation whose result it is, from any route. Delete
-  `WorkModel.pendingCreations`' filter, the hosts' `failures`/`creations`
-  cross-filters, and creation from `CreationRecovery` (`interactions`, the
-  delegated `retry`, the receipt-less item, the presentation map for Tasks).
-  `failures` holds commands that have no destination of their own.
-- The phone opens the operation's conversation from the receipt's Task and
-  Session through the retained native owner. A lagging Work query delays list
-  facts, never the conversation, and is not shown as an error. Attachment failure
-  alone offers Retry opening.
-- Start is available only with a resolved repository; with none, the editor
-  keeps the words. Never freeze a placeholder scope.
-- A retired identity keeps what recognizes its source (request ID, draft ID,
-  command digest, retirement time), not the authored words. Drop it once its
-  source can no longer resurrect it: the single editor file carries a different
-  draft ID, or the released file has been rewritten.
+### Next implement direction: a pending command is one thing, whatever its kind
 
-Show next, production views on both hosts: Start A, leave, A files and its Task
-appears in the list; open it from that row; the request row is gone on both
-hosts and stays gone after restart. Hold the Work query after the receipt binds:
-the conversation opens with no error and no tap. Fail the save: one action
-retries the same ID, one returns the words; neither is offered after save. One
-failed creation appears once on Desktop. Retire a phone creation, crash before
-editor cleanup, reopen: no second command, and no request text in the retired
-row. Desktop attachment failure and Retry opening for a creation, restart after
-uncertain send, and held Graph admission after filing are still unexercised on
-Desktop's production path.
+Concept review of the creation presentation cut (2026-11-15, headless; no code
+changed). The cut made a submitted conversation one thing across hosts. It left a
+submitted *command* as two things across kinds, and added a lifecycle that can be
+a record. Nothing below is a product choice; nobody has commented on it.
+
+**1. One presentation for every pending command.** Creation renders
+`CreationOperation.presentation()` (status, actions). Complete renders
+`WorkInteraction.Failure` rows with their own "Retry Complete" button on both
+hosts. `WorkInteraction` now holds three failure stores for the same fact:
+`failures`, `failedCreations`, `failedDeliveries`. Disconnected Complete/rename/
+move ("1a", "Waiting for connection") would be a fourth. Build that work as the
+merge instead: one per-operation presentation derived from the saved command, its
+receipt and delivery state; the kind supplies only its noun and whether authored
+words exist. Vocabulary stays as built: **Try again** (never saved), **Edit
+request** (never saved, has words), **Check request** (saved, outcome unknown),
+**Inspect** (receipt needs attention), plus the status "Waiting for connection"
+(saved, unsent, no action required). Delete `Failure`, `failedCreations`,
+`failedDeliveries`, `WorkModel.completionFailures` and both "Retry Complete"
+rows. Desktop `SessionPaneView` currently acknowledges a shown result twice
+(`CreationPresentation(recovery: .shared…)` for `session.new` and the new
+`.task(id: creationRequests)`); `CreationRecovery`'s remaining families move to
+this owner in the same cut, then that file goes.
+
+Counterexamples to hold: a Complete that failed to save keeps its row hidden
+state consistent with its presentation (Try again re-sends the same ID; giving up
+restores the row from the latest base); a saved Complete with a lost answer shows
+Check request and never restores the row on its own; a creation and a Complete
+failing together show two rows of the same shape, each with its own actions.
+
+**2. Presentation is data.** The phone decides whether to show recovery controls
+with `presentation().status != "Starting conversation…"`. Carry the attention
+messages separately (empty when nothing is wrong); each host words normal
+progress itself.
+
+**3. Reopening belongs to the attachment owner.** `Action.open` appears only
+when a host passes `openingError` (Desktop does; the phone never does and handles
+it with `break`). Phone `SessionView` borrows `CreationOperation.Action.open.rawValue`
+for its disconnected card, which renamed **Reconnect** to **Retry opening** on
+every ordinary Session, not only created ones. Remove `.open` from the creation
+actions; the Session attachment view on each host owns its reopen control and
+`SessionView` names no creation type. Restore the phone's existing **Reconnect**;
+Desktop keeps **Retry opening** from `taskOpening`. The single word for both is a
+copy question in `questions.md`. READMEs follow the code.
+
+**4. A retired source identity is a record, not a lifecycle.** The built cut
+retains a compact identity (request ID, draft ID, digest, time) and then releases
+it through `sourceReleased`, `releaseSources`, `retainCreationSource(before:)`,
+the `operations_sources` index, two `MobileTaskCreationClient` methods and a
+static that opens another Machine's database. Release coordinates two files by
+wall-clock comparison (`retiredAt <= before`, `submittedAt <= before`) and runs a
+write transaction after every debounced draft save. It reclaims roughly 200 bytes
+per phone-created Task and holds no authored words. Keep the identity row and
+delete the release path: `draftSubmitted` and the digest check in `save` already
+give "a draft revision submits at most once". Check during the cut that Start
+rotates the editor's in-memory draft ID even when the editor file rewrite fails,
+so new words are never refused as "already submitted". This reverses "source
+rewrites release that identity", which was a headless internal choice.
+
+**5. Desktop Start with no repository says so.** `canStart` now disables Start
+silently while the scope chip reads "repository". Show the reason in the sheet.
+`beginTask`'s `startingTask == nil` guard cannot fire from the sheet (opening the
+palette clears `startingTask`); drop it so no path refuses without a word.
+
+Proposed usage text, once built (both READMEs):
+> A change that hasn't finished shows as one row with what happened and what you
+> can do: **Try again**, **Edit request**, **Check request** or **Inspect**.
+> While disconnected it reads **Waiting for connection** and sends itself when the
+> Machine returns.
 
 ## Current implementation cut
 
@@ -682,7 +704,7 @@ Matching rows keep their send epoch and receipt; conflicts leave the source inta
 Imported missing send evidence remains inspectable, never unsent. Editor revisions
 are associated with submitted commands in that transaction; surviving editor files
 cannot submit again after save or retirement. Imported and editor-linked retired
-rows retain their identity in the existing owner, outside indexed pending reads.
+commands leave compact source identities in the existing owner, outside indexed pending reads.
 No second receipt ledger exists. Other-Machine imports/lookups open no transport.
 
 Query leases retain their previous bounded semantics. Last-close suspends query
@@ -745,9 +767,9 @@ Implementation owns a valid benchmark baseline; demo owns native usability.
 Earlier checks: `6e944e73b5a:scratch/instant-task-session.md` and
 `d9bf1c21ae:scratch/instant-task-session.md`. Creation checks
 (2026-11-15; inherited `LF_*` cleared):
-- `swift build --build-tests --package-path swift --jobs 4 -Xswiftc -gnone` and `scripts/test_desktop.sh --skip-build --filter 'ClientWorkQueryTests|operationConversationUsesNativeReadiness|OperationRecoveryPresentationTests'`: build and 44 checks passed; gate owns wider suites.
-- `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/MobileTaskCreationTests -only-testing:LoopflowiOSTests/ClientWorkQueryTests`: 41 checks passed, including held admission/attachment, departure, restart, legacy conflict and newer-editor races; Simulator removed.
-- `scripts/check_swift_multiplatform_boundaries.py`, `git diff --check`: passed. 10k SQLite rows use `operations_pending` for live records and `operations_draft` for origin lookup; gate owns archive/documented-command checks. Native latency remains unmeasured.
+- `swift build --build-tests --package-path swift --jobs 4 -Xswiftc -gnone` and `scripts/test_desktop.sh --skip-build --filter 'ClientWorkQueryTests|operationConversationUsesNativeReadiness|OperationRecoveryPresentationTests|SessionControlsTests'`: build and 55 checks passed, including unsaved same-ID retry/edit, no repository, departure, uncertain restart, native attachment retry and recovery beside usable input; gate owns wider suites.
+- `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/MobileTaskCreationTests -only-testing:LoopflowiOSTests/ClientWorkQueryTests`: 45 checks passed, including direct receipt-to-Session opening, ordinary Task mount acknowledgment, same-ID retry, retirement before editor cleanup, and legacy import races; Simulator removed.
+- `scripts/check_swift_multiplatform_boundaries.py`, `git diff --check`: passed. `EXPLAIN QUERY PLAN` on 10,000 synthetic client operations: source cleanup uses `operations_sources`; draft lookup uses `operations_draft` and `retired_operations_draft`. Gate owns archive/documented-command checks. Native latency remains unmeasured.
 
 ## Conversation concept review · 2026-11-15
 

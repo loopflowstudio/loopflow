@@ -156,10 +156,10 @@ final class WorkModel {
     var presentationError: String? { interaction?.cacheError }
 
     var pendingCreations: [CreationOperation] {
-        interaction?.creations.filter { $0.recovery?.resultPresented != true || $0.recovery?.needsInspection == true } ?? []
+        interaction?.listedCreations ?? []
     }
     var completionFailures: [WorkInteraction.Failure] {
-        interaction?.failures.filter { failure in !pendingCreations.contains { $0.id == failure.id } } ?? []
+        interaction?.failures ?? []
     }
 
     func selectCreation(_ operation: CreationOperation) {
@@ -521,6 +521,26 @@ final class WorkModel {
         }
     }
     var preparingCreation: Bool { navigation.startingTask != nil && taskOpening?.status != .usable }
+
+    func creationPresentationRequests(taskID: String) -> [String] {
+        interaction?.creations.filter { $0.taskID == taskID }.map(\.id) ?? []
+    }
+
+    func presentedTaskResult(_ taskID: String) async {
+        try? await interaction?.presented(.task(taskID))
+    }
+
+    func creationPresentationRequests(sessionID: String) -> [String] {
+        interaction?.creations.filter { $0.sessionID == sessionID }.map(\.id) ?? []
+    }
+
+    func presentedSessionResult(_ sessionID: String) async {
+        try? await interaction?.presented(.session(sessionID))
+    }
+
+    func inspectedCreation(_ id: String) async {
+        try? await interaction?.presented(id)
+    }
 
     func mountedCreation(taskID: String) async {
         guard let operation = navigation.startingTask, operation.receipt?.task.id == taskID,
@@ -2713,13 +2733,13 @@ final class WorkModel {
     /// Selection publishes the submitted operation before disk or network work.
     @discardableResult
     func beginTask(request: String, wave: WaveSnapshot?, graph: String?) -> CreationOperation? {
-        guard navigation.startingTask == nil else { return nil }
+        guard navigation.startingTask == nil, let repoPath, !repoPath.isEmpty else { return nil }
         dismissTaskLink()
         taskOpening = nil
         let navigation = navigation
         let interaction = interaction ?? WorkInteraction.local(observingMachineId)
         self.interaction = interaction
-        let operation = interaction.createTask(request: request, directory: repoPath ?? "/",
+        let operation = interaction.createTask(request: request, directory: repoPath,
             wave: wave?.name, graph: graph) { operation in
                 navigation.palette = nil
                 navigation.selection = nil
@@ -2992,7 +3012,6 @@ final class WorkModel {
             let requestID = UUID().uuidString
             let task = try await query.createTaskFromSession(
                 id: draft.sessionId, title: draft.taskTitle, cwd: repo, requestID: requestID)
-            CreationRecovery.shared.awaitingPresentation(requestID, of: .task(task.id))
             // Keep the selected Session, its retained terminal and composer.
             // Promotion changes its Work address, never its input attachment.
             supersedeSessions()

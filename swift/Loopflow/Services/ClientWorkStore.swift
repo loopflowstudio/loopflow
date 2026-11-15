@@ -157,6 +157,22 @@ public actor ClientWorkStore {
 
     public func draftSubmitted(_ id: String) throws -> Bool { try disk().draftSubmitted(id) }
 
+    public func retainCreationSource(draftID: String?, before: Date) throws {
+        try disk().retainCreationSource(draftID: draftID, before: before)
+    }
+
+    public func releaseCreationSources(requests: [String], draftID: String?) throws {
+        try disk().releaseSources(requests: requests, draftID: draftID)
+    }
+
+    public static func releaseCreationSources(requests: [String], draftID: String?, directory: URL,
+        prepareDirectory: @escaping @Sendable (URL) throws -> Void) async throws {
+        try await Task.detached {
+            try ClientWorkDatabase(directory: directory, prepareDirectory: prepareDirectory)
+                .releaseSources(requests: requests, draftID: draftID)
+        }.value
+    }
+
     public func resolveMachine() async throws -> String { try await currentMachine() }
 
     public func isRecovering(_ id: String) -> Bool { active.contains(id) }

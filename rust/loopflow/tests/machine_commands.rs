@@ -3904,7 +3904,7 @@ fn watch_for(home: &Path, terminal: &str, line: String) -> std::thread::JoinHand
         .write_all(
             format!(
                 "{}\n",
-                serde_json::json!({"terminal": terminal, "revision": 2})
+                serde_json::json!({"terminal": terminal, "revision": 3})
             )
             .as_bytes(),
         )

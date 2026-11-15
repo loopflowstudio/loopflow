@@ -331,9 +331,11 @@ it. A reconnect tracks paste delimiters even while dropping queued input and
 restores paste framing before forwarding any remaining content. Ctrl+] inside
 a paste is content; outside a paste it detaches the view. No paste timeout or
 Return is added.
-Held-terminal protocol revision 2 pairs this behavior with relays that restore
+Held-terminal protocol revision 3 pairs this behavior with relays that restore
 paste framing after a reconnect; a relay from another revision is replaced by
 the selected installation before it attaches.
+The entrance handshakes in `tests/transport_tests.rs` and
+`tests/machine_commands.rs` pin this revision; update both when advancing it.
 
 A local attachment waits up to five seconds for acknowledgement. Over command
 pipes it allows sixty seconds for SSH setup and destination Session

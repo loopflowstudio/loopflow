@@ -205,7 +205,7 @@ choice is open.
 Each record source carries its own reading's context. `WorkModel.taskRecords`
 returns every record naming the Task in authority order (roadmap, Task
 subscription, retained selection), each with its own freshness; `taskEvidence`
-(and so `task(id:)` metadata/actions) takes the first, unchanged. 
+(and so `task(id:)` metadata/actions) takes the first, unchanged.
 `taskPresentation` weighs every record, then scoped Task-list and selection-plan
 content, and picks the first current name before any retained one. A healthy
 Task subscription therefore names the Task while a retained roadmap row says

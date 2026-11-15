@@ -86,7 +86,7 @@ change and every 60 s only while Changes is visible.
 
 - **Navigator** = filter field, pinned `scratch` group (agent pages, unchanged
   follow behavior), then the checkout **tree** from `lf task files <issue>
-  <dir> --json` (restore `RegistryQuery.taskFiles` + `TaskDirectory` DTO).
+  <dir> --json`.
   Directories load lazily on expand, 500 entries per page; `Load more` passes
   `next_cursor`.
   Changed paths get a change badge from the existing `changes` snapshot.
@@ -171,13 +171,9 @@ the navigator's `Changed files` section (`showsChanges`, `changedPaths`).
 
 ### Acceptance checks (gate, headless)
 
-- `uv run python scripts/test.py --reuse-passing` → swift suite passes,
-  including new `LoopflowTests` cases:
-  - `TaskFilesTests`: tree loads `TaskDirectory` pages lazily, `Load more`
-    appends, failed directory read is local to that node; page/tree/scroll
-    state survives `SessionWorkspace` Task switch; remote store never issues a
-    local path read.
-  - Exist: `PullRequestTests.deliveryDistinguishesEveryStateWithDistinctText`
+- `uv run python scripts/test.py --reuse-passing` → swift suite passes. Exist:
+  `TaskFilesTests` (lazy pages + Load more, failed node, remote reads via
+  Machine, tree kept across Task switch), `PullRequestTests.deliveryDistinguishesEveryStateWithDistinctText`
     (all delivery states, `Task still open`), `TaskBriefTests` (related Tasks,
     outline), `ReviewDiffTests` (stream, cross-file next/previous, word
     emphasis, moves, selection reference).

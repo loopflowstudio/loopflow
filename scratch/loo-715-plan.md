@@ -12,7 +12,8 @@ an absent signal record excludes a crash.
 This serves Infrastructure's recovery and actionable-failure objective and the
 chapter's uninterrupted Session work. No numeric performance KR was supplied.
 No install, merge, OS upgrade, Apple report or evidence upload is authorized;
-review precedes shipping. Production reporter policy remains Jack's decision.
+review precedes shipping. Jack Heart selected disabling Ghostty's reporter after
+the measured comparison on November 14; see `loo-715-direction.md`.
 
 ## Evidence and current architecture
 
@@ -82,8 +83,11 @@ without `isolated deinit`.
 - No production retirement predecessor is deleted before a baseline reproduces.
   If selected, remove dictionary-drop disposal in `BrowserPages.release` and
   cover pool loss through the same retirement owner; preserve Undo/history.
-- Reporter experiments remain isolated. A selected production route replaces the
-  relevant unknown-exit diagnostic, rather than adding a second reporter owner.
+- Delete `rust/loopflow/src/desktop_exits/envelope_experiment.rs`, its test-only
+  module declaration and its README candidate description. Keep the completed
+  comparison results here; production diagnostics use the signal journal/macOS.
+- Replace the lf8 framework with an lf9 artifact built with `-Dsentry=false`;
+  remove Sentry/Breakpad from the shipped dependency inventory and notices.
 
 ## What exists (November 14)
 
@@ -190,15 +194,6 @@ metadata parsing and handling rotating envelope files, while retaining native
 dump memory on disk. Neither alternative repairs WebKit. Headless review leaves
 the product choice open; no install, merge, upload or reporter change occurred.
 
-Focused checks: `scripts/test_desktop.sh --filter BrowserPageLifecycleTests`
-passed (5, previous pass; production Swift unchanged); `uv run pytest
-python/tests/test_browser_lifetime.py -q` passed (9); `cargo test -p loopflow
---lib desktop_exits::envelope_experiment::` passed (4, including interval/lint cleanup); original no-record diagnostic test passed (1, unchanged).
-Ruff and Swift multiplatform checks passed. Final fmt, `cargo clippy --all-targets -- -D warnings` and diff checks passed.
-`cargo test -p loopflow --test integration documented_commands::` passed (4).
-The test link emitted the existing large `__eh_frame` compact-unwind warning;
-no test failed.
-
 ## Concept review — November 14
 
 The interaction stays Close → Undo, with the same live page and history. A second
@@ -222,39 +217,76 @@ implementation direction remains conditional on a failing baseline on a capable
 display; do not turn missing display input into another delay or survival sweep.
 Both reporter experiments are complete, so repeating them is unnecessary.
 
-**Open product choice for loop-or-next (Blocked):** should production disable
-Ghostty's reporter and use the signal journal/macOS reports, or retain it and add
-exact launch-to-envelope correlation in `lf doctor`? Disabling is the measured
-recommendation, not a selected policy. It changes which crash evidence is kept:
-the alternative retains native dump memory and needs launch-identity fields plus
-rotation-aware metadata reads. Neither choice fixes WebKit. The missing
-unoccluded reproduction session is a separate experimental dependency, not a
-product decision. Show the failing-baseline comparison and the chosen diagnostic
-route before review for shipping.
+**Decision received after review:** Jack Heart replied “sure” to disabling
+Ghostty's reporter and using the signal journal/macOS reports. The artifact,
+build/pin and parser removal now exist in the working tree, as recorded below.
+The earlier blocked reporter question is superseded.
+
+**Current concept-review outcome: advance, no model change or open product
+choice.** Keep the existing Close/Undo interaction and ownership split. The
+unoccluded baseline subsequently survived all 60 trials; missing display readiness
+is no longer the sole experimental dependency. The actual Desktop release trigger
+and a failing baseline remain missing. Those are investigation gaps, not a reason
+to ask again about reporter policy or invent a retirement state machine.
+The next evidence to show is that trigger and an identical-condition comparison
+that distinguishes a repair. The stop-windows direction still requires discussion
+in the primary conversation before visible investigation; this review authorizes
+no trial. Background final-tree checks remain available. Neither diagnostic
+packaging nor passing ownership tests satisfy the crash-survival outcome.
+
+## Production reporter and current reproduction — November 14
+
+GhosttyKit lf9 is built and published through the October 6 standing artifact
+workflow. Public download matches SHA-256
+`7f1fc48e5a14d8225fb9791dc563239be9db5c74810f5161de87a3186d4f9bc9`.
+The immutable zip is `https://bin.loopflow.studio/GhosttyKit-a60e9e2-lf9.xcframework.zip`;
+local bytes are under `swift/.build/artifacts/`. Every macOS/iOS slice lacks
+exported Sentry/Breakpad symbols. `build-provenance.json` inside the archive
+records source checksum, all patch checksums, Zig 0.16.0, build flags and final
+library hashes. No private incident evidence was packaged or uploaded.
+The pin and generated notices select lf9; Sentry/Breakpad notices and the
+unselected synthetic parser are deleted. The parser remains recoverable at
+`37b6e6acffc1466a71674242aa83e0dae8f877c0:rust/loopflow/src/desktop_exits/envelope_experiment.rs`.
+The existing disposable-fault receipt above covers the unchanged source/flags;
+no intentional fault was repeated.
+
+The display became unoccluded without intervention. Animation-frame immediate
+release over all ten scenarios × six 0–200 ms offsets completed 60 trials,
+72 native releases, zero retained pages and zero crashes. Every trial reached
+its animation-frame anchor. Same macOS 26.0.1 (25A362), WebKit image UUID
+`1501F244-BE5E-3AD9-ACD8-E9A8880CE2E5`, bundle `21622.1.22.11.15`.
+Receipts: private incident directory,
+`browser-lifetime/20261115T003112.475085Z/`; preceding single reparent trial:
+`browser-lifetime/20261115T002206.258048Z/`.
+No retirement strategy is selected: the failing baseline is still absent.
+At delivery of the stop steer about popup interference, the sweep
+parent had exited and no owned harness child remained; no subsequent visible trial
+ran. `loo-715-direction.md` records the new no-more-windows review boundary.
+
+Checks: reporter-disabled `ghostty-build` passed patch tests, shader checks and
+archive verification; public zip readback matched. Packaging/inventory pytest
+passed (11); focused Rust no-record diagnostic passed (1); Swift multiplatform
+and Rust inventory checks passed. `scripts/test_desktop.sh --jobs 4 --filter BrowserPageLifecycleTests` passed
+(5) against the published pin after `swift package resolve` prepared network
+dependencies; app/test compilation took 1162 s under shared host load. Rust fmt,
+Ruff and final diff checks passed. `cargo test -p loopflow --test integration documented_commands::` passed (4),
+with the existing large `__eh_frame` linker warning. Full clippy and fallback
+build coverage remain gate's final-tree checks.
 
 ## Remaining, in order
 
-1. Obtain an unoccluded display session with animation callbacks and reproduce
-   the baseline. At realign on November 14, `system_profiler SPDisplaysDataType`
-   reported the only display (3456×2234 built-in) `Display Asleep: Yes` while
-   the console session was logged in — the likely cause of every occluded,
-   callback-free trial. A woken, unlocked display is the input; this work does
-   not unlock the screen. Run the new
-   SwiftUI/animation/window scenarios there; if they still survive, use an
-   isolated Dev Desktop to observe the actual release trigger. No live Desktop
-   crash and no screen unlock is part of this work. This is the missing input
-   for further dependent lifetime implementation.
-2. With a failing baseline, compare all four retirement variants on identical
-   content/timing; implement the distinguished strategy in `BrowserPages`,
+1. Review how to observe the actual Desktop release trigger without disrupting
+   active work. No more visible windows or Dev Desktop before discussion in the
+   primary conversation. The unoccluded synthetic baseline survived; do not
+   substitute another delay or survival count for a reproduced failure.
+2. With a failing baseline, compare the retirement variants on identical
+   content/timing, then implement the distinguished strategy in `BrowserPages`,
    covering owner loss, failed navigation and WebContent death with bounded
    reclamation and no callback/timer cycle or `isolated deinit`.
-3. Review the measured reporter recommendation. If disabling is selected, rebuild
-   and package Ghostty with correct notices/provenance, then update its pin. If
-   correlation is selected, move the tested candidate into the real doctor read,
-   capture launch executable/process birth, and delete the test-only placement.
-4. Gate on the final production tree: `uv run python scripts/test.py --swift
-   --loopflow`; Rust diagnostic tests, fmt/clippy and fallback build. Isolated
-   Desktop walkthrough of Back/Forward, pane moves, two closes and Undo for demo.
+3. Gate the final production tree: `uv run python scripts/test.py --swift
+   --loopflow`; Rust diagnostic tests, fmt/clippy and fallback build. A visible
+   Back/Forward, pane-move, two-close/Undo walkthrough needs the same prior
+   discussion. Installation/merge/shipping remain held for review.
 
 Done when Desktop survives the demonstrated first-paint release scenario, retired
 pages are reclaimed, history/Undo/pane moves still work, and the chosen diagnostic

@@ -40,9 +40,10 @@ When Desktop goes away, `desktop-exit` reports the available evidence for each
 bundle's recent launches. The launch journal can record a quit and who asked,
 an `exit()` and the frame that called it, a signal, or an uncaught exception.
 With no exit record, doctor asks the system log over the window since Desktop's
-last 5-minute heartbeat. A missing signal record or macOS crash report does not
-rule out a crash: a native crash reporter can intercept the fault and end the
-process before either is written. Exit status 1 alone does not identify the
+last 5-minute heartbeat. Ghostty is built with its Sentry/Breakpad reporter
+disabled so faults can reach the signal journal and macOS crash reporting. Older
+bundles can still intercept faults before either is written. A missing signal
+record or macOS crash report does not rule out a crash. Exit status 1 alone does not identify the
 cause. Missing evidence leaves the cause unknown.
 
 Stacks, vitals, hangs, memory pressure and failed `lf` reads

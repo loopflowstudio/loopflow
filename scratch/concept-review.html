@@ -5,44 +5,66 @@
 <title>LOO-715 · Browser lifetime concept review</title>
 <style>
 :root { color-scheme: light dark; font: 16px/1.5 system-ui,sans-serif; background: light-dark(#faf9f6,#181a1c); color: light-dark(#25272a,#e4e6e8); }
-body { max-width: 780px; margin: 36px auto; padding: 0 20px 40px; }
-header { font-size: .82rem; color: light-dark(#555,#b3b8bd); }
-h1 { font-size: 1.7rem; line-height: 1.2; margin-bottom: 12px; } h2 { font-size: 1.08rem; margin-top: 24px; }
-p { margin: 12px 0; } code { font-size: .86em; overflow-wrap: anywhere; }
-.callout { border-left: 3px solid light-dark(#956722,#d9b06a); padding-left: 16px; }
-table { border-collapse: collapse; width: 100%; font-size: .88rem; } th,td { text-align: left; vertical-align: top; padding: 10px 6px; border-bottom: 1px solid light-dark(#d3d5d7,#41464b); } th { font-weight: 600; }
-li { margin: 10px 0; } blockquote { margin: 12px 0; padding-left: 16px; border-left: 2px solid #888; }
-@media(max-width:500px) { body { margin-top: 20px; padding: 0 12px 24px; } table { font-size: .78rem; } th,td { padding: 8px 3px; } }
+body { max-width: 760px; margin: 32px auto; padding: 0 18px 36px; }
+header { font-size: .8rem; color: light-dark(#555,#b3b8bd); }
+h1 { font-size: 1.65rem; line-height: 1.2; } h2 { font-size: 1.05rem; margin-top: 24px; }
+code { font-size: .86em; overflow-wrap: anywhere; }
+.callout { border-left: 3px solid light-dark(#956722,#d9b06a); padding-left: 14px; }
+table { border-collapse: collapse; width: 100%; font-size: .87rem; }
+th,td { text-align: left; vertical-align: top; padding: 8px 5px; border-bottom: 1px solid light-dark(#d3d5d7,#41464b); }
+li { margin: 10px 0; }
+@media(max-width:500px) { body { margin-top: 18px; padding: 0 10px 24px; } th,td { padding: 7px 3px; } table { font-size: .76rem; } }
 </style>
 <header>LOO-715 · concept-review · November 14, 2026<br>
-Sources: scratch/loo-715-plan.md, scratch/loo-715-direction.md,
-scratch/desktop-exit-2026-11-02.md, BrowserPageView.swift,
-SessionsView.swift, MultiplexerStore.swift, BrowserPageLifecycleTests.swift,
-swift/README.md, browser-lifetime/README.md, reporter/README.md,
-desktop_exits/envelope_experiment.rs.</header>
-<h1>Decide which crash evidence production keeps.</h1>
-<p>Jack Heart said “lets do it.” The required outcome is Desktop surviving first-paint closes while preserving history, pane moves and Undo. Production reporter policy remains open.</p>
-<p class="callout"><strong>Biggest mismatch:</strong> lifetime observation is built; a lifetime repair is not. All 48 comparison trials survived, including immediate release. Later probes found occluded windows without animation callbacks. A failing baseline on an unoccluded display is still missing.</p>
-<h2>Actions → concepts → APIs</h2>
+Built from scratch/loo-715-plan.md, scratch/loo-715-direction.md,
+scratch/questions.md, scratch/desktop-exit-2026-11-02.md;
+BrowserPageView.swift, SessionsView.swift, MultiplexerStore.swift,
+BrowserPageLifecycleTests.swift, swift/README.md, swift/Package.swift,
+scripts/loopflow-dev.py, third_party/manifest.json and browser-lifetime/README.md.</header>
+<h1>Keep Close and Undo. Establish the failing release before choosing a repair.</h1>
+<p><strong>Review outcome: advance.</strong> No model change or open product choice.
+Jack Heart replied “sure” to disabling Ghostty’s reporter. The lf9 artifact is
+published and pinned in the working tree; Desktop installation and shipping still await review.</p>
+<p class="callout"><strong>Biggest mismatch:</strong> diagnostics are implemented;
+crash survival is unproved. All 60 unoccluded animation-frame immediate-release
+trials survived, with 72 native releases and no retained pages. The actual Desktop
+release trigger remains unobserved. More survival counts cannot select a fix.</p>
+<h2>Actions → concepts → APIs · existing behavior stays</h2>
 <table>
-<thead><tr><th>Action</th><th>Concept that stays</th><th>Existing state change</th></tr></thead>
+<thead><tr><th>Action</th><th>Concept</th><th>State change</th></tr></thead>
 <tbody>
-<tr><td>Close A, then B</td><td>One Undo entry; B lives, A is disposable</td><td><code>closePane → closeBrowserTab → _record</code> returns A; <code>pages.release(A)</code></td></tr>
-<tr><td>Undo B</td><td>Same tab, live page and history</td><td><code>undoClose()</code> restores B; <code>view(for:url:)</code> reuses it</td></tr>
-<tr><td>Move / hide pane</td><td>Contents remain live</td><td>Reparent the view / collapse layout; hiding does not discard its tabs</td></tr>
-<tr><td>Workspace disappears</td><td>Native resources eventually die</td><td>Pool and container ownership end; destruction is logged</td></tr>
-<tr><td>Inspect an unexplained exit</td><td>Evidence, with uncertainty</td><td><code>lf doctor</code> reads launch journal and system log</td></tr>
+<tr><td>Close A, then B</td><td>One Undo entry: B stays live; A is disposable</td><td><code>closePane → closeBrowserTab → _record</code> returns A; <code>pages.release(A)</code></td></tr>
+<tr><td>Undo B</td><td>Same page and history</td><td><code>undoClose()</code> restores B; <code>view(for:url:)</code> reuses it</td></tr>
+<tr><td>Move or hide pane</td><td>Contents remain live</td><td>Reparent the native view or collapse layout. Replacing a hidden pane’s Undo entry does not discard its tabs.</td></tr>
+<tr><td>Workspace ends</td><td>Native resources are reclaimed</td><td>Pool/container ownership ends; native destruction is logged separately from retirement intent</td></tr>
+<tr><td>Inspect abnormal exit</td><td>Available evidence, otherwise unknown</td><td><code>lf machine doctor</code> reports <code>desktop-exit</code> from launch journal/system log; standard macOS crash reports remain available</td></tr>
 </tbody></table>
-<h2>Before → proposed outcome</h2>
-<p><strong>Existing:</strong> pool removal can precede native destruction; diagnostics distinguish both. Native reporting can bypass exit hooks. <strong>Proposed, unbuilt:</strong> demonstrated safe disposal in the same pool, plus attributable crash evidence. Undo owns recoverability; the pool owns native pages; containers own presentation. No second cache, persisted lifecycle or new user action.</p>
-<blockquote>Proposed usage copy: “Close a page, then Undo: its history returns. Moving or hiding a pane keeps its contents. Surviving a close during first paint remains an acceptance target under investigation.”</blockquote>
-<p><strong>Failure and recovery:</strong> relaunch restores access, not a repair or a promise of live page history after process death. Missing journal/report evidence stays unknown. Failed navigation, WebContent death and owner loss must still permit reclamation; a timeout or paint callback alone proves no safety.</p>
-<h2>Measured alternatives; production remains unchanged</h2>
-<p><strong>Disable reporter:</strong> the isolated patched Ghostty build produced one signal-journal entry and a matching macOS report after a disposable native fault. Recommended after review and packaging checks.</p>
-<p><strong>Keep reporter:</strong> synthetic envelope correlation passes its focused checks without reading memory streams. Production integration still needs executable/process-birth launch fields and handling for rotating evidence; native dump memory remains on disk.</p>
-<p>Neither alternative repairs WebKit. No experiments need repeating here. Details and private receipt locations are in the plan; dumps and envelopes stay private. No install, merge, upload or OS upgrade.</p>
-<h2>Decision needed · loop-or-next: Blocked</h2>
-<ol><li>Which production reporter policy should be implemented after review?<br>
-<strong>1a.</strong> Keep Ghostty's reporter and add exact launch-to-envelope correlation in <code>lf doctor</code>.<br>
-<strong>1b.</strong> Disable it and use the demonstrated signal-journal/macOS-report route (recommendation).</li></ol>
+<h2>Before → built → proposed</h2>
+<p><strong>Before:</strong> Ghostty’s Mach exception reporter could write a private dump
+and exit before the signal journal or macOS report. <strong>Built, pending delivery:</strong>
+lf9 uses <code>-Dsentry=false</code>, carries build provenance and matching notices;
+the unselected envelope parser is removed. The isolated native-fault experiment
+recorded one signal entry and a matching macOS report. No fault needs repeating.</p>
+<p><strong>Proposed, unbuilt:</strong> safe page disposal demonstrated against a failing
+baseline. Undo owns recoverability, the pool owns native pages, and containers own
+presentation. Keep one disposal owner for explicit discard and workspace loss;
+no second tab cache, persisted lifecycle, DTO or schema change.</p>
+<h2>Normal path, failure, recovery</h2>
+<p>Close A → close B → Undo B keeps B’s history and eventually reclaims A.
+A shell close or pane hide can also displace A’s Undo entry. A still-hidden pane
+keeps its own pages. Failed navigation, WebContent death and workspace loss must
+permit reclamation without waiting forever.</p>
+<p>Pending WebKit work can fault after native destruction. Navigation completion,
+two animation frames and a retention deadline acknowledge no drained layer tree.
+Relaunch restores access; live page history after process death is not promised.
+Missing crash evidence stays unknown.</p>
+<h2>Questions remaining</h2>
+<ol>
+<li><strong>Is a product decision needed here?</strong> No. Reporter policy is recorded;
+Close, history, pane moves, Undo and bounded reclamation remain requirements.</li>
+<li><strong>What must the next investigation establish?</strong> The actual Desktop release
+trigger and a failing comparison baseline. No more visible windows or Dev Desktop
+before discussion in the primary conversation. Background final-tree checks may
+continue; this page starts no execution and authorizes no installation or merge.</li>
+</ol>
 </html>

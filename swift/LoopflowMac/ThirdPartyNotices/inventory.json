@@ -9,7 +9,7 @@
     "swift/GhosttyKitPatches/0005-terminal-feedback.patch": "d3cd74828223982bb884157d3eafd3b837280771eba27f2ca974f4f0871ed43b",
     "swift/GhosttyKitPatches/0006-ios-external-io.patch": "631c27da22817ec159885c2e12669166d2360ae48ded352b61021c6b520835a9",
     "swift/GhosttyKitPatches/0007-no-libintl-without-i18n.patch": "c3c0c273d01831441895728b00b9106baf64e4f86843b4dc60cffedb1703393b",
-    "swift/GhosttyKitPatches/README.md": "17c0d3a5f3889586991adc7b6a5db5fe4fc038475a3454f44eb11bf3d48e8c38",
+    "swift/GhosttyKitPatches/README.md": "1e2f7d3fed945abaa49be7449df320a00534ddbb3f8a1f701819e366db01132e",
     "swift/Loopflow/Fonts/CormorantGaramond-Medium.otf": "bc49bcebc38f68498956f47b9414d6907fe9192e8d3c38d077a095da2e8f2da5",
     "swift/Loopflow/Fonts/CormorantGaramond-Regular.otf": "d276dd20a536a36c03f0ab6e845cb39260cc6639c0b835b26d1c354c8cb3b2b3",
     "swift/Loopflow/Fonts/CormorantGaramond-SemiBold.otf": "62363e27dff8453a9577e0801cfde7573ac8af68f57b7d401b0d805b67a0cf11",
@@ -65,11 +65,10 @@
     "swift/LoopflowMac/GhosttyResources/share/terminfo/78/xterm-ghostty": "7b9448b1abe6f0f36410f424fd269da67116e31aea600dfbbfca863d09a5bc20",
     "swift/LoopflowMac/GhosttyResources/share/terminfo/ghostty.terminfo": "e5e9cc4e9fddf6aab3088b40ec42fafe8309ef1ae5d3764d0bbf2fc44105ccf0",
     "swift/Package.resolved": "3b4687150d10bfa159dd90dac1b81b1977f6b622d69ca5e214fdce206449251f",
-    "swift/Package.swift": "57813179473251a2eeda35f34856691bde71a50d04be6156c0fda10e2654bcba",
-    "third_party/README.md": "9d2661253b7c6152672de67cab7f676399f71b43eaff8788aa540d4fa9e04f25",
-    "third_party/manifest.json": "e27a444e69d3cb278e09e1ab2bea1505dbf837145a214b3fe2482e87a8a699f0",
+    "swift/Package.swift": "caaa9e5c62e5c03814b934975c20bcbfd685fbec8c74e6c61166a0c10324dfef",
+    "third_party/README.md": "6165562235fa4ea7dd695da70a4e6b04f73a376b5903ace3258c1511a0c20d9a",
+    "third_party/manifest.json": "18322c3c359e6b873d5c9fd0167e08519f9ae4484cf80c0418240a38a290aff3",
     "third_party/notices/app-fonts.txt": "17b912df78b4ed923a1b2d3a03def226afeb47279cd1e54823c13f3f0964c2e1",
-    "third_party/notices/breakpad-breakpad.txt": "28fd46313ce1f83fa2716c64c5e630296849bf059758023b3df2eb1ae98557b7",
     "third_party/notices/crate-block2.txt": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54",
     "third_party/notices/crate-dispatch2.txt": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54",
     "third_party/notices/crate-objc2-encode.txt": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54",
@@ -88,7 +87,6 @@
     "third_party/notices/nerd-glyphs.txt": "feea76b94d82213763cc685894dac9f44adc642bc345efe49d92f9ed643b39ba",
     "third_party/notices/nerd_fonts_symbols_only.txt": "1745777eb9ecea5a8828df8dcb2b1837860b3505fea58f2688408b324ef6da37",
     "third_party/notices/oniguruma-oniguruma.txt": "a4d780032f7db15e33f8d8dd1500454178ab93aa57fe4963383443f2f6133099",
-    "third_party/notices/sentry-sentry.txt": "fdd9ad263e47f7c65c000ded18a64a42a08fc279aef4a2113a99b02d47855221",
     "third_party/notices/spirv-cross-spirv_cross.txt": "dfab64ca84061bc754a6451980935a2879fb5157023bf7b643c1fcfc32e41a96",
     "third_party/notices/uucode.txt": "5c5f26c8d2e93f0ab15b658ccd95a22d02be65622401d8c92ef54e92fa4b087d",
     "third_party/notices/vaxis.txt": "1306dd94538c211fcfd9f9dda2ea715d243c042fa6e14934047e6a4e74001196",
@@ -101,8 +99,8 @@
     "third_party/notices/zlib-zlib.txt": "97898cd24ff025482d7a03a34bde681008418e79e45ad1cb96c8ecd9af7b9d01"
   },
   "ghostty": {
-    "url": "https://bin.loopflow.studio/GhosttyKit-a60e9e2-lf8.xcframework.zip",
-    "sha256": "306d53ebe8604121ca0e371f01d5f7eeabf788a78e615ff21572eb25bfaaaa99",
+    "url": "https://bin.loopflow.studio/GhosttyKit-a60e9e2-lf9.xcframework.zip",
+    "sha256": "7f1fc48e5a14d8225fb9791dc563239be9db5c74810f5161de87a3186d4f9bc9",
     "revision": "a60e9e2a57f73e1eef2bd1cf2995a467f69e7fb0"
   },
   "components": [
@@ -201,34 +199,6 @@
         {
           "path": "third_party/notices/spirv-cross-spirv_cross.txt",
           "sha256": "dfab64ca84061bc754a6451980935a2879fb5157023bf7b643c1fcfc32e41a96"
-        }
-      ]
-    },
-    {
-      "id": "sentry-sentry",
-      "scope": "GhosttyKit",
-      "source": {
-        "url": "https://deps.files.ghostty.org/sentry-1220446be831adcca918167647c06c7b825849fa3fba5f22da394667974537a9c77e.tar.gz",
-        "sha256": "2ac6497cc8d61a8d31093e47addb8c9b2c45b16b0705bb334a835b6423c318df"
-      },
-      "notices": [
-        {
-          "path": "third_party/notices/sentry-sentry.txt",
-          "sha256": "fdd9ad263e47f7c65c000ded18a64a42a08fc279aef4a2113a99b02d47855221"
-        }
-      ]
-    },
-    {
-      "id": "breakpad-breakpad",
-      "scope": "GhosttyKit",
-      "source": {
-        "url": "https://deps.files.ghostty.org/breakpad-b99f444ba5f6b98cac261cbb391d8766b34a5918.tar.gz",
-        "sha256": "6cca98943d1a990766cef61077c09aff5938063fe17a1efe1228e5412b6d6ad9"
-      },
-      "notices": [
-        {
-          "path": "third_party/notices/breakpad-breakpad.txt",
-          "sha256": "28fd46313ce1f83fa2716c64c5e630296849bf059758023b3df2eb1ae98557b7"
         }
       ]
     },
@@ -2709,5 +2679,5 @@
       }
     }
   ],
-  "notices_sha256": "2b962ac16cf053878143a62687f38f235dc6e3c16e4fd754605aa5efe6aa3d5e"
+  "notices_sha256": "c827272b069e1336f6c680d91c2e90d9ba011ea92c83682f5ebea26c3b9285b9"
 }

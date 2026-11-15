@@ -31,7 +31,7 @@ For a dependency/artifact update:
    license locations; `notices/` retains the reviewed text and its source paths.
 2. For GhosttyKit, check embedded font bytes and their licenses, and audit the
    complete pinned `SharedDeps.zig` plus transitive sources. GhosttyKit builds
-   with `-Di18n=false`, so it carries no GNU libintl; confirm `ar t` on each
+   with `-Di18n=false -Dsentry=false`, so it carries no GNU libintl; confirm `ar t` on each
    slice's `libghostty.a` lists no `gettext.o`. Update the manifest pin. Do not
    overwrite an already published binary; use the existing artifact publication
    workflow and a new artifact name when authorized.
@@ -46,8 +46,7 @@ component (z2d, option-ext), which that license requires be available to
 recipients. A crate's license comes from Cargo; a manifest component's from its
 `license` field, so a new MPL-2.0 GhosttyKit dependency needs one. Every other
 license in the inventory needs its notice only: libpng's GPL files are
-uncompiled examples, glslang's Bison output and Breakpad's configure scripts
-carry exceptions, and the GPL shell integration ships as source with its license
+uncompiled examples, glslang's Bison output carries an exception, and the GPL shell integration ships as source with its license
 text in the notices. A framework archive carries only GhosttyKit's MPL sources.
 A failed download, stale inventory or missing source aborts packaging.
 `contents.json` records hashes, and final-artifact verification requires the
@@ -62,6 +61,8 @@ respective material. This audit is packaging evidence, not legal certification.
 
 The historical public lf3/lf7 archives are immutable and are not republished.
 They statically combine GNU libintl; archives from lf8 on are built without it.
+From lf9 on, Sentry/Breakpad is also disabled; native faults use the signal journal
+and macOS reports. Historical archives retain their original notices.
 
 The iOS target links the same archive's `ios-arm64` and `ios-arm64-simulator`
 slices and bundles the generated `NOTICES.txt` plus the font notices. Shared theme

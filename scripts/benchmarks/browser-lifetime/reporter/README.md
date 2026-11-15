@@ -26,20 +26,5 @@ this executable. Evidence stays outside Git in the existing private incident
 directory. The command kills and reaps its own child on interruption or timeout.
 It installs nothing and changes no preferences, package pins or reporter policy.
 
-The alternative experiment is
-`desktop_exits::envelope_experiment::` in Rust's library test binary. Synthetic
-fatal envelopes carry executable metadata plus minidump header, exception and
-process-info streams. The parser seeks over attachments and reads neither thread
-contexts nor stack/memory streams. A receipt names the envelope and embedded dump
-attachment; it does not invent a separate extracted dump path. Ambiguity, missing
-or torn evidence, a different executable, PID or process birth time, and crash
-buckets outside the launch interval stay unknown. The candidate is test-only:
-production `lf doctor` does not scan envelopes.
-
-Integration would need the launch journal to record the executable and kernel
-process creation time. Its current bundle/PID/start line cannot establish exact
-process identity, and no production fallback guesses those missing fields.
-The envelope parser currently targets sentry-native's explicit-length items;
-unknown formats stay unknown. Sentry's [envelope specification](https://develop.sentry.dev/sdk/foundations/envelopes/)
-and Breakpad's [metadata definitions](https://github.com/google/breakpad/blob/main/src/google_breakpad/common/minidump_format.h)
-describe the formats. No real incident envelope or dump enters the tests.
+Desktop builds use `-Dsentry=false`. The completed synthetic envelope comparison
+was removed after selecting the signal journal and macOS reports.

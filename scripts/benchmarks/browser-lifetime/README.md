@@ -63,8 +63,8 @@ kills and reaps the owned trial process. The probe starts no provider or server.
 Do not run intentional faults in an installed Desktop.
 
 Survival without a reproduced baseline crash does not establish a repair.
-The [native reporter diagnostic](reporter/README.md) compares the isolated
-reporter-disabled build with synthetic envelope correlation. A real Desktop
+The [native reporter diagnostic](reporter/README.md) checks the isolated
+reporter-disabled build against the signal journal and macOS reports. A real Desktop
 history/pane/Undo walkthrough remains separate.
 
 ```sh

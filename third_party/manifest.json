@@ -1,7 +1,7 @@
 {
   "ghostty": {
-    "url": "https://bin.loopflow.studio/GhosttyKit-a60e9e2-lf8.xcframework.zip",
-    "sha256": "306d53ebe8604121ca0e371f01d5f7eeabf788a78e615ff21572eb25bfaaaa99",
+    "url": "https://bin.loopflow.studio/GhosttyKit-a60e9e2-lf9.xcframework.zip",
+    "sha256": "7f1fc48e5a14d8225fb9791dc563239be9db5c74810f5161de87a3186d4f9bc9",
     "revision": "a60e9e2a57f73e1eef2bd1cf2995a467f69e7fb0"
   },
   "components": [
@@ -100,34 +100,6 @@
         {
           "path": "third_party/notices/spirv-cross-spirv_cross.txt",
           "sha256": "dfab64ca84061bc754a6451980935a2879fb5157023bf7b643c1fcfc32e41a96"
-        }
-      ]
-    },
-    {
-      "id": "sentry-sentry",
-      "scope": "GhosttyKit",
-      "source": {
-        "url": "https://deps.files.ghostty.org/sentry-1220446be831adcca918167647c06c7b825849fa3fba5f22da394667974537a9c77e.tar.gz",
-        "sha256": "2ac6497cc8d61a8d31093e47addb8c9b2c45b16b0705bb334a835b6423c318df"
-      },
-      "notices": [
-        {
-          "path": "third_party/notices/sentry-sentry.txt",
-          "sha256": "fdd9ad263e47f7c65c000ded18a64a42a08fc279aef4a2113a99b02d47855221"
-        }
-      ]
-    },
-    {
-      "id": "breakpad-breakpad",
-      "scope": "GhosttyKit",
-      "source": {
-        "url": "https://deps.files.ghostty.org/breakpad-b99f444ba5f6b98cac261cbb391d8766b34a5918.tar.gz",
-        "sha256": "6cca98943d1a990766cef61077c09aff5938063fe17a1efe1228e5412b6d6ad9"
-      },
-      "notices": [
-        {
-          "path": "third_party/notices/breakpad-breakpad.txt",
-          "sha256": "28fd46313ce1f83fa2716c64c5e630296849bf059758023b3df2eb1ae98557b7"
         }
       ]
     },

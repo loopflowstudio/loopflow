@@ -6,8 +6,8 @@
 // because trimming replaces the journal file. The handler then restores the
 // previous disposition: a termination signal is raised again; a fault returns
 // and re-faults into the previous signal disposition. A Mach exception handler
-// (including Ghostty's Breakpad) can intercept a fault before any BSD signal
-// arrives and call _exit, bypassing this journal and macOS crash reporting.
+// can intercept a fault before any BSD signal arrives and call _exit, bypassing
+// this journal and macOS crash reporting. Ghostty is built with -Dsentry=false.
 
 import Darwin
 import Foundation

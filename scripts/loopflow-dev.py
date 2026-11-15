@@ -67,7 +67,7 @@ DEV_CONTROL_CONFIG = "LoopflowDevControl.json"
 # are built from; build.rs reads the same file to fetch and link libghostty-vt.
 GHOSTTY_VT_PIN = REPO_ROOT / "rust" / "loopflow" / "ghostty-vt.json"
 GHOSTTY_REVISION = json.loads(GHOSTTY_VT_PIN.read_text())["revision"]
-GHOSTTY_ARTIFACT = "GhosttyKit-a60e9e2-lf8.xcframework.zip"
+GHOSTTY_ARTIFACT = "GhosttyKit-a60e9e2-lf9.xcframework.zip"
 # Rust target → Zig target for the libghostty-vt archives `lf` links.
 GHOSTTY_VT_TARGETS = {
     "aarch64-apple-darwin": "aarch64-macos",
@@ -238,12 +238,40 @@ def _strip_ghostty_debug_info(framework: Path) -> None:
         subprocess.run(["xcrun", "strip", "-S", str(path)], check=True)
 
 
+def _record_ghostty_build(framework: Path, command: list[str]) -> None:
+    libraries = {}
+    for item in plistlib.loads((framework / "Info.plist").read_bytes())["AvailableLibraries"]:
+        path = framework / item["LibraryIdentifier"] / item["LibraryPath"]
+        symbols = subprocess.check_output(
+            ["nm", "-gU", str(path)], stderr=subprocess.DEVNULL
+        )
+        if b"_sentry_" in symbols or b"google_breakpad" in symbols:
+            raise ValueError(f"Ghostty crash reporter is still linked: {path}")
+        libraries[str(path.relative_to(framework))] = hashlib.sha256(path.read_bytes()).hexdigest()
+    patches = {
+        path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in sorted((SWIFT_DIR / "GhosttyKitPatches").glob("*.patch"))
+    }
+    provenance = {
+        "revision": GHOSTTY_REVISION,
+        "source_archive_sha256": hashlib.sha256(
+            (SWIFT_DIR / ".build/ghostty-kit/source.tar.gz").read_bytes()
+        ).hexdigest(),
+        "zig": run_capture([command[0], "version"]).stdout.strip(),
+        "command": ["zig", *command[1:]],
+        "patches": patches,
+        "libraries": libraries,
+    }
+    (framework / "build-provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
+
+
 def cmd_ghostty_build() -> int:
     """Build the pinned GhosttyKit with Loopflow's small embedder patch."""
     build_root = SWIFT_DIR / ".build" / "ghostty-kit"
     local_framework = SWIFT_DIR / ".build" / "local" / "GhosttyKit.xcframework"
     artifact = SWIFT_DIR / ".build" / "artifacts" / GHOSTTY_ARTIFACT
     source = _download_ghostty_source(build_root)
+    zig = _zig_0_16()
 
     if (code := _apply_patches(source, SWIFT_DIR / "GhosttyKitPatches")) != 0:
         return code
@@ -251,9 +279,10 @@ def cmd_ghostty_build() -> int:
     # Patch behavior, the protocol parser it consumes, and the exported action ABI.
     result = run(
         [
-            "zig",
+            zig,
             "build",
             "test",
+            "-Dsentry=false",
             "-Dtest-filter=command",
             "-Dtest-filter=bounded text",
             "-Dtest-filter=semantic prompt",
@@ -280,8 +309,12 @@ def cmd_ghostty_build() -> int:
     if result.returncode != 0:
         return result.returncode
 
+    build_command = [
+        zig, "build", "-Doptimize=ReleaseFast", "-Demit-macos-app=false",
+        "-Di18n=false", "-Dsentry=false",
+    ]
     result = run(
-        ["zig", "build", "-Doptimize=ReleaseFast", "-Demit-macos-app=false", "-Di18n=false"],
+        build_command,
         cwd=source,
         check=False,
     )
@@ -300,6 +333,7 @@ def cmd_ghostty_build() -> int:
 
     _normalize_ghostty_library(local_framework)
     _strip_ghostty_debug_info(local_framework)
+    _record_ghostty_build(local_framework, build_command)
     run(
         [
             sys.executable,

@@ -39,5 +39,5 @@ It is also embedded in this checkout's
 The original report's Sparkle control-test/old-Dev-build analysis and Claude
 weekly-limit failover analysis are separate incidents. They establish no
 browser lifetime repair and select no work here. Current scope and remaining
-experiments are in `loo-715-plan.md`; reporter disabling and envelope correlation
-remain alternatives awaiting measured comparison and Jack's policy decision.
+experiments are in `loo-715-plan.md`; the November 14 reporter decision and unfinished
+lifetime reproduction are recorded there.

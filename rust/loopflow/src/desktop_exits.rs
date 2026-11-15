@@ -897,8 +897,3 @@ mod tests {
         assert_eq!(parse_termination(r#"{"count":0,"finished":1}"#), None);
     }
 }
-
-// Candidate for the reporter comparison, with synthetic envelopes only. No
-// production scan is selected before the reporter-policy review.
-#[cfg(test)]
-mod envelope_experiment;

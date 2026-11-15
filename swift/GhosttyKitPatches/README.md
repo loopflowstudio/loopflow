@@ -7,7 +7,10 @@ uv run python scripts/loopflow-dev.py ghostty-build
 Requires Zig 0.16.0, `glslangValidator`, and a macOS Metal device. Runs the patches' Zig tests, builds the pinned upstream revision,
 and writes the framework under `swift/.build/local/` plus a versioned zip under
 `swift/.build/artifacts/`. The command prints the SwiftPM checksum; it does not
-publish the artifact. It builds with `-Di18n=false`, so no GNU libintl is linked.
+publish the artifact. It builds with `-Di18n=false -Dsentry=false`, so no GNU libintl is linked.
+Sentry/Breakpad is disabled so native faults reach the launch signal journal and
+macOS crash reporting. Each slice is checked for reporter symbols;
+`build-provenance.json` records its hash, source, patches, Zig version and flags.
 Packaging includes the audited notices and matching source; missing material
 fails the build. See
 [third-party packaging](../../third_party/README.md). Packaging normalizes the upstream static archive to
@@ -34,7 +37,7 @@ After the patch's relevant build and behavior checks pass, upload the zip to the
 `bin` R2 bucket (`bin.loopflow.studio`) as `application/zip`, immutable, with R2
 credentials from Doppler. Download it back and compare its checksum with the
 build's, then update the URL and checksum in `Package.swift`.
-Use a new artifact version whenever the patch changes.
+Use a new artifact version whenever patches or build options change.
 
 ## iOS and embedder-supplied bytes
 
@@ -80,10 +83,10 @@ reject changes to every managed color key and unresolved cursor colors.
 
 ## Combined artifact
 
-`Package.swift` selects `GhosttyKit-a60e9e2-lf8.xcframework.zip` (SHA-256
-`306d53ebe8604121ca0e371f01d5f7eeabf788a78e615ff21572eb25bfaaaa99`, 38 MB): every
-patch here, with macOS, iOS and iOS Simulator slices. It builds with
-`-Di18n=false`; `0007-no-libintl-without-i18n.patch` stops upstream linking GNU
+`Package.swift` selects `GhosttyKit-a60e9e2-lf9.xcframework.zip`: every patch
+here, with macOS, iOS and iOS Simulator slices. The checksum is in the
+[artifact manifest](../../third_party/manifest.json). It builds with
+`-Di18n=false -Dsentry=false`; `0007-no-libintl-without-i18n.patch` stops upstream linking GNU
 libintl on Apple targets regardless, and nothing calls it with i18n off. Each
 slice's `libghostty.a` is stripped of debug info (`strip -S`), which the
 apps never shipped. The earlier lf3-theme-readback1, lf7 and

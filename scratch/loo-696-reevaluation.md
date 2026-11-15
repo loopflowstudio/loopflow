@@ -25,6 +25,12 @@ contradictory Task status across Desktop.
 After implementation, `0917d5acf9` checkpointed the cutover and `409bc089d4`
 merged main `3fbf3d2ca3` (v0.16.0 release notes, migration order, a mobile test).
 None of main's files overlap this branch; no tests rerun for that merge.
+`8d2bed328f` then merged main `f3eab806e3` (#1943, readable Task names while
+planning loads), which overlaps `WorkModel.swift`, `swift/README.md` and several
+tests. It auto-merged; its new rows render `TaskHeading.state` (lifecycle) and
+filter by Rust `states`, so it adds no second derivation.
+`scripts/test_desktop.sh --filter 'ProgramStatusTests|TaskRowMetadataTests|TaskConceptTests|WorkModelTests'`
+after that merge: app/test build and 63 headless tests passed.
 
 ## Architecture and decisions
 

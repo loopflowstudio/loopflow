@@ -45,7 +45,13 @@ final class ClientWorkStoreTests: XCTestCase {
             try await client.observeSaved(record)
             XCTFail("Ended observation must report the missing live evidence")
         } catch { }
+        try await client.presented(record.id)
         let restarted = store()
+        let recovery = try await restarted.recovery(record.id)
+        XCTAssertTrue(recovery?.resultPresented == true)
+        XCTAssertEqual(recovery?.planning, .resolved)
+        XCTAssertTrue(recovery?.needsInspection == true) // unclassified command diagnostic remains
+        XCTAssertEqual(recovery?.diagnostic, historical.error)
         let saved = try await restarted.receipt(record.id)
         let status = try await restarted.planning(record.id)
         XCTAssertEqual(saved?.result, historical.result)
@@ -55,6 +61,30 @@ final class ClientWorkStoreTests: XCTestCase {
         XCTAssertEqual(recovered?.planning, newer.planning)
         let pending = try await restarted.pending()
         XCTAssertEqual(pending.first?.payload, record.payload)
+
+        // A replacement lifetime and delayed old receipt cannot turn the saved
+        // result into current confirmation, even after the phone restarts.
+        var replacement = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(try XCTUnwrap(frames[0].stamp))) as? [String: Any])
+        replacement["epoch"] = "replacement"
+        let missing = try JSONDecoder().decode(SubscriptionReading<OperationReceipt>.self,
+            from: JSONSerialization.data(withJSONObject: ["answers": NSNull(), "unavailable": NSNull(),
+                "body": NSNull(), "stamp": replacement]))
+        let resetFrames = [missing, frames[0]]
+        let resetClient = ClientWorkStore(directory: directory, machine: { "machine_fixture" }, read: { _ in "null" }, observe: { _ in
+            let stream = AsyncThrowingStream<SubscriptionReading<OperationReceipt>, any Error> { continuation in
+                for frame in resetFrames { continuation.yield(frame) }
+                continuation.finish()
+            }
+            return ServerWatch(updates: stream, checkpoint: { _ in }, cancel: {})
+        }, send: { _ in XCTFail("Epoch replacement cannot replay the saved edit") })
+        do { try await resetClient.observeSaved(record) } catch { }
+        // The first receipt from this new observer belongs to the departed epoch.
+        do { try await store().observeSaved(record) } catch { }
+        let afterReset = try await store().recovery(record.id)
+        XCTAssertTrue(afterReset?.resultPresented == true)
+        XCTAssertTrue(afterReset?.needsInspection == true)
+        XCTAssertEqual(afterReset?.planning, .unavailable)
+        XCTAssertTrue(afterReset?.receiptAvailable == false)
     }
 
     func testSubmittedWordsSurvivePhoneRestartWithoutSending() async throws {

@@ -63,8 +63,6 @@ final class CreationRecovery {
             do {
                 try Task.checkCancellation()
                 try await submissions.presented(id)
-                recoveryTasks.removeValue(forKey: id)?.cancel()
-                recoveryErrors.removeValue(forKey: id)
                 presentations.removeValue(forKey: id)
                 items.removeAll { $0.id == id }
             } catch is CancellationError { return }
@@ -74,6 +72,7 @@ final class CreationRecovery {
                 items.append(Item(id: id, text: error.localizedDescription, complete: false, resource: nil))
             }
         }
+        await refresh()
     }
     private var recoveryErrors: [String: String] = [:]
     @ObservationIgnored private var recoveryTasks: [String: Task<Void, Never>] = [:]
@@ -152,23 +151,24 @@ final class CreationRecovery {
                     let resource = Resource(destination: record.destination, directory: directory,
                         task: task, session: session,
                         receipt: String(decoding: try encoder.encode(operation), as: UTF8.self))
-                    let planning = try await submissions.planning(record.id)
-                    let unresolved = planning?.unresolved ?? []
+                    guard let recovery = try await submissions.recovery(record.id) else { continue }
+                    let lookupError = recoveryErrors[record.id]
+                    let needsInspection = recovery.needsInspection || lookupError != nil
+                    // Showing the saved result clears only its redundant prompt.
+                    // Current failures and receipt observation outlive that view.
+                    if recovery.resultPresented && !needsInspection { continue }
+                    var messages = recovery.messages
+                    if let lookupError, !messages.contains(lookupError) { messages.append(lookupError) }
                     let progress = operation.delivery == .finished ? "Request completed" : "Request saved; preparing its conversation"
-                    let message: String
-                    if let change = unresolved.first {
-                        message = change.error ?? "Planning update needs inspection (\(change.state.rawValue))"
-                    } else {
-                        message = planning == nil ? operation.error ?? progress : progress
-                    }
-                    current.append(Item(id: record.id, text: recoveryErrors[record.id] ?? message,
-                        complete: operation.delivery == .finished && operation.validation == .bound
-                            && recoveryErrors[record.id] == nil && unresolved.isEmpty, resource: resource))
+                    current.append(Item(id: record.id,
+                        text: messages.isEmpty ? progress : messages.joined(separator: "\n"),
+                        complete: !needsInspection && operation.delivery == .finished
+                            && operation.validation == .bound, resource: resource))
                 } catch {
                     current.append(Item(id: record.id, text: "Creation \(record.id): \(error.localizedDescription)", complete: false, resource: nil))
                 }
             }
-            // A mounted view may have retired a request while lookup awaited I/O.
+            // A concurrent save may have changed the set while lookup awaited I/O.
             let pending = Set(try await submissions.pending().map(\.id))
             items = current.filter { pending.contains($0.id) }
         } catch { items = [Item(id: "storage", text: error.localizedDescription, complete: false, resource: nil)] }
@@ -196,7 +196,7 @@ struct CreationRecoveryView: View {
         .padding(items.isEmpty ? 0 : 12)
         .sheet(item: $inspecting) { item in
             if let resource = item.resource { RecoveredCreationInspector(resource: resource, presented: {
-                if item.complete { await recovery.presented([item.id]) }
+                await recovery.presented([item.id])
             }) }
         }
         .task { recovery.start() }
@@ -259,8 +259,8 @@ private struct RecoveredCreationInspector: View {
     }
 }
 
-// A mounted result retires the submitted request. Navigation and socket replies
-// alone cannot do so; a cancelled or failed presentation remains recoverable.
+// A mounted result acknowledges presentation only. Domain recovery and Work
+// query coverage stay with the shared owner after navigation leaves this view.
 struct CreationPresentation: ViewModifier {
     let recovery: CreationRecovery
     let resource: CreationRecovery.Presentation

@@ -119,7 +119,7 @@ final class RemoteMobileClient: MobileTaskCreationClient {
             receipt: receipt, message: lookup.disposition == .inspect ? lookup.explanation : nil)
     }
 
-    /// The created Task is on screen: its saved creation is done.
+    /// Acknowledge showing the result; domain and query obligations remain saved.
     func taskPresented(_ submission: MobileTaskSubmission) async throws {
         try await journal.presented(submission.id.uuidString.lowercased())
     }

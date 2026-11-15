@@ -6,7 +6,61 @@ import Testing
 
 @MainActor
 struct OperationRecoveryPresentationTests {
-    @Test func currentPlanningStatusReplacesHistoricalFailureWithoutResubmitting() async throws {
+    @Test func aPresentedResultKeepsObservingWhileItsPlanningConfirmationIsMissing() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let pending = try operationPlanningTestFrame(delivered: false, diagnostic: nil)
+        let delivered = try operationPlanningTestFrame(delivered: true, diagnostic: nil)
+        let server = try OperationServer(frame: pending)
+        func client() -> ClientWorkStore {
+            ClientWorkStore(directory: root, machine: { "machine_fixture" }, read: { _ in "null" },
+                observe: { server.observe($0) }, send: { try server.send($0) })
+        }
+        let submissions = client()
+        let record = try await submissions.record(.taskUpdate(directory: "/repo", issue: "LOO-1", notes: "Original edit"),
+            requestID: "operation_fixture")
+        _ = try await submissions.reconcile(record)
+        let recovery = CreationRecovery(submissions: submissions)
+        var watches = server.observations.makeAsyncIterator()
+        _ = await watches.next()
+        await recovery.refresh()
+        _ = await watches.next()
+        _ = await watches.next()
+        await recovery.presented([record.id])
+        #expect(recovery.items.first?.text.contains("lost delivery acknowledgment") == true)
+        #expect(server.watchCount == 1)
+
+        let changes = await submissions.changes()
+        server.publish(delivered)
+        for await _ in changes {
+            if try await submissions.receipt(record.id)?.revision == delivered.body?.revision { break }
+        }
+        await recovery.refresh()
+        #expect(recovery.items.isEmpty) // only the result prompt was discharged
+        #expect(server.watchCount == 1)
+        let restarted = client()
+        #expect(try await restarted.recovery(record.id)?.resultPresented == true)
+        #expect(try await restarted.recovery(record.id)?.planning == .resolved)
+        #expect(try await restarted.pending().first?.payload == record.payload)
+        #expect(server.submissions.isEmpty)
+    }
+
+    @Test func missingPlanningEvidenceCannotDischargeInspection() async throws {
+        let frame = try operationPlanningTestFrame(delivered: true, diagnostic: nil)
+        let receipt = try #require(frame.body)
+        let noEvidence = OperationRecovery(receipt: receipt, planning: nil,
+            resultPresented: true, receiptAvailable: true)
+        #expect(noEvidence.resultPresented)
+        #expect(noEvidence.needsInspection)
+        #expect(noEvidence.planning == .unavailable)
+        let partial = OperationPlanningReading(fence: try #require(receipt.planning).fence, changes: [])
+        let missingChange = OperationRecovery(receipt: receipt, planning: partial,
+            resultPresented: false, receiptAvailable: true)
+        #expect(missingChange.needsInspection)
+        #expect(missingChange.planning == .unavailable)
+    }
+
+    @Test func planningDeliveryCannotHideAnUnclassifiedFailureOrConsumeTheResult() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let older = try operationPlanningTestFrame(delivered: false)
@@ -22,7 +76,7 @@ struct OperationRecoveryPresentationTests {
         let recovery = CreationRecovery(submissions: submissions)
         await recovery.refresh()
         #expect(recovery.items.first?.complete == false)
-        #expect(recovery.items.first?.text == "lost delivery acknowledgment")
+        #expect(recovery.items.first?.text.contains("lost delivery acknowledgment") == true)
         _ = await watches.next() // saved-result lookup
         _ = await watches.next() // continued observation after returning the result
 
@@ -32,8 +86,9 @@ struct OperationRecoveryPresentationTests {
             if try await submissions.receipt(record.id)?.revision == newer.body?.revision { break }
         }
         await recovery.refresh()
-        #expect(recovery.items.first?.complete == true)
-        #expect(recovery.items.first?.text == "Request completed")
+        #expect(recovery.items.first?.complete == false)
+        #expect(recovery.items.first?.text.contains("planning response lost") == true)
+        #expect(recovery.items.first?.text.contains("lost delivery acknowledgment") == false)
         #expect(try await submissions.receipt(record.id)?.error == older.body?.error)
         #expect(try await submissions.receipt(record.id)?.result == older.body?.result)
 
@@ -45,11 +100,11 @@ struct OperationRecoveryPresentationTests {
         #expect(server.watchCount == 1)
         #expect(server.submissions.isEmpty)
         await recovery.presented([record.id])
-        for await _ in changes {
-            if await !submissions.isRecovering(record.id) { break }
-        }
-        #expect(server.watchCount == 0)
-        #expect(recovery.items.isEmpty)
+        #expect(server.watchCount == 1)
+        #expect(try await submissions.recovery(record.id)?.resultPresented == true)
+        #expect(recovery.items.first?.complete == false)
+        #expect(recovery.items.first?.text.contains("planning response lost") == true)
+        #expect(try await submissions.pending().first?.payload == record.payload)
     }
 }
 #endif

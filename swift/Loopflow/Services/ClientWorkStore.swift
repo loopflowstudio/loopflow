@@ -87,7 +87,8 @@ public actor ClientWorkStore {
     /// Current planning evidence is independent of the saved command result and
     /// of any Work query's coverage. A replaced database needs fresh evidence.
     public func planning(_ id: String) throws -> OperationPlanningReading? {
-        guard let state = try disk().state(id), state.receiptEpoch == state.observedEpoch,
+        guard let state = try disk().state(id), state.receiptUnavailable != true,
+              state.receiptEpoch == state.observedEpoch,
               let reading = state.receipt?.planning,
               reading.fence.machine == state.record.destination,
               reading.fence.epoch == state.observedEpoch,
@@ -95,19 +96,18 @@ public actor ClientWorkStore {
         return reading
     }
 
-    public func presented(_ id: String) async throws {
-        guard let state = try disk().state(id) else { return }
-        guard try await currentMachine() == state.record.destination else {
-            throw RegistryQueryError("Waiting for the original Machine \(state.record.destination)")
-        }
-        try Task.checkCancellation()
-        guard let current = try disk().state(id) else { return }
-        guard current.receipt?.delivery == .finished, current.receipt?.validation == .bound,
-              current.receiptEpoch == current.observedEpoch else {
-            throw RegistryQueryError("The operation is still unresolved; its request is retained")
-        }
-        try disk().remove(id)
+    /// Presentation acknowledges only the local act of showing a saved result.
+    /// It neither consumes the command nor confirms any domain or query effect.
+    public func presented(_ id: String) throws {
+        try disk().presented(id)
         changed()
+    }
+
+    public func recovery(_ id: String) throws -> OperationRecovery? {
+        guard let state = try disk().state(id) else { return nil }
+        return OperationRecovery(receipt: state.receipt, planning: try planning(id),
+            resultPresented: state.presentedAt != nil,
+            receiptAvailable: state.receiptUnavailable != true && state.receiptEpoch == state.observedEpoch)
     }
 
     public func record(_ command: ServedWrite, requestID: String) async throws -> SubmittedOperation {
@@ -180,7 +180,11 @@ public actor ClientWorkStore {
     /// receipt instead of presenting its historical error as current recovery.
     private func receive(_ frame: SubscriptionReading<OperationReceipt>, record: SubmittedOperation,
                          cursor: inout ReceiptCursor) throws -> ClientWorkDatabase.State? {
-        if let reason = frame.unavailable { throw RegistryQueryError(reason) }
+        if let reason = frame.unavailable {
+            try disk().unavailable(record.id)
+            changed()
+            throw RegistryQueryError(reason)
+        }
         guard let stamp = frame.stamp else {
             throw RegistryQueryError("The Machine returned an unstamped receipt reading")
         }
@@ -188,9 +192,11 @@ public actor ClientWorkStore {
             throw RegistryQueryError("The Machine returned the receipt for another operation")
         }
         guard try cursor.receive(frame.body, stamp: stamp) else { return nil }
-        try disk().observeEpoch(stamp.epoch, id: record.id)
+        guard try disk().observeEpoch(stamp.epoch, id: record.id) else { return try disk().state(record.id) }
         if let receipt = frame.body {
             try disk().receive(receipt, epoch: stamp.epoch, id: record.id)
+        } else {
+            try disk().unavailable(record.id)
         }
         changed()
         return try disk().state(record.id)
@@ -276,9 +282,9 @@ struct ReceiptCursor {
             revision = nil
         }
         if let receipt {
-            if let revision, receipt.revision <= revision { return false }
+            if let revision, receipt.revision < revision { return false }
             revision = receipt.revision
-        } else if revision != nil { return false }
+        }
         return true
     }
 }

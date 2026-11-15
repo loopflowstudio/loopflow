@@ -10,6 +10,9 @@ final class ClientWorkDatabase {
         var receiptEpoch: String?
         var observedEpoch: String?
         var receipt: OperationReceipt?
+        var presentedAt: Date?
+        var receiptUnavailable: Bool?
+        var departedEpochs: [String]?
     }
     private let connection: OpaquePointer
 
@@ -68,9 +71,34 @@ final class ClientWorkDatabase {
         try execute("INSERT INTO operations(id,state) VALUES(?,?)", id: record.id, data: JSONEncoder().encode(state))
     }
 
-    func observeEpoch(_ epoch: String, id: String) throws {
-        guard var state = try state(id), state.observedEpoch != epoch else { return }
+    /// Epoch departure survives reconnect and restart; an old subscription can
+    /// never restore its former evidence just by being the first to answer.
+    func observeEpoch(_ epoch: String, id: String) throws -> Bool {
+        guard var state = try state(id) else { return false }
+        if state.observedEpoch == epoch { return true }
+        guard !(state.departedEpochs ?? []).contains(epoch) else { return false }
+        if let previous = state.observedEpoch {
+            state.departedEpochs = (state.departedEpochs ?? []) + [previous]
+        }
         state.observedEpoch = epoch
+        state.receiptUnavailable = true
+        try update(state)
+        return true
+    }
+
+    func unavailable(_ id: String) throws {
+        guard var state = try state(id) else { return }
+        state.receiptUnavailable = true
+        try update(state)
+    }
+
+    func presented(_ id: String) throws {
+        guard var state = try state(id) else { return }
+        guard state.receipt?.result != nil || state.receipt?.commits.contains(where: { $0.result != .null }) == true else {
+            throw RegistryQueryError("No saved result is available to present")
+        }
+        guard state.presentedAt == nil else { return }
+        state.presentedAt = Date()
         try update(state)
     }
 
@@ -82,15 +110,19 @@ final class ClientWorkDatabase {
 
     func receive(_ receipt: OperationReceipt, epoch: String, id: String) throws {
         guard var state = try state(id) else { return }
-        if state.receiptEpoch == epoch, let previous = state.receipt, previous.revision >= receipt.revision { return }
-        state.receipt = receipt
+        // A replacement database cannot rewrite the original result. Its facts
+        // need domain recovery before they can confirm this saved operation.
+        guard state.receiptEpoch == nil || state.receiptEpoch == epoch else { return }
+        if state.receiptEpoch == epoch, let previous = state.receipt, previous.revision > receipt.revision { return }
+        state.receiptUnavailable = false
+        if state.receiptEpoch != epoch || state.receipt?.revision != receipt.revision {
+            state.receipt = receipt
+        }
         state.receiptEpoch = epoch
         // Learning the receipt's lifetime makes an imported journal recoverable.
         state.sentEpoch = epoch
         try update(state)
     }
-
-    func remove(_ id: String) throws { try execute("DELETE FROM operations WHERE id=?", id: id) }
 
     private func update(_ state: State) throws {
         try execute("UPDATE operations SET state=?2 WHERE id=?1", id: state.record.id, data: JSONEncoder().encode(state))

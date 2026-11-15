@@ -155,3 +155,59 @@ public struct OperationReceipt: Codable, Equatable, Sendable {
         try fields.encode(updatedAt, forKey: .updatedAt)
     }
 }
+
+/// Current recovery obligations, derived without changing the historical result.
+/// A diagnostic without an owning domain remains inspectable. Planning delivery
+/// cannot resolve attachment, execution, filesystem or unclassified failures.
+public struct OperationRecovery: Equatable, Sendable {
+    public enum Planning: Equatable, Sendable {
+        case unavailable
+        case resolved
+        case unresolved([OperationPlanningChange])
+    }
+
+    public let resultPresented: Bool
+    public let planning: Planning
+    public let diagnostic: String?
+    public let receiptAvailable: Bool
+    public let resultAvailable: Bool
+    public let outcomeAvailable: Bool
+
+    init(receipt: OperationReceipt?, planning reading: OperationPlanningReading?,
+         resultPresented: Bool, receiptAvailable: Bool) {
+        self.resultPresented = resultPresented
+        self.receiptAvailable = receiptAvailable
+        diagnostic = receipt?.error
+        outcomeAvailable = receipt?.delivery == .finished && receipt?.validation == .bound
+        resultAvailable = receipt?.result != nil || receipt?.commits.contains(where: { $0.result != .null }) == true
+        let expected = receipt?.commits.flatMap(\.planningChanges) ?? []
+        if receiptAvailable, let reading, !expected.isEmpty,
+           expected.allSatisfy({ expected in reading.changes.contains { $0.change == expected } }) {
+            let unresolved = reading.unresolved.filter { expected.contains($0.change) }
+            planning = unresolved.isEmpty ? .resolved : .unresolved(unresolved)
+        } else {
+            // Until a command's domain registry establishes inapplicability,
+            // missing correlation/status cannot certify planning convergence.
+            planning = .unavailable
+        }
+    }
+
+    public var needsInspection: Bool {
+        if !receiptAvailable || !outcomeAvailable || diagnostic != nil { return true }
+        if case .resolved = planning { return false }
+        return true
+    }
+
+    public var messages: [String] {
+        var messages: [String] = []
+        switch planning {
+        case .unavailable: messages.append("Planning confirmation unavailable")
+        case .resolved: break
+        case .unresolved(let changes):
+            messages += changes.map { $0.error ?? "Planning update needs inspection (\($0.state.rawValue))" }
+        }
+        if let diagnostic, !messages.contains(diagnostic) { messages.append(diagnostic) }
+        if !receiptAvailable { messages.append("Current receipt unavailable; the original request is retained") }
+        return messages
+    }
+}

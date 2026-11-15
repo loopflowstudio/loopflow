@@ -71,13 +71,18 @@ final class OperationServer: @unchecked Sendable {
     func finish() { lock.withLock { for continuation in watches.values { continuation.finish() } } }
 }
 
-func operationPlanningTestFrame(delivered: Bool) throws -> SubscriptionReading<OperationReceipt> {
+func operationPlanningTestFrame(delivered: Bool, diagnostic: String? = "planning response lost") throws -> SubscriptionReading<OperationReceipt> {
     let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         .deletingLastPathComponent().deletingLastPathComponent()
         .appendingPathComponent("rust/loopflow/tests/fixtures/dto/server/operation_planning.json")
     let result = try #require(try RawJSON(Data(contentsOf: fixture)).fields()["result"])
     var receipt = try #require(JSONSerialization.jsonObject(with: result.bytes) as? [String: Any])
     receipt["revision"] = delivered ? 15 : 14
+    receipt["error"] = diagnostic as Any? ?? NSNull()
+    var commits = try #require(receipt["commits"] as? [[String: Any]])
+    let references = try #require(commits[0]["planning_changes"] as? [[String: Any]])
+    commits[0]["planning_changes"] = [references[0]]
+    receipt["commits"] = commits
     var planning = try #require(receipt["planning"] as? [String: Any])
     var fence = try #require(planning["fence"] as? [String: Any])
     fence["revisions"] = ["planning": delivered ? 13 : 12]
@@ -98,11 +103,6 @@ func operationPlanningTestFrame(delivered: Bool) throws -> SubscriptionReading<O
 
 
 struct ClientWorkStoreTests {
-    private actor Checks {
-        private var count = 0
-        func next() -> Int { count += 1; return count }
-    }
-
     private func directory() -> URL { FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString) }
     private func client(_ root: URL, _ server: OperationServer) -> ClientWorkStore {
         ClientWorkStore(directory: root, machine: { "machine" }, read: { _ in "null" }, observe: { server.observe($0) }, send: { try server.send($0) })
@@ -188,7 +188,9 @@ struct ClientWorkStoreTests {
         await #expect(throws: (any Error).self) { try await following.value }
         #expect(try await store.pending().first?.payload == record.payload)
         #expect(try await store.planning(record.id) == nil)
-        await #expect(throws: (any Error).self) { try await store.presented(record.id) }
+        try await store.presented(record.id)
+        #expect(try await store.recovery(record.id)?.resultPresented == true)
+        #expect(try await store.recovery(record.id)?.needsInspection == true)
         #expect(server.submissions.isEmpty)
         #expect(server.watchCount == 0)
     }
@@ -226,7 +228,8 @@ struct ClientWorkStoreTests {
         #expect(server.submissions.count == 1)
         #expect(server.watchCount == 0)
         try await restarted.presented(record.id)
-        #expect(try await restarted.pending().isEmpty)
+        #expect(try await restarted.pending().first?.payload == record.payload)
+        #expect(try await client(root, server).recovery(record.id)?.resultPresented == true)
     }
 
     @Test func restartRetainsSupersessionAfterAnOlderReceiptArrives() throws {
@@ -388,11 +391,15 @@ struct ClientWorkStoreTests {
         })
         await #expect(throws: OperationSubmissionError.self) { try await failing.submit(command, requestID: "same") }
         let record = try #require(await failing.pending().first)
+        // Same lifetime: retrying admission uses exactly the saved content.
+        #expect(try await client(root, server).reconcile(record)?.delivery == .finished)
+        #expect(server.submissions.count == 1)
         let reset = try OperationServer(frame: operationTestFrame(delivery: nil, epoch: "replacement"))
         await #expect(throws: (any Error).self) { try await client(root, reset).reconcile(record) }
         #expect(reset.submissions.isEmpty)
-        // Same lifetime: retrying admission uses exactly the saved content.
-        #expect(try await client(root, server).reconcile(record)?.delivery == .finished)
+        // Once replacement was observed, returning to the departed lifetime is
+        // not a same-lifetime admission retry, including after another restart.
+        await #expect(throws: (any Error).self) { try await client(root, server).reconcile(record) }
         #expect(server.submissions.count == 1)
     }
 
@@ -403,7 +410,9 @@ struct ClientWorkStoreTests {
         let store = client(root, server)
         let record = try await store.record(command, requestID: "same")
         #expect(try await store.reconcile(record)?.delivery == .uncertain)
-        await #expect(throws: (any Error).self) { try await store.presented(record.id) }
+        try await store.presented(record.id)
+        #expect(try await store.recovery(record.id)?.resultPresented == true)
+        #expect(try await store.recovery(record.id)?.needsInspection == true)
         #expect(try await store.pending().count == 1)
         #expect(server.submissions.isEmpty)
     }
@@ -431,29 +440,44 @@ struct ClientWorkStoreTests {
         #expect(try await store.pending().first?.payload == original.payload)
     }
 
-    @Test func epochChangeDuringPresentationKeepsTheUnresolvedRequest() async throws {
+    @Test func presentationSurvivesEpochReplacementAndRestartWithoutCertifyingOldEffects() async throws {
         let root = directory()
         defer { try? FileManager.default.removeItem(at: root) }
         let server = try OperationServer(frame: operationTestFrame())
-        let checks = Checks()
-        let (entered, began) = AsyncStream<Void>.makeStream()
-        let (held, release) = AsyncStream<Void>.makeStream()
-        let store = ClientWorkStore(directory: root, machine: {
-            if await checks.next() == 3 {
-                began.yield(())
-                for await _ in held { break }
-            }
-            return "machine"
-        }, read: { _ in "null" }, observe: { server.observe($0) }, send: { try server.send($0) })
+        let store = client(root, server)
         let original = try await store.record(command, requestID: "same")
         _ = try await store.reconcile(original)
-        let presentation = Task { try await store.presented("same") }
-        for await _ in entered { break }
+        try await store.presented(original.id)
         server.publish(try operationTestFrame(delivery: nil, epoch: "replacement"))
         await #expect(throws: (any Error).self) { try await store.reconcile(original) }
-        release.finish()
-        await #expect(throws: (any Error).self) { try await presentation.value }
-        #expect(try await store.pending().count == 1)
+        let restarted = client(root, server)
+        server.publish(try operationTestFrame()) // departed epoch answers first
+        await #expect(throws: (any Error).self) { try await restarted.reconcile(original) }
+        let recovery = try #require(await restarted.recovery(original.id))
+        #expect(recovery.resultPresented)
+        #expect(recovery.needsInspection)
+        #expect(!recovery.receiptAvailable)
+        #expect(recovery.planning == .unavailable)
+        #expect(try await restarted.pending().first?.payload == original.payload)
+        #expect(server.submissions.isEmpty)
+    }
+
+    @Test func replacementReceiptCannotEraseTheOriginalResultOrDiagnostic() async throws {
+        let root = directory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let original = try operationTestFrame(error: "Attachment interrupted")
+        let server = try OperationServer(frame: original)
+        let store = client(root, server)
+        let record = try await store.record(command, requestID: "same")
+        _ = try await store.reconcile(record)
+        try await store.presented(record.id)
+        server.publish(try operationTestFrame(delivery: "queued", epoch: "replacement", result: nil))
+        await #expect(throws: (any Error).self) { try await store.reconcile(record) }
+        let restarted = client(root, server)
+        #expect(try await restarted.receipt(record.id)?.result == original.body?.result)
+        #expect(try await restarted.recovery(record.id)?.diagnostic == "Attachment interrupted")
+        #expect(try await restarted.recovery(record.id)?.resultPresented == true)
+        #expect(try await restarted.recovery(record.id)?.receiptAvailable == false)
         #expect(server.submissions.isEmpty)
     }
 

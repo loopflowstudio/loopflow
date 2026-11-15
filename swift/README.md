@@ -1144,7 +1144,12 @@ remains unknown without replay.
 saved command result; Desktop retains that observation while the request remains
 saved. It never submits commands. `planning` exposes current evidence for the
 exact correlated changes, separately from the result's historical `sync` and
-error. A replacement database requires new evidence. Work query incorporation
+error. Showing a result records a local acknowledgment in that same saved
+operation; it does not delete the request or stop observing it. Missing planning
+confirmation and diagnostics without a confirmed recovery owner keep **Inspect**.
+The acknowledgment and departed database epochs survive restart; a reply from a
+departed epoch cannot replace the saved result or authorize another submission.
+A replacement database requires new domain evidence. Work query incorporation
 and native readiness remain separate obligations; live receipt observation alone
 does not complete the shared projection or phone presentation migration.
 

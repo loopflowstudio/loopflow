@@ -1,0 +1,78 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>LOO-696 QA — one Rust source per Task concept</title>
+<style>
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:980px;margin:2em auto;padding:0 1em;color:#222}
+h1{font-size:1.5em}h2{font-size:1.15em;margin-top:2em;border-bottom:1px solid #ddd}
+code,pre{font:12.5px ui-monospace,Menlo,monospace;background:#f4f4f4}pre{padding:.7em;overflow:auto}
+table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:4px 8px;text-align:left;vertical-align:top}
+img{max-width:100%;border:1px solid #ccc;margin:.5em 0}.ok{color:#176b2c}.warn{color:#9a5b00}
+</style></head><body>
+<h1>LOO-696 QA: one Rust source per Task concept</h1>
+<p>Branch build <code>0.16.0+85e54627e.dirty</code> (HEAD plus the uncommitted compress edits). Two private Machines:
+a disposable Git-planning repository on the branch <code>lf server run</code>, and an <code>lf-world one-task</code>
+world opened in <code>Loopflow Dev.app</code> with two added Tasks. Nothing touched the real <code>~/.lf</code>.</p>
+
+<h2>1. Planning Todo while execution is Active (CLI and server)</h2>
+<p>Ran Alpha's Graph (<code>- cmd: help</code>, <code>- interactive: demo</code>) to its interactive step, completed Charlie
+in planning without starting it, checked out Bravo, then unassigned Alpha.</p>
+<table><tr><th>Task</th><th>planning <code>task.state</code></th><th><code>lifecycle</code></th><th><code>section</code></th><th><code>selection_states</code></th></tr>
+<tr><td>Alpha (ran, then unassigned)</td><td>unstarted</td><td>active</td><td>backlog</td><td>active, backlog</td></tr>
+<tr><td>Bravo (checked out, owned)</td><td>unstarted</td><td>idle</td><td>working</td><td>open, idle, working</td></tr>
+<tr><td>Charlie (completed, never started)</td><td>completed</td><td>done</td><td>done</td><td>—</td></tr></table>
+<p class="ok">Server <code>plan.board</code> over the socket matches: Alpha <code>state: active</code>, Backlog, waiting reason
+"Unassigned; nothing moves it until <code>lf task claim</code> or <code>lf task run</code>". No "Not started". Alpha's open
+primary conversation with no report adds neither Busy nor Available.</p>
+
+<h2>2. Shared order across store, CLI and Desktop</h2>
+<pre>$ lf desktop move -p fdf8ed --destination 5709b4
+task_orders: ["task_fdf8ed…","task_5709b4…"]
+lf task list:  fdf8ed, 5709b4, f7656b
+lf desktop ls: 1 fdf8ed, 2 5709b4
+--json:        fdf8ed:active:working, 5709b4:idle:working, f7656b:unstarted:backlog</pre>
+<p class="ok">One move puts the Task first in the store, CLI, Desktop list and sidebar. The owned but unstarted Task stays in Backlog.</p>
+<img src="qa/01-repo.png" alt="repository view after the move">
+
+<h2>3. Task header and unassignment in Desktop</h2>
+<p>The Task page breadcrumb shows <b>Active</b>, and the Graph strip shows "At demo · yours". After <code>lf task unassign</code> on
+the started 5709b4, it leaves the sidebar and Working count and appears in Backlog beside the owned-unstarted f7656b.</p>
+<img src="qa/02-repo-after-unassign.png" alt="Task page header Active">
+<img src="qa/03-board-backlog.png" alt="Backlog with unassigned-started and unstarted Tasks">
+<p class="warn">Not seen in the window: the unassigned Task's own page (Start/Reopen offers). <code>lf desktop enter</code> reaches only
+Working tiles, and <code>lf desktop view</code>/<code>lf open</code> would route <code>loopflow://</code> to the installed app. The headless production-view
+checks below cover that header from the Rust fixture.</p>
+
+<h2>4. Conversation activity</h2>
+<p>I wrote <code>ESC]7501;state=working</code>, then <code>state=idle</code>, to fdf8ed's held conversation tty.</p>
+<table><tr><th>report</th><th>Rust <code>selection_states</code></th><th>sidebar row</th><th>board tile / pane header</th></tr>
+<tr><td>none</td><td>open, active, working</td><td>no label</td><td>Active / —</td></tr>
+<tr><td>working</td><td>+ busy</td><td>Working</td><td>Active / —</td></tr>
+<tr><td>idle</td><td>+ available</td><td><b>Idle</b></td><td>Active / <b>Idle</b></td></tr></table>
+<img src="qa/05-busy.png" alt="sidebar Working">
+<img src="qa/07-working-board.png" alt="Working Tasks tile Active with pane header Idle">
+<p class="warn">Rust and the filters agree (<code>busy</code> → <code>available</code>). The sidebar row label and pane header still show the
+provider's raw report through <code>SessionProgramStatus</code> (unchanged on this branch). An idle report reads "Idle" where Rust and the
+board say Available, and it sits next to a Task whose lifecycle is Active. Task lifecycle also has an Idle state.</p>
+
+<h2>5. Headless production-view checks</h2>
+<pre>scripts/test_desktop.sh -Xswiftc -gnone --filter 'TaskConceptTests|WorkNavigationTests|WaveStandupTests|TaskHistoryFilterTests|
+  TaskRowMetadataTests|TaskStatusTests|DTOFixtureTests|NowProjectionTests|DesktopHeadlessTests'
+✔ Test run with 158 tests in 9 suites passed after 28.200 seconds.</pre>
+
+<h2>Fixed</h2>
+<p>No product code changed in QA. <code>.lf/skills/qa.md</code> now records how to reorder, navigate, screenshot and drive activity reports
+in the Dev app, plus the <code>pgrep -f</code> self-match trap.</p>
+
+<h2>Result</h2>
+<p><b>Works:</b> lifecycle survives unassignment and conflicting planning text (CLI, server, Task header, board tile). A never-started
+planning-completed Task is Done. Shared order moves everywhere at once. Unknown activity adds no badge. Busy/Available follow reports in Rust and its filters.</p>
+<p><b>Not reached:</b> a Wave board badge with a live report; a Linear-closed started Task (git planning can't express it apart from
+<code>planning_completed</code>); Auto-Ship Restarting/Unassigned live; the Backlog Task's page and its offers in the window. The headless suites cover these from the shared fixture.</p>
+<p><b>Still wrong, worst first:</b></p>
+<ol>
+<li>The sidebar row and pane header label conversation activity from the raw report ("Idle"), not the shared state (Available).
+"Idle" next to an "Active" Task reads as a contradiction, which is what this Task set out to remove. Mapping the report state to the shared
+Available/Busy wording is a copy decision, so it's described here and not changed.</li>
+<li>Dev app log: 1,218 <code>AttributeGraph: cycle detected</code> lines in bursts during launch and navigation. Other branches' QA app logs
+show 101–180 per run, so this change didn't clearly cause them.</li>
+</ol>
+</body></html>

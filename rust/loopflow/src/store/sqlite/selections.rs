@@ -76,16 +76,17 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
         kind,
         id,
     };
-    let mut work = vec![SelectionWork {
+    let repository_work = SelectionWork {
         key: key(WorkWorkspaceKind::Repository, repository.to_string()),
         parent_wave: None,
         open: None,
         name: repo.clone(),
         states: BTreeSet::new(),
         activity_known: false,
-    }];
+    };
+    let mut wave_work = Vec::with_capacity(waves.len());
     for wave in &waves {
-        work.push(SelectionWork {
+        wave_work.push(SelectionWork {
             key: key(WorkWorkspaceKind::Wave, wave.id().to_string()),
             parent_wave: wave.parent_wave_id().cloned(),
             open: None,
@@ -96,10 +97,6 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
     }
     let tasks = super::children::repository_tasks_in(conn, repository)?;
     let reading = task_selection_in(conn, repository, &repo)?;
-    let ranks: HashMap<_, _> = tasks
-        .iter()
-        .map(|task| (task.id.to_string(), task.rank))
-        .collect();
     // State, publication and ownership for every Task in a fixed number of
     // statements: a query per Task costs thousands on a large repository.
     let ids: Vec<_> = tasks.iter().map(|task| task.id.clone()).collect();
@@ -109,6 +106,7 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
     )?;
     let published = super::project_adoption::published_in(conn, &ids)?;
     let owners = super::task_ownership::owners_in(conn, &ids)?;
+    let mut task_work = Vec::with_capacity(tasks.len());
     for task in tasks {
         let state = *task_states
             .get(&task.id)
@@ -125,26 +123,27 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
             .activity
             .get(&task.id)
             .is_none_or(|activity| activity.known);
-        work.push(SelectionWork {
-            key: key(WorkWorkspaceKind::Task, task.id.to_string()),
-            parent_wave: task.wave_id,
-            open: Some(open),
-            name: task.identifier,
-            states,
-            activity_known,
-        });
+        let order = reading.order.key(task.id.as_str(), task.rank, &states);
+        task_work.push((
+            order,
+            SelectionWork {
+                key: key(WorkWorkspaceKind::Task, task.id.to_string()),
+                parent_wave: task.wave_id,
+                open: Some(open),
+                name: task.identifier,
+                states,
+                activity_known,
+            },
+        ));
     }
-    work.sort_by_cached_key(|item| match item.key.kind {
-        WorkWorkspaceKind::Task => (
-            0,
-            reading
-                .order
-                .key(&item.key.id, ranks[&item.key.id], &item.states),
-        ),
-        WorkWorkspaceKind::Wave => (1, (0, false, 0, String::new())),
-        WorkWorkspaceKind::Repository => (2, (0, false, 0, String::new())),
-    });
-    Ok(work)
+    task_work.sort_by(|left, right| left.0.cmp(&right.0));
+    // Tasks precede the already alphabetized Waves, then the repository.
+    Ok(task_work
+        .into_iter()
+        .map(|(_, task)| task)
+        .chain(wave_work)
+        .chain([repository_work])
+        .collect())
 }
 
 /// Conversation activity is independent of Task lifecycle and ownership.

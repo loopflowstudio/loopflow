@@ -1083,7 +1083,7 @@ async fn open_tasks(
             query
                 .state
                 .as_deref()
-                .is_none_or(|state| task_state(task).label() == state)
+                .is_none_or(|state| task.lifecycle.label() == state)
         })
         .collect())
 }
@@ -1391,11 +1391,6 @@ async fn wave_tasks(
         tasks: Evidence::complete(details),
         unavailable_tasks,
     })
-}
-
-/// A Task's one state; a Task with no recorded work has not started.
-pub(crate) fn task_state(task: &RoadmapTask) -> TaskState {
-    task.lifecycle
 }
 
 /// The wave `lf wave status` is about: the name the caller typed, else the wave this
@@ -3134,14 +3129,8 @@ mod tests {
             rusqlite::params![active, serde_json::to_string(&graph).unwrap()],
         )
         .unwrap();
-        db.execute_batch(
-            &std::fs::read_to_string(
-                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("tests/fixtures/task_concepts.sql"),
-            )
-            .unwrap(),
-        )
-        .unwrap();
+        db.execute_batch(include_str!("../../../tests/fixtures/task_concepts.sql"))
+            .unwrap();
         for (id, bound, cwd, scope) in [
             ("bound", Some(active), "/elsewhere", None),
             ("checkout", Some(active), "/repo/fix-2/nested", None),
@@ -3266,13 +3255,9 @@ mod tests {
             )
             .unwrap();
         let owned_working = read(&store, "owned_working").await;
-        db.execute_batch(
-            &std::fs::read_to_string(
-                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("tests/fixtures/task_concepts_unassigned.sql"),
-            )
-            .unwrap(),
-        )
+        db.execute_batch(include_str!(
+            "../../../tests/fixtures/task_concepts_unassigned.sql"
+        ))
         .unwrap();
         let working = read(&store, "unassigned_working").await;
         let task = &working["tasks"][0];
@@ -3352,16 +3337,38 @@ mod tests {
         }
         let saved: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
-        let concepts = |value: &serde_json::Value| {
-            value.as_array().unwrap().iter().map(|phase| {
-            let tasks = phase["tasks"].as_array().unwrap().iter().map(|task| {
-                serde_json::json!({"id":task["task"]["id"],"lifecycle":task["lifecycle"],"section":task["section"],
-                    "states":task["selection_states"],"runtime":task["runtime"]["status"],"owner":task["runtime"]["owner"]})
-            }).collect::<Vec<_>>();
-            let sessions = phase["sessions"].as_array().unwrap().iter().map(|s| serde_json::json!({"id":s["id"],"tasks":s["task_ids"]})).collect::<Vec<_>>();
-            serde_json::json!({"name":phase["name"],"tasks":tasks,"sessions":sessions})
-        }).collect::<Vec<_>>()
-        };
+        // Compare stable concepts only; process IDs and reading timestamps vary.
+        fn concepts(value: &serde_json::Value) -> Vec<serde_json::Value> {
+            value
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|phase| {
+                    let tasks = phase["tasks"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|task| {
+                            serde_json::json!({
+                                "id": task["task"]["id"],
+                                "lifecycle": task["lifecycle"],
+                                "section": task["section"],
+                                "states": task["selection_states"],
+                                "runtime": task["runtime"]["status"],
+                                "owner": task["runtime"]["owner"],
+                            })
+                        })
+                        .collect::<Vec<_>>();
+                    let sessions = phase["sessions"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|session| serde_json::json!({"id": session["id"], "tasks": session["task_ids"]}))
+                        .collect::<Vec<_>>();
+                    serde_json::json!({"name": phase["name"], "tasks": tasks, "sessions": sessions})
+                })
+                .collect()
+        }
         assert_eq!(concepts(&fixture), concepts(&saved));
     }
 

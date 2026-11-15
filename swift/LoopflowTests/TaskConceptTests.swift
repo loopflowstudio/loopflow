@@ -41,6 +41,12 @@ struct TaskConceptTests {
         return try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: wire))
     }
 
+    private func activeTaskWire() throws -> [String: Any] {
+        let phases = try #require(JSONSerialization.jsonObject(
+            with: Data(contentsOf: fixtures.appendingPathComponent("task_concepts.json"))) as? [[String: Any]])
+        return try #require((phases[0]["tasks"] as? [[String: Any]])?.first { $0["lifecycle"] as? String == "active" })
+    }
+
     @Test func lifecycleAndActionsFollowTheSameRustReading() throws {
         for phase in try phases() {
             let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Passive rendering") }, repoPath: "/repo")
@@ -73,7 +79,6 @@ struct TaskConceptTests {
     }
 
     @Test func boardPickerAndProjectionKeepServerOrderAndMembership() async throws {
-        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Passive rendering") }, repoPath: "/repo")
         for phase in try phases() {
             let roadmap = try roadmap(phase)
             let entries = try JSONEncoder().encode(phase.sessions)
@@ -83,10 +88,9 @@ struct TaskConceptTests {
                 }
                 throw RegistryQueryError("Passive rendering")
             }
-            let membershipModel = WorkModel(query: query, repoPath: "/repo")
-            membershipModel.applyFixture(roadmap: .available(roadmap), waves: .available([]), workActivity: .loading, repos: [])
-            await membershipModel.refreshSessions()
+            let model = WorkModel(query: query, repoPath: "/repo")
             model.applyFixture(roadmap: .available(roadmap), waves: .available([]), workActivity: .loading, repos: [])
+            await model.refreshSessions()
             let members = phase.tasks.map { task in
                 WorkViewPlan.Content(paneRevision: nil, face: nil,
                     work: .init(repository: task.task.repositoryId, kind: .task, id: task.id), title: task.task.name,
@@ -116,7 +120,7 @@ struct TaskConceptTests {
             for task in projected {
                 let expected = phase.sessions.filter { $0.taskIds.contains(task.task.id) }.map(\.id)
                 #expect(task.sessions.map(\.id) == expected)
-                #expect(membershipModel.taskSessions(task.task.id).map(\.id) == expected)
+                #expect(model.taskSessions(task.task.id).map(\.id) == expected)
             }
             let siblings = try #require(projection.breadcrumb(selection: nil, sessionId: "checkout")?.siblings)
             #expect(Set(siblings.map(\.id)) == ["bound", "checkout", "unknown"])
@@ -145,10 +149,24 @@ struct TaskConceptTests {
         #expect(projection.waves.flatMap(\.tasks).allSatisfy { $0.sessions.isEmpty })
     }
 
+    @Test func conversationReportsRemainSeparateFromTaskActivity() throws {
+        let phase = try #require(phases().first { $0.name == "reclaimed_available_and_busy" })
+        let task = try #require(phase.tasks.first { $0.task.identifier == "FIX-2" })
+        let conversation = try #require(phase.sessions.first { $0.id == "bound" })
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Passive rendering") }, repoPath: "/repo")
+        let board = try #require(model.standup(phase.tasks, doneDays: 0).working.first { $0.id == task.id })
+        #expect(board.session == .available)
+        #expect(task.selectionStates.contains(.busy))
+        let status = SessionProgramStatus(sessions: [conversation], unavailable: nil)
+        let row = TaskRowMetadata(task: task, status: status)
+        #expect(try row.inspect().find(text: "Blocked").string() == "Blocked")
+        let pane = ProgramStatusLabel(status: try #require(conversation.programStatus))
+        #expect(try pane.inspect().find(text: "Blocked").string() == "Blocked")
+        #expect(task.lifecycle == .active)
+    }
+
     @Test func membershipAndLifecycleSurviveAnAbsentRuntimePayload() throws {
-        let phases = try #require(JSONSerialization.jsonObject(
-            with: Data(contentsOf: fixtures.appendingPathComponent("task_concepts.json"))) as? [[String: Any]])
-        var row = try #require((phases[0]["tasks"] as? [[String: Any]])?.first { $0["lifecycle"] as? String == "active" })
+        var row = try activeTaskWire()
         row["runtime"] = NSNull()
         var planning = try #require(row["task"] as? [String: Any])
         planning["wave_id"] = NSNull()
@@ -164,9 +182,7 @@ struct TaskConceptTests {
 
     @Test(arguments: ["restarting", "unassigned"])
     func handoffsRemainStoppableBetweenRuns(state: String) throws {
-        let phases = try #require(JSONSerialization.jsonObject(
-            with: Data(contentsOf: fixtures.appendingPathComponent("task_concepts.json"))) as? [[String: Any]])
-        var row = try #require((phases[0]["tasks"] as? [[String: Any]])?.first { $0["lifecycle"] as? String == "active" })
+        var row = try activeTaskWire()
         row["lifecycle"] = "idle"
         row["shipping"] = ["shipped_at": 1, "state": state, "reason": "Handoff remains active"]
         let task = try JSONDecoder().decode(RoadmapTask.self, from: JSONSerialization.data(withJSONObject: row))
@@ -177,9 +193,7 @@ struct TaskConceptTests {
     }
 
     @Test func missingKeysFailAndSavedActivityCannotReturn() throws {
-        let phases = try #require(JSONSerialization.jsonObject(
-            with: Data(contentsOf: fixtures.appendingPathComponent("task_concepts.json"))) as? [[String: Any]])
-        var row = try #require((phases[0]["tasks"] as? [[String: Any]])?.first { $0["lifecycle"] as? String == "active" })
+        var row = try activeTaskWire()
         for key in ["lifecycle", "selection_states"] {
             var missing = row
             missing.removeValue(forKey: key)

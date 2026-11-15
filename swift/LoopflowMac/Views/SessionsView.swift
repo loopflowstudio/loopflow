@@ -959,8 +959,7 @@ final class SessionsWorkspaceRegistry {
                 let belongs: Bool?
                 switch workspace.key.kind {
                 case .task:
-                    let tasks = Set(record.taskIds)
-                    belongs = tasks.isEmpty ? nil : tasks.contains(workspace.key.id)
+                    belongs = record.taskIds.isEmpty ? nil : record.names(task: workspace.key.id)
                 case .wave: belongs = record.waveId.map { $0 == workspace.key.id }
                 case .repository: belongs = nil
                 }

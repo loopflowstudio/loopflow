@@ -125,7 +125,7 @@ with lifecycle Shipping.
 `TaskConditionState`. Waiting/Blocked/Clear/Unknown describe operating condition,
 not lifecycle sections. Preserve it and its tests.
 
-## Delete and cut over together
+## Delete — do not maintain
 
 - `TaskWorkflowHeader` planning-state lifecycle labels, terminal OR expressions
   in `TaskActionItems` and `TaskShipControl`, and the planning-only refusal in
@@ -143,8 +143,16 @@ not lifecycle sections. Preserve it and its tests.
 - `WorkChannelChips` runtime-only display and `WaveDetailPane` history/planning
   status precedence; both now render the required lifecycle. Planning chips
   remain explicitly labeled PM.
+- `waves::task_state` and the extra `next_command` state argument; CLI consumers
+  read the required lifecycle directly.
+- Selection ordering's separate rank map and mixed Work-kind comparator; sort Task
+  rows with the shared order key, then append Waves and repository.
+- Swift Task-detail scope checks and temporary membership sets; trust `task_ids`.
 - Fixture-only aliases between a planning Task ID and a different runtime Work
   ID; complete records name the same Task on both fields.
+- Raw-state capitalization in `SessionProgramStatus.label` and
+  `ProgramStatusReport.displayText`; both consume `ProgramStatusState.label`.
+  Keep individual report provenance, details, priority, and wire values.
 
 Replace assertions that encode those rules, including WaveStandup rank-order
 expectations. Keep tests for ownership/person grouping, Done date windows,
@@ -183,6 +191,17 @@ consumers, not just the helper's output.
 
 ## Remaining work
 
+November 14 QA iteration: conversation rows and pane headers share the enum-to-label
+mapping (`idle` → Available, `working` → Busy), including Available's color. This
+is report presentation, not a second availability fold: Task filters and board
+badges retain Rust's aggregate, and Blocked/Error/Done keep their report meaning.
+Unknown/cleared reports stay unlabeled. QA's original screenshots and observations
+remain in `scratch/qa.html`; the wording correction is verified headless below.
+
+- `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter 'ProgramStatusTests|TaskRowMetadataTests|TaskConceptTests'` — app/test build passed; 32 headless tests passed, including production row/pane labels and individual report versus Task aggregate.
+- `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter statusWithSelectionAndFocus` — passed across five appearances, selected/unselected and focused/unfocused.
+- `uv run python scripts/check_swift_multiplatform_boundaries.py`, `uv run python scripts/check_architecture.py` — passed; gate retains broader platform/performance checks.
+
 The Rust/Swift cutover is implemented as one change. Remaining Swift
 `primaryScope` reads (`WorkModel` warm primary conversation, `WorkProjection.subject`
 for unmatched Sessions) route repository/Wave primaries, not Task membership;
@@ -193,41 +212,38 @@ steps, with no merge authorization implied here.
 
 ## Concept review — November 14
 
-Outcome for loop-or-next: nothing to change and no open product choice; advance.
-The implemented model matches the intended interaction. No next implement
-direction is needed. `scratch/concept-review.html` shows the review beside the
-conversation. This review changes no production code and starts no execution.
+No product choice remains open; advance. `scratch/concept-review.html` records
+the review, including QA §4's wording correction. `ProgramStatusState.label` now
+gives both production report views Available/Busy wording. This renders a report;
+it does not derive Task availability. The Rust fixture's mixed-report case keeps
+a Blocked conversation beside an Available Task that also matches Busy. Preserve
+that distinction, report provenance and Done as an individual program result.
+Lifecycle, ownership, Auto-Ship handoff and NOW condition remain separate.
 
-The important distinction survives the simplification: Active describes the
-Task's lifecycle; Backlog can describe its lack of ownership; Available/Busy
-describe its conversations. Auto-Ship's retained handoff supplies Stop Auto-Ship
-even between autonomous runs. NOW still describes operating condition. Making
-all five into one status would discard behavior the design requires.
+The correction follows the existing design; no further implementation direction
+or open product choice remains. Unknown/cleared reports remain unlabeled, failed
+reads retain last-good content, and fresh reports restore current presentation
+without starting execution. Existing focused production-view checks cover this
+iteration; this review changed no production code and reran no tests. Gate retains
+broader performance/platform checks; mounted clarity and native input remain for
+the demo. The original QA screenshots document the pre-correction build.
 
-The normal path is one Active Task with planning Todo: page, picker and heading
-read `lifecycle`; board and sidebar read the shared selection states; conversation
-menus read `task_ids`; ordinary arrays retain Rust's order. Unassignment changes
-section without offering Start or discarding checkout, PR or conversations.
-The existing mutations recheck state rather than trusting those displayed facts.
+## Compression — November 14
 
-The failure path is an unavailable reading or saved startup display. Missing
-required fields invalidate the payload rather than inventing Unstarted. Saved
-display strips conversation activity and run/ship permissions. Recovery receives
-fresh projections through the existing subscription; it must retain panes and
-drafts through incomplete Session inventory. No new persisted lifecycle, migration,
-provider call or refresh owner is needed.
+The deletion list is complete. Keep the repository selection memo across Waves
+and the per-batch map for direct worker reads: they avoid repeated bulk reads
+and per-row locks. Remove the obsolete lifecycle accessor, separate rank index,
+mixed Work-kind sort, redundant Swift membership checks and duplicate test models.
+SQL seeds now use `include_str!`; fixture comparison names the stable concepts
+and excludes timestamps/process IDs intentionally.
 
-Counterexamples retained: never-started planning completion must offer Reopen;
-planning completion must not withdraw started Active work; an unknown open Session
-must not become Busy; concurrent Available and Busy reports must match both
-filters; explicit Dashboard arrangement and Done date order must survive ordinary
-Task reordering; Restarting/Unassigned Auto-Ship must remain stoppable. The current
-design and production consumers account for these cases. Earlier validation
-results below are prior-run observations, not checks rerun during this review.
-
-Next show the same Task across page, board, sidebar and picker, then unassign,
-reclaim and reorder it. Gate still owns read-volume/performance and platform
-checks; the interactive demo still owns visible clarity and retained native input.
+- `cargo test -p loopflow --lib store::sqlite::selections::tests::` — 22 passed;
+  gate owns broader performance/read-volume checks.
+- `cargo test -p loopflow --lib lf::commands::waves::tests::task_concepts_share_lifecycle_activity_membership_and_order` — passed against the final source; the known macOS linker unwind-table warning remained.
+- `swift build --build-tests --package-path swift --jobs 4 -Xswiftc -gnone` — passed.
+- `scripts/test_desktop.sh --skip-build --filter 'TaskConceptTests|WorkNavigationTests|WorktreeWorkspaceTests'` — 63 passed headless; visible demo remains.
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` — passed.
+- `lf context` — memory and scratch are within both configured limits.
 
 ## Gate acceptance and demo
 

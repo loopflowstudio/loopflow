@@ -12,21 +12,29 @@ body{max-width:800px;margin:40px auto;padding:0 22px}h1{font-size:1.8rem;line-he
 <header><small>LOO-696 · concept-review · November 14, 2026<br>
 Sources: scratch/loo-696-reevaluation.md; docs/surfaces.md; swift/README.md;
 durable.rs; store/sqlite/selections.rs; lf/commands/waves.rs; WorkProjection.swift;
-WorkCache.swift; TaskConceptTests.swift.</small></header>
+WorkCache.swift; ProgramStatus.swift; SessionProgramStatus.swift;
+TaskRowMetadataTests.swift; TaskConceptTests.swift; scratch/qa.html §4.</small></header>
 <h1>Advance the existing design.</h1>
-<p>No open product choice or design change. The interrupted implementation already
-removes competing Task interpretations. Gate and the interactive demo remain.</p>
+<p>No further design change or open product choice. The QA wording correction is
+implemented and has focused headless production-view coverage. Gate and the
+interactive demo remain.</p>
 <h2>The biggest mismatch</h2>
 <p><strong>Before:</strong> one running Task could say Todo on its page, Active in
 its heading and Not started in its picker after unassignment.<br>
 <strong>Implemented:</strong> Active throughout; Unassigned is separate. Its
 checkout, PR and conversations remain.</p>
+<p><strong>QA before correction:</strong> conversation row <b>Idle</b> · pane
+<b>Idle</b> · Task filter <b>Available</b>.<br>
+<strong>Implemented:</strong> conversation row <b>Available</b> · pane
+<b>Available</b> · Task filter <b>Available</b>. A working report reads <b>Busy</b>
+in both report views. One enum-to-label mapping supplies both.</p>
 <table>
 <thead><tr><th>Action</th><th>Concept</th><th>Shared read → mutation</th></tr></thead>
 <tbody>
 <tr><td>Open Task or picker</td><td>Lifecycle</td><td><code>RoadmapTask.lifecycle</code> → existing Task run/reopen controls</td></tr>
 <tr><td>Unassign / reclaim</td><td>Ownership, board section</td><td><code>TaskSection::of</code> → existing ownership operations</td></tr>
-<tr><td>Filter Available / Busy</td><td>Conversation activity</td><td><code>task_selection_states</code> → existing Session reports</td></tr>
+<tr><td>Filter Available / Busy</td><td>Aggregate Task activity</td><td><code>task_selection_states</code> → existing Session reports</td></tr>
+<tr><td>Follow a conversation</td><td>Individual program report</td><td><code>ProgramStatusState.label</code> → existing report/clear events; wire states unchanged</td></tr>
 <tr><td>Choose a conversation</td><td>Task membership</td><td><code>SessionRecord.task_ids</code> → existing Session bind/open operations</td></tr>
 <tr><td>Drag Task, return to board</td><td>Shared ordinary order</td><td><code>TaskOrder</code> → <code>reorder_task</code></td></tr>
 <tr><td>Stop Auto-Ship between runs</td><td>Retained handoff</td><td><code>shipping</code> snapshot → existing ship stop operation</td></tr>
@@ -40,10 +48,16 @@ polling loop. Mutations still recheck current state.</p>
 ignores conflicting planning completion; Available and Busy can coexist; saved
 Dashboard arrangements and Done dates keep their own order. NOW condition remains
 separate from lifecycle.</p>
+<p><strong>Counterexample retained:</strong> a Blocked conversation may belong to
+an Available Task that also matches Busy. Report views keep Blocked and its
+source; Rust aggregates all conversations for filters and the board. A reported
+Done never completes the Task. QA screenshots show the earlier build; the wording
+correction was verified in production leaf views headlessly, not in a new mounted demo.</p>
 <h2>Review questions, resolved by the working design</h2>
 <ol>
 <li>Does unassignment mean never started? <strong>No.</strong> Keep Active and change ownership/section.</li>
 <li>Does an open Session imply Busy? <strong>No.</strong> Require current activity facts.</li>
 <li>Does a retained Auto-Ship handoff imply runtime Shipping? <strong>No.</strong> Keep Stop Auto-Ship through restart or unassignment.</li>
+<li>Must a pane equal its Task's aggregate activity? <strong>No.</strong> Share wording, retain report scope and provenance.</li>
 </ol>
 </html>

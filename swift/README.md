@@ -191,8 +191,12 @@ falls back to a labeled summary. Local Machine names stay hidden. Links open
 separately from the Task row; unknown activity and live clients without reports
 show no activity label.
 
-Follow a turn in the pane and Task row: Working during active work, Blocked for
-a question or permission request, and the provider’s Idle or Done on completion.
+Follow a conversation in the pane and sidebar: Busy for a working report,
+Available for an idle report, Blocked for a question or permission request, and
+Done for a reported result. Both labels use the same report wording. A pane
+describes its own conversation; a Task's Available/Busy filters and board badge
+aggregate all its conversations in Rust, so a busy pane can belong to an
+Available Task. Reported Done is a program result, independent of Task lifecycle.
 Reconnect restores the current report without sending another prompt. Quiet output
 does not change activity; clearing a report removes its label without completing
 the Task.

@@ -130,6 +130,19 @@ Run the app's bundled `lf` with the world's `env.json` variables and
   `/Applications/Loopflow.app` carries the same bundle ID macOS starts that app
   on the world instead. It then owns the socket, and its panes run the installed
   `lf`.
+- `lf desktop enter <tile>` reaches only the shown Working tiles; Backlog Tasks
+  have no socket route, so their pages need a person or headless view tests.
+  `lf desktop move -p <task> --destination <task>` writes the shared Task order;
+  `lf desktop do working-tasks` and `do back` navigate.
+- Look at the window with `screencapture -x -o -l <id>`; list window IDs with a
+  `swift` script over `CGWindowListCopyWindowInfo` (owner `Loopflow Dev`).
+- `lf desktop send` refuses control characters. To make a held conversation
+  report activity, write `ESC]7501;state=working:app=claude-code ESC\` (or
+  `state=idle`) to its stand-in's tty (`ps -o tty` of the `bin/claude` child of
+  the world's holder); `lf task list --json` then shows `busy`/`available`.
+- Wait for the app with `pgrep -x "Loopflow Dev"`: `pgrep -f` with the bundle
+  path matches the waiting shell's own command line. The first `run-debug`
+  builds the bundled `lf` in its own target directory (28 minutes on a loaded Machine).
 - An install that fails with "Third-party inputs changed" means `Cargo.lock`
   changed: `uv run python scripts/third_party.py refresh`, and commit the result.
 - To see what a pane inherited, compare `lsof -p <app pid>` pipe addresses with

@@ -130,6 +130,8 @@ agent-written; nobody chose them):
 | `continued` | Continued | Carries on. |
 | `uncertain` | Review conversation | Reads the end and continues. Unchanged. |
 
+The second pass below ends every row at the person's next message.
+
 Rename was in place, no alias: Rust `RecoveryState`, Swift
 `SessionRecovery.State`, `server_schema.json`, `session.json` and the new
 `session_manual_retry.json` fixture. `manual_retry` is decided at the
@@ -141,8 +143,7 @@ missing model or incomplete chain stays `uncertain`. Docs follow the table.
 
 Counterexamples kept: an unguarded conversation with no capacity anywhere
 resends by hand and is rejected again; that is a new failed turn with its own
-row. A `manual_retry` row followed by typed input follows the existing rule:
-newer input wins and the old turn is dropped. A late wait observation must
+row. Typed input after a `manual_retry` row ends the row (second pass). A late wait observation must
 still not replace dispatch (`SessionRecovery::observe` treats `waiting` and
 `manual_retry` as it treats today's two waits).
 
@@ -179,7 +180,7 @@ message is that thing done.
   `retry_turn`) is not the person's message.
 - Newer input stops being a reason for `uncertain`. That state keeps earlier
   work, incomplete history, and unconfirmed or cancelled dispatch. Split the
-  two reasons that currently say "Newer input or …".
+  two reasons that said "Newer input or …" at review.
 - A row that ended is not requested or checked again; nothing is resent for it.
   Dispatch stays in Session history as today.
 - `docs/sessions.md` (proposed): after the table, "The row goes away at your

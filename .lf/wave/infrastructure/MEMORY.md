@@ -25,7 +25,7 @@ preserve MTG-193's active checkout and Task. LOO-543 remains separate.
 LOO-747 (#1828) owns Graph recovery without replay; LOO-811 owns interactive
 continuation and Desktop recovery. LOO-813/#1863 is complete opening/reconnect
 work. Account switching alone is not continuation. Keep history,
-model, drafts and approvals; distinguish rejection from uncertain/completed work.
+model, drafts, approvals; tell rejection from uncertain/completed work.
 A rejected turn the client can't take is `manual_retry`, decided at rejection.
 
 Restart is allowed, but idle account adoption proves no preservation: Codex
@@ -40,7 +40,7 @@ rejected without handoff. `turn/start` can return an existing turn ID; completio
 must match the admitted hook and exact retry input. Claude joins inbox UUID,
 admitted prompt ID and Stop. Cache expiry and outside history reads reserve no input.
 
-Since 2026-11-14 the Machine server owns recovery checks and native side
+Since Nov 14 the Machine server owns recovery checks and native side
 connections; holders keep PTYs; no per-Session observer. A one-use
 socket holds native submission through preparation. Cancellation stops subsequent
 installation/retry but can't undo one already sent: keep uncertainty, track

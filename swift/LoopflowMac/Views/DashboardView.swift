@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 
 struct DashboardEditor: View {
     let model: WorkModel
-    let plan: WorkViewPlan
+    let plan: ProjectedWorkPlan
     @Environment(\.dismiss) private var dismiss
     @State private var id = UUID().uuidString
     @State private var name = ""
@@ -45,7 +45,7 @@ struct DashboardEditor: View {
 /// Working Tasks or an unsaved view it opens the edited query as a view.
 struct DashboardQueryField: View {
     let model: WorkModel
-    let plan: WorkViewPlan
+    let plan: ProjectedWorkPlan
     @State private var draft = ""
 
     var body: some View {
@@ -141,7 +141,7 @@ struct DashboardView: View {
 
     private var workingTasks: Bool { model.navigation.destination == .workingTasks }
 
-    private func writeSlots(_ plan: WorkViewPlan, _ slots: DashboardSlotLayout?) {
+    private func writeSlots(_ plan: ProjectedWorkPlan, _ slots: DashboardSlotLayout?) {
         guard let id = plan.dashboardID, let revision = plan.savedRevision else { return }
         Task { await model.setDashboardSlots(id, slots: slots, revision: revision) }
     }
@@ -188,7 +188,7 @@ struct DashboardTile: View {
     let workspaces: SessionsWorkspaceRegistry
     let sessions: SessionsStore
     let member: WorkMemberRef
-    let plan: WorkViewPlan
+    let plan: ProjectedWorkPlan
     let workingTasks: Bool
     let focused: Bool
     /// A Wave view keeps the Wave selected, so its tiles never take the window's focus.
@@ -324,7 +324,7 @@ extension WorkModel {
     }
 
     /// Hide or restore a tile. Rust decides the mode; hiding never touches the order.
-    func setTile(_ plan: WorkViewPlan, _ member: WorkMemberRef, hidden: Bool) {
+    func setTile(_ plan: ProjectedWorkPlan, _ member: WorkMemberRef, hidden: Bool) {
         guard let id = plan.dashboardID else {
             dashboardError = "Save this Dashboard before arranging its Work."; return
         }

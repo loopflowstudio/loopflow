@@ -471,8 +471,69 @@ fn query_selection_plan_wire_roundtrips() {
         serde_json::to_value(&plan).unwrap(),
         serde_json::from_str::<serde_json::Value>(fixture).unwrap()
     );
+    let work: Vec<_> = plan
+        .membership
+        .facts
+        .iter()
+        .map(|fact| SelectionWork {
+            key: fact.work.clone(),
+            parent_wave: None,
+            name: fact.name.clone(),
+            states: fact.states.clone(),
+            activity_known: fact.activity_known,
+        })
+        .collect();
+    assert_eq!(
+        plan.selection
+            .membership_plan(&plan.repository, &work, &BTreeMap::new())
+            .unwrap(),
+        plan.membership
+    );
+    assert_eq!(plan.membership.resolve(), plan.resolution);
+    let mut completed = plan.membership.clone();
+    let effect = &completed.effects["task.complete"];
+    assert_eq!(effect.stage, "task.completed");
+    for fact in &mut completed.facts {
+        fact.states = fact
+            .states
+            .difference(&effect.remove)
+            .copied()
+            .chain(effect.insert.iter().copied())
+            .collect();
+    }
+    // Only the explicit occurrence survives, with no stale attention or duplicate.
+    assert_eq!(completed.resolve().members, plan.resolution.members[1..]);
+    assert!(completed.resolve().attention.is_empty());
+    let mut missing = serde_json::to_value(&plan).unwrap();
+    missing.as_object_mut().unwrap().remove("membership");
+    assert!(serde_json::from_value::<super::selection::ViewPlan>(missing).is_err());
     assert_eq!(plan.projection, plan.arrangement.project());
     plan.arrangement.validate(&plan.resolution.members).unwrap();
+}
+
+#[test]
+fn explicit_membership_program_keeps_only_its_candidates_at_ten_thousand_tasks() {
+    let work: Vec<_> = (0..10_000)
+        .map(|index| SelectionWork {
+            key: key(&format!("task_{index}"), WorkWorkspaceKind::Task),
+            parent_wave: None,
+            name: format!("LOO-{index}"),
+            states: BTreeSet::from([SelectionState::Working]),
+            activity_known: true,
+        })
+        .collect();
+    let selection = node(
+        "one",
+        SelectionExpression::Work {
+            work: work[5000].key.clone(),
+        },
+    );
+    let plan = selection
+        .membership_plan("repo", &work, &BTreeMap::new())
+        .unwrap();
+    assert_eq!(plan.facts.len(), 1);
+    assert_eq!(plan.resolve().task_ids(), ["task_5000"]);
+    assert!(serde_json::to_vec(&plan).unwrap().len() < 1024);
 }
 
 #[test]

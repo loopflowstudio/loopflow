@@ -1,6 +1,6 @@
 # LOO-906: immediate interactions across Desktop and mobile
 
-Implementation continues 2026-11-15 from `ac6871e42f` on origin/main
+Implementation continues 2026-11-15 from `d9bf1c21ae` on origin/main
 `9cafc410ee` (unchanged at realign). Supersedes the Desktop-only delivery
 boundary. No shipping or merge decision is recorded. Placement remains this Task;
 no Wave is selected.
@@ -454,6 +454,13 @@ existing bounded input owners: no offline keystroke queue or automatic resend.
 
 ## Delete — do not maintain
 
+- Removed in this cut: `Selection::expand`'s snapshot-only interpreter. Rust now
+  compiles the finite membership program and evaluates that same program. Keep
+  selection identity, scope/name resolution, unavailable evidence and server order.
+- Removed in this cut: Desktop Dashboard's temporary mutation of
+  `resolution.members` to obtain visible rows. Projected membership, arrangement,
+  attention and counts are derived together; retained confirmed DTOs stay immutable.
+
 - Removed: `WorkModel.sidebarTaskRows`' roadmap-membership fallback. Sidebar
   membership now comes only from the confirmed Work plan; retained entity facts
   still supply details. Desktop restores stamped plans through the shared owner.
@@ -674,25 +681,36 @@ cancels observers for retired commands. The registry covers filing, new Session
 input, completion/reopen, Task edit and Wave moves; other families stay Inspect.
 It is not yet the exhaustive command/effect registry.
 
-Complete Work plan bodies now persist with stamps in the same SQLite owner.
-Desktop live Task lists/Dashboards and phone live/restored Task lists use that
-ordering. Phone query-file reads/writes are removed; Forget clears confirmed
-queries while retaining unanswered commands. An old query cannot replace a newer
-persisted base. Reload floors suppress lagging bases after operation retirement:
-`cachedPlans` returns nil for a list stamped below the floor, so a restarted
-lagging list has no base rather than a projected removal (ClientWorkQueryTests).
-Query-observed epoch replacement invalidates receipt evidence across the Machine.
-This is cache/retirement infrastructure, not ordered effect/query projection; the
-per-query overlay must replace that gap before cutover.
+Work plan bodies persist with stamps in the outbox database. Rust now compiles
+structural selection, named queries, occurrence paths and ordering into a finite
+membership program over `selection_states`. The Rust reader evaluates it too;
+Swift has no Task lifecycle resolver. Plans declare the completion display-state
+patch and confirming stage. Terminal Tasks have no actionable availability/busy
+selection states even while their retained Session execution remains unknown;
+otherwise a covering completion reading could resurrect the removed row. `ProjectedWorkPlan` derives membership, arrangement,
+visible/suppressed occurrences, attention and unique Task totals together. Unknown
+membership has no exact total. Confirmed DTO bodies are retained unchanged.
 
-Remaining, in order: declarative membership plan over #1947 `selection_states`,
-ordered per-query overlays and normalized cross-query provenance; Complete A/select
-B production navigation plus held/reordered list/count/receipt coverage on both
-clients; remaining mutation-family recovery/fences and resource lanes (remote,
-external files/config and planning families included); both-client interaction
-and retained-occurrence migration with deletion of checkpoint/presentation
-exceptions; epoch reset on historical restoration; crash/native acceptance and
-valid benchmark baseline. No full projection cutover or shipping is claimed.
+The cache applies completion effects in insertion sequence independently for each
+query. Query replacement compares declared Work domains, so unrelated usage
+revisions cannot prevent a newer membership base. A covering query stops applying an effect while a lagging query retains
+it. Retirement transfers unresolved query effects and scoped reload requirements
+in the same transaction; cached query effects survive restart after the command
+retires. New queries still need a covering base beyond retirement. Old cached
+plans without the membership vocabulary are invalidated, retaining the outbox and
+reload floors. Desktop list/Dashboard and phone list readers consume projected
+query results, prepared on the store actor before host publication; Desktop inspection still exports the confirmed plan and needs its
+presentation DTO migration alongside the interaction cutover. This does not yet establish synchronous gesture publication.
+
+Remaining, in order: shared synchronous Complete A/select B interaction and both
+production action paths; query-open/close incorporation, dependency coverage for
+all effects and normalized cross-query provenance; remaining mutation-family
+recovery/fences and resource lanes (remote, external files/config and planning
+families included); both-client retained-occurrence migration and deletion of
+checkpoint/presentation exceptions; epoch reset on historical restoration;
+crash/native acceptance and a valid benchmark baseline. Completion commands still
+need production outbox migration; the current query effects are exercised through
+the shared store, not claimed as complete UI acceptance. No shipping is claimed.
 SQLite fences cannot certify filesystem/provider effects; transport `complete`
 is query coverage, not membership or native readiness.
 
@@ -789,13 +807,16 @@ backend-stage baseline exists. Raw files and earlier detail: `8b42a874db`,
 `bb936ac371` (`scratch/instant-task-session.md`).
 
 Implementation owns a valid benchmark baseline; demo owns native usability.
+Local preflight 2026-11-15T13:19:55.670079+00:00: rejected at 571.1% background CPU,
+load [83.515625, 50.67626953125, 31.76611328125]; no native trial began.
 
-Checks (2026-11-15; `LF_*` cleared; earlier results at `a127084469:scratch/instant-task-session.md`):
-- `swift build --build-tests --package-path swift --jobs 4 -Xswiftc -gnone`: passed; existing unrelated warnings remain. Gate owns wider builds.
-- Desktop network boundary/private LF_HOME, `swift test --skip-build --disable-sandbox --package-path swift --no-parallel --filter 'ClientWorkStoreTests|ClientWorkQueryTests|OperationRecoveryPresentationTests|ServerProtocolTests|WorkNavigationTests|WorkModelTests.missingWorkMembership'`: 6 XCTest + 101 Swift Testing cases passed. Gate owns broader acceptance.
-- `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/ClientWorkQueryTests -only-testing:LoopflowiOSTests/ClientWorkStoreTests`: 8 passed; disposable Simulator removed. Gate owns wider iOS acceptance.
-- `cargo test -p loopflow --lib store::sqlite::operations::tests::`: 19 passed, including exact export matching and 10k filing/export query plans. Gate owns wider creation/launch suites in `scripts/testing.md`.
-- `cargo test -p loopflow --lib server::schema::tests::`: 8 passed; checked-in schema regenerated.
-- `cargo test -p loopflow --test integration dto_fixtures::creation_planning_evidence_keeps_the_original_export_identity`: passed.
-- `cargo fmt`, `cargo clippy --all-targets --jobs 4 -- -D warnings`, `check_swift_multiplatform_boundaries.py`, `git diff --check`: passed.
-- `cargo package --locked --allow-dirty -p loopflow`, `cargo test -p loopflow --test integration documented_commands::`: deferred to gate for archive/documentation boundaries.
+Checks before this cut: `d9bf1c21ae:scratch/instant-task-session.md` records focused
+Desktop/iOS query, receipt and recovery passes; Rust operations/schema/DTO passes;
+fmt/clippy and multiplatform checks. Archive/documentation checks remain gate-owned.
+
+Current cut checks (2026-11-15; `LF_*` cleared):
+- `swift build --build-tests --package-path swift --jobs 4 -Xswiftc -gnone`; private-Home/network-boundary `swift test --skip-build --no-parallel --filter 'ClientWorkQueryTests|WorkSelectionTests|DashboardWorkspaceTests|WorkNavigationTests'`: build + 16 XCTest/68 Swift Testing passed.
+- `scripts/test_ios.py -only-testing:LoopflowiOSTests/ClientWorkQueryTests -only-testing:LoopflowiOSTests/MobileTaskCreationTests`: 35 passed; disposable Simulator removed.
+- Rust library `work::selection_tests::` (19), selection completion/unknown execution regression (1), existing reported-attention regression (1), `server::schema::tests::` (8): passed; schema regenerated.
+- 10k-row SQLite `EXPLAIN QUERY PLAN`: Machine query range uses its primary-key index; operation sequence lookup uses its unique covering index.
+- `cargo fmt`, multiplatform boundaries and `git diff --check`: passed. Clippy passed. Gate owns wider suites and archive/documentation checks; native latency remains unmeasured.

@@ -1199,9 +1199,10 @@ struct WorkNavigationTests {
         let dashboard = WorkViewPlan(name: "Review", pinned: true, dashboardID: "review", repository: "repo", repositoryPath: "/src/fixture",
             selection: WorkSelection(id: "root", expression: .filter(.state(.open))), savedRevision: 1,
             resolution: WorkSelectionResolution(attention: [], members: members + [hidden], unavailable: []),
+            membership: WorkMembershipPlan(domains: [], effects: [:], root: .members(members + [hidden]), facts: [], unavailable: []),
             arrangement: WorkArrangement(order: members + [hidden], hidden: [hidden], mode: .touched),
             projection: WorkArrangementProjection(visible: members, suppressed: []), slots: DashboardSlotLayout(root: .slot(0)),
-            contents: review)
+            contents: review + [content(.task, "issue-available")])
         model.applySelectionPlans([
             fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"),
                             members: [content(.task, "issue-review"), content(.task, "issue-now")]),

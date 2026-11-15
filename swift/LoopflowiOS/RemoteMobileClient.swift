@@ -130,7 +130,7 @@ final class RemoteMobileClient: MobileTaskCreationClient {
     func createdTask(_ submission: MobileTaskSubmission, taskID: String) async throws -> WorkViewPlan.Content {
         try verifySubmission(submission)
         let plan = try await query.viewPlan(expression: "task:\(taskID)", repoPath: submission.directory)
-        guard let task = try mobileTasks(plan).first(where: { $0.work.id == taskID }) else {
+        guard let task = try mobileTasks(ProjectedWorkPlan(plan)).first(where: { $0.work.id == taskID }) else {
             throw RegistryQueryError("The Task was created, but its workspace is not available yet. Try Open Task again.")
         }
         return task

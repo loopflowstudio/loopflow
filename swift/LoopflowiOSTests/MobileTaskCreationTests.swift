@@ -565,7 +565,7 @@ private final class CreationClient: MobileTaskCreationClient {
             throw RegistryQueryError("task-reading.json is not a response")
         }
         let plan = try result.decode(WorkViewPlan.self)
-        task = try XCTUnwrap(mobileTasks(plan).first)
+        task = try XCTUnwrap(mobileTasks(ProjectedWorkPlan(plan)).first)
     }
 
     func creationContext() async throws -> MobileCreationContext {

@@ -188,14 +188,15 @@ public struct WorkViewPlan: Codable, Equatable, Sendable {
     public let repositoryPath: String
     public let selection: WorkSelection
     public let savedRevision: Int64?
-    public var resolution: WorkSelectionResolution
+    public let resolution: WorkSelectionResolution
+    public let membership: WorkMembershipPlan
     public let arrangement: WorkArrangement
     public let projection: WorkArrangementProjection
     /// The page geometry visible members fill, in projection order.
     public let slots: DashboardSlotLayout
     public let contents: [Content]
     enum CodingKeys: String, CodingKey {
-        case repository = "repo", selection, resolution, arrangement, projection, slots, contents, name, pinned
+        case repository = "repo", selection, resolution, membership, arrangement, projection, slots, contents, name, pinned
         case dashboardID = "dashboard_id", savedRevision = "saved_revision", repositoryPath = "repo_path"
     }
 

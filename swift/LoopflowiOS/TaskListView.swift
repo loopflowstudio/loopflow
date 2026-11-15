@@ -40,7 +40,7 @@ final class TaskFeed {
         let saved = try? await client.journal.cachedPlans(machine: client.savedMachine.machineID,
             for: .viewSelect(expression: filter.expression(wave: wave)))
         guard current == generation else { return }
-        if let saved, let repositories = try? RemoteTaskObservation.decodePlans(saved.plans).get() {
+        if let saved, let repositories = try? RemoteTaskObservation.decodePlans(saved.projection).get() {
             self.repositories = repositories
             loaded = true
             Perf.launch("tasks_saved")

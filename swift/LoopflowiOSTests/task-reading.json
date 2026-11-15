@@ -224,6 +224,117 @@
       }
     },
     "repo": "repo_fixture",
-    "repo_path": "/Users/dev/src/loopflow"
+    "repo_path": "/Users/dev/src/loopflow",
+    "membership": {
+      "root": {
+        "kind": "state",
+        "state": "open",
+        "members": [
+          {
+            "source": [
+              "working"
+            ],
+            "work": {
+              "repository": "repo_fixture",
+              "kind": "task",
+              "id": "task_fixture_1"
+            }
+          },
+          {
+            "source": [
+              "working"
+            ],
+            "work": {
+              "repository": "repo_fixture",
+              "kind": "task",
+              "id": "task_fixture_2"
+            }
+          },
+          {
+            "source": [
+              "working"
+            ],
+            "work": {
+              "repository": "repo_fixture",
+              "kind": "task",
+              "id": "task_fixture_3"
+            }
+          }
+        ]
+      },
+      "facts": [
+        {
+          "work": {
+            "repository": "repo_fixture",
+            "kind": "task",
+            "id": "task_fixture_1"
+          },
+          "name": "LOO-1",
+          "states": [
+            "open",
+            "available"
+          ],
+          "activity_known": true
+        },
+        {
+          "work": {
+            "repository": "repo_fixture",
+            "kind": "task",
+            "id": "task_fixture_2"
+          },
+          "name": "LOO-1",
+          "states": [
+            "open",
+            "available"
+          ],
+          "activity_known": true
+        },
+        {
+          "work": {
+            "repository": "repo_fixture",
+            "kind": "task",
+            "id": "task_fixture_3"
+          },
+          "name": "LOO-1",
+          "states": [
+            "open",
+            "available"
+          ],
+          "activity_known": true
+        }
+      ],
+      "unavailable": [],
+      "effects": {
+        "task.complete": {
+          "stage": "task.completed",
+          "domains": [
+            "planning"
+          ],
+          "remove": [
+            "open",
+            "available",
+            "busy",
+            "blocked",
+            "unstarted",
+            "idle",
+            "active",
+            "moving",
+            "shipping",
+            "backlog",
+            "working",
+            "autonomous"
+          ],
+          "insert": [
+            "done"
+          ]
+        }
+      },
+      "domains": [
+        "graphs",
+        "planning",
+        "processes",
+        "sessions"
+      ]
+    }
   }
 }

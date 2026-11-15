@@ -212,7 +212,82 @@
             }
           ],
           "name": null,
-          "pinned": false
+          "pinned": false,
+          "membership": {
+            "root": {
+              "kind": "members",
+              "members": [
+                {
+                  "source": [
+                    "root",
+                    "first"
+                  ],
+                  "work": {
+                    "repository": "repo_11111111111111111111111111111111",
+                    "kind": "task",
+                    "id": "task_33333333333333333333333333333333"
+                  }
+                },
+                {
+                  "source": [
+                    "root",
+                    "second"
+                  ],
+                  "work": {
+                    "repository": "repo_11111111111111111111111111111111",
+                    "kind": "task",
+                    "id": "task_33333333333333333333333333333333"
+                  }
+                }
+              ]
+            },
+            "facts": [
+              {
+                "work": {
+                  "repository": "repo_11111111111111111111111111111111",
+                  "kind": "task",
+                  "id": "task_33333333333333333333333333333333"
+                },
+                "states": [
+                  "backlog"
+                ],
+                "activity_known": true,
+                "name": "LOO-1"
+              }
+            ],
+            "unavailable": [],
+            "effects": {
+              "task.complete": {
+                "stage": "task.completed",
+                "domains": [
+                  "planning"
+                ],
+                "remove": [
+                  "open",
+                  "available",
+                  "busy",
+                  "blocked",
+                  "unstarted",
+                  "idle",
+                  "active",
+                  "moving",
+                  "shipping",
+                  "backlog",
+                  "working",
+                  "autonomous"
+                ],
+                "insert": [
+                  "done"
+                ]
+              }
+            },
+            "domains": [
+              "graphs",
+              "planning",
+              "processes",
+              "sessions"
+            ]
+          }
         }
       ],
       "stamp": null

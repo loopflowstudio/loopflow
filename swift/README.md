@@ -1149,18 +1149,24 @@ operation. Its domain stage declares whether planning applies; a missing require
 change or unavailable status keeps **Inspect**, as do unclassified diagnostics.
 Task filing follows its original export receipt; Session input replacement has no
 planning effect. A known, resolved command retires in the transaction that persists
-its required reload fence; creation also retains its result until it has been shown. Lagging cached queries remain unavailable
-until a complete reading covers that fence. A covering query uses its confirmed
-body independently of other queries.
+its required reload fence; creation also retains its result until it has been shown.
+Completion transfers its ordered removal to lagging stored queries in that same
+transaction. A covering query drops its own effect independently; a newly opened
+query beyond retirement needs a covering base. Effects and reload requirements
+survive restart without relabeling projected facts as confirmed.
 
 Desktop's live Task lists and Dashboards and the phone's Task feed persist complete
 stamped query bodies in the shared SQLite store. The phone restores those bases
 through the same freshness and invalidation rules; its separate query files are
 no longer read or written. Departed epochs and query ordering survive restart.
 A query from a replacement epoch also invalidates outstanding receipt evidence
-for that Machine; recovery never replays an uncertain command. This is confirmed
-cache and retirement infrastructure. Ordered pending membership projection,
-normalized cross-query facts and phone recovery presentation remain unfinished.
+for that Machine; recovery never replays an uncertain command. Rust compiles a
+finite membership program over selection states, preserving scope, source paths
+and order. The shared Swift projection derives members, attention, arrangement,
+visible/suppressed occurrences and unique Task counts together; unknown membership
+has no exact total. Both clients consume these projected query results. Completion's
+synchronous gesture/outbox migration, normalized cross-query facts and phone
+recovery presentation remain unfinished.
 
 Terminal recovery must preserve the exact owner, draft and newer control claims.
 Opening shows **Opening… Input paused** through attachment and native readiness;

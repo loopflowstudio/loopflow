@@ -119,21 +119,25 @@ final class WorkModel {
     var dashboardError: String?
     private(set) var dashboardSaving = false
 
-    private var selectionReadings: [RepositoryReadingKey: WorkReading<[WorkViewPlan]>] = [:]
-    private(set) var selectionPlans: WorkReading<[WorkViewPlan]> {
+    private var selectionReadings: [RepositoryReadingKey: WorkReading<[ProjectedWorkPlan]>] = [:]
+    private(set) var selectionPlans: WorkReading<[ProjectedWorkPlan]> {
         get { selectionReadings[repositoryReadingKey(repoPath ?? "")] ?? .loading }
         set { selectionReadings[repositoryReadingKey(repoPath ?? "")] = newValue }
     }
 
     /// The sidebar's started Tasks for the Wave it was read for: the list the phone shows.
-    private var taskListReadings: [RepositoryReadingKey: (wave: String?, reading: WorkReading<WorkViewPlan>)] = [:]
+    private var taskListReadings: [RepositoryReadingKey: (wave: String?, reading: WorkReading<ProjectedWorkPlan>)] = [:]
     private var taskListGeneration = 0
 
     func applyTaskList(_ plan: WorkViewPlan?, wave: String?, reason: String) {
+        applyProjectedTaskList(plan.map { ProjectedWorkPlan($0) }, wave: wave, reason: reason)
+    }
+
+    private func applyProjectedTaskList(_ plan: ProjectedWorkPlan?, wave: String?, reason: String) {
         taskListGeneration &+= 1
         let key = repositoryReadingKey(repoPath ?? "")
         let previous = taskListReadings[key]
-        let next: WorkReading<WorkViewPlan> = plan.map { .available($0) }
+        let next: WorkReading<ProjectedWorkPlan> = plan.map { .available($0) }
             ?? .unavailable(lastGood: previous?.wave == wave ? previous?.reading.value : nil, reason: reason)
         guard previous?.wave != wave || previous?.reading != next else { return }
         taskListReadings[key] = (wave, next)
@@ -141,15 +145,19 @@ final class WorkModel {
     }
 
     /// The started list, once it answers for the sidebar's current scope.
-    var taskListReading: WorkReading<WorkViewPlan> {
+    var taskListReading: WorkReading<ProjectedWorkPlan> {
         let wave: String? = if case .wave(let id) = navigation.sidebarScope { id } else { nil }
         guard let entry = taskListReadings[repositoryReadingKey(repoPath ?? "")], entry.wave == wave else { return .loading }
         return entry.reading
     }
 
-    private var taskList: WorkViewPlan? { taskListReading.value }
+    private var taskList: ProjectedWorkPlan? { taskListReading.value }
 
     func applySelectionPlans(_ plans: [WorkViewPlan]?, reason: String) {
+        applyProjectedSelectionPlans(plans?.map { ProjectedWorkPlan($0) }, reason: reason)
+    }
+
+    private func applyProjectedSelectionPlans(_ plans: [ProjectedWorkPlan]?, reason: String) {
         guard let plans else {
             selectionPlans = .unavailable(lastGood: selectionPlans.value, reason: reason)
             return
@@ -958,7 +966,7 @@ final class WorkModel {
             task: inspectSelectedTask(), session: inspectSelectedSession(),
             list: desktopList(repository: workspaceRepository ?? repository),
             actions: DesktopAction.all.map(\.descriptor), workspaces: workspaces.inspect(), openWork: workspaces.openWork,
-            view: selectedViewPlan ?? navigation.waveView.flatMap { boardPlan($0) }, viewParts: desktopViewParts(repository: repository),
+            view: (selectedViewPlan ?? navigation.waveView.flatMap { boardPlan($0) })?.confirmed, viewParts: desktopViewParts(repository: repository),
             opening: selectionOpening ?? taskOpening)
     }
 
@@ -1592,9 +1600,9 @@ final class WorkModel {
                 guard scope == workScope, machine == observingMachineId,
                       generation == taskListGeneration else { return }
                 if part == .selections {
-                    if let cached { applySelectionPlans(cached.plans, reason: "") }
+                    if let cached { applyProjectedSelectionPlans(cached.projection, reason: "") }
                 } else if let cached {
-                    applyTaskList(cached.plans.first, wave: scope.taskListWave, reason: "")
+                    applyProjectedTaskList(cached.projection.first, wave: scope.taskListWave, reason: "")
                 }
             } catch { dashboardError = error.localizedDescription }
         }
@@ -1729,7 +1737,7 @@ final class WorkModel {
                 do {
                     let confirmed = try await ClientWorkStore.shared.receivePlans(body, stamp: stamp, for: read)
                     guard scope == sentScope, machine == workMachine, answers >= max(planningFloor, scopeFloor) else { return }
-                    if let confirmed { applySelectionPlans(confirmed.plans, reason: reason) }
+                    if let confirmed { applyProjectedSelectionPlans(confirmed.projection, reason: reason) }
                     else { selectionPlans = .unavailable(lastGood: nil, reason: "Waiting for a covering Work reading") }
                 } catch {
                     guard scope == sentScope, machine == workMachine else { return }
@@ -1745,7 +1753,7 @@ final class WorkModel {
                 do {
                     let confirmed = try await ClientWorkStore.shared.receivePlans([body], stamp: stamp, for: read)
                     guard scope == sentScope, machine == workMachine, answers >= max(planningFloor, scopeFloor) else { return }
-                    if let confirmed { applyTaskList(confirmed.plans.first, wave: scope.taskListWave, reason: reason) }
+                    if let confirmed { applyProjectedTaskList(confirmed.projection.first, wave: scope.taskListWave, reason: reason) }
                     else {
                         taskListGeneration &+= 1
                         taskListReadings[repositoryReadingKey(repoPath ?? "")] =
@@ -2171,7 +2179,7 @@ final class WorkModel {
             .compactMap { member in visibleRoadmaps.first { $0.wave.id == member.work.id } }
     }
 
-    private func builtInPlan(_ expression: WorkSelection.Expression) -> WorkViewPlan? {
+    private func builtInPlan(_ expression: WorkSelection.Expression) -> ProjectedWorkPlan? {
         selectionPlans.value?.first { $0.dashboardID == nil && $0.selection.expression == expression }
     }
 
@@ -2189,11 +2197,11 @@ final class WorkModel {
     }
 
     /// A plan's Tasks in its order, as rows name them, with the states the server read.
-    private func taskRows(_ plan: WorkViewPlan?) -> [(id: String, states: [WorkSelectionState])] {
+    private func taskRows(_ plan: ProjectedWorkPlan?, visibleOnly: Bool = false) -> [(id: String, states: [WorkSelectionState])] {
         guard let plan else { return [] }
-        let states = Dictionary(plan.contents.map { ($0.work, $0.states) }, uniquingKeysWith: { first, _ in first })
+        let states = plan.states
         var seen = Set<String>()
-        return plan.resolution.members.filter { $0.work.kind == .task }.compactMap { member in
+        return (visibleOnly ? plan.projection.visible : plan.resolution.members).filter { $0.work.kind == .task }.compactMap { member in
             let id = task(id: member.work.id)?.task.id ?? member.work.id
             guard seen.insert(id).inserted, !abandoningTaskIDs.contains(id) else { return nil }
             return (id, states[member.work] ?? [])
@@ -2212,11 +2220,7 @@ final class WorkModel {
         let rows: [(id: String, states: [WorkSelectionState])]
         switch navigation.sidebarScope {
         case .repository, .wave: rows = sidebarTaskRows.filter { $0.states.contains(.working) }
-        case .dashboard(let id): rows = taskRows(dashboard(id).map { plan in
-            var visible = plan
-            visible.resolution.members = plan.projection.visible
-            return visible
-        })
+        case .dashboard(let id): rows = taskRows(dashboard(id), visibleOnly: true)
         }
         return rows.filter { row in
             switch navigation.sidebarFilter {
@@ -3236,8 +3240,8 @@ final class WorkModel {
 }
 
 extension WorkModel {
-    var dashboards: [WorkViewPlan] { selectionPlans.value?.filter { $0.dashboardID != nil } ?? [] }
-    func dashboard(_ id: String) -> WorkViewPlan? { selectionPlans.value?.first { $0.dashboardID == id } }
+    var dashboards: [ProjectedWorkPlan] { selectionPlans.value?.filter { $0.dashboardID != nil } ?? [] }
+    func dashboard(_ id: String) -> ProjectedWorkPlan? { selectionPlans.value?.first { $0.dashboardID == id } }
 
     private func selectDestination(_ destination: WorkNavigation.Destination, recordingHistory: Bool = false) {
         switch destination {
@@ -3306,7 +3310,7 @@ extension WorkModel {
         return (members ?? []).filter { $0.work.kind == .task && seen.insert($0.work).inserted }
     }
 
-    func boardPlan(_ board: WorkNavigation.Board) -> WorkViewPlan? {
+    func boardPlan(_ board: WorkNavigation.Board) -> ProjectedWorkPlan? {
         switch board {
         case .saved(let id): dashboard(id)
         case .workingTasks, .repository: builtInPlan(.repository)
@@ -3322,14 +3326,14 @@ extension WorkModel {
         presentBoard(plan, boardTiles(view), on: view, after: [key])
     }
 
-    private func presentView(_ plan: WorkViewPlan) {
+    private func presentView(_ plan: ProjectedWorkPlan) {
         // Working Tasks renders the repository plan's Tasks; its Waves stay in the sidebar.
         let members = if case .workingTasks = navigation.destination { workingTaskMembers } else { plan.projection.visible }
         presentBoard(plan, members, on: navigation.trailBoard)
     }
 
     /// Every tile gets a workspace for `lf desktop` addressing; only the current page counts as shown.
-    private func presentBoard(_ plan: WorkViewPlan, _ members: [WorkMemberRef], on board: WorkNavigation.Board?,
+    private func presentBoard(_ plan: ProjectedWorkPlan, _ members: [WorkMemberRef], on board: WorkNavigation.Board?,
                               after lead: [WorkWorkspaceKey] = []) {
         guard let registry = workspaceRegistry else { return }
         let tiles = members.map(\.work)
@@ -3426,18 +3430,11 @@ extension WorkModel {
     private func moveRepositoryMember(_ task: String, to target: String) {
         guard var plans = selectionPlans.value,
               let index = plans.firstIndex(where: { $0.dashboardID == nil && $0.selection.expression == .repository }) else { return }
-        var members = plans[index].resolution.members
-        guard let from = members.firstIndex(where: { $0.work.kind == .task && $0.work.id == task }),
-              let to = members.firstIndex(where: { $0.work.kind == .task && $0.work.id == target }) else { return }
-        members.insert(members.remove(at: from), at: to)
-        plans[index].resolution.members = members
-        applySelectionPlans(plans, reason: "")
+        plans[index] = plans[index].reordering(task, to: target)
+        applyProjectedSelectionPlans(plans, reason: "")
         let key = repositoryReadingKey(repoPath ?? "")
-        if let entry = taskListReadings[key], entry.wave == nil, var list = entry.reading.value,
-           let from = list.resolution.members.firstIndex(where: { $0.work.kind == .task && $0.work.id == task }),
-           let to = list.resolution.members.firstIndex(where: { $0.work.kind == .task && $0.work.id == target }) {
-            list.resolution.members.insert(list.resolution.members.remove(at: from), at: to)
-            taskListReadings[key] = (nil, .available(list))
+        if let entry = taskListReadings[key], entry.wave == nil, let list = entry.reading.value {
+            taskListReadings[key] = (nil, .available(list.reordering(task, to: target)))
         }
     }
 
@@ -3464,18 +3461,18 @@ extension WorkModel {
             other.dashboardID == plan.dashboardID
                 && (plan.dashboardID != nil || other.selection.expression == plan.selection.expression)
         }
-        plans.append(plan)
-        applySelectionPlans(plans, reason: "")
+        plans.append(ProjectedWorkPlan(plan))
+        applyProjectedSelectionPlans(plans, reason: "")
     }
 }
 
 
 extension WorkModel {
-    var selectedViewPlan: WorkViewPlan? {
+    var selectedViewPlan: ProjectedWorkPlan? {
         switch navigation.destination {
         case .work, .entered: nil
         case .dashboard(let id): dashboard(id)
-        case .view(let plan): plan
+        case .view(let plan): ProjectedWorkPlan(plan)
         case .workingTasks: builtInPlan(.repository)
         }
     }
@@ -3486,7 +3483,7 @@ extension WorkModel {
             let plan = try await query.viewPlan(expression: previous.selection.queryText, repoPath: repoPath)
             guard self.repoPath == repoPath, navigation.destination == .view(previous) else { return }
             navigation.destination = .view(plan)
-            presentView(plan)
+            presentView(ProjectedWorkPlan(plan))
         } catch {
             guard self.repoPath == repoPath, navigation.destination == .view(previous) else { return }
             dashboardError = error.localizedDescription

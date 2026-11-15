@@ -380,6 +380,15 @@ nothing gets a namespace of its own for a client.
 Dashboards. The portfolio is the Machine's repository set: Desktop's sidebar,
 the phone's `view.select` Task list and its creation destinations all read it.
 
+Work view plans include a required `membership` program: finite `members`, `state`,
+`compose` and `intersect` nodes, ordered candidate facts, declared fact domains and unavailable reasons.
+Rust resolves names, hierarchy, named queries and occurrence source paths before
+emitting it. Both the Rust reader and shared Swift projection evaluate that
+program. Its declared display effects identify their confirming semantic stages,
+fact domains and selection-state changes; they never establish native readiness.
+The current effect vocabulary covers completion. Confirmed plans remain unchanged
+beneath ordered per-query effects, including after command retirement and restart.
+
 - `config.*` is `engine::config`, which `lf config` calls too: `config.catalog`
   lists the typed settings, `config.settings {directory, wave, skill, graph,
   step}` resolves them with their sources, and `config.get`, `config.set

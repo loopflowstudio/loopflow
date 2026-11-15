@@ -433,6 +433,9 @@ Platform setup belongs in app targets; conditional code in shared Swift must
 compile for both platforms (`check_swift_multiplatform_boundaries.py`). Bind inner
 Swift Testing `#require` values separately; nested `#require` macros recurse.
 
+Shared Desktop/iOS fixture tests look in the test bundle, then the source checkout;
+keep fixture discovery free of nested platform gates.
+
 Headless Swift view tests inspect production leaf views directly when a parent
 needs `@Environment` Observation objects, which ViewInspector can't inject.
 Keep those views internal for `@testable` access. Mounted terminal frame checks

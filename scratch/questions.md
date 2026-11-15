@@ -10,8 +10,8 @@
   preference. Validate membership coverage during implementation. The outbox uses system
   SQLite through SQLite3; this reversible choice avoids another dependency.
   GRDB is not adopted. Protocol revision 6 now adds stamped subscriptions;
-  confirmed Work query bases now persist in the outbox database; ordered projection
-  and membership migration remain unfinished.
+  confirmed Work bases and ordered completion effects now share the outbox.
+  Synchronous interaction, provenance and full membership migration remain open.
 - Completion navigation: Jack Heart replied “1b for the question (or show noting)”
   to the numbered choice in `scratch/concept-review.html`. Remove the row and
   select the next Task immediately; an empty state is allowed when none remains.
@@ -40,7 +40,11 @@
   need a covering replacement reading before showing the unoverlaid membership.
   This avoids a second resolution ledger and guessed replacement Task values.
 
-- Retirement currently uses a conservative per-Machine domain revision frontier:
-  all stored/future Work plans must cover it before their base is usable. This is
-  a reversible engineering choice while the declarative query dependency registry
-  remains incomplete. No per-query membership overlay or full cutover is claimed.
+- Other command families retain conservative per-Machine reload requirements
+  while their declaration and projection policies remain incomplete. Full
+  cross-platform interaction cutover is not claimed.
+
+- Completion now transfers lagging stored-query effects on retirement; query
+  open/close leases and finite invalidation for closed bases remain migration work.
+  New completion reload requirements are scoped to repository and declared effect;
+  preexisting broad requirements retain their conservative meaning until epoch reset.

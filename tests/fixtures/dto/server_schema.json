@@ -4830,6 +4830,193 @@
       ],
       "type": "object"
     },
+    "MembershipFacts": {
+      "properties": {
+        "activity_known": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "states": {
+          "items": {
+            "$ref": "#/$defs/SelectionState"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "work": {
+          "$ref": "#/$defs/WorkWorkspaceKey"
+        }
+      },
+      "required": [
+        "work",
+        "name",
+        "states",
+        "activity_known"
+      ],
+      "type": "object"
+    },
+    "MembershipNode": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "const": "members",
+              "type": "string"
+            },
+            "members": {
+              "items": {
+                "$ref": "#/$defs/MemberRef"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "kind",
+            "members"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "state",
+              "type": "string"
+            },
+            "members": {
+              "items": {
+                "$ref": "#/$defs/MemberRef"
+              },
+              "type": "array"
+            },
+            "state": {
+              "$ref": "#/$defs/SelectionState"
+            }
+          },
+          "required": [
+            "kind",
+            "state",
+            "members"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "items": {
+              "items": {
+                "$ref": "#/$defs/MembershipNode"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "compose",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "items"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "items": {
+              "items": {
+                "$ref": "#/$defs/MembershipNode"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "intersect",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "items"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "MembershipPlan": {
+      "properties": {
+        "domains": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "effects": {
+          "additionalProperties": {
+            "$ref": "#/$defs/MembershipStateEffect"
+          },
+          "type": "object"
+        },
+        "facts": {
+          "items": {
+            "$ref": "#/$defs/MembershipFacts"
+          },
+          "type": "array"
+        },
+        "root": {
+          "$ref": "#/$defs/MembershipNode"
+        },
+        "unavailable": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "domains",
+        "root",
+        "facts",
+        "unavailable",
+        "effects"
+      ],
+      "type": "object"
+    },
+    "MembershipStateEffect": {
+      "description": "Predicted display-state changes. These never establish execution readiness.",
+      "properties": {
+        "domains": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "insert": {
+          "items": {
+            "$ref": "#/$defs/SelectionState"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "remove": {
+          "items": {
+            "$ref": "#/$defs/SelectionState"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "stage": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "stage",
+        "domains",
+        "remove",
+        "insert"
+      ],
+      "type": "object"
+    },
     "MetricContractIssueDto": {
       "oneOf": [
         {
@@ -16110,6 +16297,9 @@
             }
           ]
         },
+        "membership": {
+          "$ref": "#/$defs/MembershipPlan"
+        },
         "name": {
           "type": [
             "string",
@@ -16156,6 +16346,7 @@
         "selection",
         "saved_revision",
         "resolution",
+        "membership",
         "arrangement",
         "projection",
         "slots",

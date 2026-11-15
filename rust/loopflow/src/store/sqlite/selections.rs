@@ -117,10 +117,11 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
             task.state.as_deref(),
             reading.activity.get(&task.id),
         );
-        let activity_known = reading
-            .activity
-            .get(&task.id)
-            .is_none_or(|activity| activity.known);
+        let activity_known = states.contains(&SelectionState::Done)
+            || reading
+                .activity
+                .get(&task.id)
+                .is_none_or(|activity| activity.known);
         let order = reading.order.key(task.id.as_str(), task.rank, &states);
         task_work.push((
             order,
@@ -187,7 +188,14 @@ pub(crate) fn task_selection_states(
     activity: Option<&TaskActivity>,
 ) -> BTreeSet<SelectionState> {
     let state = runtime.lifecycle(plan_state);
-    let mut states = activity.map_or_else(BTreeSet::new, |activity| activity.states.clone());
+    // Completion changes actionable membership, not the retained conversation's
+    // execution facts. A completed Task cannot re-enter Ready/Working from an
+    // old Session report after its removal effect is incorporated.
+    let mut states = if state.is_terminal() {
+        BTreeSet::new()
+    } else {
+        activity.map_or_else(BTreeSet::new, |activity| activity.states.clone())
+    };
     if (owned || published) && !state.is_terminal() {
         states.insert(SelectionState::Open);
     }
@@ -331,9 +339,10 @@ fn plan_in(
     work: &[SelectionWork],
 ) -> StoreResult<crate::work::selection::ViewPlan> {
     use crate::work::selection::{PaneIntent, ViewContent, ViewLocation, ViewPlan};
-    let resolution = selection
-        .resolve(repository.as_str(), work, queries)
+    let membership = selection
+        .membership_plan(repository.as_str(), work, queries)
         .map_err(StoreError::from)?;
+    let resolution = membership.resolve();
     let mut arrangement = saved.map_or_else(
         || Arrangement::automatic(&[]),
         |saved| saved.arrangement.clone(),
@@ -455,6 +464,7 @@ fn plan_in(
         selection,
         saved_revision: saved.map(|saved| saved.revision),
         resolution,
+        membership,
         projection: arrangement.project(),
         arrangement,
         slots: saved
@@ -955,6 +965,57 @@ mod tests {
             .unwrap();
         let repo = RepositoryId::parse("repo_11111111111111111111111111111111").unwrap();
         (dir, store, repo)
+    }
+
+    #[test]
+    fn completion_removes_actionable_membership_while_retaining_unknown_session_execution() {
+        let (_dir, store, repo) = fixture();
+        let id = crate::durable::TaskId::parse("task_22222222222222222222222222222222").unwrap();
+        store.test_session("still-retained", &crate::session_record::new_artifact_key());
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET repo='/repo',task_id=?1,wave_id='11111111-1111-1111-1111-111111111111' WHERE id='still-retained'",
+                [id.as_str()],
+            )
+            .unwrap();
+        let _attachment = store
+            .claim_session_attachment("still-retained", None, &store.test_lf_process(), true)
+            .unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET workspace_slug='fix-2' WHERE id=?1",
+                [id.as_str()],
+            )
+            .unwrap();
+        let task = store.task(&id).unwrap().unwrap();
+        let request = store.request_task_completion(&id, None).unwrap().unwrap();
+        assert!(store.complete_task(&task, request).unwrap());
+        for state in ["working", "available", "busy", "blocked"] {
+            let resolution = store
+                .resolve_selection(
+                    &repo,
+                    &Selection::parse(&format!("state:{state}"), None).unwrap(),
+                )
+                .unwrap();
+            assert!(!resolution.task_ids().contains(&id.to_string()));
+            assert!(resolution.unavailable.is_empty());
+        }
+        let selected = store
+            .resolve_selection(
+                &repo,
+                &Selection::parse(&format!("task:{id}"), None).unwrap(),
+            )
+            .unwrap();
+        assert_eq!(selected.task_ids(), [id.to_string()]);
+        // Selection's known absence certifies no native readiness or termination.
+        let session = store.session("still-retained").unwrap().unwrap();
+        assert!(session.completed_at.is_none());
     }
 
     fn selection() -> Selection {

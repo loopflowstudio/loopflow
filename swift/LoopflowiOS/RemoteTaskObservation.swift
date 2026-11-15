@@ -21,7 +21,7 @@ struct TaskListReading {
 }
 
 /// The Tasks a Work reading shows, in the Machine's order.
-func mobileTasks(_ plan: WorkViewPlan) throws -> [WorkViewPlan.Content] {
+func mobileTasks(_ plan: ProjectedWorkPlan) throws -> [WorkViewPlan.Content] {
     guard plan.resolution.unavailable.isEmpty else {
         throw RegistryQueryError(plan.resolution.unavailable.joined(separator: "; "))
     }
@@ -67,7 +67,7 @@ final class RemoteTaskObservation {
                     var invalidated = false
                     if let plans = envelope.body, let stamp = envelope.stamp, envelope.unavailable == nil {
                         if let confirmed = try await store.receivePlans(plans, stamp: stamp, for: query) {
-                            reading = Self.decodePlans(confirmed.plans)
+                            reading = Self.decodePlans(confirmed.projection)
                         } else {
                             invalidated = true
                             reading = .failure(RegistryQueryError("Waiting for a covering Work reading"))
@@ -127,10 +127,10 @@ final class RemoteTaskObservation {
             return (reading.answers, .failure(RegistryQueryError(reason)))
         }
         guard let plans = reading.body else { throw RegistryQueryError("Task reading is missing its contents") }
-        return (reading.answers, decodePlans(plans))
+        return (reading.answers, decodePlans(plans.map { ProjectedWorkPlan($0) }))
     }
 
-    nonisolated static func decodePlans(_ plans: [WorkViewPlan]) -> MobileTaskReading {
+    nonisolated static func decodePlans(_ plans: [ProjectedWorkPlan]) -> MobileTaskReading {
         // One repository that cannot answer leaves the others listed; the reading
         // fails only when none could.
         var failure: RegistryQueryError?

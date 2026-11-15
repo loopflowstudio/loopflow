@@ -71,6 +71,16 @@ struct DashboardWorkspaceTests {
             var resolution = try #require(json["resolution"] as? [String: Any])
             resolution["members"] = order.map { ["source": ["repository-default"], "work": ["repository": "repo_11111111111111111111111111111111", "kind": "task", "id": $0]] }
             json["resolution"] = resolution
+            var membership = try #require(json["membership"] as? [String: Any])
+            membership["root"] = ["kind": "members", "members": resolution["members"]!]
+            json["membership"] = membership
+            let original = try #require((json["contents"] as? [[String: Any]])?.first)
+            json["contents"] = order.map { id in
+                var content = original
+                content["work"] = ["repository": json["repo"]!, "kind": "task", "id": id]
+                content["title"] = id; content["identifier"] = id
+                return content
+            }
             return String(decoding: try JSONSerialization.data(withJSONObject: json), as: UTF8.self)
         }
         let initial = try plan(ids)
@@ -107,6 +117,9 @@ struct DashboardWorkspaceTests {
         var resolution = try #require(json["resolution"] as? [String: Any])
         resolution["members"] = members
         json["resolution"] = resolution
+        var membership = try #require(json["membership"] as? [String: Any])
+        membership["root"] = ["kind": "members", "members": members]
+        json["membership"] = membership
         json["projection"] = ["visible": members, "suppressed": []]
         json["contents"] = members.map { ["work": $0["work"]!, "title": "t", "states": [], "identifier": NSNull(), "primary_session": NSNull(), "location": NSNull(), "argv": NSNull(), "unavailable": [], "face": NSNull(), "pane_revision": NSNull()] }
         let plan = try JSONDecoder().decode(WorkViewPlan.self, from: JSONSerialization.data(withJSONObject: json))
@@ -129,6 +142,16 @@ struct DashboardWorkspaceTests {
             var resolution = try #require(json["resolution"] as? [String: Any])
             resolution["members"] = members
             json["resolution"] = resolution
+            var membership = try #require(json["membership"] as? [String: Any])
+            membership["root"] = ["kind": "members", "members": resolution["members"]!]
+            json["membership"] = membership
+            let original = try #require((json["contents"] as? [[String: Any]])?.first)
+            json["contents"] = order.map { id in
+                var content = original
+                content["work"] = ["repository": json["repo"]!, "kind": "task", "id": id]
+                content["title"] = id; content["identifier"] = id
+                return content
+            }
             json["arrangement"] = ["order": members, "hidden": [], "mode": mode]
             json["projection"] = ["visible": members, "suppressed": []]
             return String(decoding: try JSONSerialization.data(withJSONObject: json), as: UTF8.self)
@@ -255,6 +278,7 @@ struct DashboardWorkspaceTests {
         let plan = WorkViewPlan(name: "Review", pinned: false, dashboardID: "review", repository: "repo", repositoryPath: "/src/fixture",
             selection: WorkSelection(id: "root", expression: .filter(.state(.open))), savedRevision: 1,
             resolution: WorkSelectionResolution(attention: [], members: members, unavailable: []),
+            membership: WorkMembershipPlan(domains: [], effects: [:], root: .members(members), facts: [], unavailable: []),
             arrangement: WorkArrangement(order: members, hidden: [], mode: .touched),
             projection: WorkArrangementProjection(visible: members, suppressed: []), slots: DashboardSlotLayout(root: .slot(0)),
             contents: [a, b].map { fixtureViewContent(work: $0, title: $0.id) })
@@ -320,11 +344,11 @@ struct DashboardWorkspaceTests {
         model.goBack()
         #expect(model.navigation.showsSelection)
         #expect(model.navigation.palette == nil)
-        #expect(model.selectedViewPlan == plan)
+        #expect(model.selectedViewPlan?.confirmed == plan)
         model.goForward()
         #expect(registry.selectedWork?.kind == .repository)
         model.goBack()
-        #expect(model.selectedViewPlan == plan)
+        #expect(model.selectedViewPlan?.confirmed == plan)
     }
 
     @Test func delayedRestoreRetainsNewTabsAndDraftsAndStaleSaveDoesNotReplaceThem() async throws {

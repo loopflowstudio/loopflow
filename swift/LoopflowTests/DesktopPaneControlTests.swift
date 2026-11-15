@@ -135,6 +135,7 @@ struct DesktopPaneControlTests {
             WorkViewPlan(name: dashboard, pinned: false, dashboardID: dashboard, repository: repository, repositoryPath: "/src/fixture",
                 selection: WorkSelection(id: "root", expression: expression), savedRevision: dashboard == nil ? nil : 1,
                 resolution: WorkSelectionResolution(attention: [], members: members, unavailable: []),
+                membership: WorkMembershipPlan(domains: [], effects: [:], root: .members(members), facts: [], unavailable: []),
                 arrangement: WorkArrangement(order: members, hidden: [], mode: .touched),
                 projection: WorkArrangementProjection(visible: members, suppressed: []), slots: DashboardSlotLayout(root: .slot(0)),
                 contents: ([a, b] + also).map { fixtureViewContent(work: $0, title: $0.id) })
@@ -213,7 +214,8 @@ struct DesktopPaneControlTests {
         let plan = WorkViewPlan(name: nil, pinned: false, dashboardID: nil, repository: repository, repositoryPath: "/src/fixture",
             selection: WorkSelection(id: "root", expression: .repository), savedRevision: nil,
             resolution: WorkSelectionResolution(attention: [], members: members, unavailable: []),
-            arrangement: WorkArrangement(order: members, hidden: [], mode: .touched),
+            membership: WorkMembershipPlan(domains: [], effects: [:], root: .members(members), facts: [], unavailable: []),
+                arrangement: WorkArrangement(order: members, hidden: [], mode: .touched),
             projection: WorkArrangementProjection(visible: members, suppressed: []), slots: DashboardSlotLayout(root: .slot(0)),
             contents: keys.map { fixtureViewContent(work: $0, title: $0.id) })
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("No execution allowed") }, repoPath: "/repo")

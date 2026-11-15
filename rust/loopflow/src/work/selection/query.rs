@@ -1,7 +1,7 @@
 //! The bounded query syntax compiles to the same authored selections as defaults.
 use super::{
-    wave_descendants, DashboardId, MemberRef, Selection, SelectionError, SelectionExpression,
-    SelectionFilter, SelectionId, SelectionResolution, SelectionState, SelectionWork,
+    wave_descendants, DashboardId, MemberRef, MembershipNode, Selection, SelectionError,
+    SelectionExpression, SelectionFilter, SelectionId, SelectionState, SelectionWork,
     WorkWorkspaceKind,
 };
 use sha2::{Digest, Sha256};
@@ -73,13 +73,13 @@ impl Selection {
         Ok(selection)
     }
 
-    pub(super) fn expand_filter(
+    pub(super) fn compile_filter(
         filter: &SelectionFilter,
         repository: &str,
         work: &[SelectionWork],
         path: &[SelectionId],
-        result: &mut SelectionResolution,
-    ) -> Result<(), SelectionError> {
+        unavailable: &mut Vec<String>,
+    ) -> Result<MembershipNode, SelectionError> {
         let scoped: Vec<_> = work
             .iter()
             .filter(|item| item.key.repository == repository)
@@ -112,10 +112,10 @@ impl Selection {
                 match matches.as_slice() {
                     [one] => Some(*one),
                     [] => {
-                        result
-                            .unavailable
-                            .push(format!("{kind:?} {name} is unavailable"));
-                        return Ok(());
+                        unavailable.push(format!("{kind:?} {name} is unavailable"));
+                        return Ok(MembershipNode::Members {
+                            members: Vec::new(),
+                        });
                     }
                     _ => return Err(SelectionError::Ambiguous(format!("{kind:?} {name}"))),
                 }
@@ -128,44 +128,31 @@ impl Selection {
             }
             _ => BTreeSet::new(),
         };
+        let mut members = Vec::new();
         for item in scoped {
             let included = match filter {
-                SelectionFilter::Task(_) => {
-                    Some(item.key == target.expect("Task target resolved").key)
-                }
-                SelectionFilter::Wave(_) => Some(
-                    item.parent_wave
-                        .as_ref()
-                        .is_some_and(|parent| descendants.contains(parent.as_str())),
-                ),
-                SelectionFilter::Kind(kind) => Some(&item.key.kind == kind),
-                SelectionFilter::State(state) if item.key.kind == WorkWorkspaceKind::Task => {
-                    match state {
-                        _ if item.states.contains(state) => Some(true),
-                        SelectionState::Available
-                        | SelectionState::Busy
-                        | SelectionState::Blocked
-                            if !item.activity_known =>
-                        {
-                            None
-                        }
-                        _ => Some(false),
-                    }
-                }
-                SelectionFilter::State(_) => Some(false),
+                SelectionFilter::Task(_) => item.key == target.expect("Task target resolved").key,
+                SelectionFilter::Wave(_) => item
+                    .parent_wave
+                    .as_ref()
+                    .is_some_and(|parent| descendants.contains(parent.as_str())),
+                SelectionFilter::Kind(kind) => &item.key.kind == kind,
+                SelectionFilter::State(_) => item.key.kind == WorkWorkspaceKind::Task,
             };
-            match included {
-                Some(true) => result.members.push(MemberRef {
+            if included {
+                members.push(MemberRef {
                     source: path.to_vec(),
                     work: item.key.clone(),
-                }),
-                None => result
-                    .unavailable
-                    .push(format!("Task {} activity is unavailable", item.name)),
-                Some(false) => {}
+                });
             }
         }
-        Ok(())
+        Ok(match filter {
+            SelectionFilter::State(state) => MembershipNode::State {
+                state: *state,
+                members,
+            },
+            _ => MembershipNode::Members { members },
+        })
     }
 }
 

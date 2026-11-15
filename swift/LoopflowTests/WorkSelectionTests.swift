@@ -96,6 +96,7 @@ func fixtureViewPlan(owner: WorkWorkspaceKey, members: [WorkViewPlan.Content],
     return WorkViewPlan(name: nil, pinned: false, dashboardID: nil, repository: owner.repository, repositoryPath: "/src/fixture",
         selection: WorkSelection(id: owner.id, expression: owner.kind == .repository ? .repository : .wave(owner.id)), savedRevision: nil,
         resolution: WorkSelectionResolution(attention: [], members: refs, unavailable: []),
+        membership: WorkMembershipPlan(domains: [], effects: [:], root: .members(refs), facts: members.map { .init(work: $0.work, name: $0.identifier ?? $0.work.id, states: $0.states, activityKnown: true) }, unavailable: []),
         arrangement: WorkArrangement(order: refs, hidden: [], mode: .auto),
         projection: WorkArrangementProjection(visible: refs, suppressed: []), slots: slots, contents: members)
 }

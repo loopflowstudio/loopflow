@@ -4,10 +4,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use super::SqliteStore;
+use crate::store::planning_sync::{PlanningChangeKind, PlanningChangeRef};
 use crate::store::{StoreError, StoreResult};
 
-/// A domain writer captures this inside the transaction that changes its facts.
-/// Only named domains can acknowledge the commit; unrelated counters do not.
+/// Captured with domain facts or a current status reading in one snapshot.
+/// A status reading dates its evidence; only a domain writer establishes a commit.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CommitFence {
     pub machine: String,
@@ -23,6 +24,34 @@ pub struct OperationCommit {
     pub resources: Vec<String>,
     pub fence: CommitFence,
     pub result: serde_json::Value,
+    pub planning_changes: Vec<PlanningChangeRef>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OperationPlanningReading {
+    pub fence: CommitFence,
+    pub changes: Vec<OperationPlanningChange>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OperationPlanningChange {
+    pub change: PlanningChangeRef,
+    pub state: PlanningDeliveryState,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub error: Option<String>,
+}
+
+/// Current evidence for the exact saved change. Unavailable never means delivered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum PlanningDeliveryState {
+    Pending,
+    Uncertain,
+    Delivered,
+    Superseded,
+    Conflict,
+    Unavailable,
 }
 
 /// Resolution of this semantic stage, independent of delivery and other stages.
@@ -77,13 +106,15 @@ pub struct OperationReceipt {
     pub submitted_fingerprint: Option<String>,
     pub validation: OperationValidation,
     pub delivery: OperationDelivery,
-    /// Orders receipt updates within one database epoch, including same-second stages.
+    /// Orders receipt and correlated planning updates within one database epoch.
     pub revision: i64,
     #[serde(deserialize_with = "Option::deserialize")]
     pub result: Option<serde_json::Value>,
     #[serde(deserialize_with = "Option::deserialize")]
     pub error: Option<String>,
     pub commits: Vec<OperationCommit>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub planning: Option<OperationPlanningReading>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -126,6 +157,18 @@ fn domain_commit_in(
             "operation commits require the domain transaction".into(),
         ));
     }
+    Ok(OperationCommit {
+        resolution: OperationResolution::Committed,
+        stage: stage.into(),
+        resources: resources.iter().map(|id| (*id).to_owned()).collect(),
+        fence: fence_in(conn, domains)?,
+        result: result.clone(),
+        planning_changes: Vec::new(),
+    })
+}
+
+/// The caller pins a snapshot; a reading's provenance is not an external acknowledgment.
+fn fence_in(conn: &Connection, domains: &[&str]) -> StoreResult<CommitFence> {
     let (machine, epoch) = conn.query_row(
         "SELECT machines.id,client_store_epoch.epoch FROM machines CROSS JOIN client_store_epoch
          WHERE machines.is_local=1 AND singleton=1",
@@ -149,18 +192,25 @@ fn domain_commit_in(
         )?;
         revisions.insert((*domain).to_owned(), revision);
     }
-    Ok(OperationCommit {
-        resolution: OperationResolution::Committed,
-        stage: stage.into(),
-        resources: resources.iter().map(|id| (*id).to_owned()).collect(),
-        fence: CommitFence {
-            machine,
-            epoch,
-            schema: crate::server::wire::REVISION,
-            revisions,
-        },
-        result: result.clone(),
+    Ok(CommitFence {
+        machine,
+        epoch,
+        schema: crate::server::wire::REVISION,
+        revisions,
     })
+}
+
+pub(super) fn commit_planning_edit_in(
+    conn: &Connection,
+    operation: &str,
+    stage: &str,
+    task: &str,
+    changes: Vec<PlanningChangeRef>,
+    result: &serde_json::Value,
+) -> StoreResult<()> {
+    let mut commit = domain_commit_in(conn, stage, &[task], &["planning"], result)?;
+    commit.planning_changes = changes;
+    record_resolution_in(conn, operation, &commit)
 }
 
 pub(super) fn commit_current_in(
@@ -482,7 +532,8 @@ impl SqliteStore {
     /// Recover the original domain result after output was lost. Retain any
     /// later failure: a Task result does not certify cleanup or planning delivery.
     pub(crate) fn recover_operation_result(&self, id: &str, stage: &str) -> StoreResult<bool> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut connection = self.conn.lock().expect("store mutex poisoned");
+        let conn = connection.savepoint()?;
         let Some(receipt) = operation_in(&conn, id)? else {
             return Ok(false);
         };
@@ -491,7 +542,7 @@ impl SqliteStore {
         }) else {
             return Ok(false);
         };
-        Ok(conn.execute(
+        let changed = conn.execute(
             "UPDATE creation_receipts SET delivery_state='finished',result=?2,updated_at=?3
              WHERE request_id=?1 AND delivery_state IN ('dispatched','uncertain')",
             params![
@@ -499,12 +550,17 @@ impl SqliteStore {
                 serde_json::to_string(&commit.result)?,
                 crate::store::rows::now_unix()
             ],
-        )? == 1)
+        )? == 1;
+        conn.commit()?;
+        Ok(changed)
     }
 
     pub fn operation_receipt(&self, id: &str) -> StoreResult<Option<OperationReceipt>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        operation_in(&conn, id)
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let snapshot = conn.savepoint()?;
+        let receipt = operation_in(&snapshot, id)?;
+        snapshot.commit()?;
+        Ok(receipt)
     }
 }
 
@@ -530,6 +586,12 @@ fn operation_in(conn: &Connection, id: &str) -> StoreResult<Option<OperationRece
             submitted_fingerprint,
             validation,
         )| {
+            let commits: Vec<OperationCommit> = serde_json::from_str(&commits)?;
+            let planning = planning_reading_in(conn, &commits)?;
+            let revision = revision
+                + planning
+                    .as_ref()
+                    .map_or(0, |reading| reading.fence.revisions["planning"]);
             Ok(OperationReceipt {
                 request_id,
                 kind,
@@ -540,13 +602,68 @@ fn operation_in(conn: &Connection, id: &str) -> StoreResult<Option<OperationRece
                 delivery: serde_json::from_value(serde_json::Value::String(delivery))?,
                 result: result.map(|text| serde_json::from_str(&text)).transpose()?,
                 error,
-                commits: serde_json::from_str(&commits)?,
+                commits,
+                planning,
                 created_at,
                 updated_at,
             })
         },
     )
     .transpose()
+}
+
+fn planning_reading_in(
+    conn: &Connection,
+    commits: &[OperationCommit],
+) -> StoreResult<Option<OperationPlanningReading>> {
+    let references: Vec<_> = commits
+        .iter()
+        .flat_map(|commit| &commit.planning_changes)
+        .collect();
+    if references.is_empty() {
+        return Ok(None);
+    }
+    let fence = fence_in(conn, &["planning"])?;
+    let mut changes = Vec::new();
+    for change in references {
+        let (table, owner) = match change.kind {
+            PlanningChangeKind::Task => ("task_changes", "task_id"),
+            PlanningChangeKind::Project => ("project_changes", "project_id"),
+        };
+        let row = conn
+            .query_row(
+                &format!(
+                    "SELECT acknowledged,conflict_json IS NOT NULL,attempted,error,
+             seq<(SELECT max(seq) FROM {table} WHERE {owner}=c.{owner} AND field=c.field)
+             FROM {table} c WHERE id=?1 AND {owner}=?2"
+                ),
+                params![change.id, change.owner],
+                |row| {
+                    Ok((
+                        row.get::<_, bool>(0)?,
+                        row.get::<_, bool>(1)?,
+                        row.get::<_, bool>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, bool>(4)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let (state, error) = match row {
+            None => (PlanningDeliveryState::Unavailable, None),
+            Some((true, _, _, _, _)) => (PlanningDeliveryState::Delivered, None),
+            Some((_, true, _, _, _)) => (PlanningDeliveryState::Conflict, None),
+            Some((_, _, true, error, _)) => (PlanningDeliveryState::Uncertain, error),
+            Some((_, _, _, _, true)) => (PlanningDeliveryState::Superseded, None),
+            Some((_, _, _, error, _)) => (PlanningDeliveryState::Pending, error),
+        };
+        changes.push(OperationPlanningChange {
+            change: change.clone(),
+            state,
+            error,
+        });
+    }
+    Ok(Some(OperationPlanningReading { fence, changes }))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -1906,6 +2023,8 @@ mod tests {
                 SELECT 'task_receipt_'||i,?1,'RECEIPT-'||i,'Receipt Task','','',1,1 FROM n",[repository.as_str()]).unwrap();
             tx.execute("INSERT INTO creation_receipts(request_id,kind,fingerprint,run,task_id,milestone,created_at,updated_at)
                 SELECT 'receipt_'||id,'task.complete','hash',0,id,'queued',1,1 FROM tasks",[]).unwrap();
+            tx.execute("INSERT INTO task_changes(id,task_id,value_json)
+                SELECT 'receipt_change_'||id,id,json_object('field','task_title','value',issue_title) FROM tasks", []).unwrap();
             tx.commit().unwrap();
         }
         let command = json!({"kind":"task.complete"});
@@ -2004,6 +2123,10 @@ mod tests {
                 });
             }));
         }
+        traced.extend(crate::store::query_plans::statements(&store, || {
+            let receipt = store.operation_receipt("edit-content").unwrap().unwrap();
+            assert_eq!(receipt.planning.unwrap().changes.len(), 1);
+        }));
         let conn = store.conn.lock().unwrap();
         for sql in traced {
             if !sql.starts_with("SELECT") && !sql.starts_with("UPDATE") {

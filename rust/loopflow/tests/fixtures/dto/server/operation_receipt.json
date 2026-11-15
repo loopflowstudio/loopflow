@@ -26,7 +26,8 @@
         "result": {
           "request": 42
         },
-        "resolution": "committed"
+        "resolution": "committed",
+        "planning_changes": []
       },
       {
         "stage": "task.completed",
@@ -44,13 +45,15 @@
         "result": {
           "request": 42
         },
-        "resolution": "superseded"
+        "resolution": "superseded",
+        "planning_changes": []
       }
     ],
     "created_at": 1,
     "updated_at": 2,
     "revision": 3,
     "submitted_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    "validation": "bound"
+    "validation": "bound",
+    "planning": null
   }
 }

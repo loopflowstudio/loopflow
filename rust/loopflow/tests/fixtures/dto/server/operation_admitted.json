@@ -14,6 +14,7 @@
     "updated_at": 1,
     "revision": 0,
     "submitted_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    "validation": "bound"
+    "validation": "bound",
+    "planning": null
   }
 }

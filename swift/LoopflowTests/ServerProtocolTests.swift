@@ -14,17 +14,32 @@ struct ServerProtocolTests {
         let change = ServedWrite.taskComplete(directory: "/repo", issue: "LOO-1")
         #expect(try encoded(.request(id: "admit", operation: .operationSubmit(requestID: "operation_fixture", epoch: "epoch_fixture", command: change), select: nil)) == value("operation_submit"))
         #expect(try encoded(.request(id: "receipt", operation: .read(.operationGet(requestID: "operation_fixture")), select: nil)) == value("operation_get"))
-        for name in ["operation_admitted", "operation_receipt", "operation_pending", "operation_candidate", "operation_conflict"] {
+        for name in ["operation_admitted", "operation_receipt", "operation_planning", "operation_pending", "operation_candidate", "operation_conflict"] {
             guard case .response(_, _, let result) = try message(name) else { Issue.record("Expected receipt"); return }
             let receipt = try result.decode(OperationReceipt.self)
             #expect(receipt.requestID == "operation_fixture")
             #expect(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(receipt)) == result.decode(JSONValue.self))
-            for key in ["request_id", "kind", "fingerprint", "submitted_fingerprint", "validation", "delivery", "revision", "result", "error", "commits", "created_at", "updated_at"] {
+            for key in ["request_id", "kind", "fingerprint", "submitted_fingerprint", "validation", "delivery", "revision", "result", "error", "commits", "planning", "created_at", "updated_at"] {
                 var missing = try #require(JSONSerialization.jsonObject(with: result.bytes) as? [String: Any])
                 missing.removeValue(forKey: key)
                 #expect(throws: DecodingError.self) { try JSONDecoder().decode(OperationReceipt.self, from: JSONSerialization.data(withJSONObject: missing)) }
             }
         }
+    }
+
+    @Test func currentPlanningEvidenceDoesNotReplaceTheSavedResult() throws {
+        guard case .response(_, _, let result) = try message("operation_planning") else { Issue.record("Expected receipt"); return }
+        let receipt = try result.decode(OperationReceipt.self)
+        let current = try #require(receipt.planning)
+        #expect(current.changes.map(\.state) == [.pending, .uncertain, .delivered, .superseded, .conflict, .unavailable])
+        #expect(current.changes.map(\.change) == receipt.commits.flatMap(\.planningChanges))
+        #expect(current.fence.revisions["planning"] == 12)
+        #expect(receipt.commits[0].fence.revisions["planning"] == 7)
+        #expect(receipt.error == "planning response lost")
+        #expect(current.changes.dropFirst(2).allSatisfy { $0.error == nil })
+        var object = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(current.changes[0])) as? [String: Any])
+        object.removeValue(forKey: "error")
+        #expect(throws: DecodingError.self) { try JSONDecoder().decode(OperationPlanningChange.self, from: JSONSerialization.data(withJSONObject: object)) }
     }
 
     @Test func stageResolutionIsRequiredAndIndependentOfDelivery() throws {

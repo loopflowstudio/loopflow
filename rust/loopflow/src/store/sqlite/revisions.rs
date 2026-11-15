@@ -51,9 +51,10 @@ impl SqliteStore {
         )?)
     }
 
+    /// Receipts also expose current evidence from correlated planning changes.
     pub(crate) fn operation_revision(&self) -> StoreResult<i64> {
         Ok(self.conn.lock().expect("store mutex poisoned").query_row(
-            "SELECT revision FROM store_revisions WHERE domain='operations'",
+            "SELECT sum(revision) FROM store_revisions WHERE domain IN ('operations','planning')",
             [],
             |row| row.get(0),
         )?)

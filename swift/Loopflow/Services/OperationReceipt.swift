@@ -12,6 +12,50 @@ public struct OperationCommit: Codable, Equatable, Sendable {
     public let resources: [String]
     public let fence: CommitFence
     public let result: JSONValue
+    public let planningChanges: [PlanningChangeRef]
+
+    private enum CodingKeys: String, CodingKey {
+        case resolution, stage, resources, fence, result
+        case planningChanges = "planning_changes"
+    }
+}
+
+public struct PlanningChangeRef: Codable, Equatable, Sendable {
+    public enum Kind: String, Codable, Sendable { case task, project }
+    public let kind: Kind
+    public let owner: String
+    public let id: String
+}
+
+/// Current evidence for these exact planning changes; the saved result stays historical.
+public struct OperationPlanningReading: Codable, Equatable, Sendable {
+    public let fence: CommitFence
+    public let changes: [OperationPlanningChange]
+}
+
+public struct OperationPlanningChange: Codable, Equatable, Sendable {
+    public enum State: String, Codable, Sendable {
+        case pending, uncertain, delivered, superseded, conflict, unavailable
+    }
+    public let change: PlanningChangeRef
+    public let state: State
+    public let error: String?
+
+    private enum CodingKeys: String, CodingKey { case change, state, error }
+
+    public init(from decoder: any Decoder) throws {
+        let fields = try decoder.container(keyedBy: CodingKeys.self)
+        change = try fields.decode(PlanningChangeRef.self, forKey: .change)
+        state = try fields.decode(State.self, forKey: .state)
+        error = try fields.decode(String?.self, forKey: .error)
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var fields = encoder.container(keyedBy: CodingKeys.self)
+        try fields.encode(change, forKey: .change)
+        try fields.encode(state, forKey: .state)
+        try fields.encode(error, forKey: .error)
+    }
 }
 
 public struct CommitFence: Codable, Equatable, Sendable {
@@ -60,12 +104,14 @@ public struct OperationReceipt: Codable, Equatable, Sendable {
     public let result: JSONValue?
     public let error: String?
     public let commits: [OperationCommit]
+    public let planning: OperationPlanningReading?
     public let createdAt: Int64
     public let updatedAt: Int64
 
     private enum CodingKeys: String, CodingKey {
         case requestID = "request_id", kind, fingerprint, validation, delivery, revision, result, error, commits
         case submittedFingerprint = "submitted_fingerprint"
+        case planning
         case createdAt = "created_at", updatedAt = "updated_at"
     }
 
@@ -81,6 +127,7 @@ public struct OperationReceipt: Codable, Equatable, Sendable {
         result = try fields.decode(JSONValue?.self, forKey: .result)
         error = try fields.decode(String?.self, forKey: .error)
         commits = try fields.decode([OperationCommit].self, forKey: .commits)
+        planning = try fields.decode(OperationPlanningReading?.self, forKey: .planning)
         createdAt = try fields.decode(Int64.self, forKey: .createdAt)
         updatedAt = try fields.decode(Int64.self, forKey: .updatedAt)
     }
@@ -97,6 +144,7 @@ public struct OperationReceipt: Codable, Equatable, Sendable {
         try fields.encode(result, forKey: .result)
         try fields.encode(error, forKey: .error)
         try fields.encode(commits, forKey: .commits)
+        try fields.encode(planning, forKey: .planning)
         try fields.encode(createdAt, forKey: .createdAt)
         try fields.encode(updatedAt, forKey: .updatedAt)
     }

@@ -631,17 +631,9 @@ and return, and native readiness before a current Task result. Attachment failur
 must remain visible beside receipt recovery, and Retry opening must reuse the
 admitted Session without another create.
 
-Desktop launch checkpoint as it stands: `createdTaskIDs` is gone.
-`WorkNavigation.pendingTaskReconciliations` keys each admitted Task to its request
-ID and the floor of a `.checkpoint(replay: ["task"])` sent after admission
-(`WorkModel.submitTask`); reopening observation re-floors it. Only a matching
-`.task` row at or beyond that floor clears it (`WorkModel.apply`); one-shot
-transports clear it from `task show` (`reconcileCreatedTask`). After clearing,
-the Task behaves ordinarily, including Graph loss. Focused tests cover
-these counterexamples, as well as attachment failure with Inspect and Retry opening
-reusing the Session. `docs/server.md` and `swift/README.md` describe this behavior.
-This map is still a per-action exception. The shared store's operation fences
-replace it; do not extend it to other actions.
+Desktop still has the per-action `pendingTaskReconciliations` checkpoint path.
+Its launch counterexamples above must survive deletion in the shared projection
+cut. Implementation map: `639411f1b27fbdb1532ac206ceb775a0dc76fde9`.
 
 Proposed usage text for the affected Desktop/mobile docs:
 > Start opens your submitted request immediately. Leave and return while it
@@ -711,12 +703,19 @@ join, and correlated lookup in the existing clear-request write, replace the
 materialized repo-path subqueries. No selected-plan restriction or index is added;
 this is a recovery-query finding, not native latency attribution.
 
-Task edit/move recovery returns the saved result and error verbatim, including
-its historical `sync`; no correlation yet derives current planning status or a
-Retry target from the planning owner (the direction above).
+Task edit/move stages now retain the exact Task field or Project-order delivery
+IDs created by their writer transaction. `operation.get.planning` reads those
+existing planning receipts in the same snapshot as a separately stamped current
+status. Pending/uncertain retain current errors; acknowledged, conflicting or
+superseded deliveries stop presenting an active error. Missing evidence stays
+unavailable. Saved results and diagnostics remain unchanged. Receipt ordering and
+subscription invalidation include planning revisions. Both native targets share
+the DTO and persisted-reply ordering; live action/projection migration is unfinished.
+No generic retry or new queue is added. Other mutation families still need their
+own correlation and domain-authorized continuation contracts.
 
 Remaining, in order: remaining mutation-family recovery and fences (remote/detached,
-external file/config confirmation and planning-delivery correlation included); exhaustive effect/stage registry and a
+external file/config confirmation and other planning-delivery families included); exhaustive effect/stage registry and a
 declarative membership plan over #1947's `selection_states`; transactional confirmed cache and ordered effect/query
 projection; both clients' interaction/retained-occurrence migration and deletion
 of checkpoint/presentation exceptions; epoch reset on historical restoration;
@@ -789,31 +788,13 @@ Still open: reordered validation replies must update only the active epoch with 
 newer receipt revision, never enabling input or retiring overlays, and full
 cross-platform presentation acceptance.
 
-## Upstream absorbed (origin/main `9cafc410ee`)
+## Upstream acceptance retained
 
-- #1947 (LOO-696) supplies the Rust-derived Task membership vocabulary. Every Task
-  row requires `lifecycle` and `selection_states`
-  (`work::selection::SelectionState`: Open/Available/Busy/Blocked, lifecycle
-  Unstarted…Shipping, section Backlog/Working/Autonomous/Done), computed by
-  `store::sqlite::selections::task_selection_states` and decoded as
-  `WaveWorkMap.selectionStates`. Projected effects transition these states (Complete:
-  Working→Done) instead of a Swift status resolver. Still missing: the declarative
-  selection/group/sort plan over them, and each state's fact domains for coverage.
-  Sidebar drag order now carries through ordinary lists; Dashboard arrangements,
-  search and Done keep their own order, so projected removal keeps that order.
-
-- #1944 (LOO-912) closes an unfinished terminal paste when an input view detaches,
-  is replaced or loses control. Retained-occurrence navigation must not detach
-  the input view on an ordinary revisit, or a quick switch discards the paste.
-
-- #1943 (LOO-905) added a third Desktop freshness owner: `WorkModel.taskPresentation`
-  / `TaskPresentation` prefers current names over retained ones per source and keeps
-  planning rows until the Task list answers. The shared normalized store absorbs it;
-  its cases (fresh roadmap before list, empty list answer, failed refresh keeps
-  names, one combined read-failure notice with Retry) join the shared tests.
-- #1942 (LOO-910) forwards terminal visibility to Ghostty, so hidden retained
-  surfaces pause rendering. A healthy revisit must unhide the retained surface,
-  not reattach it; click-to-cached-content timing includes that resume.
+Origin/main `9cafc410ee` supplies `selection_states` (#1947), terminal paste
+continuity (#1944), name freshness/failure presentation (#1943), and retained
+surface visibility (#1942). Shared projection and retained-occurrence migration
+must retain their coverage. The detailed predecessor map is at
+`639411f1b27fbdb1532ac206ceb775a0dc76fde9:scratch/instant-task-session.md`.
 
 ## Benchmark implementation and observations (2026-11-14)
 
@@ -838,7 +819,8 @@ result. The rebuilt diagnostic ran; the quiet-host baseline remains missing. Nat
 
 Benchmark observations and raw files: `8b42a874db`; earlier checks: `bb936ac371`
 (both `scratch/instant-task-session.md`). Both hosts failed load preflight on 2026-11-14; the mini also runs macOS 15.5
-against Desktop's macOS 26 target. The rebuilt debug 10k constructor warm P95
+against Desktop's macOS 26 target (`ssh mini-heart sw_vers -productVersion`
+reconfirmed 15.5 on 2026-11-15). The rebuilt debug 10k constructor warm P95
 was 235.92 ms on the rejected host; it is diagnostic, not a regression baseline
 or native/SQL attribution. No gesture, native paint/input or full backend-stage
 baseline exists. The 10k receipt diagnostic (nextest run
@@ -846,10 +828,18 @@ baseline exists. The 10k receipt diagnostic (nextest run
 all 20 receipt SQL statements used keyed indexes without table scans.
 `measureWriteToVisible` still refers to removed `pm_items.body` and needs migration.
 The earlier admission LEAK has no established cause. Preflight rejected native measurement at
-2026-11-15T09:34:29Z (CPU 280%, one-minute load 8.75), raw
-`/tmp/loo906-supersession-preflight/preflight.json`.
+2026-11-15T10:19:18Z (CPU 259.4%, one-minute load 14.28), raw
+`/tmp/loo906-planning-correlation-preflight/preflight.json`.
 
 Gate owns wider suites and packaging; implementation owns a valid benchmark
 baseline; demo owns native usability judgment.
 
 Task content checks (2026-11-15, `LF_*` cleared): `cargo nextest run -p loopflow --lib -E 'test(engine::operation::tests::task_edit_recovery) | test(store::sqlite::task_content::tests::) | test(store::sqlite::operations::tests::)'` subset 7 passed, 10k trace without row-table scans; `documented_commands::` 4 passed; clippy, fmt, `check_architecture.py`, `git diff --check` passed.
+
+Focused checks for planning correlation (2026-11-15):
+- `cargo nextest run -p loopflow --lib` with named recovery/schema/10k filters: 17 distinct checks passed; final changed rows passed in run `262781d6-b3b8-445b-b51d-aa3ba7c1d2d3`.
+- `cargo test -p loopflow --test integration dto_fixtures::operation_planning_evidence_round_trips_without_losing_required_nullable_keys`: 1 passed.
+- `scripts/test_desktop.sh --filter 'ServerProtocolTests|ClientWorkStoreTests' --jobs 4 -Xswiftc -gnone`: 42 passed.
+- `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/ReadingStampTests`: 4 passed.
+- `cargo clippy --all-targets --jobs 4 -- -D warnings` and Swift multiplatform boundary check: passed.
+- `cargo package --locked --allow-dirty -p loopflow`: archive verification passed.

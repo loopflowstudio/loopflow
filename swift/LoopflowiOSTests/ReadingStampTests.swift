@@ -20,6 +20,19 @@ final class ReadingStampTests: XCTestCase {
         XCTAssertNotNil(receipt.error)
     }
 
+    func testCurrentPlanningEvidenceUsesTheSharedDecoderOnPhone() throws {
+        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "operation_planning", withExtension: "json", subdirectory: "server"))
+        let result = try XCTUnwrap(try RawJSON(Data(contentsOf: url)).fields()["result"])
+        let receipt = try result.decode(OperationReceipt.self)
+        let current = try XCTUnwrap(receipt.planning)
+        XCTAssertEqual(current.changes.map(\.state), [.pending, .uncertain, .delivered, .superseded, .conflict, .unavailable])
+        XCTAssertEqual(current.changes.map(\.change), receipt.commits.flatMap(\.planningChanges))
+        XCTAssertEqual(current.fence.revisions["planning"], 12)
+        XCTAssertEqual(receipt.commits.first?.fence.revisions["planning"], 7)
+        XCTAssertEqual(receipt.error, "planning response lost")
+        XCTAssertTrue(current.changes.dropFirst(2).allSatisfy { $0.error == nil })
+    }
+
     func testAdmissionAndCandidateValidationStayDistinctOnPhone() throws {
         for (name, state) in [("operation_pending", OperationReceipt.Validation.pending), ("operation_candidate", .candidate), ("operation_conflict", .conflict)] {
             let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: name, withExtension: "json", subdirectory: "server"))

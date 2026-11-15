@@ -1402,3 +1402,44 @@ fn opening_receipts_distinguish_focus_from_attachment() {
         serde_json::from_str::<serde_json::Value>(json).unwrap()
     );
 }
+
+#[test]
+fn operation_planning_evidence_round_trips_without_losing_required_nullable_keys() {
+    use loopflow::store::sqlite::operations::{OperationReceipt, PlanningDeliveryState};
+    let wire: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/dto/server/operation_planning.json")).unwrap();
+    let receipt: OperationReceipt = serde_json::from_value(wire["result"].clone()).unwrap();
+    assert_eq!(serde_json::to_value(&receipt).unwrap(), wire["result"]);
+    let current = receipt.planning.as_ref().unwrap();
+    assert_eq!(
+        current
+            .changes
+            .iter()
+            .map(|change| change.state)
+            .collect::<Vec<_>>(),
+        [
+            PlanningDeliveryState::Pending,
+            PlanningDeliveryState::Uncertain,
+            PlanningDeliveryState::Delivered,
+            PlanningDeliveryState::Superseded,
+            PlanningDeliveryState::Conflict,
+            PlanningDeliveryState::Unavailable,
+        ]
+    );
+    assert_eq!(current.fence.revisions["planning"], 12);
+    assert_eq!(receipt.commits[0].fence.revisions["planning"], 7);
+    assert_eq!(receipt.error.as_deref(), Some("planning response lost"));
+    for path in ["planning", "planning_changes", "error"] {
+        let mut missing = wire["result"].clone();
+        let object = match path {
+            "planning_changes" => &mut missing["commits"][0],
+            "error" => &mut missing["planning"]["changes"][2],
+            _ => &mut missing,
+        };
+        object.as_object_mut().unwrap().remove(path);
+        assert!(
+            serde_json::from_value::<OperationReceipt>(missing).is_err(),
+            "{path}"
+        );
+    }
+}

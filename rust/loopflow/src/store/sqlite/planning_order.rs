@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::durable::ProjectId;
+use crate::store::planning_sync::{PlanningChangeKind, PlanningChangeRef};
 use crate::store::StoreResult;
 use crate::work::task::Task;
 
@@ -99,7 +100,12 @@ impl SqliteStore {
     }
 }
 
-pub(super) fn reorder_in(conn: &Connection, task: &Task, rank: u32) -> StoreResult<()> {
+pub(super) fn reorder_in(
+    conn: &Connection,
+    task: &Task,
+    rank: u32,
+) -> StoreResult<Option<PlanningChangeRef>> {
+    let mut change = None;
     let project = task.project_id.as_ref();
     let mut query = conn.prepare(
         "SELECT id FROM tasks WHERE repository_id=?1 AND project_id IS ?2
@@ -117,19 +123,25 @@ pub(super) fn reorder_in(conn: &Connection, task: &Task, rank: u32) -> StoreResu
     if previous != desired {
         if let Some(project) = project {
             let base = observed_order(conn, project)?.map(|value| json!({"value":value}));
+            let id = uuid::Uuid::new_v4().to_string();
             conn.execute(
                 "INSERT INTO project_changes(id,project_id,value_json,base_json) VALUES(?1,?2,?3,?4)",
                 params![
-                    uuid::Uuid::new_v4().to_string(),
+                    id,
                     project.as_str(),
                     serde_json::to_string(&desired)?,
                     base.map(|value| value.to_string())
                 ],
             )?;
+            change = Some(PlanningChangeRef {
+                kind: PlanningChangeKind::Project,
+                owner: project.to_string(),
+                id,
+            });
         }
         apply_order(conn, project, &desired)?;
     }
-    Ok(())
+    Ok(change)
 }
 
 pub(super) fn observed_order(

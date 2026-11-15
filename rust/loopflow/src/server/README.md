@@ -1200,6 +1200,29 @@ Failed removal repeats lookup and presentation safely. Inspect retains unresolve
 outcomes and exposes the raw receipt. This is neither an editable
 outbox nor offline creation, cross-device submission sync or generic replay.
 
+### Planning status after result recovery
+
+Task edits and local Wave moves save the exact planning change identities in
+`commits[].planning_changes`, alongside the original result and commit fence.
+Rank edits name the Project's order change. No-op saves add no delivery identity.
+The saved `TaskEdit.sync` is historical; recovering it never repeats its words.
+
+`operation.get` returns current evidence for these identities in `planning`, with
+its own snapshot fence. `pending` and `uncertain` keep their current diagnostic;
+`delivered`, `superseded` and `conflict` resolve that delivery wait. A later unsent
+change supersedes an older unsent change; an older attempted write stays uncertain
+until its planning owner acknowledges or resolves it. Missing evidence is
+`unavailable`. A null reading means no correlated changes, not confirmation of
+other external effects. The snapshot fence dates the planning evidence; it does
+not certify an external provider write by itself.
+
+Receipt subscriptions observe planning changes as well as receipt writes. Their
+`revision` orders both within one epoch, so a delayed saved reply cannot replace
+newer delivery status. The saved result and command error remain unchanged;
+current recovery actions use `planning`, never the historical `sync` or error.
+These reads authorize no generic retry; continuations stay with planning delivery.
+Other mutation families still require their own correlation contracts.
+
 ### Terminal and provider recovery
 
 Terminal continuation addresses the held terminal, separately from Work

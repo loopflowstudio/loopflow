@@ -2068,7 +2068,7 @@
       "type": "string"
     },
     "CommitFence": {
-      "description": "A domain writer captures this inside the transaction that changes its facts.\nOnly named domains can acknowledge the commit; unrelated counters do not.",
+      "description": "Captured with domain facts or a current status reading in one snapshot.\nA status reading dates its evidence; only a domain writer establishes a commit.",
       "properties": {
         "epoch": {
           "type": "string"
@@ -5950,6 +5950,12 @@
         "fence": {
           "$ref": "#/$defs/CommitFence"
         },
+        "planning_changes": {
+          "items": {
+            "$ref": "#/$defs/PlanningChangeRef"
+          },
+          "type": "array"
+        },
         "resolution": {
           "$ref": "#/$defs/OperationResolution"
         },
@@ -5969,7 +5975,8 @@
         "stage",
         "resources",
         "fence",
-        "result"
+        "result",
+        "planning_changes"
       ],
       "type": "object"
     },
@@ -5983,6 +5990,46 @@
         "uncertain"
       ],
       "type": "string"
+    },
+    "OperationPlanningChange": {
+      "properties": {
+        "change": {
+          "$ref": "#/$defs/PlanningChangeRef"
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/PlanningDeliveryState"
+        }
+      },
+      "required": [
+        "change",
+        "state",
+        "error"
+      ],
+      "type": "object"
+    },
+    "OperationPlanningReading": {
+      "properties": {
+        "changes": {
+          "items": {
+            "$ref": "#/$defs/OperationPlanningChange"
+          },
+          "type": "array"
+        },
+        "fence": {
+          "$ref": "#/$defs/CommitFence"
+        }
+      },
+      "required": [
+        "fence",
+        "changes"
+      ],
+      "type": "object"
     },
     "OperationReceipt": {
       "description": "Creation recovery and general commands read the same row. Command output\nstays separate from the domain results that committed with displayed facts.",
@@ -6015,12 +6062,22 @@
         "kind": {
           "type": "string"
         },
+        "planning": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OperationPlanningReading"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "request_id": {
           "type": "string"
         },
         "result": true,
         "revision": {
-          "description": "Orders receipt updates within one database epoch, including same-second stages.",
+          "description": "Orders receipt and correlated planning updates within one database epoch.",
           "format": "int64",
           "type": "integer"
         },
@@ -6049,6 +6106,7 @@
         "result",
         "error",
         "commits",
+        "planning",
         "created_at",
         "updated_at"
       ],
@@ -6430,6 +6488,45 @@
         "destinations"
       ],
       "type": "object"
+    },
+    "PlanningChangeKind": {
+      "enum": [
+        "task",
+        "project"
+      ],
+      "type": "string"
+    },
+    "PlanningChangeRef": {
+      "description": "Stable delivery identities owned by planning, rather than copies of its queue.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/PlanningChangeKind"
+        },
+        "owner": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "owner",
+        "id"
+      ],
+      "type": "object"
+    },
+    "PlanningDeliveryState": {
+      "description": "Current evidence for the exact saved change. Unavailable never means delivered.",
+      "enum": [
+        "pending",
+        "uncertain",
+        "delivered",
+        "superseded",
+        "conflict",
+        "unavailable"
+      ],
+      "type": "string"
     },
     "PlanningState": {
       "description": "Availability of retained planning facts, independent of execution permission.",
@@ -7761,6 +7858,7 @@
             "error": null,
             "fingerprint": null,
             "kind": "task.create",
+            "planning": null,
             "request_id": "operation_fixture",
             "result": null,
             "revision": 0,
@@ -10612,6 +10710,7 @@
             "error": null,
             "fingerprint": null,
             "kind": "task.complete",
+            "planning": null,
             "request_id": "operation_fixture",
             "result": null,
             "revision": 0,

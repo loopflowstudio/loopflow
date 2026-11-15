@@ -6,7 +6,9 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use super::SqliteStore;
 use crate::durable::{ProjectId, TaskId};
-use crate::store::planning_sync::{PlanningBaseline, PlanningChange, TaskDeletion};
+use crate::store::planning_sync::{
+    PlanningBaseline, PlanningChange, PlanningChangeKind, PlanningChangeRef, TaskDeletion,
+};
 use crate::store::{StoreError, StoreResult};
 
 impl SqliteStore {
@@ -213,9 +215,14 @@ pub(crate) enum PlanningChanges<'a> {
 impl<'a> PlanningChanges<'a> {
     /// Save one typed edit slice to Work, Git history and Linear field receipts.
     /// The caller owns the transaction, including any selection or ordering changes.
-    pub(super) fn save(self, conn: &Connection, edits: &[Edit]) -> StoreResult<()> {
+    pub(super) fn save(
+        self,
+        conn: &Connection,
+        edits: &[Edit],
+    ) -> StoreResult<Vec<PlanningChangeRef>> {
+        let mut changes = Vec::new();
         if edits.is_empty() {
-            return Ok(());
+            return Ok(changes);
         }
         let table = match self {
             Self::Task(_) => "tasks",
@@ -227,13 +234,23 @@ impl<'a> PlanningChanges<'a> {
                 .iter()
                 .find(|previous| previous.field() == edit.field())
                 .ok_or_else(|| StoreError::InvalidData("Edit belongs to another owner".into()))?;
-            self.record(conn, previous, edit)?;
+            if let Some(id) = self.record(conn, previous, edit)? {
+                let (_, owner) = self.owner();
+                changes.push(PlanningChangeRef {
+                    kind: match self {
+                        Self::Task(_) => PlanningChangeKind::Task,
+                        Self::Project(_) => PlanningChangeKind::Project,
+                    },
+                    owner: owner.into(),
+                    id,
+                });
+            }
         }
         planning_write::local(
             conn,
             &crate::work::edit::WorkEdit::for_target(self.owner().1, edits),
         )?;
-        Ok(())
+        Ok(changes)
     }
 
     // A matching attempted write can arrive through acquisition or readback.
@@ -393,15 +410,16 @@ impl<'a> PlanningChanges<'a> {
         conn: &Connection,
         previous: &Edit,
         value: &Edit,
-    ) -> StoreResult<bool> {
+    ) -> StoreResult<Option<String>> {
         if previous == value {
-            return Ok(false);
+            return Ok(None);
         }
         let (owner, id) = self.owner();
         let base = self.baseline(conn, value)?;
+        let change = uuid::Uuid::new_v4().to_string();
         conn.execute(&format!("INSERT INTO {owner}_changes(id,{owner}_id,value_json,base_json) VALUES(?1,?2,?3,?4)"),
-            params![uuid::Uuid::new_v4().to_string(),id,serde_json::to_string(value)?,base.map(|b|serde_json::to_string(&b)).transpose()?])?;
-        Ok(true)
+            params![change,id,serde_json::to_string(value)?,base.map(|b|serde_json::to_string(&b)).transpose()?])?;
+        Ok(Some(change))
     }
 
     pub(super) fn pending(self, conn: &Connection) -> StoreResult<Vec<PlanningChange>> {
@@ -627,7 +645,8 @@ mod tests {
                             WorkValue::TaskAssignee(Some("after".into()))
                         }
                     )
-                    .unwrap());
+                    .unwrap()
+                    .is_some());
                 let base: Option<String> = conn
                     .query_row(
                         "SELECT base_json FROM task_changes WHERE task_id=?1",

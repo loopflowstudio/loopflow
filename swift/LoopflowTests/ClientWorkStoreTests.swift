@@ -8,7 +8,7 @@ func operationTestFrame(id: String = "same", delivery: String? = "finished", epo
         ["request_id": id, "kind": "task.create", "fingerprint": NSNull(),
          "submitted_fingerprint": "content", "validation": "bound", "delivery": delivery,
          "revision": revision, "result": result.map { try! JSONSerialization.jsonObject(with: JSONEncoder().encode($0)) } ?? NSNull(),
-         "error": error as Any? ?? NSNull(), "commits": [], "created_at": 1, "updated_at": 2]
+         "error": error as Any? ?? NSNull(), "commits": [], "planning": NSNull(), "created_at": 1, "updated_at": 2]
     }
     let frame: [String: Any] = ["answers": NSNull(), "unavailable": NSNull(), "body": body as Any? ?? NSNull(),
         "stamp": ["machine": "machine", "epoch": epoch, "schema": ServerProtocol.revision, "query": "operation-query",
@@ -123,6 +123,36 @@ struct ClientWorkStoreTests {
         #expect(saved.receipt == resolved)
         #expect(saved.receipt?.commits.last?.resolution == .superseded)
         #expect(saved.receipt?.delivery == .uncertain)
+    }
+
+    @Test func restartRetainsCurrentDeliveryEvidenceAfterAnOlderSavedReply() throws {
+        let root = directory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("rust/loopflow/tests/fixtures/dto/server/operation_planning.json")
+        let result = try #require(try RawJSON(Data(contentsOf: fixture)).fields()["result"])
+        let current = try result.decode(OperationReceipt.self)
+        var prior = try #require(JSONSerialization.jsonObject(with: result.bytes) as? [String: Any])
+        prior["revision"] = current.revision - 1
+        prior["planning"] = NSNull()
+        let older = try JSONDecoder().decode(OperationReceipt.self, from: JSONSerialization.data(withJSONObject: prior))
+        let record = SubmittedOperation(requestID: current.requestID, destination: "machine_fixture",
+            payload: try JSONEncoder().encode(ServedWrite.taskUpdate(directory: "/repo", issue: "LOO-1", notes: "Original edit")),
+            version: ServerProtocol.revision, submittedAt: Date())
+        do {
+            let database = try ClientWorkDatabase(directory: root)
+            try database.save(record)
+            try database.receive(current, epoch: "epoch", id: record.id)
+            try database.receive(older, epoch: "epoch", id: record.id)
+        }
+        let restarted = try ClientWorkDatabase(directory: root)
+        let saved = try #require(try restarted.state(record.id))
+        #expect(saved.record.payload == record.payload)
+        #expect(saved.receipt == current)
+        #expect(saved.receipt?.planning?.changes[2].state == .delivered)
+        #expect(saved.receipt?.planning?.changes[2].error == nil)
+        #expect(saved.receipt?.result == older.result)
     }
 
     @Test func heldDomainWorkHasDurableAdmissionAndNoSecondSend() async throws {

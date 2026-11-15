@@ -2,48 +2,47 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-906 · One request, independent obligations</title>
+<title>LOO-906 · Keep the interaction visible</title>
 <style>
 :root{color-scheme:light dark}body{font:16px/1.5 system-ui,sans-serif;margin:0}main{max-width:760px;margin:auto;padding:24px}header,small{opacity:.75;font-size:13px}h1{font-size:28px;line-height:1.2}h2{font-size:20px}table{width:100%;border-collapse:collapse}td,th{text-align:left;vertical-align:top;padding:8px;border-bottom:1px solid #8886}code{overflow-wrap:anywhere}blockquote{margin:16px 0;padding-left:16px;border-left:3px solid #888}li{margin:12px 0}@media(max-width:520px){main{padding:14px}table{font-size:12px}td,th{padding:5px}}
 </style>
 <main>
-<header>LOO-906 · concept-review · 2026-11-15<br>Sources: scratch/{instant-task-session,desktop-reactivity-feedback,questions}.md; swift/Loopflow/Services/{ClientWorkStore,ClientWorkDatabase,OperationReceipt}.swift; swift/LoopflowMac/{CreationRecovery,WorkModel,WorkProjection}.swift; swift/{LoopflowTests,LoopflowiOSTests}/ClientWorkStoreTests.swift; swift/LoopflowTests/OperationRecoveryPresentationTests.swift.</header>
-<h1>One request, independent obligations</h1>
-<p><strong>Next step:</strong> iterate to implement command-specific recovery obligations and actual list/count projection through the shared owner. No product answer is pending.</p>
-<p><strong>Biggest mismatch:</strong> receipts now survive presentation, but Work still has no shared per-query incorporation. The interim recovery model also treats every missing planning status as unavailable—even for commands whose planning applicability has not been declared.</p>
+<header>LOO-906 · concept-review · 2026-11-15<br>Sources: scratch/{instant-task-session,desktop-reactivity-feedback,questions}.md; swift/Loopflow/Services/{OperationDeclaration,ClientWorkDatabase,ClientWorkStore,ClientWorkQuery}.swift; swift/Loopflow/Models/WorkSelection.swift; swift/LoopflowMac/WorkModel.swift; swift/LoopflowiOS/RemoteTaskObservation.swift; swift/LoopflowTests/ClientWorkQueryTests.swift.</header>
+<h1>Keep the interaction visible through retirement</h1>
+<p><strong>Decision for the next step:</strong> implement shared ordered projection and synchronous interaction state through both clients. The design implies this direction; no product answer is pending.</p>
+<p><strong>Biggest mismatch:</strong> the cache can now reject an old list after request retirement, but it cannot yet keep showing the intended list. A reload requirement must not turn Complete into another waiting screen.</p>
 <table>
 <tr><th>Action</th><th>Concept</th><th>API / owner</th></tr>
-<tr><td>Complete A</td><td>Saved intent; immediate removal</td><td>Proposed <code>begin</code> and shared membership projection</td></tr>
-<tr><td>Select B</td><td>Local navigation</td><td>Local interaction owner; no receipt can select A</td></tr>
-<tr><td>Receive a count or list</td><td>Coverage for that query and effect</td><td>Proposed <code>receive</code>, <code>projection(for:)</code></td></tr>
-<tr><td>Show a result</td><td>Presentation acknowledgment</td><td>Existing <code>presented</code>; command remains saved</td></tr>
-<tr><td>Recover an effect</td><td>Exact domain attempt and current status</td><td>Existing receipt owner; proposed exhaustive effect declaration</td></tr>
+<tr><td>Complete A</td><td>Immediate membership intent</td><td>Proposed shared interaction reducer → ordered effects</td></tr>
+<tr><td>Select B</td><td>Local destination</td><td>Same synchronous reducer; replies never select</td></tr>
+<tr><td>Receive list or count</td><td>Independent incorporation</td><td>Proposed projection over persisted query bases</td></tr>
+<tr><td>Retire saved request</td><td>Resolved recovery and coverage</td><td>Existing cache/outbox transaction; proposed query dependencies</td></tr>
 </table>
-<h2>Built → proposed</h2>
-<p><small>Existing workspace: persisted receipt ordering, shown-result acknowledgment, departed-epoch rejection and conservative recovery annotations. Desktop consumes these annotations. Shared Work projection and phone recovery presentation remain unbuilt. Recorded focused builds/tests passed; this review ran no new builds.</small></p>
-<blockquote><strong>Proposed usage:</strong> Complete removes A immediately and opens the next Task, or an empty view. Selecting B stays your choice while confirmation arrives. Opening a result clears its prompt; list updates and unresolved recovery continue independently.</blockquote>
+<h2>Existing → proposed</h2>
+<p><small>Built at ac6871e42f: initial stage registry, exact creation-export correlation, finite retirement behind reload fences, persisted complete Work plans on Desktop and phone. Ordered membership effects, shared completion navigation and exhaustive declarations remain unbuilt. Earlier focused tests are recorded in the design; this review ran no new builds.</small></p>
+<blockquote><strong>Proposed usage:</strong> Complete removes A and selects the next Task, or an empty view, immediately. Selecting B stays your choice. Confirmation updates each list and count independently; recovery stays with the original request.</blockquote>
 <table>
-<tr><th>Proposed sequence</th><th>List</th><th>Count</th><th>Selection</th></tr>
-<tr><td>Cached base</td><td>A, B</td><td>2</td><td>A</td></tr>
-<tr><td>Complete A; select B</td><td>B</td><td>1</td><td>B</td></tr>
-<tr><td>Count confirms; list held</td><td>B, projected</td><td>1, confirmed</td><td>B</td></tr>
-<tr><td>Show result; restart; old list arrives</td><td>B, projected</td><td>1, confirmed</td><td>No recovery-driven change</td></tr>
-<tr><td>List confirms</td><td>B, confirmed</td><td>1</td><td>Unchanged</td></tr>
+<tr><th>Sequence</th><th>List / count</th><th>Selection</th></tr>
+<tr><td>Cached base</td><td>A, B / 2</td><td>A</td></tr>
+<tr><td>Complete A; select B</td><td>B / 1, projected</td><td>B</td></tr>
+<tr><td>Count covers settlement; list held</td><td>B, projected / 1, confirmed</td><td>B</td></tr>
+<tr><td>Planning resolves; restart</td><td>B / 1; retain the list's outstanding effect</td><td>No recovery-driven change</td></tr>
+<tr><td>List covers settlement</td><td>B / 1, confirmed; retire resolved request</td><td>Unchanged</td></tr>
 </table>
 <details>
-<summary>Model, recovery and counterexamples</summary>
-<p><strong>One declaration:</strong> each command names its effects, confirming stages, query dependencies and domain recovery owners. Planning inapplicability comes from that declaration; missing evidence for an applicable effect stays unavailable. Diagnostic text never establishes its owner.</p>
-<p><strong>Independent recovery:</strong> planning resolution clears only its correlated action. Attachment failure keeps Retry opening for the same Session. Preserve historical diagnostics; unclassified failures stay inspectable. Native owners retain input readiness.</p>
-<p><strong>Persistence:</strong> save confirmed bases, per-query incorporation and presentation acknowledgment transactionally with the outbox. Apply removal only to lagging queries. Invalidate closed cached queries with required fences so retirement does not require opening every view.</p>
-<p><strong>Failure:</strong> epoch replacement invalidates old coverage without deleting the original request or replaying it. Supersession of the exact completion restores A only from covering replacement facts. B stays selected.</p>
-<p><strong>Required checks:</strong> reorder receipt, count and list; restart between them; replace the epoch; withdraw before settlement; resolve planning and attachment in either order. Assert actual membership/counts, no duplicate send and unchanged later selection through both clients. The existing stamp-only test cannot demonstrate these behaviors.</p>
-<p><strong>Docs and skills:</strong> usage above remains proposed until both clients consume the shared projection. Existing recovery skill instructions need no change. Native latency remains unmeasured and belongs to later benchmarking.</p>
+<summary>Consequences and failure checks</summary>
+<p><strong>Presentation:</strong> publish removal and next/empty selection before awaiting the store actor, disk or Machine lookup. Save before send. A save failure removes only its layer and shows its error, without selecting again.</p>
+<p><strong>Projection:</strong> derive membership, visible/suppressed occurrences, attention and counts from one portable selection/group/sort plan over projected display facts. A composed Dashboard can contain repeated occurrences of a Task; subtracting one guessed count or changing only a member array is insufficient. Retained Task conversations stay reachable. Unknown membership remains unknown.</p>
+<p><strong>Retirement:</strong> a mounted lagging query keeps its ordered effect until a covering base arrives. Closed queries can be invalidated with persisted requirements, allowing finite retirement without opening every view. Keep these obligations in the existing cache/outbox owner. Replace the conservative Machine-wide floor with declared dependencies so unrelated changes cannot blank an unaffected query.</p>
+<p><strong>Recovery:</strong> supersession restores A only from covering replacement facts. Replacement epochs invalidate comparisons, retain unanswered commands and never authorize replay. Native attachment continues to own input readiness and Retry opening for the same Session.</p>
+<p><strong>Required checks:</strong> reorder real receipt/list/count bodies across restart and epoch replacement, while B stays selected on both clients. Resolve planning while the list is held; it must stay B/count 1 without a waiting screen. Repeat with two Dashboard occurrences of A, a newly opened filter, an unrelated mutation, save failure and exact completion withdrawal.</p>
+<p><strong>Docs and skills:</strong> the usage above remains proposed until both hosts consume the shared projection. Existing recovery skill guidance needs no change. Native latency remains unmeasured.</p>
 </details>
 <h2>Questions for the implementation check</h2>
 <ol>
-<li>Can count and list incorporate independently across restart while B stays selected?<br><strong>1a.</strong> Demonstrated through production projection and navigation. <strong>1b.</strong> Implement the shared vertical path. Current direction: 1b.</li>
-<li>Does every effect have an applicable domain owner, without hiding unrelated failures or inventing planning work?<br><strong>2a.</strong> Covered by the command declaration and both clients. <strong>2b.</strong> Complete independent recovery. Current direction: 2b.</li>
+<li>Does the mounted list remain B/count 1 through retirement and restart?<br><strong>1a.</strong> Demonstrated through production projection. <strong>1b.</strong> Implement the shared path. Current direction: 1b.</li>
+<li>Do repeated occurrences, new queries and unrelated mutations follow declared dependencies?<br><strong>2a.</strong> Covered through both clients. <strong>2b.</strong> Complete the portable plan and effect registry. Current direction: 2b.</li>
 </ol>
-<p><small>Headless outcome: design refined → iterate to implement. No open product choice. Loop-or-next determines the next step. This review changed design files only; interrupted source edits remain in place.</small></p>
+<p><small>Headless outcome: design changed → iterate to implement. No open product choice. Loop-or-next determines the next step. This review changes design files only.</small></p>
 </main>
 </html>

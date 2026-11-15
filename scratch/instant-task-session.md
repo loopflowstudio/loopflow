@@ -557,6 +557,43 @@ Full review wording and counterexamples: `a127084469:scratch/instant-task-sessio
 (the prior “Implement direction” section). This refines the contracts above;
 there is no open product choice.
 
+The next cut is projection, not another cache-only slice. The initial stage
+declaration, exact creation-export correlation and finite retirement are built at
+`ac6871e42f`; they no longer need to be proposed as missing. The declaration
+still needs effect/query dependencies and exhaustive command coverage.
+
+- A reload floor prevents reuse of an obsolete confirmed base; it is not the
+  displayed result of Complete. Keep a lagging active base usable only beneath
+  its ordered effects until replacement. An active query keeps its effect until
+  a covering base arrives; retirement cannot delete the only removal layer and
+  blank the active list. Closed queries may instead be invalidated, allowing
+  retirement without reopening them. Persist these obligations in the existing
+  cache/outbox owner; do not relabel a projection as confirmed.
+  Replace the broad per-Machine floor with declared query/domain dependencies
+  during cutover, so an unrelated command cannot blank a usable query.
+- Membership includes occurrences, arrangement and counts, not only Task IDs.
+  Evaluate the Rust-produced selection/group/sort plan over projected display
+  facts, then derive visible/suppressed occurrences and totals consistently.
+  Never filter `resolution.members` while leaving `projection.visible`, attention
+  or totals on the old snapshot. A Task composed into two source paths must not
+  be counted twice by a guessed delta. Explicit Task destinations and retained
+  conversations remain reachable when Working membership disappears. If the
+  plan lacks facts for an exact total, retain unknown membership rather than
+  inventing one. Extend shared DTO fixtures for the portable plan vocabulary.
+- Local Complete publishes removal and next/empty navigation together before
+  awaiting the store actor, Machine discovery or disk. Persist that same intent
+  before send; save failure withdraws only its layer and retains a recoverable
+  error. Neither that failure nor any receipt selects again. The asynchronous
+  outbox API alone cannot supply the synchronous gesture contract; both hosts
+  must consume the shared interaction reducer and its projected queries.
+
+Additional cutover counterexample: hold the list, let Complete settle and its
+planning resolve, then retire the command while the list is mounted. The list
+must remain B/count 1, without a waiting screen or stale A, across restart. Repeat
+with a composed Dashboard containing two occurrences of A and with an unrelated
+command advancing a domain the list does not depend on. This extends the existing
+reordered-reading matrix; no native latency result is inferred.
+
 - One command/effect declaration supplies confirming stages, recovery owners and
   affected query dependencies. A domain declares planning inapplicability;
   missing required correlation/status stays unavailable. Current status for an

@@ -358,6 +358,15 @@ write one `wait:` phase; the two new tests use `test_ambient::EnvGuard`.
 
 ### Remaining verification
 
+Native receipts are from candidate `2239def0…` (tree `de855332a3`). The
+later main sync (`3b6107a9d0`: v0.16.0 migration order, Desktop redraw and Task
+names, `engine/session.rs`, `ops/task.rs`) postdates them and changes no
+recovery module; gate rebuilds and reruns the focused selection on that tree.
+Both `results.json` there record each draft visible before release and after
+recovery, unsent, then intact on submission, with no slow served request. The
+Codex approval hang did not recur in the two runs since the watchdog was
+added; it remains unexplained, and the watchdog is the instrument if it does.
+
 The November 14 native receipts above establish the holder candidate's bulk,
 approval, held-lock cancellation and continued-input cases. November 9 receipts
 below establish only the earlier implementation. Gate owns the revised

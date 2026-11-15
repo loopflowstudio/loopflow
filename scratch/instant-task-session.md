@@ -1,6 +1,6 @@
 # LOO-906: immediate interactions across Desktop and mobile
 
-Implementation continues 2026-11-15 from checkpoint `19612daf419f` on
+Implementation continues 2026-11-15 from checkpoint `268073be98` on
 origin/main `9cafc410ee`. Supersedes the Desktop-only delivery
 boundary. No shipping or merge decision is recorded. Placement remains this Task;
 no Wave is selected.
@@ -286,8 +286,8 @@ Counterexamples required before both-client cutover:
   Resolve its stated confirmation obligation; never retire all effects merely
   because command output succeeded.
 
-This refines the existing cache/overlay and stage-fence design. It introduces no
-open product choice. Implement domain recovery and effect/stage coverage before
+This refines the cache/overlay and stage-fence design with no
+product choice. Implement domain recovery and effect/stage coverage before
 cutting both clients over; keep the recorded launch counterexamples intact.
 
 ### Superseding an intent must resolve its effect
@@ -481,12 +481,9 @@ existing bounded input owners: no offline keystroke queue or automatic resend.
 
 ## Delete — do not maintain
 
-- Removed: canonical Git discovery from `operation::admit`, caller-supplied worker
-  payloads, and read-only `check_creation`. The saved versioned command and atomic
-  `claim_creation` retain canonical identity and the existing recovery outcomes.
-- Removed: `WorkNavigator.waveRow`'s `pressedScope`/120 ms delayed selection.
-  Production row actions now select synchronously. Remove view-owned
-  mobile `SessionLink` teardown on ordinary Task switching; keep explicit Close,
+- Already removed: Git discovery in `operation::admit`, `check_creation`, and
+  `WorkNavigator.waveRow`'s delayed selection. Remove view-owned mobile
+  `SessionLink` teardown on ordinary Task switching; keep explicit Close,
   background policy and memory-pressure eviction under the retained owner.
 - Desktop `createdTaskIDs` predecessor and this pass's request-specific
   `pendingTaskReconciliations`/checkpoint exception, `StartingTask` submission state,
@@ -506,11 +503,8 @@ existing bounded input owners: no offline keystroke queue or automatic resend.
   second-submit recovery. Preserve success, duplicate prevention, failure,
   departure, ownership, layout and first-turn coverage on the shared path.
 
-Reusable current branch work: immediate surface interaction, exact Session
-attachment, original-request display, request UUIDs, recovery failure cases and
-performance endpoints. Keep source edits; they are a checkpoint, not the final
-architecture. Previous Desktop design and historical checks are recoverable at
-`7030e08a:scratch/instant-task-session.md`.
+Keep current branch source edits as a checkpoint, not the final architecture.
+Previous Desktop design: `7030e08a:scratch/instant-task-session.md`.
 
 ## Forbidden outcomes
 
@@ -717,8 +711,12 @@ join, and correlated lookup in the existing clear-request write, replace the
 materialized repo-path subqueries. No selected-plan restriction or index is added;
 this is a recovery-query finding, not native latency attribution.
 
-Remaining, in order: remaining mutation-family recovery and fences (remote/detached and
-external file/config confirmation included); exhaustive effect/stage registry and a
+Task edit/move recovery returns the saved result and error verbatim, including
+its historical `sync`; no correlation yet derives current planning status or a
+Retry target from the planning owner (the direction above).
+
+Remaining, in order: remaining mutation-family recovery and fences (remote/detached,
+external file/config confirmation and planning-delivery correlation included); exhaustive effect/stage registry and a
 declarative membership plan over #1947's `selection_states`; transactional confirmed cache and ordered effect/query
 projection; both clients' interaction/retained-occurrence migration and deletion
 of checkpoint/presentation exceptions; epoch reset on historical restoration;
@@ -783,26 +781,13 @@ reuse `queued` to mean adoption of a completed creation. Expose admission versus
 validation outcome in Rust/Swift fixtures and protocol docs before client cutover.
 Keep the existing Graph-admitted creation milestone distinct from envelope receipt.
 
-Required counterexamples before dependent work:
-
-1. Hold Git before repository discovery completes: admission and receipt lookup
-   return, disconnect does not cancel the saved submission, no effect dispatches.
-2. Upgrade released complete/Continue/Inspect rows, adopt equivalent root,
-   subdirectory and symlink spellings, and retain the original Session/result.
-3. Wrong candidate then correct candidate: the old receipt is unchanged and the
-   valid retry is possible; hold the wrong reply across reservation replacement.
-4. Restart before/after validation, race direct CLI creation with an envelope,
-   and duplicate submission after dispatch: at most one domain effect, saved
-   identity survives, no uncertain command is replayed.
-5. Reorder receipt validation replies: only the active epoch and newer receipt
-   revision update the client; admission never enables input or retires overlays.
-
-These are engineering consequences of immediate admission and lossless recovery,
-not a new product choice. Cases 1–4 have server fixtures; the live clients now use that admission. The shared receipt cursor and epoch
-admission race have focused checks. Full cross-platform presentation acceptance
-remains open. The
-Swift receipt mirror and exact-query fence comparison are shared with iOS; no
-client projection cutover is claimed.
+Server fixtures cover held Git before discovery, released-row upgrade and path
+adoption, wrong-then-correct candidates, restart/CLI races and duplicate
+submission (list at `19612daf41:scratch/instant-task-session.md`). Live clients
+use that admission; the shared receipt cursor and epoch race have focused checks.
+Still open: reordered validation replies must update only the active epoch with a
+newer receipt revision, never enabling input or retiring overlays, and full
+cross-platform presentation acceptance.
 
 ## Upstream absorbed (origin/main `9cafc410ee`)
 
@@ -860,22 +845,11 @@ baseline exists. The 10k receipt diagnostic (nextest run
 `7f2b652c-19e3-4026-8961-d4e3f4d84d37`) had lookup/admission P95 0.033 ms;
 all 20 receipt SQL statements used keyed indexes without table scans.
 `measureWriteToVisible` still refers to removed `pm_items.body` and needs migration.
-The corrected benchmark invocation puts its output variable inside the network
-boundary; the first invocation skipped when that boundary cleared `LF_*`.
-
-The earlier admission LEAK has no established cause; none appeared in this cut.
-
-Prior check details: `19612daf419f6d2b77f2f928077e8c2916e2a103:scratch/instant-task-session.md`.
-Preflight rejected native measurement at
+The earlier admission LEAK has no established cause. Preflight rejected native measurement at
 2026-11-15T09:34:29Z (CPU 280%, one-minute load 8.75), raw
 `/tmp/loo906-supersession-preflight/preflight.json`.
 
-Gate owns wider store/transport/lifecycle, DTO integration, documented-command,
-packaging and clippy checks. Implementation still owns a valid benchmark baseline
-and near-term measurements; demo owns native usability judgment, not all timing.
+Gate owns wider suites and packaging; implementation owns a valid benchmark
+baseline; demo owns native usability judgment.
 
-Task content checks (2026-11-15; inherited `LF_*` cleared; `/tmp/loo906-task-content-*.log`):
-- `cargo nextest run -p loopflow --lib -E 'test(engine::operation::tests::task_edit_recovery) | test(store::sqlite::task_content::tests::) | test(store::sqlite::operations::tests::receipt_reads_and_duplicate_admission) | test(store::sqlite::operations::tests::completion_and_reopen_record_their_own)'`: 7 passed (`final.log`); 10k trace permits only JSON iteration and fixed schema metadata scans, no row-table scans.
-- `cargo nextest run -p loopflow --test integration -E 'test(documented_commands::)'`: 4 passed (`docs.log`).
-- `cargo clippy --all-targets --jobs 4 -- -D warnings`: passed (`clippy.log`).
-- `cargo fmt --all -- --check`, `uv run python scripts/check_architecture.py`, `git diff --check`: passed. Native acceptance and the remaining architecture above stay open.
+Task content checks (2026-11-15, `LF_*` cleared): `cargo nextest run -p loopflow --lib -E 'test(engine::operation::tests::task_edit_recovery) | test(store::sqlite::task_content::tests::) | test(store::sqlite::operations::tests::)'` subset 7 passed, 10k trace without row-table scans; `documented_commands::` 4 passed; clippy, fmt, `check_architecture.py`, `git diff --check` passed.

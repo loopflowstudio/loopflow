@@ -367,35 +367,12 @@ input latency remain demo/benchmark work, separate from these deterministic chec
 
 ### A pending command is one thing, whatever its kind
 
-2026-11-15 presentation cut, current worktree. The full inspected predecessor map
-and counterexamples remain at `737b50adba:scratch/instant-task-session.md` under
-Next implement direction. This is a headless engineering choice, not a recorded
-product preference.
-
-`PendingOperation` replaces `CreationOperation` and `WorkInteraction.Failure`.
-The shared owner derives each pending command from its immutable payload, receipt
-and recovery state. Both lists render the same actions: Try again before save,
-Edit request for unsaved creation words, Check request for saved unknown outcomes,
-Inspect for receipt attention. Attention messages are data; hosts word normal
-progress without comparing copy. Failed unsaved completion withdraws only its
-effect, retains the original ID/payload for retry and never navigates again.
-Saved uncertain completion retains its removal through recovery.
-
-`CreationRecovery`, its presentation map, per-kind failure collections and both
-Retry Complete rows are deleted. Session commands and Task edits observe through
-`WorkInteraction`, including shown-result acknowledgment by resource. Check request
-retires the old observation lease before looking up the saved outcome.
-
-Reopening belongs to native attachment: Desktop retains Retry opening from
-`taskOpening`; the phone restores Reconnect. No command action names opening.
-Desktop's new-Task sheet says Open a repository to start a Task when scope is
-missing; `beginTask` no longer silently refuses because another launch is selected.
-
-Retired imported/editor-linked commands retain compact IDs/digest/time permanently;
-no authored words or receipts. `sourceReleased`, its index and all source-release
-APIs/transactions are deleted. Start rotates the editor's in-memory draft revision
-before asynchronous cleanup; a failed file rewrite cannot re-submit the original
-revision. Existing branch-format retired payloads compact on open.
+Built at `e010cda519`, a headless engineering choice; the full account is at
+`a8ca5c4cbb:scratch/instant-task-session.md` under this heading. `PendingOperation`
+replaces `CreationOperation` and `WorkInteraction.Failure`; both lists render Try
+again, Edit request, Check request and Inspect from one presentation. Reopening
+belongs to native attachment (Desktop Retry opening, phone Reconnect). Retired
+commands keep compact IDs/digest/time; the source-release lifecycle is deleted.
 
 ### Next implement direction: a healthy change shows nothing extra
 

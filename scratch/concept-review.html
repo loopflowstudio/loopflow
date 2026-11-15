@@ -33,56 +33,51 @@
 <body>
 <main>
 <header>
-  <h1>Task details: one diff reader</h1>
-  <p>LOO-515 · concept-review step · 2026-11-14</p>
-  <p>Built from <code>scratch/loo-515-task-details.md</code>, <code>swift/LoopflowMac/TaskFileDocument.swift</code>, <code>Views/TaskFilesView.swift</code>, <code>Views/TaskChangesView.swift</code>, <code>ReviewDiff.swift</code>, <code>PullRequestStore.swift</code>, <code>rust/loopflow/src/ops/task.rs</code></p>
+  <h1>Task details: one reader, one way to move through it</h1>
+  <p>LOO-515 · concept-review step, second pass · 2026-11-14</p>
+  <p>Built from <code>scratch/loo-515-task-details.md</code>, <code>swift/LoopflowMac/TaskFileDocument.swift</code>, <code>Views/ReviewStreamView.swift</code>, <code>Views/TaskChangesView.swift</code>, <code>Views/TaskFilesView.swift</code></p>
 </header>
 
-<p class="lede">Decision recorded for the next implement pass: the Files page's per-file <b>Diff</b> mode renders through the same review stream as Changes. The separate patch renderer is deleted. No product choice is open.</p>
+<p class="lede">Recorded for the next implement pass: Files' Diff mode gets the same <code>]</code>/<code>[</code> stepping and kept reading place as Changes. The accepted design already says the priorities "apply throughout" and that you come back to "the Diff's scroll". No product choice is open.</p>
 
 <h2>Actions → concepts → APIs</h2>
 <table>
   <tr><th>You do</th><th>Concept</th><th>API</th></tr>
-  <tr><td>⌥⌘1 read what was asked</td><td>Brief (derived from <code>RoadmapTask</code>)</td><td>none new</td></tr>
-  <tr><td>⌥⌘2 review the change, <code>]</code>/<code>[</code>, select → Ask</td><td>Changes: <code>TaskDelivery</code> + review stream</td><td><code>lf task changes</code>, <code>lf task diff</code>, <code>gh pr view</code></td></tr>
-  <tr><td>⌥⌘3 browse, open, edit a file</td><td>Files: <code>CheckoutTree</code> + document (Read / Edit / Diff)</td><td><code>lf task files</code> (served <code>task.files</code>), <code>lf task file</code></td></tr>
-  <tr><td>Diff one file while editing it</td><td class="proposed">same review stream, one file, draft included</td><td><code>lf task diff &lt;path&gt;</code> with <code>draft</code></td></tr>
+  <tr><td>⌥⌘2 review, <code>]</code>/<code>[</code>, select → Ask</td><td>Changes: whole comparison through <code>ReviewStream</code></td><td><code>lf task diff</code></td></tr>
+  <tr><td>Diff one file while editing</td><td>Files' Diff: one file through <code>ReviewStream</code>, draft included</td><td><code>lf task diff &lt;path&gt;</code> + draft</td></tr>
+  <tr><td class="proposed"><code>]</code>/<code>[</code> in Files' Diff; switch away and back</td><td class="proposed">stops + anchor belong to the reader, not to Changes</td><td>none new</td></tr>
 </table>
 
 <h2>The mismatch</h2>
-<p>Two readers show the same diff with different abilities. Changes has word emphasis, side by side, moves, cross-file next/previous and selection → Ask. Files' Diff mode is a plain text view with green and red line backgrounds. Changes' own file menu, "Open in Files", sends you to the weaker one. The design's forbidden outcomes already say "A second Diff renderer".</p>
+<p>The last pass made one renderer. Navigation and place stayed with Changes: <code>TaskFilesStore.step(_:)</code> walks only the whole-comparison <code>review</code>, and <code>reviewAnchor</code> is bound only in <code>TaskChangesView</code>. <code>TaskFileDiffView</code> has neither, so in Files' Diff <code>]</code> does nothing and a Task switch starts the file at the top.</p>
 
 <div class="row">
   <div class="panel">
     <h3>Now</h3>
-<pre><span class="del">Files · Diff  → TaskPatchView
-              → TaskPatchTextView
-              → TaskPatchLine, patchLines</span>
-Changes       → ReviewDiff stream</pre>
+<pre>Changes    step · currentStop · reviewAnchor
+<span class="del">Files·Diff  —      —             —</span></pre>
   </div>
   <div class="panel after">
     <h3 class="proposed">Proposed</h3>
-<pre>Files · Diff  → ReviewDiff stream
-                (one file, draft-aware)
-Changes       → ReviewDiff stream</pre>
+<pre>Changes    step(in: review) · anchor
+<span class="add">Files·Diff  step(in: fileReview) · anchor[path]
+           past last change → next file's Diff</span></pre>
   </div>
 </div>
-<p>What must survive: diffing the unsaved draft as you type (the <code>draft</code> argument and 180 ms debounce in <code>loadDiff</code>). The stream gains it; nothing else about Files changes.</p>
 
-<h2>Smaller: the comparison's name</h2>
-<div class="row">
-  <div class="panel"><h3>Now</h3><code>Working tree · parent 42b31bc791</code></div>
-  <div class="panel after"><h3 class="proposed">Proposed</h3><code>Compared with main at 42b31bc791 · includes uncommitted changes</code></div>
-</div>
-<p>"parent" is the <code>--base</code> selector name for the Task's recorded base commit. In a stacked Task it reads as the parent Task. The page shows what <code>lf pr open</code> would compare, so it says so. The Ask reference uses the same words.</p>
+<h2>Normal path, failure, recovery</h2>
+<ul>
+  <li>Editing <code>directory.rs</code> in Diff, <code>]</code> walks its changes, then opens the next changed file in Diff.</li>
+  <li>The draft changes under you: live updates keep the anchor on the nearest surviving change, as Changes does.</li>
+  <li>Cmd-2 to another Task, Cmd-1 back: same file, same change.</li>
+</ul>
 
-<h2>Kept as built</h2>
-<p><code>TaskDelivery</code> stays one derived value. <code>CheckoutTree</code> stays plain state on the store. A <code>.changes(comparison:)</code> browser tab and the Files tool's Changes page are two representations of one view, but merging them changes the persisted tab shape, which LOO-497/416 own.</p>
+<h2>Still noted, not this Task</h2>
+<p>A <code>.changes(comparison:)</code> browser tab and the Changes page are two representations of one view; merging them changes the persisted <code>WorkBrowserTab</code> shape, which LOO-497/416 own.</p>
 
 <h2>Questions</h2>
 <ol>
-  <li>Files' Diff mode: (a) render through the review stream, as recorded; (b) delete Diff mode and send "Diff" to Changes focused on the file, losing the draft diff.</li>
-  <li>Comparison label: (a) <code>Compared with &lt;branch&gt; at &lt;sha&gt;</code>; (b) keep <code>parent</code>.</li>
+  <li>None blocking. If <code>]</code> at a file's last change should stop rather than open the next file: a) cross files (recorded), b) stop.</li>
 </ol>
 </main>
 </body>

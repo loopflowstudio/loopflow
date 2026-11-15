@@ -9,18 +9,18 @@
 <main>
 <header>LOO-906 · concept-review · 2026-11-15<br>Sources: scratch/{instant-task-session,desktop-reactivity-feedback,questions}.md; rust/loopflow/src/{engine/operation.rs,store/sqlite/operations.rs,store/sqlite/task_content.rs,store/sqlite/planning_sync.rs}; swift/Loopflow/Services/{ClientWorkStore,ClientWorkDatabase,ReadingStamp}.swift.</header>
 <h1>Recover the result; observe the remaining work</h1>
-<p><strong>Next implement direction:</strong> keep the original mutation result, but get current recovery status and actions from the owner of each remaining effect. No open product choice stops this work.</p>
-<p><strong>Biggest mismatch:</strong> recovering a locally committed edit can finish command delivery while planning remains unresolved. Its saved planning status is historical; neither that snapshot nor a transport error can decide what Retry does now.</p>
+<p><strong>Review outcome:</strong> no further design change or open product choice. Continue the existing implementation direction: finish mutation-family recovery, then shared membership, cache and projection, then migrate both clients.</p>
+<p><strong>Biggest remaining mismatch:</strong> the receipt can distinguish a saved result from current planning delivery, but the clients still use creation-specific presentation and retirement. Showing a result cannot settle its outstanding list, count or recovery obligations.</p>
 <table>
 <tr><th>Action</th><th>Concept</th><th>API / owner</th></tr>
 <tr><td>Edit A</td><td>Immediate value; durable intent</td><td>Proposed shared <code>begin</code>; existing <code>task.updated</code> stage</td></tr>
 <tr><td>Restart after lost output</td><td>Original result</td><td>Existing <code>operation.get</code> / domain recovery; never reissue the edit</td></tr>
 <tr><td>Show current A</td><td>Confirmed facts plus pending effects</td><td>Proposed <code>receive</code> / <code>projection(for:)</code></td></tr>
-<tr><td>Resolve planning failure</td><td>Exact outstanding change</td><td>Existing planning owner; proposed typed recovery correlation</td></tr>
+<tr><td>Resolve planning failure</td><td>Exact outstanding change</td><td>Existing <code>operation.get.planning</code>; domain-owned recovery actions remain to migrate</td></tr>
 <tr><td>Select B / expand a Wave</td><td>Local navigation</td><td>Immediate local state; recovery never selects again</td></tr>
 </table>
 <h2>Existing → proposed</h2>
-<p><small>Existing: Task edits and Wave moves save their result with a local commit fence. Recovery preserves that result and later errors. Client creation uses the SQLite outbox; shared confirmed cache, projection and both-client migration remain unfinished.</small></p>
+<p><small>Existing at <code>9614efd346</code>: Task edits and Wave moves save their result, commit fence and exact planning-change IDs. Receipt lookup separately stamps current delivery status. Client creation uses the SQLite outbox; shared confirmed cache, projection and both-client migration remain unfinished.</small></p>
 <blockquote>Edit A → lose output → edit A again elsewhere → restart → show current A, recover the first result, and resolve only its outstanding delivery.</blockquote>
 <p><strong>Proposed experience:</strong> “Your edit stays visible while delivery is pending. After reconnect, recovery checks the saved change. A later edit stays in place. An unresolved delivery keeps its recovery action; a resolved failure remains historical.”</p>
 <details>
@@ -35,9 +35,9 @@
 </details>
 <h2>Questions for the implementation check</h2>
 <ol>
-<li>Hold planning delivery, recover a committed edit after restart, then apply a newer edit. Can recovery leave the newer value intact and target only the old delivery?<br><strong>1a.</strong> Demonstrated on both clients. <strong>1b.</strong> Implement typed domain recovery correlation.</li>
-<li>Resolve or supersede that delivery, then reorder saved-result and current-status readings. Does the old diagnostic stay historical without hiding a still-unresolved failure?<br><strong>2a.</strong> Demonstrated, including unavailable reads. <strong>2b.</strong> Implement independently stamped current recovery status.</li>
+<li>Hold planning delivery, recover a committed edit after restart, then apply a newer edit. Can recovery leave the newer value intact and target only the old delivery?<br><strong>1a.</strong> Demonstrated through both live clients. <strong>1b.</strong> Continue client migration using the implemented correlation.</li>
+<li>Mount a creation result while another window's list and count are held, then restart. Are its remaining effects retained and incorporated once per query?<br><strong>2a.</strong> Demonstrated through the shared owner. <strong>2b.</strong> Implement transactional cache/projection and replace presentation-driven deletion.</li>
 </ol>
-<p><small>Verification questions; no pending product choice. Headless outcome: design changed → iterate to implement.</small></p>
+<p><small>Verification questions; no pending product choice. Headless concept-review outcome: nothing further to change in the design → advance. The implementation remains unfinished; loop-or-next determines its next step. Native latency remains unmeasured.</small></p>
 </main>
 </html>

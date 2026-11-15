@@ -577,6 +577,11 @@ separately. Neither that target nor a SQL bottleneck has been measured here.
 
 ## Implement direction
 
+Concept-review outcome (2026-11-15, checkpoint `9614efd346`): no further
+model change or open product choice. Continue the remaining implementation in
+the order below; planning correlation does not complete client projection or
+authorize retiring saved operations on presentation.
+
 ### Recover the result; observe the remaining work
 
 Next implement direction from concept-review (2026-11-15): a recovered result is

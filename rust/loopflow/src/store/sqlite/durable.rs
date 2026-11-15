@@ -737,7 +737,14 @@ mod durable_store_tests {
             created_at: now,
             updated_at: now,
         };
-        store.seed_task(&task, &pr).unwrap();
+        let me = crate::store::ownership::acquire(
+            &store,
+            store
+                .new_task_scope(&task.repository_id, task.project_id.as_ref())
+                .unwrap(),
+        )
+        .unwrap();
+        store.seed_task(&task, &pr, Some(&me)).unwrap();
         (dir, store, task_id)
     }
 
@@ -758,7 +765,14 @@ mod durable_store_tests {
         // An unclaimed Task is new work again; the newly placed checkout claims its Task.
         crate::store::ownership::unassign_task(&store, &task_id).unwrap();
         let (new_task, pr) = unregistered_task(&store, &task_id, dir.path().join("new"));
-        store.seed_task(&new_task, &pr).unwrap();
+        let me = crate::store::ownership::acquire(
+            &store,
+            store
+                .new_task_scope(&new_task.repository_id, new_task.project_id.as_ref())
+                .unwrap(),
+        )
+        .unwrap();
+        store.seed_task(&new_task, &pr, Some(&me)).unwrap();
         store.require_task_launch(&task_id).unwrap();
         assert!(!store.task_owned(&task_id).unwrap());
         assert!(store.task_owned(&new_task.id).unwrap());

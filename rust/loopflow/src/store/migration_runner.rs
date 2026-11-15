@@ -1547,6 +1547,32 @@ fn last_migrated_by(conn: &rusqlite::Connection) -> Option<String> {
 }
 
 #[cfg(test)]
+pub(crate) fn canonical_fixture(
+    observers: &MigrationObservers<'_>,
+    build: &MigrationBuild<'_>,
+) -> (tempfile::TempDir, rusqlite::Connection) {
+    let home = tempfile::tempdir().unwrap();
+    let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let frontier = MIGRATIONS
+        .iter()
+        .position(|migration| migration_contains(migration, "canonical_structured_ids"))
+        .expect("focused tests run against the materialized release");
+    apply_set(
+        observers,
+        build,
+        &conn,
+        &MIGRATIONS[..frontier],
+        &mut Vec::new(),
+    )
+    .unwrap();
+    conn.execute_batch(include_str!(
+        "../../tests/fixtures/migrations/canonical_ids_authority.sql"
+    ))
+    .unwrap();
+    (home, conn)
+}
+
+#[cfg(test)]
 mod tests {
     use std::sync::mpsc::sync_channel;
     use std::time::Duration;

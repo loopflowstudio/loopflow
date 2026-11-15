@@ -413,7 +413,18 @@ impl Store {
 #[cfg(test)]
 impl Store {
     pub(crate) async fn seed_task(&self, task: &Task, pr: &TaskPr) -> StoreResult<Task> {
-        self.sqlite.seed_task(task, pr)
+        let me = task
+            .worktree
+            .is_some()
+            .then(|| {
+                crate::store::ownership::acquire(
+                    &self.sqlite,
+                    self.sqlite
+                        .new_task_scope(&task.repository_id, task.project_id.as_ref())?,
+                )
+            })
+            .transpose()?;
+        self.sqlite.seed_task(task, pr, me.as_ref())
     }
 }
 
@@ -533,3 +544,7 @@ mod identity_tests {
         ));
     }
 }
+
+#[cfg(test)]
+#[path = "children_tests.rs"]
+mod tests;

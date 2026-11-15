@@ -107,3 +107,7 @@ pub(crate) fn requires_migration_sqlite(conn: &rusqlite::Connection) -> StoreRes
 pub(crate) fn validate_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
     super::migration_runner::validate_sqlite(&build(), conn)
 }
+
+#[cfg(test)]
+#[path = "canonical_lifecycle_tests.rs"]
+mod canonical_lifecycle_tests;

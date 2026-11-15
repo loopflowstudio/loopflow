@@ -75,6 +75,35 @@ struct WorkOpeningCLITests {
         #expect(received[1] == .wave(id: "proof", address: "loopflow://beta/wave/proof"))
     }
 
+    @Test func localCreatedAndReopenedNamesPrecedeRoadmapDelivery() async throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let repo = try fixture.repository(parent: "local", name: "readable", planningRemote: true)
+        struct Created: Decodable, Sendable {
+            struct Task: Decodable, Sendable { let identifier: String }
+            let task: Task
+        }
+        let created = try await fixture.json(["task", "create", "--title", "Locally readable", "--json"],
+                                              cwd: repo, as: Created.self)
+        let identifier = created.task.identifier
+        let model = WorkModel(query: fixture.query, repoPath: repo.path)
+        for reopened in [false, true] {
+            if reopened {
+                _ = try await fixture.lf.run(["task", "complete", identifier, "--json"], cwd: repo)
+                _ = try await fixture.lf.run(["task", "reopen", identifier, "--json"], cwd: repo)
+            }
+            let plan = try await fixture.query.viewPlan(expression: "task:" + identifier, repoPath: repo.path)
+            let content = try #require(plan.contents.first { $0.work.kind == .task })
+            // Deliver only the local selection; neither tracker nor roadmap is needed to name it.
+            model.applySelectionPlans([plan], reason: "")
+            #expect(model.roadmap.isLoading)
+            #expect(model.workspaceTitle(content.work) == "Locally readable")
+            #expect(model.taskPresentation(id: content.work.id).identifier == identifier)
+            #expect(model.taskPresentation(id: content.work.id).context == nil)
+            #expect(model.taskOpening == nil, "display identity never establishes conversation readiness")
+        }
+    }
+
     private static func inspection(_ repository: String, _ window: UUID) -> DesktopWindowInspection {
         DesktopWindowInspection(repository: repository, window: window.uuidString, path: nil,
             destination: .work(WorkWorkspaceKey(repository: "repo", kind: .repository, id: "repo")), history: DesktopHistory(back: 0, forward: 0), reading: "loading", reason: nil,

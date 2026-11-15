@@ -892,6 +892,20 @@ fn public_commands_save_steers_without_launching_providers() {
         "steer",
         "WAVE_DIRECTION",
     ]);
+    // A thread entry can sort after the comment this command saves. Its
+    // timestamp must not decide which comment's steer the command returns.
+    loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db"))
+        .unwrap()
+        .append_task_comment(
+            &task.task.id,
+            &loopflow::work::task::comment::TaskComment {
+                id: "later-thread-entry".into(),
+                author: loopflow::work::task::comment::TaskCommentAuthor::Integration,
+                body: "Existing thread entry".into(),
+                created_at: Some("9999-12-31T23:59:59Z".into()),
+            },
+        )
+        .unwrap();
     run(&["steer", task.task.id.as_str(), "TASK_DIRECTION"]);
     let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     conn.execute(

@@ -481,6 +481,23 @@ an actual ownership result and fence; transport return or planning refresh never
 retires the projected owner. Unassign refusal after a newer local Claim removes
 only the refused layer, never restoring an old owner snapshot.
 
+Review refinement: Reopen is a conditional operation, not an unconditional
+approval-clear patch. Evaluate it over the ordered projected inputs, including
+an earlier local Complete. Known completed/pending completion clears approval;
+known open with no pending completion preserves it. If that predicate is unknown,
+publish the request immediately but leave its approval/destination answer
+incomplete. Re-evaluate as supported inputs arrive, without navigation or input
+readiness changes. A stale Done cache against an already-open approved Machine
+must reconcile to the domain's no-op, never overwrite its approval.
+
+The existing `task.reopened` result is a Task DTO and planning/graphs fence,
+not a complete supported execution reading. Incorporate only values and domains
+the result actually establishes; recover unknown inputs through stamped readings.
+Likewise ownership receipts retain historical labels but cannot certify current
+Machine labels. Add unknown-predicate → no-op and Complete → Reopen before send
+to the vertical acceptance cases. These follow the existing domain semantics;
+they introduce no product answer.
+
 These are app gestures and existing Task commands; builtin skills are unchanged.
 Shipped app usage still describes the current paths.
 This direction answers none of the product choices below, and they don't gate it.

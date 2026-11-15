@@ -9,7 +9,7 @@
 <main>
 <header>LOO-906 · concept-review · 2026-11-15 · headless Graph step<br>
 Sources: scratch/{instant-task-session,questions,desktop-reactivity-feedback}.md;
-HEAD 9987fcc9f1 and working design edits; Rust durable.rs, store/sqlite/{selections,children,task_ownership}.rs,
+HEAD ede0429321 and working design edits; Rust durable.rs, store/sqlite/{selections,children,task_ownership,operations}.rs,
 ops/task_ownership.rs and engine/operation.rs; Swift WorkFieldFacts.swift, ClientWorkQuery.swift,
 OperationDeclaration.swift, WorkModel.swift, TaskWorkView.swift and both app READMEs.<br>
 Source review only; no new runtime measurements.</header>
@@ -34,12 +34,13 @@ an already-open no-op preserves the domain's approval semantics.</pre>
 <tbody>
 <tr><td>Claim / unassign</td><td>Supported ownership, including known unowned</td><td><code>WorkModel.assignTask → performTaskAction</code> → shared synchronous <code>WorkInteraction</code> intent on both hosts; owner control and all lists use the same fields</td></tr>
 <tr><td>Reopen</td><td>Disposition/time plus retained execution inputs</td><td><code>WorkModel.reopenTask</code> and refresh barrier → shared intent; derive lifecycle/section from checkout, Workflow, approval, ownership and publication</td></tr>
-<tr><td>Deliver / recover</td><td>Original request, semantic result and field incorporation</td><td>Claim/unassign lack domain stages → transaction records actual result, including no-op or definite refusal; original-ID lookup after uncertain send</td></tr>
+<tr><td>Deliver / recover</td><td>Original request, semantic result and field incorporation</td><td>Built: Claim/unassign record actual ownership, including no-op and permission refusal; Reopen refusals persist. Proposed: shared client projection consumes these results and original-ID recovery</td></tr>
 <tr><td>Read a board, detail or history</td><td>One derived answer</td><td>Aggregate lifecycle authority → supported inputs in the existing SQLite owner, replacing the old authority through both transports and every consumer</td></tr>
 </tbody></table>
-<p><strong>Built:</strong> correlated lifecycle/completion time, dynamic membership and Complete/Move reconciliation. D1 → Machine Reopen → D2 checks cover newer readings; they do not cover a local Reopen gesture. Claim, unassign and local Reopen projection remain unbuilt.</p>
+<p><strong>Built:</strong> correlated lifecycle/completion time, dynamic membership, Complete/Move reconciliation and recoverable Task ownership outcomes. D1 → Machine Reopen → D2 checks cover newer readings; they do not cover a local Reopen gesture. Claim, unassign and local Reopen projection remain unbuilt.</p>
 <p><strong>Proposed usage:</strong> Claim requests ownership on this Machine. Unassign releases ownership while retaining checkout, PR and conversations. Reopen withdraws completion without restarting the Workflow. Actions and affected lists update immediately; missing destination facts remain incomplete. Saved changes wait for their original Machine through restart. Later navigation, drafts and the open conversation stay put.</p>
 <p><strong>Failure and recovery:</strong> save before send. A definite refusal removes only its layer from the latest base. Commit-before-reply checks the original ID; no replacement submission. Claim of an already-owned Task still needs an actual result and fence. An unrelated execution revision cannot retire ownership intent. Retain exact commands, receipts and reload floors when replacing aggregate caches.</p>
+<p><strong>Reopen counterexample:</strong> a stale Done cache can hide an already-open approved Task. Reopen there is a successful no-op and preserves approval. Proposed projection evaluates completed/pending completion over ordered inputs, including an earlier local Complete. Unknown inputs leave approval and destination incomplete while the request is visible. The recovered Task DTO and planning/graphs fence cannot certify missing execution inputs; stamped readings resolve them.</p>
 <p><strong>Next vertical exit:</strong> domain results/refusals and recovery → supported inputs on both transports → persisted shared derivation → Desktop header/hover/inspector and phone actions. Delete the old action refresh barriers and aggregate lifecycle authority in that same cut. Check owned/unowned completed and unstarted Tasks, held/running Workflow positions, Claim → unassign → Claim, Complete → Reopen → Complete, offline restart, no-op, refusal and reordered two-client readings. No builtin skill changes; proposed README text is in the working design.</p>
 <h2>Questions for the next conversation</h2>
 <ol>

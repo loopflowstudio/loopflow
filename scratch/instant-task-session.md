@@ -614,8 +614,6 @@ reconnect (`testDerivedCoveragePublishesDisconnect…`). The surface acceptance 
 Prior runs: `5c958398a6de:scratch/instant-task-session.md`.
 
 Prior dynamic/Move checks: `aee0e10dc603:scratch/instant-task-session.md`.
-Native usability/latency, broader suites and lint remain with implementation/demo
-and gate as previously assigned.
 
 ### Responsibility inventory · 2026-11-15
 

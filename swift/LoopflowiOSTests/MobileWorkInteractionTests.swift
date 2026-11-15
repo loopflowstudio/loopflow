@@ -12,7 +12,9 @@ extension ClientWorkQueryTests {
         let base = try workingPlan(["a", "b"])
         let seed = store(directory)
         _ = try await seed.receivePlans([base], stamp: stamp("list", revision: 6), for: query)
-        let prepared = try await seed.presentation(machine: "machine", queries: [key(query): query])
+        let otherQuery = ServedRead.viewSelect(expression: TaskList.available.expression(wave: nil))
+        _ = try await seed.receivePlans([base], stamp: stamp("other", revision: 6), for: otherQuery)
+        let prepared = try await seed.presentation(machine: "machine", queries: [key(query): query, key(otherQuery): otherQuery])
         let hold = HeldIntentDisk()
         let disk = ClientWorkStore(directory: directory, prepareDirectory: { _ in hold.enter() }, machine: { "machine" },
             read: { _ in "null" }, observe: { _ in ServerWatch(updates: AsyncThrowingStream { _ in }, checkpoint: { _ in }, cancel: {}) },
@@ -25,6 +27,7 @@ extension ClientWorkQueryTests {
         let first = TaskFeed(client: client)
         let second = TaskFeed(client: client)
         first.mount(); second.mount()
+        _ = owner.open(otherQuery) { _ in }
         owner.apply(prepared)
         var entered = hold.entered.makeAsyncIterator()
         _ = await entered.next()
@@ -39,6 +42,14 @@ extension ClientWorkQueryTests {
         XCTAssertEqual(route?.id, "b")
         XCTAssertEqual(otherRoute?.id, "a")
         second.stop()
+        first.filter = .available
+        first.mount()
+        XCTAssertEqual(first.repositories.first?.tasks.map(\.work.id), ["b"])
+        first.filter = .started
+        first.mount()
+        owner.apply(prepared)
+        XCTAssertEqual(first.repositories.first?.tasks.map(\.work.id), ["b"])
+        XCTAssertEqual(route?.id, "b")
         hold.release()
         await owner.persistPending()
         XCTAssertEqual(first.repositories.first?.tasks.map(\.work.id), ["b"])

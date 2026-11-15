@@ -5,6 +5,11 @@ public struct WorkSelection: Codable, Equatable, Sendable {
     public let id: String
     public let expression: Expression
 
+    /// An unresolved expression still identifies the selected query while loading.
+    public static func requestedQuery(_ expression: String) -> WorkSelection {
+        WorkSelection(id: expression, expression: .query(expression))
+    }
+
     public indirect enum Expression: Codable, Equatable, Sendable {
         case repository
         case wave(String)

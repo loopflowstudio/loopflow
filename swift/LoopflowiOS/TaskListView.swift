@@ -72,25 +72,21 @@ final class TaskFeed {
     func mount() {
         if let lease { client.interaction.close(lease); self.lease = nil }
         let current = generation
-        do {
-            lease = try client.interaction.open(.viewSelect(expression: filter.expression(wave: wave))) { [weak self] plans in
-                guard let self, current == self.generation else { return }
-                guard let plans else { self.repositories = []; self.loaded = false; return }
-                switch RemoteTaskObservation.decodePlans(plans) {
-                case .success(let repositories): self.repositories = repositories; self.loaded = true
-                case .failure(let error): self.error = error.message
-                }
+        lease = client.interaction.open(.viewSelect(expression: filter.expression(wave: wave))) { [weak self] plans in
+            guard let self, current == self.generation else { return }
+            guard let plans else { self.repositories = []; self.loaded = false; return }
+            switch RemoteTaskObservation.decodePlans(plans) {
+            case .success(let repositories): self.repositories = repositories; self.loaded = true
+            case .failure(let error): self.error = error.message
             }
-        } catch { self.error = error.localizedDescription }
+        }
     }
 
     func complete(_ task: WorkViewPlan.Content, selected: WorkWorkspaceKey?, visible: [WorkWorkspaceKey],
                   select: (WorkWorkspaceKey?) -> Void) {
         guard let directory = repositories.first(where: { $0.repository == task.work.repository })?.path else { return }
-        do {
-            try client.interaction.complete(task.work, issue: task.identifier ?? task.work.id,
+        client.interaction.complete(task.work, issue: task.identifier ?? task.work.id,
                 directory: directory, selected: selected, visible: visible, select: select)
-        } catch { self.error = error.localizedDescription }
     }
 
     func refresh() async {

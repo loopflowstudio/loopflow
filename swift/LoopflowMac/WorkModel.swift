@@ -122,7 +122,7 @@ final class WorkModel {
         leasedScope = nil
     }
 
-    private func mountQueries(_ scope: WorkScope, machine: String) throws {
+    private func mountQueries(_ scope: WorkScope, machine: String) {
         guard leasedScope != scope || interaction?.machine != machine else { return }
         closeQueryLeases()
         if interaction?.machine != machine { interaction = .local(machine) }
@@ -130,7 +130,7 @@ final class WorkModel {
         for part in [WorkPart.selections, .taskList] {
             guard let read = part.read(for: scope) else { continue }
             guard let interaction else { return }
-            let lease = try interaction.open(read) { [weak self] plans in
+            let lease = interaction.open(read) { [weak self] plans in
                 guard let self, self.workScope == scope, self.observingMachineId == machine else { return }
                 if part == .selections {
                     if let plans { self.applyProjectedSelectionPlans(plans, reason: "") }
@@ -158,7 +158,104 @@ final class WorkModel {
     var completionFailures: [WorkInteraction.Failure] { interaction?.failures ?? [] }
     func retryCompletion(_ id: String) { interaction?.retry(id) }
 
-    private var viewOpening: UUID?
+    @ObservationIgnored private var navigationGeneration = 0
+    @ObservationIgnored private var queryGeneration = UUID()
+    @ObservationIgnored private var selectedQuery: WorkNavigation.QueryDestination?
+    @ObservationIgnored private var queryInteraction: WorkInteraction?
+    @ObservationIgnored private var queryLease: UUID?
+    @ObservationIgnored private var queryReader: Task<Void, Never>?
+    @ObservationIgnored private var querySubscription: LineSubscription?
+    private(set) var queryPlans: WorkReading<[ProjectedWorkPlan]> = .loading
+
+    private func closeSelectedQuery() {
+        queryGeneration = UUID()
+        if let queryLease { queryInteraction?.close(queryLease) }
+        queryLease = nil
+        queryInteraction = nil
+        queryReader?.cancel(); queryReader = nil
+        if let subscription = querySubscription { Task { await subscription.cancel() } }
+        querySubscription = nil
+        selectedQuery = nil
+        queryPlans = .loading
+    }
+
+    private func mountSelectedQuery() {
+        let destination: WorkNavigation.QueryDestination
+        switch navigation.destination {
+        case .view(let query): destination = query
+        case .dashboard(let id):
+            guard let repoPath else { return }
+            destination = .init(machine: observingMachineId, repository: repoPath, expression: "query:" + id)
+        default: closeSelectedQuery(); return
+        }
+        guard selectedQuery != destination else { return }
+        closeSelectedQuery()
+        selectedQuery = destination
+        let generation = queryGeneration
+        guard let machine = destination.machine ?? observingMachineId else { return }
+        if interaction?.machine != machine { interaction = .local(machine) }
+        guard let interaction else { return }
+        let read = ServedRead.desktopViewGet(directory: destination.repository, expression: destination.expression)
+        queryInteraction = interaction
+        queryLease = interaction.open(read) { [weak self] plans in
+            guard let self, self.queryGeneration == generation else { return }
+            let next: WorkReading<[ProjectedWorkPlan]> = if let reason = self.queryPlans.errorMessage {
+                .unavailable(lastGood: plans, reason: reason)
+            } else { plans.map { .available($0) } ?? .loading }
+            guard self.queryPlans != next else { return }
+            self.queryPlans = next
+            if let plan = plans?.first {
+                self.presentView(plan)
+                if let opening = self.selectionOpening {
+                    self.selectionOpening = DesktopOpening(revision: UUID().uuidString, url: opening.url, status: .usable, reason: nil)
+                }
+            }
+        }
+        queryReader = Task { [weak self, query] in
+            do {
+                let subscription = try await query.subscribe(read)
+                guard let self, self.queryGeneration == generation, !Task.isCancelled else {
+                    await subscription.cancel(); return
+                }
+                self.querySubscription = subscription
+                defer { Task { await subscription.cancel() } }
+                for try await line in subscription.lines {
+                    let envelope = try await Task.detached {
+                        try JSONDecoder().decode(SubscriptionReading<WorkViewPlan>.self, from: line)
+                    }.value
+                    guard !Task.isCancelled else { return }
+                    if let reason = envelope.unavailable { throw RegistryQueryError(reason) }
+                    guard let plan = envelope.body, let stamp = envelope.stamp else {
+                        throw RegistryQueryError("Work reading is missing its stamped contents")
+                    }
+                    try await interaction.receive([plan], stamp: stamp, for: read)
+                    if self.queryGeneration == generation, !Task.isCancelled {
+                        self.dashboardError = nil
+                        if let plans = self.queryPlans.value { self.queryPlans = .available(plans) }
+                    }
+                }
+                throw RegistryQueryError("Work updates ended. Retry to reconnect.")
+            } catch {
+                guard let self, self.queryGeneration == generation, !Task.isCancelled else { return }
+                self.queryPlans = .unavailable(lastGood: self.queryPlans.value, reason: error.localizedDescription)
+                self.querySubscription = nil
+                self.queryReader = nil
+                self.dashboardError = error.localizedDescription
+                if self.queryPlans.value == nil, let opening = self.selectionOpening {
+                    self.selectionOpening = DesktopOpening(revision: UUID().uuidString, url: opening.url,
+                        status: .failed, reason: error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    func retrySelectedQuery() {
+        rescanWork()
+        dashboardError = nil
+        closeSelectedQuery()
+        mountSelectedQuery()
+    }
+
     private var selectionOpening: DesktopOpening?
     /// Tasks whose abandonment was requested; they leave the sidebar at once.
     private(set) var abandoningTaskIDs: Set<String> = []
@@ -1153,7 +1250,7 @@ final class WorkModel {
         switch navigation.destination {
         case .work(let work): return .work(key(work))
         case .dashboard(let id): return .dashboard(id: id)
-        case .view(let plan): return .view(selection: plan.selection)
+        case .view: return .view(selection: selectedViewPlan?.selection ?? .requestedQuery(selectedQuery?.expression ?? ""))
         case .workingTasks: return .workingTasks
         case .entered(.saved(let id), let work): return .entered(from: .dashboard(id), work: key(work))
         case .entered(.workingTasks, let work): return .entered(from: .workingTasks, work: key(work))
@@ -1486,6 +1583,8 @@ final class WorkModel {
         }
         savedMachineId = id
         cache?.confirmMachine(id)
+        for navigation in navigationByRepo.values { navigation.bindQueryDestinations(to: id) }
+        if let selectedQuery, selectedQuery.machine == nil { closeSelectedQuery(); mountSelectedQuery() }
     }
 
     var visibleRoadmaps: [WaveRoadmap] {
@@ -1577,7 +1676,7 @@ final class WorkModel {
     /// The window's one refresh owner: one reader process whose frames say
     /// what changed. Runs until cancelled, reopening the reader when it ends.
     func keepWorkCurrent() async {
-        defer { closeQueryLeases() }
+        defer { closeSelectedQuery(); closeQueryLeases() }
         if usesFixedFixture { return }
         await restoreConfirmedPlans()
         guard !Task.isCancelled else { return }
@@ -1639,10 +1738,8 @@ final class WorkModel {
     private func restoreConfirmedPlans() async {
         guard let machine = observingMachineId else { return }
         let scope = workScope
-        do {
-            try mountQueries(scope, machine: machine)
-            await interaction?.refreshFromStore()
-        } catch { dashboardError = error.localizedDescription }
+        mountQueries(scope, machine: machine)
+        await interaction?.refreshFromStore()
     }
 
     var workScope: WorkScope {
@@ -1661,7 +1758,7 @@ final class WorkModel {
     func syncWorkScope() {
         let scope = workScope
         if let machine = observingMachineId {
-            do { try mountQueries(scope, machine: machine) } catch { dashboardError = error.localizedDescription }
+            mountQueries(scope, machine: machine)
         }
         guard workObservation != nil else { return }
         guard scope != sentScope else { return }
@@ -1776,7 +1873,7 @@ final class WorkModel {
                 let machine = workMachine
                 do {
                     guard stamp.machine == observingMachineId, scope == workScope else { return }
-                    try mountQueries(scope, machine: stamp.machine)
+                    mountQueries(scope, machine: stamp.machine)
                     try await interaction?.receive(body, stamp: stamp, for: read)
                 } catch {
                     guard scope == sentScope, machine == workMachine else { return }
@@ -1791,7 +1888,7 @@ final class WorkModel {
                 let machine = workMachine
                 do {
                     guard stamp.machine == observingMachineId, scope == workScope else { return }
-                    try mountQueries(scope, machine: stamp.machine)
+                    mountQueries(scope, machine: stamp.machine)
                     try await interaction?.receive([body], stamp: stamp, for: read)
                 } catch {
                     guard scope == sentScope, machine == workMachine else { return }
@@ -1929,6 +2026,9 @@ final class WorkModel {
     }
 
     private func dropMachineContent() {
+        closeSelectedQuery()
+        closeQueryLeases()
+        interaction = nil
         applySelectionPlans(nil, reason: "Work reading changed; showing retained membership")
         selectionReadings = [:]
         taskListReadings = [:]
@@ -2362,6 +2462,7 @@ final class WorkModel {
     }
 
     private func select(_ requested: WorkReference?, preservingOpening: Bool, recordingHistory: Bool = true) {
+        navigationGeneration &+= 1
         let interaction = UUID().uuidString
         let journey: PerfClock.Journey? = requested?.kind == .wave ? .waveSelect
             : requested?.kind == .task ? .taskSelect : nil
@@ -2770,21 +2871,27 @@ final class WorkModel {
         }
     }
 
-    func completeTask(_ task: RoadmapTask) {
-        guard let machine = observingMachineId else {
-            dashboardError = "Waiting for the original Machine"
-            return
+    private var completionOrder: [WorkWorkspaceKey]? {
+        if let plan = selectedViewPlan { return plan.projection.visible.map(\.work) }
+        if case .entered(let board, _) = navigation.destination { return boardTiles(board).map(\.work) }
+        if let board = navigation.waveView { return boardTiles(board).map(\.work) }
+        return nil
+    }
+
+    func completeTask(_ task: RoadmapTask, visible origin: [WorkWorkspaceKey]? = nil) {
+        if interaction == nil { interaction = .local(observingMachineId) }
+        guard let interaction else { return }
+        let repository = selectedViewPlan?.repository ?? taskList?.repository ?? selectionPlans.value?.first?.repository ?? ""
+        let order = origin ?? completionOrder
+        func key(_ id: String) -> WorkWorkspaceKey {
+            let canonical = self.task(id: id)?.task.runtime?.workId ?? id
+            return order?.first { $0.id == canonical || $0.id == id }
+                ?? WorkWorkspaceKey(repository: repository, kind: .task, id: canonical)
         }
-        do {
-            try mountQueries(workScope, machine: machine)
-            guard let interaction else { return }
-            let repository = taskList?.repository ?? selectionPlans.value?.first?.repository ?? ""
-            func key(_ id: String) -> WorkWorkspaceKey { WorkWorkspaceKey(repository: repository, kind: .task, id: id) }
-            let visible = (sidebarTaskIDs + sidebarAutonomousTaskIDs).map(key)
-            _ = try interaction.complete(key(task.id), issue: task.task.identifier,
-                directory: WaveOrigin.cached(task.task.repo), selected: selection.flatMap { $0.kind == .task ? key($0.id) : nil },
-                visible: visible) { [self] next in select(next.map { .task(id: $0.id) }) }
-        } catch { dashboardError = error.localizedDescription }
+        let visible = order ?? (sidebarTaskIDs + sidebarAutonomousTaskIDs).map(key)
+        _ = interaction.complete(key(task.id), issue: task.task.identifier,
+            directory: WaveOrigin.cached(task.task.repo), selected: selection.flatMap { $0.kind == .task ? key($0.id) : nil },
+            visible: visible) { [self] next in select(next.map { .task(id: $0.id) }) }
     }
 
     func reopenTask(_ task: RoadmapTask) async {
@@ -3179,7 +3286,7 @@ final class WorkModel {
     }
 
     private func setSelection(_ selection: WorkReference?) {
-        viewOpening = nil
+        closeSelectedQuery()
         selectionOpening = nil
         guard navigation.destination != .work(selection) else { return }
         workActivityGeneration &+= 1
@@ -3293,14 +3400,15 @@ extension WorkModel {
             select(work, preservingOpening: false, recordingHistory: recordingHistory && navigation.destination != destination)
             navigation.destination = .entered(from: board, work: work)
         case .dashboard, .view, .workingTasks:
+            navigationGeneration &+= 1
             if recordingHistory, navigation.destination != destination {
                 navigation.backStack.append(navigation.destination)
                 navigation.forwardStack = []
             }
             dismissTaskLink()
-            viewOpening = nil
             selectionOpening = nil
             navigation.destination = destination
+            mountSelectedQuery()
             navigation.palette = nil
             navigation.selectedSessionId = nil
             if let plan = selectedViewPlan { presentView(plan) }
@@ -3396,6 +3504,7 @@ extension WorkModel {
         guard !dashboardSaving, let repoPath else { return }
         dashboardSaving = true
         dashboardError = nil
+        let generation = navigationGeneration
         defer { dashboardSaving = false }
         do {
             var saved = try await query.editDashboardQuery(id: id, expression: expression, revision: revision, repoPath: repoPath)
@@ -3406,7 +3515,7 @@ extension WorkModel {
                 _ = try await query.pinDashboard(id: id, pinned: pinned, revision: saved.revision, repoPath: repoPath)
             }
             try await refreshDashboard(id, repoPath: repoPath)
-            if self.repoPath == repoPath { selectDashboard(id) }
+            if self.repoPath == repoPath, navigationGeneration == generation { selectDashboard(id) }
         } catch {
             dashboardError = error.localizedDescription
             // A preceding metadata write may have succeeded; read effects, never replay writes.
@@ -3489,23 +3598,13 @@ extension WorkModel {
         try await refreshPlan("query:" + id, repoPath: repoPath)
     }
 
-    /// Re-read one plan after a write; nil reads the repository's built-in plan.
+    /// Writes request a fresh stamped answer; their raw result never publishes membership.
     private func refreshPlan(_ expression: String?, repoPath: String) async throws {
-        let plan = try await query.viewPlan(expression: expression, repoPath: repoPath)
         guard self.repoPath == repoPath else { return }
-        replacePlan(plan)
+        rescanWork()
+        await refreshSelectedView()
     }
 
-    /// A Dashboard plan replaces its Dashboard's; a built-in plan replaces its expression's.
-    private func replacePlan(_ plan: WorkViewPlan) {
-        var plans = selectionPlans.value ?? []
-        plans.removeAll { other in
-            other.dashboardID == plan.dashboardID
-                && (plan.dashboardID != nil || other.selection.expression == plan.selection.expression)
-        }
-        plans.append(ProjectedWorkPlan(plan))
-        applyProjectedSelectionPlans(plans, reason: "")
-    }
 }
 
 
@@ -3513,44 +3612,28 @@ extension WorkModel {
     var selectedViewPlan: ProjectedWorkPlan? {
         switch navigation.destination {
         case .work, .entered: nil
-        case .dashboard(let id): dashboard(id)
-        case .view(let plan): ProjectedWorkPlan(plan)
+        case .dashboard(let id): queryPlans.value?.first ?? dashboard(id)
+        case .view: queryPlans.value?.first
         case .workingTasks: builtInPlan(.repository)
         }
     }
 
     private func refreshSelectedView() async {
-        guard case .view(let previous) = navigation.destination, let repoPath else { return }
-        do {
-            let plan = try await query.viewPlan(expression: previous.selection.queryText, repoPath: repoPath)
-            guard self.repoPath == repoPath, navigation.destination == .view(previous) else { return }
-            navigation.destination = .view(plan)
-            presentView(ProjectedWorkPlan(plan))
-        } catch {
-            guard self.repoPath == repoPath, navigation.destination == .view(previous) else { return }
-            dashboardError = error.localizedDescription
-        }
+        if queryReader == nil { closeSelectedQuery() }
+        mountSelectedQuery()
+        querySubscription?.send(Data("{\"id\":1}\n".utf8))
     }
 
     func openView(expression: String, url: URL? = nil) async {
         guard let repoPath else { return }
-        let request = UUID()
-        viewOpening = request
-        let link = url?.absoluteString ?? "loopflow://open"
-        selectionOpening = DesktopOpening(revision: UUID().uuidString, url: link, status: .opening, reason: nil)
-        do {
-            let plan = try await query.viewPlan(expression: expression, repoPath: repoPath)
-            guard viewOpening == request, self.repoPath == repoPath else { return }
-            if plan.dashboardID != nil { replacePlan(plan) }
-            selectDestination(plan.dashboardID.map { .dashboard($0) } ?? .view(plan), recordingHistory: true)
-            selectionOpening = DesktopOpening(revision: UUID().uuidString, url: link, status: .usable, reason: nil)
-        } catch {
-            guard viewOpening == request else { return }
-            viewOpening = nil
-            dashboardError = error.localizedDescription
-            selectionOpening = DesktopOpening(revision: UUID().uuidString, url: link, status: .failed, reason: error.localizedDescription)
-        }
+        let destination = WorkNavigation.QueryDestination(machine: observingMachineId,
+            repository: repoPath, expression: expression)
+        selectDestination(.view(destination), recordingHistory: true)
+        mountSelectedQuery()
+        selectionOpening = DesktopOpening(revision: UUID().uuidString, url: url?.absoluteString ?? "loopflow://open",
+            status: selectedViewPlan == nil ? .opening : .usable, reason: nil)
     }
+
 }
 
 /// Drag payload for moving a Task in the shared Working Tasks order.

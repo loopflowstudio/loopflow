@@ -35,7 +35,10 @@ a lost answer is recovered by its original request ID. A replacement Machine
 database never authorizes another submission of an unanswered request.
 The Task feed restores confirmed query bases from that same SQLite store. Older
 replies cannot replace newer saved bases; a retired command leaves a required
-reload fence so an older saved list cannot be shown as current.
+reload fence so an older saved list cannot be shown as current. Returning to a
+cached filter applies pending completion before showing its rows. Separate feeds
+keep their own query leases; closing one leaves the other feed current. A failed
+refresh keeps usable cached content beside **Try again**.
 
 ## Task
 

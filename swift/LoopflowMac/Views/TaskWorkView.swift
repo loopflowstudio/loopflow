@@ -606,6 +606,7 @@ struct TaskStartOffer: View {
 
 /// Shared Task actions for keyboard access and sidebar context menus.
 struct TaskActionItems: View {
+    var completionOrder: [WorkWorkspaceKey]? = nil
     let model: WorkModel
     let task: RoadmapTask
     let wave: WaveSnapshot?
@@ -631,7 +632,7 @@ struct TaskActionItems: View {
         if task.isCompleted {
             Button("Reopen Task") { Task { await model.reopenTask(task) } }.disabled(unavailable)
         } else {
-            Button("Complete Task") { model.completeTask(task) }.disabled(unavailable)
+            Button("Complete Task") { model.completeTask(task, visible: completionOrder) }.disabled(unavailable)
             Button(task.runtime?.owner == nil ? "Claim Task" : "Unassign Task") {
                 Task { await model.assignTask(task, claimed: task.runtime?.owner == nil) }
             }.disabled(unavailable)

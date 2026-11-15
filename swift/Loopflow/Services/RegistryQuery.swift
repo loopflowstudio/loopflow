@@ -1165,6 +1165,13 @@ public struct RegistryQuery: Sendable {
                         from: await serve(.taskGet(directory: cwd ?? "/", issue: task)))
     }
 
+    /// A stamped query subscription. Checkpoints request freshness; only its
+    /// reading can incorporate a pending effect.
+    public func subscribe(_ read: ServedRead) async throws -> LineSubscription {
+        guard let observeRead else { throw RegistryQueryError("Live Work observation is unavailable on this transport") }
+        return try await observeRead(read.argv + ["--subscribe"], read.cwd)
+    }
+
     /// One store-driven reading keeps position, readiness and run history together.
     public func subscribeTask(task: String) async throws -> LineSubscription {
         guard let observeRead else { throw RegistryQueryError("Live Task observation is unavailable on this transport") }

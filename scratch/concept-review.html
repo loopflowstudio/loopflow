@@ -2,48 +2,45 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-906 · A query, not its last answer</title>
+<title>LOO-906 · Closing a query</title>
 <style>
-:root{color-scheme:light dark}body{font:16px/1.5 system-ui,sans-serif;margin:0}main{max-width:760px;margin:auto;padding:24px}header,small{opacity:.75;font-size:13px}h1{font-size:28px;line-height:1.2}h2{font-size:20px}table{width:100%;border-collapse:collapse}td,th{text-align:left;vertical-align:top;padding:8px;border-bottom:1px solid #8886}code{overflow-wrap:anywhere}blockquote{margin:16px 0;padding-left:16px;border-left:3px solid #888}li{margin:12px 0}@media(max-width:520px){main{padding:14px}table{font-size:12px}td,th{padding:5px}}
+:root{color-scheme:light dark}body{font:16px/1.5 system-ui,sans-serif;margin:0}main{max-width:760px;margin:auto;padding:24px}header,small{font-size:13px;opacity:.75}h1{font-size:28px;line-height:1.2}h2{font-size:20px}table{width:100%;border-collapse:collapse}td,th{text-align:left;vertical-align:top;padding:8px;border-bottom:1px solid #8886}code{overflow-wrap:anywhere}blockquote{margin:16px 0;padding-left:16px;border-left:3px solid #888}li{margin:12px 0}@media(max-width:520px){main{padding:14px}td,th{padding:5px}table{font-size:12px}}
 </style>
 <main>
-<header>LOO-906 · concept-review · 2026-11-15<br>Sources: scratch/{instant-task-session,desktop-reactivity-feedback,questions}.md; swift/Loopflow/Services/{WorkInteraction,ClientWorkStore,ClientWorkQuery,WorkObservation,RegistryQuery}.swift; swift/LoopflowMac/{WorkModel,WorkProjection}.swift; swift/LoopflowiOS/{TaskListView,RemoteTaskObservation}.swift; shared and host Work interaction tests. Reviewed HEAD: a41877f304.</header>
-<h1>Navigate to a query, not its last answer</h1>
-<p><strong>Next decision:</strong> iterate to implement query destinations and remove raw-plan publication. The existing design settles this; no product choice is open.</p>
-<p><strong>Biggest mismatch:</strong> Complete now publishes through one shared owner on both hosts. Desktop's arbitrary views still carry a server answer in navigation, and post-write refreshes can publish raw plans over projected membership.</p>
+<header>LOO-906 · concept-review · 2026-11-15<br>Sources: scratch/{instant-task-session,questions,desktop-reactivity-feedback}.md; swift/Loopflow/Services/{WorkInteraction,ClientWorkStore,ClientWorkDatabase,ClientWorkQuery}.swift; swift/LoopflowMac/{WorkModel,WorkProjection}.swift; Desktop and mobile interaction tests. Reviewed cfebc7f89a plus the query-destination working tree.</header>
+<h1>Closing a query must release its answer</h1>
+<p><strong>Next direction: iterate to implement.</strong> Bound reusable query answers and replace closed-query effects with persisted reload requirements. The existing design implies this; no product choice is open.</p>
+<p><strong>Biggest mismatch:</strong> query navigation now uses the shared projection, but every visited expression remains in its prepared set. Retired completions can leave exact effects in closed saved queries until those queries receive covering reads.</p>
 <table>
 <tr><th>Action</th><th>Concept</th><th>API / owner</th></tr>
-<tr><td>Open / revisit a view</td><td>Query identity + local destination</td><td>Proposed destination reference; select before I/O</td></tr>
-<tr><td>Render rows / tiles / counts</td><td>One projected answer</td><td>Existing WorkInteraction.open / close leases</td></tr>
-<tr><td>Refresh or receive a write result</td><td>Confirmed facts beneath intent</td><td>Stamped subscription → receive → shared publication</td></tr>
-<tr><td>Complete; select next</td><td>Shared intent; origin navigation</td><td>Existing complete; proposed origin's displayed order</td></tr>
+<tr><td>Open / return</td><td>Query destination</td><td>Existing local selection → WorkInteraction.open</td></tr>
+<tr><td>Read cached content</td><td>Reusable projected answer</td><td>Proposed bounded shared working set</td></tr>
+<tr><td>Close</td><td>Release one mount</td><td>Existing close; proposed eviction of unleased entries</td></tr>
+<tr><td>Complete / recover</td><td>Durable intent and confirming facts</td><td>Existing outbox; proposed transactional closed-base invalidation</td></tr>
 </table>
-<h2>Built → next</h2>
-<p><strong>Built:</strong> synchronous Complete, save-before-send, same-ID adoption, shared-query leases and origin-only navigation on Desktop and phone. Existing checks cover held disk, receipt/list/count permutations, restart and replacement epoch. This review ran no builds or latency trials.</p>
-<p><strong>Proposed:</strong> remove <code>.view(WorkViewPlan)</code>, raw <code>replacePlan</code> publication and the separate refresh reader's authority to draw membership. Keep query identity in history; render its latest projection from the shared owner. Refresh failure retains usable content with its error.</p>
-<blockquote><strong>Proposed usage:</strong> Open a cached view: it selects immediately with pending changes already applied. Complete removes the Task across affected feeds and counts. Back returns to the current query. Refresh never brings back the captured old list.</blockquote>
+<h2>Existing → proposed</h2>
+<p><strong>Existing in the working tree:</strong> destinations hold query identity; stamped subscriptions publish projected membership; Complete publishes before discovery/disk and follows the origin's displayed order. Recorded focused Desktop and iOS checks passed. This review ran no builds or latency trials.</p>
+<p><strong>Proposed:</strong> a mount pins a query entry, not every answer ever visited. Evict unused prepared entries. Resolved effects leave compact reload requirements for closed bases. Reconcile suspended prepared entries before reuse. Keep pending commands, navigation and native workspaces under their existing owners.</p>
+<blockquote><strong>Proposed usage:</strong> Return to a recent view: usable projected content appears while refreshing. Return to an evicted or invalidated view: the same destination selects immediately and loads there. Retry stays in place. Closing never cancels the saved action.</blockquote>
 <table>
-<tr><th>Sequence</th><th>Displayed Work</th><th>Navigation</th></tr>
-<tr><td>Dashboard shows A, C, B; sidebar A, B, C</td><td>3 Tasks</td><td>A selected from Dashboard</td></tr>
-<tr><td>Complete A; disk held</td><td>C, B / 2 across affected queries</td><td>C, following Dashboard order</td></tr>
-<tr><td>Open cached expression; navigate elsewhere</td><td>Same effect on applicable membership</td><td>Latest deliberate selection</td></tr>
-<tr><td>Old refresh / write response arrives</td><td>Accepted facts projected beneath intent</td><td>No reply-driven selection or tile opening</td></tr>
-<tr><td>Refresh fails; restart with saved intent</td><td>Usable projection + error; saved effect restored</td><td>Recovery does not select</td></tr>
+<tr><th>Journey</th><th>Visible result / recovery</th></tr>
+<tr><td>Complete A; list and count open</td><td>A disappears; next Task selected only in the origin.</td></tr>
+<tr><td>Count covers settlement; list is held</td><td>Live list keeps its effect; count does not subtract twice.</td></tr>
+<tr><td>Close the list; completion resolves</td><td>Proposed: atomically invalidate its old base and retain its reload requirement.</td></tr>
+<tr><td>Restart; return to the list</td><td>Saved pending intent is projected, or invalidated content loads until covered. No replay or navigation from a reply.</td></tr>
+<tr><td>Refresh fails with usable warm content</td><td>Keep the projection and Retry. A known-invalid base is not usable.</td></tr>
 </table>
-<details open>
-<summary>Follow the query through</summary>
-<p><strong>Model:</strong> Machine/repository and query identity identify the destination; answers, errors and freshness live outside navigation history. A saved Dashboard retains its identity through expression edits; changed plan coverage is still required. Retained Task/Session destinations stay reachable.</p>
-<p><strong>APIs:</strong> mount every displayed query through the shared owner, including expressions and post-write refreshes. Reuse served subscriptions for stamped answers. A returned command plan or checkpoint cannot certify membership incorporation; never invent a stamp for a one-shot response.</p>
-<p><strong>Persistence and recovery:</strong> reuse confirmed cache, outbox and per-query coverage. Opening a cached query applies effects before display. Closing one shared-query window leaves the other's lease intact. Old epochs cannot authorize replay. Finite closed-query invalidation remains required.</p>
-<p><strong>Ownership:</strong> query freshness does not control selection. Departed readers may warm their own cache under stamp checks, but cannot navigate or present native tiles. Complete takes the originating displayed order, deduplicated by full Work identity; another window keeps its selection.</p>
-<p><strong>Both hosts:</strong> Desktop removes the alternate readers; mobile exercises the same query-open, refresh and recovery semantics through its existing filters. No new mobile Dashboard or tree is proposed. Native input readiness remains separate.</p>
+<details>
+<summary>Follow ownership through storage and execution</summary>
+<p>One shared working set serves both hosts. Live leases pin entries; closed entries may be evicted. Publication work follows that set, not navigation history. Keep confirmed bases, outbox, incorporation and scoped reload requirements in the existing SQLite transaction owner. Compact requirements by Machine/epoch/schema, repository, effect and declared domains, rather than retaining one per completion.</p>
+<p>Do not remove the current retirement transfer before transactional invalidation replaces it. Preserve unresolved recovery and unseen creation results independently. Closing or eviction never infers refusal, releases an unresolved execution lane, acknowledges a result, resends a command or disposes a native workspace. Existing broad requirements keep their conservative meaning.</p>
 </details>
 <h2>Questions for the next implementation check</h2>
 <ol>
-<li>Can cached expressions, saved Dashboards and post-write refreshes all render exclusively through the shared owner?<br><strong>1a.</strong> Demonstrated. <strong>1b.</strong> Cut over and delete the raw readers. Current direction: 1b.</li>
-<li>Does Complete select the next Task in the originating displayed order when it differs from the sidebar?<br><strong>2a.</strong> Demonstrated on production actions. <strong>2b.</strong> Pass the origin's order and exercise the counterexample. Current direction: 2b.</li>
-<li>Do reordered replies, refresh failure, same-query window close and restart retain projected membership without taking navigation?<br><strong>3a.</strong> Demonstrated on both hosts. <strong>3b.</strong> Extend acceptance through the migrated readers.</li>
+<li>Does closing one of two same-query mounts leave the other current?<br><strong>1a.</strong> Keep this covered behavior. <strong>1b.</strong> Repair any regression.</li>
+<li>Can a closed query release exact resolved effects while retaining its required confirmation?<br><strong>2a.</strong> Demonstrated through restart and reordered replies. <strong>2b.</strong> Implement atomic invalidation and reload. Current direction: 2b.</li>
+<li>Do many closed expressions and repeated completions leave bounded reusable entries and compact obligations?<br><strong>3a.</strong> Demonstrated without weakening recovery. <strong>3b.</strong> Bound retention and exercise the counterexample. Current direction: 3b.</li>
 </ol>
-<p><small>Headless outcome: design changed → iterate to implement. Other mutation families, creation and retained-occurrence migration, resource recovery, finite invalidation and native benchmarks remain open. Loop-or-next determines the next step. No code change, publish or merge.</small></p>
+<p><small>Headless outcome: design changed → iterate to implement. Retain refusal, supersession, epoch and origin-order coverage. Launch, other mutation families, normalized provenance, retained native content and valid latency measurements remain in scope. No publish or merge.</small></p>
 </main>
 </html>

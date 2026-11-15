@@ -100,6 +100,8 @@ public actor ClientWorkStore {
         return publication
     }
 
+    public func resolveMachine() async throws -> String { try await currentMachine() }
+
     public func isRecovering(_ id: String) -> Bool { active.contains(id) }
 
     public func pending() throws -> [SubmittedOperation] { try disk().pending() }

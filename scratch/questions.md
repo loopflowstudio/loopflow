@@ -50,3 +50,10 @@
   closed bases remains migration work.
   New completion reload requirements are scoped to repository and declared effect;
   preexisting broad requirements retain their conservative meaning until epoch reset.
+
+- Query destinations retain the requested expression when canonical resolution is
+  pending. A saved query opened through an expression retains that identity in
+  history; a saved Dashboard selected by ID keeps its ID. Deferred Machine
+  discovery binds an unsaved Complete through the original store endpoint before
+  saving; it never retargets a saved command. Prepared query entries now remain
+  with the shared owner across close/reopen; bounded eviction remains open.

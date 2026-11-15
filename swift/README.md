@@ -1179,9 +1179,12 @@ mounted queries without another server frame. Save failure retains the original
 command for retry. Shared query tests run on both targets, including held disk,
 reply permutations, restart and replacement epochs. Normalized cross-query facts,
 finite closed-query invalidation and the remaining mutation families are unfinished.
-Desktop's unsaved Dashboard and `replacePlan` readers still bypass this owner;
-cutting those readers over and exposing displayed projection in inspection remain
-required before the cross-platform migration is complete.
+Desktop query destinations keep the original Machine, repository and expression,
+not a captured plan. Unsaved queries and saved Dashboard refreshes mount shared
+query leases; stamped replies update their confirmed bases before projection.
+Post-write refreshes request subscription freshness rather than publishing a raw
+plan. Navigation history returns to the query's current projection. Projection in
+inspection and the remaining migration work above are still unfinished.
 
 Terminal recovery must preserve the exact owner, draft and newer control claims.
 Opening shows **Opening… Input paused** through attachment and native readiness;
@@ -1355,6 +1358,12 @@ lf desktop view 'query:attention'             # open a saved one
 ```
 
 Dashboards open only through `lf desktop`; the sidebar, Cmd-K and menus offer none.
+Opening selects the query immediately and shows its cached projection while it
+refreshes. A new query shows loading in that destination. Back and Forward return
+to the query with current pending changes. Failed refreshes keep usable content
+beside **Retry**. Completing a Task follows that view's displayed occurrence order,
+with repeated occurrences counted once.
+
 Save an open query to name, pin and arrange it. Edit changes only that Dashboard;
 repository and Wave conversations keep their normal views. Unstarted Tasks show
 **Start** and their brief without opening a Session. Tasks appear side by side

@@ -457,6 +457,10 @@ existing bounded input owners: no offline keystroke queue or automatic resend.
 - Removed in this cut: `Selection::expand`'s snapshot-only interpreter. Rust now
   compiles the finite membership program and evaluates that same program. Keep
   selection identity, scope/name resolution, unavailable evidence and server order.
+- Removed in this pass: `.view(WorkViewPlan)` navigation, `replacePlan`,
+  one-shot `openView`/`refreshSelectedView` publication, and Complete's pre-publication
+  Machine/mount refusal. Query identity, subscription leases and shared projection
+  replace these paths; keep cached content, native ownership and error/Retry.
 - Removed: Desktop Complete's checkpoint/action path and async button wrappers;
   phone stream-owned displayed rows and unbound Task navigation links. Shared
   intent, leases and outbox publications replace them; keep generic command
@@ -564,84 +568,18 @@ journey/platform, endpoints reported separately. Nothing here is measured yet.
 
 ## Implementation direction (2026-11-15)
 
-### One intent through the synchronous-to-durable handoff
+### Synchronous intent and effect contracts
 
-Built at `a41877f304` (see Current implementation cut). Full direction text:
-`052baca0dc:scratch/instant-task-session.md`. Named tests cover held disk and
-network, every receipt/list/count order, save failure then retry, replacement
-epoch after restart, and two windows/feeds on each host
-(`ClientWorkQueryTests`, `DesktopWorkInteractionTests`,
-`MobileWorkInteractionTests`). No test is named for an older prepared base
-arriving between gesture and adoption, closing one of two same-query mounts, or
-rapid manual navigation during save; treat those as unexercised.
-
-Desktop refuses Complete with "Waiting for the original Machine" when no
-observing Machine is known, and `mountQueries` can throw before publication;
-both happen before the synchronous publication the contract requires.
-
-Full review wording: `a127084469:scratch/instant-task-session.md`. The
-contracts below remain acceptance requirements through the cutover.
-
-- A reload floor prevents reuse of an obsolete confirmed base; it is not the
-  displayed result of Complete. Keep a lagging active base usable only beneath
-  its ordered effects until replacement. An active query keeps its effect until
-  a covering base arrives; retirement cannot delete the only removal layer and
-  blank the active list. Closed queries may instead be invalidated, allowing
-  retirement without reopening them. Persist these obligations in the existing
-  cache/outbox owner; do not relabel a projection as confirmed.
-  Replace the broad per-Machine floor with declared query/domain dependencies
-  during cutover, so an unrelated command cannot blank a usable query.
-- Membership includes occurrences, arrangement and counts, not only Task IDs.
-  Evaluate the Rust-produced selection/group/sort plan over projected display
-  facts, then derive visible/suppressed occurrences and totals consistently.
-  Never filter `resolution.members` while leaving `projection.visible`, attention
-  or totals on the old snapshot. A Task composed into two source paths must not
-  be counted twice by a guessed delta. Explicit Task destinations and retained
-  conversations remain reachable when Working membership disappears. If the
-  plan lacks facts for an exact total, retain unknown membership rather than
-  inventing one. Extend shared DTO fixtures for the portable plan vocabulary.
-- Local Complete publishes removal and next/empty navigation together before
-  awaiting the store actor, Machine discovery or disk. Persist that same intent
-  before send; save failure withdraws only its layer and retains a recoverable
-  error. Neither that failure nor any receipt selects again. The asynchronous
-  outbox API alone cannot supply the synchronous gesture contract; both hosts
-  must consume the shared interaction reducer and its projected queries.
-
-Additional cutover counterexample: hold the list, let Complete settle and its
-planning resolve, then retire the command while the list is mounted. The list
-must remain B/count 1, without a waiting screen or stale A, across restart. Repeat
-with a composed Dashboard containing two occurrences of A and with an unrelated
-command advancing a domain the list does not depend on. This extends the existing
-reordered-reading matrix; no native latency result is inferred.
-
-- One command/effect declaration supplies confirming stages, recovery owners and
-  affected query dependencies. A domain declares planning inapplicability;
-  missing required correlation/status stays unavailable. Current status for an
-  exact change never rewrites its original result. Historical diagnostics stay;
-  only their established owner can clear their current action. Unclassified
-  diagnostics and unavailable evidence retain Inspect. Native attachment owns
-  Retry opening for the same Session and input readiness.
-- Make one vertical shared path executable: Complete A, select B, incorporate a
-  count and a list independently. Real query bodies and declarative membership
-  over `selection_states` are required; stamp-only assertions are insufficient.
-  Persist confirmed bases, effect incorporation and result acknowledgment with
-  the command. Neither client adds a local removal set. Recovery never selects.
-- Required sequence: base A/B, count 2 → Complete A/select B, list B/count 1 →
-  count covers settlement while list is held → present/restart → lagging list
-  still projects B → covering list confirms B. Count never subtracts twice.
-  Reverse every receipt/list/count order; retain B throughout. A query opened
-  after submission follows the same dependency rule. Closed bases must be
-  incorporated or invalidated with a persisted reload fence before retirement.
-- Run the supersession matrix above through this same path; replacement epochs
-  retain unanswered commands and presentation acknowledgment.
-- Recover edit A after another edit elsewhere: return its original result, show
-  newer Work facts, and recover only its exact pending planning change. Missing
-  Task rows, unrelated planning, pre-admission caches, no-Graph results, Graph
-  removal, departure/return and native readiness before current Task facts remain
-  launch counterexamples. Attachment failure remains beside receipt recovery.
-
-The usage in Representative timelines stays proposed until both clients consume
-the full shared projection.
+The detailed handoff, effect-stage and reordered-reading requirements remain in
+`cfebc7f89a6c8c5301518a067f9cc3a2e977ee5a:scratch/instant-task-session.md`
+(Implementation direction). Keep these acceptance requirements through subsequent
+cuts: Complete publishes before Machine discovery or disk; save/receipt recovery
+never navigates; settlement, supersession and per-query incorporation remain
+independent. A held list retains its removal after a covering count and command
+retirement, including restart, composed occurrences and unrelated domain writes.
+Required domain correlation stays inspectable when unavailable. A newer Work
+reading cannot replace an earlier command's original outcome. Attachment owns
+input readiness and Retry opening for the same Session.
 
 ### A destination identifies a query, not its last answer
 
@@ -685,13 +623,13 @@ the first displayed frame. Persisted cache identity, plan coverage and outbox
 obligations remain in the existing database, not in a second view cache.
 
 Complete's navigation input is the origin's displayed occurrence order after its
-filter/arrangement, deduplicated by full Work identity. Desktop currently passes
-sidebar order even from other surfaces; replace that assumption at the action
-origin. The shared owner still publishes all affected queries synchronously and
+filter/arrangement, deduplicated by full Work identity. The prior Desktop path
+passed sidebar order even from other surfaces; this pass moves that input to the
+action origin. The shared owner still publishes all affected queries synchronously and
 selects next/empty only in the origin. An explicit retained occurrence may remain
 reachable without remaining in Working membership.
 
-Next implement acceptance: open a cached expression during a held Complete save;
+Query-destination acceptance: open a cached expression during a held Complete save;
 refresh a saved Dashboard after an unrelated write; navigate expression A→B→A
 with replies reordered. In each case A's completed Task stays projected out and
 counts agree until its own covering read, without a selection change from a
@@ -702,35 +640,89 @@ later deliberate navigation. Exercise the same query-open/refresh/recovery rules
 on mobile's existing picker/feed, without adding a Dashboard or tree there.
 Retain the earlier success/refusal/supersession and epoch counterexamples.
 
-This is the next implementation direction, not completion of the full migration.
+This query-destination cut does not complete the full migration.
 Finite closed-query invalidation, exhaustive effect declarations, other mutation
 families, launch/retained-occurrence cutover and valid native measurements remain
 required. Existing skill guidance needs no new rule; proposed usage above belongs
 in host docs when these readers are cut over.
 
+### Closing a view must not keep its whole answer alive
+
+Headless concept-review of `cfebc7f89a` plus the query-destination working tree,
+2026-11-15. The destination cut is present; its recorded focused checks are below.
+This review ran no builds or latency trials. Next implement direction: finish the
+query lifecycle by separating a mounted lease, a reusable prepared answer and a
+durable reload requirement. These are internal ownership distinctions; opening,
+closing and returning remain the only actions people learn. No product choice is
+open.
+
+Proposed usage: returning to a recent query shows usable projected content while
+refreshing. Closing it never cancels a submitted command. After its cached answer
+has been evicted or invalidated, returning selects the same query immediately and
+loads there; it never briefly shows membership known to predate a resolved effect.
+A failed refresh keeps any still-usable projection with Retry. Loading a cold
+invalidated query does not reopen a Task or attach its native Session.
+
+The current shared owner retains every `reads`/`bases` entry after `close`, and
+`presentation` prepares every retained query on each store change. Retirement
+also copies an exact effect into every lagging stored query. This makes work and
+retained effects grow with navigation and completion history. Operation retirement
+alone does not finish the cache lifecycle. The existing fence transfer remains
+necessary until its replacement is transactional; do not simply delete it.
+
+Implement one bounded reusable query working set in the shared owner. Live leases
+pin their entry; unleased entries can be evicted without touching navigation,
+unsaved intent, saved commands or native workspaces. Prepare/publicize only live
+and retained reusable entries, rather than all expressions ever visited. A
+prepared answer includes its incorporated effects and publication generation.
+If store observation is suspended, that answer must be reconciled with current
+cache/outbox state before reuse; it cannot bypass invalidation on first display.
+Avoid a second host cache or an observation task for each closed expression.
+
+In the existing cache/outbox transaction, transfer a resolved effect either to
+an actively retained projected base or to invalidation of a closed base plus its
+scoped reload requirement. Store enough query/plan provenance to distinguish
+these cases. Compact requirements by Machine/epoch/schema, repository, effect
+and declared domains; retained metadata must not grow per completed operation.
+An invalidated base is unavailable until a complete covering reading arrives.
+Keep unresolved domain requests and unseen creation results independently.
+Eviction and close never authorize resend, infer refusal, acknowledge presentation
+or release an unresolved execution lane. Preserve legacy broad floors and all
+saved payloads. Use the existing SQLite owner, not another receipt ledger.
+
+Acceptance on both hosts: close all mounts while save or settlement is held;
+resolve success, refusal or supersession; reopen before a queued publication and
+after restart. Reorder a covering count and lagging list, then change the saved
+plan. No stale row flash, double count delta, lost command or reply-driven
+navigation. Close one of two same-query mounts: the other stays live. Visit and
+close more expressions than the reusable bound, settle repeated completions
+without reopening old queries, and show bounded retained entries/effects with
+eventual operation retirement. Preserve usable warm content on refresh failure,
+original-Machine recovery and replacement-epoch coverage. These are deterministic
+correctness/size checks; native reaction and input readiness still require their
+separate measurements. Existing skills need no new rule; update host usage docs
+when this lifecycle is built.
+
 ## Current implementation cut
 
-This pass connects production Complete on both hosts through shared
-`WorkInteraction`: one main-actor owner per Machine, per-window/feed query leases,
-synchronous membership/count publication and origin-only next/empty navigation.
-The same immutable ID and original destination enter the outbox in gesture order
-before send. Transient effects use the existing membership evaluator; snapshots
-from the disk actor adopt them by ID/publication revision, including retirement
-before first adoption. Store changes repaint mounted queries without another
-server reply. Save failure removes only its unsaved layer, retains its command
-and error, and never navigates. Saved completion recovery starts on mount and
-never silently retargets or replays a dispatched request after epoch replacement.
-The phone now replaces its route rather than stacking obsolete destinations;
-network failure keeps its presentation lease. Pending Complete and Retry appear
-on both hosts. Confirmed DTOs remain separate from presentation.
+Production Complete uses shared `WorkInteraction` on both hosts. This pass cuts
+Desktop expression/history and post-write query refreshes over to mounted stamped
+subscriptions. History holds Machine/repository/expression, never an answer.
+Saved Dashboard destinations keep their saved identity; raw write results request
+freshness without publishing membership. Cache entries prepared by the shared
+owner survive lease close and receive store publications; reopening projects
+pending intent before its first cached frame. Closing a lease never closes another
+mount's publication. A per-mount generation plus task cancellation prevents departed
+readers from presenting native tiles. Cold destinations load locally; refresh
+failure retains usable projection and Retry.
 
-The removed predecessors are Desktop Complete's `performTaskAction`/checkpoint
-path and async button wrappers, and the phone's stream-owned displayed Task list
-and unbound navigation links. Generic checkpoint behavior remains covered through
-Claim; abandonment and creation predecessors on the delete list remain open.
-Two windows can lease the same query; last close drops in-memory preparation,
-leaving the existing persisted obligations intact. Finite invalidation of closed
-query bases is still migration work.
+Complete no longer discovers a Machine or mounts queries before publication.
+An unsaved intent contains immutable payload, ID and submission time; an unknown
+Machine binds through its existing store's endpoint before saving that same
+command. A saved command's destination is never changed. Save failure retains its
+intent for same-ID retry. Navigation uses the originating displayed occurrence
+order, deduplicated by full Work identity. Generic checkpoint behavior and other
+mutation families remain on their existing owners pending the full cutover.
 
 Existing architecture and checks before this pass:
 `052baca0dcb44c83b7c4f830f8c0a86001d3cebe:scratch/instant-task-session.md`.
@@ -742,10 +734,8 @@ lagging lists retain their effects across retirement/restart. No SQL/native
 latency diagnosis follows from these correctness checks.
 
 Remaining: exhaustive effect/dependency declarations and normalized cross-query
-provenance; Desktop unsaved `.view`/`refreshSelectedView` and `replacePlan` readers
-still bypass the shared query owner and can overwrite projected membership;
-finite incorporation/invalidation of closed queries; remaining
-mutation-family recovery and resource lanes (remote/files/config/planning);
+provenance; finite incorporation/invalidation of closed queries; bounded
+prepared-query eviction; remaining mutation-family recovery and resource lanes (remote/files/config/planning);
 creation and retained-occurrence cutover on both clients; projected inspection
 DTO alongside confirmed inspection; historical-restoration epoch reset;
 crash/native acceptance and a valid benchmark baseline. This remains one
@@ -801,6 +791,6 @@ Desktop/iOS query, receipt and recovery passes; Rust operations/schema/DTO passe
 fmt/clippy and multiplatform checks. Archive/documentation checks remain gate-owned.
 
 Current pass checks (2026-11-15; inherited `LF_*` cleared):
-- `swift build --build-tests --package-path swift --jobs 4 -Xswiftc -gnone` + private-Home/network-boundary `swift test --skip-build --disable-sandbox --no-parallel --filter 'ClientWorkQueryTests|taskConfirmationDeadline'`: build, 21 XCTest and 1 Swift Testing passed; gate owns wider Desktop suites.
-- `scripts/test_ios.py -only-testing:LoopflowiOSTests/ClientWorkQueryTests -only-testing:LoopflowiOSTests/MobileTaskCreationTests`: 40 passed, including the production Complete leaf and 18 success/refusal/supersession order cases; disposable Simulator removed.
-- Multiplatform boundaries, `cargo fmt` and `git diff --check`: passed. Rust code is unchanged from `052baca0dc`; its focused checks/clippy remain applicable. Gate owns archive/documentation checks; native latency remains unmeasured.
+- `swift build --build-tests --package-path swift --jobs 4 -Xswiftc -gnone` + private-Home/network-boundary `swift test --skip-build --disable-sandbox --no-parallel --filter 'ClientWorkQueryTests|liveQueriesUseDashboardsWithoutAcquiringWork'`: build, 28 XCTest and 1 Swift Testing (2 cases) passed; gate owns wider Desktop suites.
+- `scripts/test_ios.py -only-testing:LoopflowiOSTests/ClientWorkQueryTests`: 24 passed, including phone filter reopening, shared leases, held discovery/save, restart, receipt/list/count permutations, refusal, supersession and epoch coverage; disposable Simulator removed.
+- Multiplatform boundaries and `git diff --check`: passed. No Rust changes in this pass; earlier focused checks/clippy remain applicable. Gate owns archive/documentation checks. Native latency remains unmeasured.

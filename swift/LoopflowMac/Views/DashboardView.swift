@@ -96,6 +96,7 @@ struct DashboardView: View {
                 }.padding(10)
                 if let error = model.dashboardError ?? model.selectionPlans.errorMessage {
                     Text(error).foregroundStyle(palette.warning).textSelection(.enabled)
+                    Button("Retry") { model.retrySelectedQuery() }
                 }
                 // One line: membership may be incomplete; every reason stays in its help.
                 if let first = plan.resolution.unavailable.first {
@@ -128,9 +129,13 @@ struct DashboardView: View {
                     }.font(.caption).padding(8)
                 }
             } else {
-                ContentUnavailableView("Dashboard unavailable", systemImage: "exclamationmark.triangle",
-                    description: Text(model.selectionPlans.errorMessage ?? "This Dashboard is no longer available."))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if workingTasks ? model.selectionPlans.isLoading : model.queryPlans.isLoading {
+                    ProgressView("Loading Dashboard…").frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ContentUnavailableView("Dashboard unavailable", systemImage: "exclamationmark.triangle",
+                        description: Text(model.queryPlans.errorMessage ?? model.selectionPlans.errorMessage ?? "This Dashboard is no longer available."))
+                    Button("Retry") { model.retrySelectedQuery() }
+                }
             }
         }.padding(10).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).background(palette.surfaceMuted)
             .sheet(isPresented: $editing) {
@@ -210,7 +215,7 @@ struct DashboardTile: View {
                 }.buttonStyle(.plain)
                 Spacer(minLength: 0)
                 if let task {
-                    Menu { TaskActionItems(model: model, task: task.task, wave: task.wave?.wave) }
+                    Menu { TaskActionItems(completionOrder: plan.projection.visible.map(\.work), model: model, task: task.task, wave: task.wave?.wave) }
                         label: { Image(systemName: "ellipsis") }
                         .menuStyle(.button).buttonStyle(.plain).fixedSize().help("Task actions")
                 }

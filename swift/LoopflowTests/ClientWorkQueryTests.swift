@@ -449,6 +449,108 @@ final class ClientWorkQueryTests: XCTestCase {
         return String(decoding: try encoder.encode(query), as: UTF8.self)
     }
 
+    func testQueryReopenAndIndependentLeasesProjectHeldIntentOverOlderPreparedAnswers() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let a = ServedRead.desktopViewGet(directory: "/repo", expression: "state:working")
+        let b = ServedRead.desktopViewGet(directory: "/repo", expression: "state:available")
+        let base = try workingPlan(["a", "b"])
+        let seed = store(directory)
+        _ = try await seed.receivePlans([base], stamp: stamp("a", revision: 6), for: a)
+        _ = try await seed.receivePlans([base], stamp: stamp("b", revision: 6), for: b)
+        let prepared = try await seed.presentation(machine: "machine", queries: [key(a): a, key(b): b])
+        let hold = HeldIntentDisk()
+        let disk = ClientWorkStore(directory: directory, prepareDirectory: { _ in hold.enter() }, machine: { "machine" },
+            read: { _ in "null" }, observe: { _ in ServerWatch(updates: AsyncThrowingStream { _ in }, checkpoint: { _ in }, cancel: {}) },
+            send: { _ in XCTFail("No send while saving") })
+        let owner = WorkInteraction(machine: "machine", store: disk)
+        defer { hold.release(); owner.shutdown() }
+        var first: ProjectedWorkPlan?
+        var second: ProjectedWorkPlan?
+        let firstLease = owner.open(a) { first = $0?.first }
+        _ = owner.open(a) { second = $0?.first }
+        let bLease = owner.open(b) { _ in }
+        owner.apply(prepared)
+        var entered = hold.entered.makeAsyncIterator()
+        _ = await entered.next()
+        var selected: WorkWorkspaceKey? = base.contents[0].work
+        let id = owner.complete(base.contents[0].work, issue: "a", directory: "/repo", selected: selected,
+            visible: base.contents.map(\.work)) { selected = $0 }
+        XCTAssertEqual(selected?.id, "b")
+        selected = WorkWorkspaceKey(repository: base.repository, kind: .task, id: "deliberate")
+        owner.close(firstLease)
+        owner.close(bLease)
+        var reopened: ProjectedWorkPlan?
+        _ = owner.open(b) { reopened = $0?.first }
+        XCTAssertEqual(reopened?.taskCount, 1) // First cached publication, before the actor can answer.
+        owner.apply(prepared) // Prepared before the gesture, delivered after it.
+        XCTAssertEqual(first?.taskCount, 1)
+        XCTAssertEqual(second?.taskCount, 1)
+        XCTAssertEqual(reopened?.projection.visible.map(\.work.id), ["b"])
+        XCTAssertEqual(selected?.id, "deliberate")
+        hold.release()
+        await owner.persistPending()
+        let records = try await disk.pending()
+        XCTAssertEqual(records.map(\.id), [id])
+        XCTAssertEqual(second?.taskCount, 1)
+    }
+
+    func testMachineDiscoveryFailureRetainsTheUnsavedIntentForSameIdentityRetry() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fault = IntentDiskFault()
+        let disk = ClientWorkStore(directory: directory, machine: { try fault.check(); return "machine" },
+            read: { _ in "null" }, observe: { _ in ServerWatch(updates: AsyncThrowingStream { _ in }, checkpoint: { _ in }, cancel: {}) },
+            send: { _ in })
+        let owner = WorkInteraction(machine: nil, store: disk)
+        defer { owner.shutdown() }
+        let a = WorkWorkspaceKey(repository: "repo", kind: .task, id: "a")
+        let b = WorkWorkspaceKey(repository: "repo", kind: .task, id: "b")
+        var selected: WorkWorkspaceKey? = a
+        let id = owner.complete(a, issue: "a", directory: "/repo", selected: a, visible: [a, b]) { selected = $0 }
+        XCTAssertEqual(selected, b)
+        await owner.persistPending()
+        XCTAssertEqual(owner.failures.map(\.id), [id])
+        XCTAssertNil(owner.failures.first?.record)
+        XCTAssertFalse(owner.isCompleting(issue: "a", directory: "/repo"))
+        selected = a
+        fault.recover()
+        owner.retry(id)
+        await owner.persistPending()
+        let records = try await disk.pending()
+        XCTAssertEqual(records.map(\.id), [id])
+        XCTAssertEqual(records.first?.destination, "machine")
+        XCTAssertEqual(selected, a)
+    }
+
+    func testCompletePublishesBeforeMachineDiscoveryAndSavesTheSameIdentity() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let discovery = HeldIntentMachine()
+        let disk = ClientWorkStore(directory: directory, machine: { await discovery.read() }, read: { _ in "null" },
+            observe: { _ in ServerWatch(updates: AsyncThrowingStream { _ in }, checkpoint: { _ in }, cancel: {}) }, send: { _ in })
+        let owner = WorkInteraction(machine: nil, store: disk)
+        defer { owner.shutdown() }
+        let a = WorkWorkspaceKey(repository: "repo", kind: .task, id: "a")
+        let b = WorkWorkspaceKey(repository: "repo", kind: .task, id: "b")
+        var selected: WorkWorkspaceKey? = a
+        let id = owner.complete(a, issue: "a", directory: "/repo", selected: a, visible: [a, b]) { selected = $0 }
+        XCTAssertEqual(selected, b)
+        XCTAssertTrue(owner.isCompleting(issue: "a", directory: "/repo"))
+        var entered = discovery.entered.makeAsyncIterator()
+        _ = await entered.next()
+        XCTAssertNil(owner.machine)
+        owner.bindMachine("machine")
+        XCTAssertTrue(owner.isCompleting(issue: "a", directory: "/repo"))
+        selected = a
+        await discovery.release()
+        await owner.persistPending()
+        let records = try await disk.pending()
+        XCTAssertEqual(records.map(\.id), [id])
+        XCTAssertEqual(records.first?.destination, "machine")
+        XCTAssertEqual(selected, a)
+    }
+
     func testCompletePublishesAndNavigatesWhileDiskAndNetworkAreHeld() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -464,20 +566,20 @@ final class ClientWorkQueryTests: XCTestCase {
         let owner = WorkInteraction(machine: "machine", store: disk)
         defer { hold.release(); owner.shutdown() }
         var first: [ProjectedWorkPlan] = []
-        let lease = try owner.open(query) { first = $0 ?? [] }
+        let lease = owner.open(query) { first = $0 ?? [] }
         owner.apply(prepared)
         var entered = hold.entered.makeAsyncIterator()
         _ = await entered.next() // The store actor is now blocked opening disk.
         var selected: WorkWorkspaceKey? = base.contents[0].work
         let work = try XCTUnwrap(selected)
         let visible = base.contents.map(\.work)
-        let id = try owner.complete(work, issue: "a", directory: "/repo", selected: selected, visible: visible) { selected = $0 }
+        let id = owner.complete(work, issue: "a", directory: "/repo", selected: selected, visible: visible) { selected = $0 }
         XCTAssertEqual(selected?.id, "b")
         XCTAssertEqual(first.first?.projection.visible.map(\.work.id), ["b"])
         XCTAssertEqual(first.first?.taskCount, 1)
         XCTAssertEqual(first.first?.confirmed, base)
         var second: [ProjectedWorkPlan] = []
-        let secondLease = try owner.open(query) { second = $0 ?? [] }
+        let secondLease = owner.open(query) { second = $0 ?? [] }
         XCTAssertEqual(second.first?.taskCount, 1, "Another mounted feed needs no new Machine frame")
         owner.close(lease)
         owner.apply(prepared) // A prepared base crosses the gesture/save boundary.
@@ -513,14 +615,14 @@ final class ClientWorkQueryTests: XCTestCase {
             let count = ServedRead.desktopViewGet(directory: "/repo", expression: "state:working")
             var shown: [ProjectedWorkPlan] = []
             var counted: [ProjectedWorkPlan] = []
-            _ = try owner.open(list) { shown = $0 ?? [] }
-            _ = try owner.open(count) { counted = $0 ?? [] }
+            _ = owner.open(list) { shown = $0 ?? [] }
+            _ = owner.open(count) { counted = $0 ?? [] }
             let base = try workingPlan(["a", "b"])
             try await owner.receive([base], stamp: stamp("list", revision: 6), for: list)
             try await owner.receive([base], stamp: stamp("count", revision: 6), for: count)
             var selection: WorkWorkspaceKey? = base.contents[0].work
             var navigations = 0
-            let id = try owner.complete(base.contents[0].work, issue: "a", directory: "/repo", selected: selection,
+            let id = owner.complete(base.contents[0].work, issue: "a", directory: "/repo", selected: selection,
                 visible: base.contents.map(\.work)) { selection = $0; navigations += 1 }
             XCTAssertEqual(shown.first?.taskCount, 1)
             XCTAssertEqual(counted.first?.taskCount, 1)
@@ -577,10 +679,10 @@ final class ClientWorkQueryTests: XCTestCase {
         let owner = WorkInteraction(machine: "machine", store: disk)
         defer { owner.shutdown() }
         var shown: [ProjectedWorkPlan] = []
-        _ = try owner.open(query) { shown = $0 ?? [] }
+        _ = owner.open(query) { shown = $0 ?? [] }
         owner.apply(prepared)
         var selection: WorkWorkspaceKey? = base.contents[0].work
-        let failed = try owner.complete(base.contents[0].work, issue: "a", directory: "/repo", selected: selection,
+        let failed = owner.complete(base.contents[0].work, issue: "a", directory: "/repo", selected: selection,
             visible: base.contents.map(\.work)) { selection = $0 }
         await owner.persistPending()
         await owner.refreshFromStore()
@@ -589,19 +691,19 @@ final class ClientWorkQueryTests: XCTestCase {
         XCTAssertEqual(owner.failures.first?.id, failed)
         XCTAssertEqual(selection?.id, "b")
         fault.recover()
-        _ = try owner.complete(base.contents[1].work, issue: "b", directory: "/repo", selected: selection,
+        _ = owner.complete(base.contents[1].work, issue: "b", directory: "/repo", selected: selection,
             visible: base.contents.map(\.work)) { selection = $0 }
         XCTAssertEqual(shown.first?.projection.visible.map(\.work.id), ["a"])
         await owner.persistPending()
         XCTAssertEqual(shown.first?.taskCount, 1)
         let retained = try XCTUnwrap(owner.failures.first { $0.id == failed })
-        XCTAssertEqual(retained.record.destination, "machine")
+        XCTAssertEqual(retained.record?.destination, "machine")
         owner.retry(failed)
         XCTAssertEqual(shown.first?.taskCount, 0)
         await owner.persistPending()
         let saved = try await disk.pending()
         XCTAssertEqual(saved.count, 2)
-        XCTAssertEqual(saved.last?.payload, retained.record.payload)
+        XCTAssertEqual(saved.last?.payload, retained.record?.payload)
         XCTAssertEqual(selection?.id, "a", "Retry and save failure cannot navigate again")
     }
 
@@ -615,10 +717,10 @@ final class ClientWorkQueryTests: XCTestCase {
         defer { owner.shutdown() }
         let query = ServedRead.viewSelect(expression: "state:working")
         var shown: [ProjectedWorkPlan] = []
-        _ = try owner.open(query) { shown = $0 ?? [] }
+        _ = owner.open(query) { shown = $0 ?? [] }
         let base = try workingPlan(["a", "b"])
         try await owner.receive([base], stamp: stamp("list", revision: 6), for: query)
-        let id = try owner.complete(base.contents[0].work, issue: "a", directory: "/repo", selected: nil,
+        let id = owner.complete(base.contents[0].work, issue: "a", directory: "/repo", selected: nil,
             visible: base.contents.map(\.work)) { _ in XCTFail("An unselected Complete cannot navigate") }
         await owner.persistPending()
         var observing = server.observations.makeAsyncIterator()
@@ -635,7 +737,7 @@ final class ClientWorkQueryTests: XCTestCase {
             observe: { replacementServer.observe($0) }, send: { replacementServer.send($0) })
         let restarted = WorkInteraction(machine: "machine", store: replacement)
         defer { restarted.shutdown() }
-        _ = try restarted.open(query) { shown = $0 ?? [] }
+        _ = restarted.open(query) { shown = $0 ?? [] }
         var reopened = replacementServer.observations.makeAsyncIterator()
         _ = await reopened.next()
         for await _ in await replacement.changes() {
@@ -708,4 +810,17 @@ private final class HeldCompletionMachine: @unchecked Sendable {
         lock.withLock { current = frame; for watch in watches.values { watch.yield(frame) } }
     }
     func send(_ data: Data) { lock.withLock { sent.append(data) }; sending.yield(()) }
+}
+
+private actor HeldIntentMachine {
+    nonisolated let entered: AsyncStream<Void>
+    private let entering: AsyncStream<Void>.Continuation
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var ready = false
+    init() { (entered, entering) = AsyncStream.makeStream() }
+    func read() async -> String {
+        if !ready { await withCheckedContinuation { continuation = $0; entering.yield(()) } }
+        return "machine"
+    }
+    func release() { ready = true; continuation?.resume(); continuation = nil }
 }

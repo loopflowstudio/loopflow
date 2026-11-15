@@ -345,10 +345,15 @@ final class WorkNavigation {
     var expandedNotices: Set<String> = []
     /// Graph processes whose graph and steps are open, keyed by Graph process.
     var expandedGraphProcesses: Set<String> = []
+    struct QueryDestination: Equatable {
+        let machine: String?
+        let repository: String
+        let expression: String
+    }
     enum Destination: Equatable {
         case work(WorkReference?)
         case dashboard(String)
-        case view(WorkViewPlan)
+        case view(QueryDestination)
         /// The default Dashboard: the Working Tasks plan as a grid of slots.
         case workingTasks
         /// One Dashboard member shown as full Work; the trail returns through its Dashboard.
@@ -424,6 +429,17 @@ final class WorkNavigation {
 
     func resizeSidebar(_ width: CGFloat, availableWidth: CGFloat) {
         sidebarWidth = min(600, max(240, min(width, availableWidth - 360)))
+    }
+
+    /// Resolve an initially unknown local endpoint without recording a new visit.
+    func bindQueryDestinations(to machine: String) {
+        func bind(_ destination: Destination) -> Destination {
+            guard case .view(let query) = destination, query.machine == nil else { return destination }
+            return .view(QueryDestination(machine: machine, repository: query.repository, expression: query.expression))
+        }
+        destination = bind(destination)
+        backStack = backStack.map(bind)
+        forwardStack = forwardStack.map(bind)
     }
 
     /// Selections and visits from another Machine name no Work on this one.

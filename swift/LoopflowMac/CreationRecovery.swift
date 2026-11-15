@@ -20,10 +20,19 @@ extension ClientWorkStore {
 
 @MainActor
 extension WorkInteraction {
-    private static var machines: [String: WorkInteraction] = [:]
+    private static var machines: [String?: WorkInteraction] = [:]
 
-    static func local(_ machine: String) -> WorkInteraction {
+    static func local(_ machine: String?) -> WorkInteraction {
         if let owner = machines[machine] { return owner }
+        if let machine, let owner = machines.values.first(where: { $0.machine == machine }) {
+            machines[machine] = owner
+            return owner
+        }
+        if let machine, let owner = machines[nil], owner.machine == nil {
+            owner.bindMachine(machine)
+            machines[machine] = owner
+            return owner
+        }
         let owner = WorkInteraction(machine: machine, store: .shared)
         machines[machine] = owner
         return owner

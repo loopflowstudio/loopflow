@@ -587,9 +587,7 @@ empty Busy answer, rather than restoring rows from its older Machine body.
 Native attachment/location diagnostics do not mean missing content or invalidate
 an exact count. Prepared renderings stay off the main actor for cached reads.
 
-The latest iteration calls for this prerequisite before the dynamic/Move cut;
-the dynamic cut below supersedes fixed candidates and stamp-based retention. The three product choices,
-valid native latency baseline and gate-owned nextest LEAK remain open.
+The dynamic cut below replaced fixed candidates and stamp-based retention.
 
 
 ## Current implementation cut
@@ -665,8 +663,13 @@ was 2,848,480 bytes before ancestor fixtures were added. These are CPU/wall redu
 measurements on the active host, not native paint/input latency or a valid quiet-host
 baseline. Raw samples: `scratch/dynamic-manifest-measurements.json`.
 
-Prior prerequisite runs and the native-diagnostic counterexample remain at
-`5c958398a6de:scratch/instant-task-session.md`.
+Acceptance map (`ClientWorkQueryTests`): A→B→C, two clients, stale readings,
+offline restart (`testDynamicTwoClientsConverge…`); omitted destination,
+retirement, restart (`testDynamicMoveIntoOmittedDestination…`); later navigation
+offline (`testDynamicMovePublishesBothWindows…`); Complete→newer Reopen across
+queries, retirement, restart (`testDerivedAnswerUsesIncorporatedReopen…`);
+reconnect (`testDerivedCoveragePublishesDisconnect…`). Not covered: Complete→Reopen
+across two clients; Move into an unresolved-membership destination (full reducer). Prior runs: `5c958398a6de:scratch/instant-task-session.md`.
 
 - `swift build --build-tests --package-path swift --jobs 4`: passes; gate owns the wider app matrix.
 - `scripts/test_desktop.sh --skip-build --filter 'ClientWorkQueryTests/testDynamic|ClientWorkQueryTests/testField|ClientWorkQueryTests/testDerived|ClientWorkQueryTests/testDesktopMove|ClientWorkQueryTests/testLaterSettlement|ClientWorkQueryTests/testCompletionIncorporation|ClientWorkQueryTests/testDefiniteRefusal|ClientWorkQueryTests/testProductionIntent|ClientWorkQueryTests/testHeldList'`: 31 pass, 1 opt-in measurement skipped; that measurement ran separately with 21 recorded samples. Content/field EXPLAIN checks use indexes at 10k rows.

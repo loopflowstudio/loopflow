@@ -1329,6 +1329,15 @@ fn server_close_replaced_reattaches_by_session_then_finished_stops() {
         r#"#!/bin/sh
 if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
 stty -echo < /dev/tty
+native=
+previous=
+for argument in "$@"; do
+    case "$previous" in --session-id|--resume) native="$argument"; break;; esac
+    previous="$argument"
+done
+[ -n "$native" ] || exit 2
+mkdir -p "$CLAUDE_CONFIG_DIR/projects/fixture"
+printf '%s\n' '{"type":"user","userType":"external","message":{"content":"Continue the same conversation"}}' > "$CLAUDE_CONFIG_DIR/projects/fixture/$native.jsonl"
 printf '%s:%s:%s\n' "$$" "$LF_CAPTURE_KEY" "$*" >> "$HOME/launches"
 printf 'ready\n'
 read -r answer < /dev/tty
@@ -1337,7 +1346,9 @@ printf '%s\n' "$answer" >> "$HOME/answers"
     );
     let launch = |args: &[&str]| {
         let mut command = fixture.command(args);
-        command.env("PATH", &path);
+        command
+            .env("PATH", &path)
+            .env("CLAUDE_CONFIG_DIR", fixture.home.path().join("claude"));
         Terminal::spawn_with_placement(command, Some(true))
     };
     let mut first = launch(&["-a", "claude", "resume"]);
@@ -1356,6 +1367,7 @@ printf '%s\n' "$answer" >> "$HOME/answers"
     let next = fixture
         .command(&["session", "new", &session, "--prepare", "--json"])
         .env("PATH", &path)
+        .env("CLAUDE_CONFIG_DIR", fixture.home.path().join("claude"))
         .output()
         .unwrap();
     assert!(next.status.success(), "{next:?}");

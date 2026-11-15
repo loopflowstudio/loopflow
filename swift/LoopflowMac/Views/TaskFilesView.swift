@@ -624,8 +624,7 @@ private struct TaskFileDiffView: View {
                     if review.diff.files.isEmpty {
                         ReviewNotice(text: "No changes in \(review.path)")
                     }
-                    ReviewStream(store: store, files: review.diff.files,
-                                 split: store.reviewLayout == .split && width >= ReviewLayoutPicker.splitWidth)
+                    ReviewStream(store: store, files: review.diff.files, split: store.readsSplit(width: width))
                 }
             }
             .onGeometryChange(for: CGFloat.self, of: \.size.width) { width = $0 }

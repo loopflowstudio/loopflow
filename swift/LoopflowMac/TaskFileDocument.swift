@@ -796,6 +796,10 @@ final class TaskFilesStore {
 
     enum ReviewLayout: String, CaseIterable { case unified = "Unified", split = "Side by side" }
 
+    /// Side by side needs a wide pane; a narrower one reads unified.
+    static let splitWidth: CGFloat = 640
+    func readsSplit(width: CGFloat) -> Bool { reviewLayout == .split && width >= Self.splitWidth }
+
     func loadReview() async {
         if changes == nil { await refreshChanges() }
         reviewGeneration += 1

@@ -16,7 +16,6 @@ struct TaskChangesView: View {
     @State private var width: CGFloat = 0
 
     private var prURL: URL? { task?.pr?.publication?.github?.url }
-    private var split: Bool { store.reviewLayout == .split && width >= ReviewLayoutPicker.splitWidth }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -181,7 +180,7 @@ struct TaskChangesView: View {
             if let focused = store.focusedPath {
                 ReviewNotice(text: "Showing \(focused) · \(review.files.count - 1) other files hidden")
             }
-            ReviewStream(store: store, files: files, split: split)
+            ReviewStream(store: store, files: files, split: store.readsSplit(width: width))
         } else if let error = store.reviewError {
             ContentUnavailableView("Comparison unavailable", systemImage: "doc", description: Text(error))
                 .padding(.vertical, 24)

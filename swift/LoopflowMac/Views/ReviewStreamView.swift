@@ -298,9 +298,7 @@ struct ReviewLayoutPicker: View {
             ForEach(TaskFilesStore.ReviewLayout.allCases, id: \.self) { Text($0.rawValue).tag($0) }
         }
         .pickerStyle(.menu).labelsHidden().fixedSize()
-        .help(width < ReviewLayoutPicker.splitWidth ? "Side by side needs a wider pane" : "Unified or side by side")
+        .help(width < TaskFilesStore.splitWidth ? "Side by side needs a wider pane" : "Unified or side by side")
     }
-
-    static let splitWidth: CGFloat = 640
 }
 #endif

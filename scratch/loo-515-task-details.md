@@ -147,7 +147,7 @@ Separate Brief/PR panes (violates LOO-497's one Files tool), PR as its own page
 
 Done: `TaskPullRequestView`, `GitHubPullRequestFile`, `PullRequestStore` file
 state, the published-diff test, the mixed page/tab strip, the navigator footer,
-the navigator's `Changed files` section (`showsChanges`, `changedPaths`).
+the navigator's `Changed files` section, Files' patch renderer (`TaskPatch*`).
 
 ## Forbidden outcomes
 

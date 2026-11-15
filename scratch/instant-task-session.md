@@ -114,9 +114,10 @@ under Proposed contracts through Opening another query. Live requirements:
   `task.completion_requested` confirms intent; only `task.completed` confirms
   removal. `task.filed` binds Task/Session without proving admission or input.
   Provider/filesystem/planning readiness cannot borrow a SQLite fence.
-- In the current query-local implementation, apply an ordered effect independently
-  until its complete reading covers the confirming stage's fence. The next cut
-  replaces that criterion with the field/answer distinction below. A covering count cannot discharge
+- Field incorporation and derived answers (below) now decide visible membership
+  for fixed programs; stamp-only effect retention (`WorkQueryEffect.covered`,
+  `effectsCover`) still survives for retirement/reload and goes with the dynamic
+  membership cut. A covering count cannot discharge
   a held list; a fresh query cannot subtract twice while another remains behind.
   Partial pages, unrelated domains, native mounts and command return don't
   establish incorporation. Query identity/plan changes invalidate prior coverage.
@@ -484,24 +485,10 @@ normalized parent alone cannot put a Task into a destination whose compiled
 program omitted its identity. No new product concept or answer is needed for
 that correction; the recorded disconnected-edit “1a” already includes Move.
 
-Keep one authored membership program over the scoped candidate manifest and
-normalized fields, evaluated by the existing query owner on both hosts. Replace
-fixed dynamic leaves and the lifecycle-only effect shape together: a Move writes
-parent intent, not a synthetic lifecycle state. Explicit Work leaves remain fixed.
-Derived coverage must include parent/ancestor dependencies and candidate/content
-coverage, including Tasks that did not occur in the destination's Machine body.
-Publish source, destination and counts from that same evaluation; absent real
-content makes an answer incomplete rather than fabricating a Task or exact zero.
-Keep stable authored paths, shared/interleaved order and hidden occurrences.
-
-Remove stamp-only effect retention and the arbitrary revision shortcut with their
-callers in this cut. An absorbed field stage stays absorbed through retirement,
-close and restart; an effect's fence cannot certify unrelated changes at an older
-query's reload floor. For example, a held Wave B answer plus a Complete receipt
-at a later planning revision cannot prove whether a different Task moved into B.
-Use the scoped manifest/field/dependency proof or retain an unavailable base under
-its floor. Never turn missing content into a retained full-command lifecycle.
-Receipt uncertainty continues to recover the original ID independently.
+The Dynamic membership, Move and Retirement contracts above hold. One more
+case: a held Wave B answer plus a Complete receipt at a later planning revision
+cannot prove whether a different Task moved into B; an effect's fence never
+certifies unrelated changes at an older query's reload floor.
 
 Show next on Desktop and iOS: offline Move A→B updates both cached lists before
 save; a confirmed newer C wins over held A/B answers in either arrival order.

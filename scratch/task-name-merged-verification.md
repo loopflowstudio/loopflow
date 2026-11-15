@@ -44,6 +44,20 @@ change (`scratch/concept-review.html`).
 - `scripts/test_desktop.sh --skip-build --filter WorkNavigationTests/newSessionFailureKeepsItsTask`: passed, 1 test.
 - `uv run python scripts/check_swift_multiplatform_boundaries.py`: passed.
 
+## Compression
+
+Delete — do not maintain: no remaining targets. The shared deadline and polling
+loops are already removed. Keep the local Observation wait: both attempts await
+the originating owner's settlement, including its error update, without adding
+production completion hooks. No further code reduction; no tests rerun.
+
+- `lf context`: memory 15,695/16,000 tokens, 74,251/131,072 bytes; scratch within both limits.
+- `git diff --check`: passed.
+
+## QA (test-only)
+
+- Branch: `--skip-build` focused run passed. Mutation `catch {}` failed at line 782 in about 1 s. Mutation dropping the settlement `defer` hung until the 300 s per-test limit (exit status not captured). Clean rebuild then passed again. Details in `scratch/qa.html`.
+
 ## Remaining
 
 Gate and publish the fix-forward as a new PR (keep #1943 as history), then

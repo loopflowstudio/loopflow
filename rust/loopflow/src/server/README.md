@@ -234,8 +234,15 @@ Delivery is `queued`, `dispatched`, `finished` or `uncertain`; historical creati
 rows without an envelope are `untracked`. A duplicate reads the same outcome and
 never generically dispatches a sent command again. Adopted creations consult their
 existing Complete/Continue/Inspect recovery rules; only a domain-proven continuation
-can resume after dispatch. Server exit leaves other operations for domain inspection.
-There is no generic retry of uncertain effects.
+can resume after dispatch. Completion continues only its saved domain request;
+reopening or requesting completion again cannot authorize replay of that request.
+Settlement records `task.completed` for every receipt waiting on that exact request,
+including when a periodic check settles it after the original worker exits.
+Completion and reopen recover their original committed Task result after a lost
+reply, even if the Task has since changed. Later failures remain in `error`: the
+recovered Task result does not certify cleanup or planning delivery. Other sent
+commands remain inspectable unless their domain authorizes continuation. There is
+no generic retry of uncertain effects.
 
 `commits` contains semantic stages with resource IDs, an authoritative result and
 Machine/epoch/schema/domain revision fences written in the domain transaction.

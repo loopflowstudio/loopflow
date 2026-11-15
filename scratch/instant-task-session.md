@@ -1,6 +1,6 @@
 # LOO-906: immediate interactions across Desktop and mobile
 
-Implementation continues 2026-11-15 from checkpoint `c513f4d7e7` on origin/main
+Implementation continues 2026-11-15 from checkpoint `aeb4ed3b2b` on origin/main
 `19872301e3`. Supersedes the Desktop-only delivery
 boundary. No shipping or merge decision is recorded. Placement remains this Task;
 no Wave is selected.
@@ -310,6 +310,52 @@ This refines the existing cache/overlay and stage-fence design. It introduces no
 open product choice. Implement domain recovery and effect/stage coverage before
 cutting both clients over; keep the recorded launch counterexamples intact.
 
+### Superseding an intent must resolve its effect
+
+Next implement direction: a domain request can end without producing its intended
+effect. Record that resolution in the existing receipt owner, separately from
+command delivery and from successful commits. In particular, withdrawing a saved
+completion request must not leave its optimistic removal and resource lane pending
+forever. This follows the existing newer-facts/rebase contract; it introduces no
+new product choice or cancellation control.
+
+Concrete recovery: Complete A hides its row and selects B. While settlement is
+held, Reopen from another client or the CLI withdraws A's exact saved request.
+The withdrawing domain transaction records supersession for that request's
+subscribers, with its replacement-fact fence. A covering read restores A from
+the latest base; B stays selected. A late settler cannot complete the withdrawn
+request. If completion committed before Reopen, retain that original commit and
+result instead; the newer covering facts show Reopen. Neither path repeats Complete
+or borrows a later completion's result.
+
+Extend the effect/stage registry and Rust/Swift receipt contract with typed domain
+resolutions for committed, definitely refused and superseded effects, alongside
+pending/uncertain recovery. Keep them in the one receipt owner. A generic error,
+missing request, current Task status or `delivery=finished` is insufficient to
+infer a resolution. Every writer that withdraws or replaces a domain request must
+record it in the same transaction, including CLI and periodic writers. Historical
+rows without that record stay inspectable unless domain recovery can establish
+the exact outcome. Extend the single draft migration and cross-language fixtures.
+
+Persist each effect's resolution and per-query incorporation with the confirmed
+cache. Supersession does not immediately expose a stale base: keep the pending
+projection until a covering replacement reading (or an authoritative replacement
+fact in the same transaction) can rebase it. Release conflicting dispatch only
+when domain recovery establishes the relevant prior writer can no longer mutate
+that resource; retained query coverage alone must not hold the execution lane.
+Outstanding external stages keep their own recovery and ordering obligations.
+Refusal or supersession never erases an earlier commit or declares provider,
+planning or cleanup work rolled back. A recovered Task result with a retained
+error must still expose the unresolved stage's recovery action on both clients.
+
+Before projection cutover, hold settlement across withdrawal, restart and reordered
+receipt/list/count replies. Race settlement against Reopen in both transaction
+orders, and withdraw an old request before completing a newer one. Assert eventual
+row/count convergence, unchanged later selection, no duplicate dispatch and no
+permanent lane blockage once that domain obligation resolves. These extend the
+existing success and uncertainty cases; the current withdrawn-request fixture
+deliberately stops at `uncertain` and does not establish this behavior.
+
 ### Seeing a result does not incorporate its effects
 
 Next implement direction: replace presentation-driven deletion with a presentation
@@ -556,6 +602,8 @@ Proposed usage text for the affected Desktop/mobile docs:
 > restores its row with an explanation without changing your later selection.
 > An interrupted or partly committed completion stays pending while its outcome
 > is recovered; a refresh failure does not undo it.
+> If a newer action replaces a pending completion, the list follows that newer
+> state without changing your current selection.
 > Opening a finished result clears its Show result prompt. List and count updates
 > continue in the background; leaving the result does not cancel them. Unresolved
 > failures keep their recovery actions.
@@ -579,71 +627,38 @@ The launch checkpoint and its earlier 23-case result are recorded at
 
 ## Current implementation cut
 
-Stamped subscriptions (protocol revision 6), the launch checkpoint and synchronous
-Wave selection remain intact. One `store/sqlite/operations.rs` owner holds creation
-recovery and general commands. `operation.submit` saves before its bounded worker;
-`operation.get` only reads/subscribes. Receipt revisions order held replies within
-an active database epoch; receipt changes do not invalidate Work.
+Protocol revision 6 provides stamped subscriptions, Git-free admission and one
+receipt owner. Both creation transports use the shared SQLite outbox. Exact saved
+commands, independent submitted/canonical identities, legacy candidate adoption,
+receipt revisions and epoch-checked admission remain intact. Details and previous
+checks are at `aeb4ed3b2b0e7256748fa69bd76f77acff966b98:scratch/instant-task-session.md`.
+The launch checkpoint, presentation-driven retirement and phone sheet/outcome
+presentation remain interim; no shared projection cutover is claimed.
 
-Admission now saves a version-1 typed envelope and its submitted-content digest,
-without discovering a repository. Canonical creation fingerprints are independently
-nullable until claimed. Released rows reserve a candidate, validate off the
-admission path, and bind only after canonical comparison. A mismatch clears only
-a legacy candidate; a new submission remains immutable even if a different direct
-CLI creation wins the domain claim. Reservation generations protect against held
-validation. Unavailable normalization retains the saved content and error for
-recovery. Worker command, generation, validation and delivery are one SQL reading;
-a replaced command cannot borrow its successor's dispatch status.
+2026-11-15 implementation finding: periodic completion settlement has no original
+worker scope. Recording only the current operation's fence loses acknowledgment
+when that writer settles a request later. Completion receipts now bind the exact
+Task/request in the original request transaction; an indexed lookup lets settlement
+write all subscribers' fences in its domain transaction. A withdrawn request never
+borrows a later request's completion. The single draft migration gains the request
+column/index without changing released data.
 
-Direct CLI and served creation share an atomic canonical claim. Existing identity
-checks avoid taking the write lock for an unchanged receipt. Workers load saved
-commands rather than a retried form. Dispatched generic commands never replay;
-creation continuation still requires the domain's Complete/Continue disposition
-and its existing creation lock. No historical fences are invented. The single
-draft migration keeps every released column/value while allowing unresolved
-canonical identity and adding candidate/submitted metadata. Rust/Swift receipt
-fixtures expose pending/candidate/bound/conflict separately from delivery.
+Completion recovery continues only that saved domain request, never calls Complete
+again. Completion and reopen recover the saved committed Task result after lost
+output without applying the intent again; a later failure stays in the receipt's
+error rather than certifying cleanup/planning delivery. Other mutation families'
+continuations, refusal classification and terminal fences remain unfinished.
+Client recovery still specializes creation; this server slice does not establish
+both clients' completion presentation or effect acknowledgment.
 
-Transactional stages remain Task filing, completion request/settlement, reopen and
-Session input replacement. Failed output retains committed stages as uncertain.
-Completed command output cannot be overwritten by a late recovery worker.
-The live Desktop and mobile creation transports now send the saved command as
-`operation.submit` through `ClientWorkStore`, replacing `CreationSubmissions` and
-its JSON-file sender. The shared actor owns a SQLite ordered outbox and stamped
-`operation.get` subscriptions; admission responses establish no execution result.
-The released files import in one transaction before removal, retaining payloads,
-IDs, Machine and protocol revision. Their unknown send epochs prohibit absence
-from authorizing replay. Generic receipt revisions cannot regress within an epoch;
-departed epochs cannot replace the active stream. A mounted result can retire only
-a finished receipt observed in its current epoch. Confirmed Work cache and query
-incorporation are not implemented yet, so presentation retirement and the launch
-checkpoint remain interim obligations.
-
-Counterexample found during this cut: a domain recovery reply can arrive after
-database replacement, between a lookup and a retry send. The envelope now requires
-`epoch` from the authorizing receipt reading. The server compares it inside admission,
-including duplicates, before starting a worker. It is transport causality, outside
-submitted command identity. This closes that race without changing submitted words
-or granting generic replay. Domain-proven creation Complete/Continue can request
-the same saved envelope; Inspect never does. Broader mutation recovery is unfinished.
-Desktop recovery listens to store changes instead of a five-second poll. The phone
-still has its older sheet/outcome presentation; no full interaction migration is
-claimed. Desktop and Rust admission checks pass; native projection migration is still open.
-A held identity check during presentation now re-reads receipt state before
-retirement, retaining a request whose epoch changed during that wait. A failed
-journal import retains its source and can reopen after repair; initialized Swift
-classes run deinit on an init throw, so that owner alone closes SQLite.
-
-Remaining, in order: domain recovery continuations, definite-refusal classification and terminal fences for every mutation family (including
-remote/detached and external file/config confirmation; dispatched errors stay
-uncertain; SQLite fences cannot certify filesystem/provider effects); the
-transactional confirmed cache and ordered effect/query membership projection; both
-clients' interaction and retained-occurrence migration with the launch checkpoint
-exception and other predecessors deleted; epoch reset on historical restoration;
-held/reordered/crash and native acceptance. `complete` in a read stamp still means
-transport coverage of that query, not external membership or native readiness.
-Earlier receipt-cut details are at
-`51d23391e079b096968803e975e95c0d984e6f95:scratch/instant-task-session.md`.
+Remaining, in order: all mutation-family recovery and fences (remote/detached and
+external file/config confirmation included); exhaustive effect/stage registry and
+membership vocabulary; transactional confirmed cache and ordered effect/query
+projection; both clients' interaction/retained-occurrence migration and deletion
+of checkpoint/presentation exceptions; epoch reset on historical restoration;
+held/reordered/crash and native acceptance. Dispatched errors remain uncertain;
+SQLite fences cannot certify filesystem/provider effects. Transport `complete`
+is query coverage, not membership or native readiness.
 
 ### Admission identity and recovery contract
 
@@ -776,18 +791,16 @@ all 20 receipt SQL statements used keyed indexes without table scans.
 The corrected benchmark invocation puts its output variable inside the network
 boundary; the first invocation skipped when that boundary cleared `LF_*`.
 
-Checks:
+Checks from the preceding admission/client cut, including 47 Desktop and four iOS
+cases, remain at `aeb4ed3b2b0e7256748fa69bd76f77acff966b98:scratch/instant-task-session.md`.
+The reported nextest LEAK moved to the pure schema test in that cut; no cause has
+been established. No leaked-handle diagnosis or repair is claimed here.
 
-- `uv run python scripts/check_migrations.py`: passed; one finished draft migration.
-- `uv run pytest python/tests/test_desktop_performance.py -q -k 'host_load or preflight or sql_profile_time or native_runner or sandbox_paths_do_not_change'`: 5 passed; unchanged since the recorded benchmark-instrumentation cut.
-- `uv run python scripts/check_swift_multiplatform_boundaries.py`: passed.
-- `cargo nextest run -p loopflow --lib --build-jobs 4 -E 'test(store::sqlite::operations::tests::admission_epoch_rejects_a_delayed_send_before_saving_or_dispatching) | test(store::sqlite::operations::tests::receipt_reads_and_duplicate_admission_use_point_queries_at_ten_thousand_tasks) | test(engine::operation::tests::admission_saves_exact_content_before_git_and_unavailable_validation_is_recoverable) | test(server::service::tests::operation_admission_answers_while_git_is_held_and_survives_disconnect) | test(server::schema::tests::every_fixture_validates_against_its_definition) | test(server::schema::tests::the_checked_in_schema_is_what_describe_prints)'`: 6 passed; run `d8c45edf-304e-40ef-95da-25ff8aa6d013`, log `/tmp/loo-906-epoch-tests.log`. LEAK moved to the pure checked-in-schema test; the admission case passed without it. Both inspected bodies await their subprocesses or do none; no cause is established. The previous admission warning remains at `8b42a874db:scratch/instant-task-session.md`. CLI/test builds also emitted macOS ld's large `__eh_frame` warning.
-- `target/debug/lf server describe --json > tests/fixtures/dto/server_schema.json`: regenerated from the built CLI; includes required admission epoch.
-- `swift build --package-path swift --build-tests --jobs 2`: passed. The headless network runner with private `LF_HOME` and filter `ClientWorkStoreTests|ServerProtocolTests|WorkModelStreamTests.launchReconciliation|WorkDestinationTests.newTask|WorkDestinationTests.lateCreationReply|WorkDestinationTests.failedAutomatic|WorkNavigationTests.waveClickSelectsBeforeReturningFromTheGesture`: 47 passed, including epoch change during presentation and failed journal import/reopen; log `/tmp/loo-906-client-tests.log`.
-- `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/ReadingStampTests -only-testing:LoopflowiOSTests/ClientWorkStoreTests`: 4 passed on current sources; app/test targets built and the disposable Simulator was removed. Log `/tmp/loo-906-client-ios.log`.
+- `uv run python scripts/check_migrations.py`: passed; one draft `client_operations.sql`.
 - `uv run python scripts/check_architecture.py`: passed, 89/89 SQLite owners.
-
-The schema fixture is generated by the real CLI.
+- `cargo fmt` and `git diff --check`: passed for the recovery cut.
+- `cargo nextest run -p loopflow --lib --build-jobs 4 --success-output immediate -E 'test(engine::operation::tests::completion_recovery_never_reissues) | test(store::sqlite::operations::tests::periodic_settlement) | test(store::sqlite::operations::tests::completion_and_reopen) | test(store::sqlite::operations::tests::receipt_reads_and_duplicate_admission)'`: 4 passed on final sources; `/tmp/loo-906-completion-final.log`. Restart/real continuation, lost output, no-request uncertainty, withdrawn/newer requests and reopen recovery pass. No LEAK reported. At 10k Tasks/receipts, all traced queries/updates avoid table scans (only per-receipt JSON iteration); 20-sample diagnostic P95 0.062 ms for lookup/admission and 0.098 ms for exact-request settlement. These loaded-host timings are not native baselines; macOS ld still warns about large `__eh_frame`.
+- `uv run python scripts/desktop_performance.py preflight --output /tmp/loo-906-recovery-preflight`: rejected at 2026-11-15T08:46:01Z, background CPU 826.5%, one-minute load 44.25; raw `/tmp/loo-906-recovery-preflight/preflight.json`. Native trials remain unavailable on this host.
 
 Gate owns wider store/transport/lifecycle, DTO integration, documented-command,
 packaging and clippy checks. Implementation still owns a valid benchmark baseline

@@ -2,42 +2,43 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-906 · Seeing a result</title>
+<title>LOO-906 · Resolving replaced intent</title>
 <style>
 :root{color-scheme:light dark;--paper:#faf9f5;--ink:#252621;--muted:#65665d;--line:#cbcfc3;--accent:#426343}*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.45 system-ui,sans-serif}main{max-width:780px;margin:auto;padding:28px 22px 48px}header,.status{color:var(--muted);font-size:13px}h1{font-size:29px;line-height:1.15;margin:22px 0 12px}h2{font-size:20px;margin:24px 0 8px}p{margin:10px 0}code{font-size:.85em;overflow-wrap:anywhere}table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:left;vertical-align:top;padding:9px 5px;border-bottom:1px solid var(--line)}.journey{padding:12px 16px;border-left:3px solid var(--accent)}details{margin:16px 0}summary{cursor:pointer;font-weight:600}li{margin:10px 0}.sources{overflow-wrap:anywhere} @media(prefers-color-scheme:dark){:root{--paper:#1d211d;--ink:#eceee5;--muted:#b1b8ac;--line:#495146;--accent:#a0c398}}@media(max-width:520px){main{padding:22px 14px}table{font-size:12px}th,td{padding:7px 3px}h1{font-size:25px}}
 </style>
 <main>
 <header>LOO-906 · concept-review · 2026-11-15
-<p class="sources">Built from scratch/{instant-task-session,desktop-reactivity-feedback,questions}.md; swift/Loopflow/Services/{ClientWorkStore,ClientWorkDatabase,OperationReceipt}.swift; swift/LoopflowMac/CreationRecovery.swift; swift/LoopflowiOS/RemoteMobileClient.swift; swift/{README.md,LoopflowiOS/README.md}; rust/loopflow/src/engine/operation.rs.</p></header>
-<h1>Seeing a result must not discard pending reconciliation</h1>
-<p><strong>Decision for the next implementation:</strong> record that the result was shown; retain the operation until recovery and query obligations also finish. No open product choice stops this work.</p>
-<p><strong>Biggest mismatch:</strong> both creation clients now use Git-free admission and the shared SQLite outbox, but <code>presented(id)</code> still deletes the saved command. Mounting one result says nothing about another window’s list or count.</p>
+<p class="sources">Built from scratch/{instant-task-session,desktop-reactivity-feedback,questions}.md; rust/loopflow/src/{engine/operation.rs,ops/task.rs,store/sqlite/{children,operations}.rs}; swift/Loopflow/Services/{ClientWorkStore,ClientWorkDatabase,OperationReceipt}.swift.</p></header>
+<h1>A replaced completion must stop hiding the Task</h1>
+<p><strong>Decision for the next implementation:</strong> record exact-request supersession alongside commits in the existing receipt owner. Reconcile its effect without replaying Complete or changing a later selection. No open product choice stops this work.</p>
+<p><strong>Biggest mismatch:</strong> the interrupted recovery cut preserves exact completion identity, but withdrawal leaves its receipt uncertain. The planned projection would retain the removal and conflicting-operation lane without a domain resolution.</p>
 <table>
 <thead><tr><th>Action</th><th>Concept</th><th>API / owner</th></tr></thead>
 <tbody>
-<tr><td>Start / edit / Complete</td><td>Durable operation + immediate local effect</td><td>Proposed <code>begin(command, origin)</code>; shared store</td></tr>
-<tr><td>Admit</td><td>Saved immutable envelope</td><td>Built <code>operation.submit</code>; no readiness promise</td></tr>
-<tr><td>Open result / Inspect</td><td>Result shown</td><td>Existing <code>presented(id)</code> deletes; proposed acknowledgment only</td></tr>
-<tr><td>Receive receipt / facts</td><td>Domain stage + incorporation per query</td><td>Proposed shared <code>receive</code> reducer; retire only after all obligations finish</td></tr>
+<tr><td>Complete A</td><td>Saved operation + immediate removal</td><td>Proposed shared <code>begin</code>; existing exact domain-request binding</td></tr>
+<tr><td>Reopen elsewhere</td><td>Newer intent replaces that request</td><td>Existing <code>reopen_task</code>; proposed atomic supersession for its subscribers</td></tr>
+<tr><td>Recover</td><td>Typed domain resolution</td><td>Proposed receipt resolution; delivery/error alone cannot resolve effects</td></tr>
+<tr><td>Receive list / count</td><td>Incorporation per query</td><td>Proposed shared <code>receive</code>; rebase against covering replacement facts</td></tr>
 <tr><td>Select / expand</td><td>Local navigation / disclosure</td><td>Immediate local state; never receipt recovery</td></tr>
 </tbody></table>
-<h2>Start, before → proposed</h2>
-<p class="status">Existing: save → admit → recover result → mount → delete submission. Confirmed cache and shared projection are unfinished.</p>
-<div class="journey">Start → show submitted words → save/admit → bind exact Task and Session → open in place → acknowledge shown result → each covering query incorporates its effect → retire when nothing remains.</div>
-<p><strong>Failure / restart:</strong> attachment failure retains Retry opening for that Session. Opening Inspect clears no uncertainty. A held list keeps its effect after the conversation mounts and after restart; a fresh count never applies it twice.</p>
+<h2>Complete, before → proposed</h2>
+<p class="status">Existing recovery: save request → Reopen withdraws it → recovery reports uncertain. Shared completion projection is unfinished.</p>
+<div class="journey">Complete A → hide A and select B → another client reopens A → save exact-request supersession → covering facts restore A → B stays selected.</div>
+<p><strong>Failure / restart:</strong> retain the command and resolution; recover without repeating Complete. If completion won the race, keep its original commit/result and then show the newer Reopen facts. A later completion cannot stand in for the withdrawn request.</p>
 <details>
 <summary>Follow the model through recovery and both clients</summary>
-<p><strong>Proposed persistence:</strong> keep domain recovery, effect/query incorporation and creation-result presentation as independent obligations in one operation record. Persist acknowledgment; atomically replace confirmed cache and incorporation records. Closing a query requires saved invalidation and a reload fence. Convergence alone cannot discard an unseen creation result.</p>
-<p><strong>Domain stages:</strong> <code>task.completion_requested</code> cannot confirm completed membership; <code>task.completed</code> plus a covering read can. <code>task.filed</code> binds identity without proving Graph admission or input readiness. Partial failure retains committed facts.</p>
-<p><strong>Deletion:</strong> replace the interim presentation deletion, creation presentation map, launch checkpoint exception, duplicate caches and per-action pending owners as consumers migrate. Extend system SQLite3 on both targets; no GRDB adoption is planned.</p>
-<p><strong>Proposed usage:</strong> “Opening a finished result clears its Show result prompt. List and count updates continue in the background; leaving the result does not cancel them. Unresolved failures keep their recovery actions.” Complete still removes its row and opens the next Task, or an empty view. A later reply never changes a newer selection.</p>
-<p><strong>Epoch replacement:</strong> keep the submitted command and the local acknowledgment that it was shown. Neither old fences nor that acknowledgment certify the replacement database or authorize replay.</p>
-<p class="status">Next: finish mutation-family recovery and stage fences, then transactional confirmed cache, membership projection and both-client migration. Native latency and historical-restore epoch reset remain open. No tests rerun for this prose review; recorded prior checks do not establish the proposed behavior. The Rust leaked-handle warning remains unexplained.</p>
+<p><strong>Proposed contract:</strong> typed committed, refused and superseded resolutions attach to effects in the one receipt owner. Every request-replacing writer, including CLI and periodic work, records its resolution in the domain transaction. Extend the command registry and Rust/Swift fixtures; historical absence stays inspectable unless exact recovery establishes an outcome.</p>
+<p><strong>Projection:</strong> persist resolution, confirmed cache and per-query incorporation atomically. Retain the effect over a stale base until replacement facts cover its fence. A fresh count and a held list incorporate independently. Release the relevant resource lane when its prior domain writer can no longer mutate it; remaining query coverage does not hold dispatch.</p>
+<p><strong>Partial success:</strong> keep earlier commits and unresolved external-stage recovery. A recovered Task result with an error cannot imply cleanup or planning delivery. No fabricated SQLite fence certifies a provider effect.</p>
+<p><strong>Existing design retained:</strong> showing a result acknowledges presentation only. Retire when domain recovery, query coverage and applicable presentation obligations finish. Replace launch checkpoints, duplicate caches and per-action pending owners during both-client migration.</p>
+<p><strong>Proposed usage:</strong> “If a newer action replaces a pending completion, the list follows that newer state without changing your current selection.” Existing creation-recovery instructions need no change.</p>
+<p><strong>Epoch replacement:</strong> old resolutions/fences cannot certify the new database or authorize replay. Preserve submitted content and local presentation acknowledgment.</p>
+<p class="status">Next: mutation-family recovery, terminal resolutions and stage fences → transactional cache/membership projection → both clients. Native latency and historical-restore epoch reset remain open. This prose review reruns no production tests and does not diagnose the earlier leaked-handle warning.</p>
 </details>
 <h2>Questions for the implementation check</h2>
 <ol>
-<li>Mount a finished creation while another list/count is held, then restart. Does only the recovery prompt disappear, with remaining effects retained?<br><strong>1a.</strong> Demonstrated on both clients. <strong>1b.</strong> Finish independent retention obligations.</li>
-<li>Inspect receipt text, converge before presentation, fail attachment, or replace the epoch between presentation and incorporation. Are the original command and Session retained without replay or a second count delta?<br><strong>2a.</strong> Demonstrated. <strong>2b.</strong> Finish recovery and incorporation coverage.</li>
+<li>Withdraw Complete while settlement is held, then restart and reorder receipt/list/count replies. Does A return without reselecting it or blocking later operations forever?<br><strong>1a.</strong> Demonstrated on both clients. <strong>1b.</strong> Implement exact-request resolution and incorporation.</li>
+<li>Race settlement against Reopen in both orders; complete a newer request after withdrawing the old one. Are original commits retained without replay or attributing the newer result to the old operation?<br><strong>2a.</strong> Demonstrated with reordered replies. <strong>2b.</strong> Extend recovery/projection coverage.</li>
 </ol>
 <p class="status">Verification questions; no pending product choice. Headless outcome: design changed → iterate to implement. Production code and execution unchanged by this review.</p>
 </main>

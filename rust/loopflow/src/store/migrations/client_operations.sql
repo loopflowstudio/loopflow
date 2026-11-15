@@ -30,6 +30,7 @@ CREATE TABLE creation_receipts (
     delivery_state TEXT NOT NULL DEFAULT 'untracked'
         CHECK (delivery_state IN ('untracked','queued','dispatched','finished','uncertain')),
     command_error TEXT,
+    completion_request INTEGER,
     commits TEXT NOT NULL DEFAULT '[]',
     receipt_revision INTEGER NOT NULL DEFAULT 0
 );
@@ -38,6 +39,8 @@ INSERT INTO creation_receipts(request_id,kind,fingerprint,run,task_id,session_id
 SELECT request_id,kind,fingerprint,run,task_id,session_id,
     artifact_key,milestone,result,launch,created_at,updated_at FROM prior_creation_receipts;
 DROP TABLE prior_creation_receipts;
+CREATE INDEX operation_completion_request ON creation_receipts(task_id,completion_request)
+    WHERE kind='task.complete';
 CREATE TEMP TABLE client_operation_prior_revisions AS SELECT * FROM store_revisions;
 DROP TABLE store_revisions;
 CREATE TABLE store_revisions (

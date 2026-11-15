@@ -89,6 +89,23 @@ pub(crate) fn commit_in(
 ) -> StoreResult<()> {
     let span = tracing::info_span!("operation_domain_commit", operation_id = id, stage);
     let _entered = span.enter();
+    let commit = domain_commit_in(conn, stage, resources, domains, result)?;
+    if conn.execute(
+        "UPDATE creation_receipts SET commits=json_insert(commits,'$[#]',json(?2)),updated_at=?3 WHERE request_id=?1 AND delivery_state<>'finished'",
+        params![id,serde_json::to_string(&commit)?,crate::store::rows::now_unix()],
+    )? != 1 {
+        return Err(StoreError::NotFound);
+    }
+    Ok(())
+}
+
+fn domain_commit_in(
+    conn: &Connection,
+    stage: &str,
+    resources: &[&str],
+    domains: &[&str],
+    result: &serde_json::Value,
+) -> StoreResult<OperationCommit> {
     if conn.is_autocommit() {
         return Err(StoreError::InvalidData(
             "operation commits require the domain transaction".into(),
@@ -117,7 +134,7 @@ pub(crate) fn commit_in(
         )?;
         revisions.insert((*domain).to_owned(), revision);
     }
-    let commit = OperationCommit {
+    Ok(OperationCommit {
         stage: stage.into(),
         resources: resources.iter().map(|id| (*id).to_owned()).collect(),
         fence: CommitFence {
@@ -127,14 +144,7 @@ pub(crate) fn commit_in(
             revisions,
         },
         result: result.clone(),
-    };
-    if conn.execute(
-        "UPDATE creation_receipts SET commits=json_insert(commits,'$[#]',json(?2)),updated_at=?3 WHERE request_id=?1 AND delivery_state<>'finished'",
-        params![id,serde_json::to_string(&commit)?,crate::store::rows::now_unix()],
-    )? != 1 {
-        return Err(StoreError::NotFound);
-    }
-    Ok(())
+    })
 }
 
 pub(super) fn commit_current_in(
@@ -147,6 +157,62 @@ pub(super) fn commit_current_in(
     if let Some(id) = crate::journal::request::operation_id() {
         commit_in(conn, &id, stage, resources, domains, &result()?)?;
     }
+    Ok(())
+}
+
+/// Settlement may run on a later periodic check with no request worker. Keep
+/// its subscribers with the durable domain request, in the same receipt owner.
+pub(super) fn completion_requested_in(
+    conn: &Connection,
+    task: &str,
+    request: i64,
+) -> StoreResult<()> {
+    if let Some(id) = crate::journal::request::operation_id() {
+        if conn.execute(
+            "UPDATE creation_receipts SET task_id=?2,completion_request=?3
+             WHERE request_id=?1 AND kind='task.complete' AND completion_request IS NULL",
+            params![id, task, request],
+        )? != 1
+        {
+            return Err(StoreError::Stale(
+                "completion already has a domain request".into(),
+            ));
+        }
+        commit_in(
+            conn,
+            &id,
+            "task.completion_requested",
+            &[task],
+            &["planning"],
+            &serde_json::json!({"request":request}),
+        )?;
+    }
+    Ok(())
+}
+
+pub(super) fn completion_committed_in(
+    conn: &Connection,
+    task: &str,
+    request: i64,
+    result: &serde_json::Value,
+) -> StoreResult<()> {
+    let waiting: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM creation_receipts
+         WHERE kind='task.complete' AND task_id=?1 AND completion_request=?2 AND delivery_state<>'finished')",
+        params![task,request], |row| row.get(0),
+    )?;
+    if !waiting {
+        return Ok(());
+    }
+    let commit = domain_commit_in(conn, "task.completed", &[task], &["planning"], result)?;
+    // One indexed update fans out to the exact request's subscribers. Never
+    // replace the first result/fence when another settler observes Done.
+    conn.execute(
+        "UPDATE creation_receipts SET commits=json_insert(commits,'$[#]',json(?3)),updated_at=?4
+         WHERE kind='task.complete' AND task_id=?1 AND completion_request=?2 AND delivery_state<>'finished'
+         AND NOT EXISTS(SELECT 1 FROM json_each(commits) WHERE json_extract(value,'$.stage')='task.completed')",
+        params![task,request,serde_json::to_string(&commit)?,crate::store::rows::now_unix()],
+    )?;
     Ok(())
 }
 
@@ -344,6 +410,27 @@ impl SqliteStore {
             if !finished { return Err(StoreError::Stale(format!("operation {id} is not dispatched"))); }
         }
         Ok(())
+    }
+
+    /// Recover the original domain result after output was lost. Retain any
+    /// later failure: a Task result does not certify cleanup or planning delivery.
+    pub(crate) fn recover_operation_result(&self, id: &str, stage: &str) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let Some(receipt) = operation_in(&conn, id)? else {
+            return Ok(false);
+        };
+        let Some(commit) = receipt.commits.iter().find(|commit| commit.stage == stage) else {
+            return Ok(false);
+        };
+        Ok(conn.execute(
+            "UPDATE creation_receipts SET delivery_state='finished',result=?2,updated_at=?3
+             WHERE request_id=?1 AND delivery_state IN ('dispatched','uncertain')",
+            params![
+                id,
+                serde_json::to_string(&commit.result)?,
+                crate::store::rows::now_unix()
+            ],
+        )? == 1)
     }
 
     pub fn operation_receipt(&self, id: &str) -> StoreResult<Option<OperationReceipt>> {
@@ -1212,6 +1299,105 @@ mod tests {
         assert!(store.operation_revision().unwrap() > before);
     }
     #[test]
+    fn periodic_settlement_confirms_every_subscriber_to_the_exact_completion_request() {
+        let (dir, store) = store();
+        let repo = loopflow_test_support::TestRepo::new();
+        let repository_id = store
+            .ensure_repository(repo.path().to_str().unwrap())
+            .unwrap();
+        let task = store
+            .create_task(&crate::work::task::NewTask {
+                id: crate::durable::TaskId::new(),
+                repository_id,
+                project_id: None,
+                title: "Completion subscribers".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        let mut request = None;
+        for id in ["first", "second"] {
+            store
+                .admit_operation(
+                    &store.reading_identity().unwrap().1,
+                    id,
+                    "task.complete",
+                    "hash",
+                    &json!({}),
+                )
+                .unwrap();
+            assert!(store.dispatch_operation(id).unwrap());
+            let current = crate::journal::request::with_operation(Some(id.into()), || {
+                store.request_task_completion(&task.id, None).unwrap()
+            });
+            if let Some(request) = request {
+                assert_eq!(Some(request), current);
+            }
+            request = current;
+        }
+        drop(store);
+        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        // Periodic settlement has no request attribution, even after restart.
+        assert!(store.complete_task(&task, request.unwrap()).unwrap());
+        let first = store.operation_receipt("first").unwrap().unwrap();
+        let second = store.operation_receipt("second").unwrap().unwrap();
+        assert_eq!(first.commits, second.commits);
+        assert_eq!(first.commits.len(), 2);
+        assert_eq!(first.commits[1].stage, "task.completed");
+        assert_eq!(
+            first.commits[1].fence.revisions["planning"],
+            store.revisions().unwrap().planning
+        );
+        store
+            .finish_operation("first", Err("output lost after settlement"))
+            .unwrap();
+        store.reopen_task(&task.id, None).unwrap();
+        assert!(store
+            .recover_operation_result("first", "task.completed")
+            .unwrap());
+        let recovered = store.operation_receipt("first").unwrap().unwrap();
+        assert_eq!(recovered.result, Some(first.commits[1].result.clone()));
+        assert_eq!(
+            recovered.error.as_deref(),
+            Some("output lost after settlement")
+        );
+        assert_eq!(recovered.commits, first.commits);
+        assert_ne!(
+            store.task(&task.id).unwrap().unwrap().state.as_deref(),
+            Some("completed")
+        );
+
+        // Withdraw an older request, then complete a newer one. A delayed old
+        // settler must not certify that later completion for the withdrawn one.
+        store
+            .admit_operation(
+                &store.reading_identity().unwrap().1,
+                "withdrawn",
+                "task.complete",
+                "hash",
+                &json!({}),
+            )
+            .unwrap();
+        let withdrawn = crate::journal::request::with_operation(Some("withdrawn".into()), || {
+            store
+                .request_task_completion(&task.id, None)
+                .unwrap()
+                .unwrap()
+        });
+        store.reopen_task(&task.id, None).unwrap();
+        let newer = store
+            .request_task_completion(&task.id, None)
+            .unwrap()
+            .unwrap();
+        assert_ne!(withdrawn, newer);
+        assert!(store.complete_task(&task, newer).unwrap());
+        assert!(store.complete_task(&task, withdrawn).unwrap());
+        let old = store.operation_receipt("withdrawn").unwrap().unwrap();
+        assert_eq!(old.commits.len(), 1);
+        assert_eq!(old.commits[0].stage, "task.completion_requested");
+    }
+
+    #[test]
     fn completion_and_reopen_record_their_own_committed_task_results() {
         let (_dir, store) = store();
         let repo = loopflow_test_support::TestRepo::new();
@@ -1383,7 +1569,7 @@ mod tests {
             .admit_operation(&epoch, "selected", "task.complete", "hash", &command)
             .unwrap();
         store.dispatch_operation("selected").unwrap();
-        let traced = crate::store::query_plans::assert_no_empty_writes(&store, || {
+        let mut traced = crate::store::query_plans::assert_no_empty_writes(&store, || {
             crate::store::query_plans::statements(&store, || {
                 assert!(store.operation_receipt("selected").unwrap().is_some());
                 assert!(store.operation_revision().unwrap() > 0);
@@ -1406,9 +1592,25 @@ mod tests {
         samples.sort_by(f64::total_cmp);
         println!("10k Tasks/receipts; lookup + duplicate admission + no redispatch; n=20, median={:.3} ms, P95={:.3} ms (loaded-host diagnostic, not native latency)",
             (samples[9]+samples[10])/2.0,samples[18]);
+        store.conn.lock().unwrap().execute(
+            "UPDATE creation_receipts SET completion_request=1 WHERE request_id='receipt_task_receipt_1'", [],
+        ).unwrap();
+        let mut settlement_samples = Vec::new();
+        for _ in 0..20 {
+            let began = std::time::Instant::now();
+            traced.extend(crate::store::query_plans::statements(&store, || {
+                let mut conn = store.conn.lock().unwrap();
+                let tx = conn.transaction().unwrap();
+                super::completion_committed_in(&tx, "task_receipt_1", 1, &json!({})).unwrap();
+                tx.commit().unwrap();
+            }));
+            settlement_samples.push(began.elapsed().as_secs_f64() * 1_000.0);
+        }
+        settlement_samples.sort_by(f64::total_cmp);
+        println!("10k Tasks/receipts; exact-request settlement lookup; n=20, P95={:.3} ms (loaded-host diagnostic)", settlement_samples[18]);
         let conn = store.conn.lock().unwrap();
         for sql in traced {
-            if !sql.starts_with("SELECT") {
+            if !sql.starts_with("SELECT") && !sql.starts_with("UPDATE") {
                 continue;
             }
             let mut query = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
@@ -1421,7 +1623,9 @@ mod tests {
             for detail in details {
                 let detail = detail.unwrap();
                 assert!(
-                    !detail.starts_with("SCAN") || detail == "SCAN CONSTANT ROW",
+                    !detail.starts_with("SCAN")
+                        || detail == "SCAN CONSTANT ROW"
+                        || detail.starts_with("SCAN json_each VIRTUAL TABLE"),
                     "{detail}: {sql}"
                 );
             }

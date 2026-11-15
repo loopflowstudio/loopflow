@@ -55,7 +55,7 @@ use std::sync::Arc;
 
 use crate::agent::checkout_execution_boundary;
 use crate::child::ChildRef;
-use crate::durable::{TaskState, WorkStatus};
+use crate::durable::{TaskId, TaskState, WorkStatus};
 use crate::git::worktree_name::WorktreeName;
 use crate::git::worktrees::{
     plan_branch_placement, PlacementPlan, PlacementStrategy, WorktreeSegment,
@@ -2261,6 +2261,31 @@ pub fn task_complete(repo: &Path, issue: &str, note: Option<&str>) -> OpsResult<
             reconcile_task_completion(&store, &mut task).await?;
         }
         Ok(task)
+    })
+}
+
+/// Continue only the saved domain request. A reopen or a newer completion
+/// request cannot authorize repeating the original intent.
+pub(crate) fn recover_task_completion(id: &TaskId, request: i64) -> OpsResult<()> {
+    block_on_task(async {
+        let store = task_store().await?;
+        let mut task = store
+            .get_task(id)
+            .await
+            .map_err(task_error)?
+            .ok_or_else(|| task_error("Completion Task is no longer available"))?;
+        if store
+            .sqlite
+            .task_completion_pending(id)
+            .map_err(task_error)?
+            .map(|(pending, _)| pending)
+            != Some(request)
+        {
+            return Err(task_error(
+                "The saved completion request is no longer pending",
+            ));
+        }
+        settle_completion(&store, &mut task, request).await
     })
 }
 

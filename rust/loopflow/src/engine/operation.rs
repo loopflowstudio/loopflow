@@ -118,6 +118,14 @@ pub(crate) fn execute(store: &SqliteStore, id: &str) -> Result<()> {
         ) {
             return Ok(());
         }
+        match &command {
+            Write::TaskComplete { .. } => return recover_completion(store, id),
+            Write::TaskReopen { .. } => {
+                store.recover_operation_result(id, "task.reopened")?;
+                return Ok(());
+            }
+            _ => {}
+        }
         let Some(creation) = store.creation_receipt(id)? else {
             return Ok(());
         };
@@ -133,6 +141,47 @@ pub(crate) fn execute(store: &SqliteStore, id: &str) -> Result<()> {
         Ok(value) => store.finish_operation(id, Ok(&value))?,
         Err(error) => store.finish_operation(id, Err(&format!("{error:#}")))?,
     }
+    Ok(())
+}
+
+fn recover_completion(store: &SqliteStore, id: &str) -> Result<()> {
+    if store.recover_operation_result(id, "task.completed")? {
+        return Ok(());
+    }
+    let Some(receipt) = store.operation_receipt(id)? else {
+        return Ok(());
+    };
+    if receipt.delivery == crate::store::sqlite::operations::OperationDelivery::Finished {
+        return Ok(());
+    }
+    let Some(commit) = receipt
+        .commits
+        .iter()
+        .find(|commit| commit.stage == "task.completion_requested")
+    else {
+        return Ok(()); // No domain request: never call task_complete again.
+    };
+    let task = commit
+        .resources
+        .first()
+        .context("completion request has a Task")?;
+    let request = commit.result["request"]
+        .as_i64()
+        .context("completion has a saved request")?;
+    let result: Result<()> = crate::journal::request::with_operation(Some(id.to_owned()), || {
+        crate::lf::commands::account::served(|| {
+            Ok(crate::ops::task::recover_task_completion(
+                &crate::durable::TaskId::parse(task)?,
+                request,
+            )?)
+        })
+    });
+    if let Err(error) = result {
+        store.finish_operation(id, Err(&format!("{error:#}")))?;
+    }
+    // Even a successful continuation must establish its own settlement stage.
+    // A newer completion cannot supply this operation's result.
+    store.recover_operation_result(id, "task.completed")?;
     Ok(())
 }
 
@@ -197,6 +246,135 @@ mod tests {
             session: None,
             run: false,
         }
+    }
+
+    #[test]
+    fn completion_recovery_never_reissues_a_withdrawn_request_or_replaces_its_committed_result() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home = EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        let repo = loopflow_test_support::TestRepo::new();
+        let store = SqliteStore::new(&crate::store::default_db_path()).unwrap();
+        let repository_id = store
+            .ensure_repository(repo.path().to_str().unwrap())
+            .unwrap();
+        let task = store
+            .create_task(&crate::work::task::NewTask {
+                id: crate::durable::TaskId::new(),
+                repository_id,
+                project_id: None,
+                title: "Recovery".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        let complete = Write::TaskComplete {
+            directory: repo.path().to_owned(),
+            issue: task.identifier.clone(),
+        };
+        let epoch = store.reading_identity().unwrap().1;
+        super::admit("without-request", &epoch, &complete).unwrap();
+        assert!(store.dispatch_operation("without-request").unwrap());
+        super::execute(&store, "without-request").unwrap();
+        assert!(store.task_completion_pending(&task.id).unwrap().is_none());
+        assert_eq!(
+            store
+                .operation_receipt("without-request")
+                .unwrap()
+                .unwrap()
+                .delivery,
+            OperationDelivery::Dispatched
+        );
+        super::admit("withdrawn", &epoch, &complete).unwrap();
+        assert!(store.dispatch_operation("withdrawn").unwrap());
+        crate::journal::request::with_operation(Some("withdrawn".into()), || {
+            store.request_task_completion(&task.id, None).unwrap();
+        });
+        store.reopen_task(&task.id, None).unwrap();
+        super::execute(&store, "withdrawn").unwrap();
+        assert!(store.task_completion_pending(&task.id).unwrap().is_none());
+        let withdrawn = store.operation_receipt("withdrawn").unwrap().unwrap();
+        assert_eq!(withdrawn.delivery, OperationDelivery::Uncertain);
+        assert_eq!(withdrawn.commits.len(), 1);
+
+        super::admit("settled", &epoch, &complete).unwrap();
+        assert!(store.dispatch_operation("settled").unwrap());
+        let request = crate::journal::request::with_operation(Some("settled".into()), || {
+            store
+                .request_task_completion(&task.id, None)
+                .unwrap()
+                .unwrap()
+        });
+        store.complete_task(&task, request).unwrap();
+        let original = store.operation_receipt("settled").unwrap().unwrap().commits[1].clone();
+        store
+            .finish_operation("settled", Err("reply lost"))
+            .unwrap();
+        store.reopen_task(&task.id, None).unwrap();
+        drop(store);
+        let store = SqliteStore::new(&crate::store::default_db_path()).unwrap();
+        super::execute(&store, "settled").unwrap();
+        let recovered = store.operation_receipt("settled").unwrap().unwrap();
+        assert_eq!(recovered.delivery, OperationDelivery::Finished);
+        assert_eq!(recovered.result, Some(original.result));
+        assert_eq!(recovered.error.as_deref(), Some("reply lost"));
+        assert_ne!(
+            store.task(&task.id).unwrap().unwrap().state.as_deref(),
+            Some("completed")
+        );
+        let revision = recovered.revision;
+        super::execute(&store, "settled").unwrap();
+        assert_eq!(
+            store
+                .operation_receipt("settled")
+                .unwrap()
+                .unwrap()
+                .revision,
+            revision
+        );
+        super::admit("continuing", &epoch, &complete).unwrap();
+        assert!(store.dispatch_operation("continuing").unwrap());
+        let request = crate::journal::request::with_operation(Some("continuing".into()), || {
+            store
+                .request_task_completion(&task.id, None)
+                .unwrap()
+                .unwrap()
+        });
+        drop(store);
+        let store = SqliteStore::new(&crate::store::default_db_path()).unwrap();
+        super::execute(&store, "continuing").unwrap();
+        let continued = store.operation_receipt("continuing").unwrap().unwrap();
+        assert_eq!(continued.delivery, OperationDelivery::Finished);
+        assert_eq!(continued.commits.len(), 2);
+        assert_eq!(continued.commits[0].result["request"], request);
+        assert_eq!(continued.commits[1].stage, "task.completed");
+        assert_eq!(
+            store.task(&task.id).unwrap().unwrap().state.as_deref(),
+            Some("completed")
+        );
+        let reopen = Write::TaskReopen {
+            directory: repo.path().to_owned(),
+            issue: task.identifier.clone(),
+        };
+        super::admit("reopened", &epoch, &reopen).unwrap();
+        assert!(store.dispatch_operation("reopened").unwrap());
+        let original = crate::journal::request::with_operation(Some("reopened".into()), || {
+            store.reopen_task(&task.id, None).unwrap()
+        });
+        let request = store
+            .request_task_completion(&task.id, None)
+            .unwrap()
+            .unwrap();
+        store.complete_task(&task, request).unwrap();
+        super::execute(&store, "reopened").unwrap();
+        assert_eq!(
+            store.operation_receipt("reopened").unwrap().unwrap().result,
+            Some(serde_json::to_value(original).unwrap())
+        );
+        assert_eq!(
+            store.task(&task.id).unwrap().unwrap().state.as_deref(),
+            Some("completed")
+        );
     }
 
     #[test]

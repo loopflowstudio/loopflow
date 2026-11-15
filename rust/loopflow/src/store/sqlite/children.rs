@@ -406,14 +406,8 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let request = request_completion_in(&tx, task, note)?;
-        if request.is_some() {
-            super::operations::commit_current_in(
-                &tx,
-                "task.completion_requested",
-                &[task.as_str()],
-                &["planning"],
-                || Ok(serde_json::json!({"request":request})),
-            )?;
+        if let Some(request) = request {
+            super::operations::completion_requested_in(&tx, task.as_str(), request)?;
         } else {
             super::operations::commit_current_in(
                 &tx,
@@ -475,17 +469,8 @@ impl SqliteStore {
         validate_task_project(&transaction, task)?;
         let state = super::durable::task_state_in(&transaction, &task.id)?;
         if state == TaskState::Done {
-            super::operations::commit_current_in(
-                &transaction,
-                "task.completed",
-                &[task.id.as_str()],
-                &["planning"],
-                || {
-                    Ok(serde_json::to_value(
-                        task_on(&transaction, &task.id)?.ok_or(StoreError::NotFound)?,
-                    )?)
-                },
-            )?;
+            // A later request may have completed after this one was withdrawn.
+            // Only the transaction settling the exact request certifies it.
             transaction.commit()?;
             return Ok(true);
         }
@@ -521,16 +506,11 @@ impl SqliteStore {
                 summary: "Task completed".into(),
             },
         )?;
-        super::operations::commit_current_in(
+        super::operations::completion_committed_in(
             &transaction,
-            "task.completed",
-            &[task.id.as_str()],
-            &["planning"],
-            || {
-                Ok(serde_json::to_value(
-                    task_on(&transaction, &task.id)?.ok_or(StoreError::NotFound)?,
-                )?)
-            },
+            task.id.as_str(),
+            request,
+            &serde_json::to_value(task_on(&transaction, &task.id)?.ok_or(StoreError::NotFound)?)?,
         )?;
         transaction.commit()?;
         Ok(true)

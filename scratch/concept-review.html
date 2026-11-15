@@ -17,10 +17,10 @@ th, td { text-align: left; vertical-align: top; padding: .5rem .3rem; border-bot
 li { margin: .4rem 0; }
 @media (max-width: 520px) { body { margin-top: 1rem; } table { font-size: .76rem; } }
 </style>
-<header>LOO-650 · concept-review · November 15, 2026 · HEAD 1916b9185a<br>
+<header>LOO-650 · concept-review · November 15, 2026 · HEAD 75568dfcaf<br>
 Built from <code>scratch/{loo-650,publishing-discussion}.md</code>,
 <code>scripts/dev-lf</code>, <code>scripts/benchmarks/crate-rebuild/README.md</code>,
-<code>store/session_projection.rs</code>, <code>store/sqlite/{sessions,selections,task_ownership,planning_peers,scope_defaults}.rs</code>,
+<code>store/{session_projection,selections}.rs</code>, <code>store/sqlite/{sessions,selections,task_ownership,planning_peers,scope_defaults,repositories}.rs</code>,
 and <code>config/placement.rs</code>.</header>
 <main>
 <h1>Iterate to implement: finish scope acquisition above SQL, then extract storage.</h1>
@@ -35,21 +35,25 @@ path remain the direction. This review changes implementation guidance only.</p>
 <tbody>
 <tr><td><code>scripts/dev-lf --version</code><br>after a shipping edit</td><td>Separate model, content and terminal crates; application still owns SQL and runtime.</td><td>Same command → changed owner and its downstream crates rebuild. Storage moves with migrations and schema generation.</td></tr>
 <tr><td>Claim or move a Task;<br>import peer planning</td><td>Ownership facts and placement resolution still load configuration using a SQL connection.</td><td>Saved scope/address reading → application observes Git/files → SQL checks scope and commits current ownership atomically.</td></tr>
-<tr><td>List available Sessions;<br>watch Task activity</td><td><strong>Implemented preparation:</strong> batched identity/deadline acquisition outside the mutex; SQL compares saved inputs and filters before pagination. Quiet/death checks are recorded passing.</td><td>Move facade entry methods above SQL. Keep explicit projection values, final comparison and deadline recomputation.</td></tr>
-<tr><td>Edit Dashboard or Task order</td><td>SQL entry methods still acquire Session projections and prepare edits.</td><td>Application prepares → SQL compares Dashboard revision or saved order → atomic write. Preserve repair of ambiguous queries.</td></tr>
+<tr><td>List available Sessions;<br>watch Task activity</td><td><strong>Implemented preparation:</strong> batched identity/deadline acquisition outside the mutex; SQL compares saved inputs and filters before pagination. Quiet/death checks are recorded passing.</td><td><strong>Implemented facade:</strong> application entry loops; SQL consumes projection values and compares saved inputs. Retain deadline recomputation during extraction.</td></tr>
+<tr><td>Edit Dashboard or Task order</td><td><strong>Implemented facade:</strong> application acquires projections and prepares edits; SQL compares revisions/orders and commits. Race checks are recorded passing.</td><td>Carry that split into extraction; keep read-only reads and repair of ambiguous queries.</td></tr>
 <tr><td>Build a fresh worktree;<br>debug locally</td><td>Private cache probe hits; shared root upkeep remains unbuilt. <code>scripts/dev-lf --isolated-build</code> is implemented.</td><td>Git root inventory → coordinated idle daemon refresh. Until safe, allow misses. Isolated debugging stays checkout-local.</td></tr>
 </tbody>
 </table>
 <h2>Normal → failure → recovery</h2>
 <p>A claim reads its repository and scope, observes that scope’s preferences, then
-commits. If Project membership, Wave ancestry or the repository address changes
+commits. New-Task creation compares the supplied repository/Project scope; bulk
+hand-back batches held Tasks and observes each repository once. A changed held
+set that needs new configuration returns to acquisition. If Project membership, Wave ancestry or the repository address changes
 during acquisition, reacquire for the new scope before writing. Existing claims
 remain independent of changed preferences. No SQL mutex spans Git or file reads.</p>
 <p>A dead or unknown first Session cannot hide a live available second row at
 <code>limit=1</code>. Quiet deadlines update list and Task selection without a
 store write. The implemented short-read → observe → compare approach retains the
 enclosing Work snapshot without lending a shared connection during observation.</p>
-<p>Disconnected peer imports retain conflicts and routing. Concurrent Dashboard
+<p>Disconnected peer imports retain conflicts and routing. <strong>Proposed:</strong>
+repository registration moves Git/locator effects above SQL too; a locator left
+by a failed import is reused on retry. Concurrent Dashboard
 edits retain stale-write checks. Cached debug paths may name a deleted checkout:
 use the isolated build. An unknown root may miss while another build runs; it
 cannot restart that build’s daemon.</p>
@@ -61,9 +65,9 @@ interactive demo and review remain before merge.</p>
 <h2>Questions for the next review</h2>
 <p>Implementation checks; <strong>loop-or-next: design changed → iterate to implement.</strong></p>
 <ol>
-<li>Does changed scope during acquisition trigger fresh configuration before a claim commits?</li>
+<li>Do claims, new Tasks and changed bulk hand-back sets acquire configuration for the scope they commit?</li>
 <li>Are observation and edit preparation above SQL, with pagination, pinned reads and atomic comparisons intact?</li>
-<li>Do linked-worktree preferences, disconnected peer history and stale Dashboard/order edits retain their behavior?</li>
+<li>Do linked-worktree preferences, disconnected peer history, locator retry and stale Dashboard/order edits retain their behavior?</li>
 <li>Do measured rebuild closures and whole-build costs establish the Task outcome?</li>
 </ol>
 </main>

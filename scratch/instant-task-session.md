@@ -583,6 +583,53 @@ separately. Neither that target nor a SQL bottleneck has been measured here.
 
 ## Implement direction
 
+### Recover the result; observe the remaining work
+
+Next implement direction from concept-review (2026-11-15): a recovered result is
+an immutable account of the original mutation, not the current state of every
+owner it touched. In particular, the saved `TaskEdit.sync` describes planning
+delivery at that commit. It cannot replace newer planning status after reconnect,
+certify external delivery, or keep showing an old failure after that owner resolves
+it. Preserve the saved result and diagnostic; derive current recovery actions from
+the owner of each outstanding effect.
+
+Concrete interaction: edit A, commit locally, lose the reply before planning
+delivery finishes, then edit A again elsewhere. Restart returns the first edit's
+exact result without overwriting the second edit. A covering Work reading shows
+the current value. Planning status comes from the existing planning changes and
+delivery receipts. If the first change is still unresolved, its recovery action
+targets that change; it never reruns `TaskUpdate` with the old words. If it was
+delivered or superseded, retain the historical diagnostic without presenting it
+as a current failure. An unavailable status read establishes neither outcome.
+
+For every remaining mutation family, the effect/stage registry must name the
+domain recovery owner, its stable attempt/change identity, the reading that
+confirms resolution, and any domain-authorized continuation. Reuse existing
+planning, completion, creation, execution and filesystem owners. Where no
+recoverable identity or confirmation exists, retain Inspect and implement that
+contract before offering a retry; do not infer success from a current value that
+could belong to another attempt. A transport error string is diagnostic data,
+not a recovery policy. Neither `delivery=finished` nor viewing the saved result
+discharges an unresolved external effect.
+
+Keep this correlation in the existing receipt/stage contract and shared client
+projection; do not copy domain queues into another operation lifecycle. Current
+status readings carry their own provenance. SQLite coverage confirms only the
+local facts it covers. Release a resource lane when its prior domain writer can
+no longer mutate that resource; an unrelated planning wait must not hold every
+later edit, while a still-live external writer cannot be bypassed by lookup.
+Presentation acknowledgment and cache retirement retain their existing rules.
+
+Before both-client migration, hold external delivery across result recovery and
+restart; apply a newer edit; then resolve or supersede the old delivery. Reorder
+old saved results, current Work and delivery-status readings. Assert that newer
+values survive, unresolved recovery stays available, resolved failures stop
+appearing active, and no retry repeats authored intent. Also cover output loss
+after successful external delivery and unavailable confirmation. These are
+consequences of the existing staged recovery contract, with no open product
+choice. Finish mutation-family recovery/fences before cache and projection cutover;
+native latency remains unmeasured.
+
 Preserve the launch counterexamples in the shared tests: pre-admission cached
 Task data, a fresh unrelated planning frame, unavailable or missing Task rows,
 current no-Graph results, Graph removal after reconciliation, reconnect, departure

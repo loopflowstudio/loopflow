@@ -2,40 +2,41 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-906 · Pending intent across queries</title>
+<title>LOO-906 · Recover results without replaying edits</title>
 <style>
 :root{color-scheme:light dark}body{font:16px/1.5 system-ui,sans-serif;margin:0}main{max-width:760px;margin:auto;padding:24px}header,small{opacity:.75;font-size:13px}h1{font-size:28px;line-height:1.2}h2{font-size:20px}table{width:100%;border-collapse:collapse}td,th{text-align:left;vertical-align:top;padding:8px;border-bottom:1px solid #8886}code{overflow-wrap:anywhere}blockquote{margin:16px 0;padding-left:16px;border-left:3px solid #888}li{margin:12px 0}@media(max-width:520px){main{padding:14px}table{font-size:12px}td,th{padding:5px}}
 </style>
 <main>
-<header>LOO-906 · concept-review · 2026-11-15<br>Sources: scratch/{instant-task-session,desktop-reactivity-feedback,questions}.md; rust/loopflow/src/{engine/operation.rs,store/sqlite/operations.rs,work/selection.rs}; swift/Loopflow/Services/{ClientWorkStore,ClientWorkDatabase,ReadingStamp}.swift.</header>
-<h1>Opening another list must keep the pending change</h1>
-<p><strong>Next implement direction:</strong> derive affected queries from shared dependencies, including queries opened after the gesture. Persist incorporation or cache invalidation before retiring an operation. No open product choice stops this work.</p>
-<p><strong>Biggest mismatch:</strong> the current client store saves commands and receipts, but has no shared confirmed cache or query projection. Tracking only views open at submission would let another window show an older row or count.</p>
+<header>LOO-906 · concept-review · 2026-11-15<br>Sources: scratch/{instant-task-session,desktop-reactivity-feedback,questions}.md; rust/loopflow/src/{engine/operation.rs,store/sqlite/operations.rs,store/sqlite/task_content.rs,store/sqlite/planning_sync.rs}; swift/Loopflow/Services/{ClientWorkStore,ClientWorkDatabase,ReadingStamp}.swift.</header>
+<h1>Recover the result; observe the remaining work</h1>
+<p><strong>Next implement direction:</strong> keep the original mutation result, but get current recovery status and actions from the owner of each remaining effect. No open product choice stops this work.</p>
+<p><strong>Biggest mismatch:</strong> recovering a locally committed edit can finish command delivery while planning remains unresolved. Its saved planning status is historical; neither that snapshot nor a transport error can decide what Retry does now.</p>
 <table>
 <tr><th>Action</th><th>Concept</th><th>API / owner</th></tr>
-<tr><td>Complete A</td><td>Durable intent; immediate removal</td><td>Proposed shared <code>begin</code>; existing exact-request receipt</td></tr>
-<tr><td>Open Dashboard later</td><td>Same effects over that query's base</td><td>Proposed <code>projection(for:)</code> + declarative plan</td></tr>
-<tr><td>Receive list / count</td><td>Independent incorporation</td><td>Proposed <code>receive</code>; stage fence + complete reading</td></tr>
-<tr><td>Close / restart</td><td>Saved cache obligations</td><td>Proposed atomic cache/outbox transaction</td></tr>
-<tr><td>Select / expand</td><td>Local navigation / disclosure</td><td>Immediate local state; recovery never selects again</td></tr>
+<tr><td>Edit A</td><td>Immediate value; durable intent</td><td>Proposed shared <code>begin</code>; existing <code>task.updated</code> stage</td></tr>
+<tr><td>Restart after lost output</td><td>Original result</td><td>Existing <code>operation.get</code> / domain recovery; never reissue the edit</td></tr>
+<tr><td>Show current A</td><td>Confirmed facts plus pending effects</td><td>Proposed <code>receive</code> / <code>projection(for:)</code></td></tr>
+<tr><td>Resolve planning failure</td><td>Exact outstanding change</td><td>Existing planning owner; proposed typed recovery correlation</td></tr>
+<tr><td>Select B / expand a Wave</td><td>Local navigation</td><td>Immediate local state; recovery never selects again</td></tr>
 </table>
 <h2>Existing → proposed</h2>
-<p><small>Existing: server supersession resolves exact withdrawn completion requests. Client creation uses the SQLite outbox; shared completion projection and both-client migration remain unfinished.</small></p>
-<blockquote>Complete A → hide A and select B → open another cached list → A stays hidden → each covering reading replaces its own effect exactly once.</blockquote>
-<p><strong>Failure / recovery:</strong> Reopen can supersede the exact request. Covering replacement facts restore A without selecting it. A committed completion survives later output failure. Restart restores saved intent and cache obligations without resending uncertain work.</p>
+<p><small>Existing: Task edits and Wave moves save their result with a local commit fence. Recovery preserves that result and later errors. Client creation uses the SQLite outbox; shared confirmed cache, projection and both-client migration remain unfinished.</small></p>
+<blockquote>Edit A → lose output → edit A again elsewhere → restart → show current A, recover the first result, and resolve only its outstanding delivery.</blockquote>
+<p><strong>Proposed experience:</strong> “Your edit stays visible while delivery is pending. After reconnect, recovery checks the saved change. A later edit stays in place. An unresolved delivery keeps its recovery action; a resolved failure remains historical.”</p>
 <details>
-<summary>Follow the rule through storage and both clients</summary>
-<p><strong>Applicability:</strong> derive it from operation resources/fact dependencies and the query plan. Store plan identity/version with membership; changed filters or plans cannot borrow another query's acknowledgment. Unknown membership remains unknown.</p>
-<p><strong>Retirement:</strong> incorporate each affected stored query or invalidate its base with its required confirmation fence in the cache/outbox transaction. Future queries evaluate retained effects. After operation retirement, cache provenance still prevents reuse of an invalidated base before a covering read. No need to open every possible view.</p>
-<p><strong>Counts:</strong> a fresh count covering settlement receives no extra decrement; a held older list retains its removal. Delivery finished and showing a result cannot discharge either obligation.</p>
-<p><strong>Epoch:</strong> old fences cannot certify a replacement database or authorize replay. Preserve submitted content and recover on the original Machine. Native owners retain input readiness.</p>
-<p><strong>Proposed usage:</strong> “Opening another list or window shows the same pending changes; an older cached list never brings a completed Task back while confirmation is pending.” Existing recovery skill instructions need no change.</p>
-<p><small>Next: mutation-family recovery/stage policies → transactional cache/membership projection → both clients and predecessor removal. Native latency remains unmeasured after failed host preflight. No production code or execution changed in this review.</small></p>
+<summary>Follow recovery through storage and both clients</summary>
+<p><strong>Identity:</strong> the effect/stage registry names each domain owner, stable attempt/change identity, confirmation reading and authorized continuation. Reuse existing domain queues; keep correlation in the one receipt owner. A current matching value cannot prove which attempt wrote it.</p>
+<p><strong>Failure:</strong> a committed local edit survives planning or output failure. Retry targets its domain-owned change, never the original mutation. Missing or unavailable confirmation retains uncertainty and Inspect where no safe continuation exists.</p>
+<p><strong>Resolution:</strong> saved results and diagnostics stay immutable. Current status comes from fresh domain readings, so a historical error cannot keep a resolved change looking failed. Reading a result cannot settle an external effect.</p>
+<p><strong>Queries:</strong> keep ordered effects and incorporation per query. A covering count receives no extra decrement while an older list retains its overlay. Future windows evaluate the same dependencies. Persist cache/outbox changes atomically.</p>
+<p><strong>Ordering:</strong> release a resource lane when its prior writer can no longer mutate that resource. A planning wait does not block every local edit; a live external writer still requires domain ordering.</p>
+<p><strong>Epoch:</strong> old fences cannot certify a replacement database or authorize replay. Recover the exact command on its original Machine; native owners retain input readiness.</p>
+<p><small>Next: remaining mutation-family recovery and fences → transactional cache and declarative membership → ordered projection → both clients and predecessor removal. Existing recovery skill instructions remain valid. Native latency remains unmeasured after failed host preflight. This review changes design only.</small></p>
 </details>
 <h2>Questions for the implementation check</h2>
 <ol>
-<li>Open another window/filter after Complete, then reorder fresh count and held list replies. Is removal applied once per query without selecting A?<br><strong>1a.</strong> Demonstrated on both clients. <strong>1b.</strong> Implement dependency-based projection and incorporation.</li>
-<li>Close all affected views, restart and reopen cached data after operation retirement. Can stale membership appear, or does retirement require opening every view?<br><strong>2a.</strong> Neither occurs. <strong>2b.</strong> Implement transactional invalidation and reload fences.</li>
+<li>Hold planning delivery, recover a committed edit after restart, then apply a newer edit. Can recovery leave the newer value intact and target only the old delivery?<br><strong>1a.</strong> Demonstrated on both clients. <strong>1b.</strong> Implement typed domain recovery correlation.</li>
+<li>Resolve or supersede that delivery, then reorder saved-result and current-status readings. Does the old diagnostic stay historical without hiding a still-unresolved failure?<br><strong>2a.</strong> Demonstrated, including unavailable reads. <strong>2b.</strong> Implement independently stamped current recovery status.</li>
 </ol>
 <p><small>Verification questions; no pending product choice. Headless outcome: design changed → iterate to implement.</small></p>
 </main>

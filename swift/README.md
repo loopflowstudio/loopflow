@@ -510,7 +510,7 @@ node. **Move to** changes Workflow position; `end` requests completion.
 the selected Task opens the next visible Task, or an empty selection when none
 remains. Other windows keep their selections; Back can still reach the retained
 workspace. The original command saves before sending. A failed save restores its
-membership and offers **Retry Complete**, keeping later navigation. A lost reply
+membership and offers **Try again**, keeping later navigation. A lost reply
 recovers that same request. **Retry completion** retries a domain-reported failure
 without replaying the Graph.
 Linear completion leaves the displayed Workflow and live Processes intact.
@@ -1153,9 +1153,11 @@ starting a provider. Waves group their full inventory as Owned and Unowned; rows
 
 Test shared Work through the [server protocol](../rust/loopflow/src/server/README.md).
 Desktop and iOS decode subscription envelopes with the shared `SubscriptionReading`
-and retain their `ReadingStamp`. Its database epoch and revisions describe the same
-snapshot as the body; a local checkpoint acknowledgement cannot make cached facts
-newer. Protocol revision 6 requires the matching helper and phone app.
+and retain their `ReadingStamp`. Its database epoch and revisions describe the
+body's SQLite snapshot; live OS observations remain outside that stamp. Process
+exit can change activity and ordering without changing a SQLite revision. A local
+checkpoint acknowledgement cannot make cached facts newer. Protocol revision 6
+requires the matching helper and phone app.
 Rust's `served_reads` verifies CLI/server mutation parity, input/output/errors,
 concurrent request traces in `logs/lf.log`, and no request Process rows or global
 context changes. Native cancellation releases the client's wait; a lost reply
@@ -1197,6 +1199,10 @@ mounted queries without another server frame. Save failure retains the original
 command for retry. Shared query tests run on both targets, including held disk,
 reply permutations, restart and replacement epochs. Cross-query Task membership
 provenance and the remaining mutation families are unfinished.
+SQLite fixtures await `WorkInteraction.shutdown().value` and any direct query
+reader's close before calling `ClientWorkStore.close()` and removing temporary
+directories. Cancellation alone can leave a reader holding SQLite after its
+directory has gone. Closing a normal query lease still leaves commands running.
 Desktop query destinations keep the original Machine, repository and expression,
 not a captured plan. Unsaved queries and saved Dashboard refreshes mount shared
 query leases; stamped replies update their confirmed bases before projection.

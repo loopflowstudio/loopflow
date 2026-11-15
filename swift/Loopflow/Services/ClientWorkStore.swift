@@ -84,6 +84,18 @@ public actor ClientWorkStore {
 
     deinit { connectionChanges?.cancel() }
 
+    /// Release local readers and SQLite after consumers have stopped. Saved
+    /// commands remain on disk; a later access can reopen the same store.
+    public func close() async {
+        let changes = connectionChanges
+        connectionChanges = nil
+        changes?.cancel()
+        for observer in observers.values { observer.finish() }
+        observers = [:]
+        await changes?.value
+        database = nil
+    }
+
     nonisolated func rememberMachine(_ machine: String) { connection?.rememberMachine(machine) }
 
     private func disk() throws -> ClientWorkDatabase {

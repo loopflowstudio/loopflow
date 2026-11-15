@@ -47,6 +47,9 @@ public final class WorkInteraction {
     @ObservationIgnored private var changes: Task<Void, Never>?
     @ObservationIgnored private var saving: Task<Void, Never>?
     @ObservationIgnored private var deliveries: [String: Task<Void, Never>] = [:]
+    @ObservationIgnored private var refreshes: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored private var retiring: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored private var stopped: Task<Void, Never>?
 
     public init(machine: String?, store: ClientWorkStore) {
         self.machine = machine
@@ -80,7 +83,7 @@ public final class WorkInteraction {
         prune()
         receive(reconciled.contains(key) ? bases[key].map(project) : nil)
         if changes == nil { start() }
-        else { Task { [weak self] in await self?.refreshFromStore() } }
+        else { refresh() }
         return id
     }
 
@@ -91,12 +94,22 @@ public final class WorkInteraction {
             generation &+= 1
             reconciled = []
         }
-        Task { [weak self] in await self?.refreshFromStore() }
+        refresh()
+    }
+
+    private func refresh() {
+        let id = UUID()
+        refreshes[id] = Task { [weak self] in
+            defer { self?.refreshes[id] = nil }
+            guard !Task.isCancelled else { return }
+            await self?.refreshFromStore()
+        }
     }
 
     /// Command observation belongs to the Machine, independently of query leases.
     public func start() {
         guard changes == nil else { return }
+        stopped = nil
         changes = Task { [weak self, store] in
             for await _ in await store.changes() {
                 guard !Task.isCancelled else { return }
@@ -417,6 +430,11 @@ public final class WorkInteraction {
         for (id, task) in deliveries where !savedIDs.contains(id) {
             task.cancel()
             deliveries[id] = nil
+            let retirement = UUID()
+            retiring[retirement] = Task { [weak self] in
+                await task.value
+                self?.retiring[retirement] = nil
+            }
         }
         intents.removeAll { savedIDs.contains($0.id) || $0.savedRevision.map { $0 <= update.revision } == true }
         saved = update.records
@@ -440,13 +458,24 @@ public final class WorkInteraction {
     }
 
     /// Application/test teardown. Closing a query alone does not cancel writes.
-    public func shutdown() {
-        changes?.cancel(); changes = nil
-        saving?.cancel(); saving = nil
-        for task in deliveries.values { task.cancel() }
+    @discardableResult
+    public func shutdown() -> Task<Void, Never> {
+        if let stopped { return stopped }
+        let tasks = [changes, saving].compactMap { $0 } + Array(deliveries.values)
+            + Array(refreshes.values) + Array(retiring.values)
+        for task in tasks { task.cancel() }
+        changes = nil
+        saving = nil
         deliveries = [:]
+        refreshes = [:]
+        retiring = [:]
         leases = [:]
         generation &+= 1
         reconciled = []
+        let stopped = Task {
+            for task in tasks { await task.value }
+        }
+        self.stopped = stopped
+        return stopped
     }
 }

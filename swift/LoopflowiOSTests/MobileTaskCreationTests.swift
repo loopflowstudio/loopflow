@@ -7,15 +7,21 @@ import XCTest
 
 @MainActor
 final class MobileTaskCreationTests: XCTestCase {
+    private func stop(_ owner: WorkInteraction) {
+        let stopped = owner.shutdown()
+        addTeardownBlock { await stopped.value }
+    }
+
     func testUnsavedConversationActionsRetryTheSameIdentityOrReturnWordsToEditor() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: root) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
         let fault = IntentDiskFault()
         let disk = ClientWorkStore(directory: root, prepareDirectory: { _ in try fault.check() }, machine: { "machine" },
             read: { _ in "null" }, observe: { _ in ServerWatch(updates: AsyncThrowingStream { _ in }, checkpoint: { _ in }, cancel: {}) },
             send: { _ in XCTFail("No admission evidence yet") })
+        addTeardownBlock { await disk.close() }
         let owner = WorkInteraction(machine: "machine", store: disk)
-        defer { owner.shutdown() }
+        defer { stop(owner) }
         let client = RemoteMobileClient(savedMachine: SavedMachine(endpoint: URL(string: "https://original.invalid")!, machineID: "machine"))
         client.journal = disk
         client.interaction = owner
@@ -39,14 +45,15 @@ final class MobileTaskCreationTests: XCTestCase {
 
     func testCreateButtonSelectsSubmittedWordsBeforeHeldSaveAndClosesEditor() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: root) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
         let hold = HeldIntentDisk()
         let disk = ClientWorkStore(directory: root.appendingPathComponent("outbox"), prepareDirectory: { _ in hold.enter() },
             machine: { "machine" }, read: { _ in "null" },
             observe: { _ in ServerWatch(updates: AsyncThrowingStream { _ in }, checkpoint: { _ in }, cancel: {}) },
             send: { _ in XCTFail("Held save must not send") })
+        addTeardownBlock { await disk.close() }
         let owner = WorkInteraction(machine: "machine", store: disk)
-        defer { hold.release(); owner.shutdown() }
+        defer { hold.release(); stop(owner) }
         let client = EditorClient(interaction: owner, disk: disk)
         let store = MobileTaskDraftStore(url: root.appendingPathComponent("draft.json"))
         let model = MobileTaskCreation(client: client, store: store)
@@ -77,13 +84,14 @@ final class MobileTaskCreationTests: XCTestCase {
 
     func testLegacyFileImportsBeforeRewriteAndKeepsNewerUnsentDraft() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: root) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let disk = ClientWorkStore(directory: root.appendingPathComponent("outbox"), machine: { "machine" }, read: { _ in "null" },
             observe: { _ in ServerWatch(updates: AsyncThrowingStream { _ in }, checkpoint: { _ in }, cancel: {}) },
             send: { _ in XCTFail("Import cannot send") })
+        addTeardownBlock { await disk.close() }
         let owner = WorkInteraction(machine: "machine", store: disk)
-        defer { owner.shutdown() }
+        defer { stop(owner) }
         let client = EditorClient(interaction: owner, disk: disk)
         let store = MobileTaskDraftStore(url: root.appendingPathComponent("draft.json"))
         let id = UUID()
@@ -116,11 +124,12 @@ final class MobileTaskCreationTests: XCTestCase {
 
     func testRestartAfterOutboxSaveDoesNotResubmitTheSurvivingEditorFile() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: root) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
         let disk = ClientWorkStore(directory: root.appendingPathComponent("outbox"), machine: { "machine" }, read: { _ in "null" },
             observe: { _ in ServerWatch(updates: AsyncThrowingStream { _ in }, checkpoint: { _ in }, cancel: {}) }, send: { _ in XCTFail() })
+        addTeardownBlock { await disk.close() }
         let owner = WorkInteraction(machine: "machine", store: disk)
-        defer { owner.shutdown() }
+        defer { stop(owner) }
         let store = MobileTaskDraftStore(url: root.appendingPathComponent("draft.json"))
         var original = MobileTaskDraft()
         original.text = "Submitted words"
@@ -141,7 +150,7 @@ final class MobileTaskCreationTests: XCTestCase {
 
     func testRetiredCreationCannotResubmitASurvivingEditorAfterRestart() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: root) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
         let outbox = root.appendingPathComponent("outbox")
         let source = MobileTaskDraftStore(url: root.appendingPathComponent("draft.json"))
         var draft = MobileTaskDraft()
@@ -162,8 +171,9 @@ final class MobileTaskCreationTests: XCTestCase {
         let disk = ClientWorkStore(directory: outbox, machine: { "machine" }, read: { _ in "null" },
             observe: { _ in XCTFail("A retired creation must not be recovered"); return ServerWatch(updates: AsyncThrowingStream { $0.finish() }, checkpoint: { _ in }, cancel: {}) },
             send: { _ in XCTFail("A retired creation must not send again") })
+        addTeardownBlock { await disk.close() }
         let owner = WorkInteraction(machine: "machine", store: disk)
-        defer { owner.shutdown() }
+        defer { stop(owner) }
         let restored = MobileTaskCreation(client: EditorClient(interaction: owner, disk: disk), store: source)
         await restored.prepare()
         XCTAssertEqual(restored.draft.text, "")
@@ -177,12 +187,13 @@ final class MobileTaskCreationTests: XCTestCase {
 
     func testImportDoesNotRewriteAnEditorSavedWhileItWaited() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: root) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let disk = ClientWorkStore(directory: root.appendingPathComponent("outbox"), machine: { "machine" }, read: { _ in "null" },
             observe: { _ in ServerWatch(updates: AsyncThrowingStream { _ in }, checkpoint: { _ in }, cancel: {}) }, send: { _ in XCTFail() })
+        addTeardownBlock { await disk.close() }
         let owner = WorkInteraction(machine: "machine", store: disk)
-        defer { owner.shutdown() }
+        defer { stop(owner) }
         let client = EditorClient(interaction: owner, disk: disk)
         let store = MobileTaskDraftStore(url: root.appendingPathComponent("draft.json"))
         let source: [String: Any] = ["text": "Old words", "directory": "/repo", "machineID": "machine",
@@ -204,12 +215,13 @@ final class MobileTaskCreationTests: XCTestCase {
 
     func testFiledOperationKeepsLaterSelectionAndNativeRetryUsesOnlyItsAdmittedSession() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: root) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
         let server = CreationMachine()
         let disk = ClientWorkStore(directory: root, machine: { "machine" }, read: { _ in "null" },
             observe: { server.observe($0) }, send: { server.send($0) })
+        addTeardownBlock { await disk.close() }
         let owner = WorkInteraction(machine: "machine", store: disk)
-        defer { owner.shutdown(); server.finish() }
+        defer { stop(owner); server.finish() }
         let client = RemoteMobileClient(savedMachine: SavedMachine(endpoint: URL(string: "https://original.invalid")!, machineID: "machine"))
         client.journal = disk
         client.interaction = owner
@@ -275,12 +287,13 @@ final class MobileTaskCreationTests: XCTestCase {
 
     func testConflictingLegacyOutboxRetainsTheCompleteSourceFile() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: root) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let disk = ClientWorkStore(directory: root.appendingPathComponent("outbox"), machine: { "machine" }, read: { _ in "null" },
             observe: { _ in ServerWatch(updates: AsyncThrowingStream { _ in }, checkpoint: { _ in }, cancel: {}) }, send: { _ in XCTFail() })
+        addTeardownBlock { await disk.close() }
         let owner = WorkInteraction(machine: "machine", store: disk)
-        defer { owner.shutdown() }
+        defer { stop(owner) }
         let id = UUID()
         let original = SubmittedOperation(requestID: id.uuidString.lowercased(), destination: "machine", payload: try JSONEncoder().encode(
             ServedWrite.taskCreate(directory: "/repo", requestID: id.uuidString.lowercased(), title: nil, request: "Different saved words",
@@ -303,12 +316,13 @@ final class MobileTaskCreationTests: XCTestCase {
 
     func testUnreadableEditorIsNeverOverwritten() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: root) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let disk = ClientWorkStore(directory: root.appendingPathComponent("outbox"), machine: { "machine" }, read: { _ in "null" },
             observe: { _ in ServerWatch(updates: AsyncThrowingStream { $0.finish() }, checkpoint: { _ in }, cancel: {}) }, send: { _ in XCTFail() })
+        addTeardownBlock { await disk.close() }
         let owner = WorkInteraction(machine: "machine", store: disk)
-        defer { owner.shutdown() }
+        defer { stop(owner) }
         let store = MobileTaskDraftStore(url: root.appendingPathComponent("draft.json"))
         let bad = Data("unreadable draft".utf8)
         try bad.write(to: store.url)

@@ -1,13 +1,14 @@
 # Working assumptions
 
-- Headless concept review, 2026-11-15: Move's next cut separates per-field
-  incorporation from derived-query completeness. Proposed starting coverage is a
-  compact repository candidate manifest plus separately cached real content;
-  this is an engineering choice, not a product preference. Exact-query Machine
-  stamps remain unchanged. Implementation direction and counterexamples are in
-  `instant-task-session.md`. No code changed in this review. The three unanswered
-  product questions below remain open; concept-review reports them to
-  loop-or-next rather than silently resolving them.
+- Implementation, 2026-11-15: dependent field/manifest/Move work stopped on a
+  concrete clock counterexample. OS process exit changes activity and ordering
+  with unchanged SQLite revisions. The proposed per-field domain fences cannot
+  order those inputs; exporting `observe` counters without an incarnation also
+  reuses revisions after eviction. Proposed correction and acceptance are in
+  `instant-task-session.md` (External-observation counterexample). Source
+  replacement and persistence need design review before protocol/client cutover.
+  The SQLite teardown repair is implemented; Move remains unbuilt. The three
+  product questions remain open and independent of this engineering gap.
 
 - Jack Heart replied “1a” to the 2026-11-15 conversation review's disconnected-edit
   question: save and project Complete/rename/move locally, show “Waiting for

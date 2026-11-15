@@ -425,6 +425,10 @@ network boundary, so opening the outbox cannot import the account's real pending
 submissions. Put `env LF_HOME=/tmp/<fixture-home>` after `scripts/test_network.py
 --desktop`, before `swift test`.
 
+SQLite fixtures register directory removal with XCTest teardown, then store close,
+then an awaited `WorkInteraction.shutdown().value` barrier (blocks run in reverse
+order). A synchronous cancellation defer does not release SQLite before unlinking.
+
 Opt-in benchmark `LF_*` variables are cleared by the network boundary. Set them
 on its child command: `uv run python scripts/test_network.py --desktop env LF_WORKSPACE_PERF_OUTPUT=/tmp/projection.json swift test --skip-build --disable-sandbox --package-path swift --filter WorkspacePerformanceTests`.
 A skipped benchmark is unmeasured, even when its test run exits successfully.

@@ -15,15 +15,16 @@ extension ClientWorkQueryTests {
 
     func testUnreachableMachineShowsWaitingForColdAndSavedFeedsAndRefreshReturns() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         let connection = MachineConnection { throw ServerConnectionUnavailable(RegistryQueryError("Offline")) }
         _ = try? await connection.link()
         let disk = ClientWorkStore(directory: directory, connection: connection, machine: { "machine" },
             read: { _ in "null" }, observe: { _ in
                 ServerWatch(updates: AsyncThrowingStream { _ in }, checkpoint: { _ in }, cancel: {})
             }, send: { _ in XCTFail("No send while disconnected") })
+        addTeardownBlock { await disk.close() }
         let owner = WorkInteraction(machine: "machine", store: disk)
-        defer { owner.shutdown() }
+        defer { stop(owner) }
         let client = RemoteMobileClient(savedMachine: SavedMachine(endpoint: URL(string: "https://machine.invalid")!, machineID: "machine"))
         client.journal = disk
         client.interaction = owner
@@ -48,14 +49,17 @@ extension ClientWorkQueryTests {
         XCTAssertEqual(feed.repositories.first?.tasks.map(\.work.id), ["d"])
         XCTAssertEqual(owner.listedOperations.map(\.title), ["Complete Task · a", "Complete Task · b", "Complete Task · c"])
         let observation = RemoteTaskObservation(query: query, interaction: owner, connection: connection)
-        defer { observation.close() }
+        defer {
+            let closed = observation.close()
+            addTeardownBlock { await closed.value }
+        }
         try await observation.refresh()
         XCTAssertTrue(connection.isWaiting, "Refresh observes the existing reconnect, without waiting for it")
     }
 
     private func leaveBothFeeds(abandon: Bool) async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         let query = ServedRead.viewSelect(expression: TaskList.started.expression(wave: nil))
         let base = try workingPlan(["a", "b"])
         let seed = store(directory)
@@ -67,8 +71,9 @@ extension ClientWorkQueryTests {
         let disk = ClientWorkStore(directory: directory, prepareDirectory: { _ in hold.enter() }, machine: { "machine" },
             read: { _ in "null" }, observe: { _ in ServerWatch(updates: AsyncThrowingStream { _ in }, checkpoint: { _ in }, cancel: {}) },
             send: { _ in XCTFail("The gesture must not send") })
+        addTeardownBlock { await disk.close() }
         let owner = WorkInteraction(machine: "machine", store: disk)
-        defer { hold.release(); owner.shutdown() }
+        defer { hold.release(); stop(owner) }
         let client = RemoteMobileClient(savedMachine: SavedMachine(endpoint: URL(string: "https://machine.invalid")!, machineID: "machine"))
         client.journal = disk
         client.interaction = owner

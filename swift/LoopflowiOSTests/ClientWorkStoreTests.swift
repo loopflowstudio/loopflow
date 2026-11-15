@@ -5,7 +5,7 @@ import XCTest
 final class ClientWorkStoreTests: XCTestCase {
     func testLivePlanningStatusOutlivesTheSavedResultAndPhoneRestart() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "operation_planning", withExtension: "json", subdirectory: "server"))
         let result = try XCTUnwrap(try RawJSON(Data(contentsOf: url)).fields()["result"])
         let historical = try result.decode(OperationReceipt.self)
@@ -30,13 +30,15 @@ final class ClientWorkStoreTests: XCTestCase {
                 from: JSONSerialization.data(withJSONObject: value))
         }
         func store() -> ClientWorkStore {
-            ClientWorkStore(directory: directory, machine: { "machine_fixture" }, read: { _ in "null" }, observe: { _ in
+            let fixture = ClientWorkStore(directory: directory, machine: { "machine_fixture" }, read: { _ in "null" }, observe: { _ in
                 let stream = AsyncThrowingStream<SubscriptionReading<OperationReceipt>, any Error> { continuation in
                     for frame in frames { continuation.yield(frame) }
                     continuation.finish()
                 }
                 return ServerWatch(updates: stream, checkpoint: { _ in }, cancel: {})
             }, send: { _ in throw RegistryQueryError("Observation must never submit the saved edit") })
+            addTeardownBlock { await fixture.close() }
+            return fixture
         }
         let client = store()
         let record = try await client.record(.taskUpdate(directory: "/repo", issue: "LOO-1", notes: "Original phone edit"),
@@ -77,6 +79,7 @@ final class ClientWorkStoreTests: XCTestCase {
             }
             return ServerWatch(updates: stream, checkpoint: { _ in }, cancel: {})
         }, send: { _ in XCTFail("Epoch replacement cannot replay the saved edit") })
+        addTeardownBlock { await resetClient.close() }
         do { try await resetClient.observeSaved(record) } catch { }
         // The first receipt from this new observer belongs to the departed epoch.
         do { try await store().observeSaved(record) } catch { }
@@ -89,14 +92,16 @@ final class ClientWorkStoreTests: XCTestCase {
 
     func testSubmittedWordsSurvivePhoneRestartWithoutSending() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         func store() -> ClientWorkStore {
-            ClientWorkStore(directory: directory, machine: { "original-machine" }, read: { _ in "null" }, observe: { _ in
+            let fixture = ClientWorkStore(directory: directory, machine: { "original-machine" }, read: { _ in "null" }, observe: { _ in
                 let stream = AsyncThrowingStream<SubscriptionReading<OperationReceipt>, any Error> {
                     $0.finish(throwing: RegistryQueryError("Offline"))
                 }
                 return ServerWatch(updates: stream, checkpoint: { _ in }, cancel: {})
             }, send: { _ in throw RegistryQueryError("No submission before durable recovery") })
+            addTeardownBlock { await fixture.close() }
+            return fixture
         }
         let original = try await store().record(.taskCreate(directory: "/original-repo", requestID: "same", title: nil,
             request: "Exact phone request", wave: nil, graph: nil, session: nil, run: true), requestID: "same")

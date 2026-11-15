@@ -25,13 +25,14 @@ func creationFrame(id: String, delivery: String = "dispatched", revision: Int = 
 extension ClientWorkQueryTests {
     func testCreationPublishesBeforeHeldSaveAndSurvivesDepartureAndRestart() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         let hold = HeldIntentDisk()
         let server = CreationMachine()
         let disk = ClientWorkStore(directory: directory, prepareDirectory: { _ in hold.enter() },
             machine: { "machine" }, read: { _ in "null" }, observe: { server.observe($0) }, send: { server.send($0) })
+        addTeardownBlock { await disk.close() }
         let owner = WorkInteraction(machine: "machine", store: disk)
-        defer { hold.release(); owner.shutdown(); server.finish() }
+        defer { hold.release(); stop(owner); server.finish() }
         var selected = "old"
         let operation = owner.createTask(request: "  Exact words\n", directory: "/repo") { selected = $0.id }
         XCTAssertEqual(selected, operation.id)
@@ -67,9 +68,9 @@ extension ClientWorkQueryTests {
         await waitForCreation(operation) { operation.receipt?.sessionId != nil }
         XCTAssertEqual(selected, "B")
         XCTAssertEqual(operation.receipt?.sessionId, "exact-session")
-        owner.shutdown()
+        await owner.shutdown().value
         let restarted = WorkInteraction(machine: "machine", store: disk)
-        defer { restarted.shutdown() }
+        defer { stop(restarted) }
         restarted.start()
         await restarted.refreshFromStore()
         let restored = try XCTUnwrap(restarted.creations.first)
@@ -81,7 +82,7 @@ extension ClientWorkQueryTests {
 
     func testLegacyImportIsAtomicKeepsSendHistoryAndNeverReplaysMissingEvidence() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         func record(_ id: String, text: String = "Original words") throws -> SubmittedOperation {
             SubmittedOperation(requestID: id, destination: "machine", payload: try JSONEncoder().encode(
                 ServedWrite.taskCreate(directory: "/repo", requestID: id, title: nil, request: text,
@@ -115,6 +116,7 @@ extension ClientWorkQueryTests {
         let server = CreationMachine()
         let disk = ClientWorkStore(directory: directory, machine: { "machine" }, read: { _ in "null" },
             observe: { server.observe($0) }, send: { server.send($0) })
+        addTeardownBlock { await disk.close() }
         let recovering = Task { try await disk.reconcile(imported) }
         var observations = server.observations.makeAsyncIterator()
         _ = await observations.next()
@@ -129,10 +131,10 @@ extension ClientWorkQueryTests {
     }
     func testRecentQueryReopensFromDiskWhileNoServerAnswerCanArrive() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: root) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
         let disk = store(root)
         let owner = WorkInteraction(machine: "machine", store: disk)
-        defer { owner.shutdown() }
+        defer { stop(owner) }
         let query = ServedRead.viewSelect(expression: "state:working")
         let lease = owner.open(query) { _ in }
         try await owner.receive([workingPlan(["a"])], stamp: stamp("query", revision: 6), for: query)
@@ -148,12 +150,13 @@ extension ClientWorkQueryTests {
 
     func testPresentingCreationKeepsAHeldQueryColdAcrossRestart() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: root) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
         let server = CreationMachine()
         let disk = ClientWorkStore(directory: root, machine: { "machine" }, read: { _ in "null" },
             observe: { server.observe($0) }, send: { server.send($0) })
+        addTeardownBlock { await disk.close() }
         let owner = WorkInteraction(machine: "machine", store: disk)
-        defer { owner.shutdown(); server.finish() }
+        defer { stop(owner); server.finish() }
         let list = ServedRead.viewSelect(expression: "state:working")
         let count = ServedRead.desktopViewGet(directory: "/repo", expression: "state:working")
         _ = owner.open(list) { _ in }; _ = owner.open(count) { _ in }
@@ -167,7 +170,7 @@ extension ClientWorkQueryTests {
         await waitForCreation(operation) { operation.receipt?.sessionId != nil }
         try await owner.receive([workingPlan(["a", "created"])], stamp: stamp("list", revision: 7), for: list)
         try await owner.presented(operation.id)
-        owner.shutdown()
+        await owner.shutdown().value
         let restarted = store(root)
         let currentList = try await restarted.cachedPlans(machine: "machine", for: list)
         let heldCount = try await restarted.cachedPlans(machine: "machine", for: count)
@@ -180,13 +183,14 @@ extension ClientWorkQueryTests {
 
     func testCreationAndCompleteSaveFailuresHaveOnePresentationShapeAndIndependentRetry() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: root) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
         let fault = IntentDiskFault()
         let disk = ClientWorkStore(directory: root, prepareDirectory: { _ in try fault.check() }, machine: { "machine" },
             read: { _ in "null" }, observe: { _ in ServerWatch(updates: AsyncThrowingStream { _ in }, checkpoint: { _ in }, cancel: {}) },
             send: { _ in XCTFail("No receipt permits a send") })
+        addTeardownBlock { await disk.close() }
         let owner = WorkInteraction(machine: "machine", store: disk)
-        defer { owner.shutdown() }
+        defer { stop(owner) }
         let creation = owner.createTask(request: "Exact words", directory: "/repo") { _ in }
         let work = WorkWorkspaceKey(repository: "repo", kind: .task, id: "a")
         let completion = owner.complete(work, issue: "a", directory: "/repo", selected: nil, visible: [work]) { _ in XCTFail() }
@@ -212,13 +216,14 @@ extension ClientWorkQueryTests {
 
     func testUnsavedCreationCanReturnItsWordsToTheEditorWithoutSending() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: root) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
         let disk = ClientWorkStore(directory: root, prepareDirectory: { _ in throw RegistryQueryError("Disk unavailable") },
             machine: { "machine" }, read: { _ in "null" },
             observe: { _ in ServerWatch(updates: AsyncThrowingStream { $0.finish() }, checkpoint: { _ in }, cancel: {}) },
             send: { _ in XCTFail("An unsaved creation cannot send") })
+        addTeardownBlock { await disk.close() }
         let owner = WorkInteraction(machine: "machine", store: disk)
-        defer { owner.shutdown() }
+        defer { stop(owner) }
         let operation = owner.createTask(request: "Exact unsaved words", directory: "/original") { _ in }
         await owner.persistPending()
         XCTAssertFalse(operation.saved)
@@ -236,12 +241,13 @@ extension ClientWorkQueryTests {
 
     func testShownFiledResultHidesNormalPreparationAndReappearsIfAdmissionFails() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: root) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
         let server = CreationMachine()
         let disk = ClientWorkStore(directory: root, machine: { "machine" }, read: { _ in "null" },
             observe: { server.observe($0) }, send: { server.send($0) })
+        addTeardownBlock { await disk.close() }
         let owner = WorkInteraction(machine: "machine", store: disk)
-        defer { owner.shutdown(); server.finish() }
+        defer { stop(owner); server.finish() }
         let operation = owner.createTask(request: "Original words", directory: "/repo") { _ in }
         await owner.persistPending()
         var observations = server.observations.makeAsyncIterator()
@@ -262,12 +268,13 @@ extension ClientWorkQueryTests {
 
     func testOrdinaryTaskPresentationHidesRequestAcrossRestartWithoutResolvingPreparation() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: root) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
         let server = CreationMachine()
         let disk = ClientWorkStore(directory: root, machine: { "machine" }, read: { _ in "null" },
             observe: { server.observe($0) }, send: { server.send($0) })
+        addTeardownBlock { await disk.close() }
         let owner = WorkInteraction(machine: "machine", store: disk)
-        defer { owner.shutdown(); server.finish() }
+        defer { stop(owner); server.finish() }
         let operation = owner.createTask(request: "Original words", directory: "/repo") { _ in }
         await owner.persistPending()
         var observations = server.observations.makeAsyncIterator()
@@ -278,7 +285,7 @@ extension ClientWorkQueryTests {
         try await owner.presented(.task("created"))
         XCTAssertTrue(owner.listedOperations.isEmpty)
         let restarted = WorkInteraction(machine: "machine", store: disk)
-        defer { restarted.shutdown() }
+        defer { stop(restarted) }
         restarted.start()
         await restarted.refreshFromStore()
         XCTAssertTrue(restarted.listedOperations.isEmpty)
@@ -287,7 +294,7 @@ extension ClientWorkQueryTests {
 
     func testSubmittedDraftIdentitySurvivesRetirementAndRejectsASecondCommand() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: root) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
         let database = try ClientWorkDatabase(directory: root)
         func record(_ id: String) throws -> SubmittedOperation {
             SubmittedOperation(requestID: id, destination: "machine", payload: try JSONEncoder().encode(

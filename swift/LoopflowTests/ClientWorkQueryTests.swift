@@ -6,6 +6,11 @@ import XCTest
 /// The same persisted-query cases run in the Desktop and phone test targets.
 @MainActor
 final class ClientWorkQueryTests: XCTestCase {
+    func stop(_ owner: WorkInteraction) {
+        let stopped = owner.shutdown()
+        addTeardownBlock { await stopped.value }
+    }
+
     func plan() throws -> WorkViewPlan {
         let url = Bundle(for: Self.self).url(forResource: "view_plan", withExtension: "json")
             ?? URL(fileURLWithPath: #filePath).deletingLastPathComponent()
@@ -37,9 +42,11 @@ final class ClientWorkQueryTests: XCTestCase {
     }
 
     func store(_ directory: URL) -> ClientWorkStore {
-        ClientWorkStore(directory: directory, machine: { "machine" }, read: { _ in "null" }, observe: { _ in
+        let fixture = ClientWorkStore(directory: directory, machine: { "machine" }, read: { _ in "null" }, observe: { _ in
             ServerWatch(updates: AsyncThrowingStream { $0.finish() }, checkpoint: { _ in }, cancel: {})
         }, send: { _ in XCTFail("Cache and retirement must not send commands") })
+        addTeardownBlock { await fixture.close() }
+        return fixture
     }
 
     func save(_ directory: URL, receipt: OperationReceipt) throws {
@@ -56,7 +63,7 @@ final class ClientWorkQueryTests: XCTestCase {
 
     func testCreationRetiresOnlyAfterItsExactExportResolvesAndItsResultWasPresented() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         let url = Bundle(for: Self.self).url(forResource: "operation_creation_planning", withExtension: "json", subdirectory: "server")
             ?? URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
@@ -90,7 +97,7 @@ final class ClientWorkQueryTests: XCTestCase {
 
     func testDeclaredPlanningInapplicabilityClearsThePromptAndRetiresWithReloadFences() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         let client = store(directory)
         let base = try plan()
         let list = ServedRead.desktopViewGet(directory: "/repo", expression: "state:working")
@@ -124,7 +131,7 @@ final class ClientWorkQueryTests: XCTestCase {
 
     func testAResolvedEditDoesNotRequireAnUnrelatedCreationPresentation() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         try save(directory, receipt: receipt(kind: "task.update", stage: "task.updated"))
         let database = try ClientWorkDatabase(directory: directory)
         try database.retireIfConverged("saved")
@@ -134,7 +141,7 @@ final class ClientWorkQueryTests: XCTestCase {
     func testMissingCorrelationAndUnclassifiedDiagnosticsRetainTheExactRequest() async throws {
         for (planning, diagnostic) in [(OperationCommit.PlanningEffect.correlated, nil), (.none, "Attachment interrupted")] {
             let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-            defer { try? FileManager.default.removeItem(at: directory) }
+            addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
             try save(directory, receipt: receipt(planning: planning, diagnostic: diagnostic))
             let client = store(directory)
             try await client.presented("saved")
@@ -149,7 +156,7 @@ final class ClientWorkQueryTests: XCTestCase {
 
     func testQueryEpochReplacementInvalidatesEveryOperationAndRejectsDepartedRepliesAfterRestart() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         try save(directory, receipt: receipt(planning: .correlated))
         let base = try plan()
         let query = ServedRead.viewSelect(expression: "state:working")
@@ -169,7 +176,7 @@ final class ClientWorkQueryTests: XCTestCase {
 
     func testOlderQueryCannotReplaceThePersistedBodyAfterRestart() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         let query = ServedRead.viewSelect(expression: "state:working")
         let base = try plan()
         _ = try await store(directory).receivePlans([base], stamp: stamp("list", revision: 12), for: query)
@@ -219,7 +226,7 @@ final class ClientWorkQueryTests: XCTestCase {
     func testHeldListKeepsItsRemovalAfterCommandRetirementAndRestartRegardlessOfCountOrder() async throws {
         for countFirst in [false, true] {
             let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-            defer { try? FileManager.default.removeItem(at: directory) }
+            addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
             let client = store(directory)
             let list = ServedRead.desktopViewGet(directory: "/repo", expression: "state:working")
             let count = ServedRead.viewSelect(expression: "state:working")
@@ -259,7 +266,7 @@ final class ClientWorkQueryTests: XCTestCase {
 
     func testCompletionRetainsExplicitDestinationAndDoesNotCountItsOtherOccurrencesTwice() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         let client = store(directory)
         let query = ServedRead.viewSelect(expression: "state:working or task:a")
         _ = try await client.receivePlans([workingPlan(["a", "b"], explicit: true)], stamp: stamp("list", revision: 6), for: query)
@@ -272,7 +279,7 @@ final class ClientWorkQueryTests: XCTestCase {
     }
     func testRequestFenceCannotIncorporateCompletionAndSupersessionWaitsForReplacementFacts() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         let query = ServedRead.viewSelect(expression: "state:working")
         let base = try workingPlan(["a", "b"])
         let client = store(directory)
@@ -309,7 +316,7 @@ final class ClientWorkQueryTests: XCTestCase {
 
     func testReplacementEpochRetainsUnansweredIntentAndCannotBeReversedByOldListOrReceipt() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         let query = ServedRead.viewSelect(expression: "state:working")
         let base = try workingPlan(["a", "b"])
         let client = store(directory)
@@ -330,7 +337,7 @@ final class ClientWorkQueryTests: XCTestCase {
 
     func testRetiredCompletionDoesNotInvalidateAnUnrelatedRepository() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         let client = store(directory)
         let query = ServedRead.viewSelect(expression: "state:working")
         let unrelated = try plan() // /src/fixture, whereas the command is /repo
@@ -345,7 +352,7 @@ final class ClientWorkQueryTests: XCTestCase {
 
     func testDefiniteRefusalWithdrawsOnlyItsEffectWithoutWaitingForAnotherList() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         let query = ServedRead.viewSelect(expression: "state:working")
         let client = store(directory)
         _ = try await client.receivePlans([workingPlan(["a", "b"])], stamp: stamp("list", revision: 6), for: query)
@@ -366,7 +373,7 @@ final class ClientWorkQueryTests: XCTestCase {
 
     func testUnknownActivityElsewhereDoesNotRetainACompletedOccurrenceOrInventAnExactCount() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         var body = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(workingPlan(["a", "b"]))) as? [String: Any])
         var membership = try XCTUnwrap(body["membership"] as? [String: Any])
         var facts = try XCTUnwrap(membership["facts"] as? [[String: Any]])
@@ -393,7 +400,7 @@ final class ClientWorkQueryTests: XCTestCase {
 
     func testCompletionIncorporationUsesItsDeclaredDomains() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         let client = store(directory)
         let query = ServedRead.viewSelect(expression: "state:working")
         _ = try await client.receivePlans([workingPlan(["a", "b"])], stamp: stamp("list", revision: 6), for: query)
@@ -412,7 +419,7 @@ final class ClientWorkQueryTests: XCTestCase {
 
     func testUnrelatedUsageRevisionsCannotPreventADeclaredWorkReplacement() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         let query = ServedRead.viewSelect(expression: "state:working")
         let client = store(directory)
         _ = try await client.receivePlans([workingPlan(["a", "b"])], stamp: stamp("list", revision: 6), for: query)
@@ -428,7 +435,7 @@ final class ClientWorkQueryTests: XCTestCase {
 
     func testNewlySelectedCandidateWithoutContentStaysUnknownUntilItsCoveringRead() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         var body = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(workingPlan(["a", "b"]))) as? [String: Any])
         var membership = try XCTUnwrap(body["membership"] as? [String: Any])
         let refs = try XCTUnwrap((body["resolution"] as? [String: Any])?["members"])
@@ -455,7 +462,7 @@ final class ClientWorkQueryTests: XCTestCase {
 
     func testQueryReopenAndIndependentLeasesProjectHeldIntentOverOlderPreparedAnswers() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         let a = ServedRead.desktopViewGet(directory: "/repo", expression: "state:working")
         let b = ServedRead.desktopViewGet(directory: "/repo", expression: "state:available")
         let base = try workingPlan(["a", "b"])
@@ -467,8 +474,9 @@ final class ClientWorkQueryTests: XCTestCase {
         let disk = ClientWorkStore(directory: directory, prepareDirectory: { _ in hold.enter() }, machine: { "machine" },
             read: { _ in "null" }, observe: { _ in ServerWatch(updates: AsyncThrowingStream { _ in }, checkpoint: { _ in }, cancel: {}) },
             send: { _ in XCTFail("No send while saving") })
+        addTeardownBlock { await disk.close() }
         let owner = WorkInteraction(machine: "machine", store: disk)
-        defer { hold.release(); owner.shutdown() }
+        defer { hold.release(); stop(owner) }
         var first: ProjectedWorkPlan?
         var second: ProjectedWorkPlan?
         let firstLease = owner.open(a) { first = $0?.first }
@@ -501,13 +509,14 @@ final class ClientWorkQueryTests: XCTestCase {
 
     func testMachineDiscoveryFailureRetainsTheUnsavedIntentForSameIdentityRetry() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         let fault = IntentDiskFault()
         let disk = ClientWorkStore(directory: directory, machine: { try fault.check(); return "machine" },
             read: { _ in "null" }, observe: { _ in ServerWatch(updates: AsyncThrowingStream { _ in }, checkpoint: { _ in }, cancel: {}) },
             send: { _ in })
+        addTeardownBlock { await disk.close() }
         let owner = WorkInteraction(machine: nil, store: disk)
-        defer { owner.shutdown() }
+        defer { stop(owner) }
         let a = WorkWorkspaceKey(repository: "repo", kind: .task, id: "a")
         let b = WorkWorkspaceKey(repository: "repo", kind: .task, id: "b")
         var selected: WorkWorkspaceKey? = a
@@ -529,12 +538,13 @@ final class ClientWorkQueryTests: XCTestCase {
 
     func testCompletePublishesBeforeMachineDiscoveryAndSavesTheSameIdentity() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         let discovery = HeldIntentMachine()
         let disk = ClientWorkStore(directory: directory, machine: { await discovery.read() }, read: { _ in "null" },
             observe: { _ in ServerWatch(updates: AsyncThrowingStream { _ in }, checkpoint: { _ in }, cancel: {}) }, send: { _ in })
+        addTeardownBlock { await disk.close() }
         let owner = WorkInteraction(machine: nil, store: disk)
-        defer { owner.shutdown() }
+        defer { stop(owner) }
         let a = WorkWorkspaceKey(repository: "repo", kind: .task, id: "a")
         let b = WorkWorkspaceKey(repository: "repo", kind: .task, id: "b")
         var selected: WorkWorkspaceKey? = a
@@ -557,7 +567,7 @@ final class ClientWorkQueryTests: XCTestCase {
 
     func testCompletePublishesAndNavigatesWhileDiskAndNetworkAreHeld() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         let query = ServedRead.viewSelect(expression: "state:working")
         let base = try workingPlan(["a", "b"])
         let seed = store(directory)
@@ -567,8 +577,9 @@ final class ClientWorkQueryTests: XCTestCase {
         let disk = ClientWorkStore(directory: directory, prepareDirectory: { _ in hold.enter() }, machine: { "machine" },
             read: { _ in "null" }, observe: { _ in ServerWatch(updates: AsyncThrowingStream { _ in }, checkpoint: { _ in }, cancel: {}) },
             send: { _ in XCTFail("No send before save or receipt lookup") })
+        addTeardownBlock { await disk.close() }
         let owner = WorkInteraction(machine: "machine", store: disk)
-        defer { hold.release(); owner.shutdown() }
+        defer { hold.release(); stop(owner) }
         var first: [ProjectedWorkPlan] = []
         let lease = owner.open(query) { first = $0 ?? [] }
         owner.apply(prepared)
@@ -613,12 +624,13 @@ final class ClientWorkQueryTests: XCTestCase {
         }
         for (disposition, order) in cases {
             let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-            defer { try? FileManager.default.removeItem(at: directory) }
+            addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
             let server = HeldCompletionMachine()
             let disk = ClientWorkStore(directory: directory, machine: { "machine" }, read: { _ in "null" },
                 observe: { server.observe($0) }, send: { server.send($0) })
+            addTeardownBlock { await disk.close() }
             let owner = WorkInteraction(machine: "machine", store: disk)
-            defer { owner.shutdown() }
+            defer { stop(owner) }
             let list = ServedRead.viewSelect(expression: "state:working")
             let count = ServedRead.desktopViewGet(directory: "/repo", expression: "state:working")
             var shown: [ProjectedWorkPlan] = []
@@ -674,7 +686,7 @@ final class ClientWorkQueryTests: XCTestCase {
 
     func testSaveFailureWithdrawsOnlyItsLayerAndRetainsOriginalCommandForRetry() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         let query = ServedRead.viewSelect(expression: "state:working")
         let base = try workingPlan(["a", "b"])
         let seed = store(directory)
@@ -684,8 +696,9 @@ final class ClientWorkQueryTests: XCTestCase {
         let disk = ClientWorkStore(directory: directory, prepareDirectory: { _ in try fault.check() }, machine: { "machine" },
             read: { _ in "null" }, observe: { _ in ServerWatch(updates: AsyncThrowingStream { $0.finish() }, checkpoint: { _ in }, cancel: {}) },
             send: { _ in XCTFail("No missing lookup authorizes a send") })
+        addTeardownBlock { await disk.close() }
         let owner = WorkInteraction(machine: "machine", store: disk)
-        defer { owner.shutdown() }
+        defer { stop(owner) }
         var shown: [ProjectedWorkPlan] = []
         _ = owner.open(query) { shown = $0 ?? [] }
         owner.apply(prepared)
@@ -717,12 +730,13 @@ final class ClientWorkQueryTests: XCTestCase {
 
     func testDispatchedCompleteSurvivesReplacementEpochWithoutReplayAfterRestart() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         let server = HeldCompletionMachine()
         let disk = ClientWorkStore(directory: directory, machine: { "machine" }, read: { _ in "null" },
             observe: { server.observe($0) }, send: { server.send($0) })
+        addTeardownBlock { await disk.close() }
         let owner = WorkInteraction(machine: "machine", store: disk)
-        defer { owner.shutdown() }
+        defer { stop(owner) }
         let query = ServedRead.viewSelect(expression: "state:working")
         var shown: [ProjectedWorkPlan] = []
         _ = owner.open(query) { shown = $0 ?? [] }
@@ -738,13 +752,14 @@ final class ClientWorkQueryTests: XCTestCase {
         _ = await sent.next()
         try await owner.receive([base], stamp: stamp("list", revision: 1, epoch: "replacement"), for: query)
         XCTAssertEqual(shown.first?.taskCount, 1)
-        owner.shutdown()
+        await owner.shutdown().value
         let replacementServer = HeldCompletionMachine()
         replacementServer.publish(try completionFrame(nil, epoch: "replacement"))
         let replacement = ClientWorkStore(directory: directory, machine: { "machine" }, read: { _ in "null" },
             observe: { replacementServer.observe($0) }, send: { replacementServer.send($0) })
+        addTeardownBlock { await replacement.close() }
         let restarted = WorkInteraction(machine: "machine", store: replacement)
-        defer { restarted.shutdown() }
+        defer { stop(restarted) }
         _ = restarted.open(query) { shown = $0 ?? [] }
         var reopened = replacementServer.observations.makeAsyncIterator()
         _ = await reopened.next()
@@ -767,10 +782,10 @@ final class ClientWorkQueryTests: XCTestCase {
     func testSuspendedAnswerReconcilesBeforeReopenAfterClosedSettlementAndRestart() async throws {
         for disposition in [OperationCommit.Resolution.committed, .superseded, .definitelyRefused] {
             let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-            defer { try? FileManager.default.removeItem(at: directory) }
+            addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
             let disk = store(directory)
             let owner = WorkInteraction(machine: "machine", store: disk)
-            defer { owner.shutdown() }
+            defer { stop(owner) }
             let query = ServedRead.viewSelect(expression: "state:working")
             let base = try workingPlan(["a", "b"])
             var frames: [[ProjectedWorkPlan]?] = []
@@ -806,10 +821,10 @@ final class ClientWorkQueryTests: XCTestCase {
 
     func testReusableWorkingSetEvictsOldAnswersButPinsIndependentLeases() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         let disk = store(directory)
         let owner = WorkInteraction(machine: "machine", store: disk)
-        defer { owner.shutdown() }
+        defer { stop(owner) }
         let base = try workingPlan(["a", "b"])
         let pinned = ServedRead.viewSelect(expression: "pinned")
         var pinnedFrames = 0
@@ -842,7 +857,7 @@ final class ClientWorkQueryTests: XCTestCase {
 
     func testRepeatedSettlementBoundsEffectsAndCompactsClosedReloadRequirements() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         let database = try ClientWorkDatabase(directory: directory)
         let query = ServedRead.viewSelect(expression: "state:working")
         let closed = ServedRead.viewSelect(expression: "closed")
@@ -888,7 +903,7 @@ final class ClientWorkQueryTests: XCTestCase {
 
     func testLaterSettlementCannotReviveAnInvalidatedBaseWithAnUnrelatedEffect() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         let query = ServedRead.viewSelect(expression: "state:working")
         let database = try complete(directory)
         _ = try database.cache(ClientWorkQuery(stamp: stamp("list", revision: 6), plans: [workingPlan(["a", "b"])]), key: key(query))
@@ -911,7 +926,7 @@ final class ClientWorkQueryTests: XCTestCase {
 
     func testHealthyCompletionWaitsAndReconnectsAfterRestartWithoutAnotherGesture() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         let machine = HeldCompletionMachine()
         let carrier = CompletionCarrier()
         let connection = MachineConnection {
@@ -920,8 +935,10 @@ final class ClientWorkQueryTests: XCTestCase {
                 control: { carrier }, ticketed: { carrier }))
         }
         func client() -> ClientWorkStore {
-            ClientWorkStore(directory: directory, connection: connection, machine: { XCTFail("Saved work needs no discovery"); return "machine" },
+            let fixture = ClientWorkStore(directory: directory, connection: connection, machine: { XCTFail("Saved work needs no discovery"); return "machine" },
                 read: { _ in "null" }, observe: { machine.observe($0) }, send: { machine.send($0) })
+            addTeardownBlock { await fixture.close() }
+            return fixture
         }
         let disk = client()
         let owner = WorkInteraction(machine: "machine", store: disk)
@@ -942,13 +959,12 @@ final class ClientWorkQueryTests: XCTestCase {
         XCTAssertTrue(operation.presentation().actions.isEmpty)
         XCTAssertTrue(owner.isCompleting(issue: "a", directory: "/repo"))
         XCTAssertTrue(machine.submissions.isEmpty)
-        owner.shutdown()
-        for await _ in await disk.changes() {
-            if await !disk.isRecovering(id) { break }
-        }
+        await owner.shutdown().value
+        let recovering = await disk.isRecovering(id)
+        XCTAssertFalse(recovering, "Shutdown releases recovery before a replacement owner starts")
         let restartedDisk = client()
         let restarted = WorkInteraction(machine: "machine", store: restartedDisk)
-        defer { restarted.shutdown() }
+        defer { stop(restarted) }
         restarted.start()
         _ = await watches.next()
         await restarted.refreshFromStore()
@@ -970,7 +986,7 @@ final class ClientWorkQueryTests: XCTestCase {
 
     func testReconnectReadsTheLostSendOutcomeWithoutExecutingAgain() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         let machine = HeldCompletionMachine()
         let disk = ClientWorkStore(directory: directory, machine: { "machine" }, read: { _ in "null" },
             observe: { machine.observe($0) }, send: {
@@ -997,16 +1013,17 @@ final class ClientWorkQueryTests: XCTestCase {
 
     func testAbandonSharesRemovalNavigationAndRefusalWithoutStealingLaterSelection() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         let machine = HeldCompletionMachine()
         let disk = ClientWorkStore(directory: directory, machine: { "machine" }, read: { _ in "null" },
             observe: { machine.observe($0) }, send: { machine.send($0) })
+        addTeardownBlock { await disk.close() }
         let query = ServedRead.viewSelect(expression: "state:working")
         let base = try workingPlan(["a", "b"])
         _ = try await disk.receivePlans([base], stamp: stamp("list", revision: 6), for: query)
         let prepared = try await disk.presentation(machine: "machine", queries: [key(query): query])
         let owner = WorkInteraction(machine: "machine", store: disk)
-        defer { owner.shutdown() }
+        defer { stop(owner) }
         var shown: ProjectedWorkPlan?
         _ = owner.open(query) { shown = $0?.first }
         owner.apply(prepared)

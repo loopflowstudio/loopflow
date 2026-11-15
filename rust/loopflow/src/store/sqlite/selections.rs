@@ -2035,6 +2035,82 @@ mod tests {
     }
 
     #[test]
+    fn process_exit_changes_selection_without_advancing_sqlite_provenance() {
+        struct Child(std::process::Child);
+        impl Drop for Child {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+        let mut child = Child(
+            std::process::Command::new("sleep")
+                .arg("60")
+                .spawn()
+                .unwrap(),
+        );
+        let (_dir, store, repo) = fixture();
+        store.test_session(
+            "external-activity",
+            &crate::session_record::new_artifact_key(),
+        );
+        store.conn.lock().unwrap().execute(
+            "UPDATE agent_sessions SET repo='/repo', task_id='task_22222222222222222222222222222222', wave_id='11111111-1111-1111-1111-111111111111' WHERE id='external-activity'",
+            [],
+        ).unwrap();
+        let attachment = store
+            .claim_session_attachment("external-activity", None, &store.test_lf_process(), true)
+            .unwrap();
+        store
+            .record_agent_process_identity(
+                "external-activity",
+                &attachment,
+                child.0.id(),
+                crate::journal::process_started_at(child.0.id())
+                    .unwrap()
+                    .unwrap(),
+            )
+            .unwrap();
+        store
+            .begin_program_status(
+                "external-activity",
+                Some(&attachment.agent_process_id),
+                "external-surface",
+            )
+            .unwrap();
+        store
+            .record_program_status(
+                "external-activity",
+                Some(&attachment.agent_process_id),
+                "external-surface",
+                1,
+                &crate::program_status::Records {
+                    seen: true,
+                    records: vec![crate::program_status::Report {
+                        state: crate::program_status::State::Working,
+                        id: None,
+                        kind: None,
+                        progress: None,
+                        app: None,
+                        title: None,
+                        msg: None,
+                    }],
+                },
+            )
+            .unwrap();
+        let query = Selection::parse("state:busy", None).unwrap();
+        let revisions = store.revisions().unwrap();
+        let before = store.resolve_selection(&repo, &query).unwrap();
+        child.0.kill().unwrap();
+        child.0.wait().unwrap();
+        let after = store.resolve_selection(&repo, &query).unwrap();
+        assert_eq!(before.members.len(), 1);
+        assert!(after.members.is_empty());
+        assert!(after.unavailable.is_empty());
+        assert_eq!(store.revisions().unwrap(), revisions);
+    }
+
+    #[test]
     fn stale_conversations_leave_task_activity_known() {
         let (_dir, store, repo) = fixture();
         let task = "task_22222222222222222222222222222222";

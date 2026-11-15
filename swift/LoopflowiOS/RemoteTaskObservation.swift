@@ -107,7 +107,14 @@ final class RemoteTaskObservation {
         }
     }
 
-    func close() { close(error: CancellationError()) }
+    @discardableResult
+    func close() -> Task<Void, Never> {
+        close(error: CancellationError())
+        let tasks = [reader, connectionChanges].compactMap { $0 }
+        return Task {
+            for task in tasks { await task.value }
+        }
+    }
 
     private func close(error: any Error) {
         guard !closed else { return }

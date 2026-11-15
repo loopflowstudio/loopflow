@@ -20,7 +20,11 @@ async fn migration_preserves_planning_identity_and_removes_snapshot_storage() {
     }]});
     {
         let conn = Connection::open(&database).unwrap();
-        crate::store::migrations::apply_released_planning_fixture(&conn);
+        crate::store::migration_runner::apply_released_planning_fixture(
+            &crate::store::test_fixture::observers(),
+            &crate::store::test_fixture::build(),
+            &conn,
+        );
         conn.execute(
             "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'product','/repo',1)",
             [wave.as_str()],

@@ -78,11 +78,6 @@ pub(crate) fn apply_newer_migration(
     super::migration_runner::apply_newer_migration(&observers(), &build(), conn, sql)
 }
 
-#[cfg(test)]
-pub(crate) fn apply_released_planning_fixture(conn: &rusqlite::Connection) {
-    super::migration_runner::apply_released_planning_fixture(&observers(), &build(), conn)
-}
-
 pub fn latest_version_sqlite(conn: &rusqlite::Connection) -> StoreResult<String> {
     super::migration_runner::latest_version_sqlite(&build(), conn)
 }

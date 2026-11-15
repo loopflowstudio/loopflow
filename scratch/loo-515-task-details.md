@@ -41,6 +41,15 @@ Page: `scratch/concept-review.html`. Both findings are built:
   arrows/position/`]`/`[` control. Past a file's last (first) change, Files'
   Diff opens the next (previous) changed file, `lf task changes` order, on its
   first (last) change.
+- **Third pass (after the stepper merge):** nothing to change. Changes and
+  Files' Diff share renderer, place store and stepper; the one difference left
+  is deliberate: Changes reads the PR-equivalent comparison (disk, no drafts,
+  `•` marks a dirty file), Files' Diff reads the draft as typed. Changes'
+  Focus file and Files' Diff on a changed file now look alike (one file, `]`
+  crossing files); both were accepted separately, so the demo should show
+  whether Focus file still earns its button. Compress: the `Unified or side by
+  side` doc comment in `ReviewStreamView.swift` slid above `ReviewStepper`;
+  it belongs on `ReviewLayoutPicker`.
 - **Noted, not this Task:** a `.changes(comparison:)` browser tab and the Files
   tool's Changes page are two representations of one view; merging them
   changes the persisted `WorkBrowserTab` shape, which LOO-497/416 own.

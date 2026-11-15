@@ -30,55 +30,31 @@
   td, th { text-align:left; padding:.4rem .5rem; border-bottom:1px solid var(--rule); vertical-align:top; }
 </style>
 </head>
-<body>
-<main>
+<body><main>
 <header>
-  <h1>Task details: one reader, one way to move through it</h1>
-  <p>LOO-515 · concept-review step, second pass · 2026-11-14</p>
-  <p>Built from <code>scratch/loo-515-task-details.md</code>, <code>swift/LoopflowMac/TaskFileDocument.swift</code>, <code>Views/ReviewStreamView.swift</code>, <code>Views/TaskChangesView.swift</code>, <code>Views/TaskFilesView.swift</code></p>
+<h1>Task details: one reader, nothing left to merge</h1>
+<p>LOO-515 · concept-review step, third pass · 2026-11-14</p>
+<p>Built from scratch/loo-515-task-details.md, swift/LoopflowMac/TaskFileDocument.swift, Views/ReviewStreamView.swift, Views/TaskChangesView.swift, Views/TaskFilesView.swift</p>
 </header>
-
-<p class="lede">Recorded for the next implement pass: Files' Diff mode gets the same <code>]</code>/<code>[</code> stepping and kept reading place as Changes. The accepted design already says the priorities "apply throughout" and that you come back to "the Diff's scroll". No product choice is open.</p>
-
+<p class="lede">Nothing to change and no product choice open. The second pass's direction is built: both diff readers step with <code>]</code>/<code>[</code> through one <code>ReviewStepper</code> and keep their place in one <code>places[ReviewReader]</code> store.</p>
 <h2>Actions → concepts → APIs</h2>
 <table>
-  <tr><th>You do</th><th>Concept</th><th>API</th></tr>
-  <tr><td>⌥⌘2 review, <code>]</code>/<code>[</code>, select → Ask</td><td>Changes: whole comparison through <code>ReviewStream</code></td><td><code>lf task diff</code></td></tr>
-  <tr><td>Diff one file while editing</td><td>Files' Diff: one file through <code>ReviewStream</code>, draft included</td><td><code>lf task diff &lt;path&gt;</code> + draft</td></tr>
-  <tr><td class="proposed"><code>]</code>/<code>[</code> in Files' Diff; switch away and back</td><td class="proposed">stops + anchor belong to the reader, not to Changes</td><td>none new</td></tr>
+<tr><th>You do</th><th>Concept</th><th>API</th></tr>
+<tr><td>⌥⌘2, <code>]</code>/<code>[</code>, select → Ask</td><td>Changes: the PR-equivalent comparison, disk only</td><td><code>lf task diff</code></td></tr>
+<tr><td>Diff one file while editing</td><td>Files' Diff: one file, draft as typed</td><td><code>lf task diff &lt;path&gt;</code> + draft</td></tr>
+<tr><td>Step, switch away, come back</td><td><code>ReviewReader</code> → <code>ReviewPlace</code> (anchor, current stop)</td><td>none new</td></tr>
 </table>
-
-<h2>The mismatch</h2>
-<p>The last pass made one renderer. Navigation and place stayed with Changes: <code>TaskFilesStore.step(_:)</code> walks only the whole-comparison <code>review</code>, and <code>reviewAnchor</code> is bound only in <code>TaskChangesView</code>. <code>TaskFileDiffView</code> has neither, so in Files' Diff <code>]</code> does nothing and a Task switch starts the file at the top.</p>
-
+<h2>What stays different, on purpose</h2>
 <div class="row">
-  <div class="panel">
-    <h3>Now</h3>
-<pre>Changes    step · currentStop · reviewAnchor
-<span class="del">Files·Diff  —      —             —</span></pre>
-  </div>
-  <div class="panel after">
-    <h3 class="proposed">Proposed</h3>
-<pre>Changes    step(in: review) · anchor
-<span class="add">Files·Diff  step(in: fileReview) · anchor[path]
-           past last change → next file's Diff</span></pre>
-  </div>
+<div class="panel"><h3>Changes</h3>What <code>lf pr open</code> would show. A dirty file gets <code>•</code>; its draft is not in the stream.</div>
+<div class="panel"><h3>Files' Diff</h3>The file as typed, 180 ms debounce, header says <code>· unsaved draft</code>.</div>
 </div>
-
-<h2>Normal path, failure, recovery</h2>
-<ul>
-  <li>Editing <code>directory.rs</code> in Diff, <code>]</code> walks its changes, then opens the next changed file in Diff.</li>
-  <li>The draft changes under you: live updates keep the anchor on the nearest surviving change, as Changes does.</li>
-  <li>Cmd-2 to another Task, Cmd-1 back: same file, same change.</li>
-</ul>
-
+<h2>Watch in the demo</h2>
+<p>Changes' <strong>Focus file</strong> and Files' Diff on a changed file now behave alike: one file, <code>]</code> crossing into the next changed file. Both were chosen separately (Focus from prototype A; Diff mode from LOO-497). Whether Focus still earns its button is something the demo will show, not a question this step settles.</p>
+<h2>For compress</h2>
+<p>The doc comment <code>/// Unified or side by side; side by side needs a wide pane.</code> slid above <code>ReviewStepper</code> in <code>ReviewStreamView.swift</code>; it belongs on <code>ReviewLayoutPicker</code>.</p>
 <h2>Still noted, not this Task</h2>
 <p>A <code>.changes(comparison:)</code> browser tab and the Changes page are two representations of one view; merging them changes the persisted <code>WorkBrowserTab</code> shape, which LOO-497/416 own.</p>
-
 <h2>Questions</h2>
-<ol>
-  <li>None blocking. If <code>]</code> at a file's last change should stop rather than open the next file: a) cross files (recorded), b) stop.</li>
-</ol>
-</main>
-</body>
-</html>
+<ol><li>None blocking.</li></ol>
+</main></body></html>

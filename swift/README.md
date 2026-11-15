@@ -1144,14 +1144,23 @@ remains unknown without replay.
 saved command result; Desktop retains that observation while the request remains
 saved. It never submits commands. `planning` exposes current evidence for the
 exact correlated changes, separately from the result's historical `sync` and
-error. Showing a result records a local acknowledgment in that same saved
-operation; it does not delete the request or stop observing it. Missing planning
-confirmation and diagnostics without a confirmed recovery owner keep **Inspect**.
-The acknowledgment and departed database epochs survive restart; a reply from a
-departed epoch cannot replace the saved result or authorize another submission.
-A replacement database requires new domain evidence. Work query incorporation
-and native readiness remain separate obligations; live receipt observation alone
-does not complete the shared projection or phone presentation migration.
+error. Showing a result records a local acknowledgment in the saved
+operation. Its domain stage declares whether planning applies; a missing required
+change or unavailable status keeps **Inspect**, as do unclassified diagnostics.
+Task filing follows its original export receipt; Session input replacement has no
+planning effect. A known, resolved command retires in the transaction that persists
+its required reload fence; creation also retains its result until it has been shown. Lagging cached queries remain unavailable
+until a complete reading covers that fence. A covering query uses its confirmed
+body independently of other queries.
+
+Desktop's live Task lists and Dashboards and the phone's Task feed persist complete
+stamped query bodies in the shared SQLite store. The phone restores those bases
+through the same freshness and invalidation rules; its separate query files are
+no longer read or written. Departed epochs and query ordering survive restart.
+A query from a replacement epoch also invalidates outstanding receipt evidence
+for that Machine; recovery never replays an uncertain command. This is confirmed
+cache and retirement infrastructure. Ordered pending membership projection,
+normalized cross-query facts and phone recovery presentation remain unfinished.
 
 Terminal recovery must preserve the exact owner, draft and newer control claims.
 Opening shows **Opening… Input paused** through attachment and native readiness;

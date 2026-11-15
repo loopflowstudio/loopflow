@@ -27,7 +27,8 @@
           "request": 42
         },
         "resolution": "committed",
-        "planning_changes": []
+        "planning_changes": [],
+        "planning_effect": "none"
       },
       {
         "stage": "task.completed",
@@ -46,7 +47,8 @@
           "request": 42
         },
         "resolution": "superseded",
-        "planning_changes": []
+        "planning_changes": [],
+        "planning_effect": "none"
       }
     ],
     "created_at": 1,

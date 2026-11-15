@@ -1524,6 +1524,8 @@ final class WorkModel {
     /// what changed. Runs until cancelled, reopening the reader when it ends.
     func keepWorkCurrent() async {
         if usesFixedFixture { return }
+        await restoreConfirmedPlans()
+        guard !Task.isCancelled else { return }
         guard query.streamsWork else {
             // This transport has no reader: one reading, shown until asked again.
             await refresh()
@@ -1576,6 +1578,25 @@ final class WorkModel {
             resumePlanningWaiters(through: .max)
             finishCheckpoints(through: .max, reason: "Work observation ended before the update was confirmed")
             do { try await Task.sleep(for: delay) } catch { return }
+        }
+    }
+
+    private func restoreConfirmedPlans() async {
+        guard let machine = observingMachineId else { return }
+        let scope = workScope
+        let generation = taskListGeneration
+        for part in [WorkPart.selections, .taskList] {
+            guard let read = part.read(for: scope) else { continue }
+            do {
+                let cached = try await ClientWorkStore.shared.cachedPlans(machine: machine, for: read)
+                guard scope == workScope, machine == observingMachineId,
+                      generation == taskListGeneration else { return }
+                if part == .selections {
+                    if let cached { applySelectionPlans(cached.plans, reason: "") }
+                } else if let cached {
+                    applyTaskList(cached.plans.first, wave: scope.taskListWave, reason: "")
+                }
+            } catch { dashboardError = error.localizedDescription }
         }
     }
 
@@ -1702,11 +1723,41 @@ final class WorkModel {
             resumePlanningWaiters(through: answers)
         case .selections(let body):
             guard answers >= max(planningFloor, scopeFloor) else { return }
-            applySelectionPlans(body, reason: reason)
+            if let body, let stamp = frame.stamp, let scope = sentScope,
+               let read = WorkPart.selections.read(for: scope) {
+                let machine = workMachine
+                do {
+                    let confirmed = try await ClientWorkStore.shared.receivePlans(body, stamp: stamp, for: read)
+                    guard scope == sentScope, machine == workMachine, answers >= max(planningFloor, scopeFloor) else { return }
+                    if let confirmed { applySelectionPlans(confirmed.plans, reason: reason) }
+                    else { selectionPlans = .unavailable(lastGood: nil, reason: "Waiting for a covering Work reading") }
+                } catch {
+                    guard scope == sentScope, machine == workMachine else { return }
+                    selectionPlans = .unavailable(lastGood: nil, reason: error.localizedDescription)
+                }
+            } else { applySelectionPlans(body, reason: reason) }
             if body != nil { await refreshSelectedView() }
         case .taskList(let body):
             guard answers >= max(planningFloor, scopeFloor) else { return }
-            applyTaskList(body, wave: sentScope?.taskListWave, reason: reason)
+            if let body, let stamp = frame.stamp, let scope = sentScope,
+               let read = WorkPart.taskList.read(for: scope) {
+                let machine = workMachine
+                do {
+                    let confirmed = try await ClientWorkStore.shared.receivePlans([body], stamp: stamp, for: read)
+                    guard scope == sentScope, machine == workMachine, answers >= max(planningFloor, scopeFloor) else { return }
+                    if let confirmed { applyTaskList(confirmed.plans.first, wave: scope.taskListWave, reason: reason) }
+                    else {
+                        taskListGeneration &+= 1
+                        taskListReadings[repositoryReadingKey(repoPath ?? "")] =
+                            (scope.taskListWave, .unavailable(lastGood: nil, reason: "Waiting for a covering Work reading"))
+                    }
+                } catch {
+                    guard scope == sentScope, machine == workMachine else { return }
+                    taskListGeneration &+= 1
+                    taskListReadings[repositoryReadingKey(repoPath ?? "")] =
+                        (scope.taskListWave, .unavailable(lastGood: nil, reason: error.localizedDescription))
+                }
+            } else { applyTaskList(body, wave: sentScope?.taskListWave, reason: reason) }
         case .peerPlanning(let body):
             guard answers >= max(planningFloor, scopeFloor), let repoPath else { return }
             guard let body else {
@@ -2149,18 +2200,10 @@ final class WorkModel {
         }
     }
 
-    /// Planning rows bridge the first list read, including when planning refreshes before the list.
+    /// Membership comes from the confirmed Work query, including while planning
+    /// is unavailable. An invalidated query cannot fall back to older inventory.
     private var sidebarTaskRows: [(id: String, states: [WorkSelectionState])] {
-        if let taskList { return taskRows(taskList) }
-        return visibleTasks.compactMap { task in
-            if case .wave(let wave) = navigation.sidebarScope, task.task.waveId != wave { return nil }
-            guard !abandoningTaskIDs.contains(task.id) else { return nil }
-            switch task.section {
-            case .working: return (task.id, [.working])
-            case .autonomous: return (task.id, [.autonomous])
-            default: return nil
-            }
-        }
+        taskRows(taskList)
     }
 
     /// The repository or Wave's Working Tasks from the started list, or a

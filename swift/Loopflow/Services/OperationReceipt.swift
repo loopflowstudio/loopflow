@@ -12,16 +12,18 @@ public struct OperationCommit: Codable, Equatable, Sendable {
     public let resources: [String]
     public let fence: CommitFence
     public let result: JSONValue
+    public enum PlanningEffect: String, Codable, Sendable { case none, correlated }
+    public let planningEffect: PlanningEffect
     public let planningChanges: [PlanningChangeRef]
 
     private enum CodingKeys: String, CodingKey {
         case resolution, stage, resources, fence, result
-        case planningChanges = "planning_changes"
+        case planningEffect = "planning_effect", planningChanges = "planning_changes"
     }
 }
 
 public struct PlanningChangeRef: Codable, Equatable, Sendable {
-    public enum Kind: String, Codable, Sendable { case task, project, taskState = "task_state" }
+    public enum Kind: String, Codable, Sendable { case task, project, taskState = "task_state", taskCreation = "task_creation" }
     public let kind: Kind
     public let owner: String
     public let id: String
@@ -162,6 +164,7 @@ public struct OperationReceipt: Codable, Equatable, Sendable {
 public struct OperationRecovery: Equatable, Sendable {
     public enum Planning: Equatable, Sendable {
         case unavailable
+        case inapplicable
         case resolved
         case unresolved([OperationPlanningChange])
     }
@@ -180,21 +183,35 @@ public struct OperationRecovery: Equatable, Sendable {
         diagnostic = receipt?.error
         outcomeAvailable = receipt?.delivery == .finished && receipt?.validation == .bound
         resultAvailable = receipt?.result != nil || receipt?.commits.contains(where: { $0.result != .null }) == true
-        let expected = receipt?.commits.flatMap(\.planningChanges) ?? []
-        if receiptAvailable, let reading, !expected.isEmpty,
+        guard receiptAvailable, let receipt,
+              let declaration = OperationDeclaration(kind: receipt.kind),
+              let resolutions = declaration.resolutions(in: receipt) else {
+            planning = .unavailable
+            return
+        }
+        guard resolutions.allSatisfy({ $0.planningEffect != .none || $0.planningChanges.isEmpty }) else {
+            planning = .unavailable
+            return
+        }
+        let applicable = resolutions.filter { $0.planningEffect == .correlated }
+        if applicable.isEmpty {
+            planning = .inapplicable
+            return
+        }
+        let expected = applicable.flatMap(\.planningChanges)
+        if let reading, !expected.isEmpty,
+           applicable.allSatisfy({ !$0.planningChanges.isEmpty }),
            expected.allSatisfy({ expected in reading.changes.contains { $0.change == expected } }) {
             let unresolved = reading.unresolved.filter { expected.contains($0.change) }
             planning = unresolved.isEmpty ? .resolved : .unresolved(unresolved)
         } else {
-            // Until a command's domain registry establishes inapplicability,
-            // missing correlation/status cannot certify planning convergence.
             planning = .unavailable
         }
     }
 
     public var needsInspection: Bool {
         if !receiptAvailable || !outcomeAvailable || diagnostic != nil { return true }
-        if case .resolved = planning { return false }
+        if planning == .resolved || planning == .inapplicable { return false }
         return true
     }
 
@@ -202,7 +219,7 @@ public struct OperationRecovery: Equatable, Sendable {
         var messages: [String] = []
         switch planning {
         case .unavailable: messages.append("Planning confirmation unavailable")
-        case .resolved: break
+        case .resolved, .inapplicable: break
         case .unresolved(let changes):
             messages += changes.map { $0.error ?? "Planning update needs inspection (\($0.state.rawValue))" }
         }

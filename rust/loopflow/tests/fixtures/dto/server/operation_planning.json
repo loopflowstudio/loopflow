@@ -71,7 +71,8 @@
             "owner": "task_fixture",
             "id": "change_5"
           }
-        ]
+        ],
+        "planning_effect": "correlated"
       }
     ],
     "planning": {

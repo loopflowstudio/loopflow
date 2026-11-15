@@ -29,10 +29,13 @@ final class RemoteMobileClient: MobileTaskCreationClient {
 
 
     /// Creations saved before their first send, for this Machine.
-    private lazy var journal: ClientWorkStore = {
+    lazy var journal: ClientWorkStore = {
         let directory = URL.applicationSupportDirectory.appending(path: "submissions-\(savedMachine.machineID)")
         let machineID = savedMachine.machineID
-        return ClientWorkStore(directory: directory, machine: { machineID }, read: { [weak self] query in
+        return ClientWorkStore(directory: directory, prepareDirectory: { directory in
+            try FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+                ofItemAtPath: directory.path)
+        }, machine: { machineID }, read: { [weak self] query in
             guard let self else { throw RegistryQueryError("The original Machine connection is closed") }
             return try await connection().request(.read(query), deadline: Self.requestDeadline).printed
         }, observe: { [weak self] id in
@@ -57,7 +60,7 @@ final class RemoteMobileClient: MobileTaskCreationClient {
 
     /// Every repository's Tasks matching `expression`, kept current.
     func observeTasks(expression: String) -> RemoteTaskObservation {
-        RemoteTaskObservation(query: .viewSelect(expression: expression)) { [self] in try await connection() }
+        RemoteTaskObservation(query: .viewSelect(expression: expression), store: journal) { [self] in try await connection() }
     }
 
     /// The Machine's Waves that are still in use.

@@ -90,7 +90,8 @@
             "owner": "task_0123456789ab40008000000000000001",
             "id": "state_delivery_fixture"
           }
-        ]
+        ],
+        "planning_effect": "correlated"
       }
     ],
     "planning": {

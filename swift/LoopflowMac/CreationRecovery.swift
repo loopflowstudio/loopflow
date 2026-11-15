@@ -106,6 +106,12 @@ final class CreationRecovery {
         defer { refreshing = false }
         do {
             let records = try await submissions.pending()
+            let retained = Set(records.map(\.id))
+            for (id, task) in recoveryTasks where !retained.contains(id) {
+                task.cancel()
+                recoveryTasks.removeValue(forKey: id)
+                recoveryErrors.removeValue(forKey: id)
+            }
             for record in records where recoveryTasks[record.id] == nil {
                 if await submissions.isRecovering(record.id) { continue }
                 recoveryTasks[record.id] = Task { [weak self, submissions] in

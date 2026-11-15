@@ -33,6 +33,9 @@ repository, **Create & start**. The shared SQLite outbox saves the original requ
 before `operation.submit` admits it. Receipt subscriptions observe preparation;
 a lost answer is recovered by its original request ID. A replacement Machine
 database never authorizes another submission of an unanswered request.
+The Task feed restores confirmed query bases from that same SQLite store. Older
+replies cannot replace newer saved bases; a retired command leaves a required
+reload fence so an older saved list cannot be shown as current.
 
 ## Task
 

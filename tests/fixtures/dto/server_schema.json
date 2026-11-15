@@ -5956,6 +5956,9 @@
           },
           "type": "array"
         },
+        "planning_effect": {
+          "$ref": "#/$defs/PlanningEffect"
+        },
         "resolution": {
           "$ref": "#/$defs/OperationResolution"
         },
@@ -5976,6 +5979,7 @@
         "resources",
         "fence",
         "result",
+        "planning_effect",
         "planning_changes"
       ],
       "type": "object"
@@ -6493,7 +6497,8 @@
       "enum": [
         "task",
         "project",
-        "task_state"
+        "task_state",
+        "task_creation"
       ],
       "type": "string"
     },
@@ -6526,6 +6531,14 @@
         "superseded",
         "conflict",
         "unavailable"
+      ],
+      "type": "string"
+    },
+    "PlanningEffect": {
+      "description": "The domain writer declares whether this stage has an external planning effect.",
+      "enum": [
+        "none",
+        "correlated"
       ],
       "type": "string"
     },

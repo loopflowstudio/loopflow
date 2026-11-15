@@ -33,15 +33,56 @@ struct OperationRecoveryPresentationTests {
         let changes = await submissions.changes()
         server.publish(delivered)
         for await _ in changes {
-            if try await submissions.receipt(record.id)?.revision == delivered.body?.revision { break }
+            if try await submissions.pending().isEmpty { break }
+        }
+        for await _ in await submissions.changes() {
+            if await !submissions.isRecovering(record.id) { break }
         }
         await recovery.refresh()
-        #expect(recovery.items.isEmpty) // only the result prompt was discharged
-        #expect(server.watchCount == 1)
+        #expect(recovery.items.isEmpty)
+        #expect(server.watchCount == 0)
         let restarted = client()
-        #expect(try await restarted.recovery(record.id)?.resultPresented == true)
-        #expect(try await restarted.recovery(record.id)?.planning == .resolved)
-        #expect(try await restarted.pending().first?.payload == record.payload)
+        #expect(try await restarted.recovery(record.id) == nil)
+        #expect(try await restarted.pending().isEmpty)
+        #expect(server.submissions.isEmpty)
+    }
+
+    @Test func successfulCreationHasNoPermanentInspectRowAndStopsItsObserver() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("tests/fixtures/dto/task_create_receipt.json")
+        let result = try #require(JSONDecoder().decode([JSONValue].self, from: Data(contentsOf: fixture)).first)
+        let original = try operationTestFrame(result: result)
+        let savedReceipt = try #require(original.body)
+        var body = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(savedReceipt)) as? [String: Any])
+        body["commits"] = [["resolution": "committed", "stage": "task.filed", "resources": [],
+            "fence": ["machine": "machine", "epoch": "epoch-a", "schema": ServerProtocol.revision,
+                      "revisions": ["planning": 7, "sessions": 7]],
+            "result": try JSONSerialization.jsonObject(with: JSONEncoder().encode(result)),
+            "planning_effect": "none", "planning_changes": []]]
+        let frame = try JSONDecoder().decode(SubscriptionReading<OperationReceipt>.self,
+            from: JSONSerialization.data(withJSONObject: ["answers": NSNull(), "unavailable": NSNull(), "body": body,
+                "stamp": try JSONSerialization.jsonObject(with: JSONEncoder().encode(try #require(original.stamp)))]))
+        let server = try OperationServer(frame: frame)
+        let submissions = ClientWorkStore(directory: root, machine: { "machine" }, read: { _ in "null" },
+            observe: { server.observe($0) }, send: { try server.send($0) })
+        let record = try await submissions.record(.taskCreate(directory: "/repo", requestID: "same", title: nil,
+            request: "Original request", wave: nil, graph: nil, session: nil, run: true), requestID: "same")
+        _ = try await submissions.reconcile(record)
+        let recovery = CreationRecovery(submissions: submissions)
+        await recovery.refresh()
+        #expect(recovery.items.first?.complete == true)
+        #expect(recovery.items.first?.text.contains("Planning confirmation unavailable") == false)
+        await recovery.presented([record.id])
+        for await _ in await submissions.changes() {
+            if await !submissions.isRecovering(record.id) { break }
+        }
+        await recovery.refresh()
+        #expect(recovery.items.isEmpty)
+        #expect(try await submissions.pending().isEmpty)
+        #expect(server.watchCount == 0)
         #expect(server.submissions.isEmpty)
     }
 

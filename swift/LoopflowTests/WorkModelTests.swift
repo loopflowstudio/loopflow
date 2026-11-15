@@ -9,6 +9,19 @@ import ViewInspector
 @Suite("Work model")
 @MainActor
 struct WorkModelTests {
+    @Test func missingWorkMembershipCannotResurrectRowsFromOlderPlanningOrChangeSelection() throws {
+        let fixture = try WorkTestFixture.load()
+        let model = WorkModel(query: fixture.query, repoPath: "/src/loopflow")
+        model.applyFixture(roadmap: .available(fixture.roadmap), waves: .available(fixture.waves),
+            workActivity: .available(fixture.workActivity), repos: [])
+        model.select(.task(id: "issue-now"))
+        model.applyTaskList(nil, wave: nil, reason: "Waiting for a covering Work reading")
+        #expect(!model.visibleTasks.isEmpty)
+        #expect(model.sidebarTaskIDs.isEmpty)
+        #expect(model.sidebarAutonomousTaskIDs.isEmpty)
+        #expect(model.selection == .task(id: "issue-now"))
+    }
+
     @Test("Back visits retained Work in repository order without recording its own return")
     func backUsesRepositoryHistory() throws {
         let fixture = try WorkTestFixture.load()

@@ -37,16 +37,11 @@ final class TaskFeed {
         stop()
         let current = generation
         waiting = Perf.begin("tasks_current")
-        // The last reading under each filter, shown at once while the Machine answers.
-        // It is kept as wire bytes and read by the live decoder, so a file an older
-        // app wrote fails to load instead of showing a stale shape.
-        let url = savedURL
-        let saved = await Task.detached(priority: .userInitiated) {
-            (try? RemoteTaskObservation.decode(frame: RawJSON(Data(contentsOf: url))).reading).flatMap { try? $0.get() }
-        }.value
+        let saved = try? await client.journal.cachedPlans(machine: client.savedMachine.machineID,
+            for: .viewSelect(expression: filter.expression(wave: wave)))
         guard current == generation else { return }
-        if let saved {
-            repositories = saved
+        if let saved, let repositories = try? RemoteTaskObservation.decodePlans(saved.plans).get() {
+            self.repositories = repositories
             loaded = true
             Perf.launch("tasks_saved")
         } else {
@@ -59,6 +54,10 @@ final class TaskFeed {
             do {
                 for try await update in observation.readings {
                     guard let self, current == self.generation else { return }
+                    if update.invalidated {
+                        self.repositories = []
+                        self.loaded = false
+                    }
                     switch update.reading {
                     case .success(let repositories):
                         let changed = repositories != self.repositories || !self.loaded
@@ -68,7 +67,6 @@ final class TaskFeed {
                         Perf.launch("tasks_current")
                         if let waiting = self.waiting { Perf.end(waiting, self.filter.rawValue) }
                         self.waiting = nil
-                        if changed { self.save(update.wire) }
                         if self.waves.isEmpty, let found = try? await self.client.waves() { self.waves = found }
                     case .failure(let error): self.error = error.message
                     }
@@ -98,23 +96,15 @@ final class TaskFeed {
         observation = nil
     }
 
-    /// Removes what this Machine's readings left on the phone.
-    func forget() {
+    /// Remove cached Work without discarding unanswered submitted commands.
+    func forget() async {
         stop()
+        do { try await client.journal.forgetQueries(machine: client.savedMachine.machineID) }
+        catch { self.error = error.localizedDescription }
+        // Released versions kept query files outside the outbox.
         let saved = (try? FileManager.default.contentsOfDirectory(at: .cachesDirectory, includingPropertiesForKeys: nil)) ?? []
         for file in saved where file.lastPathComponent.hasPrefix("tasks-\(client.savedMachine.machineID)-") {
             try? FileManager.default.removeItem(at: file)
-        }
-    }
-
-    private var savedURL: URL {
-        URL.cachesDirectory.appending(path: "tasks-\(client.savedMachine.machineID)-\(filter.rawValue)\(wave.map { "-\($0)" } ?? "").json")
-    }
-
-    private func save(_ wire: Data) {
-        let url = savedURL
-        Task.detached(priority: .utility) {
-            try? wire.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         }
     }
 
@@ -276,8 +266,10 @@ struct TaskListView: View {
                         Text(client.savedMachine.endpoint.host ?? "Machine")
                         Button("Change address", action: onChangeAddress)
                         Button("Forget Machine", role: .destructive) {
-                            feed.forget()
-                            onForget()
+                            Task {
+                                await feed.forget()
+                                onForget()
+                            }
                         }
                     } label: { Image(systemName: "desktopcomputer") }
                         .accessibilityLabel("Machine")

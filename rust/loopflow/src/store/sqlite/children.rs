@@ -280,6 +280,10 @@ impl SqliteStore {
             None => super::task_ownership::OwnershipFacts::of_task_in(&conn, task_id)?,
         };
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let changes_before: i64 =
+            tx.query_row("SELECT COALESCE(max(seq),0) FROM task_changes", [], |row| {
+                row.get(0)
+            })?;
         if let Some(input) = creation {
             if let Some(project) = &input.project_id {
                 super::durable::require_selected_project(&tx, project)?;
@@ -362,6 +366,32 @@ impl SqliteStore {
                 None,
                 "filed",
                 Some(&result),
+            )?;
+            let mut query =
+                tx.prepare("SELECT id FROM task_changes WHERE task_id=?1 AND seq>?2 ORDER BY seq")?;
+            let mut changes = query
+                .query_map(params![task_id.as_str(), changes_before], |row| {
+                    Ok(crate::store::planning_sync::PlanningChangeRef {
+                        kind: crate::store::planning_sync::PlanningChangeKind::Task,
+                        owner: task_id.to_string(),
+                        id: row.get(0)?,
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            if creation.is_some() && me.planning_connected() {
+                changes.push(crate::store::planning_sync::PlanningChangeRef {
+                    kind: crate::store::planning_sync::PlanningChangeKind::TaskCreation,
+                    owner: task_id.to_string(),
+                    id: task_id.to_string(),
+                });
+            }
+            super::operations::commit_filing_in(
+                &tx,
+                &identity.request_id,
+                task_id.as_str(),
+                session.map(|s| s.id.as_str()),
+                &result,
+                changes,
             )?;
         }
         tx.commit()?;

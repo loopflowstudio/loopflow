@@ -14,10 +14,10 @@ struct RepositoryTasks: Equatable {
 
 typealias MobileTaskReading = Result<[RepositoryTasks], RegistryQueryError>
 
-/// A reading and the wire bytes it was decoded from, which is what the phone keeps.
+/// Presentation of a confirmed query; invalidation also withdraws retained rows.
 struct TaskListReading {
     let reading: MobileTaskReading
-    let wire: Data
+    let invalidated: Bool
 }
 
 /// The Tasks a Work reading shows, in the Machine's order.
@@ -47,7 +47,7 @@ final class RemoteTaskObservation {
     private var refreshing: (id: UInt64, continuation: CheckedContinuation<Void, any Error>)?
     private var closed = false
 
-    init(query: ServedRead, connect: @escaping @Sendable () async throws -> ServerLink) {
+    init(query: ServedRead, store: ClientWorkStore, connect: @escaping @Sendable () async throws -> ServerLink) {
         watch = ServerLink.subscribe(query, connect: connect) { update -> RawJSON? in
             guard case .reading(let frame) = update else { return nil }
             return frame
@@ -59,9 +59,22 @@ final class RemoteTaskObservation {
                     guard let self, !self.closed else { return }
                     // A reading is tens to hundreds of kilobytes; decoding it here would
                     // stall a scroll for each one.
-                    let reading = try await Task.detached { try Self.decode(frame: frame) }.value
+                    let envelope = try await Task.detached {
+                        try frame.decode(SubscriptionReading<[WorkViewPlan]>.self)
+                    }.value
+                    guard !self.closed, !Task.isCancelled else { return }
+                    let reading: MobileTaskReading
+                    var invalidated = false
+                    if let plans = envelope.body, let stamp = envelope.stamp, envelope.unavailable == nil {
+                        if let confirmed = try await store.receivePlans(plans, stamp: stamp, for: query) {
+                            reading = Self.decodePlans(confirmed.plans)
+                        } else {
+                            invalidated = true
+                            reading = .failure(RegistryQueryError("Waiting for a covering Work reading"))
+                        }
+                    } else { reading = try Self.decode(frame: frame).reading }
                     guard !self.closed else { return }
-                    self.receive(reading, wire: frame.bytes)
+                    self.receive((envelope.answers, reading), invalidated: invalidated)
                 }
                 throw RegistryQueryError("Task updates ended. Refresh to reconnect.")
             } catch { self?.close(error: error) }
@@ -100,8 +113,8 @@ final class RemoteTaskObservation {
         refreshing = nil
     }
 
-    private func receive(_ reading: (answers: UInt64?, reading: MobileTaskReading), wire: Data) {
-        continuation.yield(TaskListReading(reading: reading.reading, wire: wire))
+    private func receive(_ reading: (answers: UInt64?, reading: MobileTaskReading), invalidated: Bool) {
+        continuation.yield(TaskListReading(reading: reading.reading, invalidated: invalidated))
         if let refreshing, let answers = reading.answers, answers >= refreshing.id {
             self.refreshing = nil
             refreshing.continuation.resume()
@@ -114,6 +127,10 @@ final class RemoteTaskObservation {
             return (reading.answers, .failure(RegistryQueryError(reason)))
         }
         guard let plans = reading.body else { throw RegistryQueryError("Task reading is missing its contents") }
+        return (reading.answers, decodePlans(plans))
+    }
+
+    nonisolated static func decodePlans(_ plans: [WorkViewPlan]) -> MobileTaskReading {
         // One repository that cannot answer leaves the others listed; the reading
         // fails only when none could.
         var failure: RegistryQueryError?
@@ -124,8 +141,8 @@ final class RemoteTaskObservation {
             }
         }
         if let failure, repositories.allSatisfy(\.tasks.isEmpty), plans.allSatisfy({ !$0.resolution.unavailable.isEmpty }) {
-            return (reading.answers, .failure(failure))
+            return .failure(failure)
         }
-        return (reading.answers, .success(repositories))
+        return .success(repositories)
     }
 }

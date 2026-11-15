@@ -14,7 +14,7 @@ struct ServerProtocolTests {
         let change = ServedWrite.taskComplete(directory: "/repo", issue: "LOO-1")
         #expect(try encoded(.request(id: "admit", operation: .operationSubmit(requestID: "operation_fixture", epoch: "epoch_fixture", command: change), select: nil)) == value("operation_submit"))
         #expect(try encoded(.request(id: "receipt", operation: .read(.operationGet(requestID: "operation_fixture")), select: nil)) == value("operation_get"))
-        for name in ["operation_admitted", "operation_receipt", "operation_planning", "operation_state_planning", "operation_pending", "operation_candidate", "operation_conflict"] {
+        for name in ["operation_admitted", "operation_receipt", "operation_planning", "operation_creation_planning", "operation_state_planning", "operation_pending", "operation_candidate", "operation_conflict"] {
             guard case .response(_, _, let result) = try message(name) else { Issue.record("Expected receipt"); return }
             let receipt = try result.decode(OperationReceipt.self)
             #expect(receipt.requestID == "operation_fixture")
@@ -78,6 +78,9 @@ struct ServerProtocolTests {
         #expect(throws: DecodingError.self) {
             try JSONDecoder().decode(OperationCommit.self, from: JSONSerialization.data(withJSONObject: object))
         }
+        var noPlanningDeclaration = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(stage)) as? [String: Any])
+        noPlanningDeclaration.removeValue(forKey: "planning_effect")
+        #expect(throws: DecodingError.self) { try JSONDecoder().decode(OperationCommit.self, from: JSONSerialization.data(withJSONObject: noPlanningDeclaration)) }
         for resolution in ["committed", "definitely_refused", "superseded"] {
             object["resolution"] = resolution
             let decoded = try JSONDecoder().decode(OperationCommit.self, from: JSONSerialization.data(withJSONObject: object))

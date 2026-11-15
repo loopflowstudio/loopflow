@@ -260,7 +260,13 @@ retry of uncertain effects.
 `commits` contains semantic stages with resource IDs, a result and
 Machine/epoch/schema/domain revision fences written in the domain transaction.
 Every entry requires `resolution`: `committed`, `definitely_refused` or
-`superseded`. The stage names the intended effect; a superseded `task.completed`
+`superseded`, and `planning_effect`: `none` or `correlated`. The domain writer
+sets `none` only when that stage has no external planning obligation; missing
+correlation or status for a `correlated` stage stays unavailable. Task filing
+correlates its original `task_creation` export receipt and field changes from
+the promotion transaction. Later edits are separate changes. Session input
+replacement declares no planning effect. The stage names the intended effect;
+a superseded `task.completed`
 is not a completion. Its result identifies the withdrawn request, and its fence
 requires a covering replacement reading before dropping the pending membership
 projection. Only `committed` entries can supply recovered command output.

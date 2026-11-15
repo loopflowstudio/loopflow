@@ -24,7 +24,16 @@ pub struct OperationCommit {
     pub resources: Vec<String>,
     pub fence: CommitFence,
     pub result: serde_json::Value,
+    pub planning_effect: PlanningEffect,
     pub planning_changes: Vec<PlanningChangeRef>,
+}
+
+/// The domain writer declares whether this stage has an external planning effect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanningEffect {
+    None,
+    Correlated,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -163,6 +172,7 @@ fn domain_commit_in(
         resources: resources.iter().map(|id| (*id).to_owned()).collect(),
         fence: fence_in(conn, domains)?,
         result: result.clone(),
+        planning_effect: PlanningEffect::None,
         planning_changes: Vec::new(),
     })
 }
@@ -209,6 +219,11 @@ pub(super) fn commit_planning_edit_in(
     result: &serde_json::Value,
 ) -> StoreResult<()> {
     let mut commit = domain_commit_in(conn, stage, &[task], &["planning"], result)?;
+    commit.planning_effect = if changes.is_empty() {
+        PlanningEffect::None
+    } else {
+        PlanningEffect::Correlated
+    };
     commit.planning_changes = changes;
     record_resolution_in(conn, operation, &commit)
 }
@@ -223,6 +238,11 @@ pub(super) fn commit_current_in(
 ) -> StoreResult<()> {
     if let Some(id) = crate::journal::request::operation_id() {
         let mut commit = domain_commit_in(conn, stage, resources, domains, &result()?)?;
+        commit.planning_effect = if changes.is_empty() {
+            PlanningEffect::None
+        } else {
+            PlanningEffect::Correlated
+        };
         commit.planning_changes = changes;
         record_resolution_in(conn, &id, &commit)?;
     }
@@ -335,6 +355,11 @@ fn completion_resolved_in(
     }
     let mut commit = domain_commit_in(conn, "task.completed", &[task], &["planning"], result)?;
     commit.resolution = resolution;
+    commit.planning_effect = if changes.is_empty() {
+        PlanningEffect::None
+    } else {
+        PlanningEffect::Correlated
+    };
     commit.planning_changes = changes;
     // Delivery may already have finished while settlement was pending. It does
     // not discharge this domain obligation. The first resolution always wins.
@@ -640,6 +665,30 @@ fn planning_reading_in(
     let fence = fence_in(conn, &["planning"])?;
     let mut changes = Vec::new();
     for change in references {
+        if change.kind == PlanningChangeKind::TaskCreation {
+            let row = conn.query_row(
+                "SELECT t.external_issue_id,json_extract(c.export_json,'$.id'),c.export_attempted,c.export_error
+                 FROM task_creation_intents c JOIN tasks t ON t.id=c.task_id
+                 WHERE c.task_id=?1 AND c.task_id=?2",
+                params![change.id, change.owner],
+                |row| Ok((row.get::<_,Option<String>>(0)?,row.get::<_,Option<String>>(1)?,row.get::<_,bool>(2)?,row.get::<_,Option<String>>(3)?)),
+            ).optional()?;
+            let (state, error) = match row {
+                None => (PlanningDeliveryState::Unavailable, None),
+                Some((Some(mapped), Some(expected), true, _)) if mapped == expected => {
+                    (PlanningDeliveryState::Delivered, None)
+                }
+                Some((Some(_), _, _, error)) => (PlanningDeliveryState::Unavailable, error),
+                Some((None, _, true, error)) => (PlanningDeliveryState::Uncertain, error),
+                Some((None, _, false, error)) => (PlanningDeliveryState::Pending, error),
+            };
+            changes.push(OperationPlanningChange {
+                change: change.clone(),
+                state,
+                error,
+            });
+            continue;
+        }
         let (table, owner, settled, field) = match change.kind {
             PlanningChangeKind::Task => (
                 "task_changes",
@@ -654,6 +703,7 @@ fn planning_reading_in(
                 " AND field=c.field",
             ),
             PlanningChangeKind::TaskState => ("task_state_deliveries", "task_id", "settled", ""),
+            PlanningChangeKind::TaskCreation => unreachable!("creation handled above"),
         };
         let row = conn
             .query_row(
@@ -749,17 +799,33 @@ pub(crate) fn insert_in(
             identity.request_id
         )));
     }
-    if milestone == "filed" {
-        commit_in(
-            conn,
-            &identity.request_id,
-            "task.filed",
-            &task_id.into_iter().chain(session_id).collect::<Vec<_>>(),
-            &["planning", "sessions"],
-            result.unwrap_or(&serde_json::Value::Null),
-        )?;
-    }
+
     Ok(())
+}
+
+/// Filing and its external export correlation share the promotion transaction.
+pub(super) fn commit_filing_in(
+    conn: &Connection,
+    id: &str,
+    task: &str,
+    session: Option<&str>,
+    result: &serde_json::Value,
+    changes: Vec<PlanningChangeRef>,
+) -> StoreResult<()> {
+    let mut commit = domain_commit_in(
+        conn,
+        "task.filed",
+        &std::iter::once(task).chain(session).collect::<Vec<_>>(),
+        &["planning", "sessions"],
+        result,
+    )?;
+    commit.planning_effect = if changes.is_empty() {
+        PlanningEffect::None
+    } else {
+        PlanningEffect::Correlated
+    };
+    commit.planning_changes = changes;
+    record_resolution_in(conn, id, &commit)
 }
 
 impl SqliteStore {
@@ -990,9 +1056,11 @@ mod tests {
             let decoded: super::OperationCommit = serde_json::from_value(stage.clone()).unwrap();
             assert_eq!(serde_json::to_value(decoded).unwrap(), stage);
         }
-        let mut missing = wire["commits"][1].clone();
-        missing.as_object_mut().unwrap().remove("resolution");
-        assert!(serde_json::from_value::<super::OperationCommit>(missing).is_err());
+        for field in ["resolution", "planning_effect"] {
+            let mut missing = wire["commits"][1].clone();
+            missing.as_object_mut().unwrap().remove(field);
+            assert!(serde_json::from_value::<super::OperationCommit>(missing).is_err());
+        }
         for field in [
             "request_id",
             "kind",
@@ -1023,6 +1091,139 @@ mod tests {
             fingerprint: fingerprint.into(),
             run: true,
         }
+    }
+
+    #[test]
+    fn filing_correlates_the_original_export_and_declares_local_only_planning() {
+        let (dir, store) = store();
+        let repository_id = store.ensure_repository("/filing").unwrap();
+        let task = store
+            .create_task(&crate::work::task::NewTask {
+                id: crate::durable::TaskId::new(),
+                repository_id,
+                project_id: None,
+                title: "Filed once".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        let epoch = store.reading_identity().unwrap().1;
+        for (id, connected) in [("export", true), ("local", false)] {
+            store
+                .admit_operation(
+                    &epoch,
+                    id,
+                    "task.create",
+                    id,
+                    &json!({"kind":"task.create"}),
+                )
+                .unwrap();
+            let mut conn = store.conn.lock().unwrap();
+            let tx = conn.transaction().unwrap();
+            let changes = if connected {
+                vec![crate::store::planning_sync::PlanningChangeRef {
+                    kind: crate::store::planning_sync::PlanningChangeKind::TaskCreation,
+                    owner: task.id.to_string(),
+                    id: task.id.to_string(),
+                }]
+            } else {
+                Vec::new()
+            };
+            super::commit_filing_in(
+                &tx,
+                id,
+                task.id.as_str(),
+                None,
+                &json!({"original":id}),
+                changes,
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        }
+        let exported = store.operation_receipt("export").unwrap().unwrap();
+        let stage = &exported.commits[0];
+        assert_eq!(stage.planning_effect, super::PlanningEffect::Correlated);
+        assert_eq!(stage.planning_changes[0].id, task.id.as_str());
+        assert_eq!(
+            exported.planning.unwrap().changes[0].state,
+            super::PlanningDeliveryState::Pending
+        );
+        let local = store.operation_receipt("local").unwrap().unwrap();
+        assert_eq!(
+            local.commits[0].planning_effect,
+            super::PlanningEffect::None
+        );
+        assert!(local.planning.is_none());
+        store.conn.lock().unwrap().execute(
+            "UPDATE task_creation_intents SET export_attempted=1,export_error='reply lost' WHERE task_id=?1", [task.id.as_str()]).unwrap();
+        drop(store);
+        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        let uncertain = store.operation_receipt("export").unwrap().unwrap();
+        assert_eq!(uncertain.commits[0].result, json!({"original":"export"}));
+        assert_eq!(
+            uncertain.planning.unwrap().changes[0].state,
+            super::PlanningDeliveryState::Uncertain
+        );
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute("UPDATE task_creation_intents SET export_json=json_object('id','expected-export') WHERE task_id=?1", [task.id.as_str()]).unwrap();
+            conn.execute(
+                "UPDATE tasks SET external_issue_id='another-export' WHERE id=?1",
+                [task.id.as_str()],
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            store
+                .operation_receipt("export")
+                .unwrap()
+                .unwrap()
+                .planning
+                .unwrap()
+                .changes[0]
+                .state,
+            super::PlanningDeliveryState::Unavailable
+        );
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET external_issue_id='expected-export' WHERE id=?1",
+                [task.id.as_str()],
+            )
+            .unwrap();
+        assert_eq!(
+            store
+                .operation_receipt("export")
+                .unwrap()
+                .unwrap()
+                .planning
+                .unwrap()
+                .changes[0]
+                .state,
+            super::PlanningDeliveryState::Delivered
+        );
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "DELETE FROM task_creation_intents WHERE task_id=?1",
+                [task.id.as_str()],
+            )
+            .unwrap();
+        assert_eq!(
+            store
+                .operation_receipt("export")
+                .unwrap()
+                .unwrap()
+                .planning
+                .unwrap()
+                .changes[0]
+                .state,
+            super::PlanningDeliveryState::Unavailable
+        );
     }
 
     #[test]
@@ -2051,6 +2252,12 @@ mod tests {
             tx.execute("INSERT INTO task_changes(id,task_id,value_json)
                 SELECT 'receipt_change_'||id,id,json_object('field','task_title','value',issue_title) FROM tasks", []).unwrap();
             tx.execute(
+                "INSERT INTO task_creation_intents(task_id,title,description,repository_id)
+                SELECT id,issue_title,issue_description,repository_id FROM tasks",
+                [],
+            )
+            .unwrap();
+            tx.execute(
                 "INSERT INTO task_state_deliveries(id,task_id,target)
                 SELECT 'receipt_state_'||id,id,'completed' FROM tasks",
                 [],
@@ -2175,6 +2382,46 @@ mod tests {
         traced.extend(crate::store::query_plans::statements(&store, || {
             let receipt = store.operation_receipt("edit-content").unwrap().unwrap();
             assert_eq!(receipt.planning.unwrap().changes.len(), 1);
+        }));
+        let filing = super::CreationIdentity {
+            request_id: "filing-query".into(),
+            kind: "task.create",
+            fingerprint: "filing".into(),
+            run: false,
+        };
+        traced.extend(crate::store::query_plans::statements(&store, || {
+            store
+                .promote_task(&task.id, None, None, None, None, Some(&filing))
+                .unwrap();
+            let mut conn = store.conn.lock().unwrap();
+            let tx = conn.transaction().unwrap();
+            super::commit_filing_in(
+                &tx,
+                &filing.request_id,
+                task.id.as_str(),
+                None,
+                &json!({}),
+                vec![crate::store::planning_sync::PlanningChangeRef {
+                    kind: crate::store::planning_sync::PlanningChangeKind::TaskCreation,
+                    owner: task.id.to_string(),
+                    id: task.id.to_string(),
+                }],
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        }));
+        traced.extend(crate::store::query_plans::statements(&store, || {
+            assert_eq!(
+                store
+                    .operation_receipt(&filing.request_id)
+                    .unwrap()
+                    .unwrap()
+                    .planning
+                    .unwrap()
+                    .changes
+                    .len(),
+                1
+            );
         }));
         let conn = store.conn.lock().unwrap();
         for sql in traced {

@@ -10,7 +10,8 @@
   preference. Validate membership coverage during implementation. The outbox uses system
   SQLite through SQLite3; this reversible choice avoids another dependency.
   GRDB is not adopted. Protocol revision 6 now adds stamped subscriptions;
-  confirmed-cache/projection and membership migration remain unfinished.
+  confirmed Work query bases now persist in the outbox database; ordered projection
+  and membership migration remain unfinished.
 - Completion navigation: Jack Heart replied “1b for the question (or show noting)”
   to the numbered choice in `scratch/concept-review.html`. Remove the row and
   select the next Task immediately; an empty state is allowed when none remains.
@@ -38,3 +39,8 @@
   typed disposition. Supersession results identify the withdrawn request; clients
   need a covering replacement reading before showing the unoverlaid membership.
   This avoids a second resolution ledger and guessed replacement Task values.
+
+- Retirement currently uses a conservative per-Machine domain revision frontier:
+  all stored/future Work plans must cover it before their base is usable. This is
+  a reversible engineering choice while the declarative query dependency registry
+  remains incomplete. No per-query membership overlay or full cutover is claimed.

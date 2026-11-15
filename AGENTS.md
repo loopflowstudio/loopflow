@@ -429,6 +429,10 @@ Opt-in benchmark `LF_*` variables are cleared by the network boundary. Set them
 on its child command: `uv run python scripts/test_network.py --desktop env LF_WORKSPACE_PERF_OUTPUT=/tmp/projection.json swift test --skip-build --disable-sandbox --package-path swift --filter WorkspacePerformanceTests`.
 A skipped benchmark is unmeasured, even when its test run exits successfully.
 
+Platform setup belongs in app targets; conditional code in shared Swift must
+compile for both platforms (`check_swift_multiplatform_boundaries.py`). Bind inner
+Swift Testing `#require` values separately; nested `#require` macros recurse.
+
 Headless Swift view tests inspect production leaf views directly when a parent
 needs `@Environment` Observation objects, which ViewInspector can't inject.
 Keep those views internal for `@testable` access. Mounted terminal frame checks

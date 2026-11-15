@@ -34,6 +34,7 @@ public struct OperationSubmissionError: LocalizedError {
 public actor ClientWorkStore {
     public typealias ReceiptWatch = ServerWatch<SubscriptionReading<OperationReceipt>>
     private let directory: URL
+    private let prepareDirectory: @Sendable (URL) throws -> Void
     private var database: ClientWorkDatabase?
     private var active: Set<String> = []
     private let currentMachine: @Sendable () async throws -> String
@@ -43,11 +44,13 @@ public actor ClientWorkStore {
     private var observers: [UUID: AsyncStream<Void>.Continuation] = [:]
 
     public init(directory: URL,
+                prepareDirectory: @escaping @Sendable (URL) throws -> Void = { _ in },
                 machine: @escaping @Sendable () async throws -> String,
                 read: @escaping @Sendable (ServedRead) async throws -> String,
                 observe: @escaping @Sendable (String) -> ReceiptWatch,
                 send: @escaping @Sendable (Data) async throws -> Void) {
         self.directory = directory
+        self.prepareDirectory = prepareDirectory
         currentMachine = machine
         self.read = read
         self.observe = observe
@@ -56,7 +59,7 @@ public actor ClientWorkStore {
 
     private func disk() throws -> ClientWorkDatabase {
         if let database { return database }
-        let opened = try ClientWorkDatabase(directory: directory)
+        let opened = try ClientWorkDatabase(directory: directory, prepareDirectory: prepareDirectory)
         database = opened
         return opened
     }
@@ -87,17 +90,35 @@ public actor ClientWorkStore {
     /// Current planning evidence is independent of the saved command result and
     /// of any Work query's coverage. A replaced database needs fresh evidence.
     public func planning(_ id: String) throws -> OperationPlanningReading? {
-        guard let state = try disk().state(id), state.receiptUnavailable != true,
-              state.receiptEpoch == state.observedEpoch,
-              let reading = state.receipt?.planning,
-              reading.fence.machine == state.record.destination,
-              reading.fence.epoch == state.observedEpoch,
-              reading.fence.schema == ServerProtocol.revision else { return nil }
-        return reading
+        guard let state = try disk().state(id) else { return nil }
+        return try disk().currentPlanning(state)
     }
 
-    /// Presentation acknowledges only the local act of showing a saved result.
-    /// It neither consumes the command nor confirms any domain or query effect.
+    /// Complete Work bases share the outbox transaction owner. A retired command
+    /// leaves a reload requirement, so an old cached query cannot bring it back.
+    public func receivePlans(_ plans: [WorkViewPlan], stamp: ReadingStamp, for read: ServedRead) throws -> ClientWorkQuery? {
+        let result = try disk().cache(ClientWorkQuery(stamp: stamp, plans: plans), key: queryKey(read))
+        changed()
+        return result
+    }
+
+    public func cachedPlans(machine: String, for read: ServedRead) throws -> ClientWorkQuery? {
+        try disk().cached(machine: machine, key: queryKey(read))
+    }
+
+    public func forgetQueries(machine: String) throws {
+        try disk().forgetQueries(machine: machine)
+        changed()
+    }
+
+    private func queryKey(_ read: ServedRead) throws -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        return String(decoding: try encoder.encode(read), as: UTF8.self)
+    }
+
+    /// Acknowledge showing a saved result. Retirement independently checks
+    /// domain resolution and persists the remaining query reload obligations.
     public func presented(_ id: String) throws {
         try disk().presented(id)
         changed()
@@ -105,9 +126,10 @@ public actor ClientWorkStore {
 
     public func recovery(_ id: String) throws -> OperationRecovery? {
         guard let state = try disk().state(id) else { return nil }
+        let epoch = try disk().activeEpoch(machine: state.record.destination)
         return OperationRecovery(receipt: state.receipt, planning: try planning(id),
             resultPresented: state.presentedAt != nil,
-            receiptAvailable: state.receiptUnavailable != true && state.receiptEpoch == state.observedEpoch)
+            receiptAvailable: state.receiptUnavailable != true && epoch != nil && state.receiptEpoch == epoch)
     }
 
     public func record(_ command: ServedWrite, requestID: String) async throws -> SubmittedOperation {
@@ -153,6 +175,7 @@ public actor ClientWorkStore {
     public func observeSaved(_ record: SubmittedOperation) async throws {
         guard active.insert(record.id).inserted else { return }
         defer { active.remove(record.id); changed() }
+        guard try disk().state(record.id) != nil else { return }
         try await verify(record)
         let watch = observe(record.id)
         defer { watch.cancel() }
@@ -198,8 +221,10 @@ public actor ClientWorkStore {
         } else {
             try disk().unavailable(record.id)
         }
+        let state = try disk().state(record.id)
+        try disk().retireIfConverged(record.id)
         changed()
-        return try disk().state(record.id)
+        return state
     }
 
     private func recover(_ record: SubmittedOperation) async throws -> OperationReceipt? {
@@ -215,7 +240,7 @@ public actor ClientWorkStore {
                 continue
             }
             // receive validated the stamp before changing the durable state.
-            guard let epoch = state.observedEpoch else { continue }
+            guard let epoch = try disk().activeEpoch(machine: record.destination) else { continue }
             if state.receiptEpoch == epoch, let receipt = state.receipt {
                 let canContinue: Bool
                 if !submitted && (receipt.delivery == .dispatched || receipt.delivery == .uncertain),

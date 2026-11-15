@@ -454,9 +454,13 @@ existing bounded input owners: no offline keystroke queue or automatic resend.
 
 ## Delete — do not maintain
 
+- Removed: `WorkModel.sidebarTaskRows`' roadmap-membership fallback. Sidebar
+  membership now comes only from the confirmed Work plan; retained entity facts
+  still supply details. Desktop restores stamped plans through the shared owner.
 - Removed: presentation-driven `ClientWorkStore.presented` deletion and its
   exclusive race fixture. Mounted results now persist acknowledgment; observation
-  and inspection continue. Retirement awaits query/domain obligations.
+  and inspection continue until domain resolution and persisted cache invalidation
+  permit retirement.
 - Removed: `ClientWorkStore.recover`'s separate receipt reducer. Recovery and
   continued observation now share `receive`.
 - Removed in this cut: newest-only delivery selection/acknowledgment in
@@ -547,151 +551,49 @@ with EXPLAIN on the 10,000-Task fixture; unrelated events must not reread every 
 Proposed target: local reaction P95 under 100 ms, at least 20 native samples per
 journey/platform, endpoints reported separately. Nothing here is measured yet.
 
-## Implement direction
+## Implementation direction (2026-11-15)
 
-Concept-review outcome (2026-11-15): resolve each effect independently, including
-unavailable evidence, alongside live Work incorporation and before the remaining
-mutation-family fences and both-client cutover. No open product choice.
+Full review wording and counterexamples: `a127084469:scratch/instant-task-session.md`
+(the prior “Implement direction” section). This refines the contracts above;
+there is no open product choice.
 
-### Independent recovery and query incorporation
+- One command/effect declaration supplies confirming stages, recovery owners and
+  affected query dependencies. A domain declares planning inapplicability;
+  missing required correlation/status stays unavailable. Current status for an
+  exact change never rewrites its original result. Historical diagnostics stay;
+  only their established owner can clear their current action. Unclassified
+  diagnostics and unavailable evidence retain Inspect. Native attachment owns
+  Retry opening for the same Session and input readiness.
+- Make one vertical shared path executable: Complete A, select B, incorporate a
+  count and a list independently. Real query bodies and declarative membership
+  over `selection_states` are required; stamp-only assertions are insufficient.
+  Persist confirmed bases, effect incorporation and result acknowledgment with
+  the command. Neither client adds a local removal set. Recovery never selects.
+- Required sequence: base A/B, count 2 → Complete A/select B, list B/count 1 →
+  count covers settlement while list is held → present/restart → lagging list
+  still projects B → covering list confirms B. Count never subtracts twice.
+  Reverse every receipt/list/count order; retain B throughout. A query opened
+  after submission follows the same dependency rule. Closed bases must be
+  incorporated or invalidated with a persisted reload fence before retirement.
+- Supersede the exact completion while settlement is held. Replacement coverage
+  restores membership; never a stale base or the saved result. Test both
+  transaction race orders, later completion, restart and epoch replacement.
+  Replacement retains unanswered commands and presentation acknowledgment;
+  delayed old replies neither resurrect bases nor replay or select.
+- Recover edit A after another edit elsewhere: return its original result, show
+  newer Work facts, and recover only its exact pending planning change. Missing
+  Task rows, unrelated planning, pre-admission caches, no-Graph results, Graph
+  removal, departure/return and native readiness before current Task facts remain
+  launch counterexamples. Attachment failure remains beside receipt recovery.
+- Native latency stays measured acceptance, not inferred from these tests.
 
-2026-11-15 review direction and counterexamples (full wording at
-`c8d86049e176e6e491fb01e21beb850a225952df:scratch/instant-task-session.md`):
-
-- An effect is unresolved, confirmed resolved, unavailable, or declared
-  inapplicable by the command registry. Missing planning status cannot establish
-  inapplicability or success. Epoch replacement retains Inspect.
-- Planning confirms only exact correlated changes. Attachment, Graph, filesystem
-  and unclassified diagnostics keep their own actions and original result.
-  Filed Task plus failed attachment must keep Retry opening for the same Session.
-- Presenting a result acknowledges presentation only. Keep unresolved effects and
-  lagging list/count obligations independently, including after leaving/restart.
-- Test newer planning status, older saved result and lagging Work list/count in
-  every order across restart and later selection of B. Resolve planning and
-  attachment in either order; then remove evidence or replace the epoch. Each
-  query applies an effect once; neither lookup nor receipt replays or reselects.
-- The existing lagging-reading test checks only a stamp. It is not projection,
-  list/count or selection acceptance. These remain required before cutover.
-
-Interim state and its known regression are under Current implementation cut.
-
-### Next cut: make obligations executable
-
-Concept-review direction (2026-11-15): derive recovery actions and projection
-coverage from one command/effect declaration. Do not extend the interim global
-planning check into another command lifecycle. A command with no planning effect
-must not acquire a permanent planning warning; only the declaration can establish
-that it is inapplicable. For an applicable effect, absent correlation or missing
-status remains unavailable. Associate a diagnostic with its exact effect/attempt
-when that owner can establish the association; never classify it by its text.
-Confirmed resolution clears that effect's current action while retaining its
-historical diagnostic. Unclassified diagnostics remain inspectable. Native
-attachment continues to own Retry opening and input readiness.
-
-Implement one vertical path through the shared owner before adding more receipt
-presentation helpers: Complete A, select B, incorporate a count and a list
-independently. Use real query bodies and the declarative membership rules over
-`selection_states`; stamp comparisons alone cannot establish the behavior.
-Persist the confirmed query base, effect incorporation and presentation
-acknowledgment with the saved command. Both clients consume this projected output;
-neither adds a local removal set. Receipt recovery can change facts and actions,
-never selection. Selection is owned by the local interaction, including the
-initial next-Task choice on Complete.
-
-Required observable sequence, proposed until the shared projection exists:
-
-| Event | Working list | Working count | Selection |
-| --- | --- | --- | --- |
-| Cached base contains A and B | A, B | 2 | A |
-| Complete A; then deliberately select B | B | 1 | B |
-| Settlement commits; count covers it, list is held | B (overlay) | 1 (confirmed) | B |
-| Present result; restart with those persisted bases | B (overlay) | 1 (confirmed) | B if route restored; never selected by recovery |
-| Lagging list containing A arrives | B (overlay) | 1 | unchanged |
-| Covering list excludes A | B (confirmed) | 1 | unchanged |
-
-Also reverse receipt/count/list order; replace the epoch between replies; and
-supersede the exact completion before settlement. Replacement invalidates old
-coverage while retaining the original request, shown-result acknowledgment and
-unknown recovery. Supersession restores membership only from covering replacement
-facts. In neither case may an old reply reveal A from a stale base, subtract twice,
-replay Complete or select A. Run the same shared cases on iOS and Desktop, plus
-production navigation checks for selection of B. Route restoration policy is
-unchanged; recovery itself never restores navigation. This refines implementation
-direction without an open product choice. Native latency remains a later measured
-acceptance requirement.
-
-### Recover the result; observe the remaining work
-
-Next implement direction from concept-review (2026-11-15): a recovered result is
-an immutable account of the original mutation, not the current state of every
-owner it touched. In particular, the saved `TaskEdit.sync` describes planning
-delivery at that commit. It cannot replace newer planning status after reconnect,
-certify external delivery, or keep showing an old failure after that owner resolves
-it. Preserve the saved result and diagnostic; derive current recovery actions from
-the owner of each outstanding effect.
-
-Concrete interaction: edit A, commit locally, lose the reply before planning
-delivery finishes, then edit A again elsewhere. Restart returns the first edit's
-exact result without overwriting the second edit. A covering Work reading shows
-the current value. Planning status comes from the existing planning changes and
-delivery receipts. If the first change is still unresolved, its recovery action
-targets that change; it never reruns `TaskUpdate` with the old words. If it was
-delivered or superseded, retain the historical diagnostic without presenting it
-as a current failure. An unavailable status read establishes neither outcome.
-
-For every remaining mutation family, the effect/stage registry must name the
-domain recovery owner, its stable attempt/change identity, the reading that
-confirms resolution, and any domain-authorized continuation. Reuse existing
-planning, completion, creation, execution and filesystem owners. Where no
-recoverable identity or confirmation exists, retain Inspect and implement that
-contract before offering a retry; do not infer success from a current value that
-could belong to another attempt. A transport error string is diagnostic data,
-not a recovery policy. Neither `delivery=finished` nor viewing the saved result
-discharges an unresolved external effect.
-
-Keep this correlation in the existing receipt/stage contract and shared client
-projection; do not copy domain queues into another operation lifecycle. Current
-status readings carry their own provenance. SQLite coverage confirms only the
-local facts it covers. Release a resource lane when its prior domain writer can
-no longer mutate that resource; an unrelated planning wait must not hold every
-later edit, while a still-live external writer cannot be bypassed by lookup.
-Presentation acknowledgment and cache retirement retain their existing rules.
-
-Preserve the launch counterexamples in the shared tests: pre-admission cached
-Task data, a fresh unrelated planning frame, unavailable or missing Task rows,
-current no-Graph results, Graph removal after reconciliation, reconnect, departure
-and return, and native readiness before a current Task result. Attachment failure
-must remain visible beside receipt recovery, and Retry opening must reuse the
-admitted Session without another create.
-
-Proposed usage text for the affected Desktop/mobile docs:
-> Start opens your submitted request immediately. Leave and return while it
-> prepares; Retry opening uses the same conversation. Complete removes the Task
-> from the list and opens the next Task, or an empty view. A definite refusal
-> restores its row with an explanation without changing your later selection.
-> An interrupted or partly committed completion stays pending while its outcome
-> is recovered; a refresh failure does not undo it.
-> If a newer action replaces a pending completion, the list follows that newer
-> state without changing your current selection.
-> Opening a finished result clears its Show result prompt. List and count updates
-> continue in the background; leaving the result does not cancel them. Unresolved
-> failures keep their recovery actions.
-> Opening another list or window shows the same pending changes; an older cached
-> list never brings a completed Task back while confirmation is pending.
-> Selecting a recent Task shows its retained content while refreshing. Expanding
-> a Wave opens its children immediately; a cold section loads in place.
-
-Keep this text marked proposed until each client uses the shared owner. Existing
-creation-recovery instructions remain valid; no skill workflow change is needed.
-
-Additional held-response counterexamples for the shared owner: a list at planning
-revision 12 arrives before a detail response at revision 11 for the same Task;
-the title must not regress. A refreshed count already includes Complete while
-another affected list is held; apply the removal only to the lagging list. A Task
-leaves a filtered list but remains open elsewhere; retain its entity/workspace.
-After an epoch change, an old frame and a lost-write recovery reply arrive; neither
-may restore the old base or trigger a second submission. These refine the existing
-cache/overlay design and require no new product choice.
+Proposed usage remains unshipped: Start opens submitted words immediately; Complete
+removes the row and chooses next/empty once; definite refusal restores only its
+row, preserving later selection. Interrupted outcomes stay pending. Reopen follows
+covering replacement facts. Showing results clears redundant prompts while remaining
+recovery and list/count work continue. New windows follow the same pending changes;
+recent Tasks retain content and Wave disclosure opens before child loading. Keep
+this proposed until both clients consume the full shared projection.
 
 ## Current implementation cut
 
@@ -701,8 +603,8 @@ commands, independent submitted/canonical identities, legacy candidate adoption,
 receipt revisions and epoch-checked admission remain intact. Details and previous
 checks are at `aeb4ed3b2b0e7256748fa69bd76f77acff966b98:scratch/instant-task-session.md`.
 The launch checkpoint and phone sheet/outcome presentation remain interim;
-no shared projection cutover is claimed. Presentation no longer deletes outbox
-requests. Finite retirement awaits the domain/query registry and cache transaction.
+no shared projection cutover is claimed. Presentation acknowledges showing a result;
+retirement also requires resolved domain evidence and persisted reload fences.
 
 Server recovery (detail and checks at `9fdf6ef582:scratch/instant-task-session.md`):
 completion/reopen and Task field/Wave edits return original results without
@@ -722,35 +624,36 @@ observation use one persisted reducer; an older first reply after restart return
 the newer saved evidence instead of waiting indefinitely. Current planning
 evidence is separate from historical result/error and becomes unavailable on
 epoch replacement. Desktop's recovery message reads the shared recovery annotations and Retry waits
-for its prior observer. Acknowledgment clears only a converged result prompt;
+for its prior observer. Acknowledgment clears only the redundant result prompt;
 missing planning evidence and unrelated diagnostics retain Inspect. Tests cover macOS
-presentation (Task edit fixtures only) and the shared owner on both targets. Live
-Work incorporation, per-query overlays and phone recovery presentation remain open.
+presentation and successful creation, and the shared query/retirement owner on both targets. Ordered Work incorporation, per-query overlays and phone recovery presentation remain open.
 
-2026-11-15 review of `c8d86049e1` found missing planning evidence treated as
-resolved and presentation deleting finished requests. `fff8aaa849` already
-changed both (`OperationRecovery.planning`, `ClientWorkDatabase.remove` deleted).
-Read from code, not run: the fix overcorrects. `task.filed`
-(`store/sqlite/operations.rs`) records no `planning_changes`, so every finished
-`task.create`/`session.new` derives `.unavailable`, `needsInspection` stays true,
-and Desktop keeps a "Planning confirmation unavailable" Inspect/Retry row after a
-successful launch. Nothing retires an operation, so every saved command stays in
-`operations` and `CreationRecovery.refresh` starts a reconcile/observer for each
-on every launch. Both await the command/effect declaration below; neither is
-fixed by a Swift-side kind check.
+Current pass adds domain `planning_effect` declarations (`none`/`correlated`),
+exact Task creation-export correlation, and the initial client stage registry.
+Known resolved operations retire atomically with a bounded per-Machine reload
+frontier; creation additionally requires presentation. Missing stages/correlation, uncertain delivery, unclassified
+errors and replaced-epoch evidence retain the original request. Desktop recovery
+cancels observers for retired commands. The registry covers filing, new Session
+input, completion/reopen, Task edit and Wave moves; other families stay Inspect.
+It is not yet the exhaustive command/effect registry.
 
-Remaining, in order: the command/effect declaration that gives creation its
-planning correlation (or declared inapplicability, e.g. `session.new`) and finite
-retirement, with a successful-creation presentation test; integrate live Work query incorporation and current recovery
-actions with saved-result/planning observation (including reordered replies,
-restart and later selection); lost-output coverage for families beyond completion;
-remaining mutation-family recovery and fences (remote/detached,
-external file/config confirmation and other planning-delivery families included); exhaustive effect/stage registry and a
-declarative membership plan over #1947's `selection_states`; transactional confirmed cache and ordered effect/query
-projection; both clients' interaction/retained-occurrence migration and deletion
-of checkpoint/presentation exceptions; epoch reset on historical restoration;
-held/reordered/crash and native acceptance. Dispatched errors remain uncertain;
-SQLite fences cannot certify filesystem/provider effects. Transport `complete`
+Complete Work plan bodies now persist with stamps in the same SQLite owner.
+Desktop live Task lists/Dashboards and phone live/restored Task lists use that
+ordering. Phone query-file reads/writes are removed; Forget clears confirmed
+queries while retaining unanswered commands. An old query cannot replace a newer
+persisted base. Reload floors suppress lagging bases after operation retirement;
+query-observed epoch replacement invalidates receipt evidence across the Machine.
+This is cache/retirement infrastructure, not ordered effect/query projection.
+
+Remaining, in order: declarative membership plan over #1947 `selection_states`,
+ordered per-query overlays and normalized cross-query provenance; Complete A/select
+B production navigation plus held/reordered list/count/receipt coverage on both
+clients; remaining mutation-family recovery/fences and resource lanes (remote,
+external files/config and planning families included); both-client interaction
+and retained-occurrence migration with deletion of checkpoint/presentation
+exceptions; epoch reset on historical restoration; crash/native acceptance and
+valid benchmark baseline. No full projection cutover or shipping is claimed.
+SQLite fences cannot certify filesystem/provider effects; transport `complete`
 is query coverage, not membership or native readiness.
 
 ### Admission identity and recovery contract
@@ -847,8 +750,12 @@ backend-stage baseline exists. Raw files and earlier detail: `8b42a874db`,
 
 Implementation owns a valid benchmark baseline; demo owns native usability.
 
-Checks at `fff8aaa849` (2026-11-15, `LF_*` cleared; earlier Rust: `9fdf6ef582`):
+Checks (2026-11-15; `LF_*` cleared; earlier results at `a127084469:scratch/instant-task-session.md`):
 - `swift build --build-tests --package-path swift --jobs 4 -Xswiftc -gnone`: passed; existing unrelated warnings remain. Gate owns wider builds.
-- Desktop network boundary, private LF_HOME, `swift test --skip-build --disable-sandbox --package-path swift --no-parallel --filter 'ClientWorkStoreTests|OperationRecoveryPresentationTests'`: 23 passed. Gate owns broader acceptance.
-- `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/ClientWorkStoreTests`: 2 passed; disposable Simulator removed. Gate owns wider iOS acceptance.
-- `check_swift_multiplatform_boundaries.py`, `git diff --check`: passed.
+- Desktop network boundary/private LF_HOME, `swift test --skip-build --disable-sandbox --package-path swift --no-parallel --filter 'ClientWorkStoreTests|ClientWorkQueryTests|OperationRecoveryPresentationTests|ServerProtocolTests|WorkNavigationTests|WorkModelTests.missingWorkMembership'`: 6 XCTest + 101 Swift Testing cases passed. Gate owns broader acceptance.
+- `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/ClientWorkQueryTests -only-testing:LoopflowiOSTests/ClientWorkStoreTests`: 8 passed; disposable Simulator removed. Gate owns wider iOS acceptance.
+- `cargo test -p loopflow --lib store::sqlite::operations::tests::`: 19 passed, including exact export matching and 10k filing/export query plans. Gate owns wider creation/launch suites in `scripts/testing.md`.
+- `cargo test -p loopflow --lib server::schema::tests::`: 8 passed; checked-in schema regenerated.
+- `cargo test -p loopflow --test integration dto_fixtures::creation_planning_evidence_keeps_the_original_export_identity`: passed.
+- `cargo fmt`, `cargo clippy --all-targets --jobs 4 -- -D warnings`, `check_swift_multiplatform_boundaries.py`, `git diff --check`: passed.
+- `cargo package --locked --allow-dirty -p loopflow`, `cargo test -p loopflow --test integration documented_commands::`: deferred to gate for archive/documentation boundaries.

@@ -414,6 +414,7 @@ impl SqliteStore {
                 "task.completed",
                 &[task.as_str()],
                 &["planning"],
+                Vec::new(),
                 || {
                     Ok(serde_json::to_value(
                         task_on(&tx, task)?.ok_or(StoreError::NotFound)?,
@@ -498,7 +499,7 @@ impl SqliteStore {
             "UPDATE tasks SET completion_request=NULL,completion_error=NULL WHERE id=?1",
             params![task.id.as_str()],
         )?;
-        super::task_state_delivery::queue_in(&transaction, &task.id, "completed")?;
+        let change = super::task_state_delivery::queue_in(&transaction, &task.id, "completed")?;
         insert_task_event_in(
             &transaction,
             &task.id,
@@ -510,6 +511,7 @@ impl SqliteStore {
             &transaction,
             task.id.as_str(),
             request,
+            vec![change],
             &serde_json::to_value(task_on(&transaction, &task.id)?.ok_or(StoreError::NotFound)?)?,
         )?;
         transaction.commit()?;
@@ -532,12 +534,13 @@ impl SqliteStore {
             [id.as_str()],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
+        let mut changes = Vec::new();
         if completed || pending.is_some() {
             tx.execute(
                 "UPDATE tasks SET completion_request=NULL,completion_error=NULL WHERE id=?1",
                 [id.as_str()],
             )?;
-            super::task_state_delivery::queue_in(&tx, id, "unstarted")?;
+            changes.push(super::task_state_delivery::queue_in(&tx, id, "unstarted")?);
             // Reopening withdraws Auto-Ship: the approval ended with the Task.
             super::task_work::unship_in(&tx, id)?;
             insert_task_event_in(
@@ -560,6 +563,7 @@ impl SqliteStore {
             "task.reopened",
             &[id.as_str()],
             &["planning", "graphs"],
+            changes,
             || Ok(serde_json::to_value(&task)?),
         )?;
         tx.commit()?;

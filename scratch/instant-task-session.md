@@ -1,6 +1,6 @@
 # LOO-906: immediate interactions across Desktop and mobile
 
-Implementation continues 2026-11-15 from checkpoint `9614efd346` on
+Implementation continues 2026-11-15 from checkpoint `fc50618e31` on
 origin/main `9cafc410ee`. Supersedes the Desktop-only delivery
 boundary. No shipping or merge decision is recorded. Placement remains this Task;
 no Wave is selected.
@@ -577,10 +577,15 @@ separately. Neither that target nor a SQL bottleneck has been measured here.
 
 ## Implement direction
 
-Concept-review outcome (2026-11-15, checkpoint `9614efd346`): no further
-model change or open product choice. Continue the remaining implementation in
-the order below; planning correlation does not complete client projection or
-authorize retiring saved operations on presentation.
+Concept-review outcome (2026-11-15, checkpoint `fc50618e31` plus current
+state-delivery correlation edits): no further model change or open product
+choice. The older-attempt recovery gap below is an unfinished part of the
+existing domain-owner contract, not another operation lifecycle. Next implement
+that recovery under the Task-state delivery lock, then finish the remaining
+mutation-family fences before shared membership/cache/projection and both-client
+cutover. Planning correlation does not complete client reconciliation or authorize
+retiring saved operations on presentation. Loop-or-next may advance this review;
+the implementation and native latency acceptance remain unfinished.
 
 ### Recover the result; observe the remaining work
 
@@ -622,8 +627,9 @@ Presentation acknowledgment and cache retirement retain their existing rules.
 Server side, `planning_recovery_tracks_the_exact_change_across_newer_edits_and_restart`
 (`store/sqlite/task_content.rs`) holds delivery across a newer edit and restart,
 resolves the old change only, and keeps missing evidence unavailable. Still open:
-client reordering of saved results, Work and delivery-status readings, and output
-loss after successful external delivery. Finish mutation-family recovery/fences
+client reordering of saved results, Work and delivery-status readings. Completion
+now covers output loss after successful external delivery; other mutation families
+still need that coverage. Finish mutation-family recovery/fences
 before cache and projection cutover.
 
 Preserve the launch counterexamples in the shared tests: pre-admission cached
@@ -676,45 +682,40 @@ checks are at `aeb4ed3b2b0e7256748fa69bd76f77acff966b98:scratch/instant-task-ses
 The launch checkpoint, presentation-driven retirement and phone sheet/outcome
 presentation remain interim; no shared projection cutover is claimed.
 
-Completion/reopen recover their saved committed result without reissuing intent;
-subsequent errors remain visible rather than certifying cleanup/planning delivery.
-Task field edits and Wave membership moves now record `task.updated` /
-`task.membership_changed` in their existing writer transaction, including no-ops.
-Their saved `TaskEdit` captures planning status before external delivery. Lost
-output recovers that result without overwriting newer edits. Writer validation
-failures record definite refusal before changing facts in the same transaction; write or
-external errors remain uncertain. Remote Machine moves are outside this recovery
-rule. Remaining mutation families and both clients' completion presentation remain
-unfinished.
+Completion/reopen and Task field/Wave edits recover their writer's original
+result without replaying intent. Field/membership validation records definite
+refusal; later errors stay uncertain. Saved `TaskEdit.sync` is historical. Remote
+Machine moves remain outside the Wave-move recovery rule. Other mutation families
+and both clients' completion presentation remain unfinished.
 
-2026-11-15 supersession cut: each semantic entry in the existing `commits` array
-has a required typed `resolution` (committed, definitely_refused, superseded),
-with its resource/result/fence. No second ledger or schema migration is added;
-released creation rows have no stage entries to convert. Superseded completion
-entries name the intended `task.completed` stage and exact withdrawn request;
-their fence requires a replacement reading, rather than supplying a guessed Task.
-Reopen, replacement PR insertion and accepted Linear status changes resolve that
-request in their existing transaction. First resolution wins, even after command
-delivery finishes. Recovery uses only committed results and never continues a
-superseded request. Definitive-refusal classification outside Task content and
-membership writer validation remains unfinished.
+Stage resolutions stay in `commits`: committed, definitely refused or superseded.
+Completion withdrawal resolves the exact saved request in the withdrawing writer's
+transaction, with replacement coverage rather than a guessed Task. First resolution
+wins even after delivery finishes. Recovery never repeats a superseded request.
+The indexed 10k status-withdrawal lookup replaced a `repository_plans` scan;
+prior detail/checks: `fc50618e31:scratch/instant-task-session.md`.
 
-The 10k trace caught `SCAN repository_plans` in the new status-withdrawal lookup
-(`/tmp/loo906-supersession-atomic-query.log`). A Task-to-repository primary-key
-join, and correlated lookup in the existing clear-request write, replace the
-materialized repo-path subqueries. No selected-plan restriction or index is added;
-this is a recovery-query finding, not native latency attribution.
+Task edit/move stages correlate exact Task-field or Project-order delivery IDs.
+Completion settlement now correlates its `task_state_deliveries` ID to every
+receipt for the exact request; Reopen correlates its own state delivery, including
+no-op coverage without inventing a change. `operation.get.planning` reads current
+status with its own snapshot fence. Settled conflicts are adoption, not delivery;
+older attempted writes remain uncertain despite newer local decisions. Missing
+rows remain unavailable. Saved results/diagnostics never change with that status.
+Receipt revisions and subscription invalidation include planning revisions. Both
+native targets share the DTO and persisted receipt ordering; live action/projection
+migration is unfinished. No new queue, generic retry or migration was introduced.
 
-Task edit/move stages now retain the exact Task field or Project-order delivery
-IDs created by their writer transaction. `operation.get.planning` reads those
-existing planning receipts in the same snapshot as a separately stamped current
-status. Pending/uncertain retain current errors; acknowledged, conflicting or
-superseded deliveries stop presenting an active error. Missing evidence stays
-unavailable. Saved results and diagnostics remain unchanged. Receipt ordering and
-subscription invalidation include planning revisions. Both native targets share
-the DTO and persisted-reply ordering; live action/projection migration is unfinished.
-No generic retry or new queue is added. Other mutation families still need their
-own correlation and domain-authorized continuation contracts.
+New recovery gap: the state-delivery owner selects/observes the newest decision
+(`task_state_delivery::pending_task_state`, `linear::acceptance::observe_task_state`).
+Resolve the exact older attempt under the existing Task-state delivery lock,
+without ingesting its result over the newer local decision. Provider history can
+settle it or prove noncommit; unknown history retains Inspect. Only then can the
+newer state writer reserve delivery. Held old acknowledgments, lost success,
+noncommit and restart must cover this before the registry releases its lane.
+Correlation keeps uncertainty visible; it does not authorize that external writer.
+Definite refusal outside Task content/membership validation, other planning families,
+remote/detached operations and file/config confirmation remain open.
 
 Remaining, in order: remaining mutation-family recovery and fences (remote/detached,
 external file/config confirmation and other planning-delivery families included); exhaustive effect/stage registry and a
@@ -830,18 +831,18 @@ baseline exists. The 10k receipt diagnostic (nextest run
 all 20 receipt SQL statements used keyed indexes without table scans.
 `measureWriteToVisible` still refers to removed `pm_items.body` and needs migration.
 The earlier admission LEAK has no established cause. Preflight rejected native measurement at
-2026-11-15T10:19:18Z (CPU 259.4%, one-minute load 14.28), raw
-`/tmp/loo906-planning-correlation-preflight/preflight.json`.
+2026-11-15T10:40:27Z (CPU 371.0%, one-minute load 39.52), raw
+`/tmp/loo906-state-planning-preflight-session_b2a6/preflight.json`.
 
 Gate owns wider suites and packaging; implementation owns a valid benchmark
 baseline; demo owns native usability judgment.
 
-Task content checks (2026-11-15, `LF_*` cleared): `cargo nextest run -p loopflow --lib -E 'test(engine::operation::tests::task_edit_recovery) | test(store::sqlite::task_content::tests::) | test(store::sqlite::operations::tests::)'` subset 7 passed, 10k trace without row-table scans; `documented_commands::` 4 passed; clippy, fmt, `check_architecture.py`, `git diff --check` passed.
+Earlier focused checks and raw results: `fc50618e31:scratch/instant-task-session.md`.
 
-Focused checks for planning correlation (2026-11-15):
-- `cargo nextest run -p loopflow --lib` with named recovery/schema/10k filters: 17 distinct checks passed; final changed rows passed in run `262781d6-b3b8-445b-b51d-aa3ba7c1d2d3`.
-- `cargo test -p loopflow --test integration dto_fixtures::operation_planning_evidence_round_trips_without_losing_required_nullable_keys`: 1 passed.
-- `scripts/test_desktop.sh --filter 'ServerProtocolTests|ClientWorkStoreTests' --jobs 4 -Xswiftc -gnone`: 42 passed.
-- `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/ReadingStampTests`: 4 passed.
-- `cargo clippy --all-targets --jobs 4 -- -D warnings` and Swift multiplatform boundary check: passed.
-- `cargo package --locked --allow-dirty -p loopflow`: archive verification passed.
+Focused checks (2026-11-15; inherited `LF_*` cleared):
+- `cargo nextest run -p loopflow --lib` named state-delivery/lost-output/10k/schema filters: 11 passed; final fixture rows passed in `0515918e-76a5-4917-8426-eb5e3cab5466`.
+- `cargo nextest run -p loopflow --test integration` named DTO/documented-command filters: 5 passed.
+- `scripts/test_desktop.sh --filter 'ServerProtocolTests|ClientWorkStoreTests' --jobs 4 -Xswiftc -gnone`: 43 passed.
+- `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/ReadingStampTests`: 5 passed.
+- `cargo clippy --all-targets --jobs 4 -- -D warnings`, fmt, architecture, Swift boundary and diff checks: passed.
+- `cargo package --locked --allow-dirty -p loopflow`: verified; registry warned `chacha20 v0.10.0` is yanked. Gate owns wider suites.

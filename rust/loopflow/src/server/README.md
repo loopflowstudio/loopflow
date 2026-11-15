@@ -1202,10 +1202,14 @@ outbox nor offline creation, cross-device submission sync or generic replay.
 
 ### Planning status after result recovery
 
-Task edits and local Wave moves save the exact planning change identities in
-`commits[].planning_changes`, alongside the original result and commit fence.
-Rank edits name the Project's order change. No-op saves add no delivery identity.
-The saved `TaskEdit.sync` is historical; recovering it never repeats its words.
+Task edits, local Wave moves, completion and reopening save the exact planning
+change identities in `commits[].planning_changes`, alongside the original result
+and commit fence. `kind` distinguishes Task fields (`task`), Project order
+(`project`) and Task state delivery (`task_state`). Completion settlement attaches
+its state delivery to every receipt for that exact completion request, even when
+a periodic writer settles it. Reopen names only its own new delivery. No-op saves
+add no delivery identity. The saved `TaskEdit.sync` is historical; recovering it
+never repeats its words.
 
 `operation.get` returns current evidence for these identities in `planning`, with
 its own snapshot fence. `pending` and `uncertain` keep their current diagnostic;
@@ -1220,6 +1224,10 @@ Receipt subscriptions observe planning changes as well as receipt writes. Their
 `revision` orders both within one epoch, so a delayed saved reply cannot replace
 newer delivery status. The saved result and command error remain unchanged;
 current recovery actions use `planning`, never the historical `sync` or error.
+State delivery uses its existing provider observation/history owner; a settled
+conflict means the provider's different state was adopted, not that the requested
+state was delivered. Recovering command output never repeats completion or reopens
+a Task to repair planning delivery.
 These reads authorize no generic retry; continuations stay with planning delivery.
 Other mutation families still require their own correlation contracts.
 

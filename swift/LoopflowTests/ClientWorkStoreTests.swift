@@ -125,33 +125,46 @@ struct ClientWorkStoreTests {
         #expect(saved.receipt?.delivery == .uncertain)
     }
 
-    @Test func restartRetainsCurrentDeliveryEvidenceAfterAnOlderSavedReply() throws {
+    @Test(arguments: [("operation_planning", 2), ("operation_state_planning", 0)])
+    func restartRetainsCurrentDeliveryEvidenceAfterAnOlderSavedReply(fixtureName: String, deliveredIndex: Int) throws {
         let root = directory()
         defer { try? FileManager.default.removeItem(at: root) }
         let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("rust/loopflow/tests/fixtures/dto/server/operation_planning.json")
+            .appendingPathComponent("rust/loopflow/tests/fixtures/dto/server/\(fixtureName).json")
         let result = try #require(try RawJSON(Data(contentsOf: fixture)).fields()["result"])
-        let current = try result.decode(OperationReceipt.self)
         var prior = try #require(JSONSerialization.jsonObject(with: result.bytes) as? [String: Any])
-        prior["revision"] = current.revision - 1
-        prior["planning"] = NSNull()
         let older = try JSONDecoder().decode(OperationReceipt.self, from: JSONSerialization.data(withJSONObject: prior))
+        prior["planning"] = NSNull()
+        let withoutStatus = try JSONDecoder().decode(OperationReceipt.self, from: JSONSerialization.data(withJSONObject: prior))
+        prior = try #require(JSONSerialization.jsonObject(with: result.bytes) as? [String: Any])
+        prior["revision"] = older.revision + 1
+        var planning = try #require(prior["planning"] as? [String: Any])
+        var changes = try #require(planning["changes"] as? [[String: Any]])
+        changes[deliveredIndex]["state"] = "delivered"
+        changes[deliveredIndex]["error"] = NSNull()
+        planning["changes"] = changes
+        prior["planning"] = planning
+        let current = try JSONDecoder().decode(OperationReceipt.self, from: JSONSerialization.data(withJSONObject: prior))
+        let command: ServedWrite = fixtureName == "operation_state_planning"
+            ? .taskComplete(directory: "/repo", issue: "LOO-1")
+            : .taskUpdate(directory: "/repo", issue: "LOO-1", notes: "Original edit")
         let record = SubmittedOperation(requestID: current.requestID, destination: "machine_fixture",
-            payload: try JSONEncoder().encode(ServedWrite.taskUpdate(directory: "/repo", issue: "LOO-1", notes: "Original edit")),
+            payload: try JSONEncoder().encode(command),
             version: ServerProtocol.revision, submittedAt: Date())
         do {
             let database = try ClientWorkDatabase(directory: root)
             try database.save(record)
             try database.receive(current, epoch: "epoch", id: record.id)
             try database.receive(older, epoch: "epoch", id: record.id)
+            try database.receive(withoutStatus, epoch: "epoch", id: record.id)
         }
         let restarted = try ClientWorkDatabase(directory: root)
         let saved = try #require(try restarted.state(record.id))
         #expect(saved.record.payload == record.payload)
         #expect(saved.receipt == current)
-        #expect(saved.receipt?.planning?.changes[2].state == .delivered)
-        #expect(saved.receipt?.planning?.changes[2].error == nil)
+        #expect(saved.receipt?.planning?.changes[deliveredIndex].state == .delivered)
+        #expect(saved.receipt?.planning?.changes[deliveredIndex].error == nil)
         #expect(saved.receipt?.result == older.result)
     }
 

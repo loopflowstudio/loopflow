@@ -15,6 +15,7 @@ pub struct PlanningChangeRef {
 pub enum PlanningChangeKind {
     Task,
     Project,
+    TaskState,
 }
 
 /// A pending field edit and its provider baseline, independent of connection state.

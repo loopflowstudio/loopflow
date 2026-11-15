@@ -1404,6 +1404,31 @@ fn opening_receipts_distinguish_focus_from_attachment() {
 }
 
 #[test]
+fn completion_planning_evidence_keeps_the_original_task_and_state_delivery() {
+    use loopflow::store::planning_sync::PlanningChangeKind;
+    use loopflow::store::sqlite::operations::{OperationReceipt, PlanningDeliveryState};
+    let wire: serde_json::Value = serde_json::from_str(include_str!(
+        "fixtures/dto/server/operation_state_planning.json"
+    ))
+    .unwrap();
+    let receipt: OperationReceipt = serde_json::from_value(wire["result"].clone()).unwrap();
+    assert_eq!(serde_json::to_value(&receipt).unwrap(), wire["result"]);
+    let task: loopflow::work::task::Task = serde_json::from_value(receipt.result.unwrap()).unwrap();
+    assert_eq!(task.state.as_deref(), Some("completed"));
+    let current = receipt.planning.unwrap();
+    assert_eq!(
+        current.changes[0].change.kind,
+        PlanningChangeKind::TaskState
+    );
+    assert_eq!(current.changes[0].change.owner, task.id.as_str());
+    assert_eq!(
+        current.changes[0].change,
+        receipt.commits[0].planning_changes[0]
+    );
+    assert_eq!(current.changes[0].state, PlanningDeliveryState::Uncertain);
+}
+
+#[test]
 fn operation_planning_evidence_round_trips_without_losing_required_nullable_keys() {
     use loopflow::store::sqlite::operations::{OperationReceipt, PlanningDeliveryState};
     let wire: serde_json::Value =

@@ -14,7 +14,7 @@ struct ServerProtocolTests {
         let change = ServedWrite.taskComplete(directory: "/repo", issue: "LOO-1")
         #expect(try encoded(.request(id: "admit", operation: .operationSubmit(requestID: "operation_fixture", epoch: "epoch_fixture", command: change), select: nil)) == value("operation_submit"))
         #expect(try encoded(.request(id: "receipt", operation: .read(.operationGet(requestID: "operation_fixture")), select: nil)) == value("operation_get"))
-        for name in ["operation_admitted", "operation_receipt", "operation_planning", "operation_pending", "operation_candidate", "operation_conflict"] {
+        for name in ["operation_admitted", "operation_receipt", "operation_planning", "operation_state_planning", "operation_pending", "operation_candidate", "operation_conflict"] {
             guard case .response(_, _, let result) = try message(name) else { Issue.record("Expected receipt"); return }
             let receipt = try result.decode(OperationReceipt.self)
             #expect(receipt.requestID == "operation_fixture")
@@ -25,6 +25,20 @@ struct ServerProtocolTests {
                 #expect(throws: DecodingError.self) { try JSONDecoder().decode(OperationReceipt.self, from: JSONSerialization.data(withJSONObject: missing)) }
             }
         }
+    }
+
+    @Test func completionPlanningEvidenceUsesItsExactStateDelivery() throws {
+        guard case .response(_, _, let result) = try message("operation_state_planning") else { Issue.record("Expected receipt"); return }
+        let receipt = try result.decode(OperationReceipt.self)
+        let stage = try #require(receipt.commits.first)
+        let current = try #require(receipt.planning?.changes.first)
+        #expect(stage.stage == "task.completed")
+        #expect(current.change == stage.planningChanges.first)
+        #expect(current.change.kind == .taskState)
+        #expect(current.state == .uncertain)
+        #expect(current.error == "planning response lost")
+        #expect(receipt.delivery == .finished)
+        #expect(receipt.result == stage.result)
     }
 
     @Test func currentPlanningEvidenceDoesNotReplaceTheSavedResult() throws {

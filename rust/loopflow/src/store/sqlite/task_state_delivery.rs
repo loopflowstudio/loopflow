@@ -6,6 +6,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::durable::TaskId;
 use crate::linear::StateHistory;
+use crate::store::planning_sync::{PlanningChangeKind, PlanningChangeRef};
 use crate::store::{StoreError, StoreResult};
 
 use super::SqliteStore;
@@ -31,7 +32,11 @@ fn read_delivery(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskStateDelivery>
     })
 }
 
-pub(super) fn queue_in(conn: &Connection, task: &TaskId, target: &str) -> StoreResult<()> {
+pub(super) fn queue_in(
+    conn: &Connection,
+    task: &TaskId,
+    target: &str,
+) -> StoreResult<PlanningChangeRef> {
     let completed_at = (target == "completed")
         .then(|| {
             time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339)
@@ -49,15 +54,20 @@ pub(super) fn queue_in(conn: &Connection, task: &TaskId, target: &str) -> StoreR
             })],
         ),
     )?;
+    let id = uuid::Uuid::new_v4().to_string();
     conn.execute(
         "INSERT INTO task_state_deliveries(id,task_id,target,base_revision,base_state)
          SELECT ?2,t.id,?3,i.revision,i.state
          FROM tasks t JOIN repository_plans w ON w.id=t.repository_id
          LEFT JOIN pm_items i ON i.id=t.external_issue_id AND i.repo=w.repo AND i.provider='linear'
          WHERE t.id=?1",
-        params![task.as_str(), uuid::Uuid::new_v4().to_string(), target],
+        params![task.as_str(), id, target],
     )?;
-    Ok(())
+    Ok(PlanningChangeRef {
+        kind: PlanningChangeKind::TaskState,
+        owner: task.to_string(),
+        id,
+    })
 }
 
 /// Acquisition and delivery use the same transaction rule. No execution rows change.
@@ -215,5 +225,155 @@ impl SqliteStore {
             params![delivery.id, error],
         )?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::durable::TaskId;
+    use crate::store::planning_sync::PlanningChangeKind;
+    use crate::store::sqlite::operations::PlanningDeliveryState;
+    use crate::store::sqlite::SqliteStore;
+    use crate::work::task::NewTask;
+
+    #[test]
+    fn completion_and_reopen_keep_their_exact_state_delivery_across_restart() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("db");
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let repository_id = store.ensure_repository("/state-recovery").unwrap();
+        let task = store
+            .create_task(&NewTask {
+                id: TaskId::new(),
+                repository_id,
+                project_id: None,
+                title: "State recovery".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        let epoch = store.reading_identity().unwrap().1;
+        for (id, kind) in [
+            ("complete", "task.complete"),
+            ("reopen", "task.reopen"),
+            ("noop", "task.reopen"),
+        ] {
+            store
+                .admit_operation(&epoch, id, kind, "hash", &serde_json::json!({}))
+                .unwrap();
+            store.dispatch_operation(id).unwrap();
+            crate::journal::request::with_operation(Some(id.into()), || {
+                if id == "complete" {
+                    let request = store
+                        .request_task_completion(&task.id, None)
+                        .unwrap()
+                        .unwrap();
+                    assert!(store.complete_task(&task, request).unwrap());
+                } else {
+                    store.reopen_task(&task.id, None).unwrap();
+                }
+            });
+            store.finish_operation(id, Err("output lost")).unwrap();
+        }
+        let completed = store.operation_receipt("complete").unwrap().unwrap();
+        let reopened = store.operation_receipt("reopen").unwrap().unwrap();
+        let completion = &completed.commits.last().unwrap().planning_changes[0];
+        let reopening = &reopened.commits[0].planning_changes[0];
+        assert_eq!(completion.kind, PlanningChangeKind::TaskState);
+        assert_eq!(completion.owner, task.id.as_str());
+        assert_ne!(completion.id, reopening.id);
+        assert_eq!(
+            completed.planning.as_ref().unwrap().changes[0].state,
+            PlanningDeliveryState::Superseded
+        );
+        assert_eq!(
+            reopened.planning.as_ref().unwrap().changes[0].state,
+            PlanningDeliveryState::Pending
+        );
+        let noop = store.operation_receipt("noop").unwrap().unwrap();
+        assert!(noop.commits[0].planning_changes.is_empty());
+        assert!(noop.planning.is_none());
+
+        // A newer intent cannot certify an earlier external writer's outcome.
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE task_state_deliveries SET attempted=1,error='response lost' WHERE id=?1",
+                [&completion.id],
+            )
+            .unwrap();
+        assert_eq!(
+            store
+                .operation_receipt("complete")
+                .unwrap()
+                .unwrap()
+                .planning
+                .unwrap()
+                .changes[0]
+                .state,
+            PlanningDeliveryState::Uncertain
+        );
+        let completion_id = completion.id.clone();
+        let reopening_id = reopening.id.clone();
+        drop(store);
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        for (id, stage, saved) in [
+            ("complete", "task.completed", &completed),
+            ("reopen", "task.reopened", &reopened),
+        ] {
+            assert!(store.recover_operation_result(id, stage).unwrap());
+            let recovered = store.operation_receipt(id).unwrap().unwrap();
+            assert_eq!(
+                recovered.result.as_ref(),
+                Some(&saved.commits.last().unwrap().result)
+            );
+            assert_eq!(recovered.error.as_deref(), Some("output lost"));
+            assert_eq!(
+                recovered.planning.unwrap().changes[0].change,
+                saved.commits.last().unwrap().planning_changes[0]
+            );
+        }
+        assert_eq!(
+            store.task(&task.id).unwrap().unwrap().state.as_deref(),
+            Some("unstarted")
+        );
+        // A settled conflict records adoption, not delivery of the local value.
+        store.conn.lock().unwrap().execute(
+            "UPDATE task_state_deliveries SET settled=1,conflict_json='{}',error=NULL WHERE id=?1",
+            [&reopening_id],
+        ).unwrap();
+        assert_eq!(
+            store
+                .operation_receipt("reopen")
+                .unwrap()
+                .unwrap()
+                .planning
+                .unwrap()
+                .changes[0]
+                .state,
+            PlanningDeliveryState::Conflict
+        );
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "DELETE FROM task_state_deliveries WHERE id=?1",
+                [&completion_id],
+            )
+            .unwrap();
+        assert_eq!(
+            store
+                .operation_receipt("complete")
+                .unwrap()
+                .unwrap()
+                .planning
+                .unwrap()
+                .changes[0]
+                .state,
+            PlanningDeliveryState::Unavailable
+        );
     }
 }

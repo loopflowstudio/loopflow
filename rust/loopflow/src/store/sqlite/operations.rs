@@ -218,10 +218,13 @@ pub(super) fn commit_current_in(
     stage: &str,
     resources: &[&str],
     domains: &[&str],
+    changes: Vec<PlanningChangeRef>,
     result: impl FnOnce() -> StoreResult<serde_json::Value>,
 ) -> StoreResult<()> {
     if let Some(id) = crate::journal::request::operation_id() {
-        commit_in(conn, &id, stage, resources, domains, &result()?)?;
+        let mut commit = domain_commit_in(conn, stage, resources, domains, &result()?)?;
+        commit.planning_changes = changes;
+        record_resolution_in(conn, &id, &commit)?;
     }
     Ok(())
 }
@@ -283,9 +286,17 @@ pub(super) fn completion_committed_in(
     conn: &Connection,
     task: &str,
     request: i64,
+    changes: Vec<PlanningChangeRef>,
     result: &serde_json::Value,
 ) -> StoreResult<()> {
-    completion_resolved_in(conn, task, request, OperationResolution::Committed, result)
+    completion_resolved_in(
+        conn,
+        task,
+        request,
+        OperationResolution::Committed,
+        changes,
+        result,
+    )
 }
 
 /// Every writer withdrawing a completion records the replacement facts after
@@ -300,6 +311,7 @@ pub(crate) fn completion_superseded_in(
         task,
         request,
         OperationResolution::Superseded,
+        Vec::new(),
         &serde_json::json!({"request": request}),
     )
 }
@@ -309,6 +321,7 @@ fn completion_resolved_in(
     task: &str,
     request: i64,
     resolution: OperationResolution,
+    changes: Vec<PlanningChangeRef>,
     result: &serde_json::Value,
 ) -> StoreResult<()> {
     let waiting: bool = conn.query_row(
@@ -322,6 +335,7 @@ fn completion_resolved_in(
     }
     let mut commit = domain_commit_in(conn, "task.completed", &[task], &["planning"], result)?;
     commit.resolution = resolution;
+    commit.planning_changes = changes;
     // Delivery may already have finished while settlement was pending. It does
     // not discharge this domain obligation. The first resolution always wins.
     conn.execute(
@@ -626,15 +640,26 @@ fn planning_reading_in(
     let fence = fence_in(conn, &["planning"])?;
     let mut changes = Vec::new();
     for change in references {
-        let (table, owner) = match change.kind {
-            PlanningChangeKind::Task => ("task_changes", "task_id"),
-            PlanningChangeKind::Project => ("project_changes", "project_id"),
+        let (table, owner, settled, field) = match change.kind {
+            PlanningChangeKind::Task => (
+                "task_changes",
+                "task_id",
+                "acknowledged",
+                " AND field=c.field",
+            ),
+            PlanningChangeKind::Project => (
+                "project_changes",
+                "project_id",
+                "acknowledged",
+                " AND field=c.field",
+            ),
+            PlanningChangeKind::TaskState => ("task_state_deliveries", "task_id", "settled", ""),
         };
         let row = conn
             .query_row(
                 &format!(
-                    "SELECT acknowledged,conflict_json IS NOT NULL,attempted,error,
-             seq<(SELECT max(seq) FROM {table} WHERE {owner}=c.{owner} AND field=c.field)
+                    "SELECT {settled},conflict_json IS NOT NULL,attempted,error,
+             seq<(SELECT max(seq) FROM {table} WHERE {owner}=c.{owner}{field})
              FROM {table} c WHERE id=?1 AND {owner}=?2"
                 ),
                 params![change.id, change.owner],
@@ -651,8 +676,8 @@ fn planning_reading_in(
             .optional()?;
         let (state, error) = match row {
             None => (PlanningDeliveryState::Unavailable, None),
-            Some((true, _, _, _, _)) => (PlanningDeliveryState::Delivered, None),
             Some((_, true, _, _, _)) => (PlanningDeliveryState::Conflict, None),
+            Some((true, _, _, _, _)) => (PlanningDeliveryState::Delivered, None),
             Some((_, _, true, error, _)) => (PlanningDeliveryState::Uncertain, error),
             Some((_, _, _, _, true)) => (PlanningDeliveryState::Superseded, None),
             Some((_, _, _, error, _)) => (PlanningDeliveryState::Pending, error),
@@ -2025,6 +2050,12 @@ mod tests {
                 SELECT 'receipt_'||id,'task.complete','hash',0,id,'queued',1,1 FROM tasks",[]).unwrap();
             tx.execute("INSERT INTO task_changes(id,task_id,value_json)
                 SELECT 'receipt_change_'||id,id,json_object('field','task_title','value',issue_title) FROM tasks", []).unwrap();
+            tx.execute(
+                "INSERT INTO task_state_deliveries(id,task_id,target)
+                SELECT 'receipt_state_'||id,id,'completed' FROM tasks",
+                [],
+            )
+            .unwrap();
             tx.commit().unwrap();
         }
         let command = json!({"kind":"task.complete"});
@@ -2065,12 +2096,30 @@ mod tests {
             traced.extend(crate::store::query_plans::statements(&store, || {
                 let mut conn = store.conn.lock().unwrap();
                 let tx = conn.transaction().unwrap();
-                super::completion_committed_in(&tx, "task_receipt_1", 1, &json!({})).unwrap();
+                super::completion_committed_in(
+                    &tx,
+                    "task_receipt_1",
+                    1,
+                    vec![crate::store::planning_sync::PlanningChangeRef {
+                        kind: crate::store::planning_sync::PlanningChangeKind::TaskState,
+                        owner: "task_receipt_1".into(),
+                        id: "receipt_state_task_receipt_1".into(),
+                    }],
+                    &json!({}),
+                )
+                .unwrap();
                 tx.commit().unwrap();
             }));
             settlement_samples.push(began.elapsed().as_secs_f64() * 1_000.0);
         }
         settlement_samples.sort_by(f64::total_cmp);
+        traced.extend(crate::store::query_plans::statements(&store, || {
+            let receipt = store
+                .operation_receipt("receipt_task_receipt_1")
+                .unwrap()
+                .unwrap();
+            assert_eq!(receipt.planning.unwrap().changes.len(), 1);
+        }));
         println!("10k Tasks/receipts; exact-request settlement lookup; n=20, P95={:.3} ms (loaded-host diagnostic)", settlement_samples[18]);
         store.conn.lock().unwrap().execute(
             "UPDATE creation_receipts SET completion_request=2 WHERE request_id='receipt_task_receipt_2'", [],

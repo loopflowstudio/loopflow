@@ -2293,6 +2293,93 @@ fn task_completion_reconciles_lost_planning_response() {
 }
 
 #[test]
+fn completion_operation_recovers_external_delivery_without_repeating_completion() {
+    use crate::store::sqlite::operations::{OperationDelivery, PlanningDeliveryState};
+    with_planning_task(|runtime, fixture, repo, task, state| {
+        let sqlite = &fixture.store.sqlite;
+        let epoch = sqlite.reading_identity().unwrap().1;
+        let command = crate::lf::commands::write::Write::TaskComplete {
+            directory: repo.to_owned(),
+            issue: task.identifier.clone(),
+        };
+        crate::engine::operation::admit("completion-output-lost", &epoch, &command).unwrap();
+        assert!(sqlite.dispatch_operation("completion-output-lost").unwrap());
+        crate::journal::request::with_operation(Some("completion-output-lost".into()), || {
+            let request = sqlite
+                .request_task_completion(&task.id, None)
+                .unwrap()
+                .unwrap();
+            assert!(sqlite.complete_task(task, request).unwrap());
+        });
+        sqlite
+            .finish_operation("completion-output-lost", Err("command output lost"))
+            .unwrap();
+        let saved = sqlite
+            .operation_receipt("completion-output-lost")
+            .unwrap()
+            .unwrap();
+        let stage = saved.commits.last().unwrap();
+        assert_eq!(stage.planning_changes.len(), 1);
+        let change = stage.planning_changes[0].clone();
+        let original = stage.result.clone();
+        assert_eq!(
+            saved.planning.unwrap().changes[0].state,
+            PlanningDeliveryState::Pending
+        );
+
+        runtime.block_on(async {
+            state.lock().await.lose_completion = true;
+            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+                .await
+                .unwrap();
+        });
+        let lost = sqlite
+            .operation_receipt("completion-output-lost")
+            .unwrap()
+            .unwrap();
+        let current = lost.planning.unwrap();
+        assert_eq!(current.changes[0].change, change);
+        assert_eq!(current.changes[0].state, PlanningDeliveryState::Uncertain);
+        assert!(current.changes[0].error.is_some());
+        assert_eq!(runtime.block_on(state.lock()).completion_writes, 1);
+
+        // Reopening the registry loses no operation or delivery identity. Recover
+        // the exact local result, then let the existing planning owner observe
+        // its successful write. No second completion or provider write occurs.
+        let restarted = crate::store::sqlite::SqliteStore::new(&fixture.database).unwrap();
+        crate::engine::operation::execute(&restarted, "completion-output-lost").unwrap();
+        let recovered = restarted
+            .operation_receipt("completion-output-lost")
+            .unwrap()
+            .unwrap();
+        assert_eq!(recovered.delivery, OperationDelivery::Finished);
+        assert_eq!(recovered.result.as_ref(), Some(&original));
+        assert_eq!(
+            recovered.planning.unwrap().changes[0].state,
+            PlanningDeliveryState::Uncertain
+        );
+        runtime
+            .block_on(crate::ops::linear_observe::sync_task_state(
+                &fixture.store,
+                task,
+            ))
+            .unwrap();
+        let delivered = restarted
+            .operation_receipt("completion-output-lost")
+            .unwrap()
+            .unwrap();
+        assert!(delivered.revision > recovered.revision);
+        assert_eq!(delivered.result, Some(original));
+        assert_eq!(delivered.error.as_deref(), Some("command output lost"));
+        let current = delivered.planning.unwrap();
+        assert_eq!(current.changes[0].change, change);
+        assert_eq!(current.changes[0].state, PlanningDeliveryState::Delivered);
+        assert!(current.changes[0].error.is_none());
+        assert_eq!(runtime.block_on(state.lock()).completion_writes, 1);
+    });
+}
+
+#[test]
 fn task_completion_reconciles_lost_registered_response() {
     assert_task_completion_retry(true, None);
 }

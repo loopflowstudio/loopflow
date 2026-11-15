@@ -7,10 +7,10 @@
 :root{color-scheme:light dark}body{font:16px/1.5 system-ui,sans-serif;margin:0}main{max-width:760px;margin:auto;padding:24px}header,small{opacity:.75;font-size:13px}h1{font-size:28px;line-height:1.2}h2{font-size:20px}table{width:100%;border-collapse:collapse}td,th{text-align:left;vertical-align:top;padding:8px;border-bottom:1px solid #8886}code{overflow-wrap:anywhere}blockquote{margin:16px 0;padding-left:16px;border-left:3px solid #888}li{margin:12px 0}@media(max-width:520px){main{padding:14px}table{font-size:12px}td,th{padding:5px}}
 </style>
 <main>
-<header>LOO-906 · concept-review · 2026-11-15<br>Sources: scratch/{instant-task-session,desktop-reactivity-feedback,questions}.md; rust/loopflow/src/{engine/operation.rs,store/sqlite/operations.rs,store/sqlite/task_content.rs,store/sqlite/planning_sync.rs}; swift/Loopflow/Services/{ClientWorkStore,ClientWorkDatabase,ReadingStamp}.swift.</header>
+<header>LOO-906 · concept-review · 2026-11-15<br>Sources: scratch/{instant-task-session,desktop-reactivity-feedback,questions}.md; rust/loopflow/src/{engine/operation.rs,linear/acceptance.rs,store/sqlite/operations.rs,store/sqlite/task_content.rs,store/sqlite/task_state_delivery.rs}; swift/Loopflow/Services/{ClientWorkStore,ClientWorkDatabase,ReadingStamp}.swift.</header>
 <h1>Recover the result; observe the remaining work</h1>
 <p><strong>Review outcome:</strong> no further design change or open product choice. Continue the existing implementation direction: finish mutation-family recovery, then shared membership, cache and projection, then migrate both clients.</p>
-<p><strong>Biggest remaining mismatch:</strong> the receipt can distinguish a saved result from current planning delivery, but the clients still use creation-specific presentation and retirement. Showing a result cannot settle its outstanding list, count or recovery obligations.</p>
+<p><strong>Biggest remaining mismatch:</strong> receipts now identify completion and reopen deliveries, but the delivery owner still observes only the newest decision. It must resolve an older attempted write without replacing newer local state. Clients also retain creation-specific presentation and retirement; showing a result cannot settle its list, count or recovery obligations.</p>
 <table>
 <tr><th>Action</th><th>Concept</th><th>API / owner</th></tr>
 <tr><td>Edit A</td><td>Immediate value; durable intent</td><td>Proposed shared <code>begin</code>; existing <code>task.updated</code> stage</td></tr>
@@ -20,7 +20,7 @@
 <tr><td>Select B / expand a Wave</td><td>Local navigation</td><td>Immediate local state; recovery never selects again</td></tr>
 </table>
 <h2>Existing → proposed</h2>
-<p><small>Existing at <code>9614efd346</code>: Task edits and Wave moves save their result, commit fence and exact planning-change IDs. Receipt lookup separately stamps current delivery status. Client creation uses the SQLite outbox; shared confirmed cache, projection and both-client migration remain unfinished.</small></p>
+<p><small>Existing at <code>fc50618e31</code> plus current workspace edits: Task edits, Wave moves, completion and reopen correlate their saved stages with exact planning deliveries. Receipt lookup separately stamps current delivery status. Client creation uses the SQLite outbox; shared confirmed cache, projection and both-client migration remain unfinished.</small></p>
 <blockquote>Edit A → lose output → edit A again elsewhere → restart → show current A, recover the first result, and resolve only its outstanding delivery.</blockquote>
 <p><strong>Proposed experience:</strong> “Your edit stays visible while delivery is pending. After reconnect, recovery checks the saved change. A later edit stays in place. An unresolved delivery keeps its recovery action; a resolved failure remains historical.”</p>
 <details>
@@ -30,12 +30,13 @@
 <p><strong>Resolution:</strong> saved results and diagnostics stay immutable. Current status comes from fresh domain readings, so a historical error cannot keep a resolved change looking failed. Reading a result cannot settle an external effect.</p>
 <p><strong>Queries:</strong> keep ordered effects and incorporation per query. A covering count receives no extra decrement while an older list retains its overlay. Future windows evaluate the same dependencies. Persist cache/outbox changes atomically.</p>
 <p><strong>Ordering:</strong> release a resource lane when its prior writer can no longer mutate that resource. A planning wait does not block every local edit; a live external writer still requires domain ordering.</p>
+<p><strong>Next implementation:</strong> Complete A commits locally, its provider reply is lost, then Reopen saves a newer decision. Under the existing Task-state delivery lock, resolve the exact old attempt from provider confirmation/history without ingesting its result over Reopen. Unknown history keeps Inspect; only an established outcome allows the newer external writer to reserve delivery. Test held acknowledgments, lost success, noncommit and restart before releasing that lane. This implements the existing contract.</p>
 <p><strong>Epoch:</strong> old fences cannot certify a replacement database or authorize replay. Recover the exact command on its original Machine; native owners retain input readiness.</p>
-<p><small>Next: remaining mutation-family recovery and fences → transactional cache and declarative membership → ordered projection → both clients and predecessor removal. Existing recovery skill instructions remain valid. Native latency remains unmeasured after failed host preflight. This review changes design only.</small></p>
+<p><small>Next: exact older-attempt recovery and remaining mutation-family fences → declarative membership and transactional cache → ordered projection → both clients and predecessor removal. Existing recovery skill instructions remain valid. Native latency remains unmeasured after failed host preflight. This review updates the working design and page only.</small></p>
 </details>
 <h2>Questions for the implementation check</h2>
 <ol>
-<li>Hold planning delivery, recover a committed edit after restart, then apply a newer edit. Can recovery leave the newer value intact and target only the old delivery?<br><strong>1a.</strong> Demonstrated through both live clients. <strong>1b.</strong> Continue client migration using the implemented correlation.</li>
+<li>Lose a completion's provider reply, save Reopen, then restart. Can the old attempt resolve without replacing Reopen or letting an unresolved writer overlap?<br><strong>1a.</strong> Demonstrated under the delivery owner. <strong>1b.</strong> Implement exact older-attempt recovery before releasing its lane. Current handoff: 1b.</li>
 <li>Mount a creation result while another window's list and count are held, then restart. Are its remaining effects retained and incorporated once per query?<br><strong>2a.</strong> Demonstrated through the shared owner. <strong>2b.</strong> Implement transactional cache/projection and replace presentation-driven deletion.</li>
 </ol>
 <p><small>Verification questions; no pending product choice. Headless concept-review outcome: nothing further to change in the design → advance. The implementation remains unfinished; loop-or-next determines its next step. Native latency remains unmeasured.</small></p>

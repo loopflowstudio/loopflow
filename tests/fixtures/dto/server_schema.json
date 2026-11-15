@@ -6492,7 +6492,8 @@
     "PlanningChangeKind": {
       "enum": [
         "task",
-        "project"
+        "project",
+        "task_state"
       ],
       "type": "string"
     },

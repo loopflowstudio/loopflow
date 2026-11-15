@@ -21,7 +21,7 @@ public struct OperationCommit: Codable, Equatable, Sendable {
 }
 
 public struct PlanningChangeRef: Codable, Equatable, Sendable {
-    public enum Kind: String, Codable, Sendable { case task, project }
+    public enum Kind: String, Codable, Sendable { case task, project, taskState = "task_state" }
     public let kind: Kind
     public let owner: String
     public let id: String

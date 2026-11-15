@@ -2953,7 +2953,7 @@ mod attachment_tests {
 
     #[test]
     fn attachment_migration_preserves_released_history_and_waiting_evidence() {
-        use crate::store::migrations::{apply_before_migration, migration_section_sql};
+        use crate::store::migration_runner::{apply_before_migration, migration_section_sql};
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         apply_before_migration(&conn, "agent_process");
         conn.execute_batch(include_str!(
@@ -3089,7 +3089,7 @@ mod attachment_tests {
     }
     #[test]
     fn live_agent_inventory_upgrade_skips_other_processes() {
-        use crate::store::migrations::{apply_before_migration, apply_pending_migrations};
+        use crate::store::migration_runner::{apply_before_migration, apply_pending_migrations};
         use rusqlite::{types::Value, StatementStatus};
 
         let conn = rusqlite::Connection::open_in_memory().unwrap();

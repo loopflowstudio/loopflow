@@ -1211,7 +1211,7 @@ mod tests {
 
     #[test]
     fn process_membership_upgrade_probes_cwd_and_session_indexes() {
-        use crate::store::migrations::{apply_before_migration, apply_pending_migrations};
+        use crate::store::migration_runner::{apply_before_migration, apply_pending_migrations};
         use rusqlite::{types::Value, StatementStatus};
 
         let conn = rusqlite::Connection::open_in_memory().unwrap();
@@ -1383,7 +1383,7 @@ mod tests {
 
     #[test]
     fn session_membership_upgrade_probes_task_indexes() {
-        use crate::store::migrations::{apply_before_migration, apply_pending_migrations};
+        use crate::store::migration_runner::{apply_before_migration, apply_pending_migrations};
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         apply_before_migration(&conn, "session_list_indexes");
         conn.execute_batch(
@@ -2673,7 +2673,7 @@ mod tests {
 
     #[test]
     fn a_released_tasks_shipping_columns_become_its_auto_ship_log() {
-        use crate::store::migrations::{apply_before_migration, migration_section_sql};
+        use crate::store::migration_runner::{apply_before_migration, migration_section_sql};
 
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         apply_before_migration(&conn, "task_machine_local");

@@ -803,10 +803,12 @@ impl SqliteStore {
     #[cfg(test)]
     pub(crate) fn apply_migration_for_test(&self, name: &str) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        if crate::store::migrations::migration_is_applied_for_test(&conn, name)? {
+        if crate::store::migration_runner::migration_is_applied_for_test(&conn, name)? {
             return Ok(());
         }
-        conn.execute_batch(&crate::store::migrations::migration_sql_for_test(name))?;
+        conn.execute_batch(&crate::store::migration_runner::migration_sql_for_test(
+            name,
+        ))?;
         Ok(())
     }
 
@@ -2315,7 +2317,7 @@ mod frontier_tests {
         // recognizes the untouched store as exactly its own frontier.
         let conn = rusqlite::Connection::open(&path).unwrap();
         assert!(
-            crate::store::migrations::old_reader_recognizes(&conn),
+            crate::store::migration_runner::old_reader_recognizes(&conn),
             "the old installed reader must still recognize the untouched store"
         );
     }
@@ -2383,7 +2385,7 @@ mod frontier_tests {
         assert_eq!(current_wave(&path), "Current");
         let installed = rusqlite::Connection::open(&path).unwrap();
         assert!(
-            crate::store::migrations::old_reader_recognizes(&installed),
+            crate::store::migration_runner::old_reader_recognizes(&installed),
             "the installed release must still recognize the candidate's untouched store"
         );
         drop(installed);

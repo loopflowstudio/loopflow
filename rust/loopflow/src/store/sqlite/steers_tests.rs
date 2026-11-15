@@ -678,7 +678,7 @@ fn a_new_task_session_skips_steers_an_earlier_session_read() {
 
 #[test]
 fn migration_preserves_released_event_copies_and_planning_receipts() {
-    use crate::store::migrations::{apply_before_migration, migration_section_sql};
+    use crate::store::migration_runner::{apply_before_migration, migration_section_sql};
     let conn = rusqlite::Connection::open_in_memory().unwrap();
     apply_before_migration(&conn, "session_steers");
     conn.execute_batch(include_str!(
@@ -842,7 +842,7 @@ fn activation_never_moves_an_existing_selection() {
 
 #[test]
 fn dropping_the_adapter_thread_keeps_capabilities() {
-    use crate::store::migrations::{apply_before_migration, migration_section_sql};
+    use crate::store::migration_runner::{apply_before_migration, migration_section_sql};
     let conn = rusqlite::Connection::open_in_memory().unwrap();
     apply_before_migration(&conn, "drop_steer_adapter_thread");
     conn.execute_batch(

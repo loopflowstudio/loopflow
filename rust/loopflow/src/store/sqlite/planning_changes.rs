@@ -518,7 +518,7 @@ mod tests {
     use serde_json::json;
 
     use super::PlanningChanges;
-    use crate::store::migrations::{
+    use crate::store::migration_runner::{
         apply_before_migration, migration_section_sql, upgrade_from_migration,
     };
     use crate::store::work::edit::WorkValue;
@@ -534,7 +534,7 @@ mod tests {
         .unwrap();
         let sql = migration_section_sql("planning_peers");
         conn.execute_batch(&sql).unwrap();
-        crate::store::migrations::convert_released_data(&conn, &sql).unwrap();
+        crate::store::migration_runner::convert_released_data(&conn, &sql).unwrap();
         let task = TaskId::from_raw("task-receipt");
         let owner = PlanningChanges::Task(&task);
         let before = owner.pending(&conn).unwrap();

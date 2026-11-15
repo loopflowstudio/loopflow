@@ -296,7 +296,7 @@ fn hand_back_writes_nothing_when_a_claim_lacks_planning_facts() {
 
 #[test]
 fn hardware_rented_before_spot_existed_reads_as_on_demand() {
-    use crate::store::migrations::{apply_before_migration, migration_section_sql};
+    use crate::store::migration_runner::{apply_before_migration, migration_section_sql};
 
     let conn = rusqlite::Connection::open_in_memory().unwrap();
     apply_before_migration(&conn, "rental_spot");
@@ -318,7 +318,7 @@ fn hardware_rented_before_spot_existed_reads_as_on_demand() {
 
 #[test]
 fn runpod_rows_from_0_14_16_go_and_current_ones_stay() {
-    use crate::store::migrations::{apply_before_migration, migration_section_sql};
+    use crate::store::migration_runner::{apply_before_migration, migration_section_sql};
 
     let conn = rusqlite::Connection::open_in_memory().unwrap();
     apply_before_migration(&conn, "scope_tasks_capacity");
@@ -344,7 +344,7 @@ fn runpod_rows_from_0_14_16_go_and_current_ones_stay() {
 
 #[test]
 fn fly_rows_from_0_14_17_go_and_the_rest_still_read() {
-    use crate::store::migrations::{apply_before_migration, migration_section_sql};
+    use crate::store::migration_runner::{apply_before_migration, migration_section_sql};
 
     let conn = rusqlite::Connection::open_in_memory().unwrap();
     apply_before_migration(&conn, "forget_fly_rentals");
@@ -373,7 +373,7 @@ fn fly_rows_from_0_14_17_go_and_the_rest_still_read() {
 
 #[test]
 fn an_owned_machines_pool_cost_and_expiry_move_to_pool_machines() {
-    use crate::store::migrations::{apply_before_migration, migration_section_sql};
+    use crate::store::migration_runner::{apply_before_migration, migration_section_sql};
 
     let conn = rusqlite::Connection::open_in_memory().unwrap();
     apply_before_migration(&conn, "task_machine_local");

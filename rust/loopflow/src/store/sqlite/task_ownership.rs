@@ -1212,7 +1212,7 @@ mod tests {
 
     #[test]
     fn entries_a_released_lf_wrote_here_name_this_machine_as_their_writer() {
-        use crate::store::migrations::{apply_before_migration, migration_section_sql};
+        use crate::store::migration_runner::{apply_before_migration, migration_section_sql};
 
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         apply_before_migration(&conn, "task_machine_local");
@@ -1250,7 +1250,7 @@ mod tests {
 
     #[test]
     fn the_planning_journal_user_names_this_machines_person() {
-        use crate::store::migrations::{apply_before_migration, migration_section_sql};
+        use crate::store::migration_runner::{apply_before_migration, migration_section_sql};
 
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         apply_before_migration(&conn, "task_machine_local");

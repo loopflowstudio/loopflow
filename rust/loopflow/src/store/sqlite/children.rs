@@ -2651,7 +2651,7 @@ mod local_planning_tests {
 
     #[test]
     fn retired_branch_lookup_preserves_history_without_full_scans() {
-        use crate::store::migrations::{apply_before_migration, migration_section_sql};
+        use crate::store::migration_runner::{apply_before_migration, migration_section_sql};
 
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         apply_before_migration(&conn, "retired_work_lookup");

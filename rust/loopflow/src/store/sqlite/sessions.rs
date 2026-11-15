@@ -2146,7 +2146,7 @@ mod metadata_tests {
 
     #[test]
     fn a_released_tasks_primary_session_stays_its_conversation_here() {
-        use crate::store::migrations::{apply_before_migration, migration_section_sql};
+        use crate::store::migration_runner::{apply_before_migration, migration_section_sql};
 
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         apply_before_migration(&conn, "task_machine_local");

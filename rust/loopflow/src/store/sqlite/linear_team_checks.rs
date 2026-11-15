@@ -118,7 +118,7 @@ mod tests {
 
     #[test]
     fn linear_on_demand_migration_retains_released_work() {
-        use crate::store::migrations::{apply_before_migration, migration_section_sql};
+        use crate::store::migration_runner::{apply_before_migration, migration_section_sql};
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         apply_before_migration(&conn, "linear_team_checks");
         conn.execute_batch(include_str!(

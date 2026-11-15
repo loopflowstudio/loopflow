@@ -179,7 +179,7 @@ impl SqliteStore {
 mod tests {
     #[test]
     fn released_waves_upgrade_and_removal_needs_no_successor() {
-        use crate::store::migrations::{apply_before_migration, apply_pending_migrations};
+        use crate::store::migration_runner::{apply_before_migration, apply_pending_migrations};
 
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         apply_before_migration(&conn, "wave_removal");

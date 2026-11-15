@@ -433,7 +433,7 @@ mod tests {
     use serde_json::{json, Value};
 
     use super::{attach_in, retain_filing_export_in, PlanningExport};
-    use crate::store::migrations::{
+    use crate::store::migration_runner::{
         apply_before_migration, convert_released_data, migration_section_sql,
     };
     use crate::store::sqlite::planning_changes::PlanningChanges;

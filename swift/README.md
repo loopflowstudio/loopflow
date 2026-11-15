@@ -1140,6 +1140,14 @@ concurrent request traces in `logs/lf.log`, and no request Process rows or globa
 context changes. Native cancellation releases the client's wait; a lost reply
 remains unknown without replay.
 
+`ClientWorkStore.observeSaved` keeps domain evidence current after recovering a
+saved command result; Desktop retains that observation while the request remains
+saved. It never submits commands. `planning` exposes current evidence for the
+exact correlated changes, separately from the result's historical `sync` and
+error. A replacement database requires new evidence. Work query incorporation
+and native readiness remain separate obligations; live receipt observation alone
+does not complete the shared projection or phone presentation migration.
+
 Terminal recovery must preserve the exact owner, draft and newer control claims.
 Opening shows **Opening… Input paused** through attachment and native readiness;
 **Reconnecting…** follows a previously acknowledged connection.

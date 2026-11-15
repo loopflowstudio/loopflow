@@ -1,6 +1,6 @@
 # LOO-906: immediate interactions across Desktop and mobile
 
-Implementation continues 2026-11-15 from checkpoint `fe92171d7b` on
+Implementation continues 2026-11-15 from checkpoint `9fdf6ef582` on
 origin/main `9cafc410ee`. Supersedes the Desktop-only delivery
 boundary. No shipping or merge decision is recorded. Placement remains this Task;
 no Wave is selected.
@@ -78,12 +78,6 @@ The outbox now uses system SQLite3 directly on both native targets. This simpler
 reversible dependency choice replaces the unadopted GRDB proposal; confirmed
 cache/query transactions still belong in that same database. No new library is
 installed. Membership coverage must be proved before client projection migration.
-
-The comparison bar is behavioral: stable identity across surfaces, immediate shared
-reads, overlapping-operation rebase, stale-response protection, operation-local
-rollback, durable uncertain-outcome recovery and predictable navigation. The tests
-below must demonstrate these properties; framework branding or a new placeholder
-is not a substitute.
 
 The cache/overlay owner must project every affected query, including Dashboard
 membership and counts. If declarative membership cannot cover them, move the pure
@@ -481,6 +475,8 @@ existing bounded input owners: no offline keystroke queue or automatic resend.
 
 ## Delete — do not maintain
 
+- Removed: `ClientWorkStore.recover`'s separate receipt reducer. Recovery and
+  continued observation now share `receive`.
 - Removed in this cut: newest-only delivery selection/acknowledgment in
   `task_state_delivery`/`observe_task_state`; exact attempted-delivery recovery
   replaces it. Current-decision acquisition and its adoption coverage remain.
@@ -580,12 +576,52 @@ separately. Neither that target nor a SQL bottleneck has been measured here.
 
 ## Implement direction
 
-Concept-review outcome (2026-11-15, checkpoint `fe92171d7b`):
-no further model change or open product choice. Exact older-attempt recovery now uses the existing Task-state delivery
-lock. Finish client reordering and remaining mutation-family fences before shared
-membership/cache/projection and both-client cutover. Planning correlation does
-not complete client reconciliation or authorize retiring operations on presentation. Loop-or-next may advance this review;
-the implementation and native latency acceptance remain unfinished.
+Concept-review outcome (2026-11-15, current workspace on `9fdf6ef582`):
+refine recovery presentation to resolve each effect independently, including
+unavailable evidence. Iterate to implement this alongside live Work incorporation
+before the remaining mutation-family fences and both-client cutover. No open
+product choice. Planning correlation does not complete client reconciliation or
+authorize retiring operations on presentation; native latency remains unmeasured.
+
+### Resolve only the effect that the evidence covers
+
+Next implement direction: derive recovery presentation from the outstanding
+effect obligations in the shared owner. For each applicable effect distinguish
+unresolved, confirmed resolved and unavailable evidence; an effect declared
+inapplicable by the command registry has no obligation. Do not turn a missing
+planning reading into an empty set of unresolved changes. After epoch replacement
+or unavailable lookup, retain the request and an inspection/recovery action.
+An absent reading alone cannot establish that planning is inapplicable.
+
+Planning delivery confirms only the exact correlated planning changes. Delivered
+planning must not suppress attachment, Graph, filesystem or other unresolved
+failures; an unclassified saved diagnostic stays inspectable until its owner
+establishes resolution. Preserve the original result and diagnostic. Use the
+existing effect/stage registry and domain owners, with no additional lifecycle
+ledger or screen. Both clients consume the same derived recovery annotations;
+creation-specific `complete` cannot mean all effects have converged.
+
+Concrete interaction: Start files a Task, then attachment fails while its planning
+delivery finishes. Show the filed conversation and keep Retry opening for that
+same Session. A delivered planning frame clears only its planning warning.
+Selecting B remains final even when A's result or status arrives later. Restart
+retains the attachment obligation and each lagging list/count obligation. A
+replacement epoch shows unavailable confirmation, never an all-clear result.
+
+Current workspace review found `CreationRecovery.refresh` using
+`planning?.unresolved ?? []` and suppressing the saved operation error whenever
+planning exists with no unresolved change. `ClientWorkStore.presented` still
+deletes the request based on finished/bound delivery. These remain interim paths
+to replace under the existing presentation-acknowledgment contract, not templates
+for the shared recovery model. The live-order test checks a lagging stamp against
+a fence; it does not feed a Work reading through a projection or prove navigation.
+
+Before cutover, hold planning and attachment independently, resolve either first,
+then remove planning evidence or replace the epoch. Reorder old saved-result,
+current status and actual list/count frames across restart and selection of B.
+Assert that only the covered recovery action disappears, each query applies its
+effect once, unavailable evidence retains Inspect, and no command is replayed or
+later selection changed. Extend production presentation coverage on both targets.
 
 Next verify the live shared owner with a newer planning-status receipt, an older
 saved-result reply and a lagging Work reading delivered in each order, including
@@ -687,11 +723,10 @@ checks are at `aeb4ed3b2b0e7256748fa69bd76f77acff966b98:scratch/instant-task-ses
 The launch checkpoint, presentation-driven retirement and phone sheet/outcome
 presentation remain interim; no shared projection cutover is claimed.
 
-Completion/reopen and Task field/Wave edits recover their writer's original
-result without replaying intent. Field/membership validation records definite
-refusal; later errors stay uncertain. Saved `TaskEdit.sync` is historical. Remote
-Machine moves remain outside the Wave-move recovery rule. Other mutation families
-and both clients' completion presentation remain unfinished.
+Completion/reopen and Task field/Wave edits recover original results without
+replay. Definite refusal covers content/membership validation; later errors stay
+uncertain. Remote Machine moves, other families and both clients' completion
+presentation remain unfinished.
 
 Stage resolutions stay in `commits`: committed, definitely refused or superseded.
 Completion withdrawal resolves the exact saved request in the withdrawing writer's
@@ -712,21 +747,25 @@ Receipt revisions and subscription invalidation include planning revisions. Both
 native targets share the DTO and persisted receipt ordering; live action/projection
 migration is unfinished. No new queue, generic retry or migration was introduced.
 
-State delivery now recovers the oldest unresolved attempted write under the
-existing Task lock. Exact acknowledgment/history resolves only that delivery;
-ordinary acquisition cannot adopt it over newer local intent. Proven noncommit
-leaves the older decision superseded; unknown history retains uncertainty even
-under Retry. A resolved observation rebases the unsent successor's provider
-baseline before its own delivery, without changing its local value. Reservation
-also excludes any other unresolved attempted writer. Repository maintenance finds
-old attempts even if the newest decision is already settled. Held acknowledgment,
-lost success, noncommit, changed/unknown history and restart have focused coverage.
-This is state-delivery ordering, not the unfinished client resource-lane registry.
-Definite refusal outside Task content/membership validation, other planning families,
-remote/detached operations and file/config confirmation remain open.
+State delivery recovers older unresolved attempts under its existing Task lock;
+exact acknowledgment/history resolves only that delivery. Unknown history remains
+uncertain, and ordinary acquisition cannot adopt it over newer intent. Details,
+eight focused tests and indexed 10k query results are recorded at
+`9fdf6ef582:scratch/instant-task-session.md`. Client resource lanes remain open.
 
-Remaining, in order: client reordering of saved results against Work and
-delivery-status readings; lost-output coverage for families beyond completion;
+The shared client now supports read-only receipt observation after returning the
+saved result. Desktop keeps it while the request remains saved. Recovery and live
+observation use one persisted reducer; an older first reply after restart returns
+the newer saved evidence instead of waiting indefinitely. Current planning
+evidence is separate from historical result/error and becomes unavailable on
+epoch replacement. Desktop's recovery message follows that current status and
+Retry waits for its prior observer. Tests cover macOS presentation and the shared
+owner on both targets. Live Work incorporation, per-query overlays and phone
+recovery presentation remain open.
+
+Remaining, in order: integrate live Work query incorporation and current recovery
+actions with saved-result/planning observation (including reordered replies,
+restart and later selection); lost-output coverage for families beyond completion;
 remaining mutation-family recovery and fences (remote/detached,
 external file/config confirmation and other planning-delivery families included); exhaustive effect/stage registry and a
 declarative membership plan over #1947's `selection_states`; transactional confirmed cache and ordered effect/query
@@ -847,10 +886,9 @@ The earlier admission LEAK has no established cause. Preflight rejected native m
 Gate owns wider suites and packaging; implementation owns a valid benchmark
 baseline; demo owns native usability judgment.
 
-Earlier focused checks and raw results: `fc50618e31:scratch/instant-task-session.md`.
-
-Previous checks: `a2292b2ae7:scratch/instant-task-session.md`.
+Earlier Rust checks and raw results: `9fdf6ef582:scratch/instant-task-session.md`.
 Current cut (2026-11-15; inherited `LF_*` cleared):
-- `cargo nextest run -p loopflow --lib --build-jobs 4`, named state-attempt/held-ack/restart/uncertainty filters: 8 passed; 10k query plans indexed. Runs `476e77fd` and `79c825f0`.
-- `cargo clippy --all-targets --jobs 4 -- -D warnings`, fmt, architecture, test inventory and diff checks: passed.
-- `cargo test -p loopflow --test integration documented_commands:: --jobs 4`: 4 passed. Gate owns wider suites.
+- `swift build --build-tests --package-path swift --jobs 4 -Xswiftc -gnone`: passed on Swift 6.2.3; unchanged ServerClient/TaskWorkView warnings remain, with TaskRunDraft on the delete list.
+- `swift test --skip-build --disable-sandbox --package-path swift --no-parallel --filter 'ClientWorkStoreTests|OperationRecoveryPresentationTests'` inside the Desktop network boundary with private LF_HOME: 20 passed; gate owns wider acceptance.
+- `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/ClientWorkStoreTests`: 2 passed; disposable Simulator removed. Gate owns wider iOS acceptance.
+- `uv run python scripts/check_swift_multiplatform_boundaries.py`, `git diff --check`: passed. Gate owns wider suites and documented commands.

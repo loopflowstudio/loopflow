@@ -26,18 +26,22 @@ final class OperationServer: @unchecked Sendable {
     var watchCount: Int { lock.withLock { watches.count } }
     let entered: AsyncStream<Void>
     private let began: AsyncStream<Void>.Continuation
+    let observations: AsyncStream<Void>
+    private let observing: AsyncStream<Void>.Continuation
     private let finishOnSend: Bool
 
     init(frame: SubscriptionReading<OperationReceipt>? = nil, finishOnSend: Bool = true) throws {
         current = try frame ?? operationTestFrame(delivery: nil)
         self.finishOnSend = finishOnSend
         (entered, began) = AsyncStream.makeStream()
+        (observations, observing) = AsyncStream.makeStream()
     }
 
     func observe(_ id: String) -> ClientWorkStore.ReceiptWatch {
         let key = UUID()
         let (stream, continuation) = AsyncThrowingStream<SubscriptionReading<OperationReceipt>, any Error>.makeStream()
         lock.withLock { watches[key] = continuation; continuation.yield(current) }
+        observing.yield(())
         return ServerWatch(updates: stream, checkpoint: { _ in }, cancel: { [self] in
             lock.withLock { watches.removeValue(forKey: key)?.finish() }
         })
@@ -63,7 +67,35 @@ final class OperationServer: @unchecked Sendable {
             for continuation in watches.values { continuation.yield(frame) }
         }
     }
+
+    func finish() { lock.withLock { for continuation in watches.values { continuation.finish() } } }
 }
+
+func operationPlanningTestFrame(delivered: Bool) throws -> SubscriptionReading<OperationReceipt> {
+    let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        .deletingLastPathComponent().deletingLastPathComponent()
+        .appendingPathComponent("rust/loopflow/tests/fixtures/dto/server/operation_planning.json")
+    let result = try #require(try RawJSON(Data(contentsOf: fixture)).fields()["result"])
+    var receipt = try #require(JSONSerialization.jsonObject(with: result.bytes) as? [String: Any])
+    receipt["revision"] = delivered ? 15 : 14
+    var planning = try #require(receipt["planning"] as? [String: Any])
+    var fence = try #require(planning["fence"] as? [String: Any])
+    fence["revisions"] = ["planning": delivered ? 13 : 12]
+    planning["fence"] = fence
+    var changes = try #require(planning["changes"] as? [[String: Any]])
+    changes = [changes[0]]
+    changes[0]["state"] = delivered ? "delivered" : "uncertain"
+    changes[0]["error"] = delivered ? NSNull() : "lost delivery acknowledgment" as Any
+    planning["changes"] = changes
+    receipt["planning"] = planning
+    let frame: [String: Any] = ["answers": NSNull(), "unavailable": NSNull(), "body": receipt,
+        "stamp": ["machine": "machine_fixture", "epoch": "ab0123456789ab0123456789ab01234567",
+                  "schema": ServerProtocol.revision, "query": "operation-query", "complete": true,
+                  "revisions": ["planning": delivered ? 13 : 12, "sessions": 1, "graphs": 1, "processes": 1, "usage": 1]]]
+    return try JSONDecoder().decode(SubscriptionReading<OperationReceipt>.self,
+        from: JSONSerialization.data(withJSONObject: frame))
+}
+
 
 struct ClientWorkStoreTests {
     private actor Checks {
@@ -78,6 +110,107 @@ struct ClientWorkStoreTests {
     private var command: ServedWrite {
         .taskCreate(directory: "/original-repo", requestID: "same", title: nil, request: "Exact submitted words",
                     wave: nil, graph: nil, session: nil, run: true)
+    }
+
+    @Test(arguments: [false, true])
+    func livePlanningObservationSurvivesSavedReplyReorderingAndRestart(newerFirst: Bool) async throws {
+        let root = directory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let older = try operationPlanningTestFrame(delivered: false)
+        let newer = try operationPlanningTestFrame(delivered: true)
+        let server = try OperationServer(frame: newerFirst ? newer : older)
+        func client() -> ClientWorkStore {
+            ClientWorkStore(directory: root, machine: { "machine_fixture" }, read: { _ in "null" },
+                observe: { server.observe($0) }, send: { try server.send($0) })
+        }
+        let store = client()
+        let record = try await store.record(.taskUpdate(directory: "/repo", issue: "LOO-1", notes: "Original edit"),
+            requestID: "operation_fixture")
+        var watches = server.observations.makeAsyncIterator()
+        #expect(try await store.reconcile(record)?.result == older.body?.result)
+        _ = await watches.next()
+        let following = Task { try await store.observeSaved(record) }
+        _ = await watches.next()
+        // The saved result and current planning evidence travel independently
+        // of Work. A lagging query cannot certify this local edit's stage.
+        let stage = try #require(newer.body?.commits.first)
+        let stamp = try #require(newer.stamp)
+        var laggingJSON = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(stamp)) as? [String: Any])
+        laggingJSON["query"] = "task-list"
+        laggingJSON["revisions"] = ["planning": 6, "sessions": 1, "graphs": 1, "processes": 1, "usage": 1]
+        let lagging = try JSONDecoder().decode(ReadingStamp.self, from: JSONSerialization.data(withJSONObject: laggingJSON))
+        #expect(!stage.fence.isCovered(by: lagging, query: "task-list"))
+        server.publish(newer)
+        server.publish(older)
+        server.finish()
+        await #expect(throws: (any Error).self) { try await following.value }
+        #expect(try await store.receipt(record.id)?.result == older.body?.result)
+        #expect(try await store.receipt(record.id)?.error == "planning response lost")
+        #expect(try await store.planning(record.id)?.unresolved.isEmpty == true)
+        #expect(try await store.pending().first?.payload == record.payload)
+        #expect(server.submissions.isEmpty)
+        #expect(server.watchCount == 0)
+
+        // Restart with an older first reply: return the saved current evidence,
+        // rather than blocking forever or reviving its historical delivery error.
+        server.publish(older)
+        let restarted = client()
+        let recovered = try await restarted.reconcile(record)
+        #expect(recovered?.planning == newer.body?.planning)
+        #expect(try await restarted.planning(record.id)?.unresolved.isEmpty == true)
+        #expect(recovered?.result == older.body?.result)
+        #expect(server.submissions.isEmpty)
+    }
+
+    @Test func readOnlyObservationNeverReplaysMissingOrResetReceipts() async throws {
+        let root = directory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let known = try operationPlanningTestFrame(delivered: true)
+        let server = try OperationServer(frame: known)
+        let store = ClientWorkStore(directory: root, machine: { "machine_fixture" }, read: { _ in "null" },
+            observe: { server.observe($0) }, send: { try server.send($0) })
+        let record = try await store.record(.taskUpdate(directory: "/repo", issue: "LOO-1", notes: "Original edit"),
+            requestID: "operation_fixture")
+        var watches = server.observations.makeAsyncIterator()
+        _ = try await store.reconcile(record)
+        #expect(try await store.planning(record.id)?.unresolved.isEmpty == true)
+        _ = await watches.next()
+        let following = Task { try await store.observeSaved(record) }
+        _ = await watches.next()
+        let knownStamp = try #require(known.stamp)
+        var replacementStamp = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(knownStamp)) as? [String: Any])
+        replacementStamp["epoch"] = "replacement"
+        let replacement: [String: Any] = ["answers": NSNull(), "unavailable": NSNull(), "body": NSNull(), "stamp": replacementStamp]
+        server.publish(try JSONDecoder().decode(SubscriptionReading<OperationReceipt>.self,
+            from: JSONSerialization.data(withJSONObject: replacement)))
+        server.publish(known) // departed epoch
+        server.finish()
+        await #expect(throws: (any Error).self) { try await following.value }
+        #expect(try await store.pending().first?.payload == record.payload)
+        #expect(try await store.planning(record.id) == nil)
+        await #expect(throws: (any Error).self) { try await store.presented(record.id) }
+        #expect(server.submissions.isEmpty)
+        #expect(server.watchCount == 0)
+    }
+
+    @Test func cancellingReadOnlyObservationKeepsTheUnsentRequestRecoverable() async throws {
+        let root = directory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let server = try OperationServer()
+        let store = client(root, server)
+        let record = try await store.record(command, requestID: "same")
+        var watches = server.observations.makeAsyncIterator()
+        let following = Task { try await store.observeSaved(record) }
+        _ = await watches.next()
+        following.cancel()
+        await #expect(throws: CancellationError.self) { try await following.value }
+        #expect(server.submissions.isEmpty)
+        #expect(server.watchCount == 0)
+        #expect(await !store.isRecovering(record.id))
+        #expect(try await store.pending().first?.payload == record.payload)
+        // Listening did not mark the request sent or acquire a delivery result.
+        #expect(try await store.reconcile(record)?.delivery == .finished)
+        #expect(server.submissions.count == 1)
     }
 
     @Test func saveAdmissionReceiptAndRestartRetainOneOriginalCommand() async throws {

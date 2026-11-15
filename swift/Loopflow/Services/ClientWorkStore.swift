@@ -84,6 +84,17 @@ public actor ClientWorkStore {
 
     public func receipt(_ id: String) throws -> OperationReceipt? { try disk().state(id)?.receipt }
 
+    /// Current planning evidence is independent of the saved command result and
+    /// of any Work query's coverage. A replaced database needs fresh evidence.
+    public func planning(_ id: String) throws -> OperationPlanningReading? {
+        guard let state = try disk().state(id), state.receiptEpoch == state.observedEpoch,
+              let reading = state.receipt?.planning,
+              reading.fence.machine == state.record.destination,
+              reading.fence.epoch == state.observedEpoch,
+              reading.fence.schema == ServerProtocol.revision else { return nil }
+        return reading
+    }
+
     public func presented(_ id: String) async throws {
         guard let state = try disk().state(id) else { return }
         guard try await currentMachine() == state.record.destination else {
@@ -136,35 +147,70 @@ public actor ClientWorkStore {
         return try await recover(record)
     }
 
-    private func recover(_ record: SubmittedOperation) async throws -> OperationReceipt? {
+    /// Keep current domain evidence after recovering the saved result. This
+    /// observation never submits a command, including after a missing receipt.
+    /// The caller owns its lifetime independently of navigation or attachment.
+    public func observeSaved(_ record: SubmittedOperation) async throws {
+        guard active.insert(record.id).inserted else { return }
+        defer { active.remove(record.id); changed() }
+        try await verify(record)
+        let watch = observe(record.id)
+        defer { watch.cancel() }
+        var cursor = ReceiptCursor(machine: record.destination)
+        for try await frame in watch.updates {
+            try Task.checkCancellation()
+            _ = try receive(frame, record: record, cursor: &cursor)
+            if try disk().state(record.id) == nil { return }
+        }
+        try Task.checkCancellation()
+        throw RegistryQueryError("Receipt observation ended; the original request is retained")
+    }
+
+    private func verify(_ record: SubmittedOperation) async throws {
         guard try await currentMachine() == record.destination else {
             throw RegistryQueryError("Waiting for the original Machine \(record.destination)")
         }
         guard let saved = try disk().state(record.id), try saved.record.hasSameCommand(as: record) else {
             throw RegistryQueryError("The original saved operation is unavailable")
         }
+    }
+
+    /// Both one-shot recovery and continued observation reduce through the same
+    /// persisted ordering. An older first frame after restart returns the known
+    /// receipt instead of presenting its historical error as current recovery.
+    private func receive(_ frame: SubscriptionReading<OperationReceipt>, record: SubmittedOperation,
+                         cursor: inout ReceiptCursor) throws -> ClientWorkDatabase.State? {
+        if let reason = frame.unavailable { throw RegistryQueryError(reason) }
+        guard let stamp = frame.stamp else {
+            throw RegistryQueryError("The Machine returned an unstamped receipt reading")
+        }
+        if let receipt = frame.body, receipt.requestID != record.id {
+            throw RegistryQueryError("The Machine returned the receipt for another operation")
+        }
+        guard try cursor.receive(frame.body, stamp: stamp) else { return nil }
+        try disk().observeEpoch(stamp.epoch, id: record.id)
+        if let receipt = frame.body {
+            try disk().receive(receipt, epoch: stamp.epoch, id: record.id)
+        }
+        changed()
+        return try disk().state(record.id)
+    }
+
+    private func recover(_ record: SubmittedOperation) async throws -> OperationReceipt? {
+        try await verify(record)
         let watch = observe(record.id)
         defer { watch.cancel() }
         var cursor = ReceiptCursor(machine: record.destination)
         var submitted = false
         for try await frame in watch.updates {
             try Task.checkCancellation()
-            if let reason = frame.unavailable { throw RegistryQueryError(reason) }
-            guard let stamp = frame.stamp else {
-                throw RegistryQueryError("The Machine returned an unstamped receipt reading")
+            guard let state = try receive(frame, record: record, cursor: &cursor) else {
+                if try disk().state(record.id) == nil { return nil }
+                continue
             }
-            let body = frame.body
-            guard try cursor.receive(body, stamp: stamp) else { continue }
-            try disk().observeEpoch(stamp.epoch, id: record.id)
-            let state = try disk().state(record.id)
-            guard let state else { return nil } // already presented by another window
-            if let receipt = body {
-                if state.receiptEpoch == stamp.epoch, let known = state.receipt, known.revision > receipt.revision { continue }
-                guard receipt.requestID == record.id else {
-                    throw RegistryQueryError("The Machine returned the receipt for another operation")
-                }
-                try disk().receive(receipt, epoch: stamp.epoch, id: record.id)
-                changed()
+            // receive validated the stamp before changing the durable state.
+            guard let epoch = state.observedEpoch else { continue }
+            if state.receiptEpoch == epoch, let receipt = state.receipt {
                 let canContinue: Bool
                 if !submitted && (receipt.delivery == .dispatched || receipt.delivery == .uncertain),
                    receipt.kind == "task.create" || receipt.kind == "session.new" {
@@ -176,7 +222,7 @@ public actor ClientWorkStore {
                     canContinue = domain?.disposition == .continue || domain?.disposition == .complete
                 } else { canContinue = false }
                 if !submitted && (canContinue || receipt.delivery == .untracked || receipt.delivery == .queued || receipt.validation == .unbound) {
-                    try await admit(record, epoch: stamp.epoch)
+                    try await admit(record, epoch: epoch)
                     submitted = true
                     watch.checkpoint(1)
                     continue
@@ -186,10 +232,10 @@ public actor ClientWorkStore {
                 }
                 // After this call's admission, progress only observes the worker.
             } else if !submitted {
-                guard state.sentEpoch == nil || state.sentEpoch == stamp.epoch else {
+                guard state.sentEpoch == nil || state.sentEpoch == epoch else {
                     throw RegistryQueryError("The Machine's database changed; inspect the original request before continuing")
                 }
-                try await admit(record, epoch: stamp.epoch)
+                try await admit(record, epoch: epoch)
                 submitted = true
                 watch.checkpoint(1)
             }

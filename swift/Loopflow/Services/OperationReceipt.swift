@@ -31,6 +31,12 @@ public struct PlanningChangeRef: Codable, Equatable, Sendable {
 public struct OperationPlanningReading: Codable, Equatable, Sendable {
     public let fence: CommitFence
     public let changes: [OperationPlanningChange]
+
+    /// These exact domain changes still need recovery or inspection. Historical
+    /// command errors and TaskEdit.sync do not establish a current failure.
+    public var unresolved: [OperationPlanningChange] {
+        changes.filter { $0.state != .delivered && $0.state != .superseded }
+    }
 }
 
 public struct OperationPlanningChange: Codable, Equatable, Sendable {

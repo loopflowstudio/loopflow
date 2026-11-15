@@ -92,7 +92,11 @@ final class CreationRecovery {
     }
 
     func retry(_ id: String) async {
-        recoveryTasks.removeValue(forKey: id)?.cancel()
+        let previous = recoveryTasks[id]
+        previous?.cancel()
+        await previous?.value
+        guard recoveryTasks[id] == previous else { return }
+        recoveryTasks.removeValue(forKey: id)
         recoveryErrors.removeValue(forKey: id)
         await refresh()
     }
@@ -106,7 +110,10 @@ final class CreationRecovery {
             for record in records where recoveryTasks[record.id] == nil {
                 if await submissions.isRecovering(record.id) { continue }
                 recoveryTasks[record.id] = Task { [weak self, submissions] in
-                    do { _ = try await submissions.reconcile(record) }
+                    do {
+                        _ = try await submissions.reconcile(record)
+                        try await submissions.observeSaved(record)
+                    }
                     catch is CancellationError { }
                     catch {
                         self?.recoveryErrors[record.id] = error.localizedDescription
@@ -145,8 +152,18 @@ final class CreationRecovery {
                     let resource = Resource(destination: record.destination, directory: directory,
                         task: task, session: session,
                         receipt: String(decoding: try encoder.encode(operation), as: UTF8.self))
-                    current.append(Item(id: record.id, text: recoveryErrors[record.id] ?? operation.error ?? (operation.delivery == .finished ? "Request completed" : "Request saved; preparing its conversation"),
-                        complete: operation.delivery == .finished && operation.validation == .bound && recoveryErrors[record.id] == nil, resource: resource))
+                    let planning = try await submissions.planning(record.id)
+                    let unresolved = planning?.unresolved ?? []
+                    let progress = operation.delivery == .finished ? "Request completed" : "Request saved; preparing its conversation"
+                    let message: String
+                    if let change = unresolved.first {
+                        message = change.error ?? "Planning update needs inspection (\(change.state.rawValue))"
+                    } else {
+                        message = planning == nil ? operation.error ?? progress : progress
+                    }
+                    current.append(Item(id: record.id, text: recoveryErrors[record.id] ?? message,
+                        complete: operation.delivery == .finished && operation.validation == .bound
+                            && recoveryErrors[record.id] == nil && unresolved.isEmpty, resource: resource))
                 } catch {
                     current.append(Item(id: record.id, text: "Creation \(record.id): \(error.localizedDescription)", complete: false, resource: nil))
                 }

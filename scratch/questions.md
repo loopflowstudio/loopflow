@@ -34,11 +34,15 @@
   command. This serializes declaration removal with admission without extending a
   SQL transaction across file acquisition; the same file editor handles ordinary
   preference updates.
-- The upgrade preflights follow the read/act/compare seam (storage returns the
-  export and process rows, the application writes files and judges processes,
-  storage compares inside the exclusive transaction). The alternative, a
-  callback run inside the transaction, is less code but puts application code
-  under storage's lock and contradicts the no-callback direction.
+- Upgrade preflights stay inside the exclusive transaction and reach outside
+  through closures the application passes at open; the settings exporter keeps
+  the transaction's connection. Read/act/compare for upgrades is withdrawn: it
+  needed a new changed-source recovery to restore what the held lock already
+  gives. The alternative kept open is storage returning old-schema rows as
+  values, which removes the application's raw connection at the cost of
+  rewriting the released exporter.
+- The changed-source refusal after an interrupted cutover is existing behavior
+  and stays; its drafted recovery is outside this Task.
 - Rename, bind and attach check the Session caller whatever the title source;
   title repair checks none. This newly refuses a replaced provider binding or
   attaching a Session a person named, and lets a Task identifier update repair
@@ -47,6 +51,3 @@
   editor), which needs the caller threaded through every planning write.
 - Acquisition modules under `store/` keep their paths until the storage
   measurement picks the next cut; renaming them now changes no rebuild closure.
-- November 15 disposable cutover probe shows a changed SQL export cannot retry
-  through the existing journal. The upgrade move returns to review; the draft
-  journal rollback/archive sequence and crash checks are in `loo-650.md`.

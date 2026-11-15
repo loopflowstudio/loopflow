@@ -1,8 +1,8 @@
 //! Account observations combined with authored preferences and routes.
 use crate::profile::{AuthBrowserBinding, ProfileId, ProviderRoute, RouteScope};
 use crate::provider_auth::Provider;
-use crate::store::sqlite::SqliteStore;
 use crate::store::{ProviderAccount, ProviderAccountId, StoreError, StoreResult};
+use loopflow_storage::sqlite::SqliteStore;
 
 fn invalid(error: impl std::fmt::Display) -> StoreError {
     StoreError::InvalidData(error.to_string())

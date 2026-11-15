@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::git::{is_ancestor, is_clean, ref_exists, rev_parse};
 use crate::ops::{OpsError, OpsResult};
-use crate::store::work::task::Task;
 use crate::store::Store;
+use loopflow_storage::work::task::Task;
 
 use super::{fetch_task_refs, task_error};
 

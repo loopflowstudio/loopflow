@@ -33,9 +33,9 @@ use serde_json::Value;
 use crate::harness::HarnessKind;
 use crate::provider_account::activation::native_home;
 use crate::provider_auth::Provider;
-use crate::store::sqlite::SqliteStore;
 use loopflow_model::chat::types::{ConversationItem, Lifecycle};
 use loopflow_model::id::AgentSessionId;
+use loopflow_storage::sqlite::SqliteStore;
 
 pub(crate) use claude::is_user_input;
 

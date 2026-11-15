@@ -9,10 +9,10 @@ use crate::process::attachment;
 
 use crate::process::SessionAttachment;
 use crate::session::Holder;
-use crate::store::sqlite::SqliteStore;
 use crate::store::{StoreError, StoreResult};
 use anyhow::{anyhow, Result};
 use loopflow_model::id::LfProcessId;
+use loopflow_storage::sqlite::SqliteStore;
 use std::collections::{HashMap, HashSet};
 
 /// The store, LfSession and frozen attachment one invocation launches and
@@ -172,17 +172,17 @@ fn context_environment(
     command.env(capability_env, serde_json::to_string(&capability)?);
     command.env(
         crate::steer::STEER_SEEN_ENV,
-        crate::store::steer_markers::seen_marker(&home, &capability.agent_process_id),
+        loopflow_storage::steer_markers::seen_marker(&home, &capability.agent_process_id),
     );
     command.env(
         crate::steer::STEER_SESSION_ENV,
-        crate::store::steer_markers::session_marker(&home, session),
+        loopflow_storage::steer_markers::session_marker(&home, session),
     );
     // A Session belongs to at most one Task: Task checkouts do not nest.
     if let [task] = store.session_task_ids(session)?.as_slice() {
         command.env(
             crate::steer::STEER_TASK_ENV,
-            crate::store::steer_markers::task_marker(&home, task.as_str()),
+            loopflow_storage::steer_markers::task_marker(&home, task.as_str()),
         );
     }
     Ok(())
@@ -827,8 +827,8 @@ mod tests {
     use crate::process::attachment;
 
     use crate::session::Holder;
-    use crate::store::sqlite::SqliteStore;
     use loopflow_model::id::LfProcessId;
+    use loopflow_storage::sqlite::SqliteStore;
     use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
 

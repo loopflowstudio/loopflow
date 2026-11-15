@@ -15,9 +15,9 @@ use time::OffsetDateTime;
 
 use super::{OpsError, OpsResult};
 use crate::linear::StateHistory;
-use crate::store::sqlite::task_state_delivery::TaskStateDelivery;
-use crate::store::work::task::Task;
 use crate::store::{SharedStore, Store};
+use loopflow_storage::sqlite::task_state_delivery::TaskStateDelivery;
+use loopflow_storage::work::task::Task;
 
 pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> OpsResult<()> {
     // A command can outlive export or a mapping change. Observe the current link;
@@ -431,7 +431,7 @@ pub(crate) async fn deliver_task_state(store: &Store, task: &Task, retry: bool) 
             )));
         }
         let history = state_history(&client, issue.as_str(), &delivery, &observed).await;
-        if !crate::store::sqlite::linear_acceptance::observe_task_state(
+        if !loopflow_storage::sqlite::linear_acceptance::observe_task_state(
             &store.sqlite,
             &delivery,
             &observed,
@@ -491,7 +491,7 @@ pub(crate) async fn deliver_task_state(store: &Store, task: &Task, retry: bool) 
             }
             _ => StateHistory::Unknown,
         };
-        if crate::store::sqlite::linear_acceptance::observe_task_state(
+        if loopflow_storage::sqlite::linear_acceptance::observe_task_state(
             &store.sqlite,
             &delivery,
             &confirmed,

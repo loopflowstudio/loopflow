@@ -12,7 +12,7 @@ use serde_json::Value;
 
 use super::{rfc3339, seconds, Source, Turn};
 use crate::harness::HarnessKind;
-use crate::store::sqlite::{CurrentConversation, SqliteStore};
+use loopflow_storage::sqlite::{CurrentConversation, SqliteStore};
 
 /// How much of a transcript's end is read first; the window grows fourfold
 /// until it holds the turn's start…

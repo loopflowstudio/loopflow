@@ -4,8 +4,8 @@ use std::path::Path;
 
 use crate::linear::LinearProject;
 use crate::ops::{OpsError, OpsResult};
-use crate::store::work::project::ProjectStatus;
 use crate::store::Store;
+use loopflow_storage::work::project::ProjectStatus;
 
 use super::{project_is_foreign, LinearRepository};
 

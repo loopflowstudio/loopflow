@@ -7,7 +7,7 @@ pub(crate) use runtime::{
     finish_session_attachment, register_session_attachment_interrupt, resume_session_agent_process,
 };
 
-pub use crate::store::process::*;
+pub use loopflow_storage::process::*;
 
 pub const AGENT_CALLER_ENV: &str = "LF_AGENT_CALLER";
 

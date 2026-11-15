@@ -14,8 +14,8 @@ use serde::{Deserialize, Serialize};
 use crate::harness::agent_process::AttachmentOwner;
 use crate::process::SessionAttachment;
 use crate::session_record::CaptureHandoff;
-use crate::store::sqlite::SqliteStore;
 use crate::store::{ProviderAccountId, StoreError};
+use loopflow_storage::sqlite::SqliteStore;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct NativeExit {

@@ -9,9 +9,9 @@ use anyhow::{anyhow, bail, Context, Result};
 
 use crate::ops::human_session::moves::{self, Move};
 use crate::session::LfSession;
-use crate::store::work::task::Task;
 use crate::store::SharedStore;
 use loopflow_model::durable::{Machine, MachineId, RepositoryId, TaskOwnership};
+use loopflow_storage::work::task::Task;
 
 /// `lf --machine M resume <session>`: move the Session, if this Machine knows
 /// it, to `target` unless it is already there. A Task's conversation moves only
@@ -301,7 +301,7 @@ async fn relay_task(
 /// move with, when this is `to`, else the writer of the move's claim. `None`
 /// once it arrived, or when `to` claimed it itself.
 fn sender(
-    store: &crate::store::sqlite::SqliteStore,
+    store: &loopflow_storage::sqlite::SqliteStore,
     task: &loopflow_model::durable::TaskId,
     to: &MachineId,
 ) -> Result<Option<MachineId>> {

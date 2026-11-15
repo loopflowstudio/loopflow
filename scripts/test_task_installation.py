@@ -108,8 +108,8 @@ def _wait_for_docker() -> None:
 
 def _migration_order(repo: Path) -> str:
     """Every slug migration in this tree: origin/main's merge order, then the rest by name."""
-    directory = "rust/loopflow/src/store/migrations"
-    directories = (directory, "rust/loopflow-storage/src/migrations")
+    directory = "rust/loopflow-storage/src/migrations"
+    directories = ("rust/loopflow/src/store/migrations", directory)
     log = subprocess.run(
         [
             "git",

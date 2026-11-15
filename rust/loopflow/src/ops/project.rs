@@ -1,11 +1,11 @@
 use std::path::Path;
 
 use crate::ops::{OpsError, OpsResult};
-use crate::store::planning_sync::PlanningSyncStatus;
-use crate::store::work::project::Project;
-use crate::store::work::project::ProjectStatus;
 use crate::store::{PlanningLocks, Store};
 use crate::work::wave::Wave;
+use loopflow_storage::planning_sync::PlanningSyncStatus;
+use loopflow_storage::work::project::Project;
+use loopflow_storage::work::project::ProjectStatus;
 
 fn project_error(message: impl ToString) -> OpsError {
     OpsError::Message(message.to_string())
@@ -51,7 +51,7 @@ pub async fn bind_project(repo: &Path, name: &str, project_id: &str) -> OpsResul
 pub async fn update_plan(
     repo: &Path,
     wave: Option<&str>,
-    krs: &[crate::store::work::project::ProjectKR],
+    krs: &[loopflow_storage::work::project::ProjectKR],
     metric_targets: &[crate::work::wave::metrics::MetricTarget],
 ) -> OpsResult<(Project, PlanningSyncStatus)> {
     let store = super::planning_sync::planning_store().await?;

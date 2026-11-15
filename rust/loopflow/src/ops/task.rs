@@ -63,15 +63,15 @@ use crate::git::{fetch, merge_base, ref_exists, rev_parse};
 use crate::naming::git_user;
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::task_actions::TaskActionModel;
-use crate::store::child::ChildRef;
-use crate::store::sqlite::{SqliteStore, TaskCheckout};
-use crate::store::work::task::{
-    GithubPr, Observation, PrMergeMode, PrPhase, PrPublication, Task, TaskEventKind, TaskPr,
-    TaskPrId,
-};
 use crate::store::{open_existing_store, SharedStore, Store};
 use crate::work::wave::Wave;
 use loopflow_model::durable::WorkStatus;
+use loopflow_storage::child::ChildRef;
+use loopflow_storage::sqlite::{SqliteStore, TaskCheckout};
+use loopflow_storage::work::task::{
+    GithubPr, Observation, PrMergeMode, PrPhase, PrPublication, Task, TaskEventKind, TaskPr,
+    TaskPrId,
+};
 use time::format_description::well_known::Rfc3339;
 
 /// What `lf task wait --until` waits for.
@@ -166,7 +166,7 @@ pub struct TaskSnapshot {
     pub external_project_id: Option<String>,
     pub project: Option<String>,
     pub pm_snapshot_synced_at: Option<i64>,
-    pub pm_writeback: crate::store::work::task::LinearWritebackState,
+    pub pm_writeback: loopflow_storage::work::task::LinearWritebackState,
     pub wave: Option<String>,
     pub project_id: Option<String>,
     #[serde(rename = "repo_id")]
@@ -183,7 +183,7 @@ pub struct TaskSnapshot {
     pub base_commit: Option<String>,
     pub provider: Option<String>,
     pub pr: Option<TaskPr>,
-    pub latest_event: Option<crate::store::work::task::TaskEvent>,
+    pub latest_event: Option<loopflow_storage::work::task::TaskEvent>,
     #[schemars(with = "String")]
     #[serde(with = "time::serde::rfc3339")]
     pub created_at: time::OffsetDateTime,
@@ -282,7 +282,7 @@ pub struct TaskFileSnapshot {
 #[derive(Debug, Clone, Copy)]
 struct TaskWorkspace<'a> {
     issue_identifier: &'a str,
-    task_id: &'a crate::store::work::task::TaskId,
+    task_id: &'a loopflow_storage::work::task::TaskId,
     worktree: &'a Path,
 }
 
@@ -1790,7 +1790,7 @@ pub fn task_create(
     title: Option<String>,
     report: Option<String>,
     adoption: TaskAdoptionOptions,
-    receipt: Option<crate::store::sqlite::creation::CreationIdentity>,
+    receipt: Option<loopflow_storage::sqlite::creation::CreationIdentity>,
 ) -> OpsResult<Task> {
     let input = resolve_task_create_input(title.as_deref(), report.as_deref())?;
     let main = crate::git::worktrees::main_repo_root(repo).map_err(task_error)?;
@@ -1853,7 +1853,7 @@ pub fn task_create(
         let repository_id =
             crate::repository::location::ensure_repository(&store.sqlite, &main.to_string_lossy())
                 .map_err(task_error)?;
-        let creation = crate::store::work::task::NewTask {
+        let creation = loopflow_storage::work::task::NewTask {
             due_date: None,
             id: loopflow_model::durable::TaskId::new(),
             repository_id,
@@ -1961,14 +1961,14 @@ pub(crate) fn task_process_refusal_after(
     task: &Task,
     wave: Option<&str>,
     personal: &crate::config::PersonalSettings,
-    latest: Option<&crate::store::work::task::TaskEvent>,
+    latest: Option<&loopflow_storage::work::task::TaskEvent>,
 ) -> Option<String> {
     task_configuration_refusal(task, wave, personal, None)
         .or_else(|| task_event_process_refusal(latest).map(str::to_string))
 }
 
 pub(crate) fn task_event_process_refusal(
-    event: Option<&crate::store::work::task::TaskEvent>,
+    event: Option<&loopflow_storage::work::task::TaskEvent>,
 ) -> Option<&str> {
     match event.map(|event| &event.kind) {
         Some(TaskEventKind::Failed {
@@ -2004,7 +2004,7 @@ pub(crate) async fn task_worktree_blocker(
 /// `task_worktree_blocker` for a Task whose latest event is already read.
 pub(crate) fn task_worktree_blocker_after(
     task: &Task,
-    latest: Option<&crate::store::work::task::TaskEvent>,
+    latest: Option<&loopflow_storage::work::task::TaskEvent>,
 ) -> OpsResult<Option<TaskWorktreeBlocker>> {
     if task.worktree.is_none() {
         return Ok(None);
@@ -2082,9 +2082,9 @@ pub(crate) fn counted_task(
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct TaskStatus {
-    pub sync: Option<crate::store::planning_sync::PlanningSyncStatus>,
+    pub sync: Option<loopflow_storage::planning_sync::PlanningSyncStatus>,
     pub task: Option<Task>,
-    pub project: Option<crate::store::work::project::Project>,
+    pub project: Option<loopflow_storage::work::project::Project>,
     pub observed_at: Option<i64>,
     #[serde(rename = "plan_error")]
     pub planning_error: Option<String>,
@@ -2354,10 +2354,10 @@ pub fn task_sync(issue: &str, retry_updates: bool) -> OpsResult<String> {
             return Ok(format!("{}: {}", saved.identifier, pending.join("\n")));
         }
         Ok(match saved.pm_writeback {
-            crate::store::work::task::LinearWritebackState::Current => {
+            loopflow_storage::work::task::LinearWritebackState::Current => {
                 format!("{}: synchronized", saved.identifier)
             }
-            crate::store::work::task::LinearWritebackState::Pending { error, .. } => {
+            loopflow_storage::work::task::LinearWritebackState::Pending { error, .. } => {
                 format!("{}: {error}", saved.identifier)
             }
         })
@@ -2589,13 +2589,13 @@ pub(crate) async fn reconcile_task_completion(
 #[derive(Debug, serde::Serialize, schemars::JsonSchema)]
 pub struct TaskEdit {
     pub id: String,
-    pub sync: crate::store::planning_sync::PlanningSyncStatus,
+    pub sync: loopflow_storage::planning_sync::PlanningSyncStatus,
 }
 
 pub(crate) fn validate_task_edit_input(
-    update: &crate::store::work::task::TaskUpdate,
+    update: &loopflow_storage::work::task::TaskUpdate,
 ) -> OpsResult<()> {
-    if *update == crate::store::work::task::TaskUpdate::default() {
+    if *update == loopflow_storage::work::task::TaskUpdate::default() {
         return Err(task_error(
             "task edit requires --title, --notes, --rank or --assignee",
         ));
@@ -2614,7 +2614,7 @@ pub fn task_edit(
     repo: &Path,
     issue: &str,
     wave: Option<&str>,
-    update: crate::store::work::task::TaskUpdate,
+    update: loopflow_storage::work::task::TaskUpdate,
 ) -> OpsResult<TaskEdit> {
     validate_task_edit_input(&update)?;
     block_on_task(async {

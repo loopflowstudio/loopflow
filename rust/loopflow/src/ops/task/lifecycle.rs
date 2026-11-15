@@ -5,9 +5,9 @@ use crate::git::current_branch;
 use crate::git::worktrees::main_repo_root;
 use crate::ops::wt::BranchDeletion;
 use crate::ops::{NullProgress, OpsResult, Progress};
-use crate::store::work::task::{Task, TaskPr};
 use crate::store::SharedStore;
 use loopflow_model::durable::{WorkRef, WorkStatus};
+use loopflow_storage::work::task::{Task, TaskPr};
 
 use super::{block_on_task, repository_for_task, task_error, task_store};
 

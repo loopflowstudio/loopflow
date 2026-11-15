@@ -14,13 +14,13 @@ use time::OffsetDateTime;
 use crate::lf::{OndemandCommand, PoolCommand};
 use crate::machine_records::CopyCounts;
 use crate::rental::sandbox::Sandboxes;
-use crate::store::rental::{
+use crate::store::Store;
+use loopflow_model::durable::{CapacityDefault, Machine, MachineId, RepositoryId};
+use loopflow_storage::rental::{
     self, GiveBack, Hardware, Holdings, OnDemand, Pool, PoolMachine, Provider, Rental, RentalState,
     Resolution, Usd,
 };
-use crate::store::sqlite::SqliteStore;
-use crate::store::Store;
-use loopflow_model::durable::{CapacityDefault, Machine, MachineId, RepositoryId};
+use loopflow_storage::sqlite::SqliteStore;
 
 /// An image-built sandbox answers SSH within seconds; RunPod and AWS
 /// install the tools on stock Ubuntu first, which takes minutes.
@@ -1193,11 +1193,11 @@ mod tests {
     use super::{checkout_script, end_rental, read_holdings, reconcile, refresh, Ended};
     use crate::machine_records::CopyCounts;
     use crate::rental::sandbox::Sandboxes;
-    use crate::store::rental::{
+    use loopflow_model::durable::MachineId;
+    use loopflow_storage::rental::{
         Hardware, OnDemand, Provider, Rental, RentalState, Usd, BOOT_SECONDS,
     };
-    use crate::store::sqlite::SqliteStore;
-    use loopflow_model::durable::MachineId;
+    use loopflow_storage::sqlite::SqliteStore;
 
     type Log = Rc<RefCell<Vec<String>>>;
 

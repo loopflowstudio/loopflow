@@ -1656,6 +1656,7 @@ dependencies = [
  "libc",
  "loopflow-definitions",
  "loopflow-model",
+ "loopflow-storage",
  "loopflow-terminal",
  "loopflow-test-support",
  "notify",
@@ -1708,6 +1709,34 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "time",
+ "uuid",
+]
+
+[[package]]
+name = "loopflow-storage"
+version = "0.16.0"
+dependencies = [
+ "aes-gcm",
+ "anyhow",
+ "base64 0.23.1",
+ "chrono",
+ "clap",
+ "ctor",
+ "dirs",
+ "fs2",
+ "hex",
+ "libc",
+ "loopflow-model",
+ "loopflow-test-support",
+ "rusqlite",
+ "schemars",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.21",
+ "time",
+ "tracing",
  "uuid",
 ]
 

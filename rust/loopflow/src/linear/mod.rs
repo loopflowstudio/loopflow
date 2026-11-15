@@ -22,12 +22,12 @@ pub(crate) mod project_document;
 
 use thiserror::Error;
 
-pub(crate) use crate::store::linear_records::{
+pub(crate) use loopflow_storage::linear_records::{
     local_identifier, LinearComment, LinearIssue, LinearIssueObservation, LinearProject,
     StateHistory,
 };
-pub use crate::store::linear_records::{project_slug, terminal_reason};
-pub use crate::store::linear_records::{LinearBindingError, LinearIssueId, LinearProjectId};
+pub use loopflow_storage::linear_records::{project_slug, terminal_reason};
+pub use loopflow_storage::linear_records::{LinearBindingError, LinearIssueId, LinearProjectId};
 
 /// The result of adopting or creating a provider team for a repository. The stable
 /// `id` owns identity; `key` is mutable presentation (the Task prefix).
@@ -82,8 +82,8 @@ pub enum LinearError {
     Message(String),
 }
 
-impl From<crate::store::linear_records::ProjectDocumentError> for LinearError {
-    fn from(error: crate::store::linear_records::ProjectDocumentError) -> Self {
+impl From<loopflow_storage::linear_records::ProjectDocumentError> for LinearError {
+    fn from(error: loopflow_storage::linear_records::ProjectDocumentError) -> Self {
         Self::Message(error.0)
     }
 }
@@ -971,7 +971,7 @@ impl LinearClient {
 
     async fn project_status_id(
         &self,
-        status: crate::store::work::project::ProjectStatus,
+        status: loopflow_storage::work::project::ProjectStatus,
     ) -> LinearResult<String> {
         let team = self.require_team_id()?;
         self.project_statuses()
@@ -1437,10 +1437,10 @@ impl LinearClient {
 
     pub(crate) async fn project_field_input(
         &self,
-        value: &crate::store::work::edit::WorkValue,
+        value: &loopflow_storage::work::edit::WorkValue,
         content: &str,
     ) -> LinearResult<Value> {
-        use crate::store::work::edit::WorkValue;
+        use loopflow_storage::work::edit::WorkValue;
         match value {
             WorkValue::ProjectName(value) => Ok(json!({"name": value})),
             WorkValue::ProjectSummary(value) => Ok(json!({"description": value})),
@@ -1591,17 +1591,17 @@ impl LinearClient {
             && node.archived_at.is_none()
             && matches!(
                 node.status.type_,
-                crate::store::work::project::ProjectStatus::Backlog
-                    | crate::store::work::project::ProjectStatus::Planned
+                loopflow_storage::work::project::ProjectStatus::Backlog
+                    | loopflow_storage::work::project::ProjectStatus::Planned
             );
         if promote {
-            node.status.type_ = crate::store::work::project::ProjectStatus::Started;
+            node.status.type_ = loopflow_storage::work::project::ProjectStatus::Started;
         }
         let mut project = node.into_observation()?;
         crate::linear::validate_project_ownership("adoption", initiative, Some(team), &project)?;
         if apply && promote {
             let input = json!({
-                "statusId": self.project_status_id(crate::store::work::project::ProjectStatus::Started).await?
+                "statusId": self.project_status_id(loopflow_storage::work::project::ProjectStatus::Started).await?
             });
             let response: Value = self
                 .graphql(
@@ -2333,7 +2333,7 @@ struct TeamCreatePayload {
 #[derive(Deserialize)]
 struct ProjectStatusNode {
     #[serde(rename = "type")]
-    type_: crate::store::work::project::ProjectStatus,
+    type_: loopflow_storage::work::project::ProjectStatus,
 }
 
 #[derive(Deserialize)]
@@ -2341,7 +2341,7 @@ struct ProjectStatusChoice {
     #[serde(deserialize_with = "loopflow_model::id::deserialize_uuid")]
     id: String,
     #[serde(rename = "type")]
-    type_: crate::store::work::project::ProjectStatus,
+    type_: loopflow_storage::work::project::ProjectStatus,
     position: f64,
     #[serde(rename = "teamId")]
     team_id: Option<String>,
@@ -2381,9 +2381,9 @@ struct ProjectNode {
 // Replace only the selected planning field, retaining unrelated provider prose.
 fn patch_project_field(
     content: &str,
-    value: &crate::store::work::edit::WorkValue,
+    value: &loopflow_storage::work::edit::WorkValue,
 ) -> LinearResult<String> {
-    use crate::store::work::edit::WorkValue;
+    use loopflow_storage::work::edit::WorkValue;
     use project_document::ProjectField::{Krs, Targets};
     let document = parse_project_document(content)?;
     let (owner, replacement) = match value {
@@ -2392,7 +2392,7 @@ fn patch_project_field(
         }
         WorkValue::Krs(krs) => (Krs, project_document::render_krs(krs)),
         WorkValue::MetricTargets(targets) => {
-            crate::store::work::project::validate_metric_targets(targets)
+            loopflow_storage::work::project::validate_metric_targets(targets)
                 .map_err(LinearError::Message)?;
             (Targets, project_document::render_metric_targets(targets))
         }
@@ -2421,9 +2421,9 @@ impl ProjectNode {
             // Older rotation archived its predecessor without changing status.
             // Retain that history without presenting it as a current plan.
             status: if self.archived_at.is_some()
-                && self.status.type_ != crate::store::work::project::ProjectStatus::Canceled
+                && self.status.type_ != loopflow_storage::work::project::ProjectStatus::Canceled
             {
-                crate::store::work::project::ProjectStatus::Completed
+                loopflow_storage::work::project::ProjectStatus::Completed
             } else {
                 self.status.type_
             },
@@ -2594,7 +2594,7 @@ fn first_meaningful_paragraph(description: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use crate::store::work::edit::WorkValue;
+    use loopflow_storage::work::edit::WorkValue;
     #[tokio::test]
     async fn project_markdown_prose_replacement_preserves_managed_fields() {
         let client =
@@ -2681,7 +2681,7 @@ mod tests {
         let source = "## Metric targets\n[]\n## KRs\nPreamble.\n- [ ] Existing proof\n";
         let after = super::patch_project_field(
             source,
-            &WorkValue::Krs(vec![crate::store::work::project::ProjectKR {
+            &WorkValue::Krs(vec![loopflow_storage::work::project::ProjectKR {
                 text: "New proof".into(),
                 holds: true,
             }]),
@@ -2764,7 +2764,7 @@ mod tests {
         assert_eq!(adopted.krs[0].text, "Preserve this proof");
         assert_eq!(
             adopted.status,
-            crate::store::work::project::ProjectStatus::Started
+            loopflow_storage::work::project::ProjectStatus::Started
         );
         assert_eq!(requests.lock().await.len(), 1);
     }
@@ -3188,7 +3188,7 @@ mod tests {
             let client = LinearClient::with_base_url("fixture".into(), Some(team.into()), base_url);
             assert_eq!(
                 client
-                    .project_status_id(crate::store::work::project::ProjectStatus::Completed)
+                    .project_status_id(loopflow_storage::work::project::ProjectStatus::Completed)
                     .await
                     .unwrap(),
                 preferred
@@ -3213,7 +3213,7 @@ mod tests {
             let client =
                 LinearClient::with_base_url("fixture".into(), Some("selected".into()), base_url);
             let error = client
-                .project_status_id(crate::store::work::project::ProjectStatus::Completed)
+                .project_status_id(loopflow_storage::work::project::ProjectStatus::Completed)
                 .await
                 .unwrap_err();
             assert!(error.to_string().contains("cursor"));

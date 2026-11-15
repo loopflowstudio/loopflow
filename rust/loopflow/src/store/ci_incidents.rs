@@ -2,8 +2,8 @@
 
 use time::OffsetDateTime;
 
-use crate::store::pr_landing::PrLandingId;
-use crate::store::work::task::CiIncident;
+use loopflow_storage::pr_landing::PrLandingId;
+use loopflow_storage::work::task::CiIncident;
 
 use super::{run_sqlite, Store, StoreResult};
 

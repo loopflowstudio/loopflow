@@ -1,9 +1,10 @@
 use crate::process::attachment;
-use crate::store::planning_exchange::PlanningMutation;
-use crate::store::sqlite::SqliteStore;
-use crate::store::work::task::{NewTask, TaskUpdate};
 use loopflow_model::durable::{ProjectId, RepositoryId, TaskId};
 use loopflow_model::id::WaveId;
+use loopflow_storage::migration_runner::migration_section_sql;
+use loopflow_storage::planning_exchange::PlanningMutation;
+use loopflow_storage::sqlite::SqliteStore;
+use loopflow_storage::work::task::{NewTask, TaskUpdate};
 use rusqlite::{params, OptionalExtension};
 
 fn local_repository(store: &SqliteStore) -> RepositoryId {
@@ -26,7 +27,7 @@ fn local_project(store: &SqliteStore) -> ProjectId {
 
 fn import_edits(
     store: &SqliteStore,
-    edits: &[crate::store::work::edit::WorkEdit],
+    edits: &[loopflow_storage::work::edit::WorkEdit],
 ) -> crate::store::StoreResult<()> {
     let repo = store.home_dir()?.canonicalize().unwrap();
     let repo = repo.to_str().unwrap();
@@ -66,8 +67,8 @@ fn import_edits(
 fn task_identifier_repairs_all_generated_titles_from_a_replaced_editor_with_foreign_capture() {
     use crate::process::{AgentCaller, AGENT_CALLER_ENV};
     use crate::session::TitleSource;
-    use crate::store::sqlite::SessionCaller;
-    use crate::store::work::edit::{WorkEdit, WorkValue};
+    use loopflow_storage::sqlite::SessionCaller;
+    use loopflow_storage::work::edit::{WorkEdit, WorkValue};
 
     let ledger = crate::journal::TestLedgerGuard::new();
     let _ambient = crate::test_ambient::EnvGuard::new();
@@ -157,7 +158,7 @@ fn task_identifier_repairs_all_generated_titles_from_a_replaced_editor_with_fore
 #[test]
 fn task_labels_and_generated_names_follow_local_identity_and_linear_mapping() {
     use crate::session::{SessionFilter, TitleSource, WorkSource};
-    use crate::store::work::edit::{WorkEdit, WorkValue};
+    use loopflow_storage::work::edit::{WorkEdit, WorkValue};
     let home = tempfile::tempdir().unwrap();
     let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
     let task = store
@@ -384,7 +385,7 @@ fn task_checkout_reads_this_machines_checkout() {
 #[test]
 fn canonical_task_fields_survive_restart_and_peer_import() {
     use crate::planning_git::PlanningDestination;
-    use crate::store::work::edit::{Disposition, WorkValue};
+    use loopflow_storage::work::edit::{Disposition, WorkValue};
 
     let source = tempfile::tempdir().unwrap();
     let target = tempfile::tempdir().unwrap();
@@ -404,7 +405,7 @@ fn canonical_task_fields_survive_restart_and_peer_import() {
     {
         import_edits(
             &store,
-            &crate::store::work::edit::WorkEdit::for_target(
+            &loopflow_storage::work::edit::WorkEdit::for_target(
                 task.id.as_str(),
                 &[
                     WorkValue::TaskRank(7),
@@ -482,7 +483,7 @@ fn project_edits_preserve_retired_iteration_and_events() {
     let event = store
         .append_project_event(
             &id,
-            &crate::store::work::project::ProjectEventKind::IterationCompleted {
+            &loopflow_storage::work::project::ProjectEventKind::IterationCompleted {
                 iteration: 7,
                 summary: "Retained historical judgment".into(),
             },
@@ -718,9 +719,7 @@ fn local_planning_prefix_collision_is_explicit() {
 
 #[test]
 fn local_planning_migration_preserves_released_links_and_orphan_deletion_evidence() {
-    use crate::store::migrations::{
-        apply_before_migration, migration_section_sql, upgrade_from_migration,
-    };
+    use crate::store::migrations::{apply_before_migration, upgrade_from_migration};
     use std::sync::{Arc, Mutex};
 
     let conn = rusqlite::Connection::open_in_memory().unwrap();

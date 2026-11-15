@@ -35,9 +35,9 @@ use anyhow::{bail, Context, Result};
 use sha2::{Digest, Sha256};
 
 use crate::harness::native_exit::{NativeExit, Settled};
-use crate::store::sqlite::ViewerHold;
 use input::{Paste, PendingInput};
 use loopflow_model::id::{LfSessionId, TerminalId};
+use loopflow_storage::sqlite::ViewerHold;
 use wire::{
     Close, CloseReason, Decoder, Event, Incoming, Outgoing, Own, Reply, Request, Scanner, Tag,
 };

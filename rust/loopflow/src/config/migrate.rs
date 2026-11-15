@@ -350,11 +350,11 @@ fn export(conn: &Connection) -> Result<Export> {
         })? {
             let (name, provider, hardware, max_machines, price, hours) = row?;
             let declaration = super::placement::OnDemandDeclaration {
-                provider: crate::store::rental::Provider::parse(&provider)
+                provider: loopflow_storage::rental::Provider::parse(&provider)
                     .context("known rental provider")?,
                 hardware: serde_json::from_str(&hardware)?,
                 max_machines,
-                max_usd_per_hour: crate::store::rental::Usd::parse(&price)
+                max_usd_per_hour: loopflow_storage::rental::Usd::parse(&price)
                     .map_err(anyhow::Error::msg)?,
                 hours,
             };

@@ -1,18 +1,18 @@
 use crate::journal::{ProcessIdentityEvidence, ProcessReceipt, PROCESS_RECEIPT_ROOT};
 use crate::process::attachment;
-use crate::store::canonical_ids::session_fence_file;
 use crate::store::migrations::{apply_pending_migrations, apply_sqlite};
-use crate::store::sqlite::SqliteStore;
 use crate::work::wave::metrics::MetricObservation;
 use fs2::FileExt;
 use loopflow_model::id::LfProcessId;
+use loopflow_storage::sqlite::SqliteStore;
+use loopflow_storage::test_fixture::session_fence_file;
 use rusqlite::{params, Connection};
 use std::fs;
 const SESSION: &str = "SESSION_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const PROCESS: &str = "BBBBBBBB-BBBB-4BBB-8BBB-BBBBBBBBBBBB";
 const TRACE: &str = "CCCCCCCC-CCCC-4CCC-8CCC-CCCCCCCCCCCC";
 fn released() -> (tempfile::TempDir, Connection) {
-    crate::store::migration_runner::canonical_fixture(
+    loopflow_storage::migration_runner::canonical_fixture(
         &crate::store::migrations::observers(),
         &crate::store::migrations::build(),
     )

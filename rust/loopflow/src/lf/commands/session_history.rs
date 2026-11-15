@@ -11,7 +11,7 @@ const MAX_SESSIONS: usize = 50;
 /// Shared Session history, newest input first. SQL selects the recent budget
 /// before decoding; exact Task and caller-input drills remain complete.
 pub(crate) fn collect_recent_history(
-    store: &crate::store::sqlite::SqliteStore,
+    store: &loopflow_storage::sqlite::SqliteStore,
     filter: WorkFilter,
 ) -> Result<(Vec<SessionHistory>, bool)> {
     let since = chrono::Utc::now().timestamp() - WINDOW_DAYS * 24 * 3600;
@@ -35,7 +35,7 @@ pub(crate) fn collect_history(
     if !database.exists() {
         return Ok(Vec::new());
     }
-    let store = crate::store::sqlite::SqliteStore::open_processes_read_only(
+    let store = loopflow_storage::sqlite::SqliteStore::open_processes_read_only(
         &database,
         crate::store::token_key::encryption_key,
     )?;
@@ -71,7 +71,7 @@ pub(crate) fn render(selector: &str, view: SessionView, json: bool) -> Result<St
     let mut output = String::new();
     let home = crate::store::lf_home_dir();
     let database = crate::store::database_path_from_env()?;
-    let store = crate::store::sqlite::SqliteStore::open_processes_read_only(
+    let store = loopflow_storage::sqlite::SqliteStore::open_processes_read_only(
         &database,
         crate::store::token_key::encryption_key,
     )?;

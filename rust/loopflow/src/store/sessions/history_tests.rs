@@ -1,31 +1,8 @@
 //! Projection checks use the application's full capture manifest.
-use crate::process::attachment;
 use crate::session::SessionEventKind;
-use crate::store::sqlite::SqliteStore;
+pub(crate) use loopflow_storage::test_fixture::record_captured_start;
 use rusqlite::params;
 use serde_json::json;
-pub(crate) fn record_captured_start(store: &SqliteStore, session: &str, turn: &str) -> i64 {
-    let attachment = store
-        .session_attachment(session)
-        .unwrap()
-        .unwrap_or_else(|| {
-            let process = loopflow_model::id::LfProcessId::new();
-            store
-                .conn
-                .lock()
-                .unwrap()
-                .execute(
-                    "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
-                    [&process],
-                )
-                .unwrap();
-            attachment::claim_session_attachment(store, session, None, &process, false).unwrap()
-        });
-    let origin = store.session_turn_origin(session, &attachment).unwrap();
-    store
-        .record_session_turn_origin(&"thread".into(), turn, &origin)
-        .unwrap()
-}
 #[test]
 fn first_provider_attempt_follows_original_input_order_after_import() {
     let home = tempfile::tempdir().unwrap();
@@ -40,7 +17,7 @@ fn first_provider_attempt_follows_original_input_order_after_import() {
             .first_provider_attempt_at,
         None
     );
-    let pr = crate::store::work::task::TaskPrId::new();
+    let pr = loopflow_storage::work::task::TaskPrId::new();
     let manifest = json!({"schema_version":1,"artifact_key":input,
             "created_at":"1970-01-01T00:00:01Z","harness":"codex","surface":"headless",
             "cwd":"/fixture","subjects":[],"host":"fixture",
@@ -613,7 +590,7 @@ fn task_history_reads_every_row_naming_the_task() {
     let [task, other] = [0, 1].map(|_| {
         let id = loopflow_model::durable::TaskId::new();
         store
-            .create_task(&crate::store::work::task::NewTask {
+            .create_task(&loopflow_storage::work::task::NewTask {
                 repository_id: repository.clone(),
                 id: id.clone(),
                 project_id: None,

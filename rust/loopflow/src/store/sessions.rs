@@ -1,9 +1,9 @@
 use crate::session::{LfSession, PrimaryScope, TitleSource};
 use crate::store::session_projection;
-use crate::store::sqlite::sessions::{PendingHistory, PendingInput};
-use crate::store::sqlite::{SessionCaller, SqliteStore};
 use loopflow_model::durable::TaskId;
 use loopflow_model::id::LfProcessId;
+use loopflow_storage::sqlite::sessions::{PendingHistory, PendingInput};
+use loopflow_storage::sqlite::{SessionCaller, SqliteStore};
 
 use super::{run_sqlite, Store, StoreError, StoreResult};
 
@@ -265,7 +265,7 @@ pub(crate) fn conversation_history(
     caller: Option<&str>,
     since: i64,
     include_finished: bool,
-) -> StoreResult<Vec<crate::store::session_record::SessionHistory>> {
+) -> StoreResult<Vec<loopflow_storage::session_record::SessionHistory>> {
     conversation_inputs(
         store,
         wave,
@@ -287,7 +287,7 @@ pub(crate) fn recent_conversation_history(
     task: Option<&str>,
     since: i64,
     limit: usize,
-) -> StoreResult<(Vec<crate::store::session_record::SessionHistory>, bool)> {
+) -> StoreResult<(Vec<loopflow_storage::session_record::SessionHistory>, bool)> {
     let (rows, truncated) = conversation_inputs(
         store,
         wave,
@@ -303,7 +303,7 @@ pub(crate) fn recent_conversation_history(
 pub(crate) fn input_history(
     store: &SqliteStore,
     selector: &str,
-) -> StoreResult<crate::store::session_record::SessionHistory> {
+) -> StoreResult<loopflow_storage::session_record::SessionHistory> {
     let selected = store.resolve_history_input(selector)?;
     let input = store
         .session(&selected)?
@@ -331,7 +331,7 @@ fn conversation_inputs(
     caller: Option<&str>,
     window: (i64, bool, Option<usize>),
     input: Option<&str>,
-) -> StoreResult<(Vec<crate::store::session_record::SessionHistory>, bool)> {
+) -> StoreResult<(Vec<loopflow_storage::session_record::SessionHistory>, bool)> {
     let pending = store.pending_inputs(wave, project, task, caller, window, input)?;
     let histories = pending
         .inputs
@@ -345,7 +345,7 @@ pub(crate) fn project_history_input(
     store: &SqliteStore,
     pending: &PendingHistory,
     input: &PendingInput,
-) -> StoreResult<crate::store::session_record::SessionHistory> {
+) -> StoreResult<loopflow_storage::session_record::SessionHistory> {
     let saved = store.read_history_input(pending, input)?;
     crate::session_record::project_input_history(
         &saved.session,

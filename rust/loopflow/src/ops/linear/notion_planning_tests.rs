@@ -533,7 +533,7 @@ fn notion_status_title_body_and_comments_write_back_to_the_page() {
             repo,
             saved.id.as_str(),
             None,
-            crate::store::work::task::TaskUpdate {
+            loopflow_storage::work::task::TaskUpdate {
                 title: Some("Write back, renamed".into()),
                 description: Some("# Renamed\nNew body".into()),
                 ..Default::default()
@@ -732,7 +732,7 @@ fn notion_renames_and_completion_reach_the_task() {
             repo,
             saved.id.as_str(),
             None,
-            crate::store::work::task::TaskUpdate {
+            loopflow_storage::work::task::TaskUpdate {
                 title: Some("Renamed locally".into()),
                 ..Default::default()
             },
@@ -865,7 +865,7 @@ fn notion_pages_move_to_in_progress_when_work_starts() {
 
 #[test]
 fn notion_pages_show_the_pr() {
-    use crate::store::work::task::{GithubPr, PrPublication, TaskPr, TaskPrId};
+    use loopflow_storage::work::task::{GithubPr, PrPublication, TaskPr, TaskPrId};
     with_notion(|runtime, fixture, repo, state| {
         let saved = crate::ops::task::task_create(
             repo,

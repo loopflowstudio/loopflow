@@ -125,7 +125,6 @@ def test_packaged_migration_order_keeps_first_additions_across_source_moves(tmp_
     git("mv", str(moved / "drafts/a_later.sql"), str(moved / "a_later.sql"))
     git("commit", "-m", "move storage and merge another migration")
     git("update-ref", "refs/remotes/origin/main", "HEAD")
-    git("mv", str(moved), str(old))
-    (old / "b_unmerged.sql").write_text("SELECT 1;\n")
+    (moved / "b_unmerged.sql").write_text("SELECT 1;\n")
 
     assert installation._migration_order(tmp_path) == "z_first\na_later\nb_unmerged\n"

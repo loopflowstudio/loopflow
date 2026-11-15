@@ -1,7 +1,7 @@
 //! Machine declarations and presentation compose above saved Machine rows.
-use crate::store::sqlite::{durable::SavedMachine, SqliteStore};
 use crate::store::{StoreError, StoreResult};
 use loopflow_model::durable::{Machine, MachineId};
+use loopflow_storage::sqlite::{durable::SavedMachine, SqliteStore};
 use time::OffsetDateTime;
 fn invalid(error: impl std::fmt::Display) -> StoreError {
     StoreError::InvalidData(error.to_string())
@@ -142,14 +142,14 @@ pub fn remove_machine(store: &SqliteStore, label: &str) -> StoreResult<()> {
 pub fn pool_machines(
     store: &SqliteStore,
     name: &str,
-) -> StoreResult<Vec<crate::store::rental::PoolMachine>> {
+) -> StoreResult<Vec<loopflow_storage::rental::PoolMachine>> {
     let saved = store.saved_pool_machines(name)?;
     let config = config(store)?;
     saved
         .into_iter()
         .map(|(machine, ownership, tasks)| {
             let id = machine.id.clone();
-            Ok(crate::store::rental::PoolMachine {
+            Ok(loopflow_storage::rental::PoolMachine {
                 machine: present(Some(machine), &id, &config)?.ok_or(StoreError::NotFound)?,
                 ownership,
                 tasks,

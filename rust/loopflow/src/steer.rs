@@ -6,15 +6,15 @@ pub(crate) const PROVIDER_CONTEXT_ENV: &str = "LF_PROVIDER_CONTEXT";
 /// The [`SteerAdapter`] of a bare launch, whose hook claims its steers from
 /// the store itself and reports to no server.
 pub(crate) const BARE_STEER_ENV: &str = "LF_BARE_STEER";
-/// The provider process's seen marker; see [`crate::store::steer_markers::latest_marker`].
+/// The provider process's seen marker; see [`loopflow_storage::steer_markers::latest_marker`].
 pub(crate) const STEER_SEEN_ENV: &str = "LF_STEER_SEEN";
 
 /// The Session's own marker and, when it belongs to exactly one Task, that
-/// Task's; see [`crate::store::steer_markers::latest_marker`].
+/// Task's; see [`loopflow_storage::steer_markers::latest_marker`].
 pub(crate) const STEER_SESSION_ENV: &str = "LF_STEER_SESSION";
 pub(crate) const STEER_TASK_ENV: &str = "LF_STEER_TASK";
 
-pub use crate::store::steer::*;
+pub use loopflow_storage::steer::*;
 
 /// Steers claimed for one conversation and rendered for its provider.
 #[derive(Debug)]
@@ -29,7 +29,7 @@ pub(crate) struct ClaimedSteers {
 /// twice and is never dropped. `boundary` says whether this callback may
 /// select the Session's native conversation.
 pub(crate) fn claim(
-    store: &crate::store::sqlite::SqliteStore,
+    store: &loopflow_storage::sqlite::SqliteStore,
     repo: &Path,
     adapter: &SteerAdapter,
     thread: &str,
@@ -53,7 +53,7 @@ pub(crate) fn claim(
 
 /// The conversation took the claimed steers.
 pub(crate) fn delivered(
-    store: &crate::store::sqlite::SqliteStore,
+    store: &loopflow_storage::sqlite::SqliteStore,
     session: &str,
     claimed: &ClaimedSteers,
 ) {
@@ -130,7 +130,7 @@ fn render(
 
 /// Only confirmed live, managed conversations can be woken.
 pub(crate) fn idle_conversations(
-    store: &crate::store::sqlite::SqliteStore,
+    store: &loopflow_storage::sqlite::SqliteStore,
     session: Option<&str>,
 ) -> crate::store::StoreResult<Vec<IdleConversation>> {
     Ok(store

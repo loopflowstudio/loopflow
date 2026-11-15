@@ -2,15 +2,15 @@
 use crate::process::attachment;
 
 use crate::session::WorkSource;
-use crate::store::linear_records::{LinearIssueId, LinearProjectId};
-use crate::store::sqlite::SqliteStore;
-use crate::store::test_fixture::{unpublished_conversation, unregistered_task};
 use loopflow_model::durable::{ProjectId, TaskId};
 use loopflow_model::id::WaveId;
+use loopflow_storage::linear_records::{LinearIssueId, LinearProjectId};
+use loopflow_storage::sqlite::SqliteStore;
+use loopflow_storage::test_fixture::{unpublished_conversation, unregistered_task};
 use std::sync::{Arc, Barrier};
 use std::thread;
 fn store_with_task() -> (tempfile::TempDir, SqliteStore, TaskId) {
-    let (dir, store, task, pr) = crate::store::test_fixture::task();
+    let (dir, store, task, pr) = loopflow_storage::test_fixture::task();
     let me = crate::store::ownership::acquire(
         &store,
         store
@@ -50,7 +50,7 @@ fn configured_project_admission_preserves_started_continuation() {
     assert!(!store.task_owned(&task_id).unwrap());
     assert!(store.task_owned(&new_task.id).unwrap());
     let guard = crate::store::PlanningLocks::new(tempfile::tempfile().unwrap());
-    crate::store::sqlite::project_selection::write_project_binding(
+    loopflow_storage::sqlite::project_selection::write_project_binding(
         &store,
         task.wave_id.as_ref().unwrap(),
         Some("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3"),

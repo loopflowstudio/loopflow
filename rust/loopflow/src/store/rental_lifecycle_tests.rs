@@ -1,8 +1,8 @@
 //! Rental declarations, observed hand-back and stale-command recovery.
-use crate::store::rental::{Hardware, OnDemand, Ownership, Provider, RentalState, Usd};
-use crate::store::sqlite::SqliteStore;
-use crate::store::work::task::{LinearWritebackState, Observation, Task};
 use loopflow_model::durable::{MachineId, OwnershipKind, TaskId};
+use loopflow_storage::rental::{Hardware, OnDemand, Ownership, Provider, RentalState, Usd};
+use loopflow_storage::sqlite::SqliteStore;
+use loopflow_storage::work::task::{LinearWritebackState, Observation, Task};
 use time::OffsetDateTime;
 fn store() -> (tempfile::TempDir, SqliteStore) {
     let dir = tempfile::tempdir().unwrap();

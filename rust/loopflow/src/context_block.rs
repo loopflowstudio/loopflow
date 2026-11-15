@@ -142,7 +142,7 @@ impl ContextDelivery {
     /// the store. Bare launches keep this snapshot for their whole run.
     pub(crate) fn identify(
         &mut self,
-        store: &crate::store::sqlite::SqliteStore,
+        store: &loopflow_storage::sqlite::SqliteStore,
         session: &str,
     ) -> crate::store::StoreResult<bool> {
         let task = match store.session_task_ids(session)?.as_slice() {
@@ -162,7 +162,7 @@ impl ContextDelivery {
     /// returns whether anything moved.
     pub(crate) fn relocate(
         &mut self,
-        store: &crate::store::sqlite::SqliteStore,
+        store: &loopflow_storage::sqlite::SqliteStore,
     ) -> anyhow::Result<bool> {
         let Some((id, source)) = &self.repository else {
             return Ok(false);
@@ -314,7 +314,7 @@ impl ContextDelivery {
         let gate = format!(
             "s=\"${seen}\"; [ -n \"$s\" ] || exit 0; n() {{ [ ! -e \"$1\" ] || [ \"$s\" -nt \"$1\" ]; }}; [ -e \"$s\" ] && n {latest} && n \"${session}\" && n \"${task}\" && exit 0;",
             seen = crate::steer::STEER_SEEN_ENV,
-            latest = quote(&crate::store::steer_markers::latest_marker(&self.home)),
+            latest = quote(&loopflow_storage::steer_markers::latest_marker(&self.home)),
             session = crate::steer::STEER_SESSION_ENV,
             task = crate::steer::STEER_TASK_ENV,
         );
@@ -986,8 +986,8 @@ mod tests {
             .as_str()
             .unwrap();
         let seen = delivery.home.join("steers/seen/agent");
-        let session = crate::store::steer_markers::session_marker(&delivery.home, "session");
-        let task = crate::store::steer_markers::task_marker(&delivery.home, "task");
+        let session = loopflow_storage::steer_markers::session_marker(&delivery.home, "session");
+        let task = loopflow_storage::steer_markers::task_marker(&delivery.home, "task");
         let starts_lf = |seen: Option<&Path>| {
             let _ = fs::remove_file(&ran);
             let mut hook = std::process::Command::new("/bin/sh");
@@ -1004,7 +1004,7 @@ mod tests {
         assert!(!starts_lf(None), "no steer adapter, nothing to deliver");
         assert!(starts_lf(Some(&seen)), "the first boundary checks");
         // The started hook marks its check before reading pending steers.
-        crate::store::steer_markers::touch(&seen).unwrap();
+        loopflow_storage::steer_markers::touch(&seen).unwrap();
         assert!(
             !starts_lf(Some(&seen)),
             "nothing saved since the last check"
@@ -1013,18 +1013,18 @@ mod tests {
         let mut clock = std::time::SystemTime::now();
         let mut stamp = |path: &Path| {
             clock += std::time::Duration::from_secs(5);
-            crate::store::steer_markers::touch(path).unwrap();
+            loopflow_storage::steer_markers::touch(path).unwrap();
             let file = fs::File::options().write(true).open(path).unwrap();
             file.set_modified(clock).unwrap();
         };
-        stamp(&crate::store::steer_markers::task_marker(
+        stamp(&loopflow_storage::steer_markers::task_marker(
             &delivery.home,
             "another-task",
         ));
         stamp(&seen);
         assert!(!starts_lf(Some(&seen)), "another Task's steer");
         for marker in [
-            &crate::store::steer_markers::latest_marker(&delivery.home),
+            &loopflow_storage::steer_markers::latest_marker(&delivery.home),
             &session,
             &task,
         ] {

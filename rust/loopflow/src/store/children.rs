@@ -2,12 +2,12 @@
 
 use std::sync::Arc;
 
-use crate::store::work::project::{Project, ProjectEvent, ProjectEventKind, ProjectId};
-use crate::store::work::task::{
+use loopflow_model::id::WaveId;
+use loopflow_storage::work::project::{Project, ProjectEvent, ProjectEventKind, ProjectId};
+use loopflow_storage::work::task::{
     LinearObservationOutcome, Task, TaskEvent, TaskEventKind, TaskId, TaskLinearObservation,
     TaskPr, TaskPrId,
 };
-use loopflow_model::id::WaveId;
 use time::OffsetDateTime;
 
 use super::{run_planning_write, run_sqlite, Store, StoreResult};
@@ -17,7 +17,7 @@ impl Store {
     pub(crate) async fn promote_task(
         &self,
         task_id: &TaskId,
-        creation: Option<crate::store::work::task::NewTask>,
+        creation: Option<loopflow_storage::work::task::NewTask>,
         placement: Option<(std::path::PathBuf, TaskPr)>,
         session: Option<crate::session::LfSession>,
         destination: Option<std::path::PathBuf>,
@@ -43,7 +43,7 @@ impl Store {
         &self,
         id: &TaskId,
         expected_revision: u64,
-        patch: &crate::store::work::task::TaskUpdate,
+        patch: &loopflow_storage::work::task::TaskUpdate,
     ) -> StoreResult<Task> {
         let id = id.clone();
         let patch = patch.clone();
@@ -175,7 +175,7 @@ impl Store {
     pub(crate) async fn record_task_pr_repair_incident(
         &self,
         pr_id: &TaskPrId,
-        kind: crate::store::work::task::TaskPrRepairKind,
+        kind: loopflow_storage::work::task::TaskPrRepairKind,
         occurred_at: OffsetDateTime,
     ) -> StoreResult<bool> {
         let pr_id = pr_id.clone();
@@ -243,7 +243,7 @@ impl Store {
     pub async fn latest_project_failure(
         &self,
         project_id: &ProjectId,
-    ) -> StoreResult<Option<crate::store::work::project::HistoricalFailure>> {
+    ) -> StoreResult<Option<loopflow_storage::work::project::HistoricalFailure>> {
         let project_id = project_id.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.latest_project_failure(&project_id)
@@ -292,7 +292,7 @@ impl Store {
     pub(crate) async fn apply_linear_observation(
         &self,
         task_id: &TaskId,
-        observation: crate::store::linear_records::LinearIssueObservation,
+        observation: loopflow_storage::linear_records::LinearIssueObservation,
         observed_at: OffsetDateTime,
         planning_connected: bool,
     ) -> StoreResult<LinearObservationOutcome> {
@@ -496,7 +496,7 @@ mod identity_tests {
                 )
                 .unwrap();
             store
-                .create_task(&crate::store::work::task::NewTask {
+                .create_task(&loopflow_storage::work::task::NewTask {
                     id: loopflow_model::durable::TaskId::parse(task).unwrap(),
                     repository_id: loopflow_model::durable::RepositoryId::parse(repo_id).unwrap(),
                     project_id: None,
@@ -532,7 +532,7 @@ mod identity_tests {
     fn changed_task_identity_candidates_reject_a_stale_lookup() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
-        let scope = crate::store::sqlite::children::TaskRepositoryScope {
+        let scope = loopflow_storage::sqlite::children::TaskRepositoryScope {
             saved: store.task_identity_candidates("lf-aaaaaa").unwrap(),
             matching: vec!["/repo".into()],
         };

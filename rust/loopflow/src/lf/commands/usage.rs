@@ -66,7 +66,7 @@ pub fn context_report(runs: &[SessionHistory]) -> Result<crate::context_usage::C
     let steps = if runs.is_empty() {
         Vec::new()
     } else {
-        let store = crate::store::sqlite::SqliteStore::open_processes_read_only(
+        let store = loopflow_storage::sqlite::SqliteStore::open_processes_read_only(
             &crate::store::database_path_from_env()?,
             crate::store::token_key::encryption_key,
         )?;

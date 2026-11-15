@@ -98,7 +98,7 @@ pub fn report() -> Result<DoctorReport> {
         None => Check::ok("store", "selected database is compatible with this build"),
     }];
     // The remedy hint counts exactly what `lf monitor prune` would repair.
-    let events = match crate::store::sqlite::SqliteStore::open_processes_read_only(
+    let events = match loopflow_storage::sqlite::SqliteStore::open_processes_read_only(
         &database_path,
         crate::store::token_key::encryption_key,
     )

@@ -6,17 +6,17 @@ use super::{
 use crate::durable::TaskState;
 use crate::linear::{LinearIssueId, LinearProjectId};
 use crate::ops::pr_landing::{reconcile_pr_landing, wait_with_io, LandingIo, LandingObservation};
-use crate::store::child::ChildRef;
-use crate::store::pr_landing::{NewPrLanding, PrLanding, PrLandingState};
-use crate::store::work::project::{Project, ProjectId};
-use crate::store::work::task::{
-    GithubPr, Observation, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication, Task,
-    TaskEventKind, TaskId, TaskPr, TaskPrId,
-};
 use crate::store::{SharedStore, StorageConfig};
 use crate::test_linear_input::SeedLinear;
 use crate::work::wave::Wave;
 use loopflow_model::durable::{WorkRef, WorkStatus};
+use loopflow_storage::child::ChildRef;
+use loopflow_storage::pr_landing::{NewPrLanding, PrLanding, PrLandingState};
+use loopflow_storage::work::project::{Project, ProjectId};
+use loopflow_storage::work::task::{
+    GithubPr, Observation, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication, Task,
+    TaskEventKind, TaskId, TaskPr, TaskPrId,
+};
 use std::ffi::OsString;
 use std::os::unix::fs::PermissionsExt;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -314,7 +314,7 @@ fn prepared_placement_consumes_accepted_facts_before_checkout_or_execution() {
         snapshot.projects.truncate(1);
         snapshot.items.truncate(1);
         snapshot.projects[0].id = "999bdbdd-c045-41a6-8ffc-a97c4a40b0b3".into();
-        snapshot.projects[0].status = crate::store::work::project::ProjectStatus::Started;
+        snapshot.projects[0].status = loopflow_storage::work::project::ProjectStatus::Started;
         snapshot.items[0].id = "new-issue".into();
         snapshot.items[0].completed = false;
         snapshot.items[0].completed_at = None;
@@ -728,7 +728,7 @@ async fn task_fixture_at(identifier: &str, repository: std::path::PathBuf) -> Ta
         id: ProjectId::new(),
 
         summary: String::new(),
-        status: crate::store::work::project::ProjectStatus::Started,
+        status: loopflow_storage::work::project::ProjectStatus::Started,
         linear_id: Some(LinearProjectId::new("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3").unwrap()),
         slug: "task-recovery".to_string(),
         name: "Task recovery".to_string(),
@@ -753,7 +753,7 @@ async fn task_fixture_at(identifier: &str, repository: std::path::PathBuf) -> Ta
         description: String::new(),
         pm_snapshot_synced_at: Some(now.unix_timestamp()),
 
-        pm_writeback: crate::store::work::task::LinearWritebackState::Current,
+        pm_writeback: loopflow_storage::work::task::LinearWritebackState::Current,
         wave_id: Some(wave.id().clone()),
         project_id: Some(project.id.clone()),
         worktree: Some(repository),
@@ -791,7 +791,7 @@ async fn task_fixture_at(identifier: &str, repository: std::path::PathBuf) -> Ta
     };
     store.create_wave(&wave).await.unwrap();
     store.create_project(&project).await.unwrap();
-    crate::store::sqlite::project_selection::write_project_binding(
+    loopflow_storage::sqlite::project_selection::write_project_binding(
         &store.sqlite,
         wave.id(),
         None,
@@ -1428,7 +1428,7 @@ async fn waited_landing_survives_pending_and_repair_then_completes_requested_tas
                 },
                 1 => LandingObservation::Failing {
                     head_sha: "original".into(),
-                    failing_checks: vec![crate::store::work::task::CiCheck {
+                    failing_checks: vec![loopflow_storage::work::task::CiCheck {
                         name: "rust".into(),
                         url: None,
                     }],
@@ -1614,8 +1614,8 @@ async fn watched_landing_completes_task_only_from_merged_pr_evidence() {
         }),
     });
     store.update_task_pr(&pr).await.unwrap();
-    let landing = crate::store::pr_landing::PrLanding::new(
-        crate::store::pr_landing::NewPrLanding {
+    let landing = loopflow_storage::pr_landing::PrLanding::new(
+        loopflow_storage::pr_landing::NewPrLanding {
             repo: "loopflowstudio/loopflow".to_string(),
             pr_number: 248,
             worktree: task.worktree.as_ref().unwrap().clone(),
@@ -1636,7 +1636,7 @@ async fn watched_landing_completes_task_only_from_merged_pr_evidence() {
 
     pr.merge_commit = Some(landed_head);
     store.settle_task_pr(&pr).await.unwrap();
-    let follow_up = crate::store::work::task::TaskFollowUp {
+    let follow_up = loopflow_storage::work::task::TaskFollowUp {
         outcome: "Installed latency meets budget".into(),
         evidence: "20 samples below 1s p95".into(),
         check_at: now.unix_timestamp() - 1,
@@ -2669,7 +2669,7 @@ esac
                     .unwrap()
                     .unwrap()
                     .phase(),
-                crate::store::work::task::PrPhase::Merged
+                loopflow_storage::work::task::PrPhase::Merged
             );
             continue;
         }
@@ -2694,7 +2694,7 @@ esac
                     .unwrap()
                     .unwrap()
                     .phase(),
-                crate::store::work::task::PrPhase::Abandoned
+                loopflow_storage::work::task::PrPhase::Abandoned
             );
             assert_eq!(
                 crate::git::rev_parse(repo.bare_path(), &parent.task.branch).unwrap(),

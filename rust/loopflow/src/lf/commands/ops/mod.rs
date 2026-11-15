@@ -352,7 +352,7 @@ pub(crate) fn run_sync_in(
             continue_sync_after_authorization(repo_root, true, || {
                 crate::ops::task::record_task_pr_repair(
                     repo_root,
-                    crate::store::work::task::TaskPrRepairKind::ManualGitRepair,
+                    loopflow_storage::work::task::TaskPrRepairKind::ManualGitRepair,
                 )
                 .map(|_| ())
             })?;
@@ -368,7 +368,7 @@ pub(crate) fn run_sync_in(
             abort_sync_after_authorization(repo_root, true, || {
                 crate::ops::task::record_task_pr_repair(
                     repo_root,
-                    crate::store::work::task::TaskPrRepairKind::ManualGitRepair,
+                    loopflow_storage::work::task::TaskPrRepairKind::ManualGitRepair,
                 )
                 .map(|_| ())
             })?;
@@ -563,7 +563,7 @@ fn resolve_sync_conflict(
     if avoidable {
         crate::ops::task::record_task_pr_repair(
             repo_root,
-            crate::store::work::task::TaskPrRepairKind::AvoidableRebaseAgent,
+            loopflow_storage::work::task::TaskPrRepairKind::AvoidableRebaseAgent,
         )?;
     }
     progress.status("Launching sync agent to resolve conflicts...");
@@ -1770,7 +1770,9 @@ fn task_ownership() -> Result<WorktreeOwnership> {
             for task in tasks {
                 let work = runtime
                     .block_on(
-                        store.work_for_child(&crate::store::child::ChildRef::Task(task.id.clone())),
+                        store.work_for_child(&loopflow_storage::child::ChildRef::Task(
+                            task.id.clone(),
+                        )),
                     )
                     .map_err(|error| anyhow!("cannot resolve Task Work: {error}"))?;
                 let status = runtime

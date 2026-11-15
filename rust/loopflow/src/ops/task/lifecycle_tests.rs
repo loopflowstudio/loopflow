@@ -12,13 +12,13 @@ use serde_json::{json, Value};
 
 use crate::linear::{LinearIssueId, LinearProjectId};
 use crate::ops::linear::{LinearRefresh, LinearTestContext, LINEAR_TEST_CONTEXT};
-use crate::store::work::project::{Project, ProjectId};
-use crate::store::work::task::{
-    GithubPr, LinearWritebackState, Observation, PrPublication, Task, TaskId, TaskPr, TaskPrId,
-};
 use crate::store::{open_ephemeral_store, CredentialType, ProviderToken, StorageConfig};
 use crate::work::wave::Wave;
 use loopflow_model::id::WaveId;
+use loopflow_storage::work::project::{Project, ProjectId};
+use loopflow_storage::work::task::{
+    GithubPr, LinearWritebackState, Observation, PrPublication, Task, TaskId, TaskPr, TaskPrId,
+};
 
 struct Running {
     child: Child,
@@ -325,7 +325,7 @@ fn fixture(
         summary: String::new(),
         slug: "chapter".into(),
         name: "Chapter".into(),
-        status: crate::store::work::project::ProjectStatus::Started,
+        status: loopflow_storage::work::project::ProjectStatus::Started,
         description: String::new(),
         krs: Vec::new(),
         metric_targets: Vec::new(),
@@ -395,7 +395,7 @@ fn fixture(
     runtime.block_on(async {
         store.create_wave(&wave).await.unwrap();
         store.create_project(&project).await.unwrap();
-        crate::store::sqlite::project_selection::write_project_binding(
+        loopflow_storage::sqlite::project_selection::write_project_binding(
             &store.sqlite,
             wave.id(),
             None,

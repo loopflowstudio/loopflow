@@ -9,7 +9,7 @@ pub enum OpsError {
     #[error(transparent)]
     Planning(#[from] crate::linear::LinearBindingError),
     #[error(transparent)]
-    TaskData(#[from] crate::store::work::task::TaskDataError),
+    TaskData(#[from] loopflow_storage::work::task::TaskDataError),
     #[error("git error: {0}")]
     Git(#[from] GitError),
     #[error("core error: {0}")]

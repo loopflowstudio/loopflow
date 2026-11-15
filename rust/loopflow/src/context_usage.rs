@@ -17,8 +17,8 @@ use serde::{Deserialize, Serialize};
 use crate::prompt::context_budget::{BudgetKey, ContextBudgets};
 use crate::session::TurnContext;
 use crate::session_record::SessionHistory;
-use crate::store::sqlite::SqliteStore;
 use crate::trace::{ContextAsset, ContextAssetKind, ContextDecision};
+use loopflow_storage::sqlite::SqliteStore;
 
 #[derive(
     Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, schemars::JsonSchema,

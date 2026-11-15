@@ -9,10 +9,10 @@ use serde_json::json;
 use super::{mark_issue_updated, seed_provider_task, with_planning_task, PlanningState};
 use crate::ops::linear::refresh_wave;
 use crate::ops::linear::test_fixture::Fixture;
-use crate::store::work::task::Task;
-use crate::store::work::task::TaskUpdate;
 use crate::store::Store;
 use loopflow_model::durable::WorkRef;
+use loopflow_storage::work::task::Task;
+use loopflow_storage::work::task::TaskUpdate;
 
 fn saved_order(fixture: &Fixture, task: &Task) -> (String, serde_json::Value) {
     let conn = rusqlite::Connection::open(&fixture.database).unwrap();

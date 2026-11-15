@@ -7,7 +7,7 @@ pub mod metrics;
 pub mod relocate;
 pub mod setup;
 
-pub use crate::store::work::wave::{Wave, WaveLocator, WaveLocatorError};
+pub use loopflow_storage::work::wave::{Wave, WaveLocator, WaveLocatorError};
 pub fn discover(repo: &std::path::Path, slug: &str) -> Result<WaveLocator, WaveLocatorError> {
     WaveLocator::new(crate::repository::discover(repo)?, slug)
 }

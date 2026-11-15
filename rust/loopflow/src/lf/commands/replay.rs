@@ -277,7 +277,7 @@ for line in sys.stdin:
         let source_id = source.artifact_key();
         source.finish("completed").unwrap();
 
-        let session = crate::store::sqlite::SqliteStore::open_processes_read_only(
+        let session = loopflow_storage::sqlite::SqliteStore::open_processes_read_only(
             &registry,
             crate::store::token_key::encryption_key,
         )

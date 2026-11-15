@@ -22,10 +22,10 @@ use crate::lf::commands::write::SessionOpenIntent;
 use crate::provider_account::LaunchCapacity;
 use crate::session::{LfSession, WorkSource};
 use crate::session_record::SessionTitleSource;
-use crate::store::sqlite::SqliteStore;
-use crate::store::work::task::Task;
 use crate::store::SharedStore;
 use loopflow_model::durable::WorkRef;
+use loopflow_storage::sqlite::SqliteStore;
+use loopflow_storage::work::task::Task;
 
 pub(crate) mod conversation_log;
 pub(crate) mod moves;
@@ -218,7 +218,10 @@ pub(crate) async fn select_connection(
     if intent == SessionOpenIntent::Reveal {
         let session = match &scope {
             PrimaryScope::Task(task) => primary::task_conversation(store, task).await?,
-            _ => store.sqlite.primary_session(&scope)?,
+            PrimaryScope::Repository(_) | PrimaryScope::Wave(_) => {
+                store.sqlite.primary_session(&scope)?
+            }
+            _ => anyhow::bail!("Unsupported conversation scope: {scope:?}"),
         }
         .context("No existing conversation; start one explicitly")?;
         return Ok(existing(session.id.into()));
@@ -227,6 +230,7 @@ pub(crate) async fn select_connection(
         PrimaryScope::Repository(repo) => primary::ensure(store, repo.as_path(), None).await?,
         PrimaryScope::Wave(wave) => primary::ensure(store, cwd, Some(wave.as_str())).await?,
         PrimaryScope::Task(task) => primary::ensure_task(store, cwd, task.as_str(), None).await?,
+        _ => anyhow::bail!("Unsupported conversation scope: {scope:?}"),
     };
     Ok(Selected {
         id: session.id.into(),
@@ -421,7 +425,7 @@ pub struct SessionPage<T = SessionRecord> {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SessionRecord {
-    pub transition: Option<crate::store::sqlite::provider_transitions::ProviderTransition>,
+    pub transition: Option<loopflow_storage::sqlite::provider_transitions::ProviderTransition>,
     pub preview: Option<crate::session::SessionPreview>,
     pub primary_scope: Option<String>,
     /// Available for a person, judged from current stream or terminal reports; absent when it is
@@ -531,7 +535,7 @@ pub enum SessionGraphOccurrence {
 }
 
 pub(crate) fn publish_prepared_input(
-    store: &crate::store::sqlite::SqliteStore,
+    store: &loopflow_storage::sqlite::SqliteStore,
     session: &LfSession,
     graph: crate::session_record::SessionGraphMembership,
 ) -> Result<LfSession> {
@@ -1386,7 +1390,7 @@ async fn fork(
             request: Some(request),
             ready_summary: None,
             completed_at: None,
-            created_at: crate::store::rows::now_unix(),
+            created_at: loopflow_storage::rows::now_unix(),
             ..source.clone()
         })
         .await?;
@@ -1426,9 +1430,12 @@ pub(crate) fn run_refusal(store: &SqliteStore, session: &LfSession) -> Result<Op
     if session.interactive {
         return Ok(None);
     }
-    let summary =
-        session_projection::session_summary(store, &session.id, crate::store::rows::now_unix())?
-            .ok_or_else(|| session_not_found(&session.id))?;
+    let summary = session_projection::session_summary(
+        store,
+        &session.id,
+        loopflow_storage::rows::now_unix(),
+    )?
+    .ok_or_else(|| session_not_found(&session.id))?;
     let running = summary.completed_at.is_none()
         && summary.agent_process_evidence == crate::journal::ProcessIdentityEvidence::Live;
     let mut what: Vec<&str> = Vec::new();
@@ -1576,14 +1583,15 @@ pub(crate) async fn new_thread(
     let launch_lock =
         crate::journal::request::spawn_blocking(move || lock_session_process(&lock_id)).await??;
     if let Some(receipt) = store.sqlite.creation_receipt(request_id)? {
-        if receipt.disposition == crate::store::sqlite::creation::RecoveryDisposition::Inspect {
+        if receipt.disposition == loopflow_storage::sqlite::creation::RecoveryDisposition::Inspect {
             return Err(crate::engine::creation::unknown(&receipt).into());
         }
         let next = store
             .session(id)
             .await?
             .ok_or_else(|| session_not_found(id))?;
-        if receipt.disposition == crate::store::sqlite::creation::RecoveryDisposition::Continue {
+        if receipt.disposition == loopflow_storage::sqlite::creation::RecoveryDisposition::Continue
+        {
             // The input and receipt committed together, before filesystem publication.
             // Only that exact input may finish publishing; never replace a newer one.
             if next.artifact_key != receipt.artifact_key {

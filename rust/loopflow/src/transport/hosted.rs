@@ -22,7 +22,7 @@ use super::{
     provider_exit_code, publish_reports, release_viewer_hold, selected_directory, snapshot,
     viewer_hold, Ownership, Settling, Span, Viewer, HEARTBEAT_TIMEOUT, LIMIT,
 };
-use crate::store::sqlite::ViewerHold;
+use loopflow_storage::sqlite::ViewerHold;
 
 /// PTY output read from the holder, with the line discipline it was written under.
 pub(super) struct Chunk {

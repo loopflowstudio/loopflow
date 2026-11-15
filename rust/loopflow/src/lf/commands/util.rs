@@ -12,8 +12,8 @@ use crate::agent::{
 use crate::harness::native_exit::{attachment_lost, departure};
 use crate::process::LfProcessRuntime;
 use crate::provider_auth::Provider;
-use crate::store::sqlite::SqliteStore;
 use loopflow_model::id::AgentSessionId;
+use loopflow_storage::sqlite::SqliteStore;
 
 pub fn find_repo_root() -> Result<PathBuf> {
     crate::repo::find_repo_root()
@@ -1240,7 +1240,7 @@ mod tests {
         let repo = home.path().canonicalize().unwrap();
         let repo = repo.to_str().unwrap();
         let task = store
-            .create_task(&crate::store::work::task::NewTask {
+            .create_task(&loopflow_storage::work::task::NewTask {
                 repository_id: crate::repository::location::ensure_repository(&store, repo)
                     .unwrap(),
                 due_date: None,

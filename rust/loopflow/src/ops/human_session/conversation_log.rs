@@ -10,9 +10,9 @@ use serde_json::Value;
 
 use crate::harness::HarnessKind;
 use crate::session::LfSession;
-use crate::store::sqlite::SqliteStore;
 use crate::transcript::{self, RequestSource, Turn, TurnItem};
 use loopflow_model::chat::types::{ConversationItem, Lifecycle};
+use loopflow_storage::sqlite::SqliteStore;
 
 const TOOL_INPUT_CHARS: usize = 200;
 const ERROR_TAIL_CHARS: usize = 400;

@@ -11,7 +11,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/check_migrations.py"
-MIGRATIONS = Path("rust/loopflow/src/store/migrations")
+MIGRATIONS = Path("rust/loopflow-storage/src/migrations")
 
 
 def _git(repo: Path, *args: str, when: dt.datetime | None = None) -> None:
@@ -77,7 +77,7 @@ def test_package_order_records_merge_order_without_unmerged_slugs(repo: Path):
     command = [sys.executable, "scripts/check_migrations.py", "--write-package-order"]
     result = subprocess.run(command, cwd=repo, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
-    snapshot = repo / "rust/loopflow/migration-order.txt"
+    snapshot = repo / "rust/loopflow-storage/migration-order.txt"
     assert snapshot.read_text() == "task_graphs\na_later_migration\n"
 
     (repo / MIGRATIONS / "unfinished.sql").write_text("CREATE TABLE unfinished (id TEXT);")
@@ -269,7 +269,7 @@ def test_a_unique_index_older_rows_never_enter_is_additive(repo: Path):
 def test_source_moves_keep_original_order_age_and_immutable_bytes(repo: Path):
     """A relocation is neither a new expand date nor a new migration identity."""
     merge(repo, "z_expand.sql", "ALTER TABLE waves ADD title TEXT;", days_ago=31)
-    relocated = Path("rust/loopflow-storage/src/migrations")
+    relocated = Path("rust/loopflow/src/store/migrations")
     (repo / relocated.parent).mkdir(parents=True)
     _git(repo, "mv", str(MIGRATIONS), str(relocated))
     _git(repo, "commit", "-qm", "move storage")

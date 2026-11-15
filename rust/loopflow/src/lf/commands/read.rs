@@ -85,7 +85,7 @@ pub enum Read {
     ProcessHistory { id: String },
     /// Look up a creation without starting or retrying it. Null confirms absence.
     #[serde(rename = "creation.get")]
-    #[schemars(extend("x-result" = generator.subschema_for::<Option<crate::store::sqlite::creation::CreationReceipt>>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<Option<loopflow_storage::sqlite::creation::CreationReceipt>>()))]
     CreationGet { request_id: String },
     /// `lf process list`: live Loopflow call trees.
     #[serde(rename = "process.list")]
@@ -93,12 +93,12 @@ pub enum Read {
     ProcessList,
     /// `lf --cwd <directory> desktop view list`: the plans a repository window shows.
     #[serde(rename = "desktop.view.list")]
-    #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::store::work::selection::ViewPlan>>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<Vec<loopflow_storage::work::selection::ViewPlan>>()))]
     DesktopViewList { directory: PathBuf },
     /// `lf desktop view list --all [--expression <expression>]`: one selection
     /// across the portfolio repositories, as the phone lists open Tasks.
     #[serde(rename = "view.select")]
-    #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::store::work::selection::ViewPlan>>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<Vec<loopflow_storage::work::selection::ViewPlan>>()))]
     ViewSelect { expression: Option<String> },
     /// `lf --cwd <directory> session list`, with `--headless`
     /// when `headless` Sessions are shown too: every row, or with a `limit`
@@ -215,7 +215,7 @@ pub enum Read {
     /// `lf --cwd <directory> desktop view show [expression]`: what a view
     /// shows; no expression is the repository's own.
     #[serde(rename = "desktop.view.get")]
-    #[schemars(extend("x-result" = generator.subschema_for::<crate::store::work::selection::ViewPlan>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_storage::work::selection::ViewPlan>()))]
     DesktopViewGet {
         directory: PathBuf,
         expression: Option<String>,

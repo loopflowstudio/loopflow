@@ -16,7 +16,7 @@ use serde_json::{json, Value};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
-use crate::store::rental::{Provider, Rental, Usd};
+use loopflow_storage::rental::{Provider, Rental, Usd};
 
 const BRIDGE: &str = include_str!("sandbox.py");
 const GUARDIAN: &str = include_str!("guardian.py");
@@ -216,7 +216,7 @@ mod tests {
     }
 
     fn rental() -> Rental {
-        use crate::store::rental::{Hardware, RentalId, RentalState};
+        use loopflow_storage::rental::{Hardware, RentalId, RentalState};
         let id = RentalId::new();
         let now = OffsetDateTime::UNIX_EPOCH;
         Rental {

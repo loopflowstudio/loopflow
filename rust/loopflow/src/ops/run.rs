@@ -1,12 +1,12 @@
 use std::path::{Path, PathBuf};
 
-use crate::store::work::project::Project;
 use crate::store::SharedStore;
 use loopflow_model::durable::WorkRef;
 use loopflow_model::id::WaveId;
+use loopflow_storage::work::project::Project;
 
-use crate::store::work::task::{Task, TaskPr};
 use crate::work::wave::Wave;
+use loopflow_storage::work::task::{Task, TaskPr};
 
 use super::{OpsError, OpsResult};
 
@@ -65,7 +65,7 @@ pub(crate) fn render_task_context(
     context
 }
 
-fn render_project_context(project: &crate::store::work::project::Project) -> String {
+fn render_project_context(project: &loopflow_storage::work::project::Project) -> String {
     let targets = serde_json::to_string_pretty(&project.metric_targets)
         .expect("validated metric targets serialize");
     let mut content = format!(
@@ -347,15 +347,15 @@ mod tests {
     use super::{resolve_work_binding, resolve_work_selection, WorkSelection};
     use crate::linear::LinearProject;
     use crate::linear::{LinearIssueId, LinearProjectId};
-    use crate::store::work::project::Project;
-    use crate::store::work::project::ProjectKR;
-    use crate::store::work::task::{LinearWritebackState, Observation, Task, TaskPr, TaskPrId};
     use crate::store::SharedStore;
     use crate::store::StorageConfig;
     use crate::test_linear_input::Inventory;
     use crate::work::wave::Wave;
     use loopflow_model::durable::{ProjectId, TaskId, WorkRef};
     use loopflow_model::id::WaveId;
+    use loopflow_storage::work::project::Project;
+    use loopflow_storage::work::project::ProjectKR;
+    use loopflow_storage::work::task::{LinearWritebackState, Observation, Task, TaskPr, TaskPrId};
     use std::path::PathBuf;
 
     async fn test_store() -> (tempfile::TempDir, SharedStore) {
@@ -374,7 +374,7 @@ mod tests {
             id: ProjectId::new(),
 
             summary: String::new(),
-            status: crate::store::work::project::ProjectStatus::Started,
+            status: loopflow_storage::work::project::ProjectStatus::Started,
             linear_id: Some(LinearProjectId::new(planning_id).unwrap()),
             slug: slug.to_string(),
             name: slug.to_string(),
@@ -442,7 +442,7 @@ mod tests {
             created_at: now,
             updated_at: now,
         };
-        crate::store::sqlite::project_selection::write_project_binding(
+        loopflow_storage::sqlite::project_selection::write_project_binding(
             &store.sqlite,
             wave.id(),
             None,
@@ -466,7 +466,7 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let project = project(&wave, "runtime", "project-runtime");
         store.create_project(&project).await.unwrap();
-        crate::store::sqlite::project_selection::write_project_binding(
+        loopflow_storage::sqlite::project_selection::write_project_binding(
             &store.sqlite,
             wave.id(),
             None,
@@ -476,7 +476,7 @@ mod tests {
         .unwrap();
         let task = store
             .sqlite
-            .create_task(&crate::store::work::task::NewTask {
+            .create_task(&loopflow_storage::work::task::NewTask {
                 repository_id: crate::repository::location::ensure_repository(
                     &store.sqlite,
                     wave.repo(),
@@ -1331,7 +1331,7 @@ mod tests {
                 summary: String::new(),
 
                 metric_targets: Vec::new(),
-                status: crate::store::work::project::ProjectStatus::Started,
+                status: loopflow_storage::work::project::ProjectStatus::Started,
                 krs: vec![ProjectKR {
                     text: "One model everywhere".to_string(),
                     holds: false,

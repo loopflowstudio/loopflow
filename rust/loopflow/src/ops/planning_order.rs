@@ -5,9 +5,9 @@ use std::path::Path;
 use serde_json::json;
 
 use crate::linear::{LinearClient, OrderedIssue};
-use crate::store::sqlite::planning_order::{include_members, OrderEffect};
 use crate::store::Store;
 use loopflow_model::durable::ProjectId;
+use loopflow_storage::sqlite::planning_order::{include_members, OrderEffect};
 
 use super::{OpsError, OpsResult};
 
@@ -32,7 +32,7 @@ pub(super) async fn sync_order(
     let mut issues = client.ordered_items(external).await.map_err(message)?;
     loop {
         let items = issues.iter().map(|i| i.item.clone()).collect::<Vec<_>>();
-        if !crate::store::sqlite::linear_acceptance::accept_linear_project_order_in(
+        if !loopflow_storage::sqlite::linear_acceptance::accept_linear_project_order_in(
             &store.sqlite,
             &repo.to_string_lossy(),
             external,

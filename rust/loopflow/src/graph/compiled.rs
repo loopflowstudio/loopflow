@@ -17,7 +17,7 @@ use std::path::Path;
 use crate::graph::runner::{ExecutionCursor, NestedCursor};
 use crate::graph::ConcreteStep;
 
-pub use crate::store::graph::{
+pub use loopflow_storage::graph::{
     project_position, CompiledGraph, CompiledGraphPath, GraphNode, GraphNodeKind, GraphReturn,
     PositionProjection,
 };
@@ -282,7 +282,7 @@ pub fn graph_iterations(steps: &[ConcreteStep], cursor: &ExecutionCursor) -> Vec
 
 /// Recorded return counts (see `graph_iterations`) in words: the pass each
 /// returned loop is on, loops numbered in authored order. `None` on a first pass.
-pub use crate::store::graph::loop_passes;
+pub use loopflow_storage::graph::loop_passes;
 
 #[cfg(test)]
 mod tests {

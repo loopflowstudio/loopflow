@@ -93,8 +93,8 @@ mod tests {
 
     use super::{off_reactor, within};
     use crate::process::SessionAttachment;
-    use crate::store::sqlite::SqliteStore;
     use loopflow_model::id::LfProcessId;
+    use loopflow_storage::sqlite::SqliteStore;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{mpsc, Arc};
     use std::time::Duration;

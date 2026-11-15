@@ -3,8 +3,13 @@
 use std::fs::File;
 use std::path::Path;
 
-pub use super::migration_runner::*;
 use super::{ProcessIdentityEvidence, StoreError, StoreResult};
+pub use loopflow_storage::migration_runner::{
+    apply_sqlite_with_backup, latest_applied_version_sqlite, latest_known_version,
+    migration_backups, migration_sql_for_test, prune_migration_backups, unmerged_migrations,
+    validate_set, validate_sqlite_schema, Migration, MigrationBuild, MigrationId,
+    MigrationObservers, MigrationProcess,
+};
 
 pub(crate) fn observers() -> MigrationObservers<'static> {
     MigrationObservers {

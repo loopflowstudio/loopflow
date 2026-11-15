@@ -3,9 +3,9 @@
 use std::collections::HashMap;
 
 use crate::journal::{agent_process_evidence, process_identity_evidence, ProcessIdentityEvidence};
-use crate::store::sqlite::sessions::{SessionProjection, SessionProjectionInputs};
-use crate::store::sqlite::SqliteStore;
 use crate::store::StoreResult;
+use loopflow_storage::sqlite::sessions::{SessionProjection, SessionProjectionInputs};
+use loopflow_storage::sqlite::SqliteStore;
 
 #[derive(Debug)]
 pub(crate) struct Reading {
@@ -110,7 +110,7 @@ pub(crate) fn sessions(
 pub(crate) fn provider_lineage(
     store: &SqliteStore,
     source: &crate::session::LfSession,
-) -> StoreResult<crate::store::sqlite::provider_transitions::ProviderLineage> {
+) -> StoreResult<loopflow_storage::sqlite::provider_transitions::ProviderLineage> {
     let thread = source
         .artifact_key
         .as_deref()
@@ -118,7 +118,7 @@ pub(crate) fn provider_lineage(
         .transpose()?
         .flatten()
         .map(|t| t.agent_session.to_string());
-    let summary = session_summary(store, &source.id, crate::store::rows::now_unix())?;
+    let summary = session_summary(store, &source.id, loopflow_storage::rows::now_unix())?;
     let process = summary.as_ref().and_then(|s| s.agent_process_id.clone());
     let running = summary.and_then(|s| match s.agent_process_evidence {
         crate::store::ProcessIdentityEvidence::Live => Some(true),
@@ -126,7 +126,7 @@ pub(crate) fn provider_lineage(
         crate::store::ProcessIdentityEvidence::Unknown => None,
     });
     Ok(
-        crate::store::sqlite::provider_transitions::ProviderLineage {
+        loopflow_storage::sqlite::provider_transitions::ProviderLineage {
             source_session: source.id.to_string(),
             provider_session: thread,
             agent_process: process,
@@ -269,7 +269,7 @@ mod tests {
     }
     #[test]
     fn identity_acquisition_is_batched_and_indexes_out_completed_history() {
-        use crate::store::query_plans::{growing_scans, statements};
+        use loopflow_storage::query_plans::{growing_scans, statements};
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         store.test_session("live", &crate::session_record::new_artifact_key());

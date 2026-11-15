@@ -291,7 +291,7 @@ pub(crate) fn start_lf(
 
 fn launch_environment(
     env: &[(&str, &str)],
-    context: &crate::store::child::ChildExecutionContext,
+    context: &loopflow_storage::child::ChildExecutionContext,
 ) -> Vec<(String, String)> {
     let inherited_context = [
         crate::config::AGENT_OVERRIDE_ENV,

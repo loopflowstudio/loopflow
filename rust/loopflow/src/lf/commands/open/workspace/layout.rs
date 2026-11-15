@@ -10,7 +10,7 @@ use serde_json::Value;
 use super::{
     lf_argv, tool_cwd, tools, with_machine_home, Native, Presentation, SqliteStore, ViewContent,
 };
-use crate::store::work::selection::{
+use loopflow_storage::work::selection::{
     BrowserTab, ChangeComparison, PaneIntent, PaneTree, SplitAxis, TaskLayoutTemplate,
 };
 
@@ -273,7 +273,7 @@ impl Tools<'_> {
 mod tests {
     use super::{Native, Tools};
     use crate::lf::commands::open::rex::Rex;
-    use crate::store::work::selection::{ViewContent, ViewLocation, WorkPaneLayout};
+    use loopflow_storage::work::selection::{ViewContent, ViewLocation, WorkPaneLayout};
 
     #[test]
     fn selected_tools_and_hidden_splits_shape_the_task_layout() {

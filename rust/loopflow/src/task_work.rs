@@ -22,4 +22,4 @@ pub struct TaskOverview {
     pub graph: Option<crate::task_graph::TaskGraph>,
 }
 
-pub use crate::store::task_session::TaskSession;
+pub use loopflow_storage::task_session::TaskSession;

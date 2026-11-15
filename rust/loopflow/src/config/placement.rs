@@ -104,7 +104,7 @@ pub struct MachineDeclaration {
 
 pub(crate) fn location_at(
     home: &Path,
-    scope: Option<&crate::store::sqlite::scope_defaults::ScopeAddress>,
+    scope: Option<&loopflow_storage::sqlite::scope_defaults::ScopeAddress>,
 ) -> Result<(PathBuf, Vec<String>)> {
     let Some(scope) = scope else {
         return Ok((home.join("config.yaml"), vec![]));
@@ -120,7 +120,7 @@ pub(crate) fn location_at(
 
 pub(crate) fn read_at(
     home: &Path,
-    scope: Option<&crate::store::sqlite::scope_defaults::ScopeAddress>,
+    scope: Option<&loopflow_storage::sqlite::scope_defaults::ScopeAddress>,
 ) -> Result<Value> {
     let (path, prefix) = location_at(home, scope)?;
     let mut value = super::files::read(&path)?;
@@ -132,7 +132,7 @@ pub(crate) fn read_at(
 }
 
 pub(crate) fn route_location(
-    store: &crate::store::sqlite::SqliteStore,
+    store: &loopflow_storage::sqlite::SqliteStore,
     scope: &crate::profile::RouteScope,
 ) -> Result<(PathBuf, Vec<String>)> {
     match scope {
@@ -261,18 +261,18 @@ pub struct PoolDeclaration {
 #[derive(schemars::JsonSchema, Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct OnDemandDeclaration {
-    pub provider: crate::store::rental::Provider,
-    pub hardware: crate::store::rental::Hardware,
+    pub provider: loopflow_storage::rental::Provider,
+    pub hardware: loopflow_storage::rental::Hardware,
     pub max_machines: u32,
-    pub max_usd_per_hour: crate::store::rental::Usd,
+    pub max_usd_per_hour: loopflow_storage::rental::Usd,
     pub hours: f64,
 }
 
 impl Default for OnDemandDeclaration {
     fn default() -> Self {
         Self {
-            provider: crate::store::rental::Provider::Daytona,
-            hardware: crate::store::rental::Hardware {
+            provider: loopflow_storage::rental::Provider::Daytona,
+            hardware: loopflow_storage::rental::Hardware {
                 vcpus: 2,
                 memory_gb: 4,
                 disk_gb: 20,
@@ -280,8 +280,8 @@ impl Default for OnDemandDeclaration {
                 spot: false,
             },
             max_machines: 0,
-            max_usd_per_hour: crate::store::rental::Usd::ZERO,
-            hours: crate::store::rental::DEFAULT_HOURS,
+            max_usd_per_hour: loopflow_storage::rental::Usd::ZERO,
+            hours: loopflow_storage::rental::DEFAULT_HOURS,
         }
     }
 }

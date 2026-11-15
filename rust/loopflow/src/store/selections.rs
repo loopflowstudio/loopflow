@@ -1,13 +1,13 @@
 //! Application selection acquisition and Dashboard editing.
 use crate::store::session_projection::Reading;
-use crate::store::sqlite::selections::{repository_default, TaskSelectionReading};
-use crate::store::sqlite::SqliteStore;
-use crate::store::work::selection::{
+use crate::store::{StoreError, StoreResult};
+use loopflow_model::durable::RepositoryId;
+use loopflow_storage::sqlite::selections::{repository_default, TaskSelectionReading};
+use loopflow_storage::sqlite::SqliteStore;
+use loopflow_storage::work::selection::{
     move_into_place, Arrangement, ArrangementEdit, ArrangementMode, Dashboard, DashboardId,
     DashboardReading, Selection, SelectionResolution, ViewPlan, WorkWorkspaceKey,
 };
-use crate::store::{StoreError, StoreResult};
-use loopflow_model::durable::RepositoryId;
 fn invalid(error: impl std::fmt::Display) -> StoreError {
     StoreError::InvalidData(error.to_string())
 }
@@ -18,7 +18,7 @@ pub(crate) fn plan_selection(
     selection: Selection,
 ) -> StoreResult<ViewPlan> {
     loop {
-        let reading = Reading::acquire(store, crate::store::rows::now_unix(), None)?;
+        let reading = Reading::acquire(store, loopflow_storage::rows::now_unix(), None)?;
         if let Some(result) = store.projected_plan_selection(
             repository,
             selection.clone(),
@@ -38,7 +38,7 @@ pub(crate) fn all_view_plans(
     repos: &[String],
 ) -> StoreResult<Vec<ViewPlan>> {
     loop {
-        let reading = Reading::acquire(store, crate::store::rows::now_unix(), None)?;
+        let reading = Reading::acquire(store, loopflow_storage::rows::now_unix(), None)?;
         if let Some(result) =
             store.projected_all_view_plans(source, repos, &reading.inputs, &reading.values)?
         {
@@ -56,7 +56,7 @@ pub(crate) fn selection_plans(
     repository: &RepositoryId,
 ) -> StoreResult<Vec<ViewPlan>> {
     loop {
-        let reading = Reading::acquire(store, crate::store::rows::now_unix(), None)?;
+        let reading = Reading::acquire(store, loopflow_storage::rows::now_unix(), None)?;
         if let Some(result) =
             store.projected_selection_plans(repository, &reading.inputs, &reading.values)?
         {
@@ -75,7 +75,7 @@ pub(crate) fn resolve_selection(
     selection: &Selection,
 ) -> StoreResult<SelectionResolution> {
     loop {
-        let reading = Reading::acquire(store, crate::store::rows::now_unix(), None)?;
+        let reading = Reading::acquire(store, loopflow_storage::rows::now_unix(), None)?;
         if let Some(result) = store.projected_resolve_selection(
             repository,
             selection,
@@ -92,7 +92,7 @@ pub(crate) fn task_selection_reading(
     repository: &RepositoryId,
 ) -> StoreResult<TaskSelectionReading> {
     loop {
-        let reading = Reading::acquire(store, crate::store::rows::now_unix(), None)?;
+        let reading = Reading::acquire(store, loopflow_storage::rows::now_unix(), None)?;
         if let Some(result) =
             store.projected_task_selection_reading(repository, &reading.inputs, &reading.values)?
         {
@@ -107,7 +107,7 @@ pub(crate) fn read_dashboard(
     id: &DashboardId,
 ) -> StoreResult<Option<DashboardReading>> {
     loop {
-        let reading = Reading::acquire(store, crate::store::rows::now_unix(), None)?;
+        let reading = Reading::acquire(store, loopflow_storage::rows::now_unix(), None)?;
         if let Some(result) =
             store.projected_read_dashboard(repository, id, &reading.inputs, &reading.values)?
         {
@@ -121,7 +121,7 @@ pub(crate) fn view_plan(
     store: &SqliteStore,
     repository: &RepositoryId,
     source: Option<&str>,
-) -> StoreResult<crate::store::work::selection::ViewPlan> {
+) -> StoreResult<loopflow_storage::work::selection::ViewPlan> {
     let selection = match source {
         Some(source) => Selection::parse(source, None).map_err(StoreError::from)?,
         None => repository_default(),
@@ -150,7 +150,7 @@ pub(crate) fn edit_dashboard(
         .map_err(StoreError::from)?;
     if previous.is_none() {
         // Identical text in separately authored queries still names separate sources.
-        selection.id = crate::store::work::selection::SelectionId(format!("query:{}", id.0));
+        selection.id = loopflow_storage::work::selection::SelectionId(format!("query:{}", id.0));
     }
     let recovered = store.dashboard_arrangement(repository, id, &selection.expression_key())?;
     let mut arrangement = if let Some((authored, arrangement)) = recovered {
@@ -196,9 +196,9 @@ pub(crate) fn reorder_dashboard(
 }
 
 fn prepare_plan(plan: &mut ViewPlan) {
-    use crate::store::work::selection::PaneIntent;
+    use loopflow_storage::work::selection::PaneIntent;
     for content in plan.contents.iter_mut().filter(|content| {
-        content.work.kind == crate::store::work::selection::WorkWorkspaceKind::Task
+        content.work.kind == loopflow_storage::work::selection::WorkWorkspaceKind::Task
             && content.identifier.is_some()
     }) {
         if let Some(PaneIntent::Session {
@@ -242,7 +242,7 @@ pub(crate) fn save_dashboard(
     }
     let stale = || StoreError::Stale("Dashboard changed; read it again before editing".into());
     loop {
-        let reading = Reading::acquire(store, crate::store::rows::now_unix(), None)?;
+        let reading = Reading::acquire(store, loopflow_storage::rows::now_unix(), None)?;
         let Some(inputs) = store.dashboard_edit_inputs(
             repository,
             id,
@@ -308,7 +308,7 @@ pub(crate) fn reorder_task(
     to: &str,
 ) -> StoreResult<Vec<String>> {
     for _ in 0..3 {
-        let reading = Reading::acquire(store, crate::store::rows::now_unix(), None)?;
+        let reading = Reading::acquire(store, loopflow_storage::rows::now_unix(), None)?;
         let Some((read, work)) =
             store.task_order_inputs(repository, &reading.inputs, &reading.values)?
         else {

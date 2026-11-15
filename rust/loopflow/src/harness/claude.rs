@@ -971,7 +971,7 @@ mod tests {
     /// headless sessions it attaches to.
     struct StandInClaude {
         home: tempfile::TempDir,
-        store: crate::store::sqlite::SqliteStore,
+        store: loopflow_storage::sqlite::SqliteStore,
         database: std::path::PathBuf,
         process: loopflow_model::id::LfProcessId,
         _environment: crate::test_ambient::EnvGuard,

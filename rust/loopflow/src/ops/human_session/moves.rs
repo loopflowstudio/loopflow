@@ -23,15 +23,15 @@ use crate::process::Departure;
 use crate::provider_auth::Provider;
 use crate::repository::CanonicalRepo;
 use crate::session::{LfSession, PrimaryScope, TitleSource, WorkSource};
-use crate::store::sqlite::task_moves::{MoveInFlight, MoveStage};
-use crate::store::sqlite::task_work::ShipApproval;
-use crate::store::sqlite::SqliteStore;
 use crate::store::task_work::TaskGraphRecord;
-use crate::store::work::task::Task;
 use crate::store::SharedStore;
 use crate::transcript::{Located, Source};
 use loopflow_model::durable::{MachineId, RepositoryId, TaskId, TaskOwnershipEntry, WorkRef};
 use loopflow_model::id::{AgentSessionId, LfSessionId, WaveId};
+use loopflow_storage::sqlite::task_moves::{MoveInFlight, MoveStage};
+use loopflow_storage::sqlite::task_work::ShipApproval;
+use loopflow_storage::sqlite::SqliteStore;
+use loopflow_storage::work::task::Task;
 
 /// One Session, or one Task with its Session, on its way from one Machine to another.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -255,7 +255,7 @@ pub(crate) async fn send_task(
         task: Some(MovedTask {
             task_id: task.id.clone(),
             identifier: task.identifier.clone(),
-            ownership_marker: crate::store::sqlite::task_ownership::marker(&claim)?,
+            ownership_marker: loopflow_storage::sqlite::task_ownership::marker(&claim)?,
             graph: crate::store::task_work::task_graph_record(&store.sqlite, &task.id)?,
             stopped,
             approval: store.sqlite.task_ship_approval(&task.id)?,
@@ -924,7 +924,7 @@ async fn admit(
         request: None,
         ready_summary: None,
         completed_at: None,
-        created_at: crate::store::rows::now_unix(),
+        created_at: loopflow_storage::rows::now_unix(),
     };
     let scope = match (&moved.primary, task) {
         (_, Some(task)) => PrimaryScope::Task(task.id.clone()),

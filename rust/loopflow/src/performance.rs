@@ -9,7 +9,7 @@ use std::sync::mpsc::{self, Sender};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use crate::store::instrumentation::{CONNECTIONS, ENABLED, ROWS, STATEMENTS};
+use loopflow_storage::instrumentation::{CONNECTIONS, ENABLED, ROWS, STATEMENTS};
 
 /// One receipt stream per actual CLI process, including nested CLI invocations.
 /// Missing final records expose interruption rather than implying zero work.
@@ -95,5 +95,3 @@ fn record(file: &mut File, event: &str, started: Instant) -> std::io::Result<()>
 
 #[cfg(test)]
 pub(crate) mod subscription_measurement;
-#[cfg(test)]
-pub(crate) use crate::store::instrumentation::testing;

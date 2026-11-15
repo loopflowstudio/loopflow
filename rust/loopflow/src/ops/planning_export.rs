@@ -6,10 +6,10 @@ use std::time::Duration;
 
 use serde_json::json;
 
-use crate::store::sqlite::planning_changes::PlanningChanges;
-use crate::store::sqlite::planning_export::{ExportAttempts, PlanningExport};
 use crate::store::Store;
 use loopflow_model::durable::WorkRef;
+use loopflow_storage::sqlite::planning_changes::PlanningChanges;
+use loopflow_storage::sqlite::planning_export::{ExportAttempts, PlanningExport};
 
 use super::planning_client::{PlanningClient, StateScope};
 use super::{OpsError, OpsResult};
@@ -203,7 +203,7 @@ async fn deliver(store: &Store, repo: &Path, work: &WorkRef, force: bool) -> Ops
             input["statusId"] = client
                 .linear()?
                 .project_field_input(
-                    &crate::store::work::edit::WorkValue::ProjectStatus(
+                    &loopflow_storage::work::edit::WorkValue::ProjectStatus(
                         export.project_status().map_err(message)?,
                     ),
                     "",
@@ -434,7 +434,7 @@ async fn attach_project(
             "Created Project has conflicting Initiative membership; receipt retained",
         ));
     }
-    crate::store::sqlite::linear_acceptance::accept_linear_project_in(
+    loopflow_storage::sqlite::linear_acceptance::accept_linear_project_in(
         &store.sqlite,
         wave,
         initiative,

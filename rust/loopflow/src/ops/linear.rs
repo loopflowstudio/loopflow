@@ -20,14 +20,14 @@ use crate::provider_auth::{
     provider_token_refresh_due, refresh_stored_provider_token, Provider, TokenRefreshError,
 };
 use crate::repository::RepoId;
-use crate::store::work::task::Task;
-use crate::store::work::wave::normalize_wave_name;
 use crate::store::{
     open_existing_store, LinearIssueEvidence, PlanningState, ProviderToken,
     ProviderTokenReplacement, StorageConfig, Store,
 };
 use crate::work::wave::config::{read_wave_config, update_wave_config};
 use crate::work::wave::Wave;
+use loopflow_storage::work::task::Task;
+use loopflow_storage::work::wave::normalize_wave_name;
 use serde::{Deserialize, Serialize};
 
 // ── Options and results ─────────────────────────────────────────────
@@ -1799,7 +1799,7 @@ pub fn list_local_waves(repo: &Path) -> OpsResult<Vec<String>> {
     {
         return Ok(Vec::new());
     }
-    let store = crate::store::sqlite::SqliteStore::open_read_only(
+    let store = loopflow_storage::sqlite::SqliteStore::open_read_only(
         &path,
         crate::store::token_key::encryption_key,
     )
@@ -3098,7 +3098,7 @@ mod tests {
             summary: String::new(),
 
             metric_targets: Vec::new(),
-            status: crate::store::work::project::ProjectStatus::Started,
+            status: loopflow_storage::work::project::ProjectStatus::Started,
             krs: Vec::new(),
             initiative_ids: vec!["initiative-1".to_string()],
             team_ids: vec!["team-loo".to_string()],

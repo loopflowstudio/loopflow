@@ -6,9 +6,10 @@ uv run python scripts/benchmarks/crate-rebuild/cochange.py --revision HEAD --cou
 uv run python scripts/benchmarks/crate-rebuild/run.py --base 3fbf3d2ca3 --candidate HEAD --sccache /path/to/sccache --output /tmp/lf-build-comparison
 ```
 
-The probe builds the actual model, definition-content and terminal crates in two separate
+The probe builds the actual model, definition-content, terminal and storage crates in two separate
 source/target roots. It requires a cold miss, identical-root B hit, semantic-edit
-miss and correct checkout identity from a path-sensitive fixture. Root-refresh
+miss and correct checkout identity from a path-sensitive fixture. A semantic Task-record
+edit must rebuild only storage. Root-refresh
 reuse is checked with a fresh disposable target; existing dependency artifacts
 can retain their earlier path hashes. It does not build the application. Use sccache with Rust basedir normalization and verbatim
 environment-dependency tracking; 0.19.0 lacks these features. The first verified
@@ -19,6 +20,10 @@ copies. It runs serial cold A, fresh-target warm B, and a real shipping-message
 edit in B, then a Task-record error-message edit on top of it. The Task edit
 follows its source across crate moves; each receipt names the edited file. Each
 case measures only its latest edit, with one Cargo job unless selected otherwise.
+After timing, the candidate also checks Cargo catalogue refresh across origin/main-only
+advancement, packed references, a new loose reference and a source package without Git.
+Those checks are separate from the timing receipts.
+
 Both revisions retain their own profiles and dependencies; inspect differences before attributing a
 timing change to crate layout. It needs the source repository's `origin/main`
 for migration ordering. Network fetches remain possible on cold builds.

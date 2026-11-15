@@ -1952,7 +1952,7 @@ fn finish_release_pr(
     }
 }
 
-fn wait_for_release_repair(landing: &crate::store::pr_landing::PrLanding) -> OpsResult<()> {
+fn wait_for_release_repair(landing: &loopflow_storage::pr_landing::PrLanding) -> OpsResult<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     let store = runtime.block_on(crate::ops::pr_landing::landing_store())?;
     let deadline = Instant::now() + Duration::from_secs(60 * 60);
@@ -4865,7 +4865,7 @@ mod tests {
             RepairWindow,
         };
         use crate::ops::pr_landing::{decide_merge, LandingObservation};
-        use crate::store::work::task::CiCheck;
+        use loopflow_storage::work::task::CiCheck;
         use serde_json::json;
 
         #[derive(Debug, PartialEq)]

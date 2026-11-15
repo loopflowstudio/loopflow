@@ -8,7 +8,7 @@ use std::path::Path;
 use super::{Error, ErrorCode, Result};
 use crate::ops::linear::{LinearInitResult, LinearReteamResult};
 use crate::ops::Progress;
-use crate::store::work::project::Project;
+use loopflow_storage::work::project::Project;
 
 /// `wave.plan.bind`: bind the existing tracker Project `project` as the
 /// Wave's shared current selection, as `lf wave plan bind <wave>
@@ -45,12 +45,14 @@ pub fn planning_connect(
         // `connect`, so it is only normalized here; ambient uses the
         // validating resolver.
         let name = match wave {
-            Some(raw) => crate::store::work::wave::normalize_wave_name(raw).ok_or_else(|| {
-                Error::new(
-                    ErrorCode::Invalid,
-                    "wave connect requires a non-empty wave name",
-                )
-            })?,
+            Some(raw) => {
+                loopflow_storage::work::wave::normalize_wave_name(raw).ok_or_else(|| {
+                    Error::new(
+                        ErrorCode::Invalid,
+                        "wave connect requires a non-empty wave name",
+                    )
+                })?
+            }
             None => crate::lf::commands::ops::planning_wave(&repo, None)
                 .map_err(written)?
                 .ok_or_else(|| {

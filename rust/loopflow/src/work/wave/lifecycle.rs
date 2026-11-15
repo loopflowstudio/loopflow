@@ -1,1 +1,1 @@
-pub(crate) use crate::store::work::wave::lifecycle::*;
+pub(crate) use loopflow_storage::work::wave::lifecycle::*;

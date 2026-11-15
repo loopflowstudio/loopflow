@@ -63,8 +63,8 @@ pub(super) fn open_with(
 #[cfg(test)]
 mod tests {
     use super::SqliteStore;
-    use crate::store::token_crypto::TokenCryptoError;
     use crate::store::{CredentialType, ProviderToken};
+    use loopflow_storage::token_crypto::TokenCryptoError;
 
     #[test]
     fn credential_keys_are_lazy_and_the_supplied_source_survives_reopen() {

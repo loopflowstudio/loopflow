@@ -1,12 +1,12 @@
 //! Resolve personal placement from saved addresses after releasing SQL.
 use crate::durable::OwningMachineSource;
-use crate::store::sqlite::scope_defaults::{PlacementScope, ScopeAddress};
-use crate::store::sqlite::SqliteStore;
 use crate::store::{StoreError, StoreResult};
 use loopflow_model::durable::{
     CapacityDefault, DefaultScope, MachineDefault, MachineId, MachineSetting, RepositoryId, TaskId,
 };
 use loopflow_model::id::WaveId;
+use loopflow_storage::sqlite::scope_defaults::{PlacementScope, ScopeAddress};
+use loopflow_storage::sqlite::SqliteStore;
 
 fn field(setting: MachineSetting) -> &'static str {
     match setting {

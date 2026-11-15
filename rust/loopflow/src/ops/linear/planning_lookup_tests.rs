@@ -196,7 +196,7 @@ async fn acquisition_returns_saved_task_fields_without_replacing_pending_edits()
                 .edit_task(
                     &task.id,
                     task.revision,
-                    &crate::store::work::task::TaskUpdate {
+                    &loopflow_storage::work::task::TaskUpdate {
                         title: Some("Saved during disconnection".into()),
                         assignee: Some(Some("pending-assignee".into())),
                         ..Default::default()

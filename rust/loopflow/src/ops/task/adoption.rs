@@ -7,9 +7,9 @@ use crate::git::worktrees::{PlacementPlan, PlacementStrategy};
 use crate::ops::human_session::{checkout_scope, SessionTarget};
 use crate::ops::OpsResult;
 use crate::session::{LfSession, PrimaryScope};
-use crate::store::work::task::{NewTask, Task};
 use crate::store::{PlanningLocks, SharedStore};
 use loopflow_model::durable::TaskId;
+use loopflow_storage::work::task::{NewTask, Task};
 
 use super::{task_error, TaskPlacement};
 
@@ -105,6 +105,11 @@ async fn resolve_checkout(
             }
             (None, None)
         }
+        Some(scope) => {
+            return Err(task_error(format!(
+                "Unsupported conversation scope: {scope:?}"
+            )))
+        }
     };
     let session_task = selected
         .as_ref()
@@ -142,7 +147,7 @@ pub(super) async fn save(
     source: Source,
     acquisition: Option<Arc<PlanningLocks>>,
     continue_in_task: bool,
-    receipt: Option<crate::store::sqlite::creation::CreationIdentity>,
+    receipt: Option<loopflow_storage::sqlite::creation::CreationIdentity>,
 ) -> OpsResult<Task> {
     if let Some(task) = source.task.as_ref().filter(|task| task.id != id) {
         return Err(task_error(format!(

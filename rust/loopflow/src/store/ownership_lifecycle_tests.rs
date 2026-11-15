@@ -3,11 +3,11 @@
 use crate::durable::{OwningMachineSource, TaskExecutionSource};
 use crate::planning_git::PlanningDestination;
 use crate::store::ownership::local_label;
-use crate::store::sqlite::task_moves::MoveStage;
-use crate::store::sqlite::SqliteStore;
-use crate::store::work::task::NewTask;
 use loopflow_model::comment::{TaskComment, TaskCommentAuthor};
 use loopflow_model::durable::{MachineId, OwnershipKind, RepositoryId, TaskId};
+use loopflow_storage::sqlite::task_moves::MoveStage;
+use loopflow_storage::sqlite::SqliteStore;
+use loopflow_storage::work::task::NewTask;
 use loopflow_test_support::TestRepo;
 fn published_bodies(store: &SqliteStore, task: &TaskId) -> Vec<String> {
     let conn = store.conn.lock().unwrap();
@@ -23,7 +23,7 @@ fn published_bodies(store: &SqliteStore, task: &TaskId) -> Vec<String> {
 
 #[test]
 fn a_claim_names_its_person_once_and_the_latest_name_shows() {
-    let (_dir, store, task) = crate::store::test_fixture::unowned_task();
+    let (_dir, store, task) = loopflow_storage::test_fixture::unowned_task();
     store
         .record_local_person("linear:lee", Some("Lee"))
         .unwrap();
@@ -44,7 +44,7 @@ fn a_claim_names_its_person_once_and_the_latest_name_shows() {
 
 #[test]
 fn connecting_linear_keeps_journal_era_claims_yours() {
-    let (dir, store, task) = crate::store::test_fixture::unowned_task();
+    let (dir, store, task) = loopflow_storage::test_fixture::unowned_task();
     for args in [&["init", "-q"][..], &["config", "user.email", "a@x"]] {
         let status = std::process::Command::new("git")
             .arg("-C")
@@ -74,7 +74,7 @@ fn connecting_linear_keeps_journal_era_claims_yours() {
 
 #[test]
 fn unassigning_an_unowned_task_writes_nothing() {
-    let (_dir, store, task) = crate::store::test_fixture::unowned_task();
+    let (_dir, store, task) = loopflow_storage::test_fixture::unowned_task();
     assert_eq!(
         crate::store::ownership::unassign_task(&store, &task).unwrap(),
         None
@@ -87,7 +87,7 @@ fn unassigning_an_unowned_task_writes_nothing() {
 
 #[test]
 fn a_private_machine_publishes_its_id_but_not_its_hostname() {
-    let (_dir, store, task) = crate::store::test_fixture::unowned_task();
+    let (_dir, store, task) = loopflow_storage::test_fixture::unowned_task();
     crate::store::ownership::claim_task(&store, &task)
         .unwrap()
         .unwrap();
@@ -100,7 +100,7 @@ fn a_private_machine_publishes_its_id_but_not_its_hostname() {
 
 #[test]
 fn a_move_does_not_publish_the_targets_local_label() {
-    let (_dir, store, task) = crate::store::test_fixture::unowned_task();
+    let (_dir, store, task) = loopflow_storage::test_fixture::unowned_task();
     crate::store::ownership::claim_task(&store, &task)
         .unwrap()
         .unwrap();
@@ -118,7 +118,7 @@ fn a_move_does_not_publish_the_targets_local_label() {
 
 #[test]
 fn a_move_leaves_from_its_claim_until_it_is_sent_or_handed_back() {
-    let (_dir, store, task) = crate::store::test_fixture::unowned_task();
+    let (_dir, store, task) = loopflow_storage::test_fixture::unowned_task();
     let (laptop, mini) = (
         crate::store::machines::local_machine(&store).unwrap().id,
         MachineId::new(),

@@ -325,8 +325,8 @@ pub fn task_edit_update(
     notes: &Option<String>,
     rank: Option<u32>,
     assignee: &Option<String>,
-) -> crate::store::work::task::TaskUpdate {
-    crate::store::work::task::TaskUpdate {
+) -> loopflow_storage::work::task::TaskUpdate {
+    loopflow_storage::work::task::TaskUpdate {
         title: title.clone(),
         description: notes.clone(),
         rank,

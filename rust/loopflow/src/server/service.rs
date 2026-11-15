@@ -2498,8 +2498,8 @@ mod tests {
     #[test]
     fn typed_events_share_connection_order_survive_selection_and_stop_on_cancel() {
         with_empty_home(async {
-            use crate::store::work::task::TaskId;
             use loopflow_model::durable::{Author, WorkRef};
+            use loopflow_storage::work::task::TaskId;
             let path = crate::store::database_path_from_env().unwrap();
             let store = crate::store::opening::open_ephemeral(&path).unwrap();
             rusqlite::Connection::open(&path)
@@ -2747,7 +2747,7 @@ mod tests {
             let repo = loopflow_test_support::TestRepo::new();
             let task = loopflow_model::durable::TaskId::new();
             store
-                .create_task(&crate::store::work::task::NewTask {
+                .create_task(&loopflow_storage::work::task::NewTask {
                     repository_id: crate::repository::location::ensure_repository(
                         &store,
                         repo.path().to_str().unwrap(),
@@ -3107,20 +3107,20 @@ mod tests {
     // ---- Work subscriptions over the test's Machine store ----
 
     /// The Machine store under the test's `LF_HOME`.
-    fn home_store() -> crate::store::sqlite::SqliteStore {
+    fn home_store() -> loopflow_storage::sqlite::SqliteStore {
         crate::store::opening::open_ephemeral(&crate::store::lf_home_dir().join("loopflow.db"))
             .unwrap()
     }
 
     /// A started (owned) Task in `repo`, so `state:open` selects it.
     fn create_task(
-        store: &crate::store::sqlite::SqliteStore,
+        store: &loopflow_storage::sqlite::SqliteStore,
         repo: &loopflow_test_support::TestRepo,
         title: &str,
-    ) -> crate::store::work::task::Task {
+    ) -> loopflow_storage::work::task::Task {
         let path = repo.path().canonicalize().unwrap();
         let task = store
-            .create_task(&crate::store::work::task::NewTask {
+            .create_task(&loopflow_storage::work::task::NewTask {
                 repository_id: crate::repository::location::ensure_repository(
                     store,
                     path.to_str().unwrap(),

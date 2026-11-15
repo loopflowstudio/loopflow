@@ -361,7 +361,7 @@ mod tests {
 
     use super::{recoveries, save, BEFORE_EXCHANGE};
     use crate::ops::task::{file_snapshot, git_output, TaskWorkspace};
-    use crate::store::work::task::TaskId;
+    use loopflow_storage::work::task::TaskId;
 
     #[test]
     fn task_files_save_retains_late_descriptor_writes_and_refuses_stale_revision() {

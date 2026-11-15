@@ -9,8 +9,8 @@ use std::process::Command;
 use anyhow::{anyhow, Context, Result};
 
 use crate::repository::CanonicalRepo;
-use crate::store::sqlite::SqliteStore;
 use loopflow_model::durable::{MachineId, RepositoryId};
+use loopflow_storage::sqlite::SqliteStore;
 
 const LOCATOR: &str = "loopflow-repository";
 
@@ -115,7 +115,7 @@ pub fn bind_repository(
 
 #[derive(Debug)]
 pub(crate) struct PreparedRegistration {
-    pub inputs: crate::store::sqlite::repositories::RepositoryRegistration,
+    pub inputs: loopflow_storage::sqlite::repositories::RepositoryRegistration,
     pub id: RepositoryId,
     _lock: Option<fs::File>,
 }
@@ -430,7 +430,7 @@ mod tests {
 
     #[test]
     fn registration_uses_indexed_checkout_evidence_and_an_unchanged_identity_only_reads() {
-        use crate::store::query_plans::{assert_no_empty_writes, growing_scans, statements};
+        use loopflow_storage::query_plans::{assert_no_empty_writes, growing_scans, statements};
 
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();

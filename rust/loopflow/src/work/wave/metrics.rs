@@ -1,4 +1,4 @@
-pub use crate::store::metric::*;
+pub use loopflow_storage::metric::*;
 use serde::Deserialize;
 use std::fs;
 use std::path::Path;
@@ -191,7 +191,7 @@ struct MetricContractFrontmatter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::metric::MAX_METRIC_DURATION_SECONDS;
+    use loopflow_storage::metric::MAX_METRIC_DURATION_SECONDS;
     use time::{Duration, OffsetDateTime};
 
     #[test]

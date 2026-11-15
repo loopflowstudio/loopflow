@@ -12,10 +12,10 @@ use std::path::{Component, Path, PathBuf};
 use anyhow::{anyhow, bail, Context};
 use base64::Engine as _;
 
-use crate::store::sqlite::SqliteStore;
 use loopflow_model::durable::MachineId;
+use loopflow_storage::sqlite::SqliteStore;
 
-pub use crate::store::machine_records::*;
+pub use loopflow_storage::machine_records::*;
 
 /// Where an event's copied capture lives here, when it was copied.
 fn capture_dir(history: &CopiedHistory, lf_home: &Path, event: &CopiedEvent) -> Option<PathBuf> {

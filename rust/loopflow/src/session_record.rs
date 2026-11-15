@@ -22,7 +22,7 @@ use time::OffsetDateTime;
 use crate::store::{StoreError, StoreResult};
 use loopflow_model::chat::types::ConversationEvent;
 
-pub use crate::store::session_record::*;
+pub use loopflow_storage::session_record::*;
 
 #[derive(Debug, Clone)]
 pub(crate) struct SessionCaptureSpec {
@@ -35,15 +35,15 @@ pub(crate) struct SessionCaptureSpec {
     pub skill: Option<String>,
     pub subjects: Vec<SubjectAttribution>,
     pub graph: SessionGraphMembership,
-    pub work: Option<crate::store::session::SessionWork>,
+    pub work: Option<loopflow_storage::session::SessionWork>,
 }
 
 /// A Graph position older manifests captured. New captures record none: a step
 /// is an ordinary command, and its Graph is read from the Graph process record.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionGraphStep {
-    pub task_id: Option<crate::store::work::task::TaskId>,
-    pub task_pr_id: Option<crate::store::work::task::TaskPrId>,
+    pub task_id: Option<loopflow_storage::work::task::TaskId>,
+    pub task_pr_id: Option<loopflow_storage::work::task::TaskPrId>,
     pub invocation_id: String,
     #[serde(rename = "flow")] // Existing capture manifests remain replayable.
     pub graph: String,
@@ -122,7 +122,7 @@ pub(crate) fn resolve_manifest(
         }
     }
     let database = database_in(lf_home).map_err(std::io::Error::other)?;
-    let store = crate::store::sqlite::SqliteStore::open_processes_read_only(
+    let store = loopflow_storage::sqlite::SqliteStore::open_processes_read_only(
         &database,
         crate::store::token_key::encryption_key,
     )
@@ -150,7 +150,7 @@ pub(crate) fn resolve_manifest(
 
 pub(crate) fn read_provider_session(dir: &Path) -> std::io::Result<Option<ProviderSessionRef>> {
     let input = input_id_from_dir(dir)?;
-    crate::store::sqlite::SqliteStore::open_processes_read_only(
+    loopflow_storage::sqlite::SqliteStore::open_processes_read_only(
         &row_database(dir).map_err(std::io::Error::other)?,
         crate::store::token_key::encryption_key,
     )
@@ -266,7 +266,10 @@ pub(crate) struct SessionRecorder {
     attempt_started: bool,
     event_seq: u64,
     /// Where facts are kept; none for a mechanical command's capture.
-    history: Option<(crate::store::sqlite::SqliteStore, crate::session::LfSession)>,
+    history: Option<(
+        loopflow_storage::sqlite::SqliteStore,
+        crate::session::LfSession,
+    )>,
     /// When the stream's previous event arrived, to record silences.
     previous_event: Option<OffsetDateTime>,
     telemetry_warned: bool,
@@ -523,7 +526,7 @@ impl SessionRecorder {
 }
 
 /// The store that holds the conversation for the capture recorded at `dir`.
-pub(crate) fn row_store(dir: &Path) -> StoreResult<crate::store::sqlite::SqliteStore> {
+pub(crate) fn row_store(dir: &Path) -> StoreResult<loopflow_storage::sqlite::SqliteStore> {
     crate::store::open_sqlite(&row_database(dir)?)
 }
 
@@ -574,7 +577,7 @@ fn resolve_capture(key: &str) -> StoreResult<(PathBuf, crate::session::LfSession
     let home = crate::store::lf_home_dir();
     let dir = record_dir(&home, key)
         .ok_or_else(|| record_error(std::io::Error::other("invalid capture key")))?;
-    let store = crate::store::sqlite::SqliteStore::open_processes_read_only(
+    let store = loopflow_storage::sqlite::SqliteStore::open_processes_read_only(
         &database_in(&home)?,
         crate::store::token_key::encryption_key,
     )?;
@@ -939,9 +942,9 @@ pub struct SessionCaptureManifest {
 }
 
 pub(crate) fn project_input_history(
-    session: &crate::store::session::HistoryCapture,
+    session: &loopflow_storage::session::HistoryCapture,
     artifact_key: Option<&str>,
-    history: &[crate::store::session::SessionEvent],
+    history: &[loopflow_storage::session::SessionEvent],
     names: (Option<String>, Option<String>),
 ) -> std::io::Result<SessionHistory> {
     let mut facts = Vec::new();
@@ -949,7 +952,7 @@ pub(crate) fn project_input_history(
     let mut manifest: Option<SessionCaptureManifest> = None;
     let mut gaps = 0;
     for event in history {
-        if event.kind != crate::store::session::SessionEventKind::Observed {
+        if event.kind != loopflow_storage::session::SessionEventKind::Observed {
             continue;
         }
         let input = event.payload["input_id"].as_str();

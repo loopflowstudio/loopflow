@@ -1,9 +1,9 @@
 //! Provider lifetime and attachment handoff over saved steer state.
 use crate::process::attachment;
-use crate::store::sqlite::sessions::TerminalRetention::LiveTurn;
-use crate::store::steer::NativeBoundary;
-use crate::store::test_fixture::{hold, native_steer as native_fixture, steer as fixture};
 use crate::store::StoreError;
+use loopflow_storage::sqlite::sessions::TerminalRetention::LiveTurn;
+use loopflow_storage::steer::NativeBoundary;
+use loopflow_storage::test_fixture::{hold, native_steer as native_fixture, steer as fixture};
 const ACTIVATE: NativeBoundary<'static> = NativeBoundary::Activate { source: "startup" };
 const CLEAR: NativeBoundary<'static> = NativeBoundary::Select { source: "clear" };
 #[test]
@@ -12,7 +12,7 @@ fn pending_requests_hold_the_terminal_until_the_current_attachment_settles_them(
     let first = store.session_attachment("session").unwrap().unwrap();
     let owner = first.lf_process_id.as_ref().unwrap();
     let terminal = hold(&store);
-    let mut activity = crate::store::session::SessionActivity {
+    let mut activity = loopflow_storage::session::SessionActivity {
         preview: None,
         observed_at: 1,
         open_tools: 0,
@@ -26,7 +26,7 @@ fn pending_requests_hold_the_terminal_until_the_current_attachment_settles_them(
         store
             .record_viewer_hold(
                 &terminal,
-                viewed.then_some(crate::store::sqlite::ViewerHold::Viewed(1)),
+                viewed.then_some(loopflow_storage::sqlite::ViewerHold::Viewed(1)),
             )
             .unwrap();
         store

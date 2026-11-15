@@ -1,11 +1,11 @@
 //! Acquire configuration outside SQL and retry commands whose saved scope changed.
 use crate::durable::{OwningMachineSource, TaskExecutionRoute, TaskExecutionSource};
-use crate::store::sqlite::scope_defaults::TaskScope;
-use crate::store::sqlite::task_ownership::{label_owner, OwnershipFacts, Person};
-use crate::store::sqlite::SqliteStore;
-use crate::store::work::task::{NewTask, Task, TaskPr};
 use crate::store::{StoreError, StoreResult};
 use loopflow_model::durable::{MachineId, MachineSetting, TaskId, TaskOwnershipEntry};
+use loopflow_storage::sqlite::scope_defaults::TaskScope;
+use loopflow_storage::sqlite::task_ownership::{label_owner, OwnershipFacts, Person};
+use loopflow_storage::sqlite::SqliteStore;
+use loopflow_storage::work::task::{NewTask, Task, TaskPr};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -163,7 +163,7 @@ pub(crate) fn promote_task(
     placement: Option<&(PathBuf, TaskPr)>,
     session: Option<&crate::session::LfSession>,
     destination: Option<&Path>,
-    receipt: Option<&crate::store::sqlite::creation::CreationIdentity>,
+    receipt: Option<&loopflow_storage::sqlite::creation::CreationIdentity>,
 ) -> StoreResult<Task> {
     let caller = if session.is_some() {
         super::sessions::session_caller()?
@@ -218,7 +218,7 @@ pub(crate) fn held_planning(
     store: &SqliteStore,
     machine: &MachineId,
 ) -> StoreResult<(
-    crate::store::sqlite::task_ownership::HeldPlanningScope,
+    loopflow_storage::sqlite::task_ownership::HeldPlanningScope,
     HashMap<TaskId, bool>,
 )> {
     let scope = store.held_planning_scope(machine)?;
@@ -238,9 +238,9 @@ pub(crate) fn held_planning(
 
 pub fn set_rental_state(
     store: &SqliteStore,
-    id: &crate::store::rental::RentalId,
-    state: crate::store::rental::RentalState,
-) -> StoreResult<(crate::store::rental::Rental, Vec<TaskId>)> {
+    id: &loopflow_storage::rental::RentalId,
+    state: loopflow_storage::rental::RentalState,
+) -> StoreResult<(loopflow_storage::rental::Rental, Vec<TaskId>)> {
     loop {
         let rental = store.rental(id)?;
         let prepared = match (&rental.machine_id, state.is_live()) {
@@ -284,7 +284,7 @@ pub fn task_ownership(
 pub fn task_detail_facts(
     store: &SqliteStore,
     tasks: &[&Task],
-) -> StoreResult<crate::store::sqlite::TaskDetailFacts> {
+) -> StoreResult<loopflow_storage::sqlite::TaskDetailFacts> {
     let (local, mut facts) = store.saved_task_detail_facts(tasks)?;
     let mut names = machine_names(store)?;
     names.insert(local, local_label());
@@ -297,10 +297,10 @@ pub fn task_detail_facts(
 pub(crate) fn apply_linear_observation(
     store: &SqliteStore,
     task_id: &TaskId,
-    observation: &crate::store::linear_records::LinearIssueObservation,
+    observation: &loopflow_storage::linear_records::LinearIssueObservation,
     observed_at: time::OffsetDateTime,
     planning_connected: bool,
-) -> StoreResult<crate::store::work::task::LinearObservationOutcome> {
+) -> StoreResult<loopflow_storage::work::task::LinearObservationOutcome> {
     let mut names = machine_names(store)?;
     names.insert(
         crate::store::machines::local_machine(store)?.id,

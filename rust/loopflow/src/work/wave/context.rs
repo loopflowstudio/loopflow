@@ -212,7 +212,7 @@ pub async fn resolve_managed_wave(
             }
             return Ok(wave);
         }
-        let slug = crate::store::work::wave::normalize_wave_name(raw)
+        let slug = loopflow_storage::work::wave::normalize_wave_name(raw)
             .ok_or(WaveResolveError::EmptyExplicit)?;
         let store = store.ok_or_else(|| {
             WaveResolveError::Registry("no wave registry on this machine".to_string())
@@ -255,8 +255,8 @@ pub async fn resolve_managed_wave(
         return Ok(wave);
     }
 
-    let slug =
-        crate::store::work::wave::normalize_wave_name(raw).ok_or(WaveResolveError::NoContext)?;
+    let slug = loopflow_storage::work::wave::normalize_wave_name(raw)
+        .ok_or(WaveResolveError::NoContext)?;
     resolve_slug(store, repo, &slug)
         .await
         .map_err(|error| match error {

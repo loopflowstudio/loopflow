@@ -20,9 +20,9 @@ use crate::performance::subscription_measurement as meter;
 use crate::process::SessionAttachment;
 use crate::server::subscriptions::Subscriptions;
 use crate::server::wire::MAX_CONNECTIONS;
-use crate::store::sqlite::SqliteStore;
 use loopflow_model::durable::TaskId;
 use loopflow_model::id::LfProcessId;
+use loopflow_storage::sqlite::SqliteStore;
 
 struct ChildGuard(Child);
 impl Drop for ChildGuard {
@@ -73,7 +73,7 @@ fn seed(home: &Path, pid: u32) {
         crate::repository::location::ensure_repository(&store, repo.to_str().unwrap()).unwrap();
     for i in 0..64 {
         store
-            .create_task(&crate::store::work::task::NewTask {
+            .create_task(&loopflow_storage::work::task::NewTask {
                 repository_id: repository_id.clone(),
                 id: TaskId::new(),
                 project_id: None,

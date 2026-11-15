@@ -1,7 +1,7 @@
 //! Compose saved planning evidence with observed repository configuration.
-use crate::store::planning_sync::PlanningSyncStatus;
 use crate::store::{Store, StoreResult};
 use loopflow_model::durable::{ProjectId, TaskId};
+use loopflow_storage::planning_sync::PlanningSyncStatus;
 
 impl Store {
     pub fn task_comments(

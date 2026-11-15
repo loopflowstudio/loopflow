@@ -106,9 +106,9 @@ static GH_LOGIN_RE: Lazy<Regex> = Lazy::new(|| {
 static ANSI_ESCAPE_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\x1B\[[0-9;]*[A-Za-z]").expect("ansi escape regex"));
 
-pub use crate::store::provider::{ParseProviderError, Provider};
+pub use loopflow_storage::provider::{ParseProviderError, Provider};
 
-pub use crate::store::provider::{AuthStatus, ProviderAuthSnapshot};
+pub use loopflow_storage::provider::{AuthStatus, ProviderAuthSnapshot};
 
 /// How the provider completes authorization after the browser opens.
 #[derive(Clone, PartialEq, Eq)]
@@ -1710,7 +1710,7 @@ async fn extract_doppler_token() -> Option<ProviderToken> {
         oauth_client_id: None,
         expires_at: None,
         login: None,
-        updated_at: crate::store::rows::now_unix(),
+        updated_at: loopflow_storage::rows::now_unix(),
         credential_type: CredentialType::OAuth,
     })
 }
@@ -3168,9 +3168,7 @@ async fn refresh_provider_token_with_runner(
                 provider: Provider::OpenCodeZen,
             })
         }
-        Provider::Linear | Provider::Asana | Provider::Notion | Provider::Doppler => {
-            Err(TokenRefreshError::MissingToken { provider })
-        }
+        _ => Err(TokenRefreshError::MissingToken { provider }),
     }
 }
 

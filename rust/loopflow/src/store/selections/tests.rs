@@ -1,12 +1,12 @@
 use crate::process::attachment;
 use crate::store::selections;
 
-use crate::store::sqlite::SqliteStore;
-use crate::store::work::selection::{
+use loopflow_model::durable::RepositoryId;
+use loopflow_storage::sqlite::SqliteStore;
+use loopflow_storage::work::selection::{
     Arrangement, ArrangementMode, DashboardId, Selection, SelectionExpression, SelectionId,
     WorkWorkspaceKind,
 };
-use loopflow_model::durable::RepositoryId;
 
 fn fixture() -> (tempfile::TempDir, SqliteStore, RepositoryId) {
     let dir = tempfile::tempdir().unwrap();
@@ -356,7 +356,7 @@ fn a_wave_scoped_reading_skips_repositories_without_that_wave() {
 
 #[test]
 fn wave_default_plan_uses_three_slot_strip() {
-    use crate::store::work::selection::{SlotLayout, SlotNode, SplitAxis};
+    use loopflow_storage::work::selection::{SlotLayout, SlotNode, SplitAxis};
     let (_dir, store, repo) = fixture();
     let plans = selections::selection_plans(&store, &repo).unwrap();
     let wave = plans
@@ -365,7 +365,7 @@ fn wave_default_plan_uses_three_slot_strip() {
             plan.selection
                 .id
                 .0
-                .starts_with(crate::store::sqlite::selections::WAVE_DEFAULT_PREFIX)
+                .starts_with(loopflow_storage::sqlite::selections::WAVE_DEFAULT_PREFIX)
         })
         .expect("fixture has a Wave");
     assert_eq!(wave.slots, SlotLayout::strip(3));
@@ -381,7 +381,7 @@ fn wave_default_plan_uses_three_slot_strip() {
 
 #[test]
 fn resizing_two_slots_reweights_only_the_split_between_them() {
-    use crate::store::work::selection::{SlotLayout, SlotNode};
+    use loopflow_storage::work::selection::{SlotLayout, SlotNode};
     let golden = SlotLayout::golden();
     // Slots 1 and 2 share the inner top split; the bottom band and slot 0 keep theirs.
     let resized = golden.resized(1, 2, 0.75).unwrap();
@@ -416,7 +416,7 @@ fn resizing_two_slots_reweights_only_the_split_between_them() {
 
 #[test]
 fn dashboard_slots_round_trip_survive_query_edits_and_reject_invalid_layouts() {
-    use crate::store::work::selection::{SlotLayout, SlotNode, SplitAxis};
+    use loopflow_storage::work::selection::{SlotLayout, SlotNode, SplitAxis};
     let (_dir, store, repo) = fixture();
     assert_eq!(
         selections::view_plan(&store, &repo, Some("state:open"))
@@ -552,8 +552,8 @@ fn dashboards_leave_repository_and_wave_defaults_unchanged() {
 
 #[test]
 fn selection_pane_ownership_is_repository_scoped_for_every_work_kind() {
-    use crate::store::work::selection::{WorkPaneLayout, WorkWorkspaceKey};
     use crate::store::StoreError;
+    use loopflow_storage::work::selection::{WorkPaneLayout, WorkWorkspaceKey};
     let (_dir, store, repo) = fixture();
     let other = crate::repository::location::ensure_repository(&store, "/other").unwrap();
     for (kind, id) in [
@@ -650,8 +650,8 @@ fn selection_pane_ownership_is_repository_scoped_for_every_work_kind() {
     }
 }
 
-fn designated_tree(kind: &WorkWorkspaceKind) -> crate::store::work::selection::PaneTree {
-    use crate::store::work::selection::{PaneIntent, PaneTree, SplitAxis};
+fn designated_tree(kind: &WorkWorkspaceKind) -> loopflow_storage::work::selection::PaneTree {
+    use loopflow_storage::work::selection::{PaneIntent, PaneTree, SplitAxis};
     let pane = |id: &str, content| PaneTree::Pane {
         id: id.into(),
         content,
@@ -696,7 +696,7 @@ fn designated_tree(kind: &WorkWorkspaceKind) -> crate::store::work::selection::P
 
 #[test]
 fn selection_designated_panes_restore_and_invalid_writes_are_atomic() {
-    use crate::store::work::selection::{BrowserTab, PaneIntent, PaneTree, WorkPaneLayout};
+    use loopflow_storage::work::selection::{BrowserTab, PaneIntent, PaneTree, WorkPaneLayout};
     let (dir, store, repo) = fixture();
     let mut layout: WorkPaneLayout = serde_json::from_str(include_str!(
         "../../../../../tests/fixtures/dto/pane_layout.json"
@@ -758,7 +758,7 @@ fn selection_designated_panes_restore_and_invalid_writes_are_atomic() {
     // A fourth pane, a missing pane, a stale tab selection and a non-web page are rejected.
     let mut invalid = saved.clone();
     invalid.tree = PaneTree::Split {
-        axis: crate::store::work::selection::SplitAxis::Vertical,
+        axis: loopflow_storage::work::selection::SplitAxis::Vertical,
         ratio: 0.5,
         first: Box::new(invalid.tree),
         second: Box::new(PaneTree::Pane {
@@ -813,7 +813,7 @@ fn selection_designated_panes_restore_and_invalid_writes_are_atomic() {
 
 #[test]
 fn selection_panes_restore_drafts_and_reject_stale_or_foreign_intent() {
-    use crate::store::work::selection::{
+    use loopflow_storage::work::selection::{
         BrowserTab, FileDraft, PaneIntent, PaneTree, ViewLocation, WorkPaneLayout, WorkWorkspaceKey,
     };
     let (dir, store, repo) = fixture();
@@ -839,7 +839,7 @@ fn selection_panes_restore_drafts_and_reject_stale_or_foreign_intent() {
                         *place = Some(location.clone());
                         *tabs = vec![BrowserTab::Files {
                             id: "files".into(),
-                            tabs: vec![crate::store::work::selection::FileTab {
+                            tabs: vec![loopflow_storage::work::selection::FileTab {
                                 id: "file-1".into(),
                                 path: "src/lib.rs".into(),
                             }],
@@ -1071,7 +1071,7 @@ fn query_selection_uses_current_reported_attention_and_prunes_ended_activity() {
             [&attachment.agent_process_id],
         )
         .unwrap();
-    crate::store::query_plans::assert_no_empty_writes(&store, || {
+    loopflow_storage::query_plans::assert_no_empty_writes(&store, || {
         let ended = selections::read_dashboard(&store, &repo, &id)
             .unwrap()
             .unwrap();
@@ -1305,7 +1305,7 @@ fn released_work_upgrades_to_saved_intent_without_rewriting_work() {
             .unwrap(),
         4
     );
-    crate::store::migrations::validate_persisted_json(&conn).unwrap();
+    loopflow_storage::test_fixture::validate_persisted_json(&conn).unwrap();
 }
 
 #[test]
@@ -1387,7 +1387,7 @@ fn saved_selections_upgrade_reload_and_edit_atomically_without_execution() {
             0
         );
     }
-    crate::store::migrations::validate_persisted_json(&conn).unwrap();
+    loopflow_storage::test_fixture::validate_persisted_json(&conn).unwrap();
 }
 
 #[test]

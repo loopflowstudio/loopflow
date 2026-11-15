@@ -3,10 +3,10 @@
 use std::path::Path;
 
 use crate::ops::{OpsError, OpsResult};
-use crate::store::sqlite::task_moves::{MoveInFlight, MoveStage};
-use crate::store::sqlite::SqliteStore;
 use crate::store::StoreResult;
 use loopflow_model::durable::{MachineId, TaskId, TaskOwnership};
+use loopflow_storage::sqlite::task_moves::{MoveInFlight, MoveStage};
+use loopflow_storage::sqlite::SqliteStore;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OwnershipChange {

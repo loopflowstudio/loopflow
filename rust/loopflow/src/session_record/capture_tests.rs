@@ -350,9 +350,9 @@ fn prepared_run_keeps_its_recorded_pr_instead_of_the_launching_pr() {
     let _ambient = crate::test_ambient::EnvGuard::new();
     let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
     let home = tempfile::tempdir().unwrap();
-    let original = crate::store::work::task::TaskPrId::new();
+    let original = loopflow_storage::work::task::TaskPrId::new();
     let mut step = crate::session_record::SessionGraphStep {
-        task_id: Some(crate::store::work::task::TaskId::new()),
+        task_id: Some(loopflow_storage::work::task::TaskId::new()),
         task_pr_id: Some(original.clone()),
         invocation_id: "invocation".into(),
         graph: "feature".into(),
@@ -366,7 +366,7 @@ fn prepared_run_keeps_its_recorded_pr_instead_of_the_launching_pr() {
     let id =
         crate::session_record::SessionRecorder::prepare_at(home.path(), prepared, None).unwrap();
     let (dir, _) = crate::session_record::resolve_manifest(home.path(), id.as_str()).unwrap();
-    step.task_pr_id = Some(crate::store::work::task::TaskPrId::new());
+    step.task_pr_id = Some(loopflow_storage::work::task::TaskPrId::new());
     let mut process = spec(home.path());
     process.graph = crate::session_record::SessionGraphMembership::Step(step);
     let context = crate::trace::PreparedTurnContext::from_prompts("system", "review");
@@ -1060,7 +1060,7 @@ fn continuation_publication_failure_keeps_reservation_without_settling_a_turn() 
 fn attached_session(
     ledger: &crate::journal::TestLedgerGuard,
 ) -> (
-    crate::store::sqlite::SqliteStore,
+    loopflow_storage::sqlite::SqliteStore,
     crate::process::SessionAttachment,
     std::process::Child,
     loopflow_model::id::LfProcessId,

@@ -10,8 +10,8 @@ use std::process::Command;
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::store::people::GithubPerson;
-use crate::store::sqlite::SqliteStore;
+use loopflow_storage::people::GithubPerson;
+use loopflow_storage::sqlite::SqliteStore;
 
 /// How long GitHub knowing no user for an email stands before it is asked again.
 const MISS_RETRY_SECS: i64 = 24 * 60 * 60;
@@ -152,7 +152,7 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     use super::github_person;
-    use crate::store::people::GithubPerson;
+    use loopflow_storage::people::GithubPerson;
 
     #[test]
     fn an_email_reaches_github_once() {

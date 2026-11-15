@@ -40,7 +40,7 @@ pub enum PlanningPublication {
     Unconfirmed,
 }
 
-pub use crate::store::planning_destination::{PlanningDestination, PlanningGitError};
+pub use loopflow_storage::planning_destination::{PlanningDestination, PlanningGitError};
 type Result<T> = std::result::Result<T, PlanningGitError>;
 
 /// Resolve an explicitly chosen alias once, without contacting its remote.

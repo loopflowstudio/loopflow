@@ -11,9 +11,9 @@ use anyhow::Result;
 use super::{SessionAvailability, SessionGraphMembership, SessionRecord, SessionState};
 use crate::harness::HarnessKind;
 use crate::session_record::SessionTitleSource;
-use crate::store::sqlite::SqliteStore;
 use crate::transcript::live::SessionTurn;
 use loopflow_model::durable::TaskId;
+use loopflow_storage::sqlite::SqliteStore;
 
 /// Read the current turn of each live Session among `sessions`. A Session
 /// whose agent reports no status is available once its turn hands back.

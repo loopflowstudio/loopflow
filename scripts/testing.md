@@ -266,6 +266,11 @@ It leaves the ordinary target and shared cache in place. Reuse that isolated
 target for later debugging builds. This also works when another checkout that
 produced cached debug-source paths has been removed.
 
+Storage fixture changes first compile `cargo test -p loopflow-storage --lib --no-run`
+without `test-support`, then `cargo test -p loopflow --lib --no-run` with its
+dev dependency. Application acquisition and lifecycle tests stay above storage;
+prepared SQL invariants and migration checks stay in the storage crate.
+
 Cargo rebuilds changed libraries and their dependents. An edit to Task shipping
 rebuilds the application; unchanged lower-level libraries can be reused. Changes
 to a shared library also rebuild its callers. Binaries and test executables

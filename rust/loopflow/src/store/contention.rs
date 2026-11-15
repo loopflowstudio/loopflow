@@ -1,7 +1,5 @@
 //! Read writer and victim diagnostics grouped by the binary that logged them.
 
-#[cfg(test)]
-pub(crate) use super::write_holds::empty_writes;
 use super::write_holds::SLOW_WRITE_MESSAGE;
 use crate::diagnostic_log::{field, read_tail};
 use std::collections::{BTreeMap, BTreeSet};
@@ -79,7 +77,7 @@ mod tests {
 
     use super::{summarize, UNIDENTIFIED};
     use crate::diagnostic_log::{field, IdentifiedLines};
-    use crate::store::sqlite::SqliteStore;
+    use loopflow_storage::sqlite::SqliteStore;
 
     #[derive(Clone, Default)]
     struct Captured(Arc<Mutex<Vec<u8>>>);

@@ -534,7 +534,7 @@ fn claude_usage_reconciliation_legacy_precedence_and_indexed_lookups() {
     let revision = store
         .provider_account_capacity_revision("claude", &account.account_id)
         .unwrap();
-    let statements = crate::store::query_plans::statements(&store, || {
+    let statements = loopflow_storage::query_plans::statements(&store, || {
         assert!(crate::provider_account::capacity::reconcile(
             &store,
             &account,
@@ -584,7 +584,7 @@ fn a_capacity_replacement_rechecks_the_snapshot_after_a_stream_write() {
     let reading = store
         .provider_account_capacity("claude", &account.account_id)
         .unwrap();
-    let update = crate::store::capacity::ProviderCapacityUpdate {
+    let update = loopflow_storage::capacity::ProviderCapacityUpdate {
         windows: vec![window("seven_day", 10, None)],
         superseded_windows: vec!["weekly".into()],
         recovered: true,

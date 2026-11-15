@@ -27,15 +27,15 @@ use crate::portfolio::{self, PortfolioCommand};
 use crate::process::LfProcess;
 use crate::provider_auth::Provider;
 use crate::session::TitleSource;
-use crate::store::work::edit::{Disposition, WorkEdit, WorkValue};
-use crate::store::work::project::ProjectKR;
-use crate::store::work::task::{Task, TaskEventKind};
 use crate::store::{SharedStore, StorageConfig};
 use crate::task_graph::END;
 use crate::work::wave::metrics::MetricTarget;
 pub use crate::work::wave::metrics::Threshold;
 use loopflow_model::durable::TaskId;
 use loopflow_model::id::{LfProcessId, TraceId};
+use loopflow_storage::work::edit::Disposition;
+use loopflow_storage::work::project::ProjectKR;
+use loopflow_storage::work::task::{Task, TaskEventKind};
 
 const DAY: i64 = 24 * 60 * 60;
 const GITHUB_REPO: &str = "https://github.com/demo/project";
@@ -309,7 +309,7 @@ impl World {
             dir,
             env,
             repo,
-            now: crate::store::rows::now_unix(),
+            now: loopflow_storage::rows::now_unix(),
             runtime: tokio::runtime::Runtime::new()?,
         })
     }
@@ -577,13 +577,9 @@ impl World {
 
     fn dispose(&self, task: &Task, disposition: Disposition) -> Result<()> {
         let store = self.store()?;
-        let mut conn = store.sqlite.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction()?;
-        crate::store::sqlite::planning_write::local(
-            &tx,
-            &WorkEdit::for_target(task.id.as_str(), &[WorkValue::Disposition(disposition)]),
-        )?;
-        tx.commit()?;
+        store
+            .sqlite
+            .record_task_disposition(&task.id, disposition)?;
         Ok(())
     }
 

@@ -4,9 +4,9 @@ use std::path::Path;
 use crate::durable::TaskExecutionRoute;
 use crate::lf::{Cli, Commands, SessionCommand, TaskCommand};
 use crate::ops::human_session::moves::conversation_task;
-use crate::store::sqlite::SqliteStore;
 use anyhow::{anyhow, Result};
 use loopflow_model::durable::{MachineId, RepositoryId, RepositoryIdentity, TaskId};
+use loopflow_storage::sqlite::SqliteStore;
 
 pub fn identity(
     bind: Option<&RepositoryId>,
@@ -369,7 +369,7 @@ pub(crate) fn remote_ownership_writer(selector: &str) -> Result<Option<TaskExecu
     };
     let sent = matches!(
         moving.stage,
-        crate::store::sqlite::task_moves::MoveStage::Sent { .. }
+        loopflow_storage::sqlite::task_moves::MoveStage::Sent { .. }
     );
     let arrived = sent && super::session_move::arrived_on(&route.task_id, &moving.to_machine_id)?;
     Ok(arrived.then_some(route))
@@ -619,6 +619,7 @@ fn context_scope(
                     .map(|wave| ContextScope::Wave(wave.name().to_string())),
                 Ok(PrimaryScope::Repository(_)) => Some(ContextScope::Repository),
                 Ok(PrimaryScope::Task(_)) | Err(_) => None,
+                Ok(_) => None,
             },
         )
     })
@@ -739,9 +740,9 @@ mod tests {
     use super::{launch_task, repository_path, resolve, resolve_task, without_placement};
     use crate::lf::Cli;
 
-    use crate::store::work::task::NewTask;
     use clap::Parser;
     use loopflow_model::durable::{RepositoryId, TaskId};
+    use loopflow_storage::work::task::NewTask;
 
     #[test]
     fn routing_resolves_task_prefixes_within_historical_repository_locators() {

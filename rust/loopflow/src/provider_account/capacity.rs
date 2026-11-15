@@ -1,7 +1,7 @@
 //! Account quota policy over saved provider observations.
-use crate::store::capacity::{ProviderCapacityReading, ProviderCapacityUpdate};
-use crate::store::sqlite::SqliteStore;
 use crate::store::{AccountLimitRow, AccountLimitWindow, ProviderAccount, StoreResult};
+use loopflow_storage::capacity::{ProviderCapacityReading, ProviderCapacityUpdate};
+use loopflow_storage::sqlite::SqliteStore;
 
 fn is_model_weekly_window(window: &str, model: Option<&str>) -> bool {
     model.is_some_and(|model| {

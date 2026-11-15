@@ -32,13 +32,19 @@ def main() -> None:
         root = Path(temporary).resolve()
         trees = [root / name for name in ("a", "b")]
         for tree in trees:
-            for package in ("loopflow-model", "loopflow-definitions", "loopflow-terminal"):
+            for package in (
+                "loopflow-model",
+                "loopflow-definitions",
+                "loopflow-terminal",
+                "loopflow-storage",
+                "loopflow-test-support",
+            ):
                 shutil.copytree(ROOT / "rust" / package, tree / "rust" / package)
             shutil.copyfile(ROOT / "Cargo.lock", tree / "Cargo.lock")
             (tree / "Cargo.toml").write_text(
                 '[workspace]\nresolver="2"\n'
                 'members=["rust/loopflow-model", "rust/loopflow-definitions", '
-                '"rust/loopflow-terminal", "rust/model-dependencies", "path-fixture"]\n'
+                '"rust/loopflow-terminal", "rust/loopflow-storage", "rust/loopflow-test-support", "rust/model-dependencies", "path-fixture"]\n'
                 "[workspace.package]\n"
                 + package_fields
                 + "[profile.dev]\ndebug=1\nincremental=false\n"
@@ -180,7 +186,13 @@ def main() -> None:
                 build(f"model_{label}", tree, "loopflow-model")
                 build(f"definitions_{label}", tree, "loopflow-definitions")
                 build(f"terminal_{label}", tree, "loopflow-terminal")
-                for package in ("loopflow_model", "loopflow_definitions", "loopflow_terminal"):
+                build(f"storage_{label}", tree, "loopflow-storage")
+                for package in (
+                    "loopflow_model",
+                    "loopflow_definitions",
+                    "loopflow_terminal",
+                    "loopflow_storage",
+                ):
                     library = tree / "target/debug" / f"lib{package}.rlib"
                     shutil.copyfile(library, output / f"{package}_{label}.rlib")
                     paths = run(["strings", str(library)]).stdout
@@ -191,6 +203,15 @@ def main() -> None:
                 actual = run([str(tree / "target/debug/path-fixture")], tree).stdout.strip()
                 if actual != str(tree / "path-fixture"):
                     raise RuntimeError(f"wrong checkout identity: {actual}")
+            changed = trees[1] / "rust/loopflow-storage/src/work/task/mod.rs"
+            changed.write_text(
+                changed.read_text().replace(
+                    '#[error("invalid Task: {0}")]', '#[error("invalid Task: {0} (cache probe)")]'
+                )
+            )
+            build("changed_storage_b", trees[1], "loopflow-storage")
+            if receipts[-1]["libraries"] != ["loopflow_storage"]:
+                raise RuntimeError(f"Task edit rebuilt outside storage: {receipts[-1]}")
             # Roots are server-startup state. A newly added root misses until
             # our own idle server is refreshed; the same cache then serves it.
             third = root / "c"
@@ -246,7 +267,13 @@ def main() -> None:
                 if receipt["case"].startswith(("model_", "new_root_", "changed_model_")):
                     if receipt["libraries"] != ["loopflow_model"]:
                         raise RuntimeError(f"model dependencies were not warm: {receipt}")
-            expected_hits = {"model_b", "definitions_b", "terminal_b", "new_root_after_refresh"}
+            expected_hits = {
+                "model_b",
+                "definitions_b",
+                "terminal_b",
+                "storage_b",
+                "new_root_after_refresh",
+            }
             for receipt in receipts:
                 count = len(receipt["libraries"])
                 expected = (count, 0) if receipt["case"] in expected_hits else (0, count)

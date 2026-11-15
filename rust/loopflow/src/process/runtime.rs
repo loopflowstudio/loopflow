@@ -14,10 +14,10 @@ use crate::session_record::{
     new_artifact_key, record_error, row_store, AgentProcessRequest, CaptureHandoff,
     SessionCaptureSpec, SessionRecorder, CAPTURE_KEY_ENV,
 };
-use crate::store::sqlite::SqliteStore;
 use crate::store::{StoreError, StoreResult};
 use loopflow_model::chat::types::ConversationEvent;
 use loopflow_model::id::AgentSessionId;
+use loopflow_storage::sqlite::SqliteStore;
 
 /// Shared live resources for an lf invocation's provider work, with no separate
 /// execution identity. A skill keeps one runtime across provider retries.
@@ -37,7 +37,7 @@ pub(crate) fn finish_session_attachment(
 }
 
 pub(crate) fn register_session_attachment_interrupt(
-    store: &crate::store::sqlite::SqliteStore,
+    store: &loopflow_storage::sqlite::SqliteStore,
     session: String,
     attachment: crate::process::SessionAttachment,
 ) {
@@ -523,7 +523,7 @@ impl RuntimeState {
 
 /// Resume the saved conversation after settling its exact former AgentProcess.
 pub(crate) fn resume_session_agent_process(
-    store: &crate::store::sqlite::SqliteStore,
+    store: &loopflow_storage::sqlite::SqliteStore,
     session: &str,
     lf_process_id: &loopflow_model::id::LfProcessId,
 ) -> StoreResult<crate::process::SessionAttachment> {
@@ -563,8 +563,8 @@ mod tests {
     use std::process::{Command, Stdio};
     use std::time::Duration;
 
-    use crate::store::sqlite::SqliteStore;
     use loopflow_model::id::LfProcessId;
+    use loopflow_storage::sqlite::SqliteStore;
 
     struct Child(std::process::Child);
 
@@ -633,7 +633,7 @@ mod tests {
         let _ambient = crate::test_ambient::EnvGuard::new();
         let (home, store, detached) = resume_fixture();
         let task = store
-            .create_task(&crate::store::work::task::NewTask {
+            .create_task(&loopflow_storage::work::task::NewTask {
                 id: loopflow_model::durable::TaskId::new(),
                 repository_id: crate::repository::location::ensure_repository(
                     &store,

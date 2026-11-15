@@ -1,8 +1,8 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::store::sqlite::SQLITE_WRITE_BUSY_TIMEOUT;
 use crate::store::{CredentialType, ProviderToken, ProviderTokenReplacement, Store};
+use loopflow_storage::sqlite::SQLITE_WRITE_BUSY_TIMEOUT;
 
 #[tokio::test]
 async fn linear_oauth_cancelled_commit_retains_lock_until_blocking_work_settles() {

@@ -2,11 +2,11 @@
 
 use crate::process::{AgentProcessState, Departure, LfProcessStart, SessionAttachment};
 use crate::session::LfSession;
-use crate::store::sqlite::{
-    PreviousAgentDisposition, SessionTransfer, SqliteStore, UnrecordedAncestry,
-};
 use crate::store::{StoreError, StoreResult};
 use loopflow_model::id::{AgentSessionId, LfProcessId};
+use loopflow_storage::sqlite::{
+    PreviousAgentDisposition, SessionTransfer, SqliteStore, UnrecordedAncestry,
+};
 
 pub fn session_connection(
     store: &SqliteStore,

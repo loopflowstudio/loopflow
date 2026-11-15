@@ -20,8 +20,8 @@ use tracing::{debug, warn};
 
 use crate::git::worktrees::main_repo_root;
 use crate::process::{AgentCaller, LfProcess, AGENT_CALLER_ENV};
-use crate::store::sqlite::SqliteStore;
 use loopflow_model::id::{LfProcessId, TraceId};
+use loopflow_storage::sqlite::SqliteStore;
 
 const JOURNAL_ROOT: &str = ".lf/journal/traces";
 const JOURNAL_EXCLUDE_ENTRY: &str = ".lf/journal/";
@@ -204,13 +204,13 @@ pub struct ReceiptCost {
 /// attempt, so a held write lock delays a command once, not once per receipt.
 #[cfg(not(test))]
 fn receipt_wait() -> Duration {
-    crate::store::sqlite::SQLITE_WRITE_BUSY_TIMEOUT
+    loopflow_storage::sqlite::SQLITE_WRITE_BUSY_TIMEOUT
 }
 
 #[cfg(test)]
 thread_local! {
     static TEST_RECEIPT_WAIT: std::cell::Cell<Duration> =
-        const { std::cell::Cell::new(crate::store::sqlite::SQLITE_WRITE_BUSY_TIMEOUT) };
+        const { std::cell::Cell::new(loopflow_storage::sqlite::SQLITE_WRITE_BUSY_TIMEOUT) };
 }
 
 #[cfg(test)]

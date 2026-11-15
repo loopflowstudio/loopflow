@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::git::{acquire_worktree_lease, worktrees::is_persistent_worktree};
 use crate::os_process::bounded_output;
-use crate::store::sqlite::{read_task_worktree_ownership, SqliteStore};
+use loopflow_storage::sqlite::{read_task_worktree_ownership, SqliteStore};
 
 #[cfg(test)]
 thread_local! {
@@ -434,7 +434,7 @@ mod tests {
         let store = crate::store::opening::open_ephemeral(&db).unwrap();
         let task = loopflow_model::durable::TaskId::new();
         let wave = loopflow_model::id::WaveId::new();
-        let project = crate::store::work::project::ProjectId::new();
+        let project = loopflow_storage::work::project::ProjectId::new();
         let conn = Connection::open(&db).unwrap();
         conn.execute(
             "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'proof',?2,1)",

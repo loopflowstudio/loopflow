@@ -23,9 +23,9 @@ use crate::provider_account::{
     ensure_account_home, match_account, new_account, open_account_store, AccountMatch,
 };
 use crate::provider_auth::Provider;
-use crate::store::rows::now_unix;
 use crate::store::{CredentialState, CredentialType, ProviderAccount, ProviderToken, SharedStore};
 use loopflow_model::durable::{Machine, MachineId};
+use loopflow_storage::rows::now_unix;
 
 // Deliberately no Debug: native credential JSON and tokens must never be logged.
 #[derive(Serialize, Deserialize)]
@@ -74,7 +74,7 @@ enum Credential {
 /// rental refreshed at prepare must not outlive it, or Linear stops working
 /// there; raising `rental::MAX_HOURS` past it needs another way to renew.
 const LINEAR_ACCESS_HOURS: f64 = 24.0;
-const _: () = assert!(crate::store::rental::MAX_HOURS <= LINEAR_ACCESS_HOURS);
+const _: () = assert!(loopflow_storage::rental::MAX_HOURS <= LINEAR_ACCESS_HOURS);
 
 /// A rental's Claude access token counts as current until this close to its
 /// expiry; then a connect, by hand or before a launch, sends the next one. A
@@ -1818,7 +1818,7 @@ esac
 
     /// A Machine at `route` under a live rental.
     fn live_rental(store: &SharedStore, route: &str) -> loopflow_model::durable::Machine {
-        use crate::store::rental::{Hardware, OnDemand, Provider, Usd};
+        use loopflow_storage::rental::{Hardware, OnDemand, Provider, Usd};
         let usd = |text| Usd::parse(text).unwrap();
         crate::store::rentals::add_ondemand(
             &store.sqlite,

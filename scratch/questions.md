@@ -69,3 +69,9 @@
 - Mixed child fixtures use observed peer import above storage; prepared SQL tests
   keep local writer/title repair and Task-field persistence below it. This avoids
   exporting a transaction helper solely for the application fixtures.
+
+- Unknown future provider kinds use the existing missing-token refresh error; no
+  provider command is attempted. Known non-refreshing kinds retain that behavior.
+- The demo World records upstream disposition through a storage-owned command;
+  the hook's quiet cache reads the database path through storage. Raw connection
+  access is available only with the dev-only `test-support` feature.

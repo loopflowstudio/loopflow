@@ -7,8 +7,8 @@ use crate::durable::{
     TaskLocationObservation,
 };
 use crate::ops::context::{ContextExplanation, ContextFact};
-use crate::store::sqlite::SqliteStore;
 use loopflow_model::durable::{Machine, RepositoryId, TaskId};
+use loopflow_storage::sqlite::SqliteStore;
 
 pub async fn observe(
     store: &SqliteStore,

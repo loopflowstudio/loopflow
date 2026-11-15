@@ -12,10 +12,10 @@ use crate::journal::ProcessIdentityEvidence;
 use crate::process::ProcessEntry;
 use crate::session::GraphProcessSummaryState;
 use crate::session_record::activity::{self, Activity};
-use crate::store::sqlite::{entry_of, AgentLimitRecovery, GraphExecutionFacts, SqliteStore};
-use crate::store::work::task::Task;
 use crate::store::{SharedStore, StoreResult};
 use loopflow_model::durable::TaskId;
+use loopflow_storage::sqlite::{entry_of, AgentLimitRecovery, GraphExecutionFacts, SqliteStore};
+use loopflow_storage::work::task::Task;
 
 use super::error::{OpsError, OpsResult};
 
@@ -376,7 +376,7 @@ mod tests {
     };
     use crate::journal::ProcessIdentityEvidence::{Dead, Live, Unknown};
     use crate::session::GraphProcessSummaryState;
-    use crate::store::sqlite::AgentLimitRecovery;
+    use loopflow_storage::sqlite::AgentLimitRecovery;
 
     fn snapshot(state: TaskExecutionState) -> TaskExecutionSnapshot {
         TaskExecutionSnapshot {

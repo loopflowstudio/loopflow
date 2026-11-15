@@ -9,10 +9,10 @@ use serde::{Deserialize, Serialize};
 
 use super::{locate, read, ExpiryPolicy, Gap, Located, Source, Turn};
 use crate::harness::HarnessKind;
-use crate::store::sqlite::SqliteStore;
 use crate::store::ProviderAccountId;
+use loopflow_storage::sqlite::SqliteStore;
 
-pub use crate::store::transcript::{ThreadFacts, TurnFacts};
+pub use loopflow_storage::transcript::{ThreadFacts, TurnFacts};
 
 /// `lf history show SESSION --transcript --json`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -17,14 +17,14 @@ use crate::lf::output::Colors;
 use crate::lf::{Cli, Commands, PrCommand};
 use crate::ops::graph_process;
 use crate::ops::WorkBinding;
-use crate::store::sqlite::SqliteStore;
-use crate::store::work::task::Task;
 use crate::store::SharedStore;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use clap::Parser;
 use loopflow_model::durable::WorkRef;
 use loopflow_model::id::LfProcessId;
+use loopflow_storage::sqlite::SqliteStore;
+use loopflow_storage::work::task::Task;
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -261,7 +261,7 @@ pub fn run_task_graph_for(
                 // The recovery sweep restarts a wait at its reset, not now.
                 if let Some(retry_at) = recovery
                     .retry_at
-                    .filter(|at| *at > crate::store::rows::now_unix())
+                    .filter(|at| *at > loopflow_storage::rows::now_unix())
                 {
                     eprintln!(
                         "The run of {run} is waiting on a limit until {}; it starts again at {step} then.",

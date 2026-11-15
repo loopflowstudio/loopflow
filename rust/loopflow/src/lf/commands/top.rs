@@ -15,9 +15,9 @@ use crate::journal::{
     recorded_process_receipt, OsProcess, ProcessIdentityEvidence, ProcessReceipt,
 };
 use crate::lf::output::truncate;
-use crate::store::rows::unix_to_datetime;
-use crate::store::sqlite::SqliteStore;
 use loopflow_model::id::LfProcessId;
+use loopflow_storage::rows::unix_to_datetime;
+use loopflow_storage::sqlite::SqliteStore;
 
 const SCHEMA_VERSION: u32 = 1;
 const COMMAND_WIDTH: usize = 82;
@@ -84,7 +84,7 @@ pub struct ProcessPruneReport {
     pub reaped_agent_process_groups: u32,
     pub agent_process_records: Vec<crate::harness::agent_process::AgentProcessCleanup>,
     /// Store retention; absent on a dry run or before the store exists.
-    pub store: Option<crate::store::sqlite::retention::RetentionReport>,
+    pub store: Option<loopflow_storage::sqlite::retention::RetentionReport>,
     pub errors: u32,
 }
 

@@ -11,8 +11,8 @@ use super::waves::{
 };
 use crate::durable::{GraphProcessDetail, TaskSection, TaskState};
 use crate::ops::human_session::{SessionRecord, SessionState};
-use crate::store::work::task::{CiCheck, CiState};
 use loopflow_model::comment::TaskComments;
+use loopflow_storage::work::task::{CiCheck, CiState};
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PlanBoard {

@@ -11,8 +11,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::planning_git::{PlanningGit, PlanningPublication, PlanningRevision};
-use crate::store::planning_exchange::PlanningSnapshot;
 use crate::store::{open_store, sqlite::SqliteStore, StorageConfig, Store};
+use loopflow_storage::planning_exchange::PlanningSnapshot;
 
 use super::{OpsError, OpsResult};
 
@@ -26,7 +26,7 @@ pub(crate) async fn find_task(
     store: &Store,
     repo: &str,
     selector: &str,
-) -> OpsResult<Option<crate::store::work::task::Task>> {
+) -> OpsResult<Option<loopflow_storage::work::task::Task>> {
     let read = || {
         crate::store::children::resolve_task_id(&store.sqlite, selector, Some(repo))?
             .map(|id| store.sqlite.task(&id))

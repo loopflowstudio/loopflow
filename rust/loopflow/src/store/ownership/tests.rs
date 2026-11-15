@@ -1,8 +1,8 @@
 use super::{acquire, claim_task, held_planning, task_execution_route, task_ownership};
 use crate::store::placement::{set_machine_default, wave_owning_machine};
-use crate::store::sqlite::SqliteStore;
-use crate::store::work::task::NewTask;
 use loopflow_model::durable::{DefaultScope, MachineId, MachineSetting, TaskId};
+use loopflow_storage::sqlite::SqliteStore;
+use loopflow_storage::work::task::NewTask;
 use loopflow_test_support::TestRepo;
 use rusqlite::params;
 
@@ -141,7 +141,7 @@ fn new_task_reacquires_placement_after_wave_ancestry_changes() {
             None,
             None,
             &stale,
-            &crate::store::sqlite::SessionCaller {
+            &loopflow_storage::sqlite::SessionCaller {
                 agent: None,
                 capture_key: None
             },
@@ -206,7 +206,7 @@ fn hand_back_rejects_a_changed_repository_with_the_same_held_set() {
     crate::store::machines::add_machine(&store, &remote, "mini", "mini").unwrap();
     claim_task(&store, &task.id).unwrap();
     super::move_claim(&store, &task.id, &remote).unwrap();
-    use crate::store::rental::{Hardware, OnDemand, Provider, RentalState, Usd};
+    use loopflow_storage::rental::{Hardware, OnDemand, Provider, RentalState, Usd};
     crate::store::rentals::add_ondemand(
         &store,
         &OnDemand {
@@ -325,7 +325,7 @@ fn held_scope_batches_ten_thousand_tasks_and_keys_repository_joins() {
     let task = store.create_task(&input(&store, repo.path())).unwrap();
     claim_task(&store, &task.id).unwrap();
     let local = store.saved_local_machine().unwrap().id;
-    let before = crate::store::query_plans::statements(&store, || {
+    let before = loopflow_storage::query_plans::statements(&store, || {
         assert_eq!(
             held_planning(&store, &local).unwrap().0.repositories.len(),
             1
@@ -349,7 +349,7 @@ fn held_scope_batches_ten_thousand_tasks_and_keys_repository_joins() {
         ).unwrap();
         tx.commit().unwrap();
     }
-    let after = crate::store::query_plans::statements(&store, || {
+    let after = loopflow_storage::query_plans::statements(&store, || {
         assert_eq!(
             held_planning(&store, &local).unwrap().0.repositories.len(),
             10001
@@ -361,15 +361,15 @@ fn held_scope_batches_ten_thousand_tasks_and_keys_repository_joins() {
         .filter(|sql| sql.contains("SELECT t.id,t.repository_id,r.repo"))
         .collect();
     assert_eq!(repository_joins.len(), 1);
-    assert!(crate::store::query_plans::growing_scans(&store, &repository_joins).is_empty());
+    assert!(loopflow_storage::query_plans::growing_scans(&store, &repository_joins).is_empty());
 }
 
 #[test]
 fn promotion_refuses_a_replaced_caller_for_either_title_source() {
     use crate::process::AgentCaller;
     use crate::session::TitleSource;
-    use crate::store::sqlite::SessionCaller;
     use crate::store::StoreError;
+    use loopflow_storage::sqlite::SessionCaller;
 
     let (_home, store) = store();
     let repo = TestRepo::new();

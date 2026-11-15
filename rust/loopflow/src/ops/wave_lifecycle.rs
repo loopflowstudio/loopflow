@@ -13,10 +13,10 @@ use crate::work::wave::lifecycle::{Identity, Operation, ProviderChange};
 use serde::{Deserialize, Serialize};
 
 use crate::ops::{OpsError, OpsResult};
-use crate::store::work::project::Project;
 use crate::store::Store;
 use crate::work::wave::Wave;
 use loopflow_model::id::WaveId;
+use loopflow_storage::work::project::Project;
 
 fn lifecycle_error(message: impl ToString) -> OpsError {
     OpsError::Message(message.to_string())
@@ -920,7 +920,7 @@ pub async fn rename(
         .to_path_buf();
     let target = new_name
         .map(|name| {
-            crate::store::work::wave::normalize_wave_name(name)
+            loopflow_storage::work::wave::normalize_wave_name(name)
                 .ok_or_else(|| lifecycle_error(format!("invalid Wave name {name:?}")))
         })
         .transpose()?;

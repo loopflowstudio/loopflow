@@ -9,9 +9,9 @@ use crate::lf::commands::util::parse_since;
 use crate::lf::commands::work_catalog::{WorkCatalog, WorkOwner};
 use crate::lf::commands::WorkFilter;
 use crate::session_record::SessionHistory;
-use crate::store::rows::unix_to_datetime;
-use crate::store::sqlite::SqliteStore;
 use loopflow_model::durable::WorkRef;
+use loopflow_storage::rows::unix_to_datetime;
+use loopflow_storage::sqlite::SqliteStore;
 
 const MAX_LIMIT: usize = 200;
 
@@ -370,7 +370,7 @@ fn print_snapshot(snapshot: &WorkActivitySnapshot) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::work::task::TaskId;
+    use loopflow_storage::work::task::TaskId;
 
     #[test]
     fn work_activity_fixture_round_trips() {

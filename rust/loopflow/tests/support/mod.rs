@@ -22,8 +22,7 @@ pub mod ambient;
 pub mod rex;
 
 // Shared with the library's cfg(test) store setup; production never embeds it.
-#[path = "../../src/store/test_database.rs"]
-pub(crate) mod test_database;
+pub(crate) use loopflow_storage::test_database;
 
 #[allow(dead_code)] // Shared helper compiled into each integration test binary.
 pub fn seed_store(home: &Path) {

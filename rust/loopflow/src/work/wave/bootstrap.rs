@@ -2,11 +2,11 @@
 
 use std::path::Path;
 
-use crate::store::sqlite::wave_definitions::WaveBootstrapRow;
-use crate::store::sqlite::SqliteStore;
-use crate::store::work::project::Project;
 use crate::store::{StoreError, StoreResult};
 use loopflow_model::id::WaveId;
+use loopflow_storage::sqlite::wave_definitions::WaveBootstrapRow;
+use loopflow_storage::sqlite::SqliteStore;
+use loopflow_storage::work::project::Project;
 
 fn invalid(error: impl std::fmt::Display) -> StoreError {
     StoreError::InvalidData(error.to_string())
@@ -315,17 +315,21 @@ mod tests {
         let removed = crate::work::wave::bootstrap::ensure_wave(&store, root, "archive").unwrap();
         // The store renames `product` and retires `archive`; this checkout still
         // has both old directories.
-        {
-            let conn = store.conn.lock().unwrap();
-            crate::store::sqlite::planning_write::local(
-                &conn,
-                &crate::store::work::edit::WorkEdit::for_target(
-                    renamed.as_str(),
-                    &[crate::store::work::edit::WorkValue::WaveName("prod".into())],
-                ),
-            )
+        let saved = store.get_wave(&renamed).unwrap().unwrap();
+        store
+            .relocate_waves(&[loopflow_storage::WaveLocatorUpdate {
+                wave_id: renamed.clone(),
+                expected_repo: saved.repo().into(),
+                expected_slug: "product".into(),
+                target: loopflow_storage::work::wave::WaveLocator::new(
+                    loopflow_storage::address::CanonicalRepo::from_canonical_path(
+                        std::path::PathBuf::from(saved.repo()),
+                    ),
+                    "prod",
+                )
+                .unwrap(),
+            }])
             .unwrap();
-        }
         store
             .retire_waves(std::slice::from_ref(&removed), "removed")
             .unwrap();
@@ -552,7 +556,7 @@ mod tests {
                     conn.execute(&sql, [&id]).unwrap();
                 }
             }
-            let addition = crate::store::sqlite::wave_definitions::WaveBootstrapRow {
+            let addition = loopflow_storage::sqlite::wave_definitions::WaveBootstrapRow {
                 id: WaveId::new(),
                 repo: canonical.clone(),
                 name: "parser".into(),

@@ -271,8 +271,8 @@ use std::ffi::OsString;
 use super::human_session_argv;
 use crate::lf::commands::write::SessionOpenIntent;
 use crate::session::LfSession;
-use crate::store::work::task::TaskId;
 use crate::store::{open_ephemeral_store, SharedStore, StorageConfig};
+use loopflow_storage::work::task::TaskId;
 
 pub(crate) struct SessionHome {
     home: tempfile::TempDir,
@@ -522,7 +522,7 @@ async fn session_work_labels_follow_stable_ancestry_without_a_roadmap() {
         directory.path().display().to_string(),
     );
     store.create_wave(&wave).await.unwrap();
-    let session = |task_id: Option<crate::store::work::task::TaskId>| LfSession {
+    let session = |task_id: Option<loopflow_storage::work::task::TaskId>| LfSession {
         captured: None,
         caller_artifact_key: None,
         id: "conversation".into(),
@@ -563,7 +563,7 @@ async fn session_work_labels_follow_stable_ancestry_without_a_roadmap() {
         super::session_work_path(&store, &unbound).await.unwrap(),
         None
     );
-    let missing = crate::store::work::task::TaskId::new();
+    let missing = loopflow_storage::work::task::TaskId::new();
     assert_eq!(
         super::session_work_path(&store, &session(Some(missing.clone())))
             .await
@@ -995,7 +995,7 @@ async fn task_detail_reads_capacity_once_for_all_sessions() {
     let task = logins
         .store
         .sqlite
-        .create_task(&crate::store::work::task::NewTask {
+        .create_task(&loopflow_storage::work::task::NewTask {
             repository_id: crate::repository::location::ensure_repository(
                 &logins.store.sqlite,
                 repo.path().to_str().unwrap(),
@@ -1010,7 +1010,7 @@ async fn task_detail_reads_capacity_once_for_all_sessions() {
         .unwrap();
     // `lf task status`, Desktop and screens read this on the write store.
     let mut status =
-        crate::store::query_plans::assert_no_empty_writes(&logins.store.sqlite, || {
+        loopflow_storage::query_plans::assert_no_empty_writes(&logins.store.sqlite, || {
             tokio::task::block_in_place(|| {
                 tokio::runtime::Handle::current()
                     .block_on(crate::ops::task::registered_task_status(
@@ -1579,7 +1579,7 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
             .unwrap();
         assert_eq!(
             stopped.disposition,
-            crate::store::sqlite::creation::RecoveryDisposition::Inspect
+            loopflow_storage::sqlite::creation::RecoveryDisposition::Inspect
         );
         assert_eq!(stopped.explanation, "Conversation change unconfirmed");
         // A crash while stopping is uncertain, even if no provider is live now.
@@ -1618,7 +1618,7 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
                 .unwrap()
                 .unwrap()
                 .disposition,
-            crate::store::sqlite::creation::RecoveryDisposition::Continue
+            loopflow_storage::sqlite::creation::RecoveryDisposition::Continue
         );
         // Simulate app/server death after the atomic append, before publication.
         let recovered = super::new_thread(&store, &record.id, None, false, false, "interrupted")
@@ -1641,7 +1641,7 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
                 .unwrap()
                 .unwrap()
                 .disposition,
-            crate::store::sqlite::creation::RecoveryDisposition::Complete
+            loopflow_storage::sqlite::creation::RecoveryDisposition::Complete
         );
         let mut newer = recovered.clone();
         newer.request = Some("A later independent input".into());
@@ -1690,7 +1690,7 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
                 .unwrap()
                 .unwrap()
                 .disposition,
-            crate::store::sqlite::creation::RecoveryDisposition::Continue
+            loopflow_storage::sqlite::creation::RecoveryDisposition::Continue
         );
         let newest = super::append_input(&store, pending).await.unwrap();
         let refused = super::new_thread(&store, &record.id, None, false, false, "superseded")
@@ -1707,7 +1707,7 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
             .unwrap();
         assert_eq!(
             receipt.disposition,
-            crate::store::sqlite::creation::RecoveryDisposition::Inspect
+            loopflow_storage::sqlite::creation::RecoveryDisposition::Inspect
         );
         assert_eq!(
             receipt.explanation,
@@ -1756,7 +1756,7 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
                 .unwrap()
                 .unwrap()
                 .disposition,
-            crate::store::sqlite::creation::RecoveryDisposition::Complete
+            loopflow_storage::sqlite::creation::RecoveryDisposition::Complete
         );
     });
 }
@@ -1801,7 +1801,7 @@ async fn a_held_task_conversation_without_a_view_offers_attach() {
     let created = logins
         .store
         .sqlite
-        .create_task(&crate::store::work::task::NewTask {
+        .create_task(&loopflow_storage::work::task::NewTask {
             repository_id: crate::repository::location::ensure_repository(
                 &logins.store.sqlite,
                 "/fixture",
@@ -1870,7 +1870,7 @@ impl ListFilters {
         let store = home.store().await;
         let repo = loopflow_test_support::TestRepo::new();
         let wave = loopflow_model::id::WaveId::new();
-        let project = crate::store::work::project::ProjectId::new();
+        let project = loopflow_storage::work::project::ProjectId::new();
         let task = loopflow_model::durable::TaskId::new();
         let db = rusqlite::Connection::open(home.home.path().join("loopflow.db")).unwrap();
         db.execute(

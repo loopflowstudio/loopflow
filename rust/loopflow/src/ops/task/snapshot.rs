@@ -14,9 +14,9 @@ use std::process::Command;
 use crate::config::parse_agent;
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::task_actions::{derive_task_actions, TaskActionEvidence, TaskActionModel};
-use crate::store::child::ChildRef;
-use crate::store::work::task::{PrPhase, Task, TaskPr};
 use crate::store::SharedStore;
+use loopflow_storage::child::ChildRef;
+use loopflow_storage::work::task::{PrPhase, Task, TaskPr};
 use sha2::{Digest, Sha256};
 
 pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {

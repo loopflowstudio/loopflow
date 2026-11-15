@@ -103,7 +103,7 @@ pub(crate) async fn ensure_task(
 /// and `lf resume` creates the conversation as before.
 pub(crate) async fn start_task_conversation(
     store: &SharedStore,
-    task: &crate::store::work::task::Task,
+    task: &loopflow_storage::work::task::Task,
 ) {
     let (phase, subject) = match start_in_background(store, task).await {
         Ok(Some(session)) => ("background_start", session),
@@ -118,7 +118,7 @@ pub(crate) async fn start_task_conversation(
 
 async fn start_in_background(
     store: &SharedStore,
-    task: &crate::store::work::task::Task,
+    task: &loopflow_storage::work::task::Task,
 ) -> Result<Option<String>> {
     let worktree = task.worktree()?.clone();
     let wave = match &task.wave_id {
@@ -229,6 +229,7 @@ fn scope_segment(scope: &PrimaryScope) -> Result<crate::git::worktrees::Worktree
         PrimaryScope::Repository(_) => WorktreeSegment::parse("repo")?,
         PrimaryScope::Wave(id) => wave_agent_segment(id.as_str())?,
         PrimaryScope::Task(id) => bail!("Task {id}'s conversations live in its own checkout"),
+        _ => bail!("Unsupported conversation scope: {scope:?}"),
     })
 }
 
@@ -288,6 +289,7 @@ pub(crate) async fn admit_workspace(store: &SharedStore, session: LfSession) -> 
                 .await??
             }
         }
+        _ => bail!("Unsupported conversation scope: {scope:?}"),
     };
     if session.cwd != cwd {
         return Ok(store.sqlite.admit_session_workspace(&session, &cwd)?);

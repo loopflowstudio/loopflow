@@ -6,11 +6,11 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use crate::store::planning_sync::{PlanningChange, TaskDeletion};
-use crate::store::sqlite::planning_changes::PlanningChanges;
-use crate::store::work::edit::WorkValue;
 use crate::store::Store;
 use loopflow_model::durable::WorkRef;
+use loopflow_storage::planning_sync::{PlanningChange, TaskDeletion};
+use loopflow_storage::sqlite::planning_changes::PlanningChanges;
+use loopflow_storage::work::edit::WorkValue;
 
 use super::planning_client::PlanningClient;
 use super::{OpsError, OpsResult};
@@ -355,7 +355,7 @@ pub(super) async fn apply_response(
                 .ok_or_else(|| message("Wave is missing"))?;
             let initiative = super::linear::read_initiative(repo, wave.slug())
                 .ok_or_else(|| message("Wave has no Linear Initiative"))?;
-            crate::store::sqlite::linear_acceptance::accept_linear_project_in(
+            loopflow_storage::sqlite::linear_acceptance::accept_linear_project_in(
                 &store.sqlite,
                 &project.wave_id,
                 &initiative,
@@ -454,7 +454,7 @@ async fn observe(
                 .ok_or_else(|| message("Project Wave is missing"))?;
             let initiative = super::linear::read_initiative(repo, wave.slug())
                 .ok_or_else(|| message("Wave has no Linear Initiative"))?;
-            crate::store::sqlite::linear_acceptance::accept_linear_project_in(
+            loopflow_storage::sqlite::linear_acceptance::accept_linear_project_in(
                 &store.sqlite,
                 &project.wave_id,
                 &initiative,
@@ -556,7 +556,7 @@ pub(super) async fn ingest_task(
             }
         }
     }
-    crate::store::sqlite::linear_acceptance::accept_linear_issue_in(
+    loopflow_storage::sqlite::linear_acceptance::accept_linear_issue_in(
         &store.sqlite,
         &repo.to_string_lossy(),
         issue,

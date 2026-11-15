@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod location;
 
-pub use crate::store::address::{CanonicalRepo, CanonicalRepoError};
+pub use loopflow_storage::address::{CanonicalRepo, CanonicalRepoError};
 
 pub fn discover(path: &Path) -> Result<CanonicalRepo, CanonicalRepoError> {
     let main = crate::git::worktrees::main_repo_root(path).unwrap_or_else(|_| path.to_path_buf());

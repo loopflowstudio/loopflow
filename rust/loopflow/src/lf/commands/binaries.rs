@@ -19,8 +19,8 @@ use time::OffsetDateTime;
 use crate::journal::{
     lf_process_evidence, recorded_process_receipt, OsProcess, ProcessIdentityEvidence,
 };
-use crate::store::sqlite::SqliteStore;
 use loopflow_model::id::LfProcessId;
+use loopflow_storage::sqlite::SqliteStore;
 
 const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -370,8 +370,8 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::{group, parse_version, superseded_summary, BinaryInventory, RunningLfProcess};
-    use crate::store::sqlite::SqliteStore;
     use loopflow_model::id::LfProcessId;
+    use loopflow_storage::sqlite::SqliteStore;
 
     fn process(pid: u32) -> RunningLfProcess {
         RunningLfProcess {

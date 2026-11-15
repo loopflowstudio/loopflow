@@ -14,9 +14,9 @@ use anyhow::Result;
 
 use crate::harness::native_exit::{NativeExit, Settled};
 use crate::process::SessionAttachment;
-use crate::store::sqlite::{SqliteStore, ViewerHold};
 use crate::store::RecordingGap;
 use loopflow_model::id::TerminalId;
+use loopflow_storage::sqlite::{SqliteStore, ViewerHold};
 
 /// How often the recorder retries a failed write and rechecks shell Close and
 /// native clients while nothing changes.
@@ -194,7 +194,7 @@ impl Watch {
     }
 
     /// Record what changed.
-    fn record(&mut self, store: &crate::store::sqlite::SqliteStore) {
+    fn record(&mut self, store: &loopflow_storage::sqlite::SqliteStore) {
         if self.recorded != Some(self.hold)
             && report_result(
                 &mut self.hold_failure,
@@ -282,8 +282,8 @@ fn report_result<T>(
 mod tests {
     use crate::process::attachment;
 
-    use crate::store::sqlite::ViewerHold;
     use loopflow_model::id::TerminalId;
+    use loopflow_storage::sqlite::ViewerHold;
     use std::time::{Duration, Instant};
 
     #[test]

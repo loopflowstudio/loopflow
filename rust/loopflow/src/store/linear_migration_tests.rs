@@ -20,9 +20,9 @@ async fn migration_preserves_planning_identity_and_removes_snapshot_storage() {
     }]});
     {
         let conn = Connection::open(&database).unwrap();
-        crate::store::migration_runner::apply_released_planning_fixture(
-            &crate::store::test_fixture::observers(),
-            &crate::store::test_fixture::build(),
+        loopflow_storage::migration_runner::apply_released_planning_fixture(
+            &loopflow_storage::test_fixture::observers(),
+            &loopflow_storage::test_fixture::build(),
             &conn,
         );
         conn.execute(
@@ -37,7 +37,7 @@ async fn migration_preserves_planning_identity_and_removes_snapshot_storage() {
         &database,
         directory.path(),
         FrontierAdvance::Authorized,
-        crate::store::sqlite::SQLITE_WRITE_BUSY_TIMEOUT,
+        loopflow_storage::sqlite::SQLITE_WRITE_BUSY_TIMEOUT,
     )
     .unwrap();
     sqlite.apply_migration_for_test("planning_peers").unwrap();

@@ -7,11 +7,11 @@ use loopflow_test_support::TestRepo;
 use rusqlite::params;
 
 use super::{advance, now, sweep};
-use crate::store::sqlite::ViewerHold;
-use crate::store::work::task::Task;
 use crate::store::{SharedStore, StorageConfig};
 use loopflow_model::durable::TaskId;
 use loopflow_model::id::{LfProcessId, TerminalId};
+use loopflow_storage::sqlite::ViewerHold;
+use loopflow_storage::work::task::Task;
 
 struct Workspace {
     repo: TestRepo,
@@ -261,7 +261,7 @@ fn cleanup_ends_a_done_tasks_held_conversation() {
         assert!(!reason.contains("still has live"), "{reason}");
         assert_eq!(fixture.intent().phase, "closing");
         // Past the viewing grace since completion, cleanup names the terminal.
-        let later = now() + crate::store::sqlite::WORKSPACE_GRACE;
+        let later = now() + loopflow_storage::sqlite::WORKSPACE_GRACE;
         assert_eq!(
             fixture
                 .store
@@ -424,7 +424,7 @@ impl Workspace {
             .unwrap();
     }
 
-    fn intent(&self) -> crate::store::sqlite::TaskRetirement {
+    fn intent(&self) -> loopflow_storage::sqlite::TaskRetirement {
         self.store
             .sqlite
             .task_retirement(&self.task.id)

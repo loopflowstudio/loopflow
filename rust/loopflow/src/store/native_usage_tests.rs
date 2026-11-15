@@ -1,6 +1,6 @@
 //! Native usage attribution through application attachment and input replacement.
 use crate::process::attachment;
-use crate::store::session::SessionEventKind;
+use loopflow_storage::session::SessionEventKind;
 use serde_json::json;
 #[test]
 fn native_usage_survives_attachment_and_input_replacement_without_double_counting() {

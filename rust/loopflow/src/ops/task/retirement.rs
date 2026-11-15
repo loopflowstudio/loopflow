@@ -5,7 +5,6 @@ use std::path::Path;
 
 use super::{block_on_task, task_error, task_store};
 use crate::ops::{NullProgress, OpsError, OpsResult};
-use crate::store::work::task::Task;
 use crate::store::{
     sqlite::{SqliteStore, TaskRetirement, ViewerHold},
     SharedStore,
@@ -13,6 +12,7 @@ use crate::store::{
 use fs2::FileExt;
 use loopflow_model::durable::{TaskId, WorkStatus};
 use loopflow_model::id::TerminalId;
+use loopflow_storage::work::task::Task;
 
 fn now() -> i64 {
     time::OffsetDateTime::now_utc().unix_timestamp()
@@ -99,7 +99,9 @@ fn conversation_closes(store: &SqliteStore, task: &TaskId) -> OpsResult<Vec<(Ter
     } else {
         match viewer_hold(store, task, now)? {
             Some(ViewerHold::Viewed(_)) => return Ok(Vec::new()),
-            Some(ViewerHold::Absent(at)) if at + crate::store::sqlite::WORKSPACE_GRACE > now => {
+            Some(ViewerHold::Absent(at))
+                if at + loopflow_storage::sqlite::WORKSPACE_GRACE > now =>
+            {
                 return Ok(Vec::new())
             }
             _ => {}

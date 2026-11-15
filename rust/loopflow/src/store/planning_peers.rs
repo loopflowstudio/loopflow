@@ -63,7 +63,7 @@ pub fn import_peer_planning(
     repo: &str,
     destination: &str,
     revision: &str,
-    incoming: &crate::store::planning_exchange::PlanningSnapshot,
+    incoming: &loopflow_storage::planning_exchange::PlanningSnapshot,
 ) -> StoreResult<()> {
     if store.peer_import_current(repo, destination, revision)? {
         return Ok(());
@@ -109,9 +109,9 @@ mod tests {
     use crate::repository::location::{
         bind_repository, ensure_repository, locator_directory, read_locator,
     };
-    use crate::store::planning_exchange::PlanningSnapshot;
-    use crate::store::sqlite::PeerImport;
     use loopflow_model::durable::RepositoryId;
+    use loopflow_storage::planning_exchange::PlanningSnapshot;
+    use loopflow_storage::sqlite::PeerImport;
     use loopflow_test_support::TestRepo;
 
     #[test]

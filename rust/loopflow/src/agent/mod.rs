@@ -391,7 +391,7 @@ impl CapacityWait {
             );
             _record_limit_recovery(provider, reason, Some(retry_at));
         }
-        let left = retry_at - crate::store::rows::now_unix();
+        let left = retry_at - loopflow_storage::rows::now_unix();
         Duration::from_secs(left.clamp(1, CAPACITY_POLL_SECS) as u64)
     }
 
@@ -408,7 +408,7 @@ impl CapacityWait {
 /// Status only: a store that cannot say so never stops the recovery.
 fn _note_limit_recovery(
     note: impl FnOnce(
-        &crate::store::sqlite::SqliteStore,
+        &loopflow_storage::sqlite::SqliteStore,
         &loopflow_model::id::LfProcessId,
     ) -> crate::store::StoreResult<()>,
 ) {
@@ -2827,7 +2827,7 @@ trust_level = "trusted"
             task_prompt: "compress the branch".to_string(),
             ..Default::default()
         };
-        let retry_at = crate::store::rows::now_unix() + 3 * 24 * 3600;
+        let retry_at = loopflow_storage::rows::now_unix() + 3 * 24 * 3600;
         let mut scripted = vec![
             managed_attempt(AgentProcessResult {
                 exit_code: 1,
@@ -2873,7 +2873,7 @@ trust_level = "trusted"
             task_prompt: "implement the plan".to_string(),
             ..Default::default()
         };
-        let retry_at = crate::store::rows::now_unix() + 3_600;
+        let retry_at = loopflow_storage::rows::now_unix() + 3_600;
         let mut scripted = vec![
             managed_attempt(limited_result()),
             cooling(Some(retry_at)),
@@ -2909,7 +2909,7 @@ trust_level = "trusted"
             agent: Some("claude".to_string()),
             ..Default::default()
         };
-        let retry_at = crate::store::rows::now_unix() + 3_600;
+        let retry_at = loopflow_storage::rows::now_unix() + 3_600;
         let mut scripted = vec![
             cooling(Some(retry_at)),
             cooling(Some(retry_at + 60)),
@@ -2959,7 +2959,7 @@ trust_level = "trusted"
             task_prompt: "implement the plan".to_string(),
             ..Default::default()
         };
-        let retry_at = crate::store::rows::now_unix() + 3_600;
+        let retry_at = loopflow_storage::rows::now_unix() + 3_600;
         let mut scripted = vec![
             managed_attempt(limited_result()),
             cooling(Some(retry_at)),
@@ -3096,7 +3096,7 @@ trust_level = "trusted"
         };
         let mut scripted = [
             refused(),
-            cooling(Some(crate::store::rows::now_unix() + 3600)),
+            cooling(Some(loopflow_storage::rows::now_unix() + 3600)),
             refused(),
         ]
         .into_iter();
@@ -3174,7 +3174,7 @@ trust_level = "trusted"
             agent: Some("claude".to_string()),
             ..Default::default()
         };
-        let retry_at = crate::store::rows::now_unix() + 3_600;
+        let retry_at = loopflow_storage::rows::now_unix() + 3_600;
         let error = _run_with_transient_retries(
             &launch,
             &auto_process(),
@@ -3515,7 +3515,7 @@ trust_level = "trusted"
                 Ok(if agent == "codex" {
                     done()
                 } else {
-                    cooling(Some(crate::store::rows::now_unix() + 3600))
+                    cooling(Some(loopflow_storage::rows::now_unix() + 3600))
                 })
             },
             |_| panic!("Codex still has capacity"),
@@ -3548,7 +3548,7 @@ trust_level = "trusted"
                 Ok(if agent == "claude:haiku" {
                     done()
                 } else {
-                    cooling(Some(crate::store::rows::now_unix() + 3600))
+                    cooling(Some(loopflow_storage::rows::now_unix() + 3600))
                 })
             },
             |_| panic!("Haiku still has capacity"),

@@ -99,7 +99,7 @@ pub(crate) fn add_opencode_context(
     holder: Holder,
 ) -> Result<()> {
     let spec = json!({"executable":crate::os_process::resolve_lf_binary()?, "delivery":context, "instructions":instructions, "turns":holder.reports_turns(),
-        "steers":crate::store::steer_markers::latest_marker(&context.home), "server":server_spec("lf opencode plugin")});
+        "steers":loopflow_storage::steer_markers::latest_marker(&context.home), "server":server_spec("lf opencode plugin")});
     let delivery = write_prompt_log(
         &context.repo,
         &serde_json::to_string(context)?,
@@ -156,7 +156,7 @@ pub(crate) fn pi_args(
         "const spec = {};\n{}\n{}",
         json!({"native":native, "turns":holder.reports_turns(), "executable":crate::os_process::resolve_lf_binary()?,
             "log":home.join("logs").join("pi-extension.log"), "server":server_spec("lf pi extension"),
-            "steers":crate::store::steer_markers::latest_marker(&home),
+            "steers":loopflow_storage::steer_markers::latest_marker(&home),
             "bashGuard":pi_bash_guard()}),
         include_str!("context_pi.mjs"),
         include_str!("server_connection.js")

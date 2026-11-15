@@ -36,7 +36,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
-MIGRATIONS_DIR = REPO_ROOT / "rust/loopflow/src/store/migrations"
+MIGRATIONS_DIR = REPO_ROOT / "rust/loopflow-storage/src/migrations"
 MIGRATION_DIRECTORIES = (
     Path("rust/loopflow/src/store/migrations"),
     Path("rust/loopflow-storage/src/migrations"),
@@ -486,7 +486,7 @@ def main() -> None:
         slugs = [name for name in catalog.ordered() if SLUG.match(name)]
         if any(name not in catalog.added for name in slugs):
             _fail("package order requires origin/main's full migration history")
-        (REPO_ROOT / "rust/loopflow/migration-order.txt").write_text(
+        (REPO_ROOT / "rust/loopflow-storage/migration-order.txt").write_text(
             "".join(f"{Path(name).stem}\n" for name in slugs)
         )
     # A merge-queue group may carry several Tasks' migrations at once.

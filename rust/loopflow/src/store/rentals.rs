@@ -1,8 +1,8 @@
 //! Personal capacity declarations acquired before synchronous rental commands.
-use crate::store::rental::{OnDemand, Ownership, Pool, Rental, Usd};
-use crate::store::sqlite::SqliteStore;
 use crate::store::{StoreError, StoreResult};
 use loopflow_model::durable::MachineId;
+use loopflow_storage::rental::{OnDemand, Ownership, Pool, Rental, Usd};
+use loopflow_storage::sqlite::SqliteStore;
 use time::OffsetDateTime;
 
 fn invalid(error: impl std::fmt::Display) -> StoreError {

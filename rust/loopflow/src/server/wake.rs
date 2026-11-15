@@ -16,7 +16,7 @@ use anyhow::{anyhow, Context, Result};
 use serde_json::json;
 
 use crate::steer::{IdleConversation, IdleReach};
-use crate::store::sqlite::SqliteStore;
+use loopflow_storage::sqlite::SqliteStore;
 
 /// How long the watcher waits for a store change before reading the revision
 /// anyway: the change signal can miss a checkpoint or a Machine's sleep.
@@ -45,7 +45,7 @@ pub(super) fn start() {
 
 fn watch() {
     let path = crate::store::default_db_path();
-    let mut changes = crate::store::changes::StoreChanges::watch(&path);
+    let mut changes = loopflow_storage::changes::StoreChanges::watch(&path);
     let mut watcher = Watcher::default();
     loop {
         watcher.read(&path);
@@ -236,7 +236,7 @@ mod tests {
     use crate::context_block::ContextDelivery;
     use crate::server::wire::{BoundaryMoment, SessionBoundary};
     use crate::steer::{NativeBoundary, SteerAdapter};
-    use crate::store::sqlite::SqliteStore;
+    use loopflow_storage::sqlite::SqliteStore;
     use std::io::Read;
     use std::os::unix::net::UnixListener;
     use std::path::{Path, PathBuf};
@@ -278,7 +278,7 @@ mod tests {
             .unwrap();
         let task = loopflow_model::durable::TaskId::new();
         store
-            .create_task(&crate::store::work::task::NewTask {
+            .create_task(&loopflow_storage::work::task::NewTask {
                 repository_id: crate::repository::location::ensure_repository(&store, "/wake")
                     .unwrap(),
                 id: task.clone(),

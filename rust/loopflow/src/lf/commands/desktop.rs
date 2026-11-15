@@ -1,7 +1,7 @@
 //! Shared selection and saved intent use lfdb; live pane control uses Desktop's Apple events.
 use crate::store::selections;
-use crate::store::work::selection::{WorkWorkspaceKey, WorkWorkspaceKind};
 use anyhow::{bail, Context, Result};
+use loopflow_storage::work::selection::{WorkWorkspaceKey, WorkWorkspaceKind};
 use serde::{Deserialize, Serialize};
 
 use super::subscribe::{Subscription, Transport};
@@ -44,7 +44,7 @@ pub struct DesktopWindowInspection {
     /// Work shown in this window, in slot fill order; retained workspaces outside it
     /// remain inspectable.
     pub open_work: Vec<WorkWorkspaceKey>,
-    pub view: Option<crate::store::work::selection::ViewPlan>,
+    pub view: Option<loopflow_storage::work::selection::ViewPlan>,
     /// The view's named parts that are neither panes nor tiles, such as a Wave
     /// view's board; `-p` names them before tiles and panes.
     pub view_parts: Vec<DesktopViewPart>,
@@ -176,7 +176,7 @@ pub enum DesktopDestination {
     WorkingTasks,
     /// An unsaved query; the window's `view` carries its plan.
     View {
-        selection: crate::store::work::selection::Selection,
+        selection: loopflow_storage::work::selection::Selection,
     },
     /// A tile entered as full Work; back returns to its Dashboard or Wave view.
     Entered {
@@ -478,7 +478,7 @@ pub(crate) fn result_schema(path: &[String]) -> Option<schemars::Schema> {
         ["desktop", "state"] => Some(schema::<DesktopInspection>()),
         ["desktop", "view"] => Some(schema::<DesktopViewResult<'_>>()),
         ["desktop", "query" | "pin" | "unpin"] => {
-            Some(schema::<crate::store::work::selection::Dashboard>())
+            Some(schema::<loopflow_storage::work::selection::Dashboard>())
         }
         ["desktop", "layout"] => Some(schema::<DesktopLayoutRecord<'_>>()),
         ["desktop", "hide" | "show" | "move" | "resize"] => Some(schema::<DesktopTileOutput<'_>>()),
@@ -528,7 +528,7 @@ pub enum DesktopOpeningStatus {
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 #[serde(untagged)]
 enum DesktopViewResult<'a> {
-    Plan(&'a crate::store::work::selection::ViewPlan),
+    Plan(&'a loopflow_storage::work::selection::ViewPlan),
     Opening(&'a DesktopOpening),
 }
 
@@ -536,9 +536,9 @@ enum DesktopViewResult<'a> {
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 #[serde(untagged)]
 pub(crate) enum DesktopLayoutRecord<'a> {
-    Work(&'a Option<crate::store::work::selection::WorkPaneLayout>),
+    Work(&'a Option<loopflow_storage::work::selection::WorkPaneLayout>),
     /// Its `slots`; null is the default layout.
-    Dashboard(&'a crate::store::work::selection::Dashboard),
+    Dashboard(&'a loopflow_storage::work::selection::Dashboard),
 }
 
 fn open_url(mut url: reqwest::Url, json: bool) -> Result<()> {
@@ -574,7 +574,7 @@ fn open_url(mut url: reqwest::Url, json: bool) -> Result<()> {
 /// One exit status for every `lf desktop` command: 2 bad arguments, 3 missing or
 /// ambiguous target, 4 Desktop unreachable, otherwise 1. Clap exits 2 and Ctrl-C 130.
 pub(super) fn exit_status(error: anyhow::Error) -> anyhow::Error {
-    use crate::store::work::selection::SelectionError;
+    use loopflow_storage::work::selection::SelectionError;
     let selection = error
         .chain()
         .find_map(|cause| cause.downcast_ref::<SelectionError>())
@@ -608,7 +608,7 @@ pub(super) fn exit_status(error: anyhow::Error) -> anyhow::Error {
 
 fn selection_repository(
     cli: &crate::lf::Cli,
-    store: &crate::store::sqlite::SqliteStore,
+    store: &loopflow_storage::sqlite::SqliteStore,
 ) -> Result<loopflow_model::durable::RepositoryId> {
     repository_in(cli.repository.as_ref(), &std::env::current_dir()?, store)
 }
@@ -617,7 +617,7 @@ fn selection_repository(
 fn repository_in(
     selected: Option<&loopflow_model::durable::RepositoryId>,
     directory: &std::path::Path,
-    store: &crate::store::sqlite::SqliteStore,
+    store: &loopflow_storage::sqlite::SqliteStore,
 ) -> Result<loopflow_model::durable::RepositoryId> {
     if let Some(repository) = selected {
         return Ok(repository.clone());
@@ -709,7 +709,7 @@ fn plans(cli: &crate::lf::Cli, subscribe: bool) -> Result<()> {
 pub(crate) fn read_plans(
     selected: Option<&loopflow_model::durable::RepositoryId>,
     directory: &std::path::Path,
-) -> Result<Vec<crate::store::work::selection::ViewPlan>> {
+) -> Result<Vec<loopflow_storage::work::selection::ViewPlan>> {
     let store = crate::store::read_existing_registry()?
         .ok_or(crate::store::StoreError::NotFound)
         .context("Work registry is unavailable")?;
@@ -748,7 +748,7 @@ pub(crate) fn subscribe_view_plan(
     transport: Transport,
 ) -> Result<Option<Subscription>> {
     if let Some(expression) = &expression {
-        crate::store::work::selection::Selection::parse(expression, None)?;
+        loopflow_storage::work::selection::Selection::parse(expression, None)?;
     }
     super::subscribe::start(
         (),
@@ -787,7 +787,7 @@ fn portfolio_repos() -> Result<Vec<String>> {
 
 pub(crate) fn read_all_view_plans(
     expression: Option<&str>,
-) -> Result<Vec<crate::store::work::selection::ViewPlan>> {
+) -> Result<Vec<loopflow_storage::work::selection::ViewPlan>> {
     let store = crate::store::read_existing_registry()?
         .ok_or(crate::store::StoreError::NotFound)
         .context("Work registry is unavailable")?;
@@ -827,9 +827,9 @@ pub fn plan_view(
     selected: Option<&loopflow_model::durable::RepositoryId>,
     directory: &std::path::Path,
     expression: Option<&str>,
-) -> Result<crate::store::work::selection::ViewPlan> {
+) -> Result<loopflow_storage::work::selection::ViewPlan> {
     if let Some(expression) = expression {
-        crate::store::work::selection::Selection::parse(expression, None)?;
+        loopflow_storage::work::selection::Selection::parse(expression, None)?;
     }
     let store = crate::store::read_existing_registry()?
         .ok_or(crate::store::StoreError::NotFound)
@@ -877,7 +877,7 @@ fn view_plan(
     }
     // Explicit Work context selects the same default model without preparing a checkout.
     let plan = if expression.is_none() && (cli.task.is_some() || cli.wave.is_some()) {
-        use crate::store::work::selection::{Selection, SelectionExpression, SelectionId};
+        use loopflow_storage::work::selection::{Selection, SelectionExpression, SelectionId};
         let store = crate::store::read_existing_registry()?
             .ok_or(crate::store::StoreError::NotFound)
             .context("Work registry is unavailable")?;
@@ -945,7 +945,7 @@ fn work_key(
     } else if let Some(id) = selector.strip_prefix("wave:") {
         (WorkWorkspaceKind::Wave, id)
     } else {
-        return Err(crate::store::work::selection::SelectionError::Query(
+        return Err(loopflow_storage::work::selection::SelectionError::Query(
             "expected repository, task:<durable-id>, or wave:<durable-id>".into(),
         )
         .into());
@@ -964,7 +964,7 @@ pub fn saved_layout(
     directory: &std::path::Path,
     work: &str,
 ) -> Result<serde_json::Value> {
-    use crate::store::work::selection::DashboardId;
+    use loopflow_storage::work::selection::DashboardId;
     let reader = crate::store::read_existing_registry()?
         .ok_or(crate::store::StoreError::NotFound)
         .context("Work registry is unavailable")?;
@@ -1026,9 +1026,9 @@ pub fn save_arrangement(
             let resolved = selections::resolve_selection(
                 &store,
                 &repository,
-                &crate::store::work::selection::Selection {
-                    id: crate::store::work::selection::SelectionId("rename-target".into()),
-                    expression: crate::store::work::selection::SelectionExpression::Work {
+                &loopflow_storage::work::selection::Selection {
+                    id: loopflow_storage::work::selection::SelectionId("rename-target".into()),
+                    expression: loopflow_storage::work::selection::SelectionExpression::Work {
                         work: key,
                     },
                 },
@@ -1039,7 +1039,7 @@ pub fn save_arrangement(
             Ok(serde_json::to_value(store.edit_task(
                 &loopflow_model::durable::TaskId::parse(task)?,
                 *revision,
-                &crate::store::work::task::TaskUpdate {
+                &loopflow_storage::work::task::TaskUpdate {
                     title: Some(name.clone()),
                     ..Default::default()
                 },
@@ -1080,11 +1080,11 @@ pub(crate) fn save_dashboard(
     directory: &std::path::Path,
     cmd: &crate::lf::DashboardCommand,
     input: &mut dyn std::io::Read,
-) -> Result<crate::store::work::selection::Dashboard> {
+) -> Result<loopflow_storage::work::selection::Dashboard> {
     use crate::lf::DashboardCommand;
-    use crate::store::work::selection::DashboardId;
+    use loopflow_storage::work::selection::DashboardId;
     if let DashboardCommand::Query { expression, .. } = cmd {
-        crate::store::work::selection::Selection::parse(expression, None)?;
+        loopflow_storage::work::selection::Selection::parse(expression, None)?;
     }
     let reader = crate::store::read_existing_registry()?
         .ok_or(crate::store::StoreError::NotFound)
@@ -1119,7 +1119,7 @@ pub(crate) fn save_dashboard(
             Some(matches!(cmd, DashboardCommand::Pin { .. })),
         ),
         DashboardCommand::Slots { query, revision } => {
-            let slots: Option<crate::store::work::selection::SlotLayout> =
+            let slots: Option<loopflow_storage::work::selection::SlotLayout> =
                 serde_json::from_reader(&mut *input)?;
             store.set_dashboard_slots(&repository, &dashboard_id(query), *revision, slots.as_ref())
         }
@@ -1143,8 +1143,8 @@ pub(crate) fn save_layout(
     directory: &std::path::Path,
     work: &str,
     input: &mut dyn std::io::Read,
-) -> Result<crate::store::work::selection::WorkPaneLayout> {
-    use crate::store::work::selection::WorkPaneLayout;
+) -> Result<loopflow_storage::work::selection::WorkPaneLayout> {
+    use loopflow_storage::work::selection::WorkPaneLayout;
     if work.starts_with("query:") {
         bail!("a Dashboard's slots are saved with `lf desktop dashboard slots {work} --revision <revision>`");
     }
@@ -1894,7 +1894,7 @@ const TILE_VERBS: &[&str] = &["hide", "show", "move", "resize"];
 /// slots, or the repository's one Task order (Working Tasks and Wave views).
 #[derive(Debug, Clone, PartialEq)]
 enum TileBoard {
-    Dashboard(crate::store::work::selection::DashboardId),
+    Dashboard(loopflow_storage::work::selection::DashboardId),
     Tasks,
 }
 
@@ -1905,13 +1905,13 @@ impl TileBoard {
             return Some(Self::Tasks);
         }
         part.strip_prefix("query:")
-            .map(|id| Self::Dashboard(crate::store::work::selection::DashboardId(id.into())))
+            .map(|id| Self::Dashboard(loopflow_storage::work::selection::DashboardId(id.into())))
     }
 
     fn shown(window: &DesktopWindowInspection) -> Result<Self> {
         match &window.destination {
             DesktopDestination::Dashboard { id } => Ok(Self::Dashboard(
-                crate::store::work::selection::DashboardId(id.clone()),
+                loopflow_storage::work::selection::DashboardId(id.clone()),
             )),
             DesktopDestination::View { .. } => Err(DesktopError::Target(
                 "This query is unsaved; save it as a Dashboard to arrange its tiles. Nothing changed."
@@ -1968,7 +1968,7 @@ impl TileEdit {
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 #[serde(untagged)]
 pub(crate) enum DesktopTileRecord {
-    Dashboard(Box<crate::store::work::selection::Dashboard>),
+    Dashboard(Box<loopflow_storage::work::selection::Dashboard>),
     /// The repository's Task order.
     Tasks(Vec<String>),
 }
@@ -2117,7 +2117,7 @@ fn edit_tiles(
         .ok_or_else(|| DesktopError::Target(format!("No Dashboard {}; nothing changed.", id.0)))?;
     let revision = reading.saved.revision;
     let mut arrangement = reading.arrangement.clone();
-    let save = |arrangement: &crate::store::work::selection::Arrangement| {
+    let save = |arrangement: &loopflow_storage::work::selection::Arrangement| {
         selections::save_dashboard(
             &store,
             repository,
@@ -2169,7 +2169,7 @@ fn edit_tiles(
                 .saved
                 .slots
                 .clone()
-                .unwrap_or_else(crate::store::work::selection::SlotLayout::golden);
+                .unwrap_or_else(loopflow_storage::work::selection::SlotLayout::golden);
             let count = slots.slots().len();
             let visible = arrangement.project().visible;
             // Tiles fill slots in order, one page per `count` tiles.

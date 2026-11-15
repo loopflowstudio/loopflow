@@ -21,10 +21,10 @@ use crate::provider_account::ProviderAccountRoute;
 use crate::session::{
     SessionActivity, SessionEventKind, SessionPreview, SessionTurnOrigin, TurnContext,
 };
-use crate::store::sqlite::SqliteStore;
 use crate::store::{RecordingGap, StoreResult};
 use loopflow_model::chat::types::{ConversationEvent, ConversationItem};
 use loopflow_model::id::AgentSessionId;
+use loopflow_storage::sqlite::SqliteStore;
 
 /// Origins frozen when Loopflow sent each request, keyed by request id. The
 /// sending side fills it; the reader's writer takes each one once.
@@ -410,9 +410,9 @@ mod tests {
     use crate::harness::opencode_decode::OpenCodeDecoder;
     use crate::process::SessionAttachment;
     use crate::session::SessionEventKind;
-    use crate::store::sqlite::SqliteStore;
     use loopflow_model::chat::types::Lifecycle;
     use loopflow_model::id::LfProcessId;
+    use loopflow_storage::sqlite::SqliteStore;
 
     const START: i64 = 1_000;
     const QUIET: i64 = crate::session::AVAILABILITY_QUIET_SECONDS;

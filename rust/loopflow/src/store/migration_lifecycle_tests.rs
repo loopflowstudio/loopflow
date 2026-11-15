@@ -29,7 +29,7 @@ async fn retired_home_landings_remain_readable_and_fence_old_supervisors() {
     use std::sync::Arc;
 
     use crate::ops::pr_landing::{reconcile_pr_landing, LandingIo, LandingObservation, ObservePr};
-    use crate::store::pr_landing::{
+    use loopflow_storage::pr_landing::{
         LandingPlacement, LandingSupervisor, PrLandingId, PrLandingState,
     };
 

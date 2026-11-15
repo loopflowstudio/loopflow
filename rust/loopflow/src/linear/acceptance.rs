@@ -4,7 +4,7 @@ use crate::store::{run_planning_write, PlanningLocks, Store, StoreResult};
 use loopflow_model::id::WaveId;
 use std::sync::Arc;
 
-use crate::store::sqlite::linear_acceptance::{
+use loopflow_storage::sqlite::linear_acceptance::{
     accept_linear_inventory_in, accept_linear_issue_in, reconcile_linear_project_teams_in,
 };
 
@@ -69,9 +69,9 @@ mod tests {
     use crate::test_linear_input::SeedLinearSqlite;
     use rusqlite::{params, Connection};
 
-    use crate::store::sqlite::SqliteStore;
     use crate::store::PlanningState;
     use loopflow_model::id::WaveId;
+    use loopflow_storage::sqlite::SqliteStore;
 
     #[test]
     fn explicit_null_detaches_but_unknown_linear_membership_retains_task() {
@@ -102,7 +102,7 @@ mod tests {
         // Unmapped Project evidence cannot manufacture a standalone Task.
         issue.project_id = Some("unknown-project".into());
         issue.revision = Some("2026-10-17T01:00:00Z".into());
-        crate::store::sqlite::linear_acceptance::accept_linear_issue_in(
+        loopflow_storage::sqlite::linear_acceptance::accept_linear_issue_in(
             &store, "/repo", &issue, None, 43, None,
         )
         .unwrap();
@@ -138,7 +138,7 @@ mod tests {
         // A complete, newer observation explicitly clearing Project detaches it.
         issue.project_id = None;
         issue.revision = Some("2026-10-17T02:00:00Z".into());
-        crate::store::sqlite::linear_acceptance::accept_linear_issue_in(
+        loopflow_storage::sqlite::linear_acceptance::accept_linear_issue_in(
             &store, "/repo", &issue, None, 44, None,
         )
         .unwrap();
@@ -155,8 +155,8 @@ mod tests {
     #[test]
     fn task_admission_reads_released_evidence_without_reconstructing_provider_content() {
         use crate::store::migrations::{apply_before_migration, upgrade_from_migration};
-        use crate::store::work::project::ProjectId;
-        use crate::store::work::task::TaskId;
+        use loopflow_storage::work::project::ProjectId;
+        use loopflow_storage::work::task::TaskId;
         use std::sync::{Arc, Mutex};
 
         let cases = [
@@ -497,7 +497,7 @@ mod tests {
 
         // Linear adds a Team without moving the Project's `updatedAt`.
         project.team_ids.push("another-team".into());
-        crate::store::sqlite::linear_acceptance::accept_linear_issue_in(
+        loopflow_storage::sqlite::linear_acceptance::accept_linear_issue_in(
             &store,
             "/repo",
             &issue,
@@ -512,7 +512,7 @@ mod tests {
         // An Initiative move is held, and released once Linear moves it back.
         let initiative = project.initiative_ids[0].clone();
         project.initiative_ids = vec!["another-initiative".into()];
-        let error = crate::store::sqlite::linear_acceptance::accept_linear_issue_in(
+        let error = loopflow_storage::sqlite::linear_acceptance::accept_linear_issue_in(
             &store,
             "/repo",
             &issue,
@@ -530,7 +530,7 @@ mod tests {
         );
         assert_eq!(state(), PlanningState::Invalid);
         project.initiative_ids = vec![initiative];
-        crate::store::sqlite::linear_acceptance::accept_linear_issue_in(
+        loopflow_storage::sqlite::linear_acceptance::accept_linear_issue_in(
             &store,
             "/repo",
             &issue,

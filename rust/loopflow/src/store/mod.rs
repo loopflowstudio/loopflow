@@ -7,76 +7,72 @@ use crate::profile::{AccessProfile, AuthBrowserBinding, ProfileId, ProviderRoute
 use crate::provider_auth::Provider;
 use crate::work::wave::{Wave, WaveLocator};
 use loopflow_model::id::{AgentSessionId, WaveId};
-mod accounts;
-pub mod address;
+pub use loopflow_storage::accounts;
+pub use loopflow_storage::address;
 pub(crate) mod admission;
-mod canonical_ids;
-pub(crate) mod capacity;
-pub(crate) mod changes;
-pub mod child;
+pub use loopflow_storage::canonical_ids;
+pub use loopflow_storage::capacity;
+pub use loopflow_storage::changes;
+pub use loopflow_storage::child;
 pub(crate) mod children;
 pub(crate) mod ci_incidents;
 pub mod contention;
-pub(crate) mod copy;
+pub use loopflow_storage::copy;
 mod durable;
-mod error;
-pub mod execution;
-pub mod graph;
-pub(crate) mod graph_process;
-pub(crate) mod instrumentation;
-pub mod linear_records;
-pub mod machine_records;
+pub use loopflow_storage::error;
+pub use loopflow_storage::execution;
+pub use loopflow_storage::graph;
+pub use loopflow_storage::graph_process;
+pub use loopflow_storage::instrumentation;
+pub use loopflow_storage::linear_records;
+pub use loopflow_storage::machine_records;
 pub mod machines;
-pub mod metric;
+pub use loopflow_storage::metric;
 mod metrics;
-#[cfg(test)]
-mod migration_build;
-mod migration_catalog;
-mod migration_runner;
-mod migration_schema;
+pub use loopflow_storage::migration_catalog;
+pub use loopflow_storage::migration_runner;
+pub use loopflow_storage::migration_schema;
 pub mod migrations;
 pub(crate) mod opening;
-pub mod planning_destination;
-pub mod planning_exchange;
-pub mod pr_landing;
-pub mod process;
-pub mod profile;
-pub mod provider;
-pub mod rental;
-pub mod session;
-pub mod session_record;
-pub mod steer;
-pub mod task_session;
-pub mod transcript;
-pub mod work;
+pub use loopflow_storage::planning_destination;
+pub use loopflow_storage::planning_exchange;
+pub use loopflow_storage::pr_landing;
+pub use loopflow_storage::process;
+pub use loopflow_storage::profile;
+pub use loopflow_storage::provider;
+pub use loopflow_storage::rental;
+pub use loopflow_storage::session;
+pub use loopflow_storage::session_record;
+pub use loopflow_storage::steer;
+pub use loopflow_storage::task_session;
+pub use loopflow_storage::transcript;
+pub use loopflow_storage::work;
 pub use opening::open_sqlite;
 pub mod ownership;
-mod peer_records;
-pub(crate) mod people;
+pub use loopflow_storage::peer_records;
+pub use loopflow_storage::people;
 pub mod placement;
 pub mod planning_peers;
 mod planning_reads;
-pub mod planning_sync;
+pub use loopflow_storage::planning_sync;
 mod pr_landings;
 mod processes;
 mod project_adoption;
-#[cfg(test)]
-pub(crate) mod query_plans;
-mod recording_gap;
-mod records;
+pub use loopflow_storage::recording_gap;
+pub use loopflow_storage::records;
 pub mod rentals;
 mod repositories;
 pub(crate) mod retention;
-pub mod rows;
+pub use loopflow_storage::rows;
 pub(crate) mod selections;
 pub(crate) mod session_projection;
 pub mod sessions;
-pub mod sqlite;
-pub(crate) mod steer_markers;
+pub use loopflow_storage::sqlite;
+pub use loopflow_storage::steer_markers;
 pub mod task_work;
-mod token_crypto;
+pub use loopflow_storage::token_crypto;
 pub(crate) mod token_key;
-mod write_holds;
+pub use loopflow_storage::write_holds;
 
 #[cfg(test)]
 mod admission_lifecycle_tests;
@@ -88,17 +84,13 @@ mod ownership_lifecycle_tests;
 mod rental_lifecycle_tests;
 #[cfg(test)]
 mod steer_lifecycle_tests;
-#[cfg(test)]
-mod test_fixture;
 
 pub use error::{StoreError, StoreResult};
 pub use planning_peers::{PeerPlanningStatus, PeerProjectionConflict, PlanningJournal};
 pub use recording_gap::{GapSpan, RecordingGap};
 pub use records::*;
 
-/// Keep live checkpoints at one-second precision for the longest public usage
-/// window. Older Turns retain only their final or latest receipt.
-pub const TURN_USAGE_LIVE_RETENTION_SECONDS: i64 = 86_400;
+pub use loopflow_storage::TURN_USAGE_LIVE_RETENTION_SECONDS;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StorageConfig {
@@ -931,17 +923,17 @@ mod tests {
         ProviderAccountId, RoutingState, StorageConfig,
     };
     use crate::profile::EmailAddress;
-    use crate::store::child::ChildRef;
-    use crate::store::linear_records::{LinearIssueId, LinearProjectId};
-    use crate::store::work::project::{Project, ProjectId};
-    use crate::store::work::task::{
-        CiIncident, GithubPr, LinearWritebackState, PrPhase, PrPresentation, PrPublication, Task,
-        TaskEventKind, TaskId, TaskPr, TaskPrId,
-    };
     use crate::test_linear_input::{InventoryFixture, SeedLinear};
     use crate::work::wave::Wave;
     use loopflow_model::durable::{Author, WorkRef};
     use loopflow_model::id::WaveId;
+    use loopflow_storage::child::ChildRef;
+    use loopflow_storage::linear_records::{LinearIssueId, LinearProjectId};
+    use loopflow_storage::work::project::{Project, ProjectId};
+    use loopflow_storage::work::task::{
+        CiIncident, GithubPr, LinearWritebackState, PrPhase, PrPresentation, PrPublication, Task,
+        TaskEventKind, TaskId, TaskPr, TaskPrId,
+    };
     use std::env;
     use std::path::PathBuf;
     use time::OffsetDateTime;
@@ -1095,7 +1087,7 @@ mod tests {
             due_date: None,
             state: None,
             completed_at: None,
-            observation: crate::store::work::task::Observation::NotRequired,
+            observation: loopflow_storage::work::task::Observation::NotRequired,
         }
     }
 
@@ -1122,12 +1114,12 @@ mod tests {
     }
 
     fn select_project(store: &super::Store, project: &Project) {
-        let previous = crate::store::sqlite::project_selection::read_project_binding(
+        let previous = loopflow_storage::sqlite::project_selection::read_project_binding(
             &store.sqlite,
             &project.wave_id,
         )
         .unwrap();
-        crate::store::sqlite::project_selection::write_project_binding(
+        loopflow_storage::sqlite::project_selection::write_project_binding(
             &store.sqlite,
             &project.wave_id,
             previous.as_deref(),
@@ -1143,7 +1135,7 @@ mod tests {
             id: ProjectId::new(),
 
             summary: String::new(),
-            status: crate::store::work::project::ProjectStatus::Started,
+            status: loopflow_storage::work::project::ProjectStatus::Started,
             linear_id: Some(LinearProjectId::new("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3").unwrap()),
             slug: "developer-efficiency".to_string(),
             name: "Developer Efficiency".to_string(),
@@ -1284,7 +1276,7 @@ mod tests {
             select_project(&store, &project);
             let task = make_task(&store, &wave, &project);
             let mut snapshot = task_planning_snapshot(&wave, &project, &task);
-            snapshot.snapshot.projects[0].krs = vec![crate::store::work::project::ProjectKR {
+            snapshot.snapshot.projects[0].krs = vec![loopflow_storage::work::project::ProjectKR {
                 text: "Work remains readable".into(),
                 holds: false,
             }];
@@ -1418,7 +1410,7 @@ mod tests {
             let mut snapshot = task_planning_snapshot(&wave, &project, &task);
             snapshot.synced_at = 17;
             store.seed_inventory(snapshot.clone(), None).await.unwrap();
-            let krs = vec![crate::store::work::project::ProjectKR {
+            let krs = vec![loopflow_storage::work::project::ProjectKR {
                 text: "Saved plan survives an outage".into(),
                 holds: false,
             }];
@@ -1446,16 +1438,16 @@ mod tests {
             }
             for (status, readiness) in [
                 (
-                    crate::store::work::project::ProjectStatus::Started,
-                    crate::store::sqlite::ProjectReadinessState::Ready,
+                    loopflow_storage::work::project::ProjectStatus::Started,
+                    loopflow_storage::sqlite::ProjectReadinessState::Ready,
                 ),
                 (
-                    crate::store::work::project::ProjectStatus::Paused,
-                    crate::store::sqlite::ProjectReadinessState::Inactive,
+                    loopflow_storage::work::project::ProjectStatus::Paused,
+                    loopflow_storage::sqlite::ProjectReadinessState::Inactive,
                 ),
                 (
-                    crate::store::work::project::ProjectStatus::Completed,
-                    crate::store::sqlite::ProjectReadinessState::Terminal,
+                    loopflow_storage::work::project::ProjectStatus::Completed,
+                    loopflow_storage::sqlite::ProjectReadinessState::Terminal,
                 ),
             ] {
                 conn.execute(
@@ -1474,7 +1466,7 @@ mod tests {
                 assert_eq!(observed.observed_at, Some(17));
                 assert_eq!(
                     crate::ops::project::current_project(&store, &wave).is_err(),
-                    status == crate::store::work::project::ProjectStatus::Completed
+                    status == loopflow_storage::work::project::ProjectStatus::Completed
                 );
             }
         }
@@ -1507,7 +1499,7 @@ mod tests {
             );
             assert_eq!(
                 store.sqlite.project_readiness(wave.id()).unwrap().state,
-                crate::store::sqlite::ProjectReadinessState::Unavailable,
+                loopflow_storage::sqlite::ProjectReadinessState::Unavailable,
                 "{change}"
             );
             assert_eq!(store.get_project(&project.id).await.unwrap(), Some(saved));
@@ -1672,7 +1664,7 @@ mod tests {
                 .unwrap();
                 store
                     .sqlite
-                    .create_task(&crate::store::work::task::NewTask {
+                    .create_task(&loopflow_storage::work::task::NewTask {
                         repository_id: crate::repository::location::ensure_repository(
                             &store.sqlite,
                             directory.path().canonicalize().unwrap().to_str().unwrap(),
@@ -1959,8 +1951,9 @@ mod tests {
         );
         store.create_wave(&other).await.unwrap();
         let mut foreign = make_project(&other);
-        foreign.linear_id =
-            Some(crate::store::linear_records::LinearProjectId::new("foreign-project").unwrap());
+        foreign.linear_id = Some(
+            loopflow_storage::linear_records::LinearProjectId::new("foreign-project").unwrap(),
+        );
         store.create_project(&foreign).await.unwrap();
         let mut response = snapshot.clone();
         response.synced_at = 2;
@@ -2176,7 +2169,7 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            crate::store::sqlite::linear_acceptance::accept_linear_project_in(
+            loopflow_storage::sqlite::linear_acceptance::accept_linear_project_in(
                 &store.sqlite,
                 wave.id(),
                 &snapshot.initiative,
@@ -2218,12 +2211,14 @@ mod tests {
         let mut confirmed = snapshot.snapshot.projects[0].clone();
         confirmed.name = "Ordinary work".into();
         confirmed.slug = "ordinary-work".into();
-        confirmed.krs.push(crate::store::work::project::ProjectKR {
-            text: "Preserve the authored proof".into(),
-            holds: false,
-        });
+        confirmed
+            .krs
+            .push(loopflow_storage::work::project::ProjectKR {
+                text: "Preserve the authored proof".into(),
+                holds: false,
+            });
         confirmed.revision = Some("2026-10-05T12:00:01Z".into());
-        crate::store::sqlite::linear_acceptance::accept_linear_project_in(
+        loopflow_storage::sqlite::linear_acceptance::accept_linear_project_in(
             &store.sqlite,
             wave.id(),
             &snapshot.initiative,
@@ -2255,7 +2250,7 @@ mod tests {
         let other = Wave::new(WaveId::new(), "other".into(), wave.repo().into());
         store.create_wave(&other).await.unwrap();
         assert!(
-            crate::store::sqlite::linear_acceptance::accept_linear_project_in(
+            loopflow_storage::sqlite::linear_acceptance::accept_linear_project_in(
                 &store.sqlite,
                 other.id(),
                 &snapshot.initiative,
@@ -2294,8 +2289,9 @@ mod tests {
         store.create_project(&predecessor).await.unwrap();
         select_project(&store, &predecessor);
         let mut successor = make_project(&wave);
-        successor.linear_id =
-            Some(crate::store::linear_records::LinearProjectId::new("successor-project").unwrap());
+        successor.linear_id = Some(
+            loopflow_storage::linear_records::LinearProjectId::new("successor-project").unwrap(),
+        );
         let task = make_task(&store, &wave, &predecessor);
         let pr = make_task_pr(&task);
         store.seed_task(&task, &pr).await.unwrap();
@@ -2833,8 +2829,8 @@ mod tests {
 
         let mut snapshot = task_planning_snapshot(&wave, &project, &task);
         let mut observed = snapshot.snapshot.projects.remove(0);
-        observed.status = crate::store::work::project::ProjectStatus::Completed;
-        crate::store::sqlite::linear_acceptance::accept_linear_project_in(
+        observed.status = loopflow_storage::work::project::ProjectStatus::Completed;
+        loopflow_storage::sqlite::linear_acceptance::accept_linear_project_in(
             &store.sqlite,
             wave.id(),
             &snapshot.initiative,
@@ -2891,18 +2887,18 @@ mod tests {
             }),
             merge: None,
         });
-        pr.ci_observation = Some(crate::store::work::task::CiObservation {
+        pr.ci_observation = Some(loopflow_storage::work::task::CiObservation {
             head_sha: "sha-abc".to_string(),
-            state: crate::store::work::task::CiState::Failing,
-            failing_checks: vec![crate::store::work::task::CiCheck {
+            state: loopflow_storage::work::task::CiState::Failing,
+            failing_checks: vec![loopflow_storage::work::task::CiCheck {
                 name: "build".to_string(),
                 url: Some("https://ci/build".to_string()),
             }],
             observed_at: OffsetDateTime::now_utc(),
         });
-        pr.github_observation = Some(crate::store::work::task::GithubObservation {
+        pr.github_observation = Some(loopflow_storage::work::task::GithubObservation {
             checked_at: OffsetDateTime::now_utc(),
-            result: crate::store::work::task::GithubObservationResult::Degraded {
+            result: loopflow_storage::work::task::GithubObservationResult::Degraded {
                 reason: "GitHub API rate limit exhausted".to_string(),
             },
         });
@@ -2913,7 +2909,7 @@ mod tests {
         assert_eq!(read.head_sha(), Some("sha-abc"));
         assert_eq!(read.presentation().unwrap().title, "Ship the proof");
         let ci = read.fresh_ci().expect("reading matches the current head");
-        assert_eq!(ci.state, crate::store::work::task::CiState::Failing);
+        assert_eq!(ci.state, loopflow_storage::work::task::CiState::Failing);
         assert_eq!(ci.failing_checks[0].name, "build");
         assert_eq!(read.github_observation, pr.github_observation);
     }
@@ -3624,3 +3620,57 @@ mod tests {
 mod account_lifecycle_tests;
 #[cfg(test)]
 mod linear_migration_tests;
+
+#[cfg(test)]
+mod repository_lifecycle_tests;
+
+#[cfg(test)]
+mod membership_lifecycle_tests;
+
+#[cfg(test)]
+mod attachment_lifecycle_tests;
+
+#[cfg(test)]
+mod program_status_tests;
+
+#[cfg(test)]
+mod linear_observation_tests;
+
+#[cfg(test)]
+mod settlement_lifecycle_tests;
+
+#[cfg(test)]
+mod planning_exchange_lifecycle_tests;
+
+#[cfg(test)]
+mod session_metadata_tests;
+
+#[cfg(test)]
+mod task_work_lifecycle_tests;
+
+#[cfg(test)]
+mod retention_lifecycle_tests;
+
+#[cfg(test)]
+mod retention_history_tests;
+
+#[cfg(test)]
+mod snapshot_projection_tests;
+
+#[cfg(test)]
+mod membership_projection_tests;
+
+#[cfg(test)]
+mod planning_sync_tests;
+
+#[cfg(test)]
+mod task_move_lifecycle_tests;
+
+#[cfg(test)]
+mod session_event_lifecycle_tests;
+
+#[cfg(test)]
+mod provider_transition_lifecycle_tests;
+
+#[cfg(test)]
+mod query_plan_lifecycle_tests;

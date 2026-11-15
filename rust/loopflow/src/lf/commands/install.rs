@@ -378,7 +378,7 @@ fn _read_executable_compatibility(
     };
     let candidate_path = directory.path().join("candidate.db");
     let copied = match store_path.exists() {
-        true => crate::store::copy::snapshot(store_path, &candidate_path),
+        true => loopflow_storage::copy::snapshot(store_path, &candidate_path),
         false => Ok(()),
     };
     if let Err(error) = copied {

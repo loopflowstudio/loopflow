@@ -241,7 +241,7 @@ fn resolve_selectors(
 /// Preferences and ranking stay outside SQL; a racing launch or quota observation
 /// causes a fresh decision rather than committing a choice from stale facts.
 pub(crate) fn select(
-    store: &crate::store::sqlite::SqliteStore,
+    store: &loopflow_storage::sqlite::SqliteStore,
     provider: Provider,
     candidates: &[ProviderAccountId],
     model: Option<&str>,

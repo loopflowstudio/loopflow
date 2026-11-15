@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use serde::Serialize;
 
-pub(crate) use crate::store::instrumentation::SUBSCRIPTION_ENABLED as ENABLED;
+pub(crate) use loopflow_storage::instrumentation::SUBSCRIPTION_ENABLED as ENABLED;
 static STAGES: Mutex<BTreeMap<&'static str, Count>> = Mutex::new(BTreeMap::new());
 
 #[derive(Debug, Clone, Copy, Default, Serialize)]
@@ -104,7 +104,7 @@ fn usage(who: i32) -> (f64, f64) {
 pub(crate) fn snapshot() -> Snapshot {
     let (user_ms, system_ms) = usage(libc::RUSAGE_SELF);
     let (child_user_ms, child_system_ms) = usage(libc::RUSAGE_CHILDREN);
-    let sql = crate::store::instrumentation::subscription_snapshot();
+    let sql = loopflow_storage::instrumentation::subscription_snapshot();
     Snapshot {
         user_ms,
         system_ms,

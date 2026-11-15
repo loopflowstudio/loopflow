@@ -1,12 +1,12 @@
-use crate::store::migration_runner::{
-    apply_all_but_head, apply_newer_migration, latest_applied_version_sqlite, latest_known_version,
-    prior_known_version,
-};
-use crate::store::sqlite::SqliteStore;
 use crate::store::FrontierAdvance::{self, Authorized, Forbidden};
 use crate::work::wave::Wave;
 use loopflow_model::durable::{WorkRef, WorkStatus};
 use loopflow_model::id::WaveId;
+use loopflow_storage::migration_runner::{
+    apply_all_but_head, apply_newer_migration, latest_applied_version_sqlite, latest_known_version,
+    prior_known_version,
+};
+use loopflow_storage::sqlite::SqliteStore;
 use std::path::{Path, PathBuf};
 
 /// The machine home whose `.lf/loopflow.db` `may_apply_migrations` treats as
@@ -38,7 +38,7 @@ fn open(
         path,
         home,
         advance,
-        crate::store::sqlite::SQLITE_WRITE_BUSY_TIMEOUT,
+        loopflow_storage::sqlite::SQLITE_WRITE_BUSY_TIMEOUT,
     )
 }
 
@@ -52,8 +52,8 @@ fn seed_shared_store_at_prior_head(path: &Path) {
     let conn = rusqlite::Connection::open(path).unwrap();
     conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
     apply_all_but_head(
-        &crate::store::test_fixture::observers(),
-        &crate::store::test_fixture::build(),
+        &loopflow_storage::test_fixture::observers(),
+        &loopflow_storage::test_fixture::build(),
         &conn,
     )
     .unwrap();
@@ -101,8 +101,8 @@ fn an_older_lf_keeps_working_on_a_store_a_newer_build_extended() {
     seed_current_wave(&path);
     let conn = rusqlite::Connection::open(&path).unwrap();
     apply_newer_migration(
-        &crate::store::test_fixture::observers(),
-        &crate::store::test_fixture::build(),
+        &loopflow_storage::test_fixture::observers(),
+        &loopflow_storage::test_fixture::build(),
         &conn,
         "ALTER TABLE waves ADD COLUMN colour TEXT;
          CREATE TABLE wave_badges (wave_id TEXT NOT NULL, badge TEXT);",
@@ -137,15 +137,15 @@ fn a_dropped_column_fails_the_statement_that_reads_it_and_nothing_else() {
     let running = open(&path, &shared.home, Forbidden).unwrap();
     let conn = rusqlite::Connection::open(&path).unwrap();
     apply_newer_migration(
-        &crate::store::test_fixture::observers(),
-        &crate::store::test_fixture::build(),
+        &loopflow_storage::test_fixture::observers(),
+        &loopflow_storage::test_fixture::build(),
         &conn,
         "ALTER TABLE waves DROP COLUMN promoted_at;",
     )
     .unwrap();
 
     running
-        .validate_current_schema(&crate::store::test_fixture::build())
+        .validate_current_schema(&loopflow_storage::test_fixture::build())
         .expect("the running reader keeps its store");
     let store = open(&path, &shared.home, Forbidden).expect("a fresh open keeps working");
 
@@ -170,8 +170,8 @@ fn a_running_older_reader_survives_an_upgrade_under_it() {
 
     let newer = rusqlite::Connection::open(&path).unwrap();
     apply_newer_migration(
-        &crate::store::test_fixture::observers(),
-        &crate::store::test_fixture::build(),
+        &loopflow_storage::test_fixture::observers(),
+        &loopflow_storage::test_fixture::build(),
         &newer,
         "ALTER TABLE waves ADD COLUMN colour TEXT;
          CREATE TABLE wave_badges (wave_id TEXT NOT NULL, badge TEXT);",
@@ -179,7 +179,7 @@ fn a_running_older_reader_survives_an_upgrade_under_it() {
     .unwrap();
 
     running
-        .validate_current_schema(&crate::store::test_fixture::build())
+        .validate_current_schema(&loopflow_storage::test_fixture::build())
         .expect("a newer migration keeps the running reader valid");
     let after = Wave::new(WaveId::new(), "After upgrade".into(), "/repo".into());
     crate::work::wave::bootstrap::upsert_wave(&running, &after).unwrap();
@@ -273,7 +273,7 @@ fn an_ordinary_open_ahead_of_the_shared_frontier_refuses_without_advancing() {
     // recognizes the untouched store as exactly its own frontier.
     let conn = rusqlite::Connection::open(&path).unwrap();
     assert!(
-        crate::store::migration_runner::old_reader_recognizes(&conn),
+        loopflow_storage::migration_runner::old_reader_recognizes(&conn),
         "the old installed reader must still recognize the untouched store"
     );
 }
@@ -340,7 +340,7 @@ fn branch_candidate_cannot_advance_shared_store_or_damage_current_state_outside_
     assert_eq!(current_wave(&path), "Current");
     let installed = rusqlite::Connection::open(&path).unwrap();
     assert!(
-        crate::store::migration_runner::old_reader_recognizes(&installed),
+        loopflow_storage::migration_runner::old_reader_recognizes(&installed),
         "the installed release must still recognize the candidate's untouched store"
     );
     drop(installed);
@@ -374,8 +374,11 @@ fn an_ordinary_open_of_the_shared_store_does_not_scan_stored_rows() {
 
     open(&path, &shared.home, Forbidden)
         .expect("an ordinary open validates ledger and schema only");
-    crate::store::migration_runner::validate_sqlite(&crate::store::test_fixture::build(), &conn)
-        .expect_err("full diagnosis still reports the dangling reference");
+    loopflow_storage::migration_runner::validate_sqlite(
+        &loopflow_storage::test_fixture::build(),
+        &conn,
+    )
+    .expect_err("full diagnosis still reports the dangling reference");
 }
 
 /// A private path (not ~/.lf/loopflow.db) initializes and migrates itself.

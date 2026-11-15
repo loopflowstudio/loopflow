@@ -20,13 +20,13 @@ use super::{
     rex::{self, Rex},
     OpenHost, OpenReceipt, OpenReport, OpenStatus, Resolved, WorkspaceArgs,
 };
-use crate::store::sqlite::SqliteStore;
-use crate::store::work::selection::{
+use loopflow_model::durable::{MachineId, RepositoryId, TaskId};
+use loopflow_model::id::WaveId;
+use loopflow_storage::sqlite::SqliteStore;
+use loopflow_storage::work::selection::{
     Selection, SelectionExpression, SelectionFilter, SelectionId, SelectionState, SplitAxis,
     TaskLayoutTemplate, ViewContent, ViewPlan, WorkWorkspaceKey, WorkWorkspaceKind,
 };
-use loopflow_model::durable::{MachineId, RepositoryId, TaskId};
-use loopflow_model::id::WaveId;
 
 /// Where a Task's tools run: its recorded checkout, else the repository.
 fn tool_cwd<'a>(content: &'a ViewContent, repo: &'a Path) -> &'a Path {
@@ -1161,7 +1161,7 @@ fn arrive_remote(
 mod tests {
     use super::{settle_remote, started, Candidate, Placement};
     use crate::lf::commands::open::{OpenHost, OpenReceipt, OpenReport, OpenStatus};
-    use crate::store::work::selection::{
+    use loopflow_storage::work::selection::{
         SelectionState, ViewContent, WorkWorkspaceKey, WorkWorkspaceKind,
     };
 

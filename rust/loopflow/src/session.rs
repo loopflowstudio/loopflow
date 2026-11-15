@@ -1,6 +1,6 @@
 //! Conversation identity and execution history. An invocation never owns feedback.
 
-pub use crate::store::session::*;
+pub use loopflow_storage::session::*;
 
 pub(crate) fn conversation(
     cwd: &std::path::Path,
@@ -40,7 +40,7 @@ pub(crate) fn conversation(
         request: None,
         ready_summary: None,
         completed_at: None,
-        created_at: crate::store::rows::now_unix(),
+        created_at: loopflow_storage::rows::now_unix(),
     })
 }
 

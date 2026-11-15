@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-905 · Concept review</title>
+<style>
+:root { color-scheme: light dark; font: 16px/1.5 system-ui, sans-serif; }
+body { max-width: 44rem; margin: 2rem auto; padding: 0 1.25rem; }
+h1 { font-size: 1.65rem; line-height: 1.2; } h2 { font-size: 1.1rem; margin-top: 1.7rem; }
+header, small { opacity: .75; } code { overflow-wrap: anywhere; }
+.row { border-inline-start: 3px solid currentColor; padding: .65rem 1rem; margin: .8rem 0; }
+.row p { margin: .25rem 0; } table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; vertical-align: top; padding: .6rem .35rem; border-bottom: 1px solid GrayText; }
+@media(max-width: 35rem) { body { margin-top: 1rem; } table { font-size: .85rem; } }
+</style>
+<header>LOO-905 · concept-review · 2026-11-14<br>
+Sources: <code>scratch/task-planning-readability.md</code>,
+<code>swift/LoopflowMac/{WorkModel,SessionProgramStatus}.swift</code>,
+<code>swift/LoopflowMac/Views/WorkNavigator.swift</code>,
+<code>swift/LoopflowTests/WorkModelTests.swift</code>, <code>swift/README.md</code>.</header>
+<h1>Iterate: attach freshness to the name's source</h1>
+<p>The biggest mismatch: one failed reading currently makes an independently
+current name say “Last known.” Recovery should describe the fact being recovered.</p>
+<h2>Current patch → proposed repair</h2>
+<p>A current list supplies this name while the roadmap fails:</p>
+<div class="row"><small>Current patch</small><p>LOO-905 · Readable local Task · Last known</p><p>Couldn't update: Planning offline · Retry</p></div>
+<div class="row"><small>Proposed</small><p>LOO-905 · Readable local Task</p><p>Couldn't update: Planning offline · Retry</p></div>
+<p>If that list itself fails and no other current source supplies the name,
+keep the name with “Last known.” Retry keeps the conversation and draft in place.
+Successful replacement clears the corresponding error.</p>
+<table>
+<thead><tr><th>Action</th><th>Concept</th><th>Existing API / owner</th></tr></thead>
+<tbody>
+<tr><td>Recognize or open a Task</td><td>Readable identity and its source</td><td><code>taskPresentation</code> derives text from scoped <code>WorkReading</code> values</td></tr>
+<tr><td>Retry a failed read</td><td>Read recovery</td><td><code>WorkModel.refresh()</code> uses the observation or fenced one-shot reads</td></tr>
+<tr><td>Continue typing</td><td>Session input readiness</td><td>Existing Task opening and mounted Session owners</td></tr>
+</tbody></table>
+<h2>Missing prose is not loading</h2>
+<p>Current patch: a fully read Task with no description or live excerpt says
+“Loading planning…” beneath its name. Proposed: omit the preview line. A title-only
+list member still waiting for details keeps its genuine loading context.</p>
+<p>Keep the existing cache, current-removal behavior, scope fences, shipping
+context and Session previews. No new record, persistence, transport or skill is needed.</p>
+<h2>Next checks</h2>
+<p>Exercise current roadmap + failed list, current list + failed roadmap,
+current selection + retained failed list, then independent recovery. Compare a
+loaded description-free Task with one still awaiting details. Rendered Desktop
+behavior and input continuity remain unverified; this page is a proposal.</p>
+<p>No open product questions. Next Graph step: implement these refinements.</p>
+</html>

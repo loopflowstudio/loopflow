@@ -1,5 +1,6 @@
 #if os(macOS)
 import Foundation
+import SwiftUI
 import Testing
 import ViewInspector
 @testable import Loopflow
@@ -970,15 +971,18 @@ struct WorkModelStreamTests {
         try await eventually { preview() == "Recovered result" }
     }
 
-    private func eventually(_ condition: @MainActor () -> Bool) async throws {
-        let deadline = ContinuousClock.now + .seconds(3)
-        while !condition() {
-            guard ContinuousClock.now < deadline else {
-                Issue.record("condition did not hold in time")
-                throw CancellationError()
-            }
-            try await Task.sleep(for: .milliseconds(5))
+
+}
+
+@MainActor
+private func eventually(_ condition: @MainActor () -> Bool) async throws {
+    let deadline = ContinuousClock.now + .seconds(3)
+    while !condition() {
+        guard ContinuousClock.now < deadline else {
+            Issue.record("condition did not hold in time")
+            throw CancellationError()
         }
+        try await Task.sleep(for: .milliseconds(5))
     }
 }
 
@@ -1068,6 +1072,9 @@ private struct WorkTestFixture {
             switch args.first {
             case "plan" where args.dropFirst().first == "list": return roadmapJSON
             case "repo" where args.dropFirst().first == "plan": return #"{"destinations":[]}"#
+            case "desktop" where args.dropFirst().prefix(2) == ["view", "show"]:
+                return String(decoding: try JSONEncoder().encode(fixtureViewPlan(
+                    owner: .init(repository: "repo", kind: .repository, id: "repo"), members: [])), as: UTF8.self)
             case "wave" where args.dropFirst().first == "list": return wavesJSON
             case "session" where args.dropFirst().first == "list": return #"{"entries":[],"next":null}"#
             case "session" where args.dropFirst().first == "history":
@@ -1204,6 +1211,248 @@ private actor DeferredActivityResponse {
     func release(_ response: String) {
         responseContinuation?.resume(returning: response)
         responseContinuation = nil
+    }
+}
+@Suite("Task planning readability", .serialized)
+@MainActor
+struct TaskPlanningReadabilityTests {
+    private let key = WorkWorkspaceKey(repository: "repo", kind: .task, id: "task-opaque")
+
+    private func plan(title: String = "Readable local Task") -> WorkViewPlan {
+        let content = WorkViewPlan.Content(paneRevision: nil, face: nil, work: key, title: title,
+            states: [.working], identifier: "LOO-905", primarySession: nil, location: nil, argv: nil, unavailable: [])
+        return fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"), members: [content])
+    }
+
+    private func savedRoadmap(_ fixture: WorkTestFixture) throws -> String {
+        var root = try #require(JSONSerialization.jsonObject(with: Data(fixture.roadmapJSON.utf8)) as? [String: Any])
+        var tasks = try #require(root["tasks"] as? [String: Any])
+        var items = try #require(tasks["items"] as? [[String: Any]])
+        items[0]["section"] = "working"
+        var other = items[0]
+        var task = try #require(other["task"] as? [String: Any])
+        task["id"] = "context-task"
+        task["identifier"] = "CTX-1"
+        task["name"] = "Readable context Task"
+        task["repo"] = "/src/context"
+        task["repo_id"] = "context-repo"
+        task["wave_id"] = NSNull()
+        task["project_id"] = NSNull()
+        other["task"] = task
+        other["runtime"] = NSNull()
+        tasks["items"] = items + [other]
+        root["tasks"] = tasks
+        return String(decoding: try JSONSerialization.data(withJSONObject: root), as: UTF8.self)
+    }
+
+    @Test("A named list arrives before planning; failure and replacement retain readable identity")
+    func listBeforePlanning() throws {
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("No side effects") }, repoPath: "/src/loopflow")
+        #expect(model.taskPresentation(id: key.id).title == "Loading Task…")
+        model.applyTaskList(plan(), wave: nil, reason: "")
+        #expect(model.sidebarTaskIDs == [key.id])
+        #expect(model.workspaceTitle(key) == "Readable local Task")
+        let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
+        #expect(try navigator.inspect().find(text: "Readable local Task").string() == "Readable local Task")
+        #expect(throws: (any Error).self) { try navigator.inspect().find(text: "Planning unavailable") }
+        model.select(.task(id: key.id))
+        #expect(model.selection == key.reference)
+        #expect(try WorkBreadcrumbs(model: model).inspect().find(text: "Readable local Task").string() == "Readable local Task")
+        let row = WorkTaskIdentity(presentation: model.taskPresentation(id: key.id))
+        #expect(try row.inspect().find(text: "Readable local Task").string() == "Readable local Task")
+        #expect(try row.inspect().find(text: "LOO-905").string() == "LOO-905")
+        model.applyTaskList(nil, wave: nil, reason: "List offline")
+        #expect(model.taskPresentation(id: key.id).context == "Last known")
+        #expect(model.workStatus.message == "Couldn't update: List offline")
+        #expect(model.sidebarTaskIDs == [key.id])
+        model.applyTaskList(plan(title: "Renamed locally"), wave: nil, reason: "")
+        #expect(model.workspaceTitle(key) == "Renamed locally")
+        #expect(model.taskPresentation(id: key.id).context == nil)
+        #expect(model.workStatus == .loading, "planning and Sessions have not answered")
+        model.applyTaskList(fixtureViewPlan(owner: key, members: []), wave: nil, reason: "")
+        #expect(model.sidebarTaskIDs.isEmpty, "a complete removal cannot revive old membership")
+    }
+
+    @Test("Missing-facts titles stay private; Wave, repository and Machine readings do not leak")
+    func unknownAndScopeChanges() {
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("No side effects") }, repoPath: "/src/loopflow")
+        model.confirmMachine("one")
+        model.applyTaskList(plan(title: key.id), wave: nil, reason: "")
+        #expect(model.workspaceTitle(key) == "Loading Task…")
+        model.applyTaskList(nil, wave: nil, reason: "Unavailable")
+        #expect(model.workspaceTitle(key) == "Task unavailable")
+        model.applyTaskList(plan(), wave: nil, reason: "")
+        model.navigation.sidebarWaveID = "other-wave"
+        #expect(model.taskListReading.isLoading)
+        #expect(model.taskPresentation(id: key.id).title == "Loading Task…")
+        model.navigation.sidebarWaveID = nil
+        model.setRepoPath("/src/other")
+        #expect(model.taskPresentation(id: key.id).title == "Loading Task…")
+        model.setRepoPath("/src/loopflow")
+        #expect(model.workspaceTitle(key) == "Readable local Task")
+        model.confirmMachine("two")
+        #expect(model.taskPresentation(id: key.id).title == "Loading Task…")
+    }
+
+    @Test("Session status, preview age and keyboard hints do not require a full Task record")
+    func partialSessionMetadata() throws {
+        let fixture = try WorkTestFixture.load()
+        let entries = try fixture.sessionEntries()
+        let session = try #require(RegistryQuery.decode([SessionRecord].self, from: entries.json).first)
+        let metadata = TaskRowMetadata(id: key.id, task: nil, status: .available(session), sourceAge: "3s")
+        #expect(try metadata.inspect().find(text: "Available · inferred").string() == "Available · inferred")
+        #expect(try metadata.inspect().find(text: "3s").string() == "3s")
+        #expect(throws: (any Error).self) { try metadata.inspect().find(text: "Unowned") }
+        let shortcut = TaskRowMetadata(id: key.id, task: nil, status: .unknown, slotHint: "⌘1")
+        #expect(try shortcut.inspect().find(text: "⌘1").string() == "⌘1")
+    }
+
+    @Test("The sidebar distinguishes a pending list, a failed list and a successful empty list")
+    func emptyListStates() throws {
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("No side effects") }, repoPath: "/src/loopflow")
+        let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
+        #expect(try navigator.inspect().find(text: "Loading Tasks…").string() == "Loading Tasks…")
+        #expect(throws: (any Error).self) { try navigator.inspect().find(text: "No working Tasks in this list") }
+        model.applyTaskList(nil, wave: nil, reason: "Offline")
+        #expect(try navigator.inspect().find(text: "Task list unavailable").string() == "Task list unavailable")
+        model.applyTaskList(fixtureViewPlan(owner: key, members: []), wave: nil, reason: "")
+        #expect(try navigator.inspect().find(text: "No working Tasks in this list").string() == "No working Tasks in this list")
+    }
+
+    @Test("A saved name remains updating while Sessions load, and a fresh list can rename it")
+    func savedIdentity() throws {
+        let fixture = try WorkTestFixture.load()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = WorkCache(directory: directory)
+        cache.saveRoadmap(try savedRoadmap(fixture))
+        cache.flush()
+        let model = WorkModel(query: fixture.query, repoPath: "/src/loopflow", cache: cache)
+        #expect(model.workStatus == .updating)
+        let expected = model.visibleTasks.filter { $0.section == .working }.map(\.id)
+        #expect(!expected.isEmpty)
+        #expect(model.sidebarTaskIDs == expected)
+        let record = try #require(model.task(id: "issue-now")?.task)
+        #expect(model.taskPresentation(id: record.id).title == record.task.name)
+        #expect(model.taskPresentation(id: record.id).context == "Updating…")
+        let content = WorkViewPlan.Content(paneRevision: nil, face: nil,
+            work: .init(repository: "repo", kind: .task, id: record.runtime?.workId ?? record.id),
+            title: "Fresh local name", states: [.working], identifier: record.task.identifier,
+            primarySession: nil, location: nil, argv: nil, unavailable: [])
+        model.applyTaskList(fixtureViewPlan(owner: key, members: [content]), wave: nil, reason: "")
+        #expect(model.taskPresentation(id: record.id).title == "Fresh local name")
+        model.applyTaskList(fixtureViewPlan(owner: key, members: []), wave: nil, reason: "")
+        #expect(model.sidebarTaskIDs.isEmpty, "a fresh empty list supersedes saved membership")
+    }
+
+    @Test("Two repository windows restore their own names from one Machine cache")
+    func cachedRepositoryWindows() throws {
+        let fixture = try WorkTestFixture.load()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = WorkCache(directory: directory)
+        cache.saveRoadmap(try savedRoadmap(fixture))
+        cache.flush()
+        let windows = ["/src/loopflow", "/src/context"].map {
+            WorkModel(query: fixture.query, repoPath: $0, cache: cache)
+        }
+        for model in windows {
+            let own = try #require(model.visibleTasks.first)
+            model.select(.task(id: own.id))
+            let crumbs = WorkBreadcrumbs(model: model)
+            #expect(try crumbs.inspect().find(text: own.task.name).string() == own.task.name)
+            #expect(try crumbs.inspect().find(text: "Updating…").string() == "Updating…")
+            #expect(model.workStatus == .updating)
+            for other in windows where other !== model {
+                for task in other.visibleTasks {
+                    #expect(model.task(id: task.id) == nil)
+                }
+            }
+        }
+    }
+
+    @Test("Independent list and Session arrival, disconnect and recovery keep the selected Task", arguments: [false, true])
+    func arrivalAndReconnect(sessionsFirst: Bool) async throws {
+        let fixture = try WorkTestFixture.load()
+        let feed = WorkFeed()
+        let model = WorkModel(query: fixture.streaming(feed), repoPath: "/src/loopflow")
+        let keeping = Task { await model.keepWorkCurrent() }
+        defer { keeping.cancel() }
+        try await feed.opened(1)
+        let scope = try await feed.request(1)
+        func sessions(_ sequence: Int, _ answers: Int) throws -> WorkFrame {
+            try fixture.sessionsFrame(sequence: sequence, answers: answers, repo: "/src/loopflow", entries: "[]")
+        }
+        if sessionsFirst { await feed.send(try sessions(1, scope.id)) }
+        await feed.send(WorkFrame(sequence: 1, answers: scope.id, unavailable: nil, content: .taskList(plan()), wire: nil))
+        try await eventually { model.sidebarTaskIDs == [key.id] }
+        model.select(.task(id: key.id))
+        let selection = model.selection
+        if !sessionsFirst { await feed.send(try sessions(1, scope.id)) }
+        #expect(model.workspaceTitle(key) == "Readable local Task")
+        await feed.fail(RegistryQueryError("Disconnected"))
+        try await eventually { model.taskListReading.errorMessage == "Disconnected" }
+        #expect(model.sidebarTaskIDs == [key.id])
+        #expect(model.taskPresentation(id: key.id).context == "Last known")
+        #expect(model.workStatus.message == "Couldn't update: Disconnected")
+        #expect(model.selection == selection)
+        try await feed.opened(2, within: .seconds(5))
+        // No Task row has arrived to change the selected Task's scope.
+        let reopened = try await feed.request(scope.id + 1)
+        await feed.send(WorkFrame(sequence: 1, answers: reopened.id, unavailable: nil,
+                                  content: .taskList(plan(title: "Recovered name")), wire: nil))
+        await feed.send(try fixture.planningFrame(sequence: 1, answers: reopened.id))
+        await feed.send(WorkFrame(sequence: 1, answers: reopened.id, unavailable: nil, content: .selections([]), wire: nil))
+        await feed.send(try sessions(1, reopened.id))
+        try await eventually { model.workStatus == .current }
+        #expect(model.workspaceTitle(key) == "Recovered name")
+        #expect(model.selection == selection)
+        keeping.cancel()
+        await keeping.value
+    }
+
+    @Test("A delayed one-shot Retry cannot overwrite a newer list or survive leaving its repository", arguments: [false, true])
+    func lateRetry(replaced: Bool) async throws {
+        let delayed = DeferredActivityResponse()
+        let query = RegistryQuery { args, _ in
+            if args.starts(with: ["desktop", "view", "show"]) { return await delayed.response() }
+            throw RegistryQueryError("Other reads unavailable")
+        }
+        let model = WorkModel(query: query, repoPath: "/src/loopflow")
+        let refreshing = Task { await model.refresh() }
+        await delayed.waitUntilRequested()
+        if replaced {
+            model.applyTaskList(plan(title: "Newer list"), wave: nil, reason: "")
+        } else {
+            model.setRepoPath("/src/other")
+            model.setRepoPath("/src/loopflow")
+        }
+        await delayed.release(String(decoding: try JSONEncoder().encode(plan(title: "Late list")), as: UTF8.self))
+        await refreshing.value
+        #expect(model.taskListReading.value?.contents.first?.title == (replaced ? "Newer list" : nil))
+    }
+
+    @Test("The production Retry action requests a new live reading and clears a list-only error")
+    func retryLiveList() async throws {
+        let fixture = try WorkTestFixture.load()
+        let feed = WorkFeed()
+        let model = WorkModel(query: fixture.streaming(feed), repoPath: "/src/loopflow")
+        let keeping = Task { await model.keepWorkCurrent() }
+        defer { keeping.cancel() }
+        try await feed.opened(1)
+        let scope = try await feed.request(1)
+        await feed.send(WorkFrame(sequence: 1, answers: scope.id, unavailable: "List offline", content: .taskList(nil), wire: nil))
+        try await eventually { model.taskListReading.errorMessage != nil }
+        let notice = WorkReadStatus(model: model, status: try #require(model.workStatus.message))
+        try notice.inspect().find(button: "Retry").tap()
+        let request = try await feed.request(2)
+        await feed.send(WorkFrame(sequence: 2, answers: request.id, unavailable: nil, content: .taskList(plan()), wire: nil))
+        await feed.send(try fixture.planningFrame(sequence: 1, answers: request.id))
+        try await eventually { model.taskListReading.errorMessage == nil && model.roadmap.value != nil }
+        #expect(model.workspaceTitle(key) == "Readable local Task")
+        #expect(model.workStatus.message?.contains("List offline") != true)
+        keeping.cancel()
+        await keeping.value
     }
 }
 #endif

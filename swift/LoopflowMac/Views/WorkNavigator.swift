@@ -34,9 +34,13 @@ struct WorkNavigator: View {
 
     private var emptyListText: String {
         switch model.navigation.sidebarScope {
-        case .repository: "No working Tasks in this list"
-        case .wave: "No working Tasks in this Wave"
-        case .dashboard(let id): model.dashboard(id) == nil ? "This Dashboard is no longer available." : "No Tasks in this Dashboard"
+        case .dashboard(let id):
+            return model.dashboard(id) == nil ? "This Dashboard is no longer available." : "No Tasks in this Dashboard"
+        case .repository, .wave:
+            if model.taskListReading.isLoading { return "Loading Tasks…" }
+            if model.taskListReading.errorMessage != nil { return "Task list unavailable" }
+            if case .wave = model.navigation.sidebarScope { return "No working Tasks in this Wave" }
+            return "No working Tasks in this list"
         }
     }
 
@@ -56,10 +60,11 @@ struct WorkNavigator: View {
     var body: some View {
         VStack(spacing: 0) {
             if let status = model.workStatus.message {
-                Text(status).font(Typography.body(11)).foregroundStyle(palette.textSecondary).padding(10)
-                    .accessibilityIdentifier("work-status")
+                WorkReadStatus(model: model, status: status)
             }
-            if let error = model.dashboardError ?? model.selectionPlans.errorMessage {
+            if let error = model.dashboardError ?? model.selectionPlans.errorMessage,
+               ![model.roadmap.errorMessage, model.taskListReading.errorMessage, model.sessions.errorMessage]
+                .compactMap({ $0 }).contains(error) {
                 Text(error).font(Typography.body(11)).foregroundStyle(palette.warning).padding(10)
             }
             // The repository tops the sidebar; a selected Wave moves up under it.
@@ -247,21 +252,22 @@ struct WorkNavigator: View {
         let muted = quiet || model.selection?.kind == .wave && found?.wave?.wave.id != model.selection?.id
         let sessions = model.taskSessions(id)
         let status = SessionProgramStatus(sessions: sessions, unavailable: model.sessions.errorMessage)
-        let title = found?.task.task.name ?? "Task unavailable · \(id)"
+        let presentation = model.taskPresentation(id: id)
+        let title = presentation.title
         // Rows slide under the pointer while scrolling. Only the ⌘N hint reads the
         // row's hover, so a crossing re-renders that hint, not rows or the sidebar.
         return RowHover { hover in VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(Typography.strong(13)).lineLimit(2).help(title)
+            WorkTaskIdentity(presentation: presentation, showsIdentifier: found == nil)
                 .allowsHitTesting(false)
             // Only a live excerpt ages; a row showing its summary needs no clock.
-            let fallback = found?.task.task.description ?? "Planning unavailable"
+            let fallback = found?.task.task.description ?? ""
             let current = status.preview(now: .now, fallback: fallback, sessions: sessions)
             if current.age == nil {
-                rowDetail(current, slotHint: slotHint, found: found, status: status, selected: selected, hover: hover)
+                rowDetail(current, id: id, presentation: presentation, hasSummary: !fallback.isEmpty, slotHint: slotHint, found: found, status: status, selected: selected, hover: hover)
             } else {
                 TimelineView(.periodic(from: .now, by: 5)) { clock in
                     rowDetail(status.preview(now: clock.date, fallback: fallback, sessions: sessions),
-                              slotHint: slotHint, found: found, status: status, selected: selected, hover: hover)
+                              id: id, presentation: presentation, hasSummary: !fallback.isEmpty, slotHint: slotHint, found: found, status: status, selected: selected, hover: hover)
                 }
             }
         }
@@ -296,22 +302,21 @@ struct WorkNavigator: View {
     }
 
     /// The preview line and metadata beneath a row's title.
-    private func rowDetail(_ preview: (text: String, help: String, age: String?), slotHint: String?, found: (wave: WaveRoadmap?, task: RoadmapTask)?,
+    private func rowDetail(_ preview: (text: String, help: String, age: String?), id: String, presentation: WorkModel.TaskPresentation, hasSummary: Bool, slotHint: String?, found: (wave: WaveRoadmap?, task: RoadmapTask)?,
                            status: SessionProgramStatus, selected: Bool, hover: HoverFlag) -> some View {
         let shipping = found?.task.shipping.map { "\($0.label) · \($0.reason)" }
         return VStack(alignment: .leading, spacing: 6) {
-            Text(shipping ?? preview.text).font(Typography.code(11)).lineLimit(status.session?.availability == .available ? 2 : 1)
-                .foregroundStyle(selected ? palette.workSelectedSecondaryText : palette.textSecondary)
-                .help(preview.help).allowsHitTesting(false)
-            if let task = found?.task {
-                TaskRowMetadata(task: task, status: status, selected: selected,
-                    slotHint: slotHint,
-                    showsSlotHint: model.navigation.showsSlotHints, hover: hover,
-                    sourceAge: preview.age)
-            } else {
-                Text("Planning unavailable").font(Typography.code(10))
-                    .foregroundStyle(palette.textSecondary).allowsHitTesting(false)
+            if hasSummary || preview.age != nil || presentation.context == nil {
+                Text(shipping ?? (hasSummary || preview.age != nil ? preview.text : "Loading planning…"))
+                    .font(Typography.code(11)).lineLimit(status.session?.availability == .available ? 2 : 1)
+                    .foregroundStyle(selected ? palette.workSelectedSecondaryText : palette.textSecondary)
+                    .help(hasSummary || preview.age != nil ? preview.help : "Waiting for Task details")
+                    .allowsHitTesting(false)
             }
+            TaskRowMetadata(id: id, task: found?.task, status: status, selected: selected,
+                slotHint: slotHint,
+                showsSlotHint: model.navigation.showsSlotHints, hover: hover,
+                sourceAge: preview.age)
         }
         .renderFlash()
     }
@@ -393,7 +398,12 @@ struct WorkBreadcrumbs: View {
                 ZoomCrumb(title: zoomed.title) { model.setZoomed(nil, in: view) }
             }
             if let task = model.breadcrumb?.task {
-                TaskHeading(task: task.task)
+                let presentation = model.taskPresentation(id: task.task.id)
+                WorkTaskIdentity(presentation: presentation)
+                if presentation.context == nil {
+                    Text(TaskHeading(task: task.task).state).foregroundStyle(.secondary).fixedSize()
+                        .accessibilityIdentifier("task-heading-state")
+                }
                 if let workspace = model.shownWorkspace, workspace.key.kind == .task, workspace.key.id == task.task.id {
                     ShowHiddenMenu(workspace: workspace).font(Typography.caption())
                     let store = workspace.multiplexer
@@ -401,6 +411,9 @@ struct WorkBreadcrumbs: View {
                         ZoomCrumb(title: pane.kind.rawValue.capitalized) { store.setZoom(zoomed, enabled: false) }
                     }
                 }
+            }
+            if model.breadcrumb?.task == nil, let selection = model.selection, selection.kind == .task {
+                WorkTaskIdentity(presentation: model.taskPresentation(id: selection.id))
             }
             if let target = model.machineTarget {
                 WorkMachineControl(model: model, target: target).padding(.leading, 6)
@@ -868,5 +881,36 @@ extension TaskOrderDrag {
             guard let source, let target else { return nil }
             return (source, target)
         }
+    }
+}
+
+/// The name remains useful before the full Task and its metadata arrive.
+struct WorkTaskIdentity: View {
+    let presentation: WorkModel.TaskPresentation
+    var showsIdentifier = true
+    var body: some View {
+        HStack(spacing: 6) {
+            if showsIdentifier, let identifier = presentation.identifier {
+                Text(identifier).font(Typography.code(10)).fixedSize()
+            }
+            Text(presentation.title).font(Typography.strong(13)).lineLimit(2).help(presentation.title)
+            if let context = presentation.context {
+                Text(context).font(Typography.code(10)).foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+struct WorkReadStatus: View {
+    let model: WorkModel
+    let status: String
+    var body: some View {
+        HStack {
+            Text(status)
+            if case .failed = model.workStatus {
+                Button("Retry") { Task { await model.refresh() } }
+                    .accessibilityIdentifier("work-retry")
+            }
+        }.font(Typography.body(11)).padding(10).accessibilityIdentifier("work-status")
     }
 }

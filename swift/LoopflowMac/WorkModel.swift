@@ -127,22 +127,27 @@ final class WorkModel {
 
     /// The sidebar's started Tasks for the Wave it was read for: the list the phone shows.
     private var taskListReadings: [RepositoryReadingKey: (wave: String?, reading: WorkReading<WorkViewPlan>)] = [:]
+    private var taskListGeneration = 0
 
     func applyTaskList(_ plan: WorkViewPlan?, wave: String?, reason: String) {
+        taskListGeneration &+= 1
         let key = repositoryReadingKey(repoPath ?? "")
         let previous = taskListReadings[key]
         let next: WorkReading<WorkViewPlan> = plan.map { .available($0) }
             ?? .unavailable(lastGood: previous?.wave == wave ? previous?.reading.value : nil, reason: reason)
         guard previous?.wave != wave || previous?.reading != next else { return }
         taskListReadings[key] = (wave, next)
+        endLaunchWhenCurrent()
     }
 
     /// The started list, once it answers for the sidebar's current scope.
-    private var taskList: WorkViewPlan? {
+    var taskListReading: WorkReading<WorkViewPlan> {
         let wave: String? = if case .wave(let id) = navigation.sidebarScope { id } else { nil }
-        guard let entry = taskListReadings[repositoryReadingKey(repoPath ?? "")], entry.wave == wave else { return nil }
-        return entry.reading.value
+        guard let entry = taskListReadings[repositoryReadingKey(repoPath ?? "")], entry.wave == wave else { return .loading }
+        return entry.reading
     }
+
+    private var taskList: WorkViewPlan? { taskListReading.value }
 
     func applySelectionPlans(_ plans: [WorkViewPlan]?, reason: String) {
         guard let plans else {
@@ -194,7 +199,7 @@ final class WorkModel {
         switch key.kind {
         case .repository: return repoPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Repository unavailable"
         case .wave: return visibleRoadmaps.first { $0.wave.id == key.id }?.wave.name ?? memberTitle ?? workspaceRegistry?.retained(key)?.title ?? "Wave unavailable"
-        case .task: return task(id: key.id)?.task.task.name ?? memberTitle ?? workspaceRegistry?.retained(key)?.title ?? "Task unavailable"
+        case .task: return taskPresentation(id: key.id, repository: key.repository).title
         }
     }
 
@@ -1366,18 +1371,13 @@ final class WorkModel {
     }
 
     var workStatus: WorkReadingStatus {
-        let sessionsError = repoPath == nil ? nil : sessions.errorMessage
-        switch (roadmap.errorMessage, sessionsError) {
-        case (let planning?, let sessions?):
-            return .failed(planning == sessions
-                ? "Couldn't update: \(planning)"
-                : "Couldn't update planning: \(planning); Sessions: \(sessions)")
-        case (let planning?, nil): return .failed("Couldn't update planning: \(planning)")
-        case (nil, let sessions?): return .failed("Couldn't update Sessions: \(sessions)")
-        case (nil, nil): break
-        }
-        if roadmap.isLoading || (repoPath != nil && sessions.isLoading) { return .loading }
-        return showsSavedWork ? .updating : .current
+        let errors = [roadmap.errorMessage, repoPath == nil ? nil : taskListReading.errorMessage,
+                      repoPath == nil ? nil : sessions.errorMessage].compactMap { $0 }
+        let unique = errors.reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
+        if !unique.isEmpty { return .failed("Couldn't update: " + unique.joined(separator: "; ")) }
+        if showsSavedWork { return .updating }
+        if roadmap.isLoading || (repoPath != nil && (sessions.isLoading || taskListReading.isLoading)) { return .loading }
+        return .current
     }
 
     /// Whether any part shown is saved text instead of a read from this launch.
@@ -1664,7 +1664,10 @@ final class WorkModel {
         peerPlanningReadings = peerPlanningReadings.mapValues {
             .unavailable(lastGood: $0.value, reason: reason)
         }
-        if repoPath != nil { applySelectionPlans(nil, reason: reason) }
+        if repoPath != nil {
+            applySelectionPlans(nil, reason: reason)
+            applyTaskList(nil, wave: workScope.taskListWave, reason: reason)
+        }
         if repoPath != nil { peerPlanning = .unavailable(lastGood: peerPlanning.value, reason: reason) }
         if let value = processActivity.value { processActivity = .unavailable(lastGood: value, reason: reason) }
         taskExecution.values = taskExecution.values.mapValues { .unavailable(lastGood: $0.value, reason: reason) }
@@ -1732,11 +1735,12 @@ final class WorkModel {
                 cache?.saveSessions([page], repo: repoPath)
             }
         case .task(let body):
+            guard answers >= max(taskFloor, scopeFloor) else { return }
             // A frame about its own Task stays true after the selection moves on.
             if let body, let row = body.row, row.task.identifier == body.task, subscribedTaskRow != row {
                 subscribedTaskRow = row
             }
-            guard answers >= max(taskFloor, scopeFloor), let shown = selection, shown.kind == .task,
+            guard let shown = selection, shown.kind == .task,
                   let task = task(id: shown.id)?.task else { return }
             guard let body else {
                 taskWork.values[task.id] = .unavailable(lastGood: taskWork[task.id].value, reason: reason)
@@ -1816,12 +1820,15 @@ final class WorkModel {
     private func dropMachineContent() {
         applySelectionPlans(nil, reason: "Work reading changed; showing retained membership")
         selectionReadings = [:]
+        taskListReadings = [:]
+        taskListGeneration &+= 1
         definitionRevision = 0
         graphCatalogRevisions = [:]
         graphCatalogRequests = [:]
         graphCatalogReadings = [:]
         roadmap = .loading
         waves = .loading
+        subscribedTaskRow = nil
         showsSavedPlanning = false
         for navigation in navigationByRepo.values {
             navigation.clearSelection()
@@ -1846,9 +1853,29 @@ final class WorkModel {
         }
         async let sessions: Void = refreshSessions()
         async let peers: Void = refreshPeerPlanning()
+        async let list: Void = refreshTaskList()
         await refreshPlanning()
         await sessions
         await peers
+        await list
+    }
+
+    private func refreshTaskList() async {
+        guard !usesFixedFixture, let repo = repoPath else { return }
+        let key = repositoryReadingKey(repo)
+        let wave = workScope.taskListWave
+        taskListGeneration &+= 1
+        let generation = taskListGeneration
+        do {
+            let plan = try await query.viewPlan(expression: TaskList.started.expression(wave: wave), repoPath: repo)
+            guard generation == taskListGeneration, repoPath == repo,
+                  repositoryReadingKey(repo) == key, workScope.taskListWave == wave else { return }
+            applyTaskList(plan, wave: wave, reason: "")
+        } catch {
+            guard generation == taskListGeneration, repoPath == repo,
+                  repositoryReadingKey(repo) == key, workScope.taskListWave == wave else { return }
+            applyTaskList(nil, wave: wave, reason: error.localizedDescription)
+        }
     }
 
     private func refreshPeerPlanning() async {
@@ -1988,6 +2015,7 @@ final class WorkModel {
         historyLookup = nil
         sessionsGeneration &+= 1
         peerPlanningGeneration &+= 1
+        taskListGeneration &+= 1
         workActivityGeneration &+= 1
         repoPath = path
         rescanWork()
@@ -2007,6 +2035,7 @@ final class WorkModel {
             historyLookup = nil
             sessionsGeneration &+= 1
             peerPlanningGeneration &+= 1
+            taskListGeneration &+= 1
             workActivityGeneration &+= 1
             if !usesFixedFixture { workActivity = .loading }
         }
@@ -2102,12 +2131,27 @@ final class WorkModel {
         }
     }
 
+    /// Saved rows are display-only until the independent list answers, including an empty answer.
+    private var sidebarTaskRows: [(id: String, states: [WorkSelectionState])] {
+        if let taskList { return taskRows(taskList) }
+        guard showsSavedPlanning else { return [] }
+        return visibleTasks.compactMap { task in
+            if case .wave(let wave) = navigation.sidebarScope, task.task.waveId != wave { return nil }
+            guard !abandoningTaskIDs.contains(task.id) else { return nil }
+            switch task.section {
+            case .working: return (task.id, [.working])
+            case .autonomous: return (task.id, [.autonomous])
+            default: return nil
+            }
+        }
+    }
+
     /// The repository or Wave's Working Tasks from the started list, or a
     /// Dashboard's; the filter reads each Task's states as the phone does.
     var sidebarTaskIDs: [String] {
         let rows: [(id: String, states: [WorkSelectionState])]
         switch navigation.sidebarScope {
-        case .repository, .wave: rows = taskRows(taskList).filter { $0.states.contains(.working) }
+        case .repository, .wave: rows = sidebarTaskRows.filter { $0.states.contains(.working) }
         case .dashboard(let id): rows = taskRows(dashboard(id).map { plan in
             var visible = plan
             visible.resolution.members = plan.projection.visible
@@ -2133,7 +2177,46 @@ final class WorkModel {
     var sidebarAutonomousTaskIDs: [String] {
         guard navigation.sidebarFilter == .working else { return [] }
         if case .dashboard = navigation.sidebarScope { return [] }
-        return taskRows(taskList).filter { $0.states.contains(.autonomous) }.map(\.id)
+        return sidebarTaskRows.filter { $0.states.contains(.autonomous) }.map(\.id)
+    }
+
+    /// Display identity comes from the same scoped readings as membership, never from IDs.
+    struct TaskPresentation {
+        let title: String
+        let identifier: String?
+        let context: String?
+    }
+
+    func taskPresentation(id: String, repository: String? = nil) -> TaskPresentation {
+        let record = task(id: id)?.task
+        let workID = record?.runtime?.workId ?? record?.id ?? id
+        let plans = [taskList].compactMap { $0 } + (selectionPlans.value ?? [])
+        let contents = plans.lazy.filter { repository == nil || $0.repository == repository }
+            .flatMap(\.contents).filter {
+                $0.work.kind == .task && ($0.work.id == workID || $0.work.id == id)
+            }
+        let member = contents.first { $0.title != $0.work.id && !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        let failed = roadmap.errorMessage != nil || taskListReading.errorMessage != nil
+            || selectionPlans.errorMessage != nil
+            || (record == nil && member == nil && contents.first?.unavailable.isEmpty == false)
+        let saved = showsSavedPlanning || roadmap.errorMessage != nil || currentTask(id: id) == nil
+        let context: String? = failed ? "Last known" : saved ? "Updating…" : nil
+        if let record, !saved {
+            return TaskPresentation(title: record.task.name, identifier: record.task.identifier, context: context)
+        }
+        if let member {
+            return TaskPresentation(title: member.title, identifier: member.identifier,
+                                    context: failed ? "Last known" : nil)
+        }
+        if let record {
+            return TaskPresentation(title: record.task.name, identifier: record.task.identifier, context: context)
+        }
+        if let repository = repository ?? workspaceRepository, let retained = workspaceRegistry?.retained(.init(repository: repository, kind: .task, id: workID)),
+           retained.title != workID, retained.title != "Loading Task…", retained.title != "Task unavailable" {
+            return TaskPresentation(title: retained.title, identifier: nil, context: failed ? "Last known" : "Updating…")
+        }
+        return TaskPresentation(title: failed ? "Task unavailable" : "Loading Task…", identifier: nil,
+                                context: failed ? "Planning unavailable" : "Loading planning…")
     }
 
     func taskSessions(_ id: String) -> [SessionRecord] {
@@ -2763,7 +2846,8 @@ final class WorkModel {
 
     func task(id: String) -> (wave: WaveRoadmap?, task: RoadmapTask)? {
         if let current = currentTask(id: id) { return current }
-        if let row = subscribedTaskRow, row.id == id || row.runtime?.workId == id {
+        if let row = subscribedTaskRow, row.id == id || row.runtime?.workId == id,
+           repoPath.map({ repoIdentity(row.task.repo) == repoIdentity($0) }) ?? true {
             return (row.task.waveId.flatMap { taskIndex.waves[$0] }, row)
         }
         if let retained = navigation.selectedTaskEvidence, retained.task.id == id || retained.task.runtime?.workId == id { return retained }
@@ -2783,6 +2867,7 @@ final class WorkModel {
 
     func clearSelectionIfOutsideScope() {
         guard navigation.dashboardID == nil, let selection else { return }
+        if selection.kind == .task, taskRows(taskList).contains(where: { $0.id == selection.id }) { return }
         if selectionPlans.value?.contains(where: { plan in
             plan.contents.contains { $0.work.reference == selection }
         }) == true { return }

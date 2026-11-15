@@ -405,26 +405,13 @@ that case launches no children. No retry was taken as a fix.
 
 ### Projected surface cut · 2026-11-15
 
-The 2026-11-15 concept reviews and their counterexamples remain at
-`aee0e10dc603:scratch/instant-task-session.md` (moving changes membership;
-one Task location across surfaces). Dynamic queries already move rows, but
-boards, No Wave grouping, trails and counts still join old planning membership.
-
-Removed in this cut: `WorkProjection`'s `wave.tasks.items` grouping and
-`task.waveId` standalone filter; `standupTasks`' roadmap membership; the Task
-breadcrumb's Session-Wave precedence; board counts from `RoadmapTask.section`.
-Keep planning content, authored order, Session attribution, panes, drafts and
-later navigation. The existing query owner exports projected fields and coverage;
-boards use the shared ancestry evaluator and lifecycle states. No view-local Move
-map or rewritten confirmed DTO. Missing content/ancestry has no exact count.
-
-Acceptance: offline Move, refusal, superseded save/retry, descendants, changed
-definitions, incomplete destinations, two-client Complete→Reopen, unresolved
-destination membership, retirement/restart and retained native ownership. The
-portfolio subscribes to the same per-repository manifests, with condition content
-kept separate from projected terminal membership. Its checkpoint must cover
-that subscription too. Unplaced parents never acquire a No Wave label.
-The three product choices below remain open and do not block this cut.
+Built. Concept reviews and counterexamples: `aee0e10dc603:scratch/instant-task-session.md`;
+acceptance map and checks: `09ab7e7ab2:scratch/instant-task-session.md`. Removed:
+`WorkProjection`'s `wave.tasks.items` grouping and `task.waveId` filter,
+`standupTasks`' roadmap membership, the breadcrumb's Session-Wave precedence and
+board counts from `RoadmapTask.section`. Boards use the shared ancestry evaluator
+and lifecycle; missing content/ancestry has no exact count; unplaced parents never
+acquire a No Wave label.
 
 ### Open product choices
 
@@ -540,12 +527,9 @@ including without a network event. Retirement cancels its receipt observer and
 transfers lagging effects or scoped reload floors. The complete prior contracts and
 query checks remain at `6e944e73b5a:scratch/instant-task-session.md`.
 
-The projected surface cut now joins boards, portfolio Roadmap/Now, Task trails,
-No Wave grouping and counts to the query owner's parent/lifecycle fields. Initial
-observation binds the receiving link's Machine before projecting; portfolio scope
-subscribes to all repository manifests. Failed unsaved Moves cannot retry behind
-a later Move. Focused checks are recorded below; native acceptance remains open.
-Full interaction cutover is not claimed.
+Boards, portfolio Roadmap/Now, trails, No Wave grouping, counts and Wave
+detail/history join the query owner's parent/lifecycle fields; native acceptance
+and full interaction cutover remain open.
 Other remaining work: effect-policy duplication; exhaustive
 effect/dependency declarations and cross-query provenance; other mutation recovery
 and resource lanes; retained mobile `SessionLink`; projected inspection;
@@ -582,8 +566,7 @@ IDs, destination and canonical resource lanes. No shipping decision.
 
 Diagnostic, SwiftPM debug, 21 samples each (20 warm): 10k synthetic manifest
 2,849,209 bytes; warm reducer P95 338.859291 ms before cleanup, 201.556583 ms
-without repeated sorting, 8.638542 ms with prepared indexes. The first manifest
-was 2,848,480 bytes before ancestor fixtures were added. These are CPU/wall reducer
+without repeated sorting, 8.638542 ms with prepared indexes. These are CPU/wall reducer
 measurements on the active host, not native paint/input latency or a valid quiet-host
 baseline. Raw samples: `scratch/dynamic-manifest-measurements.json`.
 
@@ -596,9 +579,7 @@ reconnect (`testDerivedCoveragePublishesDisconnect…`). The surface acceptance 
 `09ab7e7ab2:scratch/instant-task-session.md` (Projected surface validation).
 Prior runs: `5c958398a6de:scratch/instant-task-session.md`.
 
-Prior dynamic/Move checks, including Desktop, iOS and Rust commands/results:
-`aee0e10dc603:scratch/instant-task-session.md` (Dynamic membership and disconnected Move).
-Logs: `/tmp/loo-906-dynamic-{build,final-tests,cli-workspace,ios,rust,domain,wire,docs}.log`.
+Prior dynamic/Move checks: `aee0e10dc603:scratch/instant-task-session.md`.
 Native usability/latency, broader suites and lint remain with implementation/demo
 and gate as previously assigned.
 

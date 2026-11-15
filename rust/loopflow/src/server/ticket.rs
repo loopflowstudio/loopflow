@@ -12,7 +12,7 @@ use base64::Engine as _;
 use tokio::sync::mpsc;
 
 use super::wire::{ClientMessage, TICKET_LIFETIME};
-use crate::id::TerminalId;
+use loopflow_model::id::TerminalId;
 
 /// Who a connection was admitted as; a ticket is redeemable by the same party.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,7 +103,7 @@ impl Tickets {
 #[cfg(test)]
 mod tests {
     use super::{Admission, Purpose, Tickets};
-    use crate::id::TerminalId;
+    use loopflow_model::id::TerminalId;
     use std::time::{Duration, SystemTime};
 
     fn download(text: &str) -> Purpose {

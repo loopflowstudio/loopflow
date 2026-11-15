@@ -100,6 +100,7 @@ path = "tests/session_launch_contract.rs"
 
 # --- Core dependencies ---
 [dependencies]
+loopflow-terminal = { path = "../loopflow-terminal" }
 loopflow-definitions = { path = "../loopflow-definitions" }
 loopflow-model = { path = "../loopflow-model" }
 clap = { version = "4.6", features = ["derive", "env"] }
@@ -165,6 +166,7 @@ notify = { version = "8", default-features = false, features = ["macos_fsevent"]
 sha2 = { version = "0.10", features = ["asm"] }
 
 [dev-dependencies]
+loopflow-terminal = { path = "../loopflow-terminal", features = ["test-support"] }
 rcgen = "0.14"
 axum = "0.8"
 ctor = "1.0.13"

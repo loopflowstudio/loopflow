@@ -9,7 +9,7 @@ pub(crate) use session::{
     ProviderInvocation, SessionCommand,
 };
 
-use crate::id::AgentSessionId;
+use loopflow_model::id::AgentSessionId;
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
@@ -409,7 +409,7 @@ impl CapacityWait {
 fn _note_limit_recovery(
     note: impl FnOnce(
         &crate::store::sqlite::SqliteStore,
-        &crate::id::LfProcessId,
+        &loopflow_model::id::LfProcessId,
     ) -> crate::store::StoreResult<()>,
 ) {
     let Some(process) = crate::journal::current_lf_process_id() else {
@@ -508,7 +508,7 @@ fn resolve_account_route_blocking(
             launch
                 .env
                 .get(crate::work::wave::context::WAVE_ID_ENV)
-                .and_then(|id| crate::id::WaveId::parse(id).ok())
+                .and_then(|id| loopflow_model::id::WaveId::parse(id).ok())
                 .or_else(crate::work::wave::context::ambient_wave_id),
             parse_agent(&agent).1,
             launch.cwd.clone(),

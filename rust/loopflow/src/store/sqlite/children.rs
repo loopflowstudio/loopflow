@@ -15,8 +15,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension, TransactionBehavior};
 use time::OffsetDateTime;
 
-use crate::durable::{Author, RepositoryId, TaskState};
-use crate::id::WaveId;
+use crate::durable::TaskState;
 use crate::linear::{LinearIssueId, LinearProjectId};
 use crate::store::rows::now_unix;
 use crate::store::{PlanningState, StoreError, StoreResult};
@@ -27,6 +26,8 @@ use crate::work::task::{
     PrMergeRequest, PrPhase, PrPresentation, PrPublication, Task, TaskEvent, TaskEventKind, TaskId,
     TaskLinearObservation, TaskPr, TaskPrId, TaskPrRepairKind,
 };
+use loopflow_model::durable::{Author, RepositoryId};
+use loopflow_model::id::WaveId;
 
 use super::{SqliteStore, TaskCheckout};
 
@@ -66,7 +67,7 @@ fn task_creation_in(conn: &Connection, task: &TaskId) -> StoreResult<Option<NewT
                 due_date: row.get(3)?,
                 id: task.clone(),
                 project_id: row.get::<_, Option<String>>(0)?.map(ProjectId::from_raw),
-                repository_id: crate::durable::RepositoryId::parse(&row.get::<_, String>(4)?).map_err(|error| invalid_column(4, error))?,
+                repository_id: loopflow_model::durable::RepositoryId::parse(&row.get::<_, String>(4)?).map_err(|error| invalid_column(4, error))?,
                 title: row.get(1)?,
                 description: row.get(2)?,
             })
@@ -637,7 +638,7 @@ impl SqliteStore {
     /// time, back to those closed at `since` (RFC 3339, UTC, whole seconds).
     pub fn closed_tasks_page(
         &self,
-        repository: &crate::durable::RepositoryId,
+        repository: &loopflow_model::durable::RepositoryId,
         wave_id: Option<&WaveId>,
         since: Option<&str>,
         after: Option<&TaskId>,
@@ -684,7 +685,7 @@ impl SqliteStore {
     /// provider ID, slug or name).
     pub fn open_tasks_matching(
         &self,
-        repository: &crate::durable::RepositoryId,
+        repository: &loopflow_model::durable::RepositoryId,
         text: &str,
         wave_id: Option<&WaveId>,
         project: Option<&str>,
@@ -1225,7 +1226,7 @@ impl SqliteStore {
         snapshot
             .query_row(
                 &query,
-                params![project, crate::id::canonical_uuid(project)],
+                params![project, loopflow_model::id::canonical_uuid(project)],
                 map_project_row,
             )
             .optional()
@@ -1967,7 +1968,7 @@ pub(super) fn resolve_task_id_in(
     issue: &str,
     repo: Option<&str>,
 ) -> StoreResult<Option<TaskId>> {
-    let selector = crate::id::TaskSelector::parse(issue);
+    let selector = loopflow_model::id::TaskSelector::parse(issue);
     let mut statement = conn.prepare(
         "SELECT t.id, COALESCE(t.issue_title, t.issue_identifier, t.id), w.repo FROM tasks t
          JOIN repository_plans w ON w.id=t.repository_id
@@ -2215,7 +2216,7 @@ fn map_task_columns(
             .map_err(|error| invalid_column(10, error))?,
         wave_id: row.get(4)?,
         project_id: row.get::<_, Option<String>>(11)?.map(ProjectId::from_raw),
-        repository_id: crate::durable::RepositoryId::parse(&row.get::<_, String>(21)?)
+        repository_id: loopflow_model::durable::RepositoryId::parse(&row.get::<_, String>(21)?)
             .map_err(|error| invalid_column(21, error))?,
         worktree: row.get::<_, Option<String>>(5)?.map(PathBuf::from),
         workspace_slug: row.get(6)?,
@@ -2613,11 +2614,11 @@ mod local_planning_tests {
     use rusqlite::params;
     use rusqlite::OptionalExtension;
 
-    use crate::durable::{ProjectId, RepositoryId, TaskId};
-    use crate::id::WaveId;
     use crate::store::sqlite::SqliteStore;
     use crate::work::task::NewTask;
     use crate::work::task::TaskUpdate;
+    use loopflow_model::durable::{ProjectId, RepositoryId, TaskId};
+    use loopflow_model::id::WaveId;
 
     fn local_repository(store: &SqliteStore) -> RepositoryId {
         let repo = store.home_dir().unwrap();
@@ -2781,7 +2782,7 @@ mod local_planning_tests {
                 .issue_identifier,
             "abcdef"
         );
-        let process = crate::id::LfProcessId::new();
+        let process = loopflow_model::id::LfProcessId::new();
         store.conn.lock().unwrap().execute(
             "INSERT INTO processes(id,trace_id,started_at,command,cwd) VALUES(?1,'trace',1,'lf session resume','/fixture')",
             [&process],

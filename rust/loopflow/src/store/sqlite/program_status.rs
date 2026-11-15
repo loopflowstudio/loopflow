@@ -12,7 +12,7 @@ impl SqliteStore {
     pub(crate) fn begin_program_status(
         &self,
         session: &str,
-        agent_process: Option<&crate::id::AgentProcessId>,
+        agent_process: Option<&loopflow_model::id::AgentProcessId>,
         stream: &str,
     ) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -32,7 +32,7 @@ impl SqliteStore {
     pub(crate) fn record_program_status(
         &self,
         session: &str,
-        agent_process: Option<&crate::id::AgentProcessId>,
+        agent_process: Option<&loopflow_model::id::AgentProcessId>,
         stream: &str,
         sequence: i64,
         records: &Records,
@@ -58,7 +58,7 @@ impl SqliteStore {
     /// the terminal hosts no open Session.
     pub(crate) fn record_held_program_status(
         &self,
-        terminal: &crate::id::TerminalId,
+        terminal: &loopflow_model::id::TerminalId,
         sequence: i64,
         records: &Records,
     ) -> StoreResult<bool> {
@@ -72,7 +72,7 @@ impl SqliteStore {
                 |row| {
                     Ok((
                         row.get::<_, String>(0)?,
-                        row.get::<_, Option<crate::id::AgentProcessId>>(1)?,
+                        row.get::<_, Option<loopflow_model::id::AgentProcessId>>(1)?,
                     ))
                 },
             )
@@ -114,9 +114,9 @@ impl SqliteStore {
 
 #[cfg(test)]
 mod tests {
-    use crate::id::LfProcessId;
     use crate::session::{SessionActivity, SessionFilter};
     use crate::store::sqlite::SqliteStore;
+    use loopflow_model::id::LfProcessId;
     use loopflow_model::program_status::{Kind, Records, Report, State};
 
     #[test]

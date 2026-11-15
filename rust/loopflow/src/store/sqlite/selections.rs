@@ -1,13 +1,14 @@
 //! Saved selection and layout intent share one transaction and one Work snapshot.
 mod panes;
 use super::SqliteStore;
-use crate::durable::{RepositoryId, TaskSection, TaskState};
+use crate::durable::{TaskSection, TaskState};
 use crate::store::{StoreError, StoreResult};
 use crate::work::selection::{
     move_into_place, Arrangement, ArrangementEdit, ArrangementMode, Dashboard, DashboardId,
     DashboardReading, Selection, SelectionExpression, SelectionId, SelectionResolution,
     SelectionState, SelectionWork, SlotLayout, WorkWorkspaceKey, WorkWorkspaceKind,
 };
+use loopflow_model::durable::RepositoryId;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -300,7 +301,7 @@ fn plan_in(
                 .unavailable
                 .push("Work is unavailable; retained intent only".into());
         } else if key.kind == WorkWorkspaceKind::Task {
-            let task_id = crate::durable::TaskId::parse(&key.id).map_err(invalid)?;
+            let task_id = loopflow_model::durable::TaskId::parse(&key.id).map_err(invalid)?;
             let task = super::children::task_on(conn, &task_id)?.ok_or(StoreError::NotFound)?;
             content.identifier = Some(task.identifier);
             content.title = task.title;
@@ -505,7 +506,7 @@ impl SqliteStore {
                         wave.key.id
                     )),
                     expression: crate::work::selection::SelectionExpression::Wave {
-                        wave: crate::id::WaveId::parse(&wave.key.id).map_err(invalid)?,
+                        wave: loopflow_model::id::WaveId::parse(&wave.key.id).map_err(invalid)?,
                     },
                 },
                 None,
@@ -849,11 +850,11 @@ impl SqliteStore {
 #[cfg(test)]
 mod tests {
     use super::SqliteStore;
-    use crate::durable::RepositoryId;
     use crate::work::selection::{
         Arrangement, ArrangementMode, DashboardId, Selection, SelectionExpression, SelectionId,
         WorkWorkspaceKind,
     };
+    use loopflow_model::durable::RepositoryId;
 
     fn fixture() -> (tempfile::TempDir, SqliteStore, RepositoryId) {
         let dir = tempfile::tempdir().unwrap();

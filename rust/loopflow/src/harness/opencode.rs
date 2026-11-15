@@ -20,8 +20,8 @@ use crate::harness::fact::Decoded;
 use crate::harness::fact_writer::FactWriter;
 use crate::harness::opencode_decode::{OpenCodeDecoder, ReaderState, Snapshot};
 use crate::harness::{ApprovalPolicy, Harness, HarnessError, SendCurrentOutcome};
-use crate::id::AgentSessionId;
 use loopflow_model::chat::types::{ConversationEvent, FailureEvidence};
+use loopflow_model::id::AgentSessionId;
 
 pub(crate) const OPENCODE_DISCONNECTED_CODE: &str = "opencode_disconnected";
 
@@ -927,7 +927,7 @@ mod tests {
         let database = home.path().join("store.db");
         let store = crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
         store.test_session("stop", &crate::session_record::new_artifact_key());
-        let process = crate::id::LfProcessId::new();
+        let process = loopflow_model::id::LfProcessId::new();
         let conn = rusqlite::Connection::open(&database).unwrap();
         conn.execute(
             "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,1)",

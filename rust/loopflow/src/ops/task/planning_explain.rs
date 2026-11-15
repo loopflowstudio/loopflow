@@ -291,7 +291,7 @@ async fn read_saved_task(
     resolution: &ContextExplanation,
 ) -> anyhow::Result<crate::work::task::Task> {
     let id = match &resolution.task {
-        ContextFact::Bound { value, .. } => crate::durable::TaskId::parse(value)?,
+        ContextFact::Bound { value, .. } => loopflow_model::durable::TaskId::parse(value)?,
         ContextFact::Unavailable { reason } => {
             anyhow::bail!("{reason}; no planning acquisition was performed")
         }

@@ -4,11 +4,11 @@
 use rusqlite::{params, types::Type, OptionalExtension};
 use time::OffsetDateTime;
 
-use crate::id::LfProcessId;
 use crate::pr_landing::PrLandingId;
 use crate::store::ci_incidents::CiIncidentReportRow;
 use crate::store::{StoreError, StoreResult};
 use crate::work::task::{CiIncident, TaskId, TaskPrId};
+use loopflow_model::id::LfProcessId;
 
 fn timestamp(value: OffsetDateTime) -> i64 {
     value.unix_timestamp_nanos() as i64
@@ -217,7 +217,7 @@ impl super::SqliteStore {
         &self,
         repo: &str,
         pr_number: u32,
-    ) -> StoreResult<Vec<(String, crate::id::LfProcessId)>> {
+    ) -> StoreResult<Vec<(String, loopflow_model::id::LfProcessId)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
             "SELECT identity,repair_lf_process_id FROM ci_incidents
@@ -238,7 +238,7 @@ impl super::SqliteStore {
         &self,
         repo: &str,
         pr_number: u32,
-    ) -> StoreResult<Vec<(crate::id::LfProcessId, i64, Option<i64>)>> {
+    ) -> StoreResult<Vec<(loopflow_model::id::LfProcessId, i64, Option<i64>)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
             "SELECT ci.repair_lf_process_id, p.started_at,
@@ -385,7 +385,7 @@ impl super::SqliteStore {
         generation: u64,
         process: &LfProcessId,
         retry: bool,
-        task: Option<&crate::durable::TaskId>,
+        task: Option<&loopflow_model::durable::TaskId>,
     ) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;

@@ -15,8 +15,8 @@ use anyhow::Context;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use super::{Error, ErrorCode, Result};
-use crate::id::LfProcessId;
 use crate::journal::ProcessIdentityEvidence;
+use loopflow_model::id::LfProcessId;
 
 const REPORT_ENV: &str = "LF_LAUNCH_REPORT";
 const UNKNOWN_GRACE: Duration = Duration::from_secs(5);
@@ -244,9 +244,9 @@ mod tests {
 
     use super::{process_evidence, wait, write, UNKNOWN_GRACE};
     use crate::engine::{Error, ErrorCode};
-    use crate::id::LfProcessId;
     use crate::journal::{ProcessIdentityEvidence, TestLedgerGuard};
     use crate::store::sqlite::SqliteStore;
+    use loopflow_model::id::LfProcessId;
 
     #[test]
     fn unknown_liveness_returns_an_uncertain_outcome_after_the_grace() {

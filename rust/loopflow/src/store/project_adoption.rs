@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use crate::durable::TaskId;
-use crate::id::WaveId;
+use loopflow_model::durable::TaskId;
+use loopflow_model::id::WaveId;
 
 use super::{run_planning_write, run_sqlite, PlanningLocks, Store, StoreResult};
 

@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use crate::ghostty_vt;
 use loopflow_model::program_status::{Report, State};
+use loopflow_terminal::ghostty_vt;
 
 use super::{terminal, LIMIT};
 
@@ -279,8 +279,8 @@ mod tests {
     use std::path::Path;
 
     use super::{directory_report, local_directory_report, Output};
-    use crate::ghostty_vt::Terminal;
     use loopflow_model::program_status::{Kind, Records, Report, State};
+    use loopflow_terminal::ghostty_vt::Terminal;
 
     #[test]
     fn attachment_replays_launch_title_before_session_name_lookup() {

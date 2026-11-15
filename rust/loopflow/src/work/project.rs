@@ -5,10 +5,10 @@
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-pub use crate::durable::ProjectId;
-use crate::id::WaveId;
 use crate::linear::{LinearBindingError, LinearProjectId};
 use crate::work::task::{TaskEventKind, TaskId};
+pub use loopflow_model::durable::ProjectId;
+use loopflow_model::id::WaveId;
 
 /// Shared Project status, independent of a provider’s display label.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -83,7 +83,7 @@ pub enum ProjectEventKind {
     },
     /// Historical authored direction; the immutable publication owns its text.
     Steer {
-        steer_id: crate::id::SteerId,
+        steer_id: loopflow_model::id::SteerId,
     },
     /// A request to end the Project's current turn so the next re-reads its
     /// direction immediately. Acted on only by a live run, and not a report out.

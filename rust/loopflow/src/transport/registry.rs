@@ -19,10 +19,10 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::id::{LfSessionId, TerminalId};
 use crate::server::holder::client::Client;
 use crate::server::holder::wire::{self, Held};
 use crate::server::holder::Place;
+use loopflow_model::id::{LfSessionId, TerminalId};
 use loopflow_model::program_status::Records;
 
 use super::held::Source;

@@ -1,0 +1,18 @@
+[package]
+name = "loopflow-terminal"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[features]
+# Inspection helpers shared by application terminal fixtures; absent from release builds.
+test-support = []
+
+[dependencies]
+loopflow-model = { path = "../loopflow-model" }
+
+[build-dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"

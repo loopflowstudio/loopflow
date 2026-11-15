@@ -12,10 +12,10 @@ use std::time::Duration;
 use anyhow::Result;
 
 use crate::harness::native_exit::{NativeExit, Settled};
-use crate::id::TerminalId;
 use crate::process::SessionAttachment;
 use crate::store::sqlite::{SqliteStore, ViewerHold};
 use crate::store::RecordingGap;
+use loopflow_model::id::TerminalId;
 
 /// How often the recorder retries a failed write and rechecks shell Close and
 /// native clients while nothing changes.
@@ -278,8 +278,8 @@ fn report_result<T>(
 
 #[cfg(test)]
 mod tests {
-    use crate::id::TerminalId;
     use crate::store::sqlite::ViewerHold;
+    use loopflow_model::id::TerminalId;
     use std::time::{Duration, Instant};
 
     #[test]

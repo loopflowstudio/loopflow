@@ -16,11 +16,12 @@ pub mod diagnostic_log;
 pub mod durable;
 pub mod engine;
 pub mod error;
-pub(crate) mod ghostty_vt;
 pub mod git;
 pub mod graph;
 pub mod harness;
-pub mod id;
+pub use loopflow_model::id;
+#[cfg(test)]
+mod id_tests;
 pub mod installation;
 pub mod journal;
 pub mod lf;

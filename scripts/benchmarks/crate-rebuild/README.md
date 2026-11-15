@@ -6,7 +6,7 @@ uv run python scripts/benchmarks/crate-rebuild/cochange.py --revision HEAD --cou
 uv run python scripts/benchmarks/crate-rebuild/run.py --base 3fbf3d2ca3 --candidate HEAD --sccache /path/to/sccache --output /tmp/lf-build-comparison
 ```
 
-The probe builds the actual model and definition-content crates in two separate
+The probe builds the actual model, definition-content and terminal crates in two separate
 source/target roots. It requires a cold miss, identical-root B hit, semantic-edit
 miss and correct checkout identity from a path-sensitive fixture. Root-refresh
 reuse is checked with a fresh disposable target; existing dependency artifacts

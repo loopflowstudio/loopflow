@@ -37,7 +37,7 @@ fn resume_refuses_a_run_and_leaves_its_provider_running() {
                 .sqlite
                 .session_for_artifact(&capture.artifact_key())?
                 .unwrap();
-            let launcher = crate::id::LfProcessId::new();
+            let launcher = loopflow_model::id::LfProcessId::new();
             rusqlite::Connection::open(home.join("loopflow.db"))?.execute(
                 "INSERT INTO processes(id,trace_id,started_at) SELECT ?1,trace_id,started_at FROM processes WHERE id=?2",
                 rusqlite::params![launcher, crate::journal::current_lf_process_id().unwrap()],
@@ -139,7 +139,7 @@ fn session_metadata_wire_preserves_unknown_observation_and_occurrence() {
 #[test]
 fn session_metadata_keeps_unknown_position_visible() {
     let task = TaskId::new();
-    let wave = crate::id::WaveId::new();
+    let wave = loopflow_model::id::WaveId::new();
     let mut summary = crate::session::SessionSummary {
         transition: None,
         preview: None,
@@ -188,7 +188,7 @@ fn session_metadata_keeps_unknown_position_visible() {
     };
     let row = super::summary_surface(&summary, &LaunchCapacity::default());
     assert_eq!(row.id, summary.id);
-    assert_eq!(row.work, Some(crate::durable::WorkRef::Task(task)));
+    assert_eq!(row.work, Some(loopflow_model::durable::WorkRef::Task(task)));
     assert_eq!(row.wave_id, Some(wave));
     assert_eq!(row.work_path.as_deref(), Some("Infrastructure / INF-123"));
     assert_eq!(row.state, super::SessionState::Unknown);
@@ -516,7 +516,7 @@ async fn session_work_labels_follow_stable_ancestry_without_a_roadmap() {
         .unwrap(),
     );
     let wave = crate::work::wave::Wave::new(
-        crate::id::WaveId::new(),
+        loopflow_model::id::WaveId::new(),
         "product".to_string(),
         directory.path().display().to_string(),
     );
@@ -805,7 +805,7 @@ impl Logins {
             .sqlite
             .pin_provider_session_route(
                 crate::provider_auth::Provider::Codex,
-                &crate::id::AgentSessionId::from(thread.as_str()),
+                &loopflow_model::id::AgentSessionId::from(thread.as_str()),
                 account,
             )
             .unwrap();
@@ -813,7 +813,7 @@ impl Logins {
     }
 
     fn run(&self, session: &LfSession) -> RunningAgent {
-        let parent = crate::id::LfProcessId::new();
+        let parent = loopflow_model::id::LfProcessId::new();
         rusqlite::Connection::open(&self.database)
             .unwrap()
             .execute(
@@ -996,7 +996,7 @@ async fn task_detail_reads_capacity_once_for_all_sessions() {
                 .sqlite
                 .ensure_repository(repo.path().to_str().unwrap())
                 .unwrap(),
-            id: crate::durable::TaskId::new(),
+            id: loopflow_model::durable::TaskId::new(),
             project_id: None,
             title: "Many Sessions".into(),
             description: String::new(),
@@ -1534,9 +1534,9 @@ fn opening_any_primary_without_a_request_only_reads() {
         "a person's stored request is the first turn"
     );
     for skill in [
-        include_str!("../../builtins/task/skill/task_session.md"),
-        include_str!("../../builtins/ops/skill/repo_session.md"),
-        include_str!("../../builtins/wave/skill/wave_session.md"),
+        loopflow_definitions::builtins::get_builtin_skill("task-session").unwrap(),
+        loopflow_definitions::builtins::get_builtin_skill("repo-session").unwrap(),
+        loopflow_definitions::builtins::get_builtin_skill("wave-session").unwrap(),
     ] {
         let skill = skill.split_whitespace().collect::<Vec<_>>().join(" ");
         assert!(skill.contains("request is a reading pass"));
@@ -1806,7 +1806,7 @@ async fn a_held_task_conversation_without_a_view_offers_attach() {
             due_date: None,
         })
         .unwrap();
-    let terminal = crate::id::TerminalId::new();
+    let terminal = loopflow_model::id::TerminalId::new();
     rusqlite::Connection::open(&logins.database)
         .unwrap()
         .execute_batch(&format!(
@@ -1836,7 +1836,7 @@ async fn a_held_task_conversation_without_a_view_offers_attach() {
 struct ListFilters {
     home: SessionHome,
     store: SharedStore,
-    wave: crate::id::WaveId,
+    wave: loopflow_model::id::WaveId,
     repo: loopflow_test_support::TestRepo,
 }
 
@@ -1845,9 +1845,9 @@ impl ListFilters {
         let home = SessionHome::new();
         let store = home.store().await;
         let repo = loopflow_test_support::TestRepo::new();
-        let wave = crate::id::WaveId::new();
+        let wave = loopflow_model::id::WaveId::new();
         let project = crate::work::project::ProjectId::new();
-        let task = crate::durable::TaskId::new();
+        let task = loopflow_model::durable::TaskId::new();
         let db = rusqlite::Connection::open(home.home.path().join("loopflow.db")).unwrap();
         db.execute(
             "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'craft',?2,1)",

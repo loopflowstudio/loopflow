@@ -9,12 +9,13 @@ use std::sync::{Mutex, PoisonError};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::durable::{GraphStepProcess, TaskId};
-use crate::id::LfProcessId;
+use crate::durable::GraphStepProcess;
 use crate::store::sqlite::SqliteStore;
 use crate::store::{StoreError, StoreResult};
 use crate::task_graph::TaskGraphPosition;
 use crate::work::task::comment::TaskCommentAuthor;
+use loopflow_model::durable::TaskId;
+use loopflow_model::id::LfProcessId;
 
 /// Run and position changes share one steer; its complete source is on disk.
 const UPDATE_BYTES: usize = 4_000;
@@ -225,10 +226,10 @@ fn position_text(position: Option<&TaskGraphPosition>) -> String {
 #[cfg(test)]
 mod tests {
     use super::write;
-    use crate::durable::TaskId;
-    use crate::id::LfProcessId;
     use crate::store::sqlite::SqliteStore;
     use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
+    use loopflow_model::durable::TaskId;
+    use loopflow_model::id::LfProcessId;
 
     /// The updates `session` has not read, after a reading.
     fn pending(store: &SqliteStore, session: &str) -> Vec<String> {

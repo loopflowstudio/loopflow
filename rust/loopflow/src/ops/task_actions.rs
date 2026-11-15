@@ -2,9 +2,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::durable::WorkStatus;
 use crate::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
 use crate::work::task::{CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase};
+use loopflow_model::durable::WorkStatus;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -164,9 +164,9 @@ mod tests {
     use time::OffsetDateTime;
 
     use super::{derive_task_actions, TaskAction, TaskActionEvidence};
-    use crate::durable::WorkStatus;
     use crate::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
     use crate::work::task::{CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase};
+    use loopflow_model::durable::WorkStatus;
 
     fn evidence<'a>(phase: PrPhase, ci: Option<&'a CiObservation>) -> TaskActionEvidence<'a> {
         TaskActionEvidence {

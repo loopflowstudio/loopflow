@@ -1,11 +1,11 @@
 //! Task context and live input for the ordinary skill command.
 use crate::child::ChildRef;
-use crate::durable::WorkRef;
 use crate::harness::Harness;
 use crate::store::SharedStore;
 use crate::work::project::Project;
 use crate::work::task::Task;
 use anyhow::{anyhow, Result};
+use loopflow_model::durable::WorkRef;
 use std::io::{BufRead, IsTerminal};
 use std::sync::Arc;
 use std::time::{Duration, Instant};

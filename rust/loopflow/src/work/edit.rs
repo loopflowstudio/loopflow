@@ -26,9 +26,9 @@ impl WorkEdit {
         let mut edit = self.clone();
         let table = crate::store::sqlite::planning_write::table(&edit.change);
         edit.target = match table {
-            "waves" | "task_comments" => crate::id::canonical_uuid(&edit.target),
-            "projects" => crate::id::canonical_prefixed(&edit.target, "proj_"),
-            "tasks" => crate::id::canonical_prefixed(&edit.target, "task_"),
+            "waves" | "task_comments" => loopflow_model::id::canonical_uuid(&edit.target),
+            "projects" => loopflow_model::id::canonical_prefixed(&edit.target, "proj_"),
+            "tasks" => loopflow_model::id::canonical_prefixed(&edit.target, "task_"),
             _ => unreachable!("Work tables are exhaustive"),
         };
         edit.change.canonicalize()?;
@@ -118,7 +118,7 @@ work_values! {
 
 impl WorkValue {
     fn canonicalize(&mut self) -> StoreResult<()> {
-        use crate::id::{canonical_prefixed, canonical_task_identifier, canonical_uuid};
+        use loopflow_model::id::{canonical_prefixed, canonical_task_identifier, canonical_uuid};
         match self {
             Self::WaveParent(v)
             | Self::ProjectLinearId(v)

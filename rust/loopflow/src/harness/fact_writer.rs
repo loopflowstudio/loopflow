@@ -16,7 +16,6 @@ use anyhow::Result;
 use serde_json::json;
 
 use super::fact::{Decoded, ProviderFact, ProviderTurn, Signal};
-use crate::id::AgentSessionId;
 use crate::process::SessionAttachment;
 use crate::provider_account::ProviderAccountRoute;
 use crate::session::{
@@ -25,6 +24,7 @@ use crate::session::{
 use crate::store::sqlite::SqliteStore;
 use crate::store::{RecordingGap, StoreResult};
 use loopflow_model::chat::types::{ConversationEvent, ConversationItem};
+use loopflow_model::id::AgentSessionId;
 
 /// Origins frozen when Loopflow sent each request, keyed by request id. The
 /// sending side fills it; the reader's writer takes each one once.
@@ -420,11 +420,11 @@ mod tests {
     use crate::harness::codex_decode::{turn_request, CodexDecoder};
     use crate::harness::fact::{trace, Decoded, ProviderFact, ProviderTurn, Signal};
     use crate::harness::opencode_decode::OpenCodeDecoder;
-    use crate::id::LfProcessId;
     use crate::process::SessionAttachment;
     use crate::session::SessionEventKind;
     use crate::store::sqlite::SqliteStore;
     use loopflow_model::chat::types::Lifecycle;
+    use loopflow_model::id::LfProcessId;
 
     const START: i64 = 1_000;
     const QUIET: i64 = crate::session::AVAILABILITY_QUIET_SECONDS;

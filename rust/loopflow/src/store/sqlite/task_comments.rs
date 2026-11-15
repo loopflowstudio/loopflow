@@ -4,10 +4,10 @@ use super::planning_write;
 use crate::work::edit::WorkValue as Edit;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
-use crate::durable::TaskId;
 use crate::store::{StoreError, StoreResult};
 use crate::work::task::comment::TaskComments;
 use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
+use loopflow_model::durable::TaskId;
 
 use super::SqliteStore;
 
@@ -15,7 +15,7 @@ pub(super) fn ingest_task_comment(
     conn: &Connection,
     task: &TaskId,
     comment: &crate::linear::LinearComment,
-    machine_names: &std::collections::HashMap<crate::durable::MachineId, String>,
+    machine_names: &std::collections::HashMap<loopflow_model::durable::MachineId, String>,
 ) -> StoreResult<bool> {
     // A historical filing keeps its original local UUID. Only its Linear
     // representation changes version bits; an existing delivery proves the link.
@@ -305,8 +305,8 @@ pub(super) fn comment_steer_in(
         task,
         &name
             .as_ref()
-            .map(|name| crate::durable::Author::Named(name.clone()))
-            .unwrap_or(crate::durable::Author::User),
+            .map(|name| loopflow_model::durable::Author::Named(name.clone()))
+            .unwrap_or(loopflow_model::durable::Author::User),
         &text,
         &format!("comment:{}", comment.id),
         "local",
@@ -316,11 +316,11 @@ pub(super) fn comment_steer_in(
 
 #[cfg(test)]
 mod tests {
-    use crate::durable::TaskId;
-    use crate::id::WaveId;
     use crate::store::sqlite::SqliteStore;
     use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
     use crate::work::wave::Wave;
+    use loopflow_model::durable::TaskId;
+    use loopflow_model::id::WaveId;
 
     #[test]
     fn a_sessions_comment_is_stored_as_its_requesters_and_read_as_the_sessions() {
@@ -328,7 +328,7 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         let wave = Wave::new(WaveId::new(), "planning".into(), "/repo".into());
         store.create_wave(&wave).unwrap();
-        let project = crate::durable::ProjectId::new();
+        let project = loopflow_model::durable::ProjectId::new();
         let task = TaskId::new();
         {
             let conn = store.conn.lock().unwrap();
@@ -374,7 +374,7 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&database).unwrap();
         let wave = Wave::new(WaveId::new(), "planning".into(), "/repo".into());
         store.create_wave(&wave).unwrap();
-        let project = crate::durable::ProjectId::new();
+        let project = loopflow_model::durable::ProjectId::new();
         let task = TaskId::new();
         {
             let conn = store.conn.lock().unwrap();

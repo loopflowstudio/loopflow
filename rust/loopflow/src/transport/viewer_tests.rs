@@ -11,8 +11,8 @@ use std::time::{Duration, Instant};
 
 use super::wire::{self, Decoder, Event, Incoming, Outgoing, Reply, Request, Tag};
 use super::{attach_with_terminal, registry, terminal_pair, ViewerTerminal};
-use crate::ghostty_vt::{Terminal, REVISION};
-use crate::id::TerminalId;
+use loopflow_model::id::TerminalId;
+use loopflow_terminal::ghostty_vt::{Terminal, REVISION};
 
 const SESSION: &str = "session_5e55105e000040008000000000000001";
 const MODES: &[u8] = b"\x1b[?2004h\x1b[?1h\x1b[>5u";

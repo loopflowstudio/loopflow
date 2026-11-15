@@ -1,11 +1,11 @@
 use rusqlite::{params, OptionalExtension};
 
 use super::{save_in, SqliteStore};
-use crate::durable::Author;
-use crate::id::{LfProcessId, TerminalId};
 use crate::steer::{NativeBoundary, Steer, SteerAdapter};
 use crate::store::sqlite::sessions::TerminalRetention::LiveTurn;
 use crate::store::StoreError;
+use loopflow_model::durable::Author;
+use loopflow_model::id::{LfProcessId, TerminalId};
 
 /// Claim the conversation's next unread steers and stamp them as printed.
 fn read(store: &SqliteStore, adapter: &SteerAdapter, thread: &str) -> Vec<Steer> {
@@ -494,8 +494,8 @@ fn scopes_graph_downward_and_each_session_reads_for_itself() {
     for name in ["peer", "sibling", "parent", "taskless"] {
         store.test_session(name, &crate::session_record::new_artifact_key());
     }
-    let root = crate::id::WaveId::new();
-    let child = crate::id::WaveId::new();
+    let root = loopflow_model::id::WaveId::new();
+    let child = loopflow_model::id::WaveId::new();
     {
         let conn = store.conn.lock().unwrap();
         conn.execute(

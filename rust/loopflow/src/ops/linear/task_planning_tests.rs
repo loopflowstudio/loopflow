@@ -13,13 +13,13 @@ use serde_json::json;
 
 use super::test_fixture::{now, Fixture, PlanningEnvironment};
 use super::{LinearRefresh, LINEAR_TEST_CONTEXT};
-use crate::durable::WorkStatus;
 use crate::ops::NullProgress;
 use crate::work::edit::WorkValue;
 use crate::work::task::{
     GithubPr, LinearWritebackState, Observation, PrMergeMode, PrMergeRequest, PrPhase,
     PrPresentation, PrPublication, Task, TaskEventKind, TaskPr, TaskPrId,
 };
+use loopflow_model::durable::WorkStatus;
 
 async fn planning_repo(fixture: &Fixture) -> (PathBuf, crate::work::wave::Wave) {
     let (repo, wave) = fixture.planning_repo().await;
@@ -787,7 +787,7 @@ fn task_deletion_lost_reply_requires_positive_trash_evidence_without_replay() {
             .pending_task_deletion(&task.id)
             .unwrap()
             .unwrap();
-        let work = crate::durable::WorkRef::Task(task.id.clone());
+        let work = loopflow_model::durable::WorkRef::Task(task.id.clone());
         runtime.block_on(async {
             state.lock().await.lose_deletion_reply = true;
             assert!(
@@ -839,7 +839,7 @@ fn task_deletion_concurrent_delivery_has_one_effect() {
         runtime.block_on(async { state.lock().await.field_outage = true });
         crate::ops::task::task_delete(repo, task.id.as_str()).unwrap();
         runtime.block_on(async { state.lock().await.field_outage = false });
-        let work = crate::durable::WorkRef::Task(task.id.clone());
+        let work = loopflow_model::durable::WorkRef::Task(task.id.clone());
         runtime.block_on(async {
             let (first, second) = tokio::join!(
                 crate::ops::planning_delivery::sync_fields(&fixture.store, repo, &work),
@@ -878,7 +878,7 @@ fn task_deletion_old_trash_observation_cannot_settle_newer_removal() {
             assert!(crate::ops::planning_delivery::sync_fields(
                 &fixture.store,
                 repo,
-                &crate::durable::WorkRef::Task(task.id.clone())
+                &loopflow_model::durable::WorkRef::Task(task.id.clone())
             )
             .await
             .is_err());
@@ -903,7 +903,7 @@ fn task_deletion_unconfirmed_write_stays_uncertain_without_replay() {
         runtime.block_on(async { state.lock().await.field_outage = true });
         crate::ops::task::task_delete(repo, task.id.as_str()).unwrap();
         runtime.block_on(async { state.lock().await.field_outage = false });
-        let work = crate::durable::WorkRef::Task(task.id.clone());
+        let work = loopflow_model::durable::WorkRef::Task(task.id.clone());
         runtime.block_on(async {
             state.lock().await.deletion_unconfirmed = true;
             for _ in 0..2 {
@@ -946,7 +946,7 @@ fn task_deletion_adopts_newer_linear_edit_and_retains_losing_removal() {
             crate::ops::planning_delivery::sync_fields(
                 &fixture.store,
                 repo,
-                &crate::durable::WorkRef::Task(task.id.clone()),
+                &loopflow_model::durable::WorkRef::Task(task.id.clone()),
             )
             .await
             .unwrap();
@@ -1003,7 +1003,7 @@ fn task_abandonment_saves_offline_in_both_connection_modes() {
             // Every provider operation would fail; the existing Task needs none.
             LINEAR_TEST_CONTEXT.sync_scope(fixture.context("http://127.0.0.1:1"), || {
                 assert_eq!(crate::ops::task::task_abandon(repo, Some(task.id.as_str()), false).unwrap(), task.identifier);
-                let work = crate::durable::WorkRef::Task(task.id.clone());
+                let work = loopflow_model::durable::WorkRef::Task(task.id.clone());
                 assert_eq!(fixture.store.sqlite.work_status(&work).unwrap(), WorkStatus::Abandoned);
                 let receipt = || conn.query_row(
                     "SELECT id,target,attempted,settled FROM task_state_deliveries WHERE task_id=?1",
@@ -1136,7 +1136,7 @@ fn task_abandonment_adopts_linear_conflict_and_retains_local_decision() {
             fixture
                 .store
                 .sqlite
-                .work_status(&crate::durable::WorkRef::Task(task.id.clone()),)
+                .work_status(&loopflow_model::durable::WorkRef::Task(task.id.clone()),)
                 .unwrap(),
             WorkStatus::Abandoned
         );
@@ -1202,7 +1202,7 @@ fn task_abandonment_rolls_back_if_delivery_cannot_commit() {
             fixture
                 .store
                 .sqlite
-                .work_status(&crate::durable::WorkRef::Task(task.id.clone()))
+                .work_status(&loopflow_model::durable::WorkRef::Task(task.id.clone()))
                 .unwrap(),
             WorkStatus::Ready
         );
@@ -1247,7 +1247,7 @@ fn task_completion_retains_request_but_rolls_back_status_if_delivery_cannot_comm
                 .block_on(
                     fixture
                         .store
-                        .work_status(&crate::durable::WorkRef::Task(task.id.clone()))
+                        .work_status(&loopflow_model::durable::WorkRef::Task(task.id.clone()))
                 )
                 .unwrap(),
             WorkStatus::Ready
@@ -1408,7 +1408,7 @@ fn task_completion_ingestion_preserves_baseline_and_atomically_adopts_linear() {
                 .block_on(
                     fixture
                         .store
-                        .work_status(&crate::durable::WorkRef::Task(task.id.clone()))
+                        .work_status(&loopflow_model::durable::WorkRef::Task(task.id.clone()))
                 )
                 .unwrap(),
             WorkStatus::Ready
@@ -1447,9 +1447,9 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
             .unwrap());
         let process = crate::process::LfProcess {
             os_started_at: None,
-            id: crate::id::LfProcessId::new(),
+            id: loopflow_model::id::LfProcessId::new(),
             pid: None,
-            trace_id: crate::id::TraceId::new(),
+            trace_id: loopflow_model::id::TraceId::new(),
             parent_lf_process_id: None,
             via_agent: None,
             caller_session_id: None,
@@ -1545,7 +1545,7 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
                 .block_on(
                     fixture
                         .store
-                        .work_status(&crate::durable::WorkRef::Task(task.id.clone()))
+                        .work_status(&loopflow_model::durable::WorkRef::Task(task.id.clone()))
                 )
                 .unwrap(),
             WorkStatus::Ready
@@ -1950,7 +1950,7 @@ fn task_completion_lost_reply_adopts_linear_reopening() {
                 .block_on(
                     fixture
                         .store
-                        .work_status(&crate::durable::WorkRef::Task(task.id.clone()))
+                        .work_status(&loopflow_model::durable::WorkRef::Task(task.id.clone()))
                 )
                 .unwrap(),
             WorkStatus::Ready
@@ -2364,7 +2364,7 @@ fn assert_unplaced_completion_retry(lose_response: bool, uncached: bool) {
         ));
         assert!(pending.worktree.is_none());
         assert_eq!(
-            runtime.block_on(fixture.store.work_status(&crate::durable::WorkRef::Task(pending.id.clone()))).unwrap(),
+            runtime.block_on(fixture.store.work_status(&loopflow_model::durable::WorkRef::Task(pending.id.clone()))).unwrap(),
             WorkStatus::Done
         );
         assert_eq!(runtime.block_on(async { state.lock().await.completion_writes }), usize::from(uncached));
@@ -2814,7 +2814,9 @@ esac
                         .block_on(
                             fixture
                                 .store
-                                .work_status(&crate::durable::WorkRef::Task(task.id.clone()))
+                                .work_status(&loopflow_model::durable::WorkRef::Task(
+                                    task.id.clone()
+                                ))
                         )
                         .unwrap(),
                     WorkStatus::Ready
@@ -2865,7 +2867,9 @@ esac
                         .block_on(
                             fixture
                                 .store
-                                .work_status(&crate::durable::WorkRef::Task(task.id.clone()))
+                                .work_status(&loopflow_model::durable::WorkRef::Task(
+                                    task.id.clone()
+                                ))
                         )
                         .unwrap(),
                     WorkStatus::Abandoned
@@ -2907,7 +2911,7 @@ esac
                     .block_on(
                         fixture
                             .store
-                            .work_status(&crate::durable::WorkRef::Task(task.id.clone()))
+                            .work_status(&loopflow_model::durable::WorkRef::Task(task.id.clone()))
                     )
                     .unwrap(),
                 WorkStatus::Abandoned
@@ -3048,7 +3052,7 @@ fn foreign_projects_do_not_block_sweep_refresh_or_sync() {
             fixture
                 .store
                 .sqlite
-                .work_status(&crate::durable::WorkRef::Task(saved.id.clone()))
+                .work_status(&loopflow_model::durable::WorkRef::Task(saved.id.clone()))
                 .unwrap(),
             WorkStatus::Abandoned
         );
@@ -3401,14 +3405,14 @@ fn save_field_name(
     task: &Task,
     project: bool,
     name: &str,
-) -> crate::durable::WorkRef {
+) -> loopflow_model::durable::WorkRef {
     if project {
         fixture
             .store
             .sqlite
             .edit_project(task.project_id.as_ref().unwrap(), Some(name), None, None)
             .unwrap();
-        crate::durable::WorkRef::Project(task.project_id.clone().unwrap())
+        loopflow_model::durable::WorkRef::Project(task.project_id.clone().unwrap())
     } else {
         let current = fixture.store.sqlite.task(&task.id).unwrap().unwrap();
         fixture
@@ -3423,7 +3427,7 @@ fn save_field_name(
                 },
             )
             .unwrap();
-        crate::durable::WorkRef::Task(task.id.clone())
+        loopflow_model::durable::WorkRef::Task(task.id.clone())
     }
 }
 
@@ -3506,7 +3510,7 @@ fn planning_fields_unsent_save_replaces_a_concurrent_linear_edit_without_moving_
                 assert_eq!(
                     fixture
                         .store
-                        .work_status(&crate::durable::WorkRef::Task(task.id.clone()))
+                        .work_status(&loopflow_model::durable::WorkRef::Task(task.id.clone()))
                         .await
                         .unwrap(),
                     WorkStatus::Ready
@@ -3540,7 +3544,7 @@ fn planning_fields_project_content_preserves_prose_and_task_assignee_can_be_clea
             crate::ops::planning_delivery::sync_fields(
                 &fixture.store,
                 repo,
-                &crate::durable::WorkRef::Project(task.project_id.clone().unwrap()),
+                &loopflow_model::durable::WorkRef::Project(task.project_id.clone().unwrap()),
             )
             .await
             .unwrap();
@@ -3578,7 +3582,7 @@ fn planning_fields_project_content_preserves_prose_and_task_assignee_can_be_clea
                 crate::ops::planning_delivery::sync_fields(
                     &fixture.store,
                     repo,
-                    &crate::durable::WorkRef::Task(task.id.clone()),
+                    &loopflow_model::durable::WorkRef::Task(task.id.clone()),
                 )
                 .await
                 .unwrap();
@@ -3626,7 +3630,7 @@ fn planning_fields_uncertain_attempt_does_not_rewrite_an_unchanged_provider() {
 fn planning_fields_deliver_project_activation_and_task_membership_without_execution() {
     with_planning_task(|runtime, fixture, repo, task, state| {
         runtime.block_on(async {
-            let project_work = crate::durable::WorkRef::Project(task.project_id.clone().unwrap());
+            let project_work = loopflow_model::durable::WorkRef::Project(task.project_id.clone().unwrap());
             let mut provider = planning_project("project-1", "project-1");
             provider["status"] = json!({"type":"planned"});
             mark_issue_updated(&mut provider);
@@ -3689,7 +3693,7 @@ fn planning_fields_deliver_project_activation_and_task_membership_without_execut
             crate::ops::planning_delivery::sync_fields(
                 &fixture.store,
                 repo,
-                &crate::durable::WorkRef::Task(task.id.clone()),
+                &loopflow_model::durable::WorkRef::Task(task.id.clone()),
             )
             .await
             .unwrap();
@@ -3739,7 +3743,7 @@ fn with_export_plan(
                 .ensure_repository(repo.to_str().unwrap())
                 .unwrap(),
             due_date: None,
-            id: crate::durable::TaskId::new(),
+            id: loopflow_model::durable::TaskId::new(),
             project_id: Some(project),
             title: "Same title".into(),
             description: "Saved offline".into(),
@@ -3773,7 +3777,7 @@ fn exports_later_tasks_after_timeout(after_save: bool) {
             crate::ops::planning_export::sync_export(
                 &fixture.store,
                 repo,
-                &crate::durable::WorkRef::Project(task.project_id.clone().unwrap()),
+                &loopflow_model::durable::WorkRef::Project(task.project_id.clone().unwrap()),
             )
             .await
             .unwrap();
@@ -3783,7 +3787,7 @@ fn exports_later_tasks_after_timeout(after_save: bool) {
                 .create_task(&crate::work::task::NewTask {
                     repository_id: task.repository_id.clone(),
                     due_date: None,
-                    id: crate::durable::TaskId::new(),
+                    id: loopflow_model::durable::TaskId::new(),
                     project_id: task.project_id.clone(),
                     title: "Later saved Task".into(),
                     description: "Must not starve".into(),
@@ -3794,7 +3798,7 @@ fn exports_later_tasks_after_timeout(after_save: bool) {
                 .sqlite
                 .planning_export_owners(repo.to_str().unwrap())
                 .unwrap();
-            let crate::durable::WorkRef::Task(first) = &owners[0] else {
+            let loopflow_model::durable::WorkRef::Task(first) = &owners[0] else {
                 panic!("expected unmapped Task")
             };
             let export = fixture
@@ -4010,7 +4014,7 @@ fn uncertain_creation_is_resent_once_per_window_and_on_task_sync() {
             crate::ops::planning_export::sync_export(
                 &fixture.store,
                 repo,
-                &crate::durable::WorkRef::Project(task.project_id.clone().unwrap()),
+                &loopflow_model::durable::WorkRef::Project(task.project_id.clone().unwrap()),
             )
             .await
             .unwrap();
@@ -4018,7 +4022,7 @@ fn uncertain_creation_is_resent_once_per_window_and_on_task_sync() {
             assert!(crate::ops::planning_export::sync_export(
                 &fixture.store,
                 repo,
-                &crate::durable::WorkRef::Task(task.id.clone()),
+                &loopflow_model::durable::WorkRef::Task(task.id.clone()),
             )
             .await
             .is_err());
@@ -4036,7 +4040,7 @@ fn uncertain_creation_is_resent_once_per_window_and_on_task_sync() {
             .block_on(crate::ops::planning_export::sync_export(
                 &fixture.store,
                 repo,
-                &crate::durable::WorkRef::Task(task.id.clone()),
+                &loopflow_model::durable::WorkRef::Task(task.id.clone()),
             ))
             .unwrap_err();
         assert!(error.to_string().contains("next look"), "{error}");
@@ -4074,7 +4078,7 @@ fn task_sync_explicit_retry_preserves_saved_creation_identity() {
             crate::ops::planning_export::sync_export(
                 &fixture.store,
                 repo,
-                &crate::durable::WorkRef::Project(task.project_id.clone().unwrap()),
+                &loopflow_model::durable::WorkRef::Project(task.project_id.clone().unwrap()),
             )
             .await
             .unwrap();
@@ -4082,7 +4086,7 @@ fn task_sync_explicit_retry_preserves_saved_creation_identity() {
             assert!(crate::ops::planning_export::sync_export(
                 &fixture.store,
                 repo,
-                &crate::durable::WorkRef::Task(task.id.clone())
+                &loopflow_model::durable::WorkRef::Task(task.id.clone())
             )
             .await
             .is_err());
@@ -4112,7 +4116,7 @@ fn task_sync_explicit_retry_preserves_saved_creation_identity() {
             .block_on(crate::ops::planning_export::sync_export(
                 &fixture.store,
                 repo,
-                &crate::durable::WorkRef::Task(task.id.clone()),
+                &loopflow_model::durable::WorkRef::Task(task.id.clone()),
             ))
             .unwrap_err();
         assert!(error.to_string().contains("next look"), "{error}");
@@ -4144,7 +4148,7 @@ fn seed_uncertain_exports(
     template: &Task,
     count: usize,
     observed_at: Option<i64>,
-) -> Vec<crate::durable::TaskId> {
+) -> Vec<loopflow_model::durable::TaskId> {
     (0..count)
         .map(|index| {
             let task = fixture
@@ -4153,7 +4157,7 @@ fn seed_uncertain_exports(
                 .create_task(&crate::work::task::NewTask {
                     repository_id: template.repository_id.clone(),
                     due_date: None,
-                    id: crate::durable::TaskId::new(),
+                    id: loopflow_model::durable::TaskId::new(),
                     project_id: template.project_id.clone(),
                     title: format!("Uncertain creation {index}"),
                     description: String::new(),
@@ -4187,8 +4191,8 @@ fn uncertain_exports_inside_their_window_cost_a_pass_no_requests() {
     with_export_plan(|runtime, fixture, repo, task, state| {
         runtime.block_on(async {
             for work in [
-                crate::durable::WorkRef::Project(task.project_id.clone().unwrap()),
-                crate::durable::WorkRef::Task(task.id.clone()),
+                loopflow_model::durable::WorkRef::Project(task.project_id.clone().unwrap()),
+                loopflow_model::durable::WorkRef::Task(task.id.clone()),
             ] {
                 crate::ops::planning_export::sync_export(&fixture.store, repo, &work)
                     .await
@@ -4340,7 +4344,7 @@ fn timed_out_creation_names_its_step_and_the_next_pass_resolves_it() {
             crate::ops::planning_export::sync_export(
                 &fixture.store,
                 repo,
-                &crate::durable::WorkRef::Project(task.project_id.clone().unwrap()),
+                &loopflow_model::durable::WorkRef::Project(task.project_id.clone().unwrap()),
             )
             .await
             .unwrap();
@@ -4348,7 +4352,7 @@ fn timed_out_creation_names_its_step_and_the_next_pass_resolves_it() {
             let error = crate::ops::planning_export::sync_export(
                 &fixture.store,
                 repo,
-                &crate::durable::WorkRef::Task(task.id.clone()),
+                &loopflow_model::durable::WorkRef::Task(task.id.clone()),
             )
             .await
             .unwrap_err();
@@ -4393,7 +4397,7 @@ fn timed_out_creation_names_its_step_and_the_next_pass_resolves_it() {
 fn standalone_export_recovers_and_moves_without_duplicate_issues() {
     with_export_plan(|runtime, fixture, repo, task, state| {
         let project_id = task.project_id.as_ref().unwrap();
-        let work = crate::durable::WorkRef::Task(task.id.clone());
+        let work = loopflow_model::durable::WorkRef::Task(task.id.clone());
         fixture
             .store
             .sqlite
@@ -4443,7 +4447,7 @@ fn standalone_export_recovers_and_moves_without_duplicate_issues() {
             .block_on(crate::ops::planning_export::sync_export(
                 &reopened,
                 repo,
-                &crate::durable::WorkRef::Project(project_id.clone()),
+                &loopflow_model::durable::WorkRef::Project(project_id.clone()),
             ))
             .unwrap();
         let project = reopened.sqlite.project(project_id).unwrap().unwrap();
@@ -4486,8 +4490,8 @@ fn standalone_export_recovers_and_moves_without_duplicate_issues() {
 #[test]
 fn planning_export_lost_creation_and_attachment_recover_without_duplicate_effects() {
     with_export_plan(|runtime, fixture, repo, task, state| {
-        let project = crate::durable::WorkRef::Project(task.project_id.clone().unwrap());
-        let work = crate::durable::WorkRef::Task(task.id.clone());
+        let project = loopflow_model::durable::WorkRef::Project(task.project_id.clone().unwrap());
+        let work = loopflow_model::durable::WorkRef::Task(task.id.clone());
         for owner in [&project, &work] {
             state.blocking_lock().lose_creation_reply = true;
             assert!(runtime
@@ -4584,8 +4588,8 @@ fn planning_export_lost_creation_and_attachment_recover_without_duplicate_effect
 #[test]
 fn planning_export_late_readback_preserves_newer_edits_and_inventory_identity() {
     with_export_plan(|runtime, fixture, repo, task, state| {
-        let project = crate::durable::WorkRef::Project(task.project_id.clone().unwrap());
-        let work = crate::durable::WorkRef::Task(task.id.clone());
+        let project = loopflow_model::durable::WorkRef::Project(task.project_id.clone().unwrap());
+        let work = loopflow_model::durable::WorkRef::Task(task.id.clone());
         for owner in [&project, &work] {
             let arrived = Arc::new(tokio::sync::Notify::new());
             let release = Arc::new(tokio::sync::Notify::new());
@@ -4598,12 +4602,12 @@ fn planning_export_late_readback_preserves_newer_edits_and_inventory_identity() 
                 let save = async {
                     arrived.notified().await;
                     match owner {
-                        crate::durable::WorkRef::Project(id) => fixture
+                        loopflow_model::durable::WorkRef::Project(id) => fixture
                             .store
                             .sqlite
                             .edit_project(id, Some("Later chapter"), None, None)
                             .unwrap(),
-                        crate::durable::WorkRef::Task(id) => {
+                        loopflow_model::durable::WorkRef::Task(id) => {
                             let saved = fixture.store.get_task(id).await.unwrap().unwrap();
                             fixture
                                 .store
@@ -4700,8 +4704,8 @@ fn planning_export_late_readback_preserves_newer_edits_and_inventory_identity() 
 #[test]
 fn planning_export_removal_during_uncertain_creation_retains_identity() {
     with_export_plan(|runtime, fixture, repo, task, state| {
-        let project = crate::durable::WorkRef::Project(task.project_id.clone().unwrap());
-        let work = crate::durable::WorkRef::Task(task.id.clone());
+        let project = loopflow_model::durable::WorkRef::Project(task.project_id.clone().unwrap());
+        let work = loopflow_model::durable::WorkRef::Task(task.id.clone());
         runtime
             .block_on(crate::ops::planning_export::sync_export(
                 &fixture.store,
@@ -4762,7 +4766,7 @@ fn planning_export_removal_during_uncertain_creation_retains_identity() {
             .create_task(&crate::work::task::NewTask {
                 repository_id: task.repository_id.clone(),
                 due_date: None,
-                id: crate::durable::TaskId::new(),
+                id: loopflow_model::durable::TaskId::new(),
                 project_id: task.project_id.clone(),
                 title: "Remove offline".into(),
                 description: String::new(),
@@ -4953,7 +4957,7 @@ fn linear_rate_limit_retries_field_without_losing_saved_identity() {
             .pending_task_changes(&task.id)
             .unwrap()
             .remove(0);
-        let work = crate::durable::WorkRef::Task(task.id.clone());
+        let work = loopflow_model::durable::WorkRef::Task(task.id.clone());
         runtime.block_on(async {
             state.lock().await.rate_limit_query = Some("mutation DeliverTaskField");
             crate::ops::planning_delivery::sync_fields(&fixture.store, repo, &work)
@@ -5249,7 +5253,7 @@ fn planning_fields_use_mutation_responses_without_reading_back_own_writes() {
             crate::ops::planning_delivery::sync_fields(
                 &fixture.store,
                 repo,
-                &crate::durable::WorkRef::Task(task.id.clone()),
+                &loopflow_model::durable::WorkRef::Task(task.id.clone()),
             )
             .await
             .unwrap();
@@ -5277,8 +5281,8 @@ fn planning_export_acquisition_acknowledges_canonical_membership() {
         conn.execute("INSERT INTO task_changes(id,task_id,value_json) VALUES('before-creation-membership',?1,?2)",
             rusqlite::params![task.id.as_str(),serde_json::to_string(&WorkValue::TaskProject(task.project_id.as_ref().map(ToString::to_string))).unwrap()]).unwrap();
         for owner in [
-            crate::durable::WorkRef::Project(task.project_id.clone().unwrap()),
-            crate::durable::WorkRef::Task(task.id.clone()),
+            loopflow_model::durable::WorkRef::Project(task.project_id.clone().unwrap()),
+            loopflow_model::durable::WorkRef::Task(task.id.clone()),
         ] {
             runtime
                 .block_on(crate::ops::planning_export::sync_export(
@@ -5324,7 +5328,7 @@ fn planning_export_captures_shared_task_fields_without_local_execution() {
             .block_on(crate::ops::planning_export::sync_export(
                 &fixture.store,
                 repo,
-                &crate::durable::WorkRef::Project(task.project_id.clone().unwrap()),
+                &loopflow_model::durable::WorkRef::Project(task.project_id.clone().unwrap()),
             ))
             .unwrap();
         let child = fixture
@@ -5332,7 +5336,7 @@ fn planning_export_captures_shared_task_fields_without_local_execution() {
             .sqlite
             .create_task(&crate::work::task::NewTask {
                 repository_id: task.repository_id.clone(),
-                id: crate::durable::TaskId::new(),
+                id: loopflow_model::durable::TaskId::new(),
                 project_id: task.project_id.clone(),
                 title: "Retained creation".into(),
                 description: "Authored prose".into(),
@@ -5391,7 +5395,7 @@ fn project_field_delivery_requires_revision_accepted_into_work() {
     for rejection in ["stale", "foreign", "archived", "unversioned"] {
         with_planning_task(|runtime, fixture, repo, task, state| {
             runtime.block_on(async {
-                let work = crate::durable::WorkRef::Project(task.project_id.clone().unwrap());
+                let work = loopflow_model::durable::WorkRef::Project(task.project_id.clone().unwrap());
                 let mut provider = planning_project("project-1", "project-1");
                 provider["content"] = json!("Accepted\n\nworkflow: feature\n");
                 provider["updatedAt"] = json!("2026-10-10T12:00:00Z");
@@ -5474,7 +5478,7 @@ fn project_field_delivery_requires_revision_accepted_into_work() {
 fn project_prose_older_acknowledgement_preserves_successor() {
     with_planning_task(|runtime, fixture, repo, task, state| {
         runtime.block_on(async {
-            let work = crate::durable::WorkRef::Project(task.project_id.clone().unwrap());
+            let work = loopflow_model::durable::WorkRef::Project(task.project_id.clone().unwrap());
             let save = |text| {
                 fixture
                     .store
@@ -5550,7 +5554,7 @@ fn project_prose_older_acknowledgement_preserves_successor() {
 fn project_prose_omission_is_not_empty_or_receipt_settlement() {
     with_planning_task(|runtime, fixture, repo, task, state| {
         runtime.block_on(async {
-            let work = crate::durable::WorkRef::Project(task.project_id.clone().unwrap());
+            let work = loopflow_model::durable::WorkRef::Project(task.project_id.clone().unwrap());
             let mut provider = planning_project("project-1", "project-1");
             provider["content"] = json!("Observed prose\n\nworkflow: feature\n");
             mark_issue_updated(&mut provider);
@@ -5646,7 +5650,7 @@ fn project_prose_save_delivers_and_settles_without_changing_managed_fields() {
             conn.execute("INSERT INTO processes(id,trace_id,command,cwd,started_at) VALUES('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222','lf run code','/retained/task',2)", []).unwrap();
             conn.execute("INSERT INTO task_graphs(task_id,graph,step,run_start,lf_process_id,updated_at) VALUES(?1,?2,'start','{\"index\":0}','11111111-1111-4111-8111-111111111111',3)", rusqlite::params![task.id.as_str(),json!({"name":"code","steps":[]}).to_string()]).unwrap();
             let workflow_before = fixture.store.sqlite.task_graph(&task.id).unwrap();
-            let work = crate::durable::WorkRef::Project(task.project_id.clone().unwrap());
+            let work = loopflow_model::durable::WorkRef::Project(task.project_id.clone().unwrap());
             let mut provider = planning_project("project-1", "project-1");
             provider["content"] = json!("Before.\n\nworkflow: feature\n\n## KRs\n- [x] Preserve work\n\n## Notes\nAfter.\n");
             mark_issue_updated(&mut provider);
@@ -5692,7 +5696,7 @@ fn older_read_with_nothing_queued_is_not_a_delivery_failure() {
                 .unwrap();
             let saved = fixture.store.sqlite.task(&task.id).unwrap().unwrap();
             state.lock().await.issues[0] = original;
-            let work = crate::durable::WorkRef::Task(task.id.clone());
+            let work = loopflow_model::durable::WorkRef::Task(task.id.clone());
             crate::ops::planning_delivery::sync_fields(&fixture.store, repo, &work)
                 .await
                 .unwrap();
@@ -5795,7 +5799,7 @@ fn linear_scope_reads_each_repository_once_and_refreshes_next_check() {
                 // Both loops encounter every repository more than once, including failures.
                 for row in 0..2 {
                     let wave = crate::work::wave::Wave::new(
-                        crate::id::WaveId::new(),
+                        loopflow_model::id::WaveId::new(),
                         format!("scope-{row}"),
                         path.display().to_string(),
                     );
@@ -5804,7 +5808,7 @@ fn linear_scope_reads_each_repository_once_and_refreshes_next_check() {
                         .store
                         .sqlite
                         .create_task(&crate::work::task::NewTask {
-                            id: crate::durable::TaskId::new(),
+                            id: loopflow_model::durable::TaskId::new(),
                             repository_id: repository_id.clone(),
                             project_id: None,
                             title: format!("Scope {index}/{row}"),
@@ -5924,7 +5928,7 @@ fn repeated_legacy_abandonment_delivers_missing_cancellation_once() {
                 [task.id.as_str()],
             )
             .unwrap();
-        let work = crate::durable::WorkRef::Task(task.id.clone());
+        let work = loopflow_model::durable::WorkRef::Task(task.id.clone());
         runtime.block_on(async {
             fixture
                 .store

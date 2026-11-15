@@ -28,7 +28,7 @@ pub(crate) struct CaptureHandoff {
     event_seq: u64,
     account_id: Option<crate::store::ProviderAccountId>,
     account_observed: bool,
-    agent_session: Option<crate::id::AgentSessionId>,
+    agent_session: Option<loopflow_model::id::AgentSessionId>,
 }
 
 impl SessionRecorder {
@@ -328,7 +328,7 @@ impl SessionRecorder {
         &self,
         account_id: Option<crate::store::ProviderAccountId>,
         account_observed: bool,
-        agent_session: Option<crate::id::AgentSessionId>,
+        agent_session: Option<loopflow_model::id::AgentSessionId>,
     ) -> CaptureHandoff {
         CaptureHandoff {
             key: self.artifact_key(),

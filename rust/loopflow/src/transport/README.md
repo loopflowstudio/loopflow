@@ -368,7 +368,7 @@ interaction.
 ### Screens
 
 The server keeps a libghostty-vt terminal per held terminal (the Ghostty
-revision pinned in `rust/loopflow/ghostty-vt.json`, 8 MiB of scrollback) and
+revision pinned in `rust/loopflow-terminal/ghostty-vt.json`, 8 MiB of scrollback) and
 answers the program's cursor, device and mode queries while no view's
 terminal is there to. A new view is repainted through Ghostty's VT formatter:
 the newest scrollback rows (up to 2,000, under 768 KiB) above its own
@@ -639,3 +639,8 @@ server acknowledges the native client; saved screen bytes never provide that
 announcement. A successful automatic attach records its Desktop terminal
 association after the handshake, keeping current provider status without
 claiming another view's input during preparation.
+
+Terminal parsing and repainting live in
+[`loopflow-terminal`](../../../loopflow-terminal/README.md). The application
+owns screen-file persistence and viewer lifetime; the terminal library owns
+snapshot bytes, native query replies and display state.

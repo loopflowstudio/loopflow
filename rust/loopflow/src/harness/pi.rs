@@ -20,9 +20,9 @@ use super::fact_writer::FactWriter;
 use super::pi_decode::Turn;
 use super::{Harness, HarnessError, SendCurrentOutcome};
 use crate::agent::AgentConfig;
-use crate::id::AgentSessionId;
 use crate::steer::NativeBoundary;
 use loopflow_model::chat::types::{ConversationEvent, Lifecycle};
+use loopflow_model::id::AgentSessionId;
 
 #[derive(Debug)]
 struct Response {

@@ -42,7 +42,7 @@ pub fn run(repo_root: &Path, skill: Option<&str>, message: Option<&str>, cli: &C
         let id = std::env::var(crate::work::wave::context::WAVE_ID_ENV).ok()?;
         Some(crate::session::SessionWork {
             task_id: None,
-            wave_id: Some(crate::id::WaveId::parse(&id).ok()?),
+            wave_id: Some(loopflow_model::id::WaveId::parse(&id).ok()?),
             source: crate::session::WorkSource::Declared,
         })
     });
@@ -239,7 +239,7 @@ fn build_bound_prompt(
     let mut launch = cli.process_options();
     launch.wave = binding.wave_name.clone();
     let arguments = message.unwrap_or_default();
-    let message = if let crate::durable::WorkRef::Task(id) = &binding.work {
+    let message = if let loopflow_model::durable::WorkRef::Task(id) = &binding.work {
         launch.task = Some(id.to_string());
         message.unwrap_or_default().to_owned()
     } else {
@@ -263,8 +263,9 @@ fn build_bound_prompt(
     built.agent_config.holder = crate::session::Holder::of(binding.source.is_managed());
     built.work = Some(crate::session::SessionWork {
         task_id: match &binding.work {
-            crate::durable::WorkRef::Task(id) => Some(id.clone()),
-            crate::durable::WorkRef::Wave(_) | crate::durable::WorkRef::Project(_) => None,
+            loopflow_model::durable::WorkRef::Task(id) => Some(id.clone()),
+            loopflow_model::durable::WorkRef::Wave(_)
+            | loopflow_model::durable::WorkRef::Project(_) => None,
         },
         wave_id: binding.wave_id.clone(),
         source: binding.source,
@@ -352,8 +353,8 @@ fn operator_scope(
     cwd: &Path,
     binding: Option<&crate::ops::WorkBinding>,
 ) -> Result<Option<crate::session::PrimaryScope>> {
-    use crate::durable::WorkRef;
     use crate::session::PrimaryScope;
+    use loopflow_model::durable::WorkRef;
 
     if cli.cwd.is_some() || cli.task.is_some() || cli.wt.is_some() {
         return Ok(None);
@@ -685,7 +686,7 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<String>> {
         let names_thread = built.harness == "claude"
             || (built.harness == "pi"
                 && built.agent_config.holder == crate::session::Holder::Caller);
-        let agent_session: Option<crate::id::AgentSessionId> = if names_thread {
+        let agent_session: Option<loopflow_model::id::AgentSessionId> = if names_thread {
             let artifact_key = runtime.artifact_key();
             let raw_id = artifact_key
                 .as_str()

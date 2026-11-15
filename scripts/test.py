@@ -691,7 +691,7 @@ SUITES: list[Suite] = [
                 "swift/",
                 "rust/loopflow/src/store/sqlite/sessions.rs",
                 "rust/loopflow/src/naming.rs",
-                "rust/loopflow/ghostty-vt",
+                "rust/loopflow-terminal/ghostty-vt",
             )
             or _touches_exact(
                 c,
@@ -700,6 +700,7 @@ SUITES: list[Suite] = [
                 "scripts/desktop-headless.sb",
                 "scripts/loopflow-dev.py",
                 "rust/loopflow/build.rs",
+                "rust/loopflow-terminal/build.rs",
             )
         ),
         build=_swift_commands,
@@ -730,9 +731,18 @@ SUITES: list[Suite] = [
         slow=True,
         trigger_desc="Loopflow app/UI or Desktop native build inputs",
         match=lambda c: (
-            _touches(c, "swift/LoopflowMac/", "swift/LoopflowUITests/", "rust/loopflow/ghostty-vt")
+            _touches(
+                c,
+                "swift/LoopflowMac/",
+                "swift/LoopflowUITests/",
+                "rust/loopflow-terminal/ghostty-vt",
+            )
             or _touches_exact(
-                c, "swift/project.yml", "scripts/loopflow-dev.py", "rust/loopflow/build.rs"
+                c,
+                "swift/project.yml",
+                "scripts/loopflow-dev.py",
+                "rust/loopflow/build.rs",
+                "rust/loopflow-terminal/build.rs",
             )
         ),
         build=_loopflow_commands,

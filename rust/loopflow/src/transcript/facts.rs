@@ -17,9 +17,9 @@ use serde_json::{json, Value};
 use super::live::TurnState;
 use super::{seconds, Source, Turn};
 use crate::harness::HarnessKind;
-use crate::id::AgentSessionId;
 use crate::store::sqlite::SqliteStore;
 use crate::store::StoreResult;
+use loopflow_model::id::AgentSessionId;
 
 /// How long after a turn's last transcript row its live completion may have
 /// been recorded.

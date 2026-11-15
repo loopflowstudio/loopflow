@@ -32,16 +32,27 @@ def main() -> None:
         root = Path(temporary).resolve()
         trees = [root / name for name in ("a", "b")]
         for tree in trees:
-            for package in ("loopflow-model", "loopflow-definitions"):
+            for package in ("loopflow-model", "loopflow-definitions", "loopflow-terminal"):
                 shutil.copytree(ROOT / "rust" / package, tree / "rust" / package)
             shutil.copyfile(ROOT / "Cargo.lock", tree / "Cargo.lock")
             (tree / "Cargo.toml").write_text(
                 '[workspace]\nresolver="2"\n'
-                'members=["rust/loopflow-model", "rust/loopflow-definitions", "path-fixture"]\n'
+                'members=["rust/loopflow-model", "rust/loopflow-definitions", '
+                '"rust/loopflow-terminal", "rust/model-dependencies", "path-fixture"]\n'
                 "[workspace.package]\n"
                 + package_fields
                 + "[profile.dev]\ndebug=1\nincremental=false\n"
             )
+            # Match the model's exact dependency features so its measured
+            # invocation contains only the owner, including in an unlisted root.
+            dependencies = tree / "rust/model-dependencies"
+            (dependencies / "src").mkdir(parents=True)
+            (dependencies / "Cargo.toml").write_text(
+                (tree / "rust/loopflow-model/Cargo.toml")
+                .read_text()
+                .replace('name = "loopflow-model"', 'name = "model-dependencies"', 1)
+            )
+            (dependencies / "src/lib.rs").write_text("")
             fixture = tree / "path-fixture/src"
             fixture.mkdir(parents=True)
             (fixture.parent / "Cargo.toml").write_text(
@@ -161,22 +172,15 @@ def main() -> None:
                         "--jobs",
                         "1",
                         "-p",
-                        "base64",
-                        "-p",
-                        "schemars",
-                        "-p",
-                        "serde",
-                        "-p",
-                        "serde_json",
-                        "-p",
-                        "serde_yaml_ng",
+                        "model-dependencies",
                     ],
                     tree,
                 )
                 (output / f"dependencies_{label}.log").write_text(result.stderr)
                 build(f"model_{label}", tree, "loopflow-model")
                 build(f"definitions_{label}", tree, "loopflow-definitions")
-                for package in ("loopflow_model", "loopflow_definitions"):
+                build(f"terminal_{label}", tree, "loopflow-terminal")
+                for package in ("loopflow_model", "loopflow_definitions", "loopflow_terminal"):
                     library = tree / "target/debug" / f"lib{package}.rlib"
                     shutil.copyfile(library, output / f"{package}_{label}.rlib")
                     paths = run(["strings", str(library)]).stdout
@@ -203,15 +207,7 @@ def main() -> None:
                     "--jobs",
                     "1",
                     "-p",
-                    "base64",
-                    "-p",
-                    "schemars",
-                    "-p",
-                    "serde",
-                    "-p",
-                    "serde_json",
-                    "-p",
-                    "serde_yaml_ng",
+                    "model-dependencies",
                 ],
                 third,
             )
@@ -232,15 +228,7 @@ def main() -> None:
                     "--jobs",
                     "1",
                     "-p",
-                    "base64",
-                    "-p",
-                    "schemars",
-                    "-p",
-                    "serde",
-                    "-p",
-                    "serde_json",
-                    "-p",
-                    "serde_yaml_ng",
+                    "model-dependencies",
                 ],
                 third,
             )
@@ -254,7 +242,11 @@ def main() -> None:
                 changed.read_text().replace("MAX_RECORDS: usize = 64", "MAX_RECORDS: usize = 63")
             )
             build("changed_model_b", trees[1], "loopflow-model")
-            expected_hits = {"model_b", "definitions_b", "new_root_after_refresh"}
+            for receipt in receipts:
+                if receipt["case"].startswith(("model_", "new_root_", "changed_model_")):
+                    if receipt["libraries"] != ["loopflow_model"]:
+                        raise RuntimeError(f"model dependencies were not warm: {receipt}")
+            expected_hits = {"model_b", "definitions_b", "terminal_b", "new_root_after_refresh"}
             for receipt in receipts:
                 count = len(receipt["libraries"])
                 expected = (count, 0) if receipt["case"] in expected_hits else (0, count)

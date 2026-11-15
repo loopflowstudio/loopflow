@@ -61,11 +61,11 @@ fn scoped(conn: &Connection, kind: &str, id: &str) -> Result<Vec<(PathBuf, Vec<S
                 vec![],
             )])
         }
-        "repository" => {
-            crate::durable::DefaultScope::Repository(crate::durable::RepositoryId::from_raw(id))
-        }
-        "wave" => crate::durable::DefaultScope::Wave(
-            crate::id::WaveId::parse(id).map_err(anyhow::Error::msg)?,
+        "repository" => loopflow_model::durable::DefaultScope::Repository(
+            loopflow_model::durable::RepositoryId::from_raw(id),
+        ),
+        "wave" => loopflow_model::durable::DefaultScope::Wave(
+            loopflow_model::id::WaveId::parse(id).map_err(anyhow::Error::msg)?,
         ),
         _ => anyhow::bail!("unknown preference scope {kind}"),
     };
@@ -197,7 +197,7 @@ fn export(conn: &Connection) -> Result<Export> {
             let (id, label, route) = row?;
             let path = super::placement::home(conn)?.join("config.yaml");
             let value = serde_yaml_ng::to_value(super::placement::MachineDeclaration {
-                id: crate::durable::MachineId::from_raw(id.clone()),
+                id: loopflow_model::durable::MachineId::from_raw(id.clone()),
             })?;
             // Labels are literal map keys, including dots.
             super::settings::insert(

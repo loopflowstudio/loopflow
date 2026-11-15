@@ -3,12 +3,12 @@
 use rusqlite::types::ValueRef;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
-use crate::durable::{MachineId, RepositoryId, TaskId};
 use crate::machine_records::{
     CopiedEvent, CopiedHistory, CopiedSession, CopyCounts, Record, RecordKind,
 };
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
+use loopflow_model::durable::{MachineId, RepositoryId, TaskId};
 
 use super::SqliteStore;
 

@@ -7,12 +7,12 @@ use fs2::FileExt;
 use rusqlite::types::Value;
 use rusqlite::{params, params_from_iter, OptionalExtension, TransactionBehavior};
 
-use crate::id::{AgentProcessId, AgentSessionId, AttachmentToken, LfProcessId};
 use crate::process::{
     AgentCaller, AgentProcess, LfProcess, ProcessCursor, ProcessEntry, ProcessFilter,
     ProcessOutcomeFilter, ProcessPage, ProcessWorkFilter, SessionAttachment,
 };
 use crate::store::{StoreError, StoreResult};
+use loopflow_model::id::{AgentProcessId, AgentSessionId, AttachmentToken, LfProcessId};
 
 use super::SqliteStore;
 
@@ -248,7 +248,7 @@ fn attachment_in(
     conn: &rusqlite::Connection,
     session: &str,
 ) -> StoreResult<Option<SessionAttachment>> {
-    let canonical = crate::id::canonical_session(session);
+    let canonical = loopflow_model::id::canonical_session(session);
     let session = canonical.as_str();
     let row = conn
         .query_row(
@@ -459,8 +459,8 @@ impl SqliteStore {
         &self,
         selector: &str,
         repo: Option<&str>,
-    ) -> StoreResult<Option<crate::id::WaveId>> {
-        let canonical = crate::id::canonical_uuid(selector);
+    ) -> StoreResult<Option<loopflow_model::id::WaveId>> {
+        let canonical = loopflow_model::id::canonical_uuid(selector);
         self.resolve_work_id(
             "SELECT id FROM wave_addresses WHERE id=?1 OR (slug=?1 AND (?2 IS NULL OR repo=?2))
             ORDER BY (id=?1) DESC,id LIMIT 2",
@@ -468,7 +468,7 @@ impl SqliteStore {
             repo,
         )?
         .map(|id| {
-            crate::id::WaveId::parse(&id)
+            loopflow_model::id::WaveId::parse(&id)
                 .map_err(|error| StoreError::InvalidData(error.to_string()))
         })
         .transpose()
@@ -528,7 +528,7 @@ impl SqliteStore {
 
     pub(crate) fn journal_trace_locator(
         &self,
-        trace: &crate::id::TraceId,
+        trace: &loopflow_model::id::TraceId,
     ) -> StoreResult<Option<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
@@ -556,7 +556,7 @@ impl SqliteStore {
     /// The lf processes that started inside held terminal `terminal`.
     pub(crate) fn held_terminal_processes(
         &self,
-        terminal: &crate::id::TerminalId,
+        terminal: &loopflow_model::id::TerminalId,
     ) -> StoreResult<Vec<LfProcessId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query =
@@ -598,7 +598,7 @@ impl SqliteStore {
                     |row| {
                         Ok((
                             row.get::<_, Option<LfProcessId>>(0)?,
-                            row.get::<_, Option<crate::id::LfSessionId>>(1)?,
+                            row.get::<_, Option<loopflow_model::id::LfSessionId>>(1)?,
                         ))
                     },
                 )
@@ -1000,7 +1000,7 @@ impl SqliteStore {
         let locator: String = conn
             .query_row(
                 "SELECT fence_locator FROM agent_sessions WHERE id=?1",
-                [crate::id::canonical_session(session)],
+                [loopflow_model::id::canonical_session(session)],
                 |row| row.get(0),
             )
             .optional()?
@@ -1246,7 +1246,7 @@ impl SqliteStore {
         process: &LfProcessId,
         replace_provider: bool,
     ) -> StoreResult<SessionAttachment> {
-        let canonical = crate::id::canonical_session(session);
+        let canonical = loopflow_model::id::canonical_session(session);
         let session = canonical.as_str();
         let _dispatch = self.lock_session_attachment(session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
@@ -1362,7 +1362,7 @@ impl SqliteStore {
         process: &LfProcessId,
         close: impl FnOnce() -> StoreResult<bool>,
     ) -> StoreResult<SessionAttachment> {
-        let canonical = crate::id::canonical_session(session);
+        let canonical = loopflow_model::id::canonical_session(session);
         let session = canonical.as_str();
         let beside = self.runs_in_its_terminal(session)?;
         self.with_session_resume(session, expected, beside, close, |tx| {
@@ -1491,7 +1491,7 @@ impl SqliteStore {
         departure: Option<&crate::process::Departure>,
         close_provider: impl FnOnce() -> StoreResult<bool>,
     ) -> StoreResult<()> {
-        let canonical = crate::id::canonical_session(session);
+        let canonical = loopflow_model::id::canonical_session(session);
         let session = canonical.as_str();
         let _dispatch = self.lock_session_attachment(session)?;
         {
@@ -1564,7 +1564,7 @@ impl SqliteStore {
         session: &str,
         attachment: &SessionAttachment,
     ) -> StoreResult<Option<crate::process::Departure>> {
-        let canonical = crate::id::canonical_session(session);
+        let canonical = loopflow_model::id::canonical_session(session);
         let conn = self.conn.lock().expect("store mutex poisoned");
         let payload = conn
             .query_row(
@@ -1619,11 +1619,11 @@ mod discovery_tests {
 
     use rusqlite::params;
 
-    use crate::durable::{ProjectId, TaskId};
-    use crate::id::{LfProcessId, TraceId, WaveId};
     use crate::process::{ProcessEntry, ProcessFilter, ProcessOutcomeFilter, ProcessWorkFilter};
     use crate::store::sqlite::SqliteStore;
     use crate::store::StoreError;
+    use loopflow_model::durable::{ProjectId, TaskId};
+    use loopflow_model::id::{LfProcessId, TraceId, WaveId};
 
     pub(super) fn insert_process(store: &SqliteStore, number: u32, started_at: i64) -> LfProcessId {
         let id = LfProcessId::parse(&format!("00000000-0000-0000-0000-{number:012x}")).unwrap();
@@ -1845,7 +1845,7 @@ mod discovery_tests {
         let direct = insert_process(&store, 2, 2);
         let agent = insert_process(&store, 3, 3);
         let interrupted = insert_process(&store, 4, 4);
-        let issuer = crate::id::AgentProcessId::new();
+        let issuer = loopflow_model::id::AgentProcessId::new();
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(
@@ -2280,10 +2280,10 @@ mod discovery_tests {
 #[cfg(test)]
 mod attachment_tests {
     use super::discovery_tests::insert_process;
-    use crate::id::LfProcessId;
     use crate::session::SessionActivity;
     use crate::store::sqlite::SqliteStore;
     use crate::store::StoreError;
+    use loopflow_model::id::LfProcessId;
 
     #[test]
     fn attachment_close_keeps_transfer_fenced_without_blocking_store_writes() {
@@ -3021,8 +3021,8 @@ mod attachment_tests {
 mod forget_tests {
     use rusqlite::params;
 
-    use crate::id::{LfProcessId, TraceId};
     use crate::store::sqlite::SqliteStore;
+    use loopflow_model::id::{LfProcessId, TraceId};
 
     #[test]
     fn an_exit_forgets_the_process_unless_something_still_needs_it() {
@@ -3073,7 +3073,7 @@ mod forget_tests {
         let holder = start(None, false);
         let running_child = start(Some(&holder.id), false);
         let shipper = start(None, false);
-        let task = crate::durable::TaskId::new();
+        let task = loopflow_model::durable::TaskId::new();
         store
             .create_task(&crate::work::task::NewTask {
                 repository_id: store.ensure_repository("/repo").unwrap(),

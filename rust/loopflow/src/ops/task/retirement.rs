@@ -4,8 +4,6 @@ use std::fs::{File, OpenOptions};
 use std::path::Path;
 
 use super::{block_on_task, task_error, task_store};
-use crate::durable::{TaskId, WorkStatus};
-use crate::id::TerminalId;
 use crate::ops::{NullProgress, OpsError, OpsResult};
 use crate::store::{
     sqlite::{SqliteStore, TaskRetirement, ViewerHold},
@@ -13,6 +11,8 @@ use crate::store::{
 };
 use crate::work::task::Task;
 use fs2::FileExt;
+use loopflow_model::durable::{TaskId, WorkStatus};
+use loopflow_model::id::TerminalId;
 
 fn now() -> i64 {
     time::OffsetDateTime::now_utc().unix_timestamp()

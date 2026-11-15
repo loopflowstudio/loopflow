@@ -13,7 +13,7 @@ pub(crate) mod registry;
 pub(crate) use output::local_directory_report;
 mod snapshot;
 mod stream;
-mod terminal;
+use loopflow_terminal::repaint as terminal;
 #[cfg(test)]
 mod viewer_tests;
 mod wire;
@@ -35,9 +35,9 @@ use anyhow::{bail, Context, Result};
 use sha2::{Digest, Sha256};
 
 use crate::harness::native_exit::{NativeExit, Settled};
-use crate::id::{LfSessionId, TerminalId};
 use crate::store::sqlite::ViewerHold;
 use input::PendingInput;
+use loopflow_model::id::{LfSessionId, TerminalId};
 use wire::{Decoder, Event, Incoming, Outgoing, Own, Reply, Request, Scanner, Tag};
 
 /// The held terminal a direct child runs in.
@@ -2496,7 +2496,7 @@ mod tests {
         carry_across_exec, output, place_events, wire, CatchingUp, Event, Handoff, Own, Ownership,
         RelayOutput, Viewer, CONTROL_ENV, HELD_ENV, LIMIT, PARENT_ENV,
     };
-    use crate::id::TerminalId;
+    use loopflow_model::id::TerminalId;
 
     #[test]
     fn a_catching_up_views_terminal_answers_never_reach_the_agent() {

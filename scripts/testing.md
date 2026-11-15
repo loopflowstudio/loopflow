@@ -253,11 +253,18 @@ Omit `--rust-filter` (the whole workspace) only to reproduce a CI
 ```bash
 cargo build -p loopflow --bin lf    # build this checkout's target/debug/lf
 scripts/dev-lf --version           # build and run this checkout's CLI
+scripts/dev-lf --isolated-build --version # bypass compilation caches for debugging
 ```
 
 Run these from the checkout root with the repository's Rust toolchain. Invoke
 `scripts/dev-lf` directly; wrapping it in `uv run` changes argument and terminal
 handling. A build does not install the executable.
+
+For source debugging or cache diagnosis, `--isolated-build` uses this checkout's
+`target/isolated` directory and disables both Rust compiler wrappers and sccache.
+It leaves the ordinary target and shared cache in place. Reuse that isolated
+target for later debugging builds. This also works when another checkout that
+produced cached debug-source paths has been removed.
 
 Cargo rebuilds changed libraries and their dependents. An edit to Task shipping
 rebuilds the application; unchanged lower-level libraries can be reused. Changes
@@ -284,7 +291,8 @@ The cache configuration must list each worktree's absolute root in
 `CARGO_MANIFEST_DIR`, `CARGO_MANIFEST_PATH` and `LOOPFLOW_BUILD_SOURCE_ROOT`
 verbatim when compiled code reads them.
 
-Cache hits can retain another checkout's absolute debug-source paths. The
+Cache hits can retain another checkout's absolute debug-source paths. Use the
+isolated build above when those paths no longer resolve. The
 [crate rebuild probe](benchmarks/crate-rebuild/README.md) records source paths
 alongside runtime-identity checks. Automatic cross-root reuse still needs a
 source-debugging contract and shared-server root upkeep.

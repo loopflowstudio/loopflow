@@ -25,7 +25,7 @@ pub struct MetricIdentity {
 impl MetricIdentity {
     pub fn new(wave_id: &str, metric_id: impl Into<String>) -> Self {
         Self {
-            wave_id: crate::id::canonical_uuid(wave_id),
+            wave_id: loopflow_model::id::canonical_uuid(wave_id),
             metric_id: metric_id.into(),
         }
     }

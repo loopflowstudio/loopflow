@@ -8,8 +8,8 @@ pub(crate) use runtime::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::durable::TaskId;
-use crate::id::{AgentProcessId, LfProcessId, LfSessionId, TraceId, WaveId};
+use loopflow_model::durable::TaskId;
+use loopflow_model::id::{AgentProcessId, LfProcessId, LfSessionId, TraceId, WaveId};
 
 /// One recorded lf process. Unknown historical caller and exit evidence stays absent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -280,7 +280,7 @@ pub struct AgentCaller {
 pub struct SessionAttachment {
     pub agent_process_id: AgentProcessId,
     pub lf_process_id: Option<LfProcessId>,
-    pub token: crate::id::AttachmentToken,
+    pub token: loopflow_model::id::AttachmentToken,
     pub provider_lf_process_id: LfProcessId,
 }
 
@@ -308,7 +308,7 @@ pub(crate) enum Departure {
         account: crate::store::ProviderAccountId,
     },
     Machine {
-        machine: crate::durable::MachineId,
+        machine: loopflow_model::durable::MachineId,
         task: Option<TaskId>,
     },
 }
@@ -319,7 +319,7 @@ pub(crate) enum Departure {
 pub(crate) struct AgentProcessState {
     pub process: AgentProcess,
     pub attached_lf_process_id: Option<LfProcessId>,
-    pub attachment_token: Option<crate::id::AttachmentToken>,
+    pub attachment_token: Option<loopflow_model::id::AttachmentToken>,
     pub provider: Option<String>,
     pub interactive: bool,
     pub spawn_reserved: bool,

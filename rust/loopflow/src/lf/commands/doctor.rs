@@ -590,9 +590,9 @@ mod tests {
     fn row(ts: i64, event: &str) -> LfProcess {
         LfProcess {
             os_started_at: None,
-            id: crate::id::LfProcessId::new(),
+            id: loopflow_model::id::LfProcessId::new(),
             pid: None,
-            trace_id: crate::id::TraceId::new(),
+            trace_id: loopflow_model::id::TraceId::new(),
             parent_lf_process_id: None,
             via_agent: Some(false),
             caller_session_id: None,

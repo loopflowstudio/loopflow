@@ -121,7 +121,7 @@ fn steps(reading: &Value) -> impl Iterator<Item = &Value> {
 
 fn step_log(reading: &Value, index: usize) -> Result<String> {
     let step = steps(reading).nth(index).context("No step selected")?;
-    let id = crate::id::LfProcessId::parse(word(step, "lf_process_id"))?;
+    let id = loopflow_model::id::LfProcessId::parse(word(step, "lf_process_id"))?;
     let store = crate::store::read_existing_registry()?.context("Work registry is unavailable")?;
     let process = store
         .sqlite

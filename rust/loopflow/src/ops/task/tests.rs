@@ -4,7 +4,7 @@ use super::{
     task_event_process_refusal,
 };
 use crate::child::ChildRef;
-use crate::durable::{TaskState, WorkRef, WorkStatus};
+use crate::durable::TaskState;
 use crate::linear::{LinearIssueId, LinearProjectId};
 use crate::ops::pr_landing::{reconcile_pr_landing, wait_with_io, LandingIo, LandingObservation};
 use crate::pr_landing::{NewPrLanding, PrLanding, PrLandingState};
@@ -16,6 +16,7 @@ use crate::work::task::{
     TaskEventKind, TaskId, TaskPr, TaskPrId,
 };
 use crate::work::wave::Wave;
+use loopflow_model::durable::{WorkRef, WorkStatus};
 use std::ffi::OsString;
 use std::os::unix::fs::PermissionsExt;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -170,9 +171,9 @@ fn task_decision_preserves_unknown_history_and_live_process_protection() {
         .unwrap();
     let process = crate::process::LfProcess {
         os_started_at: None,
-        id: crate::id::LfProcessId::new(),
+        id: loopflow_model::id::LfProcessId::new(),
         pid: None,
-        trace_id: crate::id::TraceId::new(),
+        trace_id: loopflow_model::id::TraceId::new(),
         parent_lf_process_id: None,
         via_agent: None,
         caller_session_id: None,
@@ -644,9 +645,9 @@ fn a_dead_graph_is_history_while_a_live_graph_process_retains_the_checkout() {
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     let process = crate::process::LfProcess {
         os_started_at: None,
-        id: crate::id::LfProcessId::new(),
+        id: loopflow_model::id::LfProcessId::new(),
         pid: None,
-        trace_id: crate::id::TraceId::new(),
+        trace_id: loopflow_model::id::TraceId::new(),
         parent_lf_process_id: None,
         via_agent: None,
         caller_session_id: None,
@@ -722,7 +723,7 @@ async fn task_fixture_at(identifier: &str, repository: std::path::PathBuf) -> Ta
     );
     let now = time::OffsetDateTime::now_utc();
     let wave = Wave::new(
-        crate::id::WaveId::new(),
+        loopflow_model::id::WaveId::new(),
         "task-recovery".to_string(),
         repository.display().to_string(),
     );
@@ -820,7 +821,7 @@ fn task_checkout_machine_survives_without_lifecycle_reconciliation() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let fixture = runtime.block_on(task_fixture_at("FILES-1", repo.path().to_path_buf()));
     let local = fixture.store.sqlite.local_machine().unwrap().id;
-    let remote = crate::durable::MachineId::new();
+    let remote = loopflow_model::durable::MachineId::new();
     fixture
         .store
         .sqlite

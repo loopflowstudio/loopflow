@@ -4,10 +4,10 @@ use std::path::Path;
 
 use serde_json::json;
 
-use crate::durable::ProjectId;
 use crate::linear::{LinearClient, OrderedIssue};
 use crate::store::sqlite::planning_order::{include_members, OrderEffect};
 use crate::store::Store;
+use loopflow_model::durable::ProjectId;
 
 use super::{OpsError, OpsResult};
 

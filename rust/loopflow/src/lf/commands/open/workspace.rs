@@ -19,13 +19,13 @@ use super::{
     rex::{self, Rex},
     OpenHost, OpenReceipt, OpenReport, OpenStatus, Resolved, WorkspaceArgs,
 };
-use crate::durable::{MachineId, RepositoryId, TaskId};
-use crate::id::WaveId;
 use crate::store::sqlite::SqliteStore;
 use crate::work::selection::{
     Selection, SelectionExpression, SelectionFilter, SelectionId, SelectionState, SplitAxis,
     TaskLayoutTemplate, ViewContent, ViewPlan, WorkWorkspaceKey, WorkWorkspaceKind,
 };
+use loopflow_model::durable::{MachineId, RepositoryId, TaskId};
+use loopflow_model::id::WaveId;
 
 /// Where a Task's tools run: its recorded checkout, else the repository.
 fn tool_cwd<'a>(content: &'a ViewContent, repo: &'a Path) -> &'a Path {

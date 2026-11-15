@@ -11,7 +11,6 @@ use anyhow::{anyhow, Context};
 use serde::Serialize;
 use time::OffsetDateTime;
 
-use crate::durable::{CapacityDefault, Machine, MachineId, RepositoryId};
 use crate::lf::{OndemandCommand, PoolCommand};
 use crate::machine_records::CopyCounts;
 use crate::rental::sandbox::Sandboxes;
@@ -21,6 +20,7 @@ use crate::rental::{
 };
 use crate::store::sqlite::SqliteStore;
 use crate::store::Store;
+use loopflow_model::durable::{CapacityDefault, Machine, MachineId, RepositoryId};
 
 /// An image-built sandbox answers SSH within seconds; RunPod and AWS
 /// install the tools on stock Ubuntu first, which takes minutes.
@@ -66,8 +66,8 @@ fn defaults_for(sqlite: &SqliteStore, capacity: &str) -> anyhow::Result<Vec<Capa
 fn print_defaults(defaults: &[CapacityDefault]) {
     for default in defaults {
         let scope = match default.scope {
-            crate::durable::DefaultScope::Wave(_) => "Wave",
-            crate::durable::DefaultScope::Repository(_) => "repository",
+            loopflow_model::durable::DefaultScope::Wave(_) => "Wave",
+            loopflow_model::durable::DefaultScope::Repository(_) => "repository",
         };
         println!("  takes new Tasks of {scope} {}", default.name);
     }
@@ -159,7 +159,7 @@ struct RentalListing {
     #[serde(flatten)]
     rental: Rental,
     machine: Option<String>,
-    tasks: Vec<crate::durable::TaskId>,
+    tasks: Vec<loopflow_model::durable::TaskId>,
     /// What has been copied from it, once anything has.
     copied: Option<CopyCounts>,
 }
@@ -302,7 +302,7 @@ fn require_ondemand(sqlite: &SqliteStore, name: &str) -> anyhow::Result<OnDemand
 fn held_ids(
     sqlite: &SqliteStore,
     machine: &MachineId,
-) -> anyhow::Result<Vec<crate::durable::TaskId>> {
+) -> anyhow::Result<Vec<loopflow_model::durable::TaskId>> {
     let held = sqlite.tasks_held_by(machine)?;
     Ok(held.into_iter().map(|(task, _)| task).collect())
 }
@@ -1184,11 +1184,11 @@ mod tests {
     use std::rc::Rc;
 
     use super::{checkout_script, end_rental, read_holdings, reconcile, refresh, Ended};
-    use crate::durable::MachineId;
     use crate::machine_records::CopyCounts;
     use crate::rental::sandbox::Sandboxes;
     use crate::rental::{Hardware, OnDemand, Provider, Rental, RentalState, Usd, BOOT_SECONDS};
     use crate::store::sqlite::SqliteStore;
+    use loopflow_model::durable::MachineId;
 
     type Log = Rc<RefCell<Vec<String>>>;
 
@@ -1357,7 +1357,7 @@ mod tests {
             &["worktree", "add", "-q", worktree.to_str().unwrap()],
         );
         // No store records either checkout: the Task alone names the repository.
-        let repository = crate::durable::RepositoryId::new();
+        let repository = loopflow_model::durable::RepositoryId::new();
         let (_, script) = checkout_script(&worktree, &repository).unwrap();
         assert!(script.ends_with(&format!("lf config repo --bind {repository}")));
         assert!(script.contains("gh repo clone 'loopflowstudio/loopflow'"));

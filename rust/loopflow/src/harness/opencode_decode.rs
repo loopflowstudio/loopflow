@@ -8,8 +8,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use serde_json::{json, Value};
 
 use super::fact::{self, Decoded, ProviderFact, ProviderTurn, Signal};
-use crate::id::AgentSessionId;
 use loopflow_model::chat::types::{ConversationEvent, ConversationItem, FileEdit, Lifecycle};
+use loopflow_model::id::AgentSessionId;
 
 #[derive(Debug)]
 pub(super) struct OpenCodeDecoder {

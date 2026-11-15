@@ -176,7 +176,7 @@ fn _read_preferences(path: &Path, scope: SettingScope) -> Result<Value> {
             for (id, settings) in waves {
                 let Some(id) = id
                     .as_str()
-                    .filter(|id| crate::id::WaveId::parse(id).is_ok())
+                    .filter(|id| loopflow_model::id::WaveId::parse(id).is_ok())
                 else {
                     super::reader::warn_setting(path, &["waves".into()], "invalid Wave ID");
                     continue;
@@ -229,7 +229,7 @@ fn validate_document(value: &Value, scope: SettingScope) -> Result<()> {
             .as_mapping()
             .context("Wave preferences must be a mapping")?
         {
-            crate::id::WaveId::parse(id.as_str().context("Wave selector must be an ID")?)
+            loopflow_model::id::WaveId::parse(id.as_str().context("Wave selector must be an ID")?)
                 .map_err(anyhow::Error::msg)?;
             validate_document(value, SettingScope::Wave)?;
         }

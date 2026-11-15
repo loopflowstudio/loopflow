@@ -10,10 +10,10 @@ use crate::agent::{
     build_session_command, session_environment, AgentConfig, ProviderInvocation, SessionCommand,
 };
 use crate::harness::native_exit::{attachment_lost, departure};
-use crate::id::AgentSessionId;
 use crate::process::LfProcessRuntime;
 use crate::provider_auth::Provider;
 use crate::store::sqlite::SqliteStore;
+use loopflow_model::id::AgentSessionId;
 
 pub fn find_repo_root() -> Result<PathBuf> {
     crate::repo::find_repo_root()
@@ -1225,8 +1225,8 @@ mod tests {
 
     #[test]
     fn a_machine_move_names_the_task_that_went_with_it() {
-        use crate::durable::{MachineId, TaskId};
         use crate::process::Departure;
+        use loopflow_model::durable::{MachineId, TaskId};
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
         let repo = home.path().canonicalize().unwrap();

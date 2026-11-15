@@ -7,7 +7,6 @@ use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 
 use crate::durable::GraphProcessDetail;
-use crate::durable::TaskId;
 use crate::journal::ProcessIdentityEvidence;
 use crate::ops::graph_process::GraphProcess;
 use crate::process::ProcessEntry;
@@ -16,6 +15,7 @@ use crate::session_record::activity::{self, Activity};
 use crate::store::sqlite::{entry_of, AgentLimitRecovery, GraphExecutionFacts, SqliteStore};
 use crate::store::{SharedStore, StoreResult};
 use crate::work::task::Task;
+use loopflow_model::durable::TaskId;
 
 use super::error::{OpsError, OpsResult};
 

@@ -4,9 +4,12 @@
 cargo test -p loopflow-model --lib
 ```
 
-Conversation events, usage receipts and Program Status records have one owner
-here. The application composes these records with provider, store and terminal
-effects. These records embed no source-checkout path or Git provenance.
+Conversation events, usage receipts, Program Status, typed identities and saved
+Work ownership records have one owner here. UUID normalization, JSON and SQLite
+conversions stay with their identity type; native provider IDs keep opaque bytes.
+Resolved Machine placement, Task execution state and compiled Graph views remain
+in the application. The application composes these records with provider, store
+and terminal effects. These records embed no source-checkout path or Git provenance.
 
 Existing application module paths re-export the same types for integration
 fixtures. Public enums retain their non-exhaustive contract across crates.

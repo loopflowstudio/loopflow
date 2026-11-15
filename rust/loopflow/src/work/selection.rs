@@ -1,5 +1,5 @@
 //! Typed selection and portable arrangement intent. No provider or surface ownership.
-use crate::id::WaveId;
+use loopflow_model::id::WaveId;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 

@@ -24,10 +24,10 @@ pub mod pi;
 mod pi_decode;
 pub(crate) mod task_updates;
 
-use crate::id::AgentSessionId;
 /// Name a codex rate-limit window by duration — shared with the subscription
 /// poller so stream and poll observations land on the same window key.
 pub(crate) use codex_decode::window_name as codex_window_name;
+use loopflow_model::id::AgentSessionId;
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -369,7 +369,7 @@ pub(crate) fn admit_for_test(config: &mut AgentConfig) -> crate::journal::TestLe
     let ledger = crate::journal::TestLedgerGuard::new();
     let database = ledger.home().join("loopflow.db");
     let store = crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
-    let process = crate::id::LfProcessId::new();
+    let process = loopflow_model::id::LfProcessId::new();
     rusqlite::Connection::open(&database)
         .unwrap()
         .execute(

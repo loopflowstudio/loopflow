@@ -2,12 +2,12 @@
 
 use std::sync::Arc;
 
-use crate::id::WaveId;
 use crate::work::project::{Project, ProjectEvent, ProjectEventKind, ProjectId};
 use crate::work::task::{
     LinearObservationOutcome, Task, TaskEvent, TaskEventKind, TaskId, TaskLinearObservation,
     TaskPr, TaskPrId,
 };
+use loopflow_model::id::WaveId;
 use time::OffsetDateTime;
 
 use super::{run_planning_write, run_sqlite, Store, StoreResult};

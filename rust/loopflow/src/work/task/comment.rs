@@ -4,7 +4,7 @@
     Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 pub struct TaskComment {
-    #[serde(deserialize_with = "crate::id::deserialize_uuid")]
+    #[serde(deserialize_with = "loopflow_model::id::deserialize_uuid")]
     pub id: String,
     pub body: String,
     pub author: TaskCommentAuthor,

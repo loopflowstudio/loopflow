@@ -608,16 +608,16 @@ pub(super) fn exit_status(error: anyhow::Error) -> anyhow::Error {
 fn selection_repository(
     cli: &crate::lf::Cli,
     store: &crate::store::sqlite::SqliteStore,
-) -> Result<crate::durable::RepositoryId> {
+) -> Result<loopflow_model::durable::RepositoryId> {
     repository_in(cli.repository.as_ref(), &std::env::current_dir()?, store)
 }
 
 /// `--repository` when given, else the repository containing `directory`.
 fn repository_in(
-    selected: Option<&crate::durable::RepositoryId>,
+    selected: Option<&loopflow_model::durable::RepositoryId>,
     directory: &std::path::Path,
     store: &crate::store::sqlite::SqliteStore,
-) -> Result<crate::durable::RepositoryId> {
+) -> Result<loopflow_model::durable::RepositoryId> {
     if let Some(repository) = selected {
         return Ok(repository.clone());
     }
@@ -706,7 +706,7 @@ fn plans(cli: &crate::lf::Cli, subscribe: bool) -> Result<()> {
 /// What `lf desktop view list --json` prints for `--repository`, else the
 /// repository containing `directory`.
 pub(crate) fn read_plans(
-    selected: Option<&crate::durable::RepositoryId>,
+    selected: Option<&loopflow_model::durable::RepositoryId>,
     directory: &std::path::Path,
 ) -> Result<Vec<crate::work::selection::ViewPlan>> {
     let store = crate::store::read_existing_registry()?
@@ -719,7 +719,7 @@ pub(crate) fn read_plans(
 /// `lf desktop view list --subscribe` for `--repository`, else the repository
 /// containing `directory`.
 pub(crate) fn subscribe_plans(
-    selected: Option<crate::durable::RepositoryId>,
+    selected: Option<loopflow_model::durable::RepositoryId>,
     directory: std::path::PathBuf,
     transport: Transport,
 ) -> Result<Option<Subscription>> {
@@ -817,7 +817,7 @@ pub(crate) fn subscribe_all_view_plans(
 /// `lf desktop view [expression] --plan`: what a view shows, in `selected`
 /// or the repository containing `directory`.
 pub fn plan_view(
-    selected: Option<&crate::durable::RepositoryId>,
+    selected: Option<&loopflow_model::durable::RepositoryId>,
     directory: &std::path::Path,
     expression: Option<&str>,
 ) -> Result<crate::work::selection::ViewPlan> {
@@ -883,7 +883,7 @@ fn view_plan(
             }
         } else {
             SelectionExpression::Wave {
-                wave: crate::id::WaveId::parse(bound(&resolution.wave, "Wave")?)?,
+                wave: loopflow_model::id::WaveId::parse(bound(&resolution.wave, "Wave")?)?,
             }
         };
         store.sqlite.plan_selection(
@@ -922,7 +922,10 @@ fn view_plan(
     Ok(())
 }
 
-fn work_key(repository: &crate::durable::RepositoryId, selector: &str) -> Result<WorkWorkspaceKey> {
+fn work_key(
+    repository: &loopflow_model::durable::RepositoryId,
+    selector: &str,
+) -> Result<WorkWorkspaceKey> {
     let (kind, id) = if selector == "repository" {
         (WorkWorkspaceKind::Repository, repository.as_str())
     } else if let Some(id) = selector.strip_prefix("task:") {
@@ -945,7 +948,7 @@ fn work_key(repository: &crate::durable::RepositoryId, selector: &str) -> Result
 /// `lf desktop layout <work>`: the saved pane intent of a Work, or a
 /// Dashboard's slot layout, in `selected` or the repository containing `directory`.
 pub fn saved_layout(
-    selected: Option<&crate::durable::RepositoryId>,
+    selected: Option<&loopflow_model::durable::RepositoryId>,
     directory: &std::path::Path,
     work: &str,
 ) -> Result<serde_json::Value> {
@@ -974,7 +977,7 @@ pub fn saved_layout(
 /// prints. Renaming a Task is a Work change; the rest are arrangement and
 /// record no Process.
 pub fn save_arrangement(
-    selected: Option<&crate::durable::RepositoryId>,
+    selected: Option<&loopflow_model::durable::RepositoryId>,
     directory: &std::path::Path,
     command: &crate::lf::DesktopCommand,
     input: &mut dyn std::io::Read,
@@ -1022,7 +1025,7 @@ pub fn save_arrangement(
                 return Err(crate::store::StoreError::NotFound.into());
             }
             Ok(serde_json::to_value(store.edit_task(
-                &crate::durable::TaskId::parse(task)?,
+                &loopflow_model::durable::TaskId::parse(task)?,
                 *revision,
                 &crate::work::task::TaskUpdate {
                     title: Some(name.clone()),
@@ -1044,7 +1047,7 @@ pub fn save_arrangement(
 /// Desktop: `hide`, `show`, `move` (with `destination`) or `resize`. Returns
 /// the record it wrote.
 pub(crate) fn save_tile(
-    selected: Option<&crate::durable::RepositoryId>,
+    selected: Option<&loopflow_model::durable::RepositoryId>,
     directory: &std::path::Path,
     board: &str,
     tile: &str,
@@ -1061,7 +1064,7 @@ pub(crate) fn save_tile(
 }
 
 pub(crate) fn save_dashboard(
-    selected: Option<&crate::durable::RepositoryId>,
+    selected: Option<&loopflow_model::durable::RepositoryId>,
     directory: &std::path::Path,
     cmd: &crate::lf::DashboardCommand,
     input: &mut dyn std::io::Read,
@@ -1118,7 +1121,7 @@ pub(crate) fn save_dashboard(
 }
 
 pub(crate) fn save_layout(
-    selected: Option<&crate::durable::RepositoryId>,
+    selected: Option<&loopflow_model::durable::RepositoryId>,
     directory: &std::path::Path,
     work: &str,
     input: &mut dyn std::io::Read,
@@ -1990,7 +1993,7 @@ fn saved_tile<'p>(name: &str, path: Option<&'p str>) -> Option<(TileBoard, &'p s
 }
 
 fn edit_saved_tile(
-    selected: Option<&crate::durable::RepositoryId>,
+    selected: Option<&loopflow_model::durable::RepositoryId>,
     directory: &std::path::Path,
     board: TileBoard,
     tile: &str,
@@ -2018,7 +2021,7 @@ fn edit_shown_tile(
     request: &TileRequest,
     json: bool,
 ) -> Result<()> {
-    let repository = crate::durable::RepositoryId::parse(&window.repository)?;
+    let repository = loopflow_model::durable::RepositoryId::parse(&window.repository)?;
     edit_tiles(&repository, request)?;
     if !json {
         // A full ID, so the line can be passed back as -p.
@@ -2059,7 +2062,7 @@ fn edit_shown_tile(
 /// One writer for every tile edit, through the shared record's own owners; the
 /// read and write use its current revision.
 fn edit_tiles(
-    repository: &crate::durable::RepositoryId,
+    repository: &loopflow_model::durable::RepositoryId,
     TileRequest {
         board,
         member,

@@ -8,8 +8,8 @@ use super::codex_decode::{rpc_error, CodexDecoder};
 use super::fact::{Decoded, ProviderFact};
 use super::fact_writer::FactWriter;
 use super::opencode_decode::{OpenCodeDecoder, Snapshot};
-use crate::id::AgentSessionId;
 use loopflow_model::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
+use loopflow_model::id::AgentSessionId;
 
 fn read_trace_lines(file_name: &str) -> Vec<String> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -373,8 +373,8 @@ fn opencode_display(
 // transcript reader (`transcript::opencode`), so the stream writes none.
 #[test]
 fn opencode_native_history_preserves_output_and_tools_and_leaves_usage_to_the_transcript() {
-    use crate::id::LfProcessId;
     use crate::store::sqlite::SqliteStore;
+    use loopflow_model::id::LfProcessId;
 
     let home = tempfile::tempdir().unwrap();
     let path = home.path().join("store.db");

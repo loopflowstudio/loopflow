@@ -17,7 +17,6 @@ use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::durable::WorkRef;
 use crate::lf::commands::write::SessionOpenIntent;
 use crate::provider_account::LaunchCapacity;
 use crate::session::{LfSession, WorkSource};
@@ -25,6 +24,7 @@ use crate::session_record::SessionTitleSource;
 use crate::store::sqlite::SqliteStore;
 use crate::store::SharedStore;
 use crate::work::task::Task;
+use loopflow_model::durable::WorkRef;
 
 pub(crate) mod conversation_log;
 pub(crate) mod moves;
@@ -418,15 +418,15 @@ pub struct SessionRecord {
     pub availability: Option<SessionAvailability>,
     pub program_status: Option<loopflow_model::program_status::Records>,
     /// The provider's current AgentProcess; absent when Loopflow never launched one.
-    pub agent_process_id: Option<crate::id::AgentProcessId>,
+    pub agent_process_id: Option<loopflow_model::id::AgentProcessId>,
     /// Its Task names it as the Task's primary conversation.
     pub task_primary: bool,
-    pub task_ids: Vec<crate::durable::TaskId>,
-    pub id: crate::id::LfSessionId,
+    pub task_ids: Vec<loopflow_model::durable::TaskId>,
+    pub id: loopflow_model::id::LfSessionId,
     pub workspace: Option<SessionWorkspace>,
     pub interactive: bool,
     pub work: Option<WorkRef>,
-    pub wave_id: Option<crate::id::WaveId>,
+    pub wave_id: Option<loopflow_model::id::WaveId>,
     pub work_path: Option<String>,
     pub actions: Vec<SessionAction>,
     pub title: String,
@@ -491,7 +491,7 @@ fn session_availability(session: &crate::session::SessionSummary) -> Option<Sess
 pub enum SessionGraphMembership {
     Step {
         graph: String,
-        #[serde(deserialize_with = "crate::id::deserialize_uuid")]
+        #[serde(deserialize_with = "loopflow_model::id::deserialize_uuid")]
         graph_lf_process_id: String,
         step: String,
         /// Exact graph occurrence, unavailable for older capture manifests.
@@ -1699,7 +1699,7 @@ const STOP_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// An earlier build's `lf session serve` owner runs until it records its exit
 /// or the OS shows it gone, as after a restart. Unknown evidence is not exit.
-fn owner_running(store: &SqliteStore, owner: &crate::id::LfProcessId) -> Result<bool> {
+fn owner_running(store: &SqliteStore, owner: &loopflow_model::id::LfProcessId) -> Result<bool> {
     Ok(store
         .lf_process(owner)?
         .is_some_and(|process| process.completed_at.is_none())
@@ -1753,7 +1753,7 @@ pub(crate) fn end_earlier_owner(
 
 /// Whether a held terminal answers the server. This observes reachability,
 /// not whether its provider can safely be replaced.
-fn answering(terminal: &crate::id::TerminalId) -> bool {
+fn answering(terminal: &loopflow_model::id::TerminalId) -> bool {
     match crate::transport::controlled(terminal) {
         Ok(_) => true,
         Err(error) => {
@@ -1950,7 +1950,7 @@ pub(crate) async fn bind(store: &SharedStore, id: &str, task: &str) -> Result<Se
 /// Resolved identity for confirmation, not a reservation or permission to bind.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SessionBindingPreview {
-    pub session_id: crate::id::LfSessionId,
+    pub session_id: loopflow_model::id::LfSessionId,
     pub task_id: String,
     pub identifier: String,
     pub title: String,
@@ -1978,7 +1978,7 @@ async fn binding_target(store: &SharedStore, id: &str, task: &str) -> Result<(Lf
         session.interactive && session.completed_at.is_none(),
         "Select an unfinished interactive Session to become the Task conversation"
     );
-    let task = match crate::durable::TaskId::parse(task) {
+    let task = match loopflow_model::durable::TaskId::parse(task) {
         Ok(id) => store.get_task(&id).await?,
         Err(_) => store.get_task_by_issue(task).await?,
     }
@@ -2105,7 +2105,7 @@ pub(crate) async fn record_program_status(
     store: &SharedStore,
     id: &str,
     terminal: &str,
-    agent_process: Option<&crate::id::AgentProcessId>,
+    agent_process: Option<&loopflow_model::id::AgentProcessId>,
     stream: &str,
     sequence: i64,
     records: &loopflow_model::program_status::Records,

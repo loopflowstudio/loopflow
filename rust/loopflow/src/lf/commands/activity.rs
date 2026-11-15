@@ -5,13 +5,13 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::durable::WorkRef;
 use crate::lf::commands::util::parse_since;
 use crate::lf::commands::work_catalog::{WorkCatalog, WorkOwner};
 use crate::lf::commands::WorkFilter;
 use crate::session_record::SessionHistory;
 use crate::store::rows::unix_to_datetime;
 use crate::store::sqlite::SqliteStore;
+use loopflow_model::durable::WorkRef;
 
 const MAX_LIMIT: usize = 200;
 
@@ -39,19 +39,19 @@ pub struct WorkActivityEntry {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WorkActivityFact {
     InputCaptured {
-        session_id: crate::id::LfSessionId,
+        session_id: loopflow_model::id::LfSessionId,
         captured: i64,
     },
     InputCompletionRecorded {
-        session_id: crate::id::LfSessionId,
+        session_id: loopflow_model::id::LfSessionId,
         captured: i64,
         status: String,
     },
     ProviderHistoryRecorded {
-        session_id: crate::id::LfSessionId,
+        session_id: loopflow_model::id::LfSessionId,
         captured: Option<i64>,
         reference: crate::session_record::ProviderHistoryReference,
-        lf_process_id: Option<crate::id::LfProcessId>,
+        lf_process_id: Option<loopflow_model::id::LfProcessId>,
         status: Option<String>,
     },
 }

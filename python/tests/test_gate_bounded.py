@@ -889,8 +889,9 @@ def test_ui_host_suite_serializes_and_checks_machine_state():
         "swift/LoopflowMac/Views/WorkSurfaceView.swift",
         "scripts/loopflow-dev.py",
         "rust/loopflow/build.rs",
-        "rust/loopflow/ghostty-vt.json",
-        "rust/loopflow/ghostty-vt-patches/0004-vt-darwin-runtime.patch",
+        "rust/loopflow-terminal/build.rs",
+        "rust/loopflow-terminal/ghostty-vt.json",
+        "rust/loopflow-terminal/ghostty-vt-patches/0004-vt-darwin-runtime.patch",
     ],
 )
 def test_desktop_changes_select_headless_checks_without_host_automation(path: str) -> None:

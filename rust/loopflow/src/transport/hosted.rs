@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use anyhow::{bail, Result};
 
 use crate::harness::native_exit::NativeExit;
-use crate::id::TerminalId;
+use loopflow_model::id::TerminalId;
 
 use super::held::Source;
 use super::input::PendingInput;

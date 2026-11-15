@@ -8,7 +8,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use crate::harness::agent_process::{close_session_agent_process, AttachmentOwner};
-use crate::id::AgentSessionId;
 use crate::process::SessionAttachment;
 use crate::session_record::{
     new_artifact_key, record_error, row_store, AgentProcessRequest, CaptureHandoff,
@@ -17,6 +16,7 @@ use crate::session_record::{
 use crate::store::sqlite::SqliteStore;
 use crate::store::{StoreError, StoreResult};
 use loopflow_model::chat::types::ConversationEvent;
+use loopflow_model::id::AgentSessionId;
 
 /// Shared live resources for an lf invocation's provider work, with no separate
 /// execution identity. A skill keeps one runtime across provider retries.
@@ -517,7 +517,7 @@ impl RuntimeState {
 pub(crate) fn resume_session_agent_process(
     store: &crate::store::sqlite::SqliteStore,
     session: &str,
-    lf_process_id: &crate::id::LfProcessId,
+    lf_process_id: &loopflow_model::id::LfProcessId,
 ) -> StoreResult<crate::process::SessionAttachment> {
     let expected = store.session_attachment(session)?;
     store.resume_session_attachment(session, expected.as_ref(), lf_process_id, || {
@@ -553,8 +553,8 @@ mod tests {
     use std::process::{Command, Stdio};
     use std::time::Duration;
 
-    use crate::id::LfProcessId;
     use crate::store::sqlite::SqliteStore;
+    use loopflow_model::id::LfProcessId;
 
     struct Child(std::process::Child);
 
@@ -619,7 +619,7 @@ mod tests {
         let (home, store, detached) = resume_fixture();
         let task = store
             .create_task(&crate::work::task::NewTask {
-                id: crate::durable::TaskId::new(),
+                id: loopflow_model::durable::TaskId::new(),
                 repository_id: store
                     .ensure_repository(home.path().to_str().unwrap())
                     .unwrap(),

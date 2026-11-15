@@ -15,7 +15,6 @@ use anyhow::{anyhow, bail, Context, Result};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 
-use crate::durable::{Machine, MachineId};
 use crate::lf::{Cli, Commands, GraphCommand, MachineCredentialCommand, TaskCommand};
 use crate::profile::EmailAddress;
 use crate::provider_account::selection::AccountSelection;
@@ -26,6 +25,7 @@ use crate::provider_account::{
 use crate::provider_auth::Provider;
 use crate::store::rows::now_unix;
 use crate::store::{CredentialState, CredentialType, ProviderAccount, ProviderToken, SharedStore};
+use loopflow_model::durable::{Machine, MachineId};
 
 // Deliberately no Debug: native credential JSON and tokens must never be logged.
 #[derive(Serialize, Deserialize)]
@@ -1309,9 +1309,9 @@ mod tests {
                 .unwrap(),
         )
     }
-    fn mini() -> crate::durable::Machine {
-        crate::durable::Machine {
-            id: crate::durable::MachineId::new(),
+    fn mini() -> loopflow_model::durable::Machine {
+        loopflow_model::durable::Machine {
+            id: loopflow_model::durable::MachineId::new(),
             route: "mini".into(),
             label: Some("mini".into()),
             created_at: time::OffsetDateTime::UNIX_EPOCH,
@@ -1816,7 +1816,7 @@ esac
     }
 
     /// A Machine at `route` under a live rental.
-    fn live_rental(store: &SharedStore, route: &str) -> crate::durable::Machine {
+    fn live_rental(store: &SharedStore, route: &str) -> loopflow_model::durable::Machine {
         use crate::rental::{Hardware, OnDemand, Provider, Usd};
         let usd = |text| Usd::parse(text).unwrap();
         store
@@ -1842,7 +1842,7 @@ esac
             .sqlite
             .confirm_rental(&rental.id, route, usd("0.25"))
             .unwrap();
-        let id = crate::durable::MachineId::new();
+        let id = loopflow_model::durable::MachineId::new();
         store.sqlite.add_machine(&id, route, route).unwrap();
         store.sqlite.attach_rental(&rental.id, &id).unwrap();
         store.sqlite.machine_by_id(&id).unwrap().unwrap()

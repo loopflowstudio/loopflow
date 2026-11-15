@@ -3,13 +3,13 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::durable::TaskId;
 use crate::git::worktrees::{PlacementPlan, PlacementStrategy};
 use crate::ops::human_session::{checkout_scope, SessionTarget};
 use crate::ops::OpsResult;
 use crate::session::{LfSession, PrimaryScope};
 use crate::store::{PlanningLocks, SharedStore};
 use crate::work::task::{NewTask, Task};
+use loopflow_model::durable::TaskId;
 
 use super::{task_error, TaskPlacement};
 

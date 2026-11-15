@@ -13,7 +13,7 @@
 //! - `turn/interrupt {threadId, turnId}` -> `{}`; the turn then ends with
 //!   `turn/completed` status "interrupted" (probed live).
 
-use crate::id::AgentSessionId;
+use loopflow_model::id::AgentSessionId;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -1328,7 +1328,7 @@ mod tests {
                 .unwrap();
         store.test_session("saved", &crate::session_record::new_artifact_key());
         let sql = rusqlite::Connection::open(ledger.home().join("loopflow.db")).unwrap();
-        let process = crate::id::LfProcessId::new();
+        let process = loopflow_model::id::LfProcessId::new();
         sql.execute(
             "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
             [process.as_str()],

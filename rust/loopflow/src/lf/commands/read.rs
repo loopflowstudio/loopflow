@@ -22,10 +22,10 @@ use super::machine::{local_machine, machines};
 use super::subscribe::{Subscription, Transport};
 use super::usage;
 use super::waves::list as list_waves;
-use crate::durable::RepositoryId;
 use crate::lf::SessionListArgs;
 use crate::ops::task::{task_changes, task_diff, task_file};
 use crate::session::SessionFilter;
+use loopflow_model::durable::RepositoryId;
 
 fn words(words: &[&str]) -> Vec<String> {
     words.iter().map(|word| word.to_string()).collect()
@@ -164,7 +164,7 @@ pub enum Read {
     WaveList,
     /// `lf machine id`: this Machine's identity.
     #[serde(rename = "machine.self")]
-    #[schemars(extend("x-result" = generator.subschema_for::<crate::durable::Machine>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_model::durable::Machine>()))]
     MachineSelf,
     /// `lf desktop portfolio`: the repositories this Machine's windows show.
     #[serde(rename = "desktop.portfolio")]

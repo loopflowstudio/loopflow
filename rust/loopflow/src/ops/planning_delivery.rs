@@ -6,11 +6,11 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use crate::durable::WorkRef;
 use crate::store::planning_sync::{PlanningChange, TaskDeletion};
 use crate::store::sqlite::planning_changes::PlanningChanges;
 use crate::store::Store;
 use crate::work::edit::WorkValue;
+use loopflow_model::durable::WorkRef;
 
 use super::planning_client::PlanningClient;
 use super::{OpsError, OpsResult};
@@ -485,7 +485,7 @@ fn task_input(store: &Store, change: &PlanningChange) -> OpsResult<Value> {
         WorkValue::TaskAssignee(value) => Ok(json!({"assigneeId": value})),
         WorkValue::TaskProject(None) => Ok(json!({"projectId": null})),
         WorkValue::TaskProject(Some(value)) => {
-            let id = crate::durable::ProjectId::parse(value).map_err(message)?;
+            let id = loopflow_model::durable::ProjectId::parse(value).map_err(message)?;
             let project = store
                 .sqlite
                 .project(&id)

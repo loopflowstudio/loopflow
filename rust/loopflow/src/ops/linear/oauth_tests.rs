@@ -129,7 +129,7 @@ async fn pm_read_linear_oauth_recovers() {
         .append_project_event(
             &project.id,
             &crate::work::project::ProjectEventKind::Steer {
-                steer_id: crate::id::SteerId::new(),
+                steer_id: loopflow_model::id::SteerId::new(),
             },
         )
         .await

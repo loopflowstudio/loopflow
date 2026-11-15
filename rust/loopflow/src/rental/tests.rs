@@ -5,7 +5,7 @@ use super::{
     Ownership, Pool, PoolMachine, PoolRefusal, Provider, Refusal, Rental, RentalId, RentalState,
     Resolution, Usd, GRACE_SECONDS,
 };
-use crate::durable::{Machine, MachineId, TaskId};
+use loopflow_model::durable::{Machine, MachineId, TaskId};
 
 fn now() -> OffsetDateTime {
     OffsetDateTime::parse(

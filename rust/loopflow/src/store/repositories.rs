@@ -1,5 +1,6 @@
 use super::{run_sqlite, Store, StoreResult};
-use crate::durable::{RepositoryId, TaskExecutionRoute, TaskId};
+use crate::durable::TaskExecutionRoute;
+use loopflow_model::durable::{RepositoryId, TaskId};
 
 impl Store {
     pub async fn task_execution_route(&self, task: &TaskId) -> StoreResult<TaskExecutionRoute> {

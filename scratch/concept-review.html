@@ -2,44 +2,45 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LOO-906 · Fields settle changes; queries cover answers</title>
+<title>LOO-906 · Move must change every cached membership</title>
 <style>
 :root{color-scheme:light dark;--bg:#faf8f4;--fg:#292924;--muted:#67665e;--line:#cdc9bd;--example:#e4efe6}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.45 system-ui,sans-serif}main{max-width:800px;margin:auto;padding:26px 22px}header,small{font-size:12px;color:var(--muted)}h1{font-size:28px;line-height:1.15;margin:20px 0 12px}h2{font-size:18px;margin:24px 0 8px}p{margin:10px 0}table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;vertical-align:top;border-bottom:1px solid var(--line);padding:8px 6px}pre{background:var(--example);padding:12px;font-size:13px;white-space:pre-wrap}code{font-size:12px;overflow-wrap:anywhere}li{margin:12px 0}@media(prefers-color-scheme:dark){:root{--bg:#20221f;--fg:#ecece4;--muted:#b5b5a8;--line:#4c5046;--example:#2c382f}}@media(max-width:540px){main{padding:20px 12px}table{font-size:12px}th,td{padding:6px 3px}h1{font-size:24px}}
 </style>
 <main>
 <header>LOO-906 · concept-review · 2026-11-15 · headless Graph step<br>
 Sources: scratch/{instant-task-session,questions,desktop-reactivity-feedback}.md;
-HEAD 2c6146e43f plus current field-incorporation workspace changes;
-ClientWork{Database,Store,Query}.swift, WorkFieldFacts.swift, OperationDeclaration.swift,
-MachineConnection.swift, ServerLink.swift, WorkObservation.swift,
-WorkModel.swift, RemoteTaskObservation.swift, ClientWorkQueryTests.swift and swift/README.md.<br>
-Source review; no new runtime measurements or code changes in this step.</header>
+HEAD a5148f5745;
+ClientWork{Database,Store,Query}.swift, WorkMembership.swift, OperationDeclaration.swift,
+WorkInteraction.swift, rust/loopflow/src/work/selection/membership.rs,
+ClientWorkQueryTests.swift and swift/README.md.<br>
+Source review; no new runtime measurements or production code changes.</header>
 <h1>Decide offline Abandon, cancellation and phone names.</h1>
-<p><strong>Outcome for loop-or-next: Blocked — open product choices.</strong> Questions 1–3 below remain unanswered. Existing provisional behavior does not settle them. The engineering direction is refined and ready for a later implement step.</p>
-<p><strong>Built in the workspace:</strong> the SQLite owner persists incorporation for each resource, field and semantic stage, regardless of whether its receipt or covering field arrives first. It survives later conflicts, stale activity and restart. Receiving-link validation keeps old queued captures from borrowing a reconnected link. Recorded Desktop and iOS checks cover this storage prerequisite.</p>
-<p><strong>Biggest mismatch:</strong> a normalized lifecycle field can now incorporate Complete, but the projection still reapplies it until each query’s own stamp covers it. A held Working query can hide a Task that another query already shows as Reopened. The stored fact is ahead of what the person sees.</p>
-<pre>Complete → domain commits → another query sees Reopen
-                         → held Working query arrives
+<p><strong>Outcome for loop-or-next: Blocked — open product choices.</strong> Questions 1–3 remain unanswered. They do not prevent the dynamic membership/Move engineering cut; this step starts no execution.</p>
+<p><strong>Built:</strong> normalized fields incorporate semantic stages and feed derived query answers. A newer Reopen survives a held Working reply. Both hosts publish rows and dependency coverage together; disconnect invalidates live-dependent coverage without a new body or command. Welcome alone repairs nothing.</p>
+<p><strong>Biggest remaining mismatch:</strong> Move can be incorporated into the parent field, but a destination whose compiled program omitted the Task cannot acquire it. Fixed candidates still decide where the Task can appear.</p>
+<pre>Cached Wave A: Task T      Cached Wave B: empty
+Move T to B while disconnected
 
-Before · built: held query may apply Complete again.
+Before · current projection: B has no candidate T.
 After · proposed:
-  lifecycle fact incorporates Complete once
-  newer Reopen supplies the visible state
-  stale activity makes Busy/count answers incomplete
-  reconnect repairs coverage; Complete never returns
-  receipt recovery keeps its own original request ID</pre>
+  A: empty                B: Task T
+  conversation and drafts stay open
+  one saved request waits for the original Machine
+
+Then another client confirms parent C.
+Held A/B replies cannot move T back from C.</pre>
 <h2>Actions → concepts → APIs</h2>
 <table>
 <thead><tr><th>Action</th><th>Concept</th><th>Built → proposed</th></tr></thead>
 <tbody>
-<tr><td>Complete, then see Reopen</td><td>Field incorporation</td><td><code>WorkFieldFacts.incorporates</code> is persisted → replace <code>WorkQueryEffect.covered</code> and consume it in projection</td></tr>
-<tr><td>Open another cached view</td><td>Answer coverage</td><td><code>ClientWorkQuery.makeProjection</code> changes existing states → one derived answer publishes rows and consumed-dependency coverage together</td></tr>
-<tr><td>Disconnect and reconnect</td><td>Last-known activity</td><td><code>ReceivedReading</code> retains link attribution → dependent answers publish coverage loss even without a new body; a current capture repairs them</td></tr>
-<tr><td>Move offline</td><td>Parent intent and saved command</td><td>Fixed candidates → dynamic authored predicates; save before send, recover on the original Machine</td></tr>
+<tr><td>Complete, then see Reopen</td><td>Field incorporation</td><td><code>WorkFieldFacts.incorporates</code> feeds <code>ClientWorkQuery.deriveAnswer</code> today → retain this behavior on the replacement program</td></tr>
+<tr><td>Move to Wave B or No Wave</td><td>Parent intent</td><td><code>OperationDeclaration.field</code> names parent, but membership effects cover only Complete/Abandon → shared Move intent publishes before save and sends after save</td></tr>
+<tr><td>See every affected list and count</td><td>Dynamic membership</td><td><code>Selection::compile_membership</code> fixes candidates → authored scope/filter predicates consume a scoped manifest, normalized parents and real cached content</td></tr>
+<tr><td>Disconnect, restart, reconnect</td><td>Answer coverage and original request</td><td>Live-dependent coverage already invalidates → extend coverage to parent/ancestor dependencies; replace <code>WorkQueryEffect.covered</code> and <code>effectsCover</code>, keeping receipt recovery independent</td></tr>
 </tbody></table>
 <p><strong>Proposed usage:</strong> Move a Task to a Wave or No Wave. Cached lists and counts change immediately; its conversation and drafts stay open. Offline changes wait for their original Machine and survive restart. Refusal restores only the refused change. Missing destination content remains visibly incomplete.</p>
-<p><strong>Next implement:</strong> derive each query’s answer in the existing SQLite/cache owner from normalized fields, its program and candidate/content coverage. Publish rows and coverage together. Disconnect must update dependent live coverage without a new body; an unfiltered SQL-only answer remains independent. Welcome alone repairs nothing. Consume persisted incorporation in the replacement projection, retaining unknown-delivery recovery separately. Replace stamp-only incorporation, arbitrary revision shortcuts and the state-only reducer with the dynamic membership/Move cut. Preserve exact query bodies, native ownership, scoped reload floors and supported authored occurrences.</p>
-<p><strong>Show next on both hosts:</strong> Complete → newer Reopen → held Working reply; Move A → B → newer C; then stale activity, two windows, close/retire/offline restart and reconnect without a new body. Keep newer state, label incomplete answers, and recover the original request without replay or later navigation. Proposed usage stays in the design until acceptance; no builtin skill changes.</p>
+<p><strong>Next implement:</strong> replace fixed dynamic leaves and lifecycle-only effects together in the existing query owner. Keep explicit Work leaves, authored occurrence paths, descendant scopes, intersections, shared/interleaved order and hidden occurrences. Coverage must include candidates, content and consumed parent/ancestor fields. An unrelated later receipt cannot certify changes missing from a held query; retain an unavailable base under its reload floor when coverage cannot be established. Absorbed fields stay absorbed after retirement and restart. No parallel reducer or new request ledger.</p>
+<p><strong>Show next on both hosts:</strong> offline Move A → B → confirmed C with held A/B replies; a destination that omitted the Task; No Wave and descendants; missing content/activity; refusal and commit followed by sync failure; two clients, retirement and offline restart. Keep Complete → newer Reopen coverage. Reconnect without a body changes only live-dependent coverage, with no command submission or later navigation. Proposed usage stays in the design until acceptance; no builtin changes.</p>
 <h2>Questions for the next conversation</h2>
 <ol>
 <li><strong>Abandon while disconnected.</strong> It closes PRs and removes branches; the recorded “1a” named Complete, rename and move.<br>1a — Save Abandon and deliver on reconnect (built provisionally).<br>1b — Require a reachable Machine and keep the Task until then.</li>

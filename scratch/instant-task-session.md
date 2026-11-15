@@ -475,44 +475,43 @@ Gate owns nextest run `7bb50caf-46f5-485f-a8ff-d882ea6e5a98`:
 `server::schema::tests::bare_time_serializes_as_its_described_tuple` reported LEAK;
 that case launches no children. No retry was taken as a fix.
 
-### Concept review: incorporation survives stale answers · 2026-11-15
+### Concept review: moving changes membership, not just fields · 2026-11-15
 
-Review of `2c6146e43f` plus the field-incorporation workspace changes. Transport
-attribution and persisted resource/field/stage incorporation are built; neither
-yet changes query projection. The remaining mismatch is a saved field fact that
-has absorbed Complete while a held query still applies Complete to its old body.
-Consume that saved incorporation when replacing the projection; do not infer
-delivery from it. Conflicting or incomparable support cannot establish new
-incorporation. Once established, stale activity,
-conflict, eviction or query closure cannot reactivate the old effect: retain its
-incorporation or make the affected base unavailable under its reload floor.
+Reviewed `a5148f5745`. Field incorporation now feeds derived answers, and link
+changes publish dependent coverage loss without command traffic. Those are built
+prerequisites; the next cut is dynamic membership and disconnected Move. A
+normalized parent alone cannot put a Task into a destination whose compiled
+program omitted its identity. No new product concept or answer is needed for
+that correction; the recorded disconnected-edit “1a” already includes Move.
 
-The next implement direction is one derived answer per query, owned by the
-existing SQLite/cache owner, with program identity, candidate/content coverage
-and the field dependencies it actually consumes. It is replaceable cache state,
-not another confirmed query body, receipt ledger or readiness state. Keep exact
-Machine bodies immutable. Publish the answer's rows and coverage together to both
-hosts; a stale Busy dependency cannot invalidate an independent SQL-only parent
-or lifecycle answer, and a current parent cannot certify Busy or an exact count.
-Index dependency fan-out rather than scanning every retained query on a gesture.
+Keep one authored membership program over the scoped candidate manifest and
+normalized fields, evaluated by the existing query owner on both hosts. Replace
+fixed dynamic leaves and the lifecycle-only effect shape together: a Move writes
+parent intent, not a synthetic lifecycle state. Explicit Work leaves remain fixed.
+Derived coverage must include parent/ancestor dependencies and candidate/content
+coverage, including Tasks that did not occur in the destination's Machine body.
+Publish source, destination and counts from that same evaluation; absent real
+content makes an answer incomplete rather than fabricating a Task or exact zero.
+Keep stable authored paths, shared/interleaved order and hidden occurrences.
 
-Disconnect invalidates dependent live coverage and
-publishes that change to leased queries even if no new query body arrives; it
-does not undo incorporated parent/lifecycle effects. Reconnect alone cannot repair
-those answers. A current-link capture repairs only the answers it supports.
-Exercise this without command traffic: retain a Busy answer and an unfiltered
-parent-based answer in two windows, disconnect, then reconnect with no new body.
-Only the dependent live coverage changes; both windows retain last-known content,
-and neither welcome nor an unrelated field repairs Busy. A current capture does.
-Replace stamp-only incorporation, arbitrary revision shortcuts and the state-only
-projection with dynamic membership and disconnected Move; no parallel reducer.
+Remove stamp-only effect retention and the arbitrary revision shortcut with their
+callers in this cut. An absorbed field stage stays absorbed through retirement,
+close and restart; an effect's fence cannot certify unrelated changes at an older
+query's reload floor. For example, a held Wave B answer plus a Complete receipt
+at a later planning revision cannot prove whether a different Task moved into B.
+Use the scoped manifest/field/dependency proof or retain an unavailable base under
+its floor. Never turn missing content into a retained full-command lifecycle.
+Receipt uncertainty continues to recover the original ID independently.
 
-Show next: Complete commits, another query supplies newer Reopen, then a held
-Working query arrives; the Task stays visible. Repeat with Move A→B then confirmed
-C, stale activity, two windows, close/retire/restart and reconnect with no new
-body. Unknown delivery still recovers the original ID; neither coverage loss nor
-repair sends a command or changes later selection. Proposed Move usage above is
-unchanged; no new product vocabulary or builtin instructions.
+Show next on Desktop and iOS: offline Move A→B updates both cached lists before
+save; a confirmed newer C wins over held A/B answers in either arrival order.
+Include a destination that omitted the Task, No Wave, descendants, changed query
+definitions, missing content/activity, refusal and commit-then-sync-failure.
+Repeat after retirement and offline restart. Disconnect/reconnect without a new
+body changes only live-dependent coverage; it neither revives an absorbed Move
+nor sends a command or changes later selection. Retain Complete→newer Reopen
+coverage on the replacement program. The detailed required counterexamples and
+proposed README text above remain the acceptance contract; no builtin changes.
 
 ### Open product choices
 

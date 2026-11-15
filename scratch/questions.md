@@ -125,6 +125,6 @@
   - The phone feed shows one "Waiting for connection" line for its Machine, and
     held changes list their titles under it without repeating the words. The
     built cut shows the words per row and nothing when no change is held.
-  - Offline rename is built for Desktop only. The phone shows a Task title for
+  - Offline rename is scoped to Desktop (not yet built). The phone shows a Task title for
     each conversation and has no rename; whether it should show Session names
     or offer rename is undiscussed (question 3 in `scratch/concept-review.html`).

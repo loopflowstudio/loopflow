@@ -1,8 +1,8 @@
 # LOO-906: immediate interactions across Desktop and mobile
 
-Healthy-change/reconnect cut built at `c9b86d24f5` and concept-reviewed
-2026-11-15 on origin/main `9cafc410ee`; the conversation/Machine-link cut is in
-the working diff and its review's unreachable-Machine direction is next, then rename. Supersedes the
+Conversation/Machine-link cut committed at `a2a0a0fb33` on origin/main
+`9cafc410ee` and concept-reviewed 2026-11-15. Next: its unreachable-Machine
+fixes, then Desktop Session rename, then disconnected Move. Supersedes the
 Desktop-only delivery boundary. No shipping or merge decision is recorded. Placement remains this Task;
 no Wave is selected.
 
@@ -374,81 +374,23 @@ identity read, checks the original Machine before a send. Protocol and Machine
 identity errors are attention, not waiting. Claim has a label and `task.claimed`
 stage; its writer and projection are unmigrated.
 
-### Next implement direction: a rename is a name
+### Conversation and Machine-link cut · `a2a0a0fb33`
 
-Headless concept review of that cut, 2026-11-15. Read in the code, nothing run;
-no code changed. Two product questions are in `questions.md`.
+The shared row has list and conversation contexts, renders the request title only
+in lists, and reads creation's progress words from the declaration. Both creation
+conversations keep submitted words once beside **Starting conversation…**. Phone
+Abandon uses Desktop's confirmation title, destructive action and explanation.
 
-1. **Rename does not wait for Move.** No command edits a Task title:
-   `task.update` writes notes. What people rename is a Session (`session.rename`),
-   a Wave or a Dashboard. A rename projects one name by
-   identity wherever its Session or Wave is shown, held per reading until that
-   reading covers the rename's stage fence, restored alone on refusal. It changes
-   no membership. Build it next: declare `session.rename`, then delete Desktop's
-   `SessionRenameDraft` stale-read guard. First check where each host reads Session
-   names; if that reading is outside the shared owner, moving it in is the work.
-   Wave rename joins when it has a served write. Move keeps the correction below.
-2. **A conversation shows its request once.** The shared row prints its title
-   under the words in Desktop's `StartingTaskView` and again in the phone's
-   recovery controls. Lists supply the title; a conversation renders status and
-   actions only. One view, not two.
-3. **Progress wording belongs to the kind.** The creation conversation now says
-   "Delivering request…" for the whole workspace and provider preparation, and
-   `swift/README.md` documents it; delivery ended long before. The declaration
-   supplies in-progress words: creation and new Session keep "Starting
-   conversation…". A list row being delivered shows no status line.
-4. **Connection belongs to the Machine.** Waiting is a flag on each receipt
-   watch, each with its own backoff loop, and the phone feed's "Couldn’t update
-   Tasks" card reports the same outage separately. One reachability fact per
-   Machine link, published by the link's owner: every saved unresolved operation
-   for that Machine derives Waiting from it and resumes on its one reconnect.
-   Receipt watches stop owning backoff. Rows per change stay as built.
-5. **Abandon asks first on both hosts.** Desktop confirms "Abandon LOO-12?"; the
-   phone's new menu item fires on one tap, and the command closes PRs and removes
-   branches. Same confirmation on the phone.
-6. The plan's `effects` map already declares which kinds change membership;
-   `OperationDeclaration.changesMembership` repeats it. Keep the plan's.
-
-Acceptance: rename a Session offline on each host; the name shows everywhere it
-is listed, survives restart, delivers once on reconnect, and a refusal restores
-only that name. The starting conversation shows the words once with "Starting
-conversation…". Three held changes and one outage open one reconnect loop.
-
-### Conversation and Machine-link cut · 2026-11-15
-
-Items 2–5 above are built in the working diff: the shared row has list and
-conversation contexts, renders the request title only in lists, and reads progress
-words from the operation declaration. Both creation conversations keep submitted
-words once beside **Starting conversation…**. Phone Abandon uses Desktop's
-confirmation title, destructive action and explanation.
-
-`MachineConnection` now owns the control link, waiting fact, concurrent waiters and
+`MachineConnection` owns the control link, waiting fact, concurrent waiters and
 one reconnect backoff for each Machine endpoint. Both hosts use it; receipt watches
-no longer own waiting flags or backoff, and Desktop's `ServerLinks` and the phone's
-`opening` cache are deleted. Canceling one watch releases only its connection wait;
-the last waiter cancels opening. Receipt recovery still decides admission by the
-original ID after the new stamped reading. The phone feed retains its subscription
-through failed first opens and connection loss instead of adding a second outage
-card; a pending refresh checkpoint survives that reconnect. Protocol/identity
-failures terminate with attention rather than waiting indefinitely.
+no longer own backoff, and Desktop's `ServerLinks` and the phone's `opening` cache
+are deleted. Canceling one watch releases only its connection wait; the last waiter
+cancels opening. Receipt recovery still decides admission by the original ID after
+the new stamped reading. The phone feed retains its subscription through failed
+first opens and connection loss; a pending refresh checkpoint survives reconnect.
+Protocol/identity failures terminate with attention rather than waiting.
 
-Rename remains unimplemented. Read-path inspection: Desktop names come from
-`WorkModel.sessionReadings`, including paginated `readSessions` and stamped Work
-frames; phone `SessionLink.title` is the captured Task title, with no Session-name
-read or rename affordance. The next cut must ingest Session-name facts under the
-shared store with sessions-domain provenance, move both hosts' name consumers and
-add the domain rename fence/refusal contract before changing the write caller.
-An outbox declaration alone cannot settle names or reject old per-query values.
-Delete the direct-write/replace branch of `commitSessionRename` and its
-`SessionRenameDraft.submitting/error` delivery state in that cut; retain local
-editor text and the unrelated callers of `supersedeSessions`.
-
-Item 6 also remains: removing `changesMembership` alone would incorrectly scope
-reload floors for unmigrated `task.update` to a membership effect absent from the
-plan. Keep conservative invalidation until the shared effect/dependency cut can
-replace that policy as well.
-
-Checks of this working cut (2026-11-15, inherited `LF_*` cleared):
+Checks of this cut (2026-11-15, inherited `LF_*` cleared):
 - `swift build --build-tests --package-path swift --jobs 4 -Xswiftc -gnone`: passed; gate owns the Xcode fallback build.
 - `scripts/test_desktop.sh --skip-build --filter 'ServerClientTests|OperationRecoveryPresentationTests'`: 24 Swift Testing rows passed, including shared reconnect, failed first opens, independent cancellation, original-ID recovery and conversation copy.
 - `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/MobileTaskCreationTests -only-testing:LoopflowiOSTests/ClientWorkQueryTests/testPhoneAbandonPublishesBothFeedsAndReplacesOnlyTheOriginRouteBeforeDisk`: 10 passed; the two changed rows passed after adding the phone's one-request/progress assertion; its named row passed again with the final refresh-deadline repair compiled. Disposable Simulators removed.
@@ -456,9 +398,9 @@ Checks of this working cut (2026-11-15, inherited `LF_*` cleared):
 
 ### Next implement direction: an unreachable Machine says so once
 
-Headless concept review of the working conversation/Machine-link cut,
-2026-11-15. Read in the code, nothing run; no code changed. Fix these before
-rename; they finish the cut rather than extend it.
+Headless concept review of `a2a0a0fb33`, 2026-11-15. Read in the code; none is
+built yet (rechecked by grep at realign). Fix these before rename; they finish
+the cut rather than extend it.
 
 1. **The phone feed can no longer say the Machine is unreachable.** Its
    subscription now holds through failed opens, so `feed.error` stays nil:
@@ -500,18 +442,44 @@ rename; they finish the cut rather than extend it.
    connection and reconnect loop" (`swift/README.md`, phone README) describes
    the mechanism. Replace with the feed's waiting line and that pull to refresh
    needs no retry.
-6. **Rename is Desktop's.** The phone shows a Task title for a conversation
-   and offers no rename; the shared store ingests Session names for both, but
-   this Task adds no phone rename or Session-name display. The rename
-   acceptance above reads "on Desktop; the phone's lists are unchanged by it".
-   Whether the phone should show Session names is in `questions.md`.
-
 Acceptance: phone with its Machine unreachable — cold launch shows Waiting for
 connection, not a spinner; a saved feed shows the line above its Tasks; pull to
 refresh ends immediately; reconnect clears the line with no tap. Three held
 changes show three titles under one line. An unsaved failure and a
 needs-attention change keep their actions through the outage. A wrong-Machine
 address still shows the card with its explanation.
+
+### Next after that: rename is a Session name, on Desktop
+
+From the 2026-11-15 concept review of `c9b86d24f5`; its other items (one
+request per conversation, kind-owned progress words, one connection per Machine,
+phone Abandon confirmation) are built at `a2a0a0fb33`.
+
+No command edits a Task title: `task.update` writes notes. What people rename is
+a Session (`session.rename`), a Wave or a Dashboard. A rename projects one name by
+identity wherever its Session is shown, held per reading until that reading covers
+the rename's stage fence, restored alone on refusal. It changes no membership and
+does not wait for Move. Wave rename joins when it has a served write.
+
+Desktop names come from `WorkModel.sessionReadings` (paginated `readSessions` and
+stamped Work frames), outside the shared store. The cut ingests Session-name facts
+there with sessions-domain provenance, moves Desktop's name consumers, adds the
+domain rename fence/refusal contract and declares `session.rename` before changing
+the write caller. An outbox declaration alone cannot settle names or reject old
+per-query values. Delete the direct-write/replace branch of `commitSessionRename`
+and `SessionRenameDraft.submitting/error`; keep local editor text and the unrelated
+callers of `supersedeSessions`. The phone shows the captured Task title
+(`SessionLink.title`) and has no rename; it is unchanged by this cut (open question
+in `questions.md`).
+
+Acceptance: rename a Session offline on Desktop; the name shows everywhere it is
+listed, survives restart, delivers once on reconnect, and a refusal restores only
+that name.
+
+`OperationDeclaration.changesMembership` repeats the plan's `effects` map, but
+removing it alone would scope reload floors for unmigrated `task.update` to a
+membership effect absent from the plan. Keep conservative invalidation until the
+shared effect/dependency cut replaces that policy.
 
 ### Continuation correction: state-only candidates cannot project a Move
 
@@ -572,7 +540,7 @@ including without a network event. Retirement cancels its receipt observer and
 transfers lagging effects or scoped reload floors. The complete prior contracts and
 query checks remain at `6e944e73b5a:scratch/instant-task-session.md`.
 
-Remaining: the unreachable-Machine direction above, offline Session rename on Desktop and the effect-policy duplication, then disconnected Move
+Remaining: the unreachable-Machine fixes, offline Session rename on Desktop and the effect-policy duplication, then disconnected Move
 under the recorded 1a direction; cross-client closed-query convergence; exhaustive
 effect/dependency declarations and cross-query provenance; other mutation recovery
 and resource lanes; retained mobile `SessionLink`; projected inspection;
@@ -638,7 +606,7 @@ to the next Task (the earlier quoted 1b); rejection restores membership without
 undoing a later selection. Successful domain changes survive later sync errors.
 
 Desktop `assignTask`, `moveTask` and `reopenTask` still wait in `performTaskAction`;
-`OperationDeclaration` covers six kinds. Unfinished cutover.
+`OperationDeclaration` covers eight kinds; `session.rename` is not one. Unfinished cutover.
 
 Proposed usage, implementation still required:
 > Select a recent Task to see its retained conversation immediately. Expand a

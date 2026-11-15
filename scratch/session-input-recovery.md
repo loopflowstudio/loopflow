@@ -41,6 +41,13 @@ Read-only inspection on November 14:
   activity for PID 11516, no crash attribution.
 
 The crash cause and the exact transition that failed in the report remain unknown.
+Separate investigation: [LOO-911](https://linear.app/loopflow/issue/LOO-911),
+local Task `task_3c153eb44d4847c7857e7c221b583d74`, filed and synchronized
+November 14; linked back here and from LOO-907's thread. Its brief retains the
+observations above and calls for correlating the reported exit and both hangs,
+then a reproduction/fix or bounded diagnostics if historical records cannot
+identify the event. Neither the exit nor the stalls are attributed to the input
+failure. This investigation does not delay the recovery fix.
 
 ## Architecture
 
@@ -64,6 +71,14 @@ Swift paths are under `swift/LoopflowMac/`. Facts that still shape the approach:
 - Fresh hosted attachments already resend Return when the native client exists.
 
 ## Built (commit `55f3f8274c`)
+
+### Delete — do not maintain
+
+Removed last-warmed-store routing from `refreshSession` / `takeBackSession`,
+untracked viewer retirement from `GhosttySurfacePool.release`, and unconditional
+stale surface-failure callbacks. Their required behavior survives on addressed
+repository routing, pool-owned retirement and current-`launchId` callbacks; no
+parallel resolver, lifetime owner or compatibility path remains.
 
 Source defects found and fixed, each with a headless regression that failed first:
 
@@ -118,8 +133,6 @@ returned `task_7c45fd8c99864a9cbec4fbda9b652429 has no workspace in this Desktop
 ## Remaining
 
 - Gate checks above, then the mounted demo walkthrough.
-- Crash follow-up: the brief asks for a concrete linked follow-up when the crash is
-  a separate defect. No crash signature exists (see `scratch/questions.md`).
 - Overlap: #1861 (LOO-774, open at `07a21c5956`: transport endings,
   `connection.rs`, `ServerConnection.swift`) and #1862 (LOO-811, open at
   `753d49e7e2`: provider recovery, Session DTOs, pane presentation), unchanged as of

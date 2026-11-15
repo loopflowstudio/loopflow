@@ -46,17 +46,25 @@ change (`scratch/concept-review.html`).
 
 ## Compression
 
-Delete — do not maintain: no remaining targets. The shared deadline and polling
-loops are already removed. Keep the local Observation wait: both attempts await
-the originating owner's settlement, including its error update, without adding
-production completion hooks. No further code reduction; no tests rerun.
+Delete — do not maintain: replace the unbounded checked continuation in
+`waitForAttempt`. Keep Observation as the completion signal and give each attempt
+its own three-second bound using a finishing AsyncStream. Timeout throws a
+requirement failure naming the attempt and original Task owner; it cannot leave
+a continuation suspended. Cancel the timer when the attempt settles. No production
+completion hooks or shared deadline.
 
 - `lf context`: memory 15,695/16,000 tokens, 74,251/131,072 bytes; scratch within both limits.
 - `git diff --check`: passed.
 
 ## QA (test-only)
 
-- Branch: `--skip-build` focused run passed. Mutation `catch {}` failed at line 782 in about 1 s. Mutation dropping the settlement `defer` hung until the 300 s per-test limit (exit status not captured). Clean rebuild then passed again. Details in `scratch/qa.html`.
+- Earlier QA: mutation `catch {}` failed in about 1 s; dropping settlement hung
+  for 300 s without captured status (`995d48a2c5:scratch/qa.html`).
+- Bounded-wait repair: `swift build --build-tests --package-path swift --jobs 4`
+  passed without warnings; focused `--skip-build` normal test passed in 0.944 s.
+- Same focused test with settlement `defer` removed: exit 1 in 3.863 s,
+  “Failed preparation: issue-review did not settle on its originating owner within
+  3 seconds”. Production source restored in `finally`; rebuilt before reuse.
 
 ## Remaining
 

@@ -17,7 +17,7 @@
 <p>Both mutations were reverted with <code>git checkout --</code>. <code>git status</code> shows no production diff.</p>
 <h2>Result</h2>
 <ul><li>Works: the test passes deterministically, and it catches a lost error message in about 1 s.</li>
-<li>Still wrong, mildest first: a lost settlement surfaces as a 300 s hang rather than a fast failure. The test still catches it, just slowly. Bounding the wait would turn the hang into a fast failure. That is left out to keep this repair scoped.</li>
+<li>Follow-up repaired the lost-settlement hang: each Observation wait now has a separate three-second bound. The normal case passed in 0.944 s; dropping settlement failed in 3.863 s with exit 1 and “Failed preparation: issue-review did not settle on its originating owner within 3 seconds”. The mutation was restored in <code>finally</code>, followed by a clean-source rebuild.</li>
 <li>Not reached: a native window, and real provider input. Neither is in scope for a test-only change.</li></ul>
 <h2>Skill update</h2><p><code>.lf/skills/qa.md</code> "Test-only changes" now covers the Swift-only route: build directly, use <code>--skip-build</code>, rebuild after reverting a mutation, and expect hangs from unbounded waits.</p>
 </html>

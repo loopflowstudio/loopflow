@@ -746,15 +746,26 @@ struct WorkNavigationTests {
         await model.refresh()
         model.select(.task(id: "issue-review"))
         let owner = model.navigation
-        func waitForAttempt() async {
+        func waitForAttempt(_ attempt: String) async throws {
+            let (changes, completion) = AsyncStream<Void>.makeStream()
+            let timeout = Task {
+                do { try await Task.sleep(for: .seconds(3)) }
+                catch { return }
+                completion.finish()
+            }
+            defer {
+                timeout.cancel()
+                completion.finish()
+            }
+            var iterator = changes.makeAsyncIterator()
             while owner.startingTaskSessions.contains("issue-review") {
-                await withCheckedContinuation { (completion: CheckedContinuation<Void, Never>) in
-                    withObservationTracking {
-                        _ = owner.startingTaskSessions
-                    } onChange: {
-                        completion.resume()
-                    }
+                withObservationTracking {
+                    _ = owner.startingTaskSessions
+                } onChange: {
+                    completion.yield(())
                 }
+                let changed: Void? = await iterator.next()
+                try #require(changed != nil, "\(attempt): issue-review did not settle on its originating owner within 3 seconds")
             }
         }
         let gate = PlanningGate()
@@ -770,7 +781,7 @@ struct WorkNavigationTests {
         model.setRepoPath("/src/context")
         let other = model.navigation
         await gate.release()
-        await waitForAttempt()
+        try await waitForAttempt("Failed preparation")
         #expect(owner.startingTaskSessions.isEmpty)
         #expect(other.taskSessionErrors.isEmpty)
         model.setRepoPath("/src/loopflow")
@@ -789,7 +800,7 @@ struct WorkNavigationTests {
         #expect(throws: (any Error).self) {
             try retry.inspect().find(text: "Preparation failed for the original Task")
         }
-        await waitForAttempt()
+        try await waitForAttempt("Retry")
         #expect(owner.taskSessionErrors.isEmpty)
         #expect(owner.startingTaskSessions.isEmpty)
     }

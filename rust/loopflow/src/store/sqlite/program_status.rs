@@ -1,6 +1,7 @@
 //! Passive terminal observation shares session_activity; no attachment claim.
 //! A conversation Loopflow never attached to has no AgentProcess; its absence
 //! is the witness, and a later launch replaces it like any other provider.
+
 use rusqlite::{params, OptionalExtension};
 
 use crate::store::{StoreError, StoreResult};
@@ -114,6 +115,8 @@ impl SqliteStore {
 
 #[cfg(test)]
 mod tests {
+    use crate::process::attachment;
+
     use crate::session::{SessionActivity, SessionFilter};
     use crate::store::sqlite::SqliteStore;
     use loopflow_model::id::LfProcessId;
@@ -133,9 +136,14 @@ mod tests {
                 let home = tempfile::tempdir().unwrap();
                 let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
                 store.test_session("session", &crate::session_record::new_artifact_key());
-                let attachment = store
-                    .claim_session_attachment("session", None, &store.test_lf_process(), true)
-                    .unwrap();
+                let attachment = attachment::claim_session_attachment(
+                    &store,
+                    "session",
+                    None,
+                    &store.test_lf_process(),
+                    true,
+                )
+                .unwrap();
                 let mut child = Child(
                     std::process::Command::new("/bin/sleep")
                         .env_clear()
@@ -244,9 +252,9 @@ mod tests {
                 [&lf_process_id],
             )
             .unwrap();
-        let first = store
-            .claim_session_attachment("session", None, &lf_process_id, true)
-            .unwrap();
+        let first =
+            attachment::claim_session_attachment(&store, "session", None, &lf_process_id, true)
+                .unwrap();
         store
             .record_agent_process_identity(
                 "session",
@@ -318,9 +326,14 @@ mod tests {
                 &records
             )
             .unwrap());
-        let second = store
-            .claim_session_attachment("session", Some(&first), &lf_process_id, false)
-            .unwrap();
+        let second = attachment::claim_session_attachment(
+            &store,
+            "session",
+            Some(&first),
+            &lf_process_id,
+            false,
+        )
+        .unwrap();
         assert_eq!(
             store.session_summaries(&filter, 500).unwrap()[0]
                 .program_status
@@ -359,9 +372,14 @@ mod tests {
             )
             .unwrap());
         assert!(store.session_summaries(&filter, 500).unwrap().is_empty());
-        let third = store
-            .claim_session_attachment("session", Some(&second), &lf_process_id, true)
-            .unwrap();
+        let third = attachment::claim_session_attachment(
+            &store,
+            "session",
+            Some(&second),
+            &lf_process_id,
+            true,
+        )
+        .unwrap();
         assert!(!store
             .record_program_status(
                 "session",

@@ -230,6 +230,8 @@ fn pin_account(
 
 #[cfg(test)]
 mod tests {
+    use crate::process::attachment;
+
     use std::os::unix::process::ExitStatusExt;
     use std::process::ExitStatus;
 
@@ -267,9 +269,9 @@ mod tests {
                 .unwrap()
                 .unwrap();
             let launcher = store.test_lf_process();
-            let attachment = store
-                .claim_session_attachment(&session.id, None, &launcher, true)
-                .unwrap();
+            let attachment =
+                attachment::claim_session_attachment(&store, &session.id, None, &launcher, true)
+                    .unwrap();
             let exit = NativeExit {
                 session: session.id.to_string(),
                 attachment,
@@ -335,9 +337,14 @@ mod tests {
                     .unwrap()
                     .unwrap();
                 let launcher = journal::current_lf_process_id().unwrap();
-                let attachment = store
-                    .claim_session_attachment(&session.id, None, &launcher, true)
-                    .unwrap();
+                let attachment = attachment::claim_session_attachment(
+                    &store,
+                    &session.id,
+                    None,
+                    &launcher,
+                    true,
+                )
+                .unwrap();
                 let exit = NativeExit {
                     session: session.id.to_string(),
                     attachment,
@@ -400,9 +407,9 @@ mod tests {
                 .unwrap()
                 .unwrap();
             let launcher = journal::current_lf_process_id().unwrap();
-            let attachment = store
-                .claim_session_attachment(&session.id, None, &launcher, true)
-                .unwrap();
+            let attachment =
+                attachment::claim_session_attachment(&store, &session.id, None, &launcher, true)
+                    .unwrap();
             let exit = NativeExit {
                 session: session.id.to_string(),
                 attachment: attachment.clone(),
@@ -414,26 +421,26 @@ mod tests {
                 account: None,
                 diagnostics: (home.join("absent.log"), 0),
             };
-            store
-                .finish_session_attachment(
-                    &session.id,
-                    &attachment,
-                    "completed",
-                    Some(&Departure::Terminal {
-                        to: Some("tmux %9".into()),
-                    }),
-                    || Ok(true),
-                )
-                .unwrap();
+            attachment::finish_session_attachment(
+                &store,
+                &session.id,
+                &attachment,
+                "completed",
+                Some(&Departure::Terminal {
+                    to: Some("tmux %9".into()),
+                }),
+                || Ok(true),
+            )
+            .unwrap();
             let current = store.session_attachment(&session.id).unwrap();
-            let next = store
-                .claim_session_attachment(
-                    &session.id,
-                    current.as_ref(),
-                    &store.test_lf_process(),
-                    true,
-                )
-                .unwrap();
+            let next = attachment::claim_session_attachment(
+                &store,
+                &session.id,
+                current.as_ref(),
+                &store.test_lf_process(),
+                true,
+            )
+            .unwrap();
             let before = store
                 .agent_process(&next.agent_process_id)
                 .unwrap()

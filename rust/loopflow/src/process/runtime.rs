@@ -3,6 +3,7 @@
 //! LfProcess supplies the identity. Retries replace AgentProcess under that same
 //! invocation; recording has no authority to launch, replace or stop a process.
 
+use crate::process::attachment;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -30,7 +31,7 @@ pub(crate) fn finish_session_attachment(
     attachment: &SessionAttachment,
     outcome: &str,
 ) -> StoreResult<()> {
-    store.finish_session_attachment(session, attachment, outcome, None, || {
+    attachment::finish_session_attachment(store, session, attachment, outcome, None, || {
         close_session_agent_process(store, session)
     })
 }
@@ -86,10 +87,13 @@ impl LfProcessRuntime {
         // The row records the agent this input actually launches.
         next.provider = Some(spec.harness.clone());
         next.model = spec.model.clone();
-        let (next, attachment) =
-            store.claim_session_input(next, expected.as_ref(), &lf_process_id, || {
-                close_session_agent_process(&store, session)
-            })?;
+        let (next, attachment) = attachment::claim_session_input(
+            &store,
+            next,
+            expected.as_ref(),
+            &lf_process_id,
+            || close_session_agent_process(&store, session),
+        )?;
         // Continue the Session's attribution; the manifest still describes the
         // actual process cwd supplied by the caller.
         spec.subjects = crate::ops::human_session::capture_subjects(&next);
@@ -215,7 +219,7 @@ impl LfProcessRuntime {
             StoreError::InvalidAuthority("AgentProcess launch has no attachment".into())
         })?;
         let (store, session, attachment) = owner;
-        *attachment = store.prepare_session_agent_process(session, attachment)?;
+        *attachment = attachment::prepare_session_agent_process(store, session, attachment)?;
         command.env(
             crate::process::AGENT_CALLER_ENV,
             serde_json::to_string(&attachment.caller(session.clone().into()))?,
@@ -275,7 +279,7 @@ impl LfProcessRuntime {
             .as_mut()
             .filter(|(_, id, attachment)| !settled && id == session && attachment == expected)
             .ok_or_else(|| StoreError::InvalidAuthority("Process attachment changed".into()))?;
-        let next = store.prepare_session_agent_process(id, attachment)?;
+        let next = attachment::prepare_session_agent_process(store, id, attachment)?;
         *attachment = next.clone();
         Ok(next)
     }
@@ -332,9 +336,13 @@ impl LfProcessRuntime {
         if !retry_keeps_its_thread(saved_thread.as_ref(), resume_thread, moved) {
             anyhow::bail!("AgentProcess retry must retain its thread");
         }
-        let next = store.replace_session_agent_process(session, expected, resume_thread, || {
-            close_session_agent_process(store, session)
-        })?;
+        let next = attachment::replace_session_agent_process(
+            store,
+            session,
+            expected,
+            resume_thread,
+            || close_session_agent_process(store, session),
+        )?;
         runtime.owner = Some((store.clone(), session.clone(), next));
         if let Err(error) = runtime.fail_and_begin_attempt(provider, model, account_id) {
             runtime.recorder.warn_telemetry(error);
@@ -520,7 +528,7 @@ pub(crate) fn resume_session_agent_process(
     lf_process_id: &loopflow_model::id::LfProcessId,
 ) -> StoreResult<crate::process::SessionAttachment> {
     let expected = store.session_attachment(session)?;
-    store.resume_session_attachment(session, expected.as_ref(), lf_process_id, || {
+    attachment::resume_session_attachment(store, session, expected.as_ref(), lf_process_id, || {
         crate::harness::agent_process::close_session_agent_process(store, session)
     })
 }
@@ -548,6 +556,8 @@ impl LfProcessRuntime {
 
 #[cfg(test)]
 mod tests {
+    use crate::process::attachment;
+
     use std::io::{BufRead, BufReader};
     use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
@@ -581,9 +591,14 @@ mod tests {
             [],
         )
         .unwrap();
-        let attached = store
-            .claim_session_attachment("resume", None, &store.test_lf_process(), true)
-            .unwrap();
+        let attached = attachment::claim_session_attachment(
+            &store,
+            "resume",
+            None,
+            &store.test_lf_process(),
+            true,
+        )
+        .unwrap();
         let detached = store
             .release_session_attachment("resume", &attached)
             .unwrap();
@@ -631,9 +646,14 @@ mod tests {
             .unwrap();
         let runtime = store.session("resume").unwrap().unwrap().captured;
         store.bind_session("resume", runtime, &task.id).unwrap();
-        let attached = store
-            .claim_session_attachment("resume", Some(&detached), &store.test_lf_process(), false)
-            .unwrap();
+        let attached = attachment::claim_session_attachment(
+            &store,
+            "resume",
+            Some(&detached),
+            &store.test_lf_process(),
+            false,
+        )
+        .unwrap();
         // These children have no local lifeline writer, as when a different
         // invocation recovers a Session after its launcher has disappeared.
         let mut command = Command::new("/bin/sleep");
@@ -769,9 +789,14 @@ mod tests {
     fn native_resume_requires_observed_death_and_preserves_history() {
         let _ambient = crate::test_ambient::EnvGuard::new();
         let (home, store, detached) = resume_fixture();
-        let attached = store
-            .claim_session_attachment("resume", Some(&detached), &LfProcessId::new(), false)
-            .unwrap();
+        let attached = attachment::claim_session_attachment(
+            &store,
+            "resume",
+            Some(&detached),
+            &LfProcessId::new(),
+            false,
+        )
+        .unwrap();
         let mut command = std::process::Command::new("/bin/sleep");
         command.env_clear().arg("60");
         let mut child = Child(
@@ -858,9 +883,14 @@ mod tests {
     fn resume_detached_live_agent_uses_recorded_settings_and_preserves_history() {
         let _ambient = crate::test_ambient::EnvGuard::new();
         let (home, store, detached) = resume_fixture();
-        let attached = store
-            .claim_session_attachment("resume", Some(&detached), &store.test_lf_process(), false)
-            .unwrap();
+        let attached = attachment::claim_session_attachment(
+            &store,
+            "resume",
+            Some(&detached),
+            &store.test_lf_process(),
+            false,
+        )
+        .unwrap();
         let mut command = std::process::Command::new("/bin/sleep");
         command.env_clear().arg("60").process_group(0);
         let child = Child(command.spawn().unwrap());
@@ -909,16 +939,71 @@ mod tests {
             store.session_thread("resume").unwrap(),
             Some("saved-thread".into())
         );
-        assert!(store.session_connection("resume").unwrap().is_none());
+        assert!(attachment::session_connection(&store, "resume")
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn resume_unknown_owner_cannot_close_or_claim_an_unlaunched_agent() {
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let (_home, store, detached) = resume_fixture();
+        let owner = store.test_lf_process();
+        // The fixture's epoch start would prove death before this boot.
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE processes SET started_at=?2 WHERE id=?1",
+                rusqlite::params![owner, time::OffsetDateTime::now_utc().unix_timestamp()],
+            )
+            .unwrap();
+        let attached =
+            attachment::claim_session_attachment(&store, "resume", Some(&detached), &owner, false)
+                .unwrap();
+        let session = store.session("resume").unwrap().unwrap();
+        let agent = store.agent_process(&attached.agent_process_id).unwrap();
+        let history = store.session_history("resume", 0, 0).unwrap();
+        let resumer = store.test_lf_process();
+        assert!(attachment::resume_session_attachment(
+            &store,
+            "resume",
+            Some(&attached),
+            &resumer,
+            || { panic!("unknown owner cannot authorize closing its agent") }
+        )
+        .is_err());
+        let mut next = session.clone();
+        next.artifact_key = Some(crate::session_record::new_artifact_key());
+        next.input_published = false;
+        assert!(
+            attachment::claim_session_input(&store, next, Some(&attached), &resumer, || {
+                panic!("unknown owner cannot authorize replacing its input")
+            })
+            .is_err()
+        );
+        assert_eq!(store.session_attachment("resume").unwrap(), Some(attached));
+        assert_eq!(
+            store.agent_process(&agent.as_ref().unwrap().id).unwrap(),
+            agent
+        );
+        assert_eq!(store.session("resume").unwrap(), Some(session));
+        assert_eq!(store.session_history("resume", 0, 0).unwrap(), history);
     }
 
     #[test]
     fn resume_unknown_spawn_preserves_record_attachment_and_input() {
         let _ambient = crate::test_ambient::EnvGuard::new();
         let (_home, store, detached) = resume_fixture();
-        let attached = store
-            .claim_session_attachment("resume", Some(&detached), &LfProcessId::new(), false)
-            .unwrap();
+        let attached = attachment::claim_session_attachment(
+            &store,
+            "resume",
+            Some(&detached),
+            &LfProcessId::new(),
+            false,
+        )
+        .unwrap();
         store
             .record_agent_process_launch(
                 "resume",
@@ -935,11 +1020,14 @@ mod tests {
         let mut next = session.clone();
         next.artifact_key = Some(crate::session_record::new_artifact_key());
         next.input_published = false;
-        assert!(store
-            .claim_session_input(next, Some(&detached), &store.test_lf_process(), || {
-                super::close_session_agent_process(&store, "resume")
-            })
-            .is_err());
+        assert!(attachment::claim_session_input(
+            &store,
+            next,
+            Some(&detached),
+            &store.test_lf_process(),
+            || { super::close_session_agent_process(&store, "resume") }
+        )
+        .is_err());
         assert!(crate::process::resume_session_agent_process(
             &store,
             "resume",
@@ -958,9 +1046,14 @@ mod tests {
     fn resume_duplicate_live_identity_cannot_signal_either_session() {
         let _ambient = crate::test_ambient::EnvGuard::new();
         let (home, store, detached) = resume_fixture();
-        let attached = store
-            .claim_session_attachment("resume", Some(&detached), &store.test_lf_process(), false)
-            .unwrap();
+        let attached = attachment::claim_session_attachment(
+            &store,
+            "resume",
+            Some(&detached),
+            &store.test_lf_process(),
+            false,
+        )
+        .unwrap();
         let mut command = std::process::Command::new("/bin/sleep");
         command.env_clear().arg("60").process_group(0);
         let mut child = Child(command.spawn().unwrap());
@@ -981,9 +1074,14 @@ mod tests {
             .release_session_attachment("resume", &attached)
             .unwrap();
         store.test_session("duplicate", &crate::session_record::new_artifact_key());
-        let duplicate = store
-            .claim_session_attachment("duplicate", None, &store.test_lf_process(), true)
-            .unwrap();
+        let duplicate = attachment::claim_session_attachment(
+            &store,
+            "duplicate",
+            None,
+            &store.test_lf_process(),
+            true,
+        )
+        .unwrap();
         store
             .record_agent_process_identity("duplicate", &duplicate, pid, birth)
             .unwrap();
@@ -1003,9 +1101,14 @@ mod tests {
     fn resume_zombie_is_dead_without_signaling_or_inventing_success() {
         let _ambient = crate::test_ambient::EnvGuard::new();
         let (_home, store, detached) = resume_fixture();
-        let attached = store
-            .claim_session_attachment("resume", Some(&detached), &LfProcessId::new(), false)
-            .unwrap();
+        let attached = attachment::claim_session_attachment(
+            &store,
+            "resume",
+            Some(&detached),
+            &LfProcessId::new(),
+            false,
+        )
+        .unwrap();
         let mut child = Child(
             std::process::Command::new("/bin/sleep")
                 .env_clear()
@@ -1052,9 +1155,14 @@ mod tests {
     fn resume_fences_takeover_until_settlement_and_claim_commit() {
         let _ambient = crate::test_ambient::EnvGuard::new();
         let (_home, store, detached) = resume_fixture();
-        let attached = store
-            .claim_session_attachment("resume", Some(&detached), &LfProcessId::new(), false)
-            .unwrap();
+        let attached = attachment::claim_session_attachment(
+            &store,
+            "resume",
+            Some(&detached),
+            &LfProcessId::new(),
+            false,
+        )
+        .unwrap();
         store
             .record_agent_process_launch(
                 "resume",
@@ -1070,13 +1178,18 @@ mod tests {
         let (finished, finishing) = std::sync::mpsc::channel();
         let resumer = store.test_lf_process();
         std::thread::scope(|scope| {
-            let next = store
-                .resume_session_attachment("resume", Some(&detached), &resumer, || {
+            let next = attachment::resume_session_attachment(
+                &store,
+                "resume",
+                Some(&detached),
+                &resumer,
+                || {
                     let store = &store;
                     let expected = &detached;
                     scope.spawn(move || {
                         started.send(()).unwrap();
-                        let result = store.claim_session_attachment(
+                        let result = attachment::claim_session_attachment(
+                            store,
                             "resume",
                             Some(expected),
                             &LfProcessId::new(),
@@ -1095,8 +1208,9 @@ mod tests {
                         Some(detached.clone())
                     );
                     Ok(true)
-                })
-                .unwrap();
+                },
+            )
+            .unwrap();
             assert!(finishing
                 .recv_timeout(std::time::Duration::from_secs(5))
                 .unwrap()
@@ -1136,9 +1250,14 @@ mod tests {
             }
             // A fresh AgentProcess records the provider at launch, not the
             // Session's mutable next-launch settings.
-            let first = store
-                .claim_session_attachment("resume", Some(&detached), &launch, true)
-                .unwrap();
+            let first = attachment::claim_session_attachment(
+                &store,
+                "resume",
+                Some(&detached),
+                &launch,
+                true,
+            )
+            .unwrap();
             let mut command = std::process::Command::new("/bin/sleep");
             command.env_clear().arg("60").process_group(0);
             store
@@ -1160,9 +1279,14 @@ mod tests {
                     )
                     .unwrap();
             }
-            let second = store
-                .claim_session_attachment("resume", Some(&first), &takeover, false)
-                .unwrap();
+            let second = attachment::claim_session_attachment(
+                &store,
+                "resume",
+                Some(&first),
+                &takeover,
+                false,
+            )
+            .unwrap();
             assert_eq!(first.agent_process_id, second.agent_process_id);
             assert!(
                 super::finish_session_attachment(&store, "resume", &first, "interrupted").is_err()
@@ -1175,9 +1299,14 @@ mod tests {
                 store.session_attachment("resume").unwrap(),
                 Some(second.clone())
             );
-            let returned = store
-                .claim_session_attachment("resume", Some(&second), &launch, false)
-                .unwrap();
+            let returned = attachment::claim_session_attachment(
+                &store,
+                "resume",
+                Some(&second),
+                &launch,
+                false,
+            )
+            .unwrap();
             assert_eq!(returned.agent_process_id, first.agent_process_id);
             assert_ne!(returned.token, first.token);
             for stale in [&first, &second] {
@@ -1216,9 +1345,14 @@ mod tests {
                     [provider],
                 )
                 .unwrap();
-            let attachment = store
-                .claim_session_attachment("resume", Some(&detached), &store.test_lf_process(), true)
-                .unwrap();
+            let attachment = attachment::claim_session_attachment(
+                &store,
+                "resume",
+                Some(&detached),
+                &store.test_lf_process(),
+                true,
+            )
+            .unwrap();
             let mut command = std::process::Command::new("/bin/sleep");
             command.env_clear().arg("60").process_group(0);
             store
@@ -1281,9 +1415,8 @@ mod tests {
             [&parent],
         )
         .unwrap();
-        let attachment = store
-            .claim_session_attachment("retry", None, &parent, true)
-            .unwrap();
+        let attachment =
+            attachment::claim_session_attachment(&store, "retry", None, &parent, true).unwrap();
         let mut command = std::process::Command::new("/bin/sleep");
         command.env_clear().arg("60").process_group(0);
         store
@@ -1309,14 +1442,14 @@ mod tests {
             [],
         )
         .unwrap();
-        let next = store
-            .replace_session_agent_process(
-                "retry",
-                &attachment,
-                Some(&"retained-thread".into()),
-                || super::close_session_agent_process(&store, "retry"),
-            )
-            .unwrap();
+        let next = attachment::replace_session_agent_process(
+            &store,
+            "retry",
+            &attachment,
+            Some(&"retained-thread".into()),
+            || super::close_session_agent_process(&store, "retry"),
+        )
+        .unwrap();
         assert_ne!(next.agent_process_id, attachment.agent_process_id);
         assert_eq!(
             crate::journal::process_identity_evidence(pid, birth),

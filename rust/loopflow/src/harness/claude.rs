@@ -662,6 +662,8 @@ mod activity_tests {
 
 #[cfg(test)]
 mod tests {
+    use crate::process::attachment;
+
     use std::os::unix::fs::PermissionsExt;
 
     use super::*;
@@ -701,9 +703,8 @@ mod tests {
                 [id],
             )
             .unwrap();
-            let attachment = store
-                .claim_session_attachment(id, None, &process, true)
-                .unwrap();
+            let attachment =
+                attachment::claim_session_attachment(&store, id, None, &process, true).unwrap();
             let (tx, _rx) = mpsc::unbounded_channel();
             let mut harness = ClaudeHarness::new(tx);
             let mut config = live_config();
@@ -721,9 +722,9 @@ mod tests {
             harnesses.push(harness);
         }
         let original = harnesses[0].owner().unwrap().2;
-        let replacement = store
-            .claim_session_attachment("first", Some(&original), &process, false)
-            .unwrap();
+        let replacement =
+            attachment::claim_session_attachment(&store, "first", Some(&original), &process, false)
+                .unwrap();
         assert!(harnesses[0].stop().await.is_err());
         assert_eq!(
             crate::journal::process_identity_evidence(recorded[0].0, recorded[0].1),
@@ -1032,10 +1033,9 @@ mod tests {
                     [id],
                 )
                 .unwrap();
-            let attachment = self
-                .store
-                .claim_session_attachment(id, None, &self.process, true)
-                .unwrap();
+            let attachment =
+                attachment::claim_session_attachment(&self.store, id, None, &self.process, true)
+                    .unwrap();
             let mut config = live_config();
             config.cwd = Some(self.home.path().to_path_buf());
             config.session_attachment = Some((id.into(), attachment));

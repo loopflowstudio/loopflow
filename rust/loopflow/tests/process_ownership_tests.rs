@@ -1,6 +1,7 @@
 //! Command observation is durable even when no agent work starts.
 #![cfg(unix)]
 
+use loopflow::process::attachment;
 #[allow(dead_code)] // Linked for its inherited provider-home scrub.
 mod support;
 
@@ -48,9 +49,8 @@ async fn agent_settlement_on_read_reports_failed_observation_and_recovers_withou
     )
     .unwrap();
     let parent = recorded_lf_process(&database);
-    let attachment = store
-        .claim_session_attachment("orphan", None, &parent, true)
-        .unwrap();
+    let attachment =
+        attachment::claim_session_attachment(&store, "orphan", None, &parent, true).unwrap();
     // Only this throwaway group can be signaled. The shell supplies the server
     // argv shape, not a configured provider, account or conversation.
     let started = time::OffsetDateTime::now_utc().unix_timestamp();
@@ -207,9 +207,14 @@ fn task_checkout_blockers_are_rows_in_the_activity_list() {
     let database = home.path().join("loopflow.db");
     let store = SqliteStore::new(&database).unwrap();
     reserve_session(&store, "held", worktree);
-    let attachment = store
-        .claim_session_attachment("held", None, &recorded_lf_process(&database), true)
-        .unwrap();
+    let attachment = attachment::claim_session_attachment(
+        &store,
+        "held",
+        None,
+        &recorded_lf_process(&database),
+        true,
+    )
+    .unwrap();
     let agent = attachment.agent_process_id.as_str();
 
     let output = lf(repo.path(), &["monitor", "ps", "--json"]);
@@ -993,9 +998,14 @@ async fn historical_feedback_is_not_live_availability() {
     for id in ["waiting", "finished", "legacy_finished", "unobserved"] {
         reserve_session(&store, id, home.path());
     }
-    let finished = store
-        .claim_session_attachment("finished", None, &recorded_lf_process(&database), true)
-        .unwrap();
+    let finished = attachment::claim_session_attachment(
+        &store,
+        "finished",
+        None,
+        &recorded_lf_process(&database),
+        true,
+    )
+    .unwrap();
     let connection = rusqlite::Connection::open(&database).unwrap();
     connection
         .execute(

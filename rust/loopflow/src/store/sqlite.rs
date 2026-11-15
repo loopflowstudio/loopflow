@@ -78,6 +78,7 @@ mod planning_sync;
 pub(crate) mod planning_write;
 mod pr_landings;
 mod processes;
+pub(crate) use processes::{PreviousAgentDisposition, SessionTransfer, UnrecordedAncestry};
 mod program_status;
 pub(crate) mod project_content;
 pub(crate) mod project_selection;

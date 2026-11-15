@@ -2,6 +2,7 @@
 mod panes;
 use super::SqliteStore;
 use crate::durable::{TaskSection, TaskState};
+
 use crate::store::{StoreError, StoreResult};
 use crate::work::selection::{
     move_into_place, Arrangement, ArrangementEdit, ArrangementMode, Dashboard, DashboardId,
@@ -936,6 +937,8 @@ impl SqliteStore {
 
 #[cfg(test)]
 mod tests {
+    use crate::process::attachment;
+
     use super::SqliteStore;
     use crate::work::selection::{
         Arrangement, ArrangementMode, DashboardId, Selection, SelectionExpression, SelectionId,
@@ -1889,9 +1892,14 @@ mod tests {
             let conn = store.conn.lock().unwrap();
             conn.execute("UPDATE agent_sessions SET repo='/repo', task_id='task_22222222222222222222222222222222', wave_id='11111111-1111-1111-1111-111111111111' WHERE id='selection-session'", []).unwrap();
         }
-        let attachment = store
-            .claim_session_attachment("selection-session", None, &store.test_lf_process(), true)
-            .unwrap();
+        let attachment = attachment::claim_session_attachment(
+            &store,
+            "selection-session",
+            None,
+            &store.test_lf_process(),
+            true,
+        )
+        .unwrap();
         store
             .record_agent_process_identity(
                 "selection-session",
@@ -1992,9 +2000,14 @@ mod tests {
                 .unwrap();
         }
         let unattached = store.resolve_selection(&repo, &running).unwrap();
-        let attachment = store
-            .claim_session_attachment("before-boot", None, &store.test_lf_process(), true)
-            .unwrap();
+        let attachment = attachment::claim_session_attachment(
+            &store,
+            "before-boot",
+            None,
+            &store.test_lf_process(),
+            true,
+        )
+        .unwrap();
         let started: i64 = store
             .conn
             .lock()

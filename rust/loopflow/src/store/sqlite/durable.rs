@@ -674,6 +674,8 @@ fn tool_response_in(
 
 #[cfg(test)]
 mod durable_store_tests {
+    use crate::process::attachment;
+
     use std::path::PathBuf;
     use std::sync::{Arc, Barrier};
     use std::thread;
@@ -1802,9 +1804,8 @@ mod durable_store_tests {
                 [&process],
             )
             .unwrap();
-        let attachment = store
-            .claim_session_attachment("orphan", None, &process, false)
-            .unwrap();
+        let attachment =
+            attachment::claim_session_attachment(&store, "orphan", None, &process, false).unwrap();
         let origin = store.session_turn_origin("orphan", &attachment).unwrap();
         store
             .record_session_turn_origin(&"thread".into(), "future", &origin)

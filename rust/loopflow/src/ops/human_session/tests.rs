@@ -1,3 +1,4 @@
+use crate::process::attachment;
 fn listed_session(store: &crate::store::SharedStore, id: &str) -> super::SessionRecord {
     let capacity = crate::provider_account::LaunchCapacity::read(&store.sqlite).unwrap();
     super::listed(store, id, &capacity).unwrap().unwrap()
@@ -42,7 +43,7 @@ fn resume_refuses_a_run_and_leaves_its_provider_running() {
                 "INSERT INTO processes(id,trace_id,started_at) SELECT ?1,trace_id,started_at FROM processes WHERE id=?2",
                 rusqlite::params![launcher, crate::journal::current_lf_process_id().unwrap()],
             )?;
-            let first = store.sqlite.claim_session_attachment(&session.id, None, &launcher, true)?;
+            let first = attachment::claim_session_attachment(&store.sqlite, &session.id, None, &launcher, true)?;
             let mut command = tokio::process::Command::new("/bin/sleep");
             command.env_clear().arg("60");
             let mut provider = crate::harness::agent_process::spawn(
@@ -822,11 +823,14 @@ impl Logins {
                 [&parent],
             )
             .unwrap();
-        let attachment = self
-            .store
-            .sqlite
-            .claim_session_attachment(&session.id, None, &parent, true)
-            .unwrap();
+        let attachment = attachment::claim_session_attachment(
+            &self.store.sqlite,
+            &session.id,
+            None,
+            &parent,
+            true,
+        )
+        .unwrap();
         let mut command = std::process::Command::new("/bin/sleep");
         command.env_clear().arg("60");
         RunningAgent(
@@ -1308,10 +1312,9 @@ fn recovery_refresh_follows_current_holder_and_history() {
                 [&launcher],
             )
             .unwrap();
-        let holder = store
-            .sqlite
-            .claim_session_attachment(&record.id, None, &launcher, true)
-            .unwrap();
+        let holder =
+            attachment::claim_session_attachment(&store.sqlite, &record.id, None, &launcher, true)
+                .unwrap();
         store
             .sqlite
             .record_agent_process_launch(

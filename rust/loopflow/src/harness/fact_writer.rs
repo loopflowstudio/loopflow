@@ -413,6 +413,8 @@ impl SessionActivityTracker {
 
 #[cfg(test)]
 mod tests {
+    use crate::process::attachment;
+
     use serde_json::{json, Value};
 
     use super::{FactWriter, SessionActivityTracker};
@@ -444,9 +446,9 @@ mod tests {
         .unwrap();
         conn.execute("UPDATE agent_sessions SET interactive=?1", [interactive])
             .unwrap();
-        let attachment = store
-            .claim_session_attachment("conversation", None, &process, false)
-            .unwrap();
+        let attachment =
+            attachment::claim_session_attachment(&store, "conversation", None, &process, false)
+                .unwrap();
         store
             .record_agent_process_identity(
                 "conversation",
@@ -1120,17 +1122,27 @@ mod tests {
                 &mut writer_for(&first),
                 json!({"id":1,"method":"turn/start"}),
             );
-            let middle = store
-                .claim_session_attachment("conversation", Some(&first), &b, false)
-                .unwrap();
+            let middle = attachment::claim_session_attachment(
+                &store,
+                "conversation",
+                Some(&first),
+                &b,
+                false,
+            )
+            .unwrap();
             let mut next = original.clone();
             next.artifact_key = Some(crate::session_record::new_artifact_key());
             let next = store
                 .replace_session_input(original.captured, next, None)
                 .unwrap();
-            let current = store
-                .claim_session_attachment("conversation", Some(&middle), &a, false)
-                .unwrap();
+            let current = attachment::claim_session_attachment(
+                &store,
+                "conversation",
+                Some(&middle),
+                &a,
+                false,
+            )
+            .unwrap();
             assert_ne!(first.token, current.token);
             assert!(store.session_turn_origin("conversation", &first).is_err());
             // Both requests predate the start notification. A second reply for
@@ -1310,9 +1322,14 @@ mod tests {
             [&replacement],
         )
         .unwrap();
-        store
-            .claim_session_attachment("conversation", Some(&attachment), &replacement, true)
-            .unwrap();
+        attachment::claim_session_attachment(
+            &store,
+            "conversation",
+            Some(&attachment),
+            &replacement,
+            true,
+        )
+        .unwrap();
         let messages = vec![
             json!({"type":"user","id":request}),
             json!({"type":"assistant","id":"step1","time":{"completed":2},"content":[{"type":"tool","id":"tool","name":"shell","state":{"status":"completed"}}],"tokens":{"input":20,"output":5}}),

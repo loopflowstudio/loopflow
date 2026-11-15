@@ -94,6 +94,8 @@ impl SqliteStore {
 
 #[cfg(test)]
 mod tests {
+    use crate::process::attachment;
+
     use rusqlite::params;
 
     use super::{SqliteStore, StoreRevisions};
@@ -312,9 +314,9 @@ mod tests {
                 [&process],
             )
             .unwrap();
-        let attachment = store
-            .claim_session_attachment("conversation", None, &process, true)
-            .unwrap();
+        let attachment =
+            attachment::claim_session_attachment(&store, "conversation", None, &process, true)
+                .unwrap();
         let record = |observed_at, open_tools, pending_input, yielded| {
             let before = store.revisions().unwrap();
             store

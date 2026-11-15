@@ -1,3 +1,4 @@
+use crate::process::attachment;
 use std::fs;
 use std::sync::{Arc, Mutex};
 
@@ -201,7 +202,9 @@ fn canonical_ids_retained_receipt_and_trace_locator_survive_identity_change() {
     let store = SqliteStore::open_processes_read_only(&home.path().join("loopflow.db")).unwrap();
     let id = LfProcessId::parse(&PROCESS.to_ascii_lowercase()).unwrap();
     let record = store.lf_process(&id).unwrap().unwrap();
-    let retained_path = store.process_receipt_path(&id).unwrap().unwrap();
+    let retained_path = attachment::process_receipt_path(&store, &id)
+        .unwrap()
+        .unwrap();
     assert_eq!(retained_path.file_name(), path.file_name());
     assert_eq!(
         retained_path.canonicalize().unwrap(),

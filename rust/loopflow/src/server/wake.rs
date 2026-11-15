@@ -6,6 +6,7 @@
 //! clock per Session: Claude takes the message in its cross-session inbox,
 //! Codex as a turn its app-server starts. A conversation the server cannot
 //! reach hears it at its next boundary.
+
 use std::io::Write;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
@@ -229,6 +230,8 @@ fn send_inbox(socket: &mut UnixStream, token: &str, thread: &str, text: &str) ->
 
 #[cfg(test)]
 mod tests {
+    use crate::process::attachment;
+
     use super::{after_turn, wake_idle, Watcher};
     use crate::context_block::ContextDelivery;
     use crate::server::wire::{BoundaryMoment, SessionBoundary};
@@ -253,9 +256,8 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session(session, &crate::session_record::new_artifact_key());
         let process = store.test_lf_process();
-        let claim = store
-            .claim_session_attachment(session, None, &process, false)
-            .unwrap();
+        let claim =
+            attachment::claim_session_attachment(&store, session, None, &process, false).unwrap();
         let pid = std::process::id();
         store
             .record_agent_process_identity(

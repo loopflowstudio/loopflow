@@ -1,3 +1,4 @@
+use crate::process::attachment;
 use rusqlite::{params, OptionalExtension};
 
 use super::{save_in, SqliteStore};
@@ -34,9 +35,8 @@ fn fixture() -> (tempfile::TempDir, SqliteStore, SteerAdapter) {
             [process.as_str()],
         )
         .unwrap();
-    let claim = store
-        .claim_session_attachment("session", None, &process, false)
-        .unwrap();
+    let claim =
+        attachment::claim_session_attachment(&store, "session", None, &process, false).unwrap();
     store
         .record_agent_process_identity("session", &claim, std::process::id(), 1)
         .unwrap();
@@ -111,8 +111,7 @@ fn pending_requests_hold_the_terminal_until_the_current_attachment_settles_them(
             .unwrap();
         assert_eq!(store.terminal_retention(&terminal).unwrap(), Some(LiveTurn));
     }
-    let next = store
-        .claim_session_attachment("session", Some(&first), owner, false)
+    let next = attachment::claim_session_attachment(&store, "session", Some(&first), owner, false)
         .unwrap();
     assert_eq!(store.terminal_retention(&terminal).unwrap(), Some(LiveTurn));
     activity.pending_input = 0;
@@ -128,9 +127,7 @@ fn pending_requests_hold_the_terminal_until_the_current_attachment_settles_them(
     store
         .record_session_activity("session", &next, &activity)
         .unwrap();
-    store
-        .replace_session_agent_process("session", &next, None, || Ok(true))
-        .unwrap();
+    attachment::replace_session_agent_process(&store, "session", &next, None, || Ok(true)).unwrap();
     assert_eq!(store.terminal_retention(&terminal).unwrap(), None);
 }
 
@@ -238,8 +235,7 @@ fn silent_native_turns_follow_the_provider_through_attachment_handoff() {
         .record_native_turn(&adapter, "native", false, None)
         .unwrap();
     assert_eq!(store.terminal_retention(&terminal).unwrap(), Some(LiveTurn));
-    let next = store
-        .claim_session_attachment("session", Some(&first), owner, false)
+    let next = attachment::claim_session_attachment(&store, "session", Some(&first), owner, false)
         .unwrap();
     assert_ne!(first.token, next.token);
     // No editor input or open tool is needed to keep an unyielded turn.
@@ -283,9 +279,9 @@ fn silent_native_turns_follow_the_provider_through_attachment_handoff() {
         .record_native_turn(&adapter, "child", true, Some(0))
         .is_err());
     assert_eq!(store.terminal_retention(&terminal).unwrap(), Some(LiveTurn));
-    let replacement = store
-        .replace_session_agent_process("session", &next, None, || Ok(true))
-        .unwrap();
+    let replacement =
+        attachment::replace_session_agent_process(&store, "session", &next, None, || Ok(true))
+            .unwrap();
     // Activity from the old provider cannot keep its replacement alive.
     assert_eq!(store.terminal_retention(&terminal).unwrap(), None);
     assert!(store
@@ -811,9 +807,9 @@ fn a_cleared_conversation_is_what_reconnect_resumes_on_the_same_account() {
 fn a_replaced_agent_process_cannot_select_any_conversation() {
     let (_home, store, stale) = fixture();
     let claim = store.session_attachment("session").unwrap().unwrap();
-    let next = store
-        .replace_session_agent_process("session", &claim, None, || Ok(true))
-        .unwrap();
+    let next =
+        attachment::replace_session_agent_process(&store, "session", &claim, None, || Ok(true))
+            .unwrap();
     for thread in ["native", "foreign"] {
         assert!(matches!(
             store.with_provider_context(&stale, thread, CLEAR, || Ok(())),

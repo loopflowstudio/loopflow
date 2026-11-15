@@ -1,3 +1,4 @@
+use crate::process::attachment;
 use std::os::unix::fs::PermissionsExt;
 use std::time::Duration;
 
@@ -86,9 +87,7 @@ async fn pi_turns_resume_the_exact_conversation_and_capture_tools_usage() {
     drop(selection);
     let (store, session, attachment) =
         super::agent_process::open_owner(config.session_attachment.as_ref()).unwrap();
-    let next = store
-        .prepare_session_agent_process(&session, &attachment)
-        .unwrap();
+    let next = attachment::prepare_session_agent_process(&store, &session, &attachment).unwrap();
     config.session_attachment = Some((session, next));
     config.resume_token = Some(token.clone());
     let (tx, mut rx) = mpsc::unbounded_channel();
@@ -356,14 +355,14 @@ async fn pi_stale_attachment_cannot_send_or_stop_the_provider() {
     pi.start(&config).await.unwrap();
     let (store, session, previous) =
         super::agent_process::open_owner(config.session_attachment.as_ref()).unwrap();
-    let current = store
-        .claim_session_attachment(
-            &session,
-            Some(&previous),
-            previous.lf_process_id.as_ref().unwrap(),
-            false,
-        )
-        .unwrap();
+    let current = attachment::claim_session_attachment(
+        &store,
+        &session,
+        Some(&previous),
+        previous.lf_process_id.as_ref().unwrap(),
+        false,
+    )
+    .unwrap();
     assert!(pi.send_input("stale direction").await.is_err());
     assert!(pi.stop().await.is_err());
     let pid = pi.pid().unwrap();

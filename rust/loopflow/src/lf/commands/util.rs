@@ -1195,6 +1195,8 @@ pub(crate) fn short_id(id: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use crate::process::attachment;
+
     use super::*;
     use crate::profile::EmailAddress;
     use crate::provider_account::new_account;
@@ -1725,7 +1727,8 @@ mod tests {
         crate::journal::with_runtime(home, &["lf".into(), "session".into()], || {
             let store = SqliteStore::new(&home.join("loopflow.db"))?;
             let session = store.test_session("remote", &crate::session_record::new_artifact_key());
-            let original = store.claim_session_attachment(
+            let original = attachment::claim_session_attachment(
+                &store,
                 &session.id,
                 None,
                 &store.test_lf_process(),
@@ -1745,7 +1748,8 @@ mod tests {
                 endpoint.to_str().unwrap(),
                 &"thread".into(),
             )?;
-            let attached = store.claim_session_attachment(
+            let attached = attachment::claim_session_attachment(
+                &store,
                 &session.id,
                 Some(&original),
                 &crate::journal::current_lf_process_id().unwrap(),

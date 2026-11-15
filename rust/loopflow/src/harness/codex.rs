@@ -13,6 +13,7 @@
 //! - `turn/interrupt {threadId, turnId}` -> `{}`; the turn then ends with
 //!   `turn/completed` status "interrupted" (probed live).
 
+use crate::process::attachment;
 use loopflow_model::id::AgentSessionId;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
@@ -737,7 +738,7 @@ impl CodexHarness {
         let owner = super::agent_process::open_owner(launch.session_attachment.as_ref())?;
         self.session_attachment = Some(owner.clone());
         let (store, session, _) = &owner;
-        let connection = store.session_connection(session)?;
+        let connection = attachment::session_connection(store, session)?;
         let saved_thread = store.session_thread(session)?;
         if let Some(thread) = &saved_thread {
             if self.resume_agent_session.as_ref() != Some(thread)
@@ -1232,6 +1233,8 @@ impl CodexHarness {
 
 #[cfg(test)]
 mod tests {
+    use crate::process::attachment;
+
     use super::*;
 
     #[tokio::test]
@@ -1334,15 +1337,14 @@ mod tests {
             [process.as_str()],
         )
         .unwrap();
-        let old = store
-            .claim_session_attachment("saved", None, &process, true)
-            .unwrap();
+        let old =
+            attachment::claim_session_attachment(&store, "saved", None, &process, true).unwrap();
         store
             .record_session_connection("saved", &old, "/missing.sock", &"saved-thread".into())
             .unwrap();
-        let attachment = store
-            .claim_session_attachment("saved", Some(&old), &process, true)
-            .unwrap();
+        let attachment =
+            attachment::claim_session_attachment(&store, "saved", Some(&old), &process, true)
+                .unwrap();
         let (tx, _rx) = mpsc::unbounded_channel();
         let mut harness = CodexHarness::new(tx, ApprovalPolicy::AutoApprove);
         let config = AgentConfig {
@@ -1362,9 +1364,9 @@ mod tests {
         let released = store
             .release_session_attachment("saved", &attachment)
             .unwrap();
-        let retry = store
-            .claim_session_attachment("saved", Some(&released), &process, true)
-            .unwrap();
+        let retry =
+            attachment::claim_session_attachment(&store, "saved", Some(&released), &process, true)
+                .unwrap();
         harness.resume_agent_session = Some("saved-thread".into());
         let config = AgentConfig {
             session_attachment: Some(("saved".into(), retry)),

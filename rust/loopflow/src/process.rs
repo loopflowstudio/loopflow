@@ -1,5 +1,6 @@
 //! Process records describe OS lifetimes; runtime resources hold exact attachment authority.
 
+pub mod attachment;
 mod runtime;
 pub use runtime::LfProcessRuntime;
 pub(crate) use runtime::{
@@ -31,6 +32,13 @@ pub struct LfProcess {
     pub exit_code: Option<i32>,
     pub signal: Option<String>,
     pub error: Option<String>,
+}
+
+/// A process start receipt with its terminal placement, supplied before SQL.
+#[derive(Debug, Clone)]
+pub(crate) struct LfProcessStart {
+    pub process: LfProcess,
+    pub terminal: Option<loopflow_model::id::TerminalId>,
 }
 
 /// One recorded provider OS process, launched under the lf process that

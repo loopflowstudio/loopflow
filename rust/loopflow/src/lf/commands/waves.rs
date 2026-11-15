@@ -3085,6 +3085,8 @@ fn truncate_start(value: &str, width: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+    use crate::process::attachment;
+
     fn owned() -> loopflow_model::durable::TaskOwner {
         loopflow_model::durable::TaskOwner {
             person: Some("Jack Heart".into()),
@@ -3227,10 +3229,14 @@ mod tests {
         )
         .unwrap();
         store.sqlite.reorder_task(&repo, active, other).unwrap();
-        let attachment = store
-            .sqlite
-            .claim_session_attachment("bound", None, &store.sqlite.test_lf_process(), true)
-            .unwrap();
+        let attachment = attachment::claim_session_attachment(
+            &store.sqlite,
+            "bound",
+            None,
+            &store.sqlite.test_lf_process(),
+            true,
+        )
+        .unwrap();
         store
             .sqlite
             .record_agent_process_identity(

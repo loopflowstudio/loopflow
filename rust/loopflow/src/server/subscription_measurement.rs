@@ -1,5 +1,7 @@
 //! Isolated server for scripts/benchmarks/subscription_baseline.py. Run only
 //! through that driver; the control socket is fixture-only, never a wire API.
+
+use crate::process::attachment;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixListener as ControlListener;
 use std::path::Path;
@@ -41,9 +43,8 @@ fn attach(store: &SqliteStore, session: &str, pid: u32) -> SessionAttachment {
             [owner.as_str()],
         )
         .unwrap();
-    let attachment = store
-        .claim_session_attachment(session, None, &owner, true)
-        .unwrap();
+    let attachment =
+        attachment::claim_session_attachment(store, session, None, &owner, true).unwrap();
     let born = crate::journal::process_started_at(pid).unwrap().unwrap();
     store
         .conn

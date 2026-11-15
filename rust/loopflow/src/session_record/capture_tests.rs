@@ -1,3 +1,4 @@
+use crate::process::attachment;
 use std::collections::BTreeMap;
 use std::fs;
 
@@ -254,14 +255,14 @@ fn a_failed_terminal_receipt_still_closes_only_the_owned_provider() {
             let birth = crate::journal::process_started_at(pid)?.unwrap();
             store.record_agent_process_identity(&session, &attachment, pid, birth)?;
             let replacement = takeover.then(|| {
-                store
-                    .claim_session_attachment(
-                        &session,
-                        Some(&attachment),
-                        &store.test_lf_process(),
-                        false,
-                    )
-                    .unwrap()
+                attachment::claim_session_attachment(
+                    &store,
+                    &session,
+                    Some(&attachment),
+                    &store.test_lf_process(),
+                    false,
+                )
+                .unwrap()
             });
             // A directory at the receipt path makes the write fail independently
             // of the store that owns the still-running provider.
@@ -957,7 +958,7 @@ fn continuation_resumes_the_saved_thread_on_a_fresh_agent_process() {
             Some(&next_attachment.provider_lf_process_id),
             next_attachment.lf_process_id.as_ref()
         );
-        assert!(store.session_connection(&session.id)?.is_none());
+        assert!(attachment::session_connection(&store, &session.id)?.is_none());
         assert!(store.agent_process_identity(&session.id)?.is_none());
         assert_ne!(next_attachment.token, attachment.token);
         let saved = crate::session_record::read_manifest(&next.artifact_dir()).unwrap();
@@ -1102,9 +1103,8 @@ fn attached_session(
         .unwrap(),
     )
     .unwrap();
-    let attachment = store
-        .claim_session_attachment("conversation", None, &first, true)
-        .unwrap();
+    let attachment =
+        attachment::claim_session_attachment(&store, "conversation", None, &first, true).unwrap();
     (store, attachment, process, second)
 }
 
@@ -1159,7 +1159,9 @@ fn resume_dead_attachment_ends_its_agent_before_starting_another() {
     let _ = agent_process.wait();
     assert_ne!(replacement.agent_process_id, attachment.agent_process_id);
     assert_eq!(replacement.provider_lf_process_id, next);
-    assert!(store.session_connection("conversation").unwrap().is_none());
+    assert!(attachment::session_connection(&store, "conversation")
+        .unwrap()
+        .is_none());
     assert!(store
         .agent_process_identity("conversation")
         .unwrap()

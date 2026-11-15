@@ -607,6 +607,8 @@ fn host_command(program: &str, args: &[&str]) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use crate::process::attachment;
+
     use super::{
         display_title, renames_due, workspace_name, HostRename, Names, TerminalTitle, WorkspaceName,
     };
@@ -626,9 +628,9 @@ mod tests {
                 [process.as_str()],
             )
             .unwrap();
-        let attachment = store
-            .claim_session_attachment(&session.id, None, &process, true)
-            .unwrap();
+        let attachment =
+            attachment::claim_session_attachment(&store, &session.id, None, &process, true)
+                .unwrap();
         let terminal = loopflow_model::id::TerminalId::new();
         store.create_terminal(&terminal, "build").unwrap();
         rusqlite::Connection::open(&path)
@@ -666,10 +668,14 @@ mod tests {
             super::output_title(&title.store, &terminal).unwrap(),
             Some("Release notes".into())
         );
-        title
-            .store
-            .claim_session_attachment(&title.session, Some(&attachment), &process, false)
-            .unwrap();
+        attachment::claim_session_attachment(
+            &title.store,
+            &title.session,
+            Some(&attachment),
+            &process,
+            false,
+        )
+        .unwrap();
         assert_eq!(title.read_names().unwrap(), None);
     }
 

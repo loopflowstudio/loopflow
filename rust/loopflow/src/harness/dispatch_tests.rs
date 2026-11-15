@@ -1,6 +1,7 @@
 //! Run the deadlock regression in a child so its watchdog does not depend on
 //! the reactor (or store mutex) under test.
 
+use crate::process::attachment;
 use std::process::Command;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -69,9 +70,9 @@ async fn stalled_dispatch() {
     )
     .unwrap();
     store.test_session("conversation", "run_00000000000000000000000000000001");
-    let attachment = store
-        .claim_session_attachment("conversation", None, &process, false)
-        .unwrap();
+    let attachment =
+        attachment::claim_session_attachment(&store, "conversation", None, &process, false)
+            .unwrap();
     let (socket, _unread_peer) = UnixStream::pair().unwrap();
     let mut socket = WebSocketStream::from_raw_socket(socket, Role::Client, None).await;
     let (entered, ready) = oneshot::channel();
@@ -155,9 +156,14 @@ async fn stalled_dispatch() {
     let transfer_store = other_store.clone();
     let original = attachment.clone();
     let claimant = std::thread::spawn(move || {
-        let attachment = transfer_store
-            .claim_session_attachment("conversation", Some(&original), &replacement, false)
-            .unwrap();
+        let attachment = attachment::claim_session_attachment(
+            &transfer_store,
+            "conversation",
+            Some(&original),
+            &replacement,
+            false,
+        )
+        .unwrap();
         transferred.send(attachment).unwrap();
     });
     // Transfer must wait for the native write, but history must not.

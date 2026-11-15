@@ -2,6 +2,8 @@
 //! boundary, for the server to record. The hook opens no store for this; it
 //! reads the Session's steers and Task update from the store itself afterwards
 //! ([`crate::steer::claim`]).
+
+use crate::process::attachment;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -103,7 +105,7 @@ pub(super) fn answer(
     if let Some(gap) = gap {
         store.record_recording_gap(&adapter.session, gap.first, gap.last)?;
     }
-    let connection = store.session_connection(&adapter.session)?;
+    let connection = attachment::session_connection(store, &adapter.session)?;
     // Where the server wakes this conversation once it is idle.
     if let Some(inbox) = inbox {
         store.record_agent_inbox(adapter, inbox)?;
@@ -216,6 +218,8 @@ async fn record_codex_turns(
 
 #[cfg(test)]
 mod tests {
+    use crate::process::attachment;
+
     use super::answer;
     use crate::context_block::ContextDelivery;
     use crate::server::wire::{BoundaryGap, BoundaryMoment, SessionBoundary};
@@ -245,9 +249,8 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("session", &crate::session_record::new_artifact_key());
         let process = store.test_lf_process();
-        let claim = store
-            .claim_session_attachment("session", None, &process, false)
-            .unwrap();
+        let claim =
+            attachment::claim_session_attachment(&store, "session", None, &process, false).unwrap();
         store
             .record_agent_process_identity("session", &claim, std::process::id(), 1)
             .unwrap();

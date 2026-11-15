@@ -1,4 +1,5 @@
 use crate::support;
+use loopflow::process::attachment;
 
 use std::process::{Command, Output};
 
@@ -550,9 +551,8 @@ fn headless_resume_preserves_a_held_owners_capture_on_both_harnesses() {
                 [process.as_str()],
             )
             .unwrap();
-        let attachment = store
-            .claim_session_attachment(&id, None, &process, true)
-            .unwrap();
+        let attachment =
+            attachment::claim_session_attachment(&store, &id, None, &process, true).unwrap();
         let before = store.session(&id).unwrap().unwrap();
         let history = store.session_history(&id, 0, 0).unwrap();
         let mut paths = vec![bin];
@@ -771,9 +771,8 @@ fn available_lists_only_conversations_ready_for_input() {
     )
     .unwrap();
     for (id, pending) in [(&working, 0), (&asked, 1)] {
-        let attachment = store
-            .claim_session_attachment(id, None, &parent, true)
-            .unwrap();
+        let attachment =
+            attachment::claim_session_attachment(&store, id, None, &parent, true).unwrap();
         db.execute(
             "UPDATE processes SET pid=?2,os_started_at=?3 WHERE id=?1",
             rusqlite::params![attachment.agent_process_id, provider.0.id(), started],
@@ -1825,9 +1824,8 @@ fn program_status_cli_observes_available_without_completing_work() {
         [&lf_process_id],
     )
     .unwrap();
-    let attachment = store
-        .claim_session_attachment(&id, None, &lf_process_id, true)
-        .unwrap();
+    let attachment =
+        attachment::claim_session_attachment(&store, &id, None, &lf_process_id, true).unwrap();
     conn.execute(
         "UPDATE processes SET pid=?2,os_started_at=?3 WHERE id=?1",
         rusqlite::params![
@@ -2014,8 +2012,7 @@ fn program_status_cli_observes_available_without_completing_work() {
     assert!(ended["program_status"].is_null());
     assert!(ended["availability"].is_null());
     let attachment = store.session_attachment(&id).unwrap();
-    store
-        .claim_session_attachment(&id, attachment.as_ref(), &lf_process_id, true)
+    attachment::claim_session_attachment(&store, &id, attachment.as_ref(), &lf_process_id, true)
         .unwrap();
     let stale = observe("pane-3", 1, &records("idle"));
     assert!(!stale.status.success());

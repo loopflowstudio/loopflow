@@ -446,6 +446,33 @@ pub(super) fn primary_session_in(
     }
 }
 
+pub(super) fn claim_session_input_in(
+    tx: &Transaction<'_>,
+    mut next: LfSession,
+    expected: Option<&crate::process::SessionAttachment>,
+    process: &LfProcessId,
+    start: Option<&crate::process::LfProcessStart>,
+) -> StoreResult<(LfSession, crate::process::SessionAttachment)> {
+    let previous = session_in(tx, &next.id)?.ok_or(StoreError::NotFound)?;
+    if next.task_id == previous.task_id && next.task_id.is_some() {
+        next.wave_id = previous.wave_id.clone();
+    }
+    if previous.captured != next.captured
+        || previous.completed_at != next.completed_at
+        || previous.cwd != next.cwd
+        || previous.task_id != next.task_id
+        || previous.wave_id != next.wave_id
+    {
+        return Err(StoreError::InvalidAuthority(
+            "conversation changed before input admission".into(),
+        ));
+    }
+    replace_input_in(tx, &mut next, Some(process))?;
+    let attachment = super::processes::attach_in(tx, &next.id, expected, process, true, start)?;
+    let next = session_in(tx, &next.id)?.ok_or(StoreError::NotFound)?;
+    Ok((next, attachment))
+}
+
 fn observe_availability(conn: &Connection, mut now: i64) -> StoreResult<i64> {
     while crate::observe::active() {
         // Availability changes once at the next quiet deadline, not on every tick.
@@ -1382,7 +1409,7 @@ impl SqliteStore {
         .transpose()
     }
 
-    fn lock_session_checkouts(&self, session: &LfSession) -> StoreResult<Vec<File>> {
+    pub(crate) fn lock_session_checkouts(&self, session: &LfSession) -> StoreResult<Vec<File>> {
         self.lock_task_checkouts(&[session.cwd.as_path()], session.task_id.as_ref())
     }
 
@@ -1550,39 +1577,6 @@ impl SqliteStore {
         }
         tx.commit()?;
         Ok(session)
-    }
-
-    /// Reserve input and attachment together, including for an explicitly retried
-    /// retired Session. Retain its retirement; a losing claimant changes neither.
-    pub(crate) fn claim_session_input(
-        &self,
-        mut next: LfSession,
-        expected: Option<&crate::process::SessionAttachment>,
-        process: &loopflow_model::id::LfProcessId,
-        close: impl FnOnce() -> StoreResult<bool>,
-    ) -> StoreResult<(LfSession, crate::process::SessionAttachment)> {
-        let _admission = self.lock_session_checkouts(&next)?;
-        let session = next.id.clone();
-        self.with_session_resume(&session, expected, false, close, |tx| {
-            let previous = session_in(tx, &next.id)?.ok_or(StoreError::NotFound)?;
-            if next.task_id == previous.task_id && next.task_id.is_some() {
-                next.wave_id = previous.wave_id.clone();
-            }
-            if previous.captured != next.captured
-                || previous.completed_at != next.completed_at
-                || previous.cwd != next.cwd
-                || previous.task_id != next.task_id
-                || previous.wave_id != next.wave_id
-            {
-                return Err(StoreError::InvalidAuthority(
-                    "conversation changed before input admission".into(),
-                ));
-            }
-            replace_input_in(tx, &mut next, Some(process))?;
-            let attachment = super::processes::attach_in(tx, &next.id, expected, process, true)?;
-            let next = session_in(tx, &next.id)?.ok_or(StoreError::NotFound)?;
-            Ok((next, attachment))
-        })
     }
 
     /// Assign future work without changing earlier attribution. Closed Sessions bind too.

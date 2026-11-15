@@ -1,5 +1,7 @@
 //! Public launch proofs for the Session delivery cutover.
 use crate::support;
+use loopflow::process::attachment;
+
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Stdio};
@@ -594,17 +596,16 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
         [&other],
     )
     .unwrap();
-    let second = store
-        .claim_session_attachment(session, Some(&first), &other, false)
-        .unwrap();
-    let third = store
-        .claim_session_attachment(
-            session,
-            Some(&second),
-            first.lf_process_id.as_ref().unwrap(),
-            false,
-        )
-        .unwrap();
+    let second =
+        attachment::claim_session_attachment(&store, session, Some(&first), &other, false).unwrap();
+    let third = attachment::claim_session_attachment(
+        &store,
+        session,
+        Some(&second),
+        first.lf_process_id.as_ref().unwrap(),
+        false,
+    )
+    .unwrap();
     assert_eq!(first.agent_process_id, third.agent_process_id);
     assert_ne!(first.token, third.token);
     // The Machine server records each boundary; the hook claims its own steers.

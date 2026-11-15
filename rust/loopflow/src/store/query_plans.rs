@@ -324,6 +324,8 @@ pub(crate) fn foreign_key_lookups(store: &SqliteStore) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    use crate::process::attachment;
+
     use super::{
         assert_no_empty_writes, foreign_key_lookups, growing_scans, statements, GROWING, MEASURED,
     };
@@ -616,9 +618,8 @@ mod tests {
         let (_home, store, task, _viewer) = fixture();
         store.test_session("hooked", &crate::session_record::new_artifact_key());
         let process = store.test_lf_process();
-        let claim = store
-            .claim_session_attachment("hooked", None, &process, false)
-            .unwrap();
+        let claim =
+            attachment::claim_session_attachment(&store, "hooked", None, &process, false).unwrap();
         store
             .record_agent_process_identity("hooked", &claim, std::process::id(), 1)
             .unwrap();

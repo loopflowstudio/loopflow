@@ -7,6 +7,7 @@
 //! cargo test -p loopflow --test codex_live_smoke -- --ignored
 //! ```
 
+use loopflow::process::attachment;
 use std::time::Duration;
 
 use loopflow::agent::AgentConfig;
@@ -72,8 +73,7 @@ async fn codex_live_one_turn_smoke() {
             [&parent],
         )
         .expect("record attaching lf Process");
-    let attachment = store
-        .claim_session_attachment("smoke", None, &parent, true)
+    let attachment = attachment::claim_session_attachment(&store, "smoke", None, &parent, true)
         .expect("attachment");
     let config = AgentConfig {
         agent: Some("codex".to_string()),

@@ -1,3 +1,4 @@
+use crate::process::attachment;
 mod os_process;
 pub(crate) mod request;
 pub(crate) use os_process::OsProcess;
@@ -1279,10 +1280,7 @@ pub(crate) fn recorded_process_receipt(
     store: &SqliteStore,
     record: &crate::process::LfProcess,
 ) -> Result<Option<ProcessReceipt>, std::io::Error> {
-    match store
-        .process_receipt_path(&record.id)
-        .map_err(std::io::Error::other)?
-    {
+    match attachment::process_receipt_path(store, &record.id).map_err(std::io::Error::other)? {
         Some(path) => read_process_receipt(&path),
         None => Ok(None),
     }

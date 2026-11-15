@@ -1,4 +1,5 @@
 //! Observed provider changes. Reservations and viewer handoffs are not launches.
+
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
@@ -242,6 +243,8 @@ impl SqliteStore {
 
 #[cfg(test)]
 mod tests {
+    use crate::process::attachment;
+
     use super::{observe_in, TransitionKind};
     use crate::store::sqlite::SqliteStore;
     use loopflow_model::id::LfProcessId;
@@ -299,9 +302,9 @@ mod tests {
                 [&owner],
             )
             .unwrap();
-        let first = store
-            .claim_session_attachment("conversation", None, &owner, false)
-            .unwrap();
+        let first =
+            attachment::claim_session_attachment(&store, "conversation", None, &owner, false)
+                .unwrap();
         store.conn.lock().unwrap().execute(
             "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
              SELECT id,'observed','unreadable',1,'not JSON',current_capture FROM agent_sessions WHERE id='conversation'",
@@ -326,11 +329,14 @@ mod tests {
             store.provider_transition("conversation").unwrap().unwrap(),
             started
         );
-        let next = store
-            .replace_session_agent_process("conversation", &first, Some(&"native".into()), || {
-                Ok(true)
-            })
-            .unwrap();
+        let next = attachment::replace_session_agent_process(
+            &store,
+            "conversation",
+            &first,
+            Some(&"native".into()),
+            || Ok(true),
+        )
+        .unwrap();
         assert_eq!(
             store.provider_transition("conversation").unwrap().unwrap(),
             started

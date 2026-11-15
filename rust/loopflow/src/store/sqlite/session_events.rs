@@ -867,6 +867,8 @@ fn record_event_in(
 
 #[cfg(test)]
 mod tests {
+    use crate::process::attachment;
+
     use crate::session::SessionEventKind;
     use crate::store::sqlite::SqliteStore;
     use crate::store::RecordingGap;
@@ -1036,9 +1038,7 @@ mod tests {
                         [&process],
                     )
                     .unwrap();
-                store
-                    .claim_session_attachment(session, None, &process, false)
-                    .unwrap()
+                attachment::claim_session_attachment(store, session, None, &process, false).unwrap()
             });
         let origin = store.session_turn_origin(session, &attachment).unwrap();
         store
@@ -1072,9 +1072,9 @@ mod tests {
             conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
             conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,issue_title,issue_description,workspace_slug,created_at,updated_at) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1','Proof','','',1,1)", rusqlite::params![task.as_str(),project.as_str()]).unwrap();
         }
-        let attachment = store
-            .claim_session_attachment(&session.id, None, &process, false)
-            .unwrap();
+        let attachment =
+            attachment::claim_session_attachment(&store, &session.id, None, &process, false)
+                .unwrap();
         let before = store.session_turn_origin(&session.id, &attachment).unwrap();
         store
             .bind_session(&session.id, session.captured, &task)
@@ -1662,9 +1662,9 @@ mod tests {
                 )
                 .unwrap();
             }
-            let original = store
-                .claim_session_attachment(&session.id, None, &first, true)
-                .unwrap();
+            let original =
+                attachment::claim_session_attachment(&store, &session.id, None, &first, true)
+                    .unwrap();
             let mut child = Command::new("sleep")
                 .arg("30")
                 .process_group(0)
@@ -1686,9 +1686,14 @@ mod tests {
                 )
                 .unwrap();
             let current = if transfer {
-                let replacement = store
-                    .claim_session_attachment(&session.id, Some(&original), &second, false)
-                    .unwrap();
+                let replacement = attachment::claim_session_attachment(
+                    &store,
+                    &session.id,
+                    Some(&original),
+                    &second,
+                    false,
+                )
+                .unwrap();
                 assert!(matches!(
                     crate::process::finish_session_attachment(
                         &store,
@@ -1699,7 +1704,9 @@ mod tests {
                     Err(crate::store::StoreError::InvalidAuthority(_))
                 ));
                 assert!(child.try_wait().unwrap().is_none());
-                assert!(store.session_connection(&session.id).unwrap().is_some());
+                assert!(attachment::session_connection(&store, &session.id)
+                    .unwrap()
+                    .is_some());
                 replacement
             } else {
                 original
@@ -1712,7 +1719,9 @@ mod tests {
                 crate::journal::ProcessIdentityEvidence::Dead
             );
             let _ = child.wait();
-            assert!(store.session_connection(&session.id).unwrap().is_none());
+            assert!(attachment::session_connection(&store, &session.id)
+                .unwrap()
+                .is_none());
             assert_eq!(
                 store.session_thread(&session.id).unwrap(),
                 Some("saved-thread".into())
@@ -1780,12 +1789,12 @@ mod tests {
                     .unwrap();
                 }
             }
-            let attachment = store
-                .claim_session_attachment(id, None, &process, true)
-                .unwrap();
-            store
-                .finish_session_attachment(id, &attachment, outcome, None, || Ok(false))
-                .unwrap();
+            let attachment =
+                attachment::claim_session_attachment(&store, id, None, &process, true).unwrap();
+            attachment::finish_session_attachment(&store, id, &attachment, outcome, None, || {
+                Ok(false)
+            })
+            .unwrap();
             let saved = store.session(id).unwrap().unwrap();
             assert_eq!(saved.completed_at.is_some(), retired);
             assert_eq!(saved.captured, session.captured);
@@ -1816,18 +1825,24 @@ mod tests {
             )
             .unwrap();
         let expected = store.session_attachment("task-run").unwrap();
-        let turn = store
-            .claim_session_attachment("task-run", expected.as_ref(), &process, true)
-            .unwrap();
+        let turn = attachment::claim_session_attachment(
+            &store,
+            "task-run",
+            expected.as_ref(),
+            &process,
+            true,
+        )
+        .unwrap();
         assert!(store
             .session("task-run")
             .unwrap()
             .unwrap()
             .completed_at
             .is_none());
-        store
-            .finish_session_attachment("task-run", &turn, "completed", None, || Ok(true))
-            .unwrap();
+        attachment::finish_session_attachment(&store, "task-run", &turn, "completed", None, || {
+            Ok(true)
+        })
+        .unwrap();
         assert!(store
             .session("task-run")
             .unwrap()
@@ -1960,9 +1975,8 @@ mod tests {
                 )
                 .unwrap();
         }
-        let original = store
-            .claim_session_attachment(&session.id, None, &first, true)
-            .unwrap();
+        let original =
+            attachment::claim_session_attachment(&store, &session.id, None, &first, true).unwrap();
         record_captured_start(&store, &session.id, "turn");
         store
             .record_session_event(
@@ -1979,12 +1993,23 @@ mod tests {
             .unwrap()
             .completed_at
             .is_none());
-        let resumed = store
-            .claim_session_attachment(&session.id, Some(&original), &second, true)
-            .unwrap();
-        assert!(store
-            .finish_session_attachment(&session.id, &original, "interrupted", None, || Ok(false))
-            .is_err());
+        let resumed = attachment::claim_session_attachment(
+            &store,
+            &session.id,
+            Some(&original),
+            &second,
+            true,
+        )
+        .unwrap();
+        assert!(attachment::finish_session_attachment(
+            &store,
+            &session.id,
+            &original,
+            "interrupted",
+            None,
+            || Ok(false)
+        )
+        .is_err());
         assert!(store
             .session(&session.id)
             .unwrap()
@@ -1995,9 +2020,15 @@ mod tests {
             store.session_attachment(&session.id).unwrap().unwrap(),
             resumed
         );
-        store
-            .finish_session_attachment(&session.id, &resumed, "completed", None, || Ok(false))
-            .unwrap();
+        attachment::finish_session_attachment(
+            &store,
+            &session.id,
+            &resumed,
+            "completed",
+            None,
+            || Ok(false),
+        )
+        .unwrap();
         assert!(store
             .session(&session.id)
             .unwrap()
@@ -2028,9 +2059,8 @@ mod tests {
                 )
                 .unwrap();
         }
-        let attachment = store
-            .claim_session_attachment(&session.id, None, &first, false)
-            .unwrap();
+        let attachment =
+            attachment::claim_session_attachment(&store, &session.id, None, &first, false).unwrap();
         store
             .record_session_turn_origin(
                 &"thread".into(),
@@ -2047,8 +2077,7 @@ mod tests {
         store
             .replace_session_input(session.captured, replacement.clone(), None)
             .unwrap();
-        store
-            .claim_session_attachment(&session.id, Some(&attachment), &second, true)
+        attachment::claim_session_attachment(&store, &session.id, Some(&attachment), &second, true)
             .unwrap();
         // The replacement AgentProcess observes the first one's surviving turn.
         store
@@ -2316,9 +2345,9 @@ mod tests {
                 )
                 .unwrap();
         }
-        let original = store
-            .claim_session_attachment("conversation", None, &first, false)
-            .unwrap();
+        let original =
+            attachment::claim_session_attachment(&store, "conversation", None, &first, false)
+                .unwrap();
         store
             .record_session_connection(
                 "conversation",
@@ -2339,11 +2368,18 @@ mod tests {
                     .unwrap(),
             )
             .unwrap();
-        let replacement = store
-            .claim_session_attachment("conversation", Some(&original), &second, true)
-            .unwrap();
+        let replacement = attachment::claim_session_attachment(
+            &store,
+            "conversation",
+            Some(&original),
+            &second,
+            true,
+        )
+        .unwrap();
         assert_ne!(replacement.agent_process_id, original.agent_process_id);
-        assert!(store.session_connection("conversation").unwrap().is_none());
+        assert!(attachment::session_connection(&store, "conversation")
+            .unwrap()
+            .is_none());
         assert!(store
             .agent_process_identity("conversation")
             .unwrap()

@@ -2,6 +2,7 @@
 //! The real `lf` binary runs in a private Machine; a script stands in for the provider.
 #![cfg(unix)]
 
+use loopflow::process::attachment;
 mod support;
 
 use std::io::Write;
@@ -1520,9 +1521,7 @@ fn provider_parentage_does_not_assign_work_outside_its_checkout() {
         .session_attachment(&session)
         .unwrap()
         .unwrap_or_else(|| {
-            store
-                .claim_session_attachment(&session, None, &origin, true)
-                .unwrap()
+            attachment::claim_session_attachment(&store, &session, None, &origin, true).unwrap()
         });
     let caller = serde_json::to_string(&attachment.caller(session.clone().into())).unwrap();
     let closed = store.session(&session).unwrap().unwrap();
@@ -1594,8 +1593,7 @@ fn provider_parentage_does_not_assign_work_outside_its_checkout() {
         assert!(retained, "provider-issued work lost its causal parent");
     }
     // A stale provider keeps its original causal parent and grants no Work.
-    store
-        .claim_session_attachment(&session, Some(&attachment), &origin, true)
+    attachment::claim_session_attachment(&store, &session, Some(&attachment), &origin, true)
         .unwrap();
     let before = fixture.launches().len();
     let stale = fixture

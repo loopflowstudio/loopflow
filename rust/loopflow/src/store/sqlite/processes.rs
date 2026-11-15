@@ -8,13 +8,281 @@ use rusqlite::types::Value;
 use rusqlite::{params, params_from_iter, OptionalExtension, TransactionBehavior};
 
 use crate::process::{
-    AgentCaller, AgentProcess, LfProcess, ProcessCursor, ProcessEntry, ProcessFilter,
-    ProcessOutcomeFilter, ProcessPage, ProcessWorkFilter, SessionAttachment,
+    AgentCaller, AgentProcess, LfProcess, LfProcessStart, ProcessCursor, ProcessEntry,
+    ProcessFilter, ProcessOutcomeFilter, ProcessPage, ProcessWorkFilter, SessionAttachment,
 };
 use crate::store::{StoreError, StoreResult};
 use loopflow_model::id::{AgentProcessId, AgentSessionId, AttachmentToken, LfProcessId};
 
 use super::SqliteStore;
+
+/// Saved endpoint and native identity; liveness is observed by the caller.
+#[derive(Debug)]
+pub(crate) struct SavedSessionConnection {
+    pub endpoint: String,
+    pub thread: AgentSessionId,
+    pub completed_at: Option<i64>,
+    pub pid: Option<u32>,
+    pub os_started_at: Option<i64>,
+}
+
+/// What acquisition established about the previous AgentProcess.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PreviousAgentDisposition {
+    /// Already ended, or reserved without ever requesting a spawn.
+    Inactive,
+    /// Positive exit evidence from closing the provider.
+    Closed,
+    /// A foreground invocation continues beside the new attachment.
+    Running,
+}
+
+/// An exclusive attachment fence retained through acquisition and atomic claim.
+#[derive(Debug)]
+pub(crate) struct SessionTransfer<'a> {
+    store: &'a SqliteStore,
+    session: String,
+    expected: Option<SessionAttachment>,
+    _dispatch: File,
+}
+
+impl SessionTransfer<'_> {
+    pub(crate) fn attachment(&self) -> Option<&SessionAttachment> {
+        self.expected.as_ref()
+    }
+
+    pub(crate) fn previous_progress(&self) -> StoreResult<(bool, bool)> {
+        match &self.expected {
+            Some(previous) => {
+                let conn = self.store.conn.lock().expect("store mutex poisoned");
+                agent_process_progress_in(&conn, &previous.agent_process_id)
+            }
+            None => Ok((true, false)),
+        }
+    }
+
+    pub(crate) fn claim_attachment(
+        self,
+        process: &LfProcessId,
+        previous: PreviousAgentDisposition,
+        start: Option<&LfProcessStart>,
+    ) -> StoreResult<SessionAttachment> {
+        self.commit(previous, |tx| {
+            attach_in(
+                tx,
+                &self.session,
+                self.expected.as_ref(),
+                process,
+                true,
+                start,
+            )
+        })
+    }
+
+    pub(crate) fn claim_input(
+        self,
+        next: crate::session::LfSession,
+        process: &LfProcessId,
+        previous: PreviousAgentDisposition,
+        start: Option<&LfProcessStart>,
+    ) -> StoreResult<(crate::session::LfSession, SessionAttachment)> {
+        if loopflow_model::id::canonical_session(&next.id) != self.session {
+            return Err(attachment_changed());
+        }
+        self.commit(previous, |tx| {
+            super::sessions::claim_session_input_in(
+                tx,
+                next,
+                self.expected.as_ref(),
+                process,
+                start,
+            )
+        })
+    }
+
+    pub(crate) fn require_owner(&self) -> StoreResult<()> {
+        if self
+            .expected
+            .as_ref()
+            .is_some_and(|expected| expected.lf_process_id.is_some())
+        {
+            Ok(())
+        } else {
+            Err(attachment_changed())
+        }
+    }
+
+    pub(crate) fn replace_agent(
+        self,
+        resume_thread: Option<&AgentSessionId>,
+        reserved: bool,
+        start: Option<&LfProcessStart>,
+    ) -> StoreResult<SessionAttachment> {
+        let session = self.session.as_str();
+        let expected = self.expected.as_ref().ok_or_else(attachment_changed)?;
+        let mut conn = self.store.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        require_attachment_in(&tx, session, expected)?;
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        tx.execute(
+            "UPDATE processes SET completed_at=COALESCE(completed_at,?2),
+                spawn_state=CASE WHEN completed_at IS NULL AND NOT ?3 THEN 'exited' ELSE spawn_state END
+             WHERE id=?1",
+            params![expected.agent_process_id, now, reserved],
+        )?;
+        let next = attach_in(
+            &tx,
+            session,
+            Some(expected),
+            expected
+                .lf_process_id
+                .as_ref()
+                .expect("attachment is owned"),
+            true,
+            start,
+        )?;
+        // The former thread and all account/native observations remain history.
+        // Never clear a saved thread merely because a new harness omitted it.
+        tx.execute(
+            "INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,observed_at,payload,captured_event)
+             SELECT id,'observed',?2,?3,?4,json_object('type','agent_process_replaced',
+                'agent_process_id',?5,'next_agent_process_id',?6,
+                'provider_thread',provider_thread,'next_provider_thread',?7),current_capture
+             FROM agent_sessions WHERE id=?1",
+            params![session, format!("agent-process:{}:replacement", expected.agent_process_id),
+                expected.lf_process_id, now, expected.agent_process_id, next.agent_process_id, resume_thread],
+        )?;
+        tx.execute(
+            "UPDATE agent_sessions SET provider_thread=?2 WHERE id=?1",
+            params![session, resume_thread],
+        )?;
+        tx.commit()?;
+        Ok(next)
+    }
+
+    pub(crate) fn finish(
+        self,
+        outcome: &str,
+        departure: Option<&crate::process::Departure>,
+        closed: bool,
+    ) -> StoreResult<()> {
+        let session = self.session.as_str();
+        let expected = self.expected.as_ref().ok_or_else(attachment_changed)?;
+        let mut conn = self.store.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if attachment_in(&tx, session)?.as_ref() != Some(expected) {
+            return Err(attachment_changed());
+        }
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        let mut payload = serde_json::json!({
+            "type": "attachment_exit", "outcome": outcome, "attachment_token": expected.token
+        });
+        if let Some(departure) = departure {
+            payload["departure"] = serde_json::to_value(departure)
+                .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+        }
+        let exit_seq: i64 = tx.query_row(
+            "INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,observed_at,payload,captured_event)
+             SELECT id,'observed',?2,?3,?4,?5,current_capture FROM agent_sessions WHERE id=?1
+             RETURNING seq",
+            params![session, format!("attachment:{}:exit", expected.token), expected.lf_process_id,
+                now, payload.to_string()],
+            |row| row.get(0),
+        )?;
+        // A departure continues the Session elsewhere; only an exit without a
+        // destination completes it. A headless run is history once it stops
+        // working, whatever Work or Graph it served; attaching a later turn
+        // reopens it. Interactive primary, Wave and Task conversations, and
+        // Graph reviews, stay open.
+        tx.execute(
+            &format!(
+                "UPDATE agent_sessions AS s SET completed_at=?2 WHERE s.id=?1
+             AND s.completed_at IS NULL AND ?4
+             AND EXISTS(SELECT 1 FROM processes p WHERE p.id=s.agent_process_id AND p.attached_lf_process_id=p.parent_lf_process_id)
+             AND CASE WHEN s.interactive=0 THEN ?3 IN ('completed','interrupted','failed')
+             ELSE ?3 IN ('completed','interrupted') AND s.primary_scope IS NULL
+             AND s.wave_id IS NULL AND {} IS NULL AND NOT EXISTS({}) END",
+                super::sessions::SESSION_GRAPH,
+                super::task_work::session_tasks("s")
+            ),
+            params![session, now, outcome, departure.is_none()],
+        )?;
+        tx.execute(
+            "UPDATE processes SET attached_lf_process_id=NULL,attachment_token=?3,
+                attachment_exit_seq=?4,endpoint=CASE WHEN ?2 THEN NULL ELSE endpoint END,
+                completed_at=CASE WHEN ?2 THEN COALESCE(completed_at,?5) ELSE completed_at END,
+                spawn_state=CASE WHEN ?2 THEN 'exited' ELSE spawn_state END,
+                outcome=CASE WHEN ?2 AND ?6='interrupted' THEN ?6 ELSE outcome END WHERE id=?1",
+            params![
+                expected.agent_process_id,
+                closed,
+                AttachmentToken::new(),
+                exit_seq,
+                now,
+                outcome
+            ],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    fn commit<T>(
+        &self,
+        previous: PreviousAgentDisposition,
+        claim: impl FnOnce(&rusqlite::Transaction<'_>) -> StoreResult<T>,
+    ) -> StoreResult<T> {
+        let mut conn = self.store.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if attachment_in(&tx, &self.session)?.as_ref() != self.expected.as_ref() {
+            return Err(attachment_changed());
+        }
+        if let Some(attachment) = self
+            .expected
+            .as_ref()
+            .filter(|_| previous != PreviousAgentDisposition::Running)
+        {
+            // A never-launched reservation is retired without inventing OS exit.
+            tx.execute(
+                "UPDATE processes SET completed_at=COALESCE(completed_at,?2),
+                    spawn_state=CASE WHEN ?3 THEN 'exited' ELSE spawn_state END
+                 WHERE id=?1",
+                params![
+                    attachment.agent_process_id,
+                    time::OffsetDateTime::now_utc().unix_timestamp(),
+                    previous == PreviousAgentDisposition::Closed
+                ],
+            )?;
+        }
+        let result = claim(&tx)?;
+        tx.commit()?;
+        Ok(result)
+    }
+}
+
+/// Exact saved AgentProcess protected against attachment replacement.
+#[derive(Debug)]
+pub(crate) struct AgentProcessSettlement<'a> {
+    store: &'a SqliteStore,
+    expected: crate::process::AgentProcessState,
+    _dispatch: File,
+}
+
+impl AgentProcessSettlement<'_> {
+    pub(crate) fn commit(self) -> StoreResult<()> {
+        let mut conn = self.store.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let at = time::OffsetDateTime::now_utc().unix_timestamp();
+        tx.execute(
+            "UPDATE processes SET completed_at=?2,
+                spawn_state=CASE WHEN spawn_state='reserved' AND pid IS NULL THEN 'spawn_failed' ELSE 'exited' END,
+                endpoint=NULL WHERE id=?1",
+            params![self.expected.process.id, at],
+        )?;
+        complete_dead_headless_run_in(&tx, self.expected.process.id.as_str(), at)?;
+        tx.commit()?;
+        Ok(())
+    }
+}
 
 pub(super) const PROCESS_SELECT: &str =
     "SELECT e.id,e.trace_id,e.parent_lf_process_id,e.via_agent,e.caller_session_id,
@@ -337,6 +605,7 @@ pub(super) fn attach_in(
     expected: Option<&SessionAttachment>,
     process: &LfProcessId,
     replace_provider: bool,
+    start: Option<&LfProcessStart>,
 ) -> StoreResult<SessionAttachment> {
     let current = attachment_in(tx, session)?;
     if current.as_ref() != expected {
@@ -365,8 +634,8 @@ pub(super) fn attach_in(
         }
         // A best-effort start receipt can lose to a held write lock; the
         // attaching lf's row lands here instead, never a self-rooted agent.
-        if let Some(start) = crate::journal::current_start_record(process) {
-            super::record_process_in(tx, &start, crate::transport::current())?;
+        if let Some(start) = start {
+            super::record_process_in(tx, &start.process, start.terminal.as_ref())?;
         }
         tx.execute(
             "INSERT INTO processes(id,kind,trace_id,parent_lf_process_id,command,repo,cwd,
@@ -497,7 +766,10 @@ impl SqliteStore {
         }
     }
 
-    pub(crate) fn process_receipt_path(&self, id: &LfProcessId) -> StoreResult<Option<PathBuf>> {
+    pub(crate) fn process_receipt_locator(
+        &self,
+        id: &LfProcessId,
+    ) -> StoreResult<Option<(PathBuf, String)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let locator: Option<String> = conn
             .query_row(
@@ -512,7 +784,7 @@ impl SqliteStore {
             .and_then(|path| Path::new(path).parent());
         Ok(locator
             .zip(home)
-            .map(|(locator, home)| crate::journal::process_receipt_path(home, &locator)))
+            .map(|(locator, home)| (home.to_path_buf(), locator)))
     }
 
     pub(crate) fn process_for_receipt(&self, locator: &str) -> StoreResult<Option<LfProcess>> {
@@ -744,45 +1016,28 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn session_connection(
+    pub(crate) fn saved_session_connection(
         &self,
         session: &str,
-    ) -> StoreResult<Option<(String, AgentSessionId)>> {
-        let saved = {
-            let conn = self.conn.lock().expect("store mutex poisoned");
-            conn.query_row(
+    ) -> StoreResult<Option<SavedSessionConnection>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
                 "SELECT p.endpoint,s.provider_thread,p.completed_at,p.pid,p.os_started_at
-                 FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id
-                 WHERE s.id=?1 AND p.endpoint IS NOT NULL AND s.provider_thread IS NOT NULL",
+             FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id
+             WHERE s.id=?1 AND p.endpoint IS NOT NULL AND s.provider_thread IS NOT NULL",
                 [session],
                 |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, AgentSessionId>(1)?,
-                        row.get::<_, Option<i64>>(2)?,
-                        row.get::<_, Option<u32>>(3)?,
-                        row.get::<_, Option<i64>>(4)?,
-                    ))
+                    Ok(SavedSessionConnection {
+                        endpoint: row.get(0)?,
+                        thread: row.get(1)?,
+                        completed_at: row.get(2)?,
+                        pid: row.get(3)?,
+                        os_started_at: row.get(4)?,
+                    })
                 },
             )
-            .optional()?
-        };
-        let Some((endpoint, thread, completed, pid, start)) = saved else {
-            return Ok(None);
-        };
-        match crate::journal::agent_process_evidence(
-            completed,
-            pid,
-            start,
-            None,
-            crate::journal::process_identity_evidence,
-        ) {
-            crate::journal::ProcessIdentityEvidence::Live => Ok(Some((endpoint, thread))),
-            crate::journal::ProcessIdentityEvidence::Dead => Ok(None),
-            crate::journal::ProcessIdentityEvidence::Unknown => Err(StoreError::InvalidAuthority(
-                "AgentProcess OS identity is unavailable; cannot reconnect or replace it".into(),
-            )),
-        }
+            .optional()?)
     }
 
     pub(crate) fn session_thread(&self, session: &str) -> StoreResult<Option<AgentSessionId>> {
@@ -1120,10 +1375,11 @@ impl SqliteStore {
 
     /// Release ancestry that was never recorded, keeping the id it named in a
     /// Session fact. Returns false when the row no longer has the signature.
-    pub(crate) fn release_unrecorded_ancestry(
+    pub(crate) fn release_agent_ancestry(
         &self,
         agent: &UnrecordedAncestry,
         repairer: Option<&LfProcessId>,
+        start: Option<&LfProcessStart>,
     ) -> StoreResult<bool> {
         let _dispatch = agent
             .session_id
@@ -1132,8 +1388,8 @@ impl SqliteStore {
             .transpose()?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if let Some(start) = repairer.and_then(crate::journal::current_start_record) {
-            super::record_process_in(&tx, &start, crate::transport::current())?;
+        if let Some(start) = start {
+            super::record_process_in(&tx, &start.process, start.terminal.as_ref())?;
         }
         let released = tx.execute(
             &format!(
@@ -1168,19 +1424,18 @@ impl SqliteStore {
         Ok(true)
     }
 
-    /// Recheck the exact record and attachment while excluding native takeover.
-    /// Only positive OS death evidence (including successful termination) settles it.
-    pub(crate) fn settle_agent_process(
+    /// Acquire the Session fence and compare the complete saved process image.
+    /// The returned claim keeps takeover excluded through external termination.
+    pub(crate) fn begin_agent_settlement(
         &self,
         expected: &crate::process::AgentProcessState,
-        terminate: impl FnOnce() -> StoreResult<()>,
-    ) -> StoreResult<bool> {
+    ) -> StoreResult<Option<AgentProcessSettlement<'_>>> {
         let session = expected
             .process
             .agent_session_id
             .as_deref()
             .ok_or(StoreError::NotFound)?;
-        let _dispatch = self.lock_session_attachment(session)?;
+        let dispatch = self.lock_session_attachment(session)?;
         let matches: bool = {
             let conn = self.conn.lock().expect("store mutex poisoned");
             conn.query_row(
@@ -1199,22 +1454,11 @@ impl SqliteStore {
                 |row| row.get(0),
             )?
         };
-        if !matches {
-            return Ok(false);
-        }
-        terminate()?;
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let at = time::OffsetDateTime::now_utc().unix_timestamp();
-        tx.execute(
-            "UPDATE processes SET completed_at=?2,
-                spawn_state=CASE WHEN spawn_state='reserved' AND pid IS NULL THEN 'spawn_failed' ELSE 'exited' END,
-                endpoint=NULL WHERE id=?1",
-            params![expected.process.id, at],
-        )?;
-        complete_dead_headless_run_in(&tx, expected.process.id.as_str(), at)?;
-        tx.commit()?;
-        Ok(true)
+        Ok(matches.then(|| AgentProcessSettlement {
+            store: self,
+            expected: expected.clone(),
+            _dispatch: dispatch,
+        }))
     }
 
     /// Terminal placement is owned by the current attached lf, not by provider receipts.
@@ -1239,19 +1483,20 @@ impl SqliteStore {
         attachment_in(&conn, session)
     }
 
-    pub fn claim_session_attachment(
+    pub(crate) fn attach_session(
         &self,
         session: &str,
         expected: Option<&SessionAttachment>,
         process: &LfProcessId,
         replace_provider: bool,
+        start: Option<&LfProcessStart>,
     ) -> StoreResult<SessionAttachment> {
         let canonical = loopflow_model::id::canonical_session(session);
         let session = canonical.as_str();
         let _dispatch = self.lock_session_attachment(session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let attachment = attach_in(&tx, session, expected, process, replace_provider)?;
+        let attachment = attach_in(&tx, session, expected, process, replace_provider, start)?;
         tx.commit()?;
         Ok(attachment)
     }
@@ -1291,91 +1536,32 @@ impl SqliteStore {
             && self.session_terminal(session)?.is_none())
     }
 
-    /// Resume excludes takeover from observation through settlement and claim.
-    /// The close callback runs without SQLite held; its positive death evidence
-    /// commits with the caller's reservation, never as a successful agent outcome.
-    /// With `beside`, a previous agent that is still running keeps running,
-    /// detached from the Session, and its lf keeps waiting for it.
-    pub(super) fn with_session_resume<T>(
+    /// Hold attachment transfer across acquisition and the eventual SQL claim.
+    pub(crate) fn begin_session_transfer(
         &self,
         session: &str,
         expected: Option<&SessionAttachment>,
-        beside: bool,
-        close: impl FnOnce() -> StoreResult<bool>,
-        claim: impl FnOnce(&rusqlite::Transaction<'_>) -> StoreResult<T>,
-    ) -> StoreResult<T> {
-        let _dispatch = self.lock_session_attachment(session)?;
-        if self.session_attachment(session)?.as_ref() != expected {
+    ) -> StoreResult<SessionTransfer<'_>> {
+        let session = loopflow_model::id::canonical_session(session);
+        let dispatch = self.lock_session_attachment(&session)?;
+        if self.session_attachment(&session)?.as_ref() != expected {
             return Err(attachment_changed());
         }
-        if let Some(attached) = expected
-            .filter(|_| !beside)
-            .and_then(|attachment| attachment.lf_process_id.as_ref())
-        {
-            if crate::journal::lf_evidence(self, attached)
-                != crate::journal::ProcessIdentityEvidence::Dead
-            {
-                return Err(StoreError::InvalidAuthority(
-                    "Conversation already has an attached LfProcess; connect to it".into(),
-                ));
-            }
-        }
-        let mut closed = false;
-        let mut running = false;
-        if let Some(previous) = expected {
-            let (ended, reserved) = {
-                let conn = self.conn.lock().expect("store mutex poisoned");
-                agent_process_progress_in(&conn, &previous.agent_process_id)?
-            };
-            if !ended && !reserved {
-                closed = close()?;
-                if !closed && !beside {
-                    return Err(no_observed_exit());
-                }
-                running = !closed;
-            }
-        }
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if let Some(previous) = expected.filter(|_| !running) {
-            // A never-launched reservation is retired without inventing OS exit.
-            tx.execute(
-                "UPDATE processes SET completed_at=COALESCE(completed_at,?2),
-                    spawn_state=CASE WHEN ?3 THEN 'exited' ELSE spawn_state END
-                 WHERE id=?1",
-                params![
-                    previous.agent_process_id,
-                    time::OffsetDateTime::now_utc().unix_timestamp(),
-                    closed
-                ],
-            )?;
-        }
-        let result = claim(&tx)?;
-        tx.commit()?;
-        Ok(result)
-    }
-
-    pub(crate) fn resume_session_attachment(
-        &self,
-        session: &str,
-        expected: Option<&SessionAttachment>,
-        process: &LfProcessId,
-        close: impl FnOnce() -> StoreResult<bool>,
-    ) -> StoreResult<SessionAttachment> {
-        let canonical = loopflow_model::id::canonical_session(session);
-        let session = canonical.as_str();
-        let beside = self.runs_in_its_terminal(session)?;
-        self.with_session_resume(session, expected, beside, close, |tx| {
-            attach_in(tx, session, expected, process, true)
+        Ok(SessionTransfer {
+            store: self,
+            session,
+            expected: expected.cloned(),
+            _dispatch: dispatch,
         })
     }
 
     /// Reserve the next OS process for the same invocation after an observed
     /// exit. An uncertain spawn cannot be retried by overwriting its identity.
-    pub(crate) fn prepare_session_agent_process(
+    pub(crate) fn prepare_agent_process(
         &self,
         session: &str,
         expected: &SessionAttachment,
+        start: Option<&LfProcessStart>,
     ) -> StoreResult<SessionAttachment> {
         let _dispatch = self.lock_session_attachment(session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
@@ -1392,6 +1578,7 @@ impl SqliteStore {
                     .as_ref()
                     .expect("attachment is owned"),
                 true,
+                start,
             )?
         } else if reserved {
             expected.clone()
@@ -1400,63 +1587,6 @@ impl SqliteStore {
         };
         tx.commit()?;
         Ok(attachment)
-    }
-
-    /// Invocation-owned retry: retire a never-launched reservation or settle an
-    /// observed exit, retaining native history and selecting the next thread
-    /// atomically with the new process identity.
-    pub(crate) fn replace_session_agent_process(
-        &self,
-        session: &str,
-        expected: &SessionAttachment,
-        resume_thread: Option<&AgentSessionId>,
-        close: impl FnOnce() -> StoreResult<bool>,
-    ) -> StoreResult<SessionAttachment> {
-        let _dispatch = self.lock_session_attachment(session)?;
-        let (ended, reserved) = {
-            let conn = self.conn.lock().expect("store mutex poisoned");
-            require_attachment_in(&conn, session, expected)?;
-            agent_process_progress_in(&conn, &expected.agent_process_id)?
-        };
-        if !ended && !reserved && !close()? {
-            return Err(no_observed_exit());
-        }
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let now = time::OffsetDateTime::now_utc().unix_timestamp();
-        tx.execute(
-            "UPDATE processes SET completed_at=COALESCE(completed_at,?2),
-                spawn_state=CASE WHEN completed_at IS NULL AND NOT ?3 THEN 'exited' ELSE spawn_state END
-             WHERE id=?1",
-            params![expected.agent_process_id, now, reserved],
-        )?;
-        let next = attach_in(
-            &tx,
-            session,
-            Some(expected),
-            expected
-                .lf_process_id
-                .as_ref()
-                .expect("attachment is owned"),
-            true,
-        )?;
-        // The former thread and all account/native observations remain history.
-        // Never clear a saved thread merely because a new harness omitted it.
-        tx.execute(
-            "INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,observed_at,payload,captured_event)
-             SELECT id,'observed',?2,?3,?4,json_object('type','agent_process_replaced',
-                'agent_process_id',?5,'next_agent_process_id',?6,
-                'provider_thread',provider_thread,'next_provider_thread',?7),current_capture
-             FROM agent_sessions WHERE id=?1",
-            params![session, format!("agent-process:{}:replacement", expected.agent_process_id),
-                expected.lf_process_id, now, expected.agent_process_id, next.agent_process_id, resume_thread],
-        )?;
-        tx.execute(
-            "UPDATE agent_sessions SET provider_thread=?2 WHERE id=?1",
-            params![session, resume_thread],
-        )?;
-        tx.commit()?;
-        Ok(next)
     }
 
     pub fn release_session_attachment(
@@ -1479,81 +1609,6 @@ impl SqliteStore {
         )?;
         tx.commit()?;
         Ok(current)
-    }
-
-    /// Close and settle the exact attachment under the transfer lock. Provider
-    /// I/O holds no SQLite lock; the terminal writes commit together afterward.
-    pub(crate) fn finish_session_attachment(
-        &self,
-        session: &str,
-        expected: &SessionAttachment,
-        outcome: &str,
-        departure: Option<&crate::process::Departure>,
-        close_provider: impl FnOnce() -> StoreResult<bool>,
-    ) -> StoreResult<()> {
-        let canonical = loopflow_model::id::canonical_session(session);
-        let session = canonical.as_str();
-        let _dispatch = self.lock_session_attachment(session)?;
-        {
-            let conn = self.conn.lock().expect("store mutex poisoned");
-            if attachment_in(&conn, session)?.as_ref() != Some(expected) {
-                return Err(attachment_changed());
-            }
-        }
-        let closed = close_provider()?;
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let now = time::OffsetDateTime::now_utc().unix_timestamp();
-        let mut payload = serde_json::json!({
-            "type": "attachment_exit", "outcome": outcome, "attachment_token": expected.token
-        });
-        if let Some(departure) = departure {
-            payload["departure"] = serde_json::to_value(departure)
-                .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-        }
-        let exit_seq: i64 = tx.query_row(
-            "INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,observed_at,payload,captured_event)
-             SELECT id,'observed',?2,?3,?4,?5,current_capture FROM agent_sessions WHERE id=?1
-             RETURNING seq",
-            params![session, format!("attachment:{}:exit", expected.token), expected.lf_process_id,
-                now, payload.to_string()],
-            |row| row.get(0),
-        )?;
-        // A departure continues the Session elsewhere; only an exit without a
-        // destination completes it. A headless run is history once it stops
-        // working, whatever Work or Graph it served; attaching a later turn
-        // reopens it. Interactive primary, Wave and Task conversations, and
-        // Graph reviews, stay open.
-        tx.execute(
-            &format!(
-                "UPDATE agent_sessions AS s SET completed_at=?2 WHERE s.id=?1
-             AND s.completed_at IS NULL AND ?4
-             AND EXISTS(SELECT 1 FROM processes p WHERE p.id=s.agent_process_id AND p.attached_lf_process_id=p.parent_lf_process_id)
-             AND CASE WHEN s.interactive=0 THEN ?3 IN ('completed','interrupted','failed')
-             ELSE ?3 IN ('completed','interrupted') AND s.primary_scope IS NULL
-             AND s.wave_id IS NULL AND {} IS NULL AND NOT EXISTS({}) END",
-                super::sessions::SESSION_GRAPH,
-                super::task_work::session_tasks("s")
-            ),
-            params![session, now, outcome, departure.is_none()],
-        )?;
-        tx.execute(
-            "UPDATE processes SET attached_lf_process_id=NULL,attachment_token=?3,
-                attachment_exit_seq=?4,endpoint=CASE WHEN ?2 THEN NULL ELSE endpoint END,
-                completed_at=CASE WHEN ?2 THEN COALESCE(completed_at,?5) ELSE completed_at END,
-                spawn_state=CASE WHEN ?2 THEN 'exited' ELSE spawn_state END,
-                outcome=CASE WHEN ?2 AND ?6='interrupted' THEN ?6 ELSE outcome END WHERE id=?1",
-            params![
-                expected.agent_process_id,
-                closed,
-                AttachmentToken::new(),
-                exit_seq,
-                now,
-                outcome
-            ],
-        )?;
-        tx.commit()?;
-        Ok(())
     }
 
     /// Where the conversation went when `attachment` ended, if a mover said.
@@ -1615,6 +1670,8 @@ impl SqliteStore {
 
 #[cfg(test)]
 mod discovery_tests {
+    use crate::process::attachment;
+
     use std::num::NonZeroU32;
 
     use rusqlite::params;
@@ -1650,9 +1707,14 @@ mod discovery_tests {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("session", &crate::session_record::new_artifact_key());
-        let attachment = store
-            .claim_session_attachment("session", None, &store.test_lf_process(), true)
-            .unwrap();
+        let attachment = attachment::claim_session_attachment(
+            &store,
+            "session",
+            None,
+            &store.test_lf_process(),
+            true,
+        )
+        .unwrap();
         let conn = store.conn.lock().unwrap();
         conn.execute(
             "UPDATE processes SET spawn_state=NULL WHERE id=?1",
@@ -1670,9 +1732,14 @@ mod discovery_tests {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("session", &crate::session_record::new_artifact_key());
-        let attachment = store
-            .claim_session_attachment("session", None, &store.test_lf_process(), true)
-            .unwrap();
+        let attachment = attachment::claim_session_attachment(
+            &store,
+            "session",
+            None,
+            &store.test_lf_process(),
+            true,
+        )
+        .unwrap();
         let path = home.path().join("answering.sock");
         let _listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
         store
@@ -1684,7 +1751,7 @@ mod discovery_tests {
             )
             .unwrap();
         // Missing identity is unknown, never permission for a second launch.
-        assert!(store.session_connection("session").is_err());
+        assert!(attachment::session_connection(&store, "session").is_err());
         store
             .record_agent_process_identity(
                 "session",
@@ -1695,12 +1762,16 @@ mod discovery_tests {
                     .unwrap(),
             )
             .unwrap();
-        assert!(store.session_connection("session").unwrap().is_some());
+        assert!(attachment::session_connection(&store, "session")
+            .unwrap()
+            .is_some());
         store
             .record_agent_process_exit("session", &attachment, true)
             .unwrap();
         assert!(std::os::unix::net::UnixStream::connect(&path).is_ok());
-        assert!(store.session_connection("session").unwrap().is_none());
+        assert!(attachment::session_connection(&store, "session")
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -1711,18 +1782,18 @@ mod discovery_tests {
             store.test_session("conversation", &crate::session_record::new_artifact_key());
         let first = insert_process(&store, 1, 1);
         let second = insert_process(&store, 2, 2);
-        let attachment = store
-            .claim_session_attachment(&session.id, None, &first, true)
-            .unwrap();
+        let attachment =
+            attachment::claim_session_attachment(&store, &session.id, None, &first, true).unwrap();
         let mut next = session.clone();
         next.artifact_key = Some(crate::session_record::new_artifact_key());
         next.input_published = false;
         let before = store.session_history(&session.id, 0, 0).unwrap();
-        assert!(store
-            .claim_session_input(next.clone(), None, &second, || panic!(
+        assert!(
+            attachment::claim_session_input(&store, next.clone(), None, &second, || panic!(
                 "reserved process needs no close"
             ))
-            .is_err());
+            .is_err()
+        );
         assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
         assert_eq!(
             store.session_attachment(&session.id).unwrap(),
@@ -1744,11 +1815,14 @@ mod discovery_tests {
             )
             .unwrap();
         // A completion concurrent with preparation invalidates that snapshot.
-        assert!(store
-            .claim_session_input(next.clone(), Some(&attachment), &second, || {
-                panic!("reserved process needs no close")
-            })
-            .is_err());
+        assert!(attachment::claim_session_input(
+            &store,
+            next.clone(),
+            Some(&attachment),
+            &second,
+            || { panic!("reserved process needs no close") }
+        )
+        .is_err());
         assert_eq!(store.session_history(&session.id, 0, 0).unwrap(), before);
         assert_eq!(
             store.session_attachment(&session.id).unwrap(),
@@ -1771,11 +1845,14 @@ mod discovery_tests {
             )
             .unwrap();
         // Completion does not permit taking input from a still-attached owner.
-        assert!(store
-            .claim_session_input(next.clone(), Some(&attachment), &second, || {
-                panic!("live owner must be refused before closing its provider")
-            })
-            .is_err());
+        assert!(attachment::claim_session_input(
+            &store,
+            next.clone(),
+            Some(&attachment),
+            &second,
+            || { panic!("live owner must be refused before closing its provider") }
+        )
+        .is_err());
         assert_eq!(store.session_history(&session.id, 0, 0).unwrap(), before);
         assert_eq!(
             store.session(&session.id).unwrap().unwrap().completed_at,
@@ -1784,11 +1861,14 @@ mod discovery_tests {
         let mut owner = store.lf_process(&first).unwrap().unwrap();
         owner.completed_at = Some(11);
         store.record_process(&owner).unwrap();
-        let (admitted, claimed) = store
-            .claim_session_input(next.clone(), Some(&attachment), &second, || {
-                panic!("reserved process needs no close")
-            })
-            .unwrap();
+        let (admitted, claimed) = attachment::claim_session_input(
+            &store,
+            next.clone(),
+            Some(&attachment),
+            &second,
+            || panic!("reserved process needs no close"),
+        )
+        .unwrap();
         assert_eq!(admitted.artifact_key, next.artifact_key);
         assert_eq!(admitted.completed_at, Some(10));
         assert_ne!(admitted.captured, session.captured);
@@ -1805,11 +1885,12 @@ mod discovery_tests {
         assert_eq!(reserved.parent_lf_process_id.as_ref(), Some(&second));
         assert!(reserved.completed_at.is_none());
         next.artifact_key = Some(crate::session_record::new_artifact_key());
-        assert!(store
-            .claim_session_input(next, Some(&claimed), &first, || panic!(
+        assert!(
+            attachment::claim_session_input(&store, next, Some(&claimed), &first, || panic!(
                 "reserved process needs no close"
             ))
-            .is_err());
+            .is_err()
+        );
         assert_eq!(store.session_history(&session.id, 0, 0).unwrap(), history);
     }
 
@@ -2279,11 +2360,73 @@ mod discovery_tests {
 
 #[cfg(test)]
 mod attachment_tests {
+    use crate::process::attachment;
+
     use super::discovery_tests::insert_process;
     use crate::session::SessionActivity;
     use crate::store::sqlite::SqliteStore;
     use crate::store::StoreError;
     use loopflow_model::id::LfProcessId;
+
+    #[test]
+    fn attaching_start_receipt_and_terminal_commit_only_with_the_agent() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        store.test_session("conversation", &crate::session_record::new_artifact_key());
+        let seed = insert_process(&store, 1, 1);
+        let mut process = store.lf_process(&seed).unwrap().unwrap();
+        process.id = LfProcessId::new();
+        let terminal = loopflow_model::id::TerminalId::new();
+        store.create_terminal(&terminal, "fixture").unwrap();
+        let start = crate::process::LfProcessStart {
+            process,
+            terminal: Some(terminal.clone()),
+        };
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute_batch(
+                "CREATE TEMP TRIGGER reject_agent BEFORE INSERT ON processes
+             WHEN NEW.kind='agent' BEGIN SELECT RAISE(ABORT,'agent insert failed'); END;",
+            )
+            .unwrap();
+        assert!(store
+            .attach_session("conversation", None, &start.process.id, true, Some(&start),)
+            .is_err());
+        assert_eq!(store.lf_process(&start.process.id).unwrap(), None);
+        assert_eq!(store.session_attachment("conversation").unwrap(), None);
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute_batch("DROP TRIGGER reject_agent")
+            .unwrap();
+        let attached = store
+            .attach_session("conversation", None, &start.process.id, true, Some(&start))
+            .unwrap();
+        assert_eq!(
+            store.lf_process(&start.process.id).unwrap(),
+            Some(start.process.clone())
+        );
+        let agent = store
+            .agent_process(&attached.agent_process_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(agent.parent_lf_process_id.as_ref(), Some(&start.process.id));
+        assert_eq!(agent.trace_id, start.process.trace_id);
+        let placement: loopflow_model::id::TerminalId = store
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT held_terminal_id FROM processes WHERE id=?1",
+                [&start.process.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(placement, terminal);
+    }
 
     #[test]
     fn attachment_close_keeps_transfer_fenced_without_blocking_store_writes() {
@@ -2295,9 +2438,9 @@ mod attachment_tests {
         store.test_session("conversation", &crate::session_record::new_artifact_key());
         store.test_session("unrelated", &crate::session_record::new_artifact_key());
         let parent = insert_process(&store, 1, 1);
-        let attachment = store
-            .claim_session_attachment("conversation", None, &parent, true)
-            .unwrap();
+        let attachment =
+            attachment::claim_session_attachment(&store, "conversation", None, &parent, true)
+                .unwrap();
         let history = store.session_history("conversation", 0, 0).unwrap();
         let lock_path = std::fs::read_dir(path.with_extension("session-locks"))
             .unwrap()
@@ -2325,12 +2468,18 @@ mod attachment_tests {
             );
             Ok(())
         };
-        assert!(store
-            .finish_session_attachment("conversation", &attachment, "completed", None, || {
+        assert!(attachment::finish_session_attachment(
+            &store,
+            "conversation",
+            &attachment,
+            "completed",
+            None,
+            || {
                 close()?;
                 Err(StoreError::InvalidData("provider close failed".into()))
-            })
-            .is_err());
+            }
+        )
+        .is_err());
         assert_eq!(
             store.session_history("conversation", 0, 0).unwrap(),
             history
@@ -2346,12 +2495,18 @@ mod attachment_tests {
             .completed_at
             .is_none());
 
-        store
-            .finish_session_attachment("conversation", &attachment, "completed", None, || {
+        attachment::finish_session_attachment(
+            &store,
+            "conversation",
+            &attachment,
+            "completed",
+            None,
+            || {
                 close()?;
                 Ok(true)
-            })
-            .unwrap();
+            },
+        )
+        .unwrap();
         assert!(store
             .session_attachment("conversation")
             .unwrap()
@@ -2377,9 +2532,9 @@ mod attachment_tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("conversation", "run_00000000000000000000000000000001");
         let parent = insert_process(&store, 1, 1);
-        let first = store
-            .claim_session_attachment("conversation", None, &parent, true)
-            .unwrap();
+        let first =
+            attachment::claim_session_attachment(&store, "conversation", None, &parent, true)
+                .unwrap();
         store
             .record_agent_process_launch(
                 "conversation",
@@ -2404,9 +2559,14 @@ mod attachment_tests {
             Ok(false),
             Err(StoreError::InvalidAuthority("close failed".into())),
         ] {
-            assert!(store
-                .replace_session_agent_process("conversation", &first, None, || closed)
-                .is_err());
+            assert!(attachment::replace_session_agent_process(
+                &store,
+                "conversation",
+                &first,
+                None,
+                || closed
+            )
+            .is_err());
             assert_eq!(
                 store.agent_process(&first.agent_process_id).unwrap(),
                 Some(original.clone())
@@ -2420,8 +2580,10 @@ mod attachment_tests {
                 Some(first.clone())
             );
         }
-        let next = store
-            .replace_session_agent_process("conversation", &first, None, || Ok(true))
+        let next =
+            attachment::replace_session_agent_process(&store, "conversation", &first, None, || {
+                Ok(true)
+            })
             .unwrap();
         assert_ne!(first.agent_process_id, next.agent_process_id);
         assert_eq!(first.lf_process_id, next.lf_process_id);
@@ -2432,11 +2594,14 @@ mod attachment_tests {
             .completed_at
             .is_some());
         assert_eq!(store.session_thread("conversation").unwrap(), None);
-        assert!(store
-            .replace_session_agent_process("conversation", &first, None, || panic!(
-                "stale retry must never close the replacement"
-            ))
-            .is_err());
+        assert!(attachment::replace_session_agent_process(
+            &store,
+            "conversation",
+            &first,
+            None,
+            || panic!("stale retry must never close the replacement")
+        )
+        .is_err());
         let conn = store.conn.lock().unwrap();
         let retained: String = conn
             .query_row(
@@ -2455,13 +2620,11 @@ mod attachment_tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("conversation", "run_00000000000000000000000000000001");
         let parent = insert_process(&store, 1, 1);
-        let first = store
-            .claim_session_attachment("conversation", None, &parent, true)
-            .unwrap();
+        let first =
+            attachment::claim_session_attachment(&store, "conversation", None, &parent, true)
+                .unwrap();
         assert_eq!(
-            store
-                .prepare_session_agent_process("conversation", &first)
-                .unwrap(),
+            attachment::prepare_session_agent_process(&store, "conversation", &first).unwrap(),
             first
         );
         store
@@ -2472,9 +2635,7 @@ mod attachment_tests {
                 false,
             )
             .unwrap();
-        assert!(store
-            .prepare_session_agent_process("conversation", &first)
-            .is_err());
+        assert!(attachment::prepare_session_agent_process(&store, "conversation", &first).is_err());
         assert_eq!(
             store.session_attachment("conversation").unwrap(),
             Some(first.clone())
@@ -2486,18 +2647,15 @@ mod attachment_tests {
             .agent_process(&first.agent_process_id)
             .unwrap()
             .unwrap();
-        let next = store
-            .prepare_session_agent_process("conversation", &first)
-            .unwrap();
+        let next =
+            attachment::prepare_session_agent_process(&store, "conversation", &first).unwrap();
         assert_ne!(next.agent_process_id, first.agent_process_id);
         assert_eq!(next.lf_process_id, first.lf_process_id);
         assert_eq!(
             store.agent_process(&first.agent_process_id).unwrap(),
             Some(failed)
         );
-        assert!(store
-            .prepare_session_agent_process("conversation", &first)
-            .is_err());
+        assert!(attachment::prepare_session_agent_process(&store, "conversation", &first).is_err());
         assert!(store
             .with_session_attachment("conversation", &first, || Ok(()))
             .is_err());
@@ -2525,9 +2683,8 @@ mod attachment_tests {
                 )
                 .unwrap();
         }
-        let first = store
-            .claim_session_attachment("conversation", None, &a, true)
-            .unwrap();
+        let first =
+            attachment::claim_session_attachment(&store, "conversation", None, &a, true).unwrap();
         store
             .record_agent_process_identity(
                 "conversation",
@@ -2541,12 +2698,12 @@ mod attachment_tests {
         store
             .record_session_connection("conversation", &first, "endpoint", &"native-history".into())
             .unwrap();
-        let second = store
-            .claim_session_attachment("conversation", Some(&first), &b, false)
-            .unwrap();
-        let third = store
-            .claim_session_attachment("conversation", Some(&second), &a, false)
-            .unwrap();
+        let second =
+            attachment::claim_session_attachment(&store, "conversation", Some(&first), &b, false)
+                .unwrap();
+        let third =
+            attachment::claim_session_attachment(&store, "conversation", Some(&second), &a, false)
+                .unwrap();
         assert_eq!(first.lf_process_id, third.lf_process_id);
         assert_eq!(first.provider_lf_process_id, third.provider_lf_process_id);
         assert_eq!(first.agent_process_id, third.agent_process_id);
@@ -2558,7 +2715,7 @@ mod attachment_tests {
             .record_session_agent_session("conversation", &third, &"native-history".into())
             .unwrap();
         assert_eq!(
-            store.session_connection("conversation").unwrap(),
+            attachment::session_connection(&store, "conversation").unwrap(),
             Some(("endpoint".into(), "native-history".into()))
         );
 
@@ -2581,7 +2738,8 @@ mod attachment_tests {
                 Err(StoreError::InvalidAuthority(_))
             ));
             assert!(matches!(
-                store.finish_session_attachment(
+                attachment::finish_session_attachment(
+                    &store,
                     "conversation",
                     stale,
                     "interrupted",
@@ -2617,9 +2775,14 @@ mod attachment_tests {
         let released = store
             .release_session_attachment("conversation", &third)
             .unwrap();
-        let fourth = store
-            .claim_session_attachment("conversation", Some(&released), &a, false)
-            .unwrap();
+        let fourth = attachment::claim_session_attachment(
+            &store,
+            "conversation",
+            Some(&released),
+            &a,
+            false,
+        )
+        .unwrap();
         assert_ne!(third.token, fourth.token);
         assert!(matches!(
             store.with_session_attachment::<()>("conversation", &third, || panic!(
@@ -2851,15 +3014,14 @@ mod attachment_tests {
             store.test_session("conversation", &crate::session_record::new_artifact_key());
         let a = insert_process(&store, 1, 1);
         let b = insert_process(&store, 2, 2);
-        let first = store
-            .claim_session_attachment(&session.id, None, &a, true)
-            .unwrap();
+        let first =
+            attachment::claim_session_attachment(&store, &session.id, None, &a, true).unwrap();
         store
             .record_agent_process_identity(&session.id, &first, 4242, 123)
             .unwrap();
-        let second = store
-            .claim_session_attachment(&session.id, Some(&first), &b, false)
-            .unwrap();
+        let second =
+            attachment::claim_session_attachment(&store, &session.id, Some(&first), &b, false)
+                .unwrap();
         assert_eq!(first.agent_process_id, second.agent_process_id);
         assert_ne!(first.token, second.token);
         let released = store
@@ -2874,9 +3036,9 @@ mod attachment_tests {
             store.record_agent_process_identity(&session.id, &first, 5555, 123),
             Err(StoreError::InvalidAuthority(_))
         ));
-        let replacement = store
-            .claim_session_attachment(&session.id, Some(&released), &b, true)
-            .unwrap();
+        let replacement =
+            attachment::claim_session_attachment(&store, &session.id, Some(&released), &b, true)
+                .unwrap();
         assert_ne!(replacement.agent_process_id, first.agent_process_id);
         assert_eq!(store.agent_processes().unwrap().len(), 2);
         let old = store
@@ -2895,9 +3057,8 @@ mod attachment_tests {
         let session =
             store.test_session("conversation", &crate::session_record::new_artifact_key());
         let parent = insert_process(&store, 1, 1);
-        let attachment = store
-            .claim_session_attachment(&session.id, None, &parent, true)
-            .unwrap();
+        let attachment =
+            attachment::claim_session_attachment(&store, &session.id, None, &parent, true).unwrap();
         let history = store.session_history(&session.id, 0, 0).unwrap();
         let mut command = std::process::Command::new("codex");
         command.args(["app-server", "--listen", "unix:///fixture"]);
@@ -2948,30 +3109,27 @@ mod attachment_tests {
             store.test_session("conversation", &crate::session_record::new_artifact_key());
         let a = insert_process(&store, 1, 1);
         let b = insert_process(&store, 2, 2);
-        let first = store
-            .claim_session_attachment(&session.id, None, &a, true)
-            .unwrap();
+        let first =
+            attachment::claim_session_attachment(&store, &session.id, None, &a, true).unwrap();
         store
             .record_agent_process_identity(&session.id, &first, 4242, 123)
             .unwrap();
         let observed = store.agent_processes().unwrap().remove(0);
-        store
-            .claim_session_attachment(&session.id, Some(&first), &b, false)
-            .unwrap();
-        assert!(!store
-            .settle_agent_process(&observed, || panic!("stale signal"))
-            .unwrap());
+        attachment::claim_session_attachment(&store, &session.id, Some(&first), &b, false).unwrap();
+        assert!(
+            !attachment::settle_agent_process(&store, &observed, || panic!("stale signal"))
+                .unwrap()
+        );
         let current = store.agent_processes().unwrap().remove(0);
-        assert!(store
-            .settle_agent_process(&current, || {
-                // Settlement holds the attachment fence, not the SQLite mutex.
-                assert_eq!(
-                    store.agent_process(&current.process.id)?.as_ref(),
-                    Some(&current.process)
-                );
-                Ok(())
-            })
-            .unwrap());
+        assert!(attachment::settle_agent_process(&store, &current, || {
+            // Settlement holds the attachment fence, not the SQLite mutex.
+            assert_eq!(
+                store.agent_process(&current.process.id)?.as_ref(),
+                Some(&current.process)
+            );
+            Ok(())
+        })
+        .unwrap());
         let retained = store
             .agent_process(&first.agent_process_id)
             .unwrap()
@@ -2998,9 +3156,9 @@ mod attachment_tests {
                 )
                 .unwrap();
             let owner = insert_process(&store, number, 1);
-            let attachment = store
-                .claim_session_attachment(&session.id, None, &owner, true)
-                .unwrap();
+            let attachment =
+                attachment::claim_session_attachment(&store, &session.id, None, &owner, true)
+                    .unwrap();
             store
                 .record_agent_process_identity(&session.id, &attachment, 4242, 123)
                 .unwrap();
@@ -3010,7 +3168,7 @@ mod attachment_tests {
                 .into_iter()
                 .find(|agent| agent.process.agent_session_id.as_deref() == Some(id))
                 .unwrap();
-            assert!(store.settle_agent_process(&agent, || Ok(())).unwrap());
+            assert!(attachment::settle_agent_process(&store, &agent, || Ok(())).unwrap());
             completed.push(store.session(id).unwrap().unwrap().completed_at.is_some());
         }
         assert_eq!(completed, [true, false]);

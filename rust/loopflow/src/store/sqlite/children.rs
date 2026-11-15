@@ -1,6 +1,7 @@
 //! SQLite persistence for Project and Tasks.
 
 use super::planning_write;
+
 use crate::work::edit::WorkValue as Edit;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -2610,6 +2611,7 @@ impl SqliteStore {
 
 #[cfg(test)]
 mod local_planning_tests {
+    use crate::process::attachment;
 
     use rusqlite::params;
     use rusqlite::OptionalExtension;
@@ -2787,9 +2789,7 @@ mod local_planning_tests {
             "INSERT INTO processes(id,trace_id,started_at,command,cwd) VALUES(?1,'trace',1,'lf session resume','/fixture')",
             [&process],
         ).unwrap();
-        store
-            .claim_session_attachment("generated", None, &process, false)
-            .unwrap();
+        attachment::claim_session_attachment(&store, "generated", None, &process, false).unwrap();
         assert_eq!(
             store.session("generated").unwrap().unwrap().title,
             "abcdef Fix login"

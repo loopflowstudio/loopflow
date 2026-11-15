@@ -378,9 +378,10 @@ pub(crate) fn admit_for_test(config: &mut AgentConfig) -> crate::journal::TestLe
         )
         .unwrap();
     store.test_session("fixture", &crate::session_record::new_artifact_key());
-    let attachment = store
-        .claim_session_attachment("fixture", None, &process, true)
-        .unwrap();
+    let attachment = crate::process::attachment::claim_session_attachment(
+        &store, "fixture", None, &process, true,
+    )
+    .unwrap();
     config.session_attachment = Some(("fixture".into(), attachment));
     ledger
 }

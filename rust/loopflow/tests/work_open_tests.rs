@@ -1,4 +1,5 @@
 use crate::support;
+use loopflow::process::attachment;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -727,9 +728,8 @@ fn live_conversation(
         [&parent],
     )
     .unwrap();
-    let attachment = store
-        .claim_session_attachment(&id, None, &parent, true)
-        .unwrap();
+    let attachment =
+        attachment::claim_session_attachment(&store, &id, None, &parent, true).unwrap();
     db.execute(
         "UPDATE processes SET pid=?2,os_started_at=?3 WHERE id=?1",
         rusqlite::params![attachment.agent_process_id, provider.id(), started],
@@ -2425,9 +2425,7 @@ fn failed_attachment_returns_failure_and_the_same_command_can_retry() {
     .unwrap();
     let store =
         loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-    store
-        .claim_session_attachment(&session, None, &owner, true)
-        .unwrap();
+    attachment::claim_session_attachment(&store, &session, None, &owner, true).unwrap();
     let focus = lf(
         home.path(),
         repo.path(),

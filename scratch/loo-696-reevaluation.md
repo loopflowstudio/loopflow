@@ -31,6 +31,11 @@ tests. It auto-merged; its new rows render `TaskHeading.state` (lifecycle) and
 filter by Rust `states`, so it adds no second derivation.
 `scripts/test_desktop.sh --filter 'ProgramStatusTests|TaskRowMetadataTests|TaskConceptTests|WorkModelTests'`
 after that merge: app/test build and 63 headless tests passed.
+`48532297a3` merged main `42b31bc791` (#1861 terminal close reasons, #1945
+Desktop recovery deadlines). It auto-merged `server_schema.json`,
+`WorkNavigationTests.swift` and `.lf/skills/qa.md`;
+`cargo test -p loopflow --lib server::schema::tests::` then passed 8, including
+`the_checked_in_schema_is_what_describe_prints`.
 
 ## Architecture and decisions
 
@@ -221,16 +226,20 @@ performance/read-volume checks, full platform suites and final review; the
 interactive demo below remains. Publication and landing belong to their Graph
 steps, with no merge authorization implied here.
 
-QA round 2 (November 14, `scratch/qa.html`): live Dev app shows Busy/Available
+QA round 2 (November 14, `scratch/qa.html`; follow-up committed in `d38a194cb8`): live Dev app shows Busy/Available
 in row and pane header in agreement with Rust. The Working Tasks Dashboard caption
 said `state:open` while its members are the Working section; an owned unstarted
 Task is `open` but Backlog. Caption and `lf open`'s Desktop expression now say
 `state:working`; docs list the parser's states. The follow-up removes
 `SelectionWork.state_known`: `work_in` requires every Task state and propagates
 missing/read errors before producing rows. Unknown process activity and missing
-Work/query references retain their unavailable results. Focused regression coverage
-checks the Dashboard caption, Desktop workspace URL expressions, and an owned
-unstarted Task remaining Open/Backlog while excluded from Working.
+Work/query references retain their unavailable results. Regression coverage:
+`WorkNavigationTests.workingTasksDashboardCaption` (repository caption is
+`state:working`, authored `state:open` keeps its text),
+`open.rs::desktop_workspace_urls_select_working_tasks_in_repository_and_wave`,
+and `selections.rs::owned_unstarted_task_is_open_but_excluded_from_working_queries`
+(claimed unstarted Task absent from default, `state:working` and Wave Working;
+present in `state:open`, Wave Open and `state:unstarted state:backlog`).
 The first follow-up Swift build found two report tests still calling
 `TaskRowMetadata` without the `id` required after #1943; both now pass `task.id`.
 

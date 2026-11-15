@@ -199,6 +199,7 @@ final class GhosttyTerminalMount: NSView {
 @MainActor @Observable
 final class GhosttySurfacePool {
     private var views: [TerminalIdentity: GhosttyMetalView] = [:]
+    @ObservationIgnored private var retiring: [TerminalIdentity: (view: GhosttyMetalView, task: Task<Void, Never>)] = [:]
     @ObservationIgnored private let runtime: GhosttyManager?
     /// The size mounts last gave a terminal; an unmounted start uses it so the
     /// provider lays out for the pane it will appear in.
@@ -384,17 +385,25 @@ final class GhosttySurfacePool {
 
     /// Leaving a pane detaches its lf relay (Ctrl+]) before freeing the surface,
     /// so the Session owner records a deliberate leave without waiting for
-    /// connection-loss detection across SSH.
-    func release(_ id: TerminalIdentity) {
-        guard let view = views.removeValue(forKey: id) else { return }
+    /// connection-loss detection across SSH. Refresh awaits retirement before
+    /// preparing a replacement, so the old viewer cannot block it with Busy.
+    @discardableResult
+    func release(_ id: TerminalIdentity) -> Task<Void, Never>? {
+        guard let view = views.removeValue(forKey: id) else { return retiring[id]?.task }
+        view.updateFocus(isFocused: false, isEnabled: false)
         guard view.detachRelay() else {
             view.destroySurface()
-            return
+            return retiring[id]?.task
         }
-        Task { @MainActor in
+        let previous = retiring[id]?.task
+        let task = Task<Void, Never> { [weak self] in
+            await previous?.value
             try? await Task.sleep(for: .milliseconds(500))
             view.destroySurface()
+            if self?.retiring[id]?.view === view { self?.retiring.removeValue(forKey: id) }
         }
+        retiring[id] = (view, task)
+        return task
     }
 
     /// Begin ordinary leave for every attached relay before the app exits.
@@ -598,6 +607,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
 
     private func showConnection(_ reading: ServerConnectionReading) {
         let readonly = !reading.acceptsInput
+        let becameUsable = connectionReadonly && !readonly
         if surface != nil, connectionReadonly != readonly {
             performBinding("toggle_readonly")
             connectionReadonly = readonly
@@ -608,7 +618,20 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         retryConnection.isHidden = !(serverConnection?.canRetry ?? false)
         moveConnection.isHidden = !reading.canMoveHere
         superview?.needsLayout = true
+        if becameUsable {
+            restoreInputFocus()
+        }
     }
+
+    private func restoreInputFocus() {
+        guard focusRequested, inputEnabled, !childExited, !detaching,
+              !isHiddenOrHasHiddenAncestor, retainedSearchBar?.isHidden != false,
+              !hasMarkedText(), let window,
+              window.firstResponder == nil || window.firstResponder === window || window.firstResponder === self else { return }
+        if window.firstResponder !== self { window.makeFirstResponder(self) }
+        if window.firstResponder === self, let surface { ghostty_surface_set_focus(surface, true) }
+    }
+
     /// Last values sent to the current surface. SwiftUI calls updateNSView on every
     /// parent render; unchanged size, scale and feedback must not reach Ghostty.
     private nonisolated(unsafe) var appliedScale: (surface: ghostty_surface_t, scale: CGFloat)?
@@ -693,6 +716,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             updateFeedbackPreferences()
             if window != nil { setupDisplayLink() }
             setupTrackingArea()
+            restoreInputFocus()
             onSurfaceCreated()
         } else {
             serverConnection?.stop()
@@ -719,13 +743,15 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             updateContentScale()
             updateSurfaceSize()
         }
-        if focusRequested { window?.makeFirstResponder(self) }
+        if focusRequested, acceptsFirstResponder, retainedSearchBar?.isHidden != false, !hasMarkedText() {
+            window?.makeFirstResponder(self)
+        }
     }
 
     func updateFocus(isFocused: Bool, isEnabled: Bool) {
         inputEnabled = isEnabled
         updateFeedbackPreferences()
-        let requested = isEnabled && isFocused
+        let requested = isEnabled && isFocused && !childExited && !detaching
         let changed = focusRequested != requested
         focusRequested = requested
         if requested && changed {
@@ -776,6 +802,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }
 
     func destroySurface() {
+        updateFocus(isFocused: false, isEnabled: false)
         serverConnection?.stop()
         serverConnection = nil
         copyDismissal?.cancel()
@@ -1031,10 +1058,10 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         setupTrackingArea()
     }
 
-    override var acceptsFirstResponder: Bool { inputEnabled }
+    override var acceptsFirstResponder: Bool { inputEnabled && !childExited && !detaching }
 
     override func becomeFirstResponder() -> Bool {
-        guard inputEnabled else { return false }
+        guard acceptsFirstResponder else { return false }
         let accepted = super.becomeFirstResponder()
         if accepted, let surface {
             ghostty_surface_set_focus(surface, true)
@@ -1753,7 +1780,8 @@ final class GhosttySurfacePool {
     func title(for id: TerminalIdentity) -> String? { nil }
     func scrollToBottom(_ id: TerminalIdentity) {}
     func screen(_ id: TerminalIdentity) -> String? { nil }
-    func release(_ id: TerminalIdentity) {}
+    @discardableResult
+    func release(_ id: TerminalIdentity) -> Task<Void, Never>? { nil }
     func detachForQuit() {}
     var hasRunningRelays: Bool { false }
     func clearFocus() {}

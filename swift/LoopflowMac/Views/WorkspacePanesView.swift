@@ -987,7 +987,10 @@ struct SessionPaneView: View {
                     Perf.agentInput("surface_created", session: item.id)
                     sessions.beginPaneLoad(item.id)
                 },
-                onSurfaceFailed: { reason in sessions.recordPaneFailure(item.id, reason: reason) },
+                onSurfaceFailed: { reason in
+                    guard sessions.sessions.first(where: { $0.id == item.id })?.launchId == item.launchId else { return }
+                    sessions.recordPaneFailure(item.id, reason: reason)
+                },
                 onFocus: focusPane
             )
             .id(item.launchId)

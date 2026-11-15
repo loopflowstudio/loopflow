@@ -568,19 +568,19 @@ struct DesktopAction {
             return nil
         },
         DesktopAction("refresh-session", "Refresh Session", scope: .pane) { context in
-            let (_, pane) = try context.addressed
+            let (workspace, pane) = try context.addressed
             guard let id = pane.sessionId else {
                 throw DesktopTargetError("Address a Session pane to refresh its conversation; nothing changed.")
             }
-            Task { @MainActor in await context.workspaces.refreshSession(id) }
+            Task { @MainActor in await context.workspaces.refreshSession(id, in: workspace) }
             return DesktopActionOutcome(pane: pane.id, tab: nil)
         },
         DesktopAction("take-back-session", "Take Back Session", scope: .pane) { context in
-            let (_, pane) = try context.addressed
+            let (workspace, pane) = try context.addressed
             guard let id = pane.sessionId else {
                 throw DesktopTargetError("Address a Session pane to take back its input; nothing changed.")
             }
-            Task { @MainActor in await context.workspaces.takeBackSession(id) }
+            Task { @MainActor in await context.workspaces.takeBackSession(id, in: workspace) }
             return DesktopActionOutcome(pane: pane.id, tab: nil)
         },
         DesktopAction("switch", "Switch Conversation", scope: .pane,

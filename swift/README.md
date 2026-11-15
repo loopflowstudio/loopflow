@@ -1059,6 +1059,9 @@ Opening shows **Opening… Input paused** through attachment and native readines
 Connection feedback overlays the terminal, so clearing it does not resize the
 provider or move its cursor. Both mount layout and pre-mount sizing keep the same
 viewport while status changes.
+Refresh waits for its previous viewer to retire before preparing a replacement.
+`WarmPaneMountTests` checks this headless with paused input and overlapping
+Refresh requests. `GhosttyTerminalMountTests` checks mounted focus separately.
 Check native status, paused input, local copy/Find/scroll, Retry after exhaustion,
 one-shot **Move here**, and cancellation on pane closure. Only an owner exit means
 ended. Installed-helper replacement must preserve the Session and Graph owners

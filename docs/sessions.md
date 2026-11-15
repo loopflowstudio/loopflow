@@ -255,10 +255,30 @@ pid.
 
 ## When Desktop loses its connection
 
+Reopen Desktop after an unexpected exit and select the Task you were working on.
+If its provider is still running, the same Session returns with its history,
+unsent draft and pending requests. Once the selected pane is ready, typing
+continues there without switching to another Task and back.
+
+If the pane stays paused or refuses typing, use **Refresh session** in its
+toolbar. Refresh reconnects that Session's view and restores focus when it is
+ready. It keeps the running provider and its editor, and never resends submitted
+input or restarts the Task's Graph. Preparing the view is only the first step;
+input stays paused until the conversation can accept it.
+
+If another view holds input, the pane stays read-only. Choose **Take back** to
+move input here deliberately; Refresh leaves that other view in control. A
+connected terminal's **Move here** action also requests control explicitly.
+If the provider has ended, use the offered resume action to continue the same
+Session from history; an ended provider's unsent editor contents cannot be
+restored from history.
+
 Desktop reconnects to the same running conversation automatically and shows connection
 status outside the terminal. Typing pauses while the screen remains available.
-A newer viewer keeps control until an explicit **Move here** request. **Retry**
-repairs connectivity; it does not resume a new provider or replay input.
+**Retry connection** retries a failed connection. If it is unavailable or the
+pane remains paused, **Refresh session** reopens the view. An unavailable server
+shows its recovery action; follow [Desktop connection diagnosis](troubleshooting.md#desktop-cannot-connect)
+if it still cannot connect.
 [Connect clients](server.md) covers server updates and connection diagnosis.
 
 A view of a Task, Wave or shell conversation continues from its place in the

@@ -480,12 +480,17 @@ final class SessionsWorkspaceRegistry {
         if let sessions { openWarmConversations(store: sessions) }
     }
 
-    func refreshSession(_ id: String) async {
-        await sessions?.refresh(id)
+    func refreshSession(_ id: String, in workspace: SessionsWorkspace) async {
+        await store(for: workspace)?.refresh(id)
     }
 
-    func takeBackSession(_ id: String) async {
-        await sessions?.moveHere(id)
+    func takeBackSession(_ id: String, in workspace: SessionsWorkspace) async {
+        await store(for: workspace)?.moveHere(id)
+    }
+
+    private func store(for workspace: SessionsWorkspace) -> SessionsStore? {
+        let repository = WorkWorkspaceKey(repository: workspace.key.repository, kind: .repository, id: workspace.key.repository)
+        return workspaces[repository]?.retainedStore
     }
 
     func evict(_ key: WorkWorkspaceKey) {
@@ -1147,16 +1152,19 @@ final class SessionsStore {
         executionLocations[record.id] == nil ? checkout : repoPath
     }
 
-    func release(_ id: String) {
-        guard let index = _index(id) else { return }
+    @discardableResult
+    func release(_ id: String) -> Task<Void, Never>? {
+        guard let index = _index(id) else { return nil }
+        var retirement: Task<Void, Never>?
         if let machine = sessions[index].record.workspace?.machineId {
             // Shells retain their own lifetime, including agents launched inside them.
             let terminal = TerminalIdentity.session(id, machineId: machine)
             sessions[index].lastScreen = surfaces.screen(terminal) ?? sessions[index].lastScreen
-            surfaces.release(terminal)
+            retirement = surfaces.release(terminal)
         }
         sessions[index].state = .pending
         sessions[index].launchId = UUID()
+        return retirement
     }
 
     private let metrics: SessionsLatencyMetrics
@@ -1293,7 +1301,10 @@ final class SessionsStore {
                 Perf.agentInput("surface_created", session: id)
                 self?.beginPaneLoad(id)
             },
-            onSurfaceFailed: { [weak self] reason in self?.recordPaneFailure(id, reason: reason) })
+            onSurfaceFailed: { [weak self] reason in
+                guard let self, self.sessions.first(where: { $0.id == id })?.launchId == item.launchId else { return }
+                self.recordPaneFailure(id, reason: reason)
+            })
     }
 
     func select(_ id: String, intent: SessionOpenIntent = .reveal) async {
@@ -1331,7 +1342,14 @@ final class SessionsStore {
     /// Replace this pane's viewer and read the same conversation again. A
     /// provider running in another terminal remains there until Take back.
     func refresh(_ id: String) async {
-        release(id)
+        guard let index = _index(id) else { return }
+        let retirement = release(id)
+        let generation = sessions[index].launchId
+        sessions[index].state = .opening
+        await retirement?.value
+        guard let current = _index(id), sessions[current].launchId == generation else { return }
+        sessions[current].state = .pending
+        guard !Task.isCancelled else { return }
         await select(id)
     }
 

@@ -12,6 +12,98 @@ import GhosttyKit
 #if canImport(GhosttyKit)
 @Suite("Retained terminal mounts", .requiresDisplay, .serialized)
 struct GhosttyTerminalMountTests {
+    @Test("Delayed input readiness restores selected focus without taking Find's editor")
+    @MainActor
+    func delayedInputReadinessRestoresFocus() async throws {
+        _ = NSApplication.shared
+        let directory = URL(fileURLWithPath: "/tmp/lf-focus-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let pool = GhosttySurfacePool()
+        let identity = TerminalIdentity.session("focus-recovery", machineId: fixtureMachineId)
+        let terminal = pool.view(for: identity)
+        terminal.workingDirectory = directory.path
+        // A disposable relay speaks the production status socket. Each file
+        // advances one reading; no provider or personal Session is involved.
+        terminal.command = """
+        /bin/sh -c \(shellEscape("""
+        {
+          printf '%s\\n' '{"generation":1,"state":"connected","input":true,"native_ready":false,"message":null}'
+          for phase in 1 2 3; do
+            while [ ! -e "\(directory.path)/$phase" ]; do sleep 0.01; done
+            if [ "$phase" = 2 ]; then state=reconnecting; ready=false; input=false; else state=connected; ready=true; input=true; fi
+            printf '{"generation":%s,"state":"%s","input":%s,"native_ready":%s,"message":null}\\n' "$phase" "$state" "$input" "$ready"
+          done
+          cat < /dev/tty
+        } | /usr/bin/nc -U "$LF_SERVER_STATUS"
+        """))
+        """
+        let manager = GhosttyManager.shared
+        manager.initialize()
+        terminal.updateFocus(isFocused: true, isEnabled: true)
+        terminal.createSurface(manager: manager)
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 600, height: 400),
+            styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = GhosttyTerminalMount(terminal: terminal)
+        defer {
+            pool.release(identity)
+            terminal.destroySurface()
+            window.contentView = nil
+            try? FileManager.default.removeItem(at: directory)
+        }
+        func wait(_ condition: () -> Bool) async throws {
+            let deadline = ContinuousClock.now + .seconds(5)
+            while !condition() {
+                try #require(ContinuousClock.now < deadline)
+                try await Task.sleep(for: .milliseconds(10))
+            }
+        }
+        func advance(_ phase: Int) throws {
+            try Data().write(to: directory.appendingPathComponent(String(phase)))
+        }
+        try await wait { terminal.connectionReading?.state == .connected }
+        #expect(!terminal.connectionAcceptsInput)
+        window.makeFirstResponder(nil)
+        try advance(1)
+        try await wait { terminal.connectionAcceptsInput }
+        #expect(window.firstResponder === terminal)
+        terminal.searchBar.open(needle: "draft")
+        let editor = window.firstResponder
+        try advance(2)
+        try await wait { terminal.connectionReading?.state == .reconnecting }
+        try advance(3)
+        try await wait { terminal.connectionAcceptsInput }
+        #expect(window.firstResponder === editor)
+        terminal.updateFocus(isFocused: true, isEnabled: true)
+        #expect(window.firstResponder === editor)
+    }
+
+    @Test("A retired viewer cannot take focus back from its Refresh replacement")
+    @MainActor
+    func retiredViewerCannotRegainFocus() throws {
+        _ = NSApplication.shared
+        let pool = GhosttySurfacePool()
+        let identity = TerminalIdentity.session("retired-viewer", machineId: fixtureMachineId)
+        let retired = pool.view(for: identity)
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 600, height: 400),
+            styleMask: [.titled], backing: .buffered, defer: false)
+        let root = NSView(frame: window.contentLayoutRect)
+        window.contentView = root
+        defer { window.contentView = nil; pool.release(identity) }
+        root.addSubview(GhosttyTerminalMount(terminal: retired))
+        retired.updateFocus(isFocused: true, isEnabled: true)
+        try #require(window.firstResponder === retired)
+        pool.release(identity)
+        let replacement = pool.view(for: identity)
+        root.addSubview(GhosttyTerminalMount(terminal: replacement))
+        replacement.updateFocus(isFocused: true, isEnabled: true)
+        try #require(window.firstResponder === replacement)
+        // SwiftUI can update the outgoing representable after the replacement mounts.
+        retired.updateFocus(isFocused: true, isEnabled: true)
+        #expect(window.firstResponder === replacement)
+        #expect(retired.childExited)
+        #expect(!window.makeFirstResponder(retired))
+    }
+
     @Test("An off-window representable cannot steal a displayed terminal")
     @MainActor
     func offWindowTerminalMount() async throws {

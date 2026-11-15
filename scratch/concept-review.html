@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-907 · Session input recovery</title>
+<style>
+  :root { color-scheme: light dark; font: 17px/1.5 system-ui, sans-serif; }
+  body { max-width: 760px; margin: 3rem auto; padding: 0 1.2rem 3rem; }
+  h1 { font-size: 1.9rem; line-height: 1.15; }
+  h2 { font-size: 1.15rem; margin-top: 2rem; }
+  header, small { color: light-dark(#595959, #bdbdbd); }
+  code { font-size: .85em; overflow-wrap: anywhere; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; vertical-align: top; padding: .65rem .45rem; border-bottom: 1px solid light-dark(#ccc, #555); }
+  blockquote { margin: 1.5rem 0; padding-left: 1rem; border-left: 3px solid light-dark(#825a28, #e2ba7d); }
+  @media (max-width: 540px) { body { margin-top: 1.5rem; } table { font-size: .85rem; } }
+</style>
+<header>LOO-907 · concept-review · 2026-11-14<br>
+Built from <code>scratch/session-input-recovery.md</code>, <code>docs/sessions.md</code>,
+<code>docs/troubleshooting.md</code>, <code>DesktopActions.swift</code>,
+<code>SessionsView.swift</code>, <code>WorkspacePanesView.swift</code>,
+<code>GhosttyTerminalView.swift</code> and <code>ServerConnection.swift</code>.</header>
+<main>
+<h1>Keep the conversation. Repair its view.</h1>
+<p><strong>Review outcome: advance.</strong> No design change or open product choice.
+The existing design separates Refresh from deliberate input takeover.</p>
+<blockquote>The biggest mismatch: a pane can display history and finish preparation
+while typing is still paused. Painted history must never imply usable input.</blockquote>
+<h2>Actions → concepts → APIs</h2>
+<table>
+<thead><tr><th>Action</th><th>Concept</th><th>State-changing API</th></tr></thead>
+<tbody>
+<tr><td>Reopen the Task; continue typing</td><td>Same Session, current viewer</td><td><code>select</code> → non-replacing reveal; live <code>acceptsInput</code> → selected focus</td></tr>
+<tr><td>Refresh session</td><td>Replace the viewer; retain execution</td><td>Addressed workspace → <code>refresh</code> → await <code>release</code> → <code>select</code></td></tr>
+<tr><td>Take back / Move here</td><td>Deliberately transfer input</td><td><code>moveHere</code> → replacing resume or explicit connection move</td></tr>
+</tbody></table>
+<h2>Before → implemented in this checkout</h2>
+<p><strong>Before:</strong> addressed actions used the last warm store; Refresh could
+prepare while its paused predecessor still lived; unchanged selection could leave
+recovering focus unreconciled.</p>
+<p><strong>Implemented, awaiting mounted acceptance:</strong> addressed Work selects
+its repository store; the pool owns viewer retirement; Refresh waits for it;
+<code>launchId</code> excludes replaced failure callbacks. A transition to usable
+input reconciles selected focus while leaving Find, IME and other editors alone.</p>
+<p>The holder and provider keep the editor and running work. No new database state,
+readiness flag, protocol or recovery service. No submitted input is replayed.</p>
+<h2>Walk through recovery</h2>
+<p>Open the same Task → read its surviving conversation → type when ready.
+If status disappears, input pauses. Refresh retires the old viewer and reveals
+that same Session. Another controller keeps input until Take back. If the provider
+ended, resume its history; its lost editor is not promised.</p>
+<p><strong>Still to show:</strong> in a disposable mounted Desktop, keep an unsent
+draft, kill only Desktop, reopen the Task, edit the draft and submit one new marker.
+Repeat Refresh with another controller. Headless checks cover routing, retirement
+and transport continuity separately. They do not establish mounted focus, real
+pending-request preservation or the original crash cause.</p>
+<h2>Review questions, resolved by the existing design</h2>
+<ol>
+<li>Does Refresh take input from another view? <strong>No.</strong> Take back is deliberate.</li>
+<li>Does preparation mean recovery succeeded? <strong>No.</strong> The live reading determines usable input.</li>
+<li>Is a new product decision needed? <strong>No.</strong> Continue to verification; keep the crash cause unknown.</li>
+</ol>
+</main>
+</html>

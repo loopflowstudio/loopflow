@@ -2805,6 +2805,133 @@ fn command_line(pid: libc::pid_t) -> (libc::pid_t, String) {
     )
 }
 
+/// Desktop's viewer can disappear with a draft still in the provider's editor.
+/// Reopening and Refresh replace views, never that provider or accepted input.
+#[test]
+fn desktop_crash_reopen_keeps_draft_and_submits_new_input_once() {
+    let fixture = Fixture::new();
+    let service = ServerProof::start(&fixture, false);
+    let path = fixture.provider(
+        r#"#!/bin/bash
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+stty -echo -icanon min 1 < /dev/tty
+printf '%s:%s:%s\n' "$$" "$LF_CAPTURE_KEY" "$*" >> "$HOME/launches"
+printf 'editor-ready\r\n'
+draft=
+while IFS= read -r -n 1 char < /dev/tty; do
+    if [ -z "$char" ]; then
+        printf '%s\n' "$draft" >> "$HOME/answers"
+        printf 'received:%s\r\n' "$draft"
+        draft=
+    else
+        draft="$draft$char"
+        printf 'draft:%s\r\n' "$draft"
+    fi
+done
+"#,
+    );
+    let mut launch = fixture.command(&["-a", "claude", "resume"]);
+    launch.env("PATH", &path);
+    let mut first = Terminal::spawn(launch);
+    let launched = fixture.launches(1).pop().unwrap();
+    let provider: libc::pid_t = launched.split(':').next().unwrap().parse().unwrap();
+    let _provider = KillOnDrop(provider);
+    let session = session_of(&fixture.sql(), &launched);
+    let held = fixture.terminal_of(&session);
+    let agent: String = fixture
+        .sql()
+        .query_row(
+            "SELECT agent_process_id FROM agent_sessions WHERE id=?1",
+            [&session],
+            |row| row.get(0),
+        )
+        .unwrap();
+    first.wait_text("editor-ready");
+    first
+        .child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(b"unsent-")
+        .unwrap();
+    first.wait_text("draft:unsent-");
+    first.stop();
+
+    let open = |name: &str| {
+        let status = ConnectionStatus::new(fixture.home.path().join(name));
+        let mut command = service.command(&["session", "resume", "--reveal-existing", &session]);
+        command
+            .env("PATH", &path)
+            .env("LF_SERVER", "1")
+            .env("LF_SERVER_STATUS", &status.path);
+        let mut view = Terminal::spawn(command);
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let reading = status.reading();
+            if reading.as_ref().is_some_and(|reading| {
+                reading["state"] == "connected"
+                    && reading["input"] == true
+                    && reading["native_ready"] == true
+            }) {
+                break;
+            }
+            view.assert_viewing("the Desktop recovery viewer");
+            assert!(Instant::now() < deadline, "not ready: {reading:?}");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        (view, status)
+    };
+    let (mut reopened, status) = open("reopened.sock");
+    reopened
+        .child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(b"draft\n")
+        .unwrap();
+    reopened.wait_text("received:unsent-draft");
+    // A second non-replacing attachment cannot take this viewer's input.
+    let (socket, _) = fixture.held_entrance(&held);
+    let mut competing = Viewer::new(socket);
+    competing.request(json!({"kind":"attach","control":true,"replace":false,
+        "rows":24,"cols":80,"own":"request"}));
+    assert_eq!(competing.until_reply()["kind"], "busy");
+    drop(competing);
+    reopened.assert_viewing("the reopened Desktop viewer");
+    reopened.stop();
+    drop(status);
+    let (mut refreshed, _status) = open("refreshed.sock");
+    refreshed
+        .child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(b"after-refresh\n")
+        .unwrap();
+    refreshed.wait_text("received:after-refresh");
+    assert_eq!(
+        fixture.wait_file("answers"),
+        "unsent-draft\nafter-refresh\n"
+    );
+    assert_eq!(fixture.launches(1), vec![launched.clone()]);
+    assert_eq!(session_of(&fixture.sql(), &launched), session);
+    assert_eq!(fixture.terminal_of(&session), held);
+    let current_agent: String = fixture
+        .sql()
+        .query_row(
+            "SELECT agent_process_id FROM agent_sessions WHERE id=?1",
+            [&session],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(current_agent, agent);
+    assert!(alive(provider));
+    refreshed.stop();
+    // SAFETY: this fixture's provider recorded its own pid.
+    unsafe { libc::kill(provider, libc::SIGKILL) };
+    fixture.held_ends(&held);
+}
+
 #[test]
 fn a_held_pane_reads_reconnecting_until_the_next_server_answers() {
     let fixture = Fixture::new();

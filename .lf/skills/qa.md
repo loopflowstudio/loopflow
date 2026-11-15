@@ -138,6 +138,16 @@ Run the app's bundled `lf` with the world's `env.json` variables and
   `swift` script; both apps answer to one bundle ID. Then end the world's owners
   by PID (check `LF_HOME` in `ps eww`) and boot out the label in its
   `server.plist`.
+- `scripts/loopflow-dev.py install` builds and installs without launching; then
+  `open -n --env …` the bundle yourself to control launch timing. While the
+  screen is locked (`CGSSessionScreenIsLocked`), `screencapture` is black and
+  `-l <window>` fails: sample `lf desktop ls --json` instead. Its `reading`/
+  `reason` are the window's work status and `list` the sidebar rows.
+- To delay or break Work reads, SIGSTOP the private server. Desktop registers
+  it under launchd, so `kill -9` restarts it within seconds; for a sustained
+  outage boot out the `server.plist` label, then `lf server run` to recover.
+  The world's holder outlives both; stop it and its stand-ins by PID
+  (`ps eww` shows `LF_HOME=/private/tmp/…`).
 
 ## Physical iPhone
 
@@ -620,6 +630,17 @@ most); a PTY driver that answers only `ESC[6n` sees that pause. After a build
 swap, `lf monitor rollover --dry-run` should list the old holder and its views
 as staying; `lf ps` BINARIES names each build with its version.
 
+For final bridge reasons, attach through `session.attach` and consume the viewer
+frames described in `transport/README.md`. Check one final `0x07` Close before
+EOF: `replaced` after `session new --prepare`, `finished` after provider exit,
+and `retired` after shell Close or Task cleanup. Reattach by the same Session
+only after the replacement starts; assert no extra provider launch or input
+replay. Fault the server separately: absent a Close, EOF remains unknown and
+recovery retains the same held terminal. Use the existing heartbeat checks for
+quiet providers and a lost return path. Desktop status travels over its private
+`LF_SERVER_STATUS` Unix stream; inspect readings and actions there, never files.
+Mounted presentation still needs a display-capable check.
+
 ## Task conversation lifetime
 
 `cargo build -p loopflow --bin lf-world`, then `lf-world build one-task <dir>`
@@ -727,6 +748,14 @@ family, plus one Clap → ops wiring break (e.g. drop `worktree` in
 A break no test notices is a missing row; add it, then repeat the break.
 Edit only from one shell, one cargo command at a time, so no other build
 compiles the mutated source.
+
+For a Swift-only test change, skip the wrapper's Rust rebuild: run
+`swift build --build-tests --package-path swift --jobs 4`, then
+`scripts/test_desktop.sh --skip-build --filter <Suite>/<test>`. Rebuild after
+`git checkout` restores a mutation, or the next `--skip-build` run tests the
+mutated binary. A break that leaves an unbounded Observation wait pending
+hangs until Swift Testing's 300-second limit stops the run; run that break
+in the foreground so its exit status reaches you.
 
 A Swift "passes under parallel load" check can't use two `swift test`
 processes: the second waits on the `.build` lock ("Another instance of

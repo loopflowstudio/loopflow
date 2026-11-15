@@ -39,6 +39,8 @@ pub(crate) struct NativeExit {
 #[derive(Debug)]
 pub(crate) struct Settled {
     pub code: u8,
+    /// This attachment yielded to another place or provider.
+    pub moved: bool,
     /// What a viewer reads after the provider's own exit text.
     pub lines: Vec<String>,
 }
@@ -123,6 +125,7 @@ pub(crate) fn settle(exit: &NativeExit, status: ExitStatus) -> Settled {
     };
     let mut settled = Settled {
         code,
+        moved: command.moved.is_some(),
         lines: command.moved.into_iter().collect(),
     };
     if failed {
@@ -437,6 +440,7 @@ mod tests {
                 .unwrap();
             let settled = settle(&exit, ExitStatus::from_raw(7 << 8));
             assert_eq!(settled.code, 0);
+            assert!(settled.moved);
             assert!(settled
                 .lines
                 .iter()

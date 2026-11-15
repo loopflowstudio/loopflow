@@ -526,6 +526,33 @@ device on the same account cannot redeem them. Client-supplied identity and a
 proxy's Unix UID cannot substitute for authentication. Local and remote
 tickets are not interchangeable. The 60-second lifetime includes host sleep.
 
+### Terminal bridge endings
+
+An orderly terminal ends its viewer stream with `0x07`, a four-byte big-endian
+payload length and UTF-8 JSON, such as `{"reason":"replaced"}`. The server bridge
+and raw relay forward it unchanged. It is outside PTY bytes and needs no event
+nonce, so unfinished terminal escapes cannot swallow the reason.
+`lf server describe --json` exposes the schema under `x-terminal-close`.
+
+| Reason | Meaning | Client action |
+| --- | --- | --- |
+| `replaced` | This attachment yielded to another place or provider. | Request `session.attach` again for the same Session with `terminal_id: null`; retry with a bound while the next terminal becomes available. |
+| `finished` | Execution finished. | Stop automatic attachment and keep the final screen. |
+| `retired` | Task cleanup or shell Close ended this terminal. | Stop automatic attachment; deliberately resume when needed. |
+
+Attachment finds existing execution. It never launches a provider or replays
+keystrokes. A replacement terminal requires fresh input and geometry claims;
+request them without replacement so another viewer keeps control. Desktop's
+decoded relay shows the reason, disables input and stops recovery; it does not
+automatically follow a replacement.
+
+Shutdown allows a bounded drain. A slow or broken connection can miss the final
+frame: EOF or timeout alone leaves the reason unknown. Server restart continues
+to use the same held terminal and its PTY position, without ending the provider.
+The existing heartbeat detects an unanswered return path independently of typing;
+a quiet provider remains attached when the bridge answers. Missing execution is
+reported, never started by an attachment attempt.
+
 ## Turn and tool boundaries
 
 A launch is managed when a Task, Wave or repository command starts it: `lf

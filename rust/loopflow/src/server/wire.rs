@@ -104,8 +104,10 @@ pub enum ServerOperation {
     /// A ticket for the Session's held terminal, answered `{ticket,
     /// terminal_id, expires_in_ms}`. A new connection presents the ticket as
     /// its first message (`attach`) and becomes the bridge; this connection
-    /// stays a client. When the terminal ends, the bridge closes; attaching
-    /// again by the same Session reaches its next one. A Session no terminal
+    /// stays a client. An orderly terminal sends a final `0x07` frame with
+    /// JSON `{reason: replaced|finished|retired}` (see `x-terminal-close`).
+    /// After `replaced`, attaching by the same Session reaches its next terminal.
+    /// Bare EOF leaves the reason unknown. A Session no terminal
     /// runs is `not_found`; attaching never starts a provider.
     #[serde(rename = "session.attach")]
     #[schemars(extend("x-result" = generator.subschema_for::<SessionAttached>()))]

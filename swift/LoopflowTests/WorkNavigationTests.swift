@@ -1,6 +1,7 @@
 #if os(macOS)
 import AppKit
 import Foundation
+import Observation
 import SwiftUI
 import Testing
 import ViewInspector
@@ -343,7 +344,7 @@ struct WorkNavigationTests {
         _ = try navigator.inspect().find(text: "REVIEW")
         _ = try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-wave-repository")
         let first = try navigator.inspect().find(TaskRowMetadata.self) { try $0.actualView().slotHint == "⌘1" }
-        #expect(try first.actualView().task.id == "issue-now")
+        #expect(try first.actualView().id == "issue-now")
     }
 
     @Test("Zooming a Working Tasks tile keeps Working Tasks in the trail, and Back returns to it")
@@ -759,6 +760,28 @@ struct WorkNavigationTests {
         await model.refresh()
         model.select(.task(id: "issue-review"))
         let owner = model.navigation
+        func waitForAttempt(_ attempt: String) async throws {
+            let (changes, completion) = AsyncStream<Void>.makeStream()
+            let timeout = Task {
+                do { try await Task.sleep(for: .seconds(3)) }
+                catch { return }
+                completion.finish()
+            }
+            defer {
+                timeout.cancel()
+                completion.finish()
+            }
+            var iterator = changes.makeAsyncIterator()
+            while owner.startingTaskSessions.contains("issue-review") {
+                withObservationTracking {
+                    _ = owner.startingTaskSessions
+                } onChange: {
+                    completion.yield(())
+                }
+                let changed: Void? = await iterator.next()
+                try #require(changed != nil, "\(attempt): issue-review did not settle on its originating owner within 3 seconds")
+            }
+        }
         let gate = PlanningGate()
         let view = WorkSurfaceView(model: model, onNewSession: { _ in
             await gate.wait()
@@ -772,10 +795,7 @@ struct WorkNavigationTests {
         model.setRepoPath("/src/context")
         let other = model.navigation
         await gate.release()
-        let deadline = Date().addingTimeInterval(3)
-        while owner.startingTaskSessions.contains("issue-review"), Date() < deadline {
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        try await waitForAttempt("Failed preparation")
         #expect(owner.startingTaskSessions.isEmpty)
         #expect(other.taskSessionErrors.isEmpty)
         model.setRepoPath("/src/loopflow")
@@ -794,9 +814,7 @@ struct WorkNavigationTests {
         #expect(throws: (any Error).self) {
             try retry.inspect().find(text: "Preparation failed for the original Task")
         }
-        while owner.startingTaskSessions.contains("issue-review"), Date() < deadline {
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        try await waitForAttempt("Retry")
         #expect(owner.taskSessionErrors.isEmpty)
         #expect(owner.startingTaskSessions.isEmpty)
     }

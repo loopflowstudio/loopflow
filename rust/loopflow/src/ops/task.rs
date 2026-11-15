@@ -2964,12 +2964,7 @@ pub(crate) async fn task_comment_async(
 ) -> OpsResult<TaskComments> {
     let (store, task) = resolve_saved_task(repo, wave, issue).await?;
     if let Some(message) = message {
-        append_task_comment(&store, &task, message, steer)?;
-        super::planning_sync::sync_after_save(
-            &store,
-            &repository_for_task(&store, &task)?.to_string_lossy(),
-        )
-        .await;
+        append_task_comment_async(&store, &task, message, steer).await?;
     }
     let refresh_error = if message.is_none() && task.linear_id.is_some() {
         match tokio::time::timeout(
@@ -2991,6 +2986,21 @@ pub(crate) async fn task_comment_async(
         .map_err(|error| OpsError::Message(error.to_string()))?;
     thread.refresh_error = refresh_error;
     Ok(thread)
+}
+
+pub(crate) async fn append_task_comment_async(
+    store: &Store,
+    task: &Task,
+    message: &str,
+    steer: bool,
+) -> OpsResult<String> {
+    let id = append_task_comment(store, task, message, steer)?;
+    super::planning_sync::sync_after_save(
+        store,
+        &repository_for_task(store, task)?.to_string_lossy(),
+    )
+    .await;
+    Ok(id)
 }
 
 pub(crate) async fn resolve_saved_task(

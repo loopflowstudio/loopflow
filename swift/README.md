@@ -489,8 +489,13 @@ or running edge is marked. The labels of the edges leaving the current node
 are buttons; each runs `lf -b task run` as a child of the app. No edge is offered while one runs. An edge whose Graph stopped holds the
 Task, is drawn stopped, and is offered again with the others leaving its
 node. **Move to** changes Workflow position; `end` requests completion.
-**Complete** changes Task status independently. **Retry completion** retries a
-failed request without replaying the Graph.
+**Complete** removes the Task from affected lists and counts immediately. Completing
+the selected Task opens the next visible Task, or an empty selection when none
+remains. Other windows keep their selections; Back can still reach the retained
+workspace. The original command saves before sending. A failed save restores its
+membership and offers **Retry Complete**, keeping later navigation. A lost reply
+recovers that same request. **Retry completion** retries a domain-reported failure
+without replaying the Graph.
 Linear completion leaves the displayed Workflow and live Processes intact.
 Loading or unavailable Workflow readings remain explicit; a failed refresh keeps
 the last recorded graph with its actions disabled. Only a successful Task reading
@@ -1164,9 +1169,19 @@ for that Machine; recovery never replays an uncertain command. Rust compiles a
 finite membership program over selection states, preserving scope, source paths
 and order. The shared Swift projection derives members, attention, arrangement,
 visible/suppressed occurrences and unique Task counts together; unknown membership
-has no exact total. Both clients consume these projected query results. Completion's
-synchronous gesture/outbox migration, normalized cross-query facts and phone
-recovery presentation remain unfinished.
+has no exact total. Both clients consume these projected query results through
+`WorkInteraction`, one main-actor presentation owner per Machine. Its query leases
+keep separate windows on the same projection. Complete publishes and navigates
+synchronously, then saves the same ID in gesture order before sending. Store
+publications replace transient effects by ID and revision, including when a fast
+receipt has already retired the operation. Disk, receipt and cache changes repaint
+mounted queries without another server frame. Save failure retains the original
+command for retry. Shared query tests run on both targets, including held disk,
+reply permutations, restart and replacement epochs. Normalized cross-query facts,
+finite closed-query invalidation and the remaining mutation families are unfinished.
+Desktop's unsaved Dashboard and `replacePlan` readers still bypass this owner;
+cutting those readers over and exposing displayed projection in inspection remain
+required before the cross-platform migration is complete.
 
 Terminal recovery must preserve the exact owner, draft and newer control claims.
 Opening shows **Opening… Input paused** through attachment and native readiness;

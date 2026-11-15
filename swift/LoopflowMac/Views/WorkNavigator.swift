@@ -61,10 +61,16 @@ struct WorkNavigator: View {
             if let status = model.workStatus.message {
                 WorkReadStatus(model: model, status: status)
             }
-            if let error = model.dashboardError ?? model.selectionPlans.errorMessage,
+            if let error = model.dashboardError ?? model.presentationError ?? model.selectionPlans.errorMessage,
                ![model.roadmap.errorMessage, model.taskListReading.errorMessage, model.sessions.errorMessage]
                 .compactMap({ $0 }).contains(error) {
                 Text(error).font(Typography.body(11)).foregroundStyle(palette.warning).padding(10)
+            }
+            ForEach(model.completionFailures) { failure in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(failure.message).font(Typography.body(11)).foregroundStyle(palette.warning)
+                    Button("Retry Complete") { model.retryCompletion(failure.id) }
+                }.padding(10)
             }
             // The repository tops the sidebar; a selected Wave moves up under it.
             VStack(alignment: .leading, spacing: 5) {

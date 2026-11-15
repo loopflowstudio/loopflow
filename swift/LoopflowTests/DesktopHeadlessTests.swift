@@ -416,10 +416,6 @@ struct DesktopHeadlessTests {
         try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-move-review-design").button().tap()
         #expect(try await tapped(4) == ["task", "run", task.task.identifier, "--from", "review-design", "--json"])
 
-        // Completion has its own operation and does not move the Workflow.
-        await model.completeTask(task)
-        #expect(await started.calls.last == ["task", "complete", task.task.identifier, "--json"])
-
         // A shipping Task offers Stop Auto-Ship in place of Auto-Ship.
         let shipping = try #require(wave.tasks.items.first { $0.shipping != nil })
         let shipped = TaskShipControl(model: model, task: shipping)

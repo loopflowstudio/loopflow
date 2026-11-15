@@ -457,6 +457,10 @@ existing bounded input owners: no offline keystroke queue or automatic resend.
 - Removed in this cut: `Selection::expand`'s snapshot-only interpreter. Rust now
   compiles the finite membership program and evaluates that same program. Keep
   selection identity, scope/name resolution, unavailable evidence and server order.
+- Removed: Desktop Complete's checkpoint/action path and async button wrappers;
+  phone stream-owned displayed rows and unbound Task navigation links. Shared
+  intent, leases and outbox publications replace them; keep generic command
+  confirmation and creation recovery coverage.
 - Removed in this cut: Desktop Dashboard's temporary mutation of
   `resolution.members` to obtain visible rows. Projected membership, arrangement,
   attention and counts are derived together; retained confirmed DTOs stay immutable.
@@ -526,7 +530,7 @@ and their consumers must converge together.
 5. Measure actual latency and remove demonstrated backend waits independently of
    presentation; run the full acceptance matrix and native demo.
 
-Slice status is under Current implementation cut; slice 4 has not started.
+Slice status is under Current implementation cut; Complete starts slice 4.
 
 Headless acceptance uses deterministic held/reordered replies, not timing sleeps:
 shared reducer tests cover overlapping success/failure, stale reads, partial pages,
@@ -684,84 +688,47 @@ the full shared projection.
 
 ## Current implementation cut
 
-Protocol revision 6 provides stamped subscriptions, Git-free admission and one
-receipt owner. Both creation transports use the shared SQLite outbox. Exact saved
-commands, independent submitted/canonical identities, legacy candidate adoption,
-receipt revisions and epoch-checked admission remain intact. Details and previous
-checks are at `aeb4ed3b2b0e7256748fa69bd76f77acff966b98:scratch/instant-task-session.md`.
-The launch checkpoint and phone sheet/outcome presentation remain interim;
-no shared projection cutover is claimed. Presentation acknowledges showing a result;
-retirement also requires resolved domain evidence and persisted reload fences.
+This pass connects production Complete on both hosts through shared
+`WorkInteraction`: one main-actor owner per Machine, per-window/feed query leases,
+synchronous membership/count publication and origin-only next/empty navigation.
+The same immutable ID and original destination enter the outbox in gesture order
+before send. Transient effects use the existing membership evaluator; snapshots
+from the disk actor adopt them by ID/publication revision, including retirement
+before first adoption. Store changes repaint mounted queries without another
+server reply. Save failure removes only its unsaved layer, retains its command
+and error, and never navigates. Saved completion recovery starts on mount and
+never silently retargets or replays a dispatched request after epoch replacement.
+The phone now replaces its route rather than stacking obsolete destinations;
+network failure keeps its presentation lease. Pending Complete and Retry appear
+on both hosts. Confirmed DTOs remain separate from presentation.
 
-Server recovery (detail and checks at `9fdf6ef582:scratch/instant-task-session.md`):
-completion/reopen and Task field/Wave edits return original results without
-replay; definite refusal covers content/membership validation only, later errors
-stay uncertain. Stage resolutions stay in `commits` (committed, refused,
-superseded); completion withdrawal resolves the exact saved request in the
-withdrawing transaction, first resolution wins. Task edit/move, completion
-settlement and Reopen correlate their exact planning delivery IDs;
-`operation.get.planning` reads current status under its own fence, missing rows
-stay unavailable, and saved results never change with it. Older state-delivery
-attempts recover under the existing Task lock. Remote Machine moves, other
-families and client resource lanes remain open.
+The removed predecessors are Desktop Complete's `performTaskAction`/checkpoint
+path and async button wrappers, and the phone's stream-owned displayed Task list
+and unbound navigation links. Generic checkpoint behavior remains covered through
+Claim; abandonment and creation predecessors on the delete list remain open.
+Two windows can lease the same query; last close drops in-memory preparation,
+leaving the existing persisted obligations intact. Finite invalidation of closed
+query bases is still migration work.
 
-The shared client now supports read-only receipt observation after returning the
-saved result. Desktop keeps it while the request remains saved. Recovery and live
-observation use one persisted reducer; an older first reply after restart returns
-the newer saved evidence instead of waiting indefinitely. Current planning
-evidence is separate from historical result/error and becomes unavailable on
-epoch replacement. Desktop's recovery message reads the shared recovery annotations and Retry waits
-for its prior observer. Acknowledgment clears only the redundant result prompt;
-missing planning evidence and unrelated diagnostics retain Inspect. Tests cover macOS
-presentation and successful creation, and the shared query/retirement owner on both targets. Ordered Work incorporation, per-query overlays and phone recovery presentation remain open.
+Existing architecture and checks before this pass:
+`052baca0dcb44c83b7c4f830f8c0a86001d3cebe:scratch/instant-task-session.md`.
+Protocol 6, Git-free immutable admission, submitted/canonical identity, the single
+receipt owner, correlated planning resolutions, presentation acknowledgment,
+stamped durable Work cache, portable membership and retirement transfer remain
+in place. Ordered query effects stop independently on covering semantic fences;
+lagging lists retain their effects across retirement/restart. No SQL/native
+latency diagnosis follows from these correctness checks.
 
-Current pass adds domain `planning_effect` declarations (`none`/`correlated`),
-exact Task creation-export correlation, and the initial client stage registry.
-Known resolved operations retire atomically with a bounded per-Machine reload
-frontier; creation additionally requires presentation. Missing stages/correlation, uncertain delivery, unclassified
-errors and replaced-epoch evidence retain the original request. Desktop recovery
-cancels observers for retired commands. The registry covers filing, new Session
-input, completion/reopen, Task edit and Wave moves; other families stay Inspect.
-It is not yet the exhaustive command/effect registry.
-
-Work plan bodies persist with stamps in the outbox database. Rust now compiles
-structural selection, named queries, occurrence paths and ordering into a finite
-membership program over `selection_states`. The Rust reader evaluates it too;
-Swift has no Task lifecycle resolver. Plans declare the completion display-state
-patch and confirming stage. Terminal Tasks have no actionable availability/busy
-selection states even while their retained Session execution remains unknown;
-otherwise a covering completion reading could resurrect the removed row. `ProjectedWorkPlan` derives membership, arrangement,
-visible/suppressed occurrences, attention and unique Task totals together. Unknown
-membership has no exact total. Confirmed DTO bodies are retained unchanged.
-
-The cache applies completion effects in insertion sequence independently for each
-query. Query replacement compares declared Work domains, so unrelated usage
-revisions cannot prevent a newer membership base. A covering query stops applying an effect while a lagging query retains
-it. Retirement transfers unresolved query effects and scoped reload requirements
-in the same transaction; cached query effects survive restart after the command
-retires. New queries still need a covering base beyond retirement. Old cached
-plans without the membership vocabulary are invalidated, retaining the outbox and
-reload floors. Desktop list/Dashboard and phone list readers consume projected
-query results, prepared on the store actor before host publication; Desktop inspection still exports the confirmed plan and needs its
-presentation DTO migration alongside the interaction cutover. This does not yet establish synchronous gesture publication.
-
-Production Complete is still unconnected: Desktop `WorkModel.completeTask` awaits
-`query.completeTask` through `performTaskAction` (no outbox, no projected effect,
-no next selection), and `abandonTask` still uses `abandoningTaskIDs`. The phone
-has no Complete action. The membership plan declares only `task.complete`
-(`membership.rs`, confirming stage `task.completed`).
-
-Remaining, in order: shared synchronous Complete A/select B interaction and both
-production action paths (outbox command, effect, next/empty selection); query-open/close incorporation, dependency coverage for
-all effects and normalized cross-query provenance; remaining mutation-family
-recovery/fences and resource lanes (remote, external files/config and planning
-families included); both-client retained-occurrence migration and deletion of
-checkpoint/presentation exceptions; epoch reset on historical restoration;
-crash/native acceptance and a valid benchmark baseline. Completion commands still
-need production outbox migration; the current query effects are exercised through
-the shared store, not claimed as complete UI acceptance. No shipping is claimed.
-SQLite fences cannot certify filesystem/provider effects; transport `complete`
-is query coverage, not membership or native readiness.
+Remaining: exhaustive effect/dependency declarations and normalized cross-query
+provenance; Desktop unsaved `.view`/`refreshSelectedView` and `replacePlan` readers
+still bypass the shared query owner and can overwrite projected membership;
+finite incorporation/invalidation of closed queries; remaining
+mutation-family recovery and resource lanes (remote/files/config/planning);
+creation and retained-occurrence cutover on both clients; projected inspection
+DTO alongside confirmed inspection; historical-restoration epoch reset;
+crash/native acceptance and a valid benchmark baseline. This remains one
+indivisible cross-platform PR; no shipping or merge decision is recorded.
+SQLite fences cannot certify filesystem/provider readiness.
 
 ### Admission identity and recovery contract
 
@@ -811,9 +778,7 @@ Checks before this cut: `d9bf1c21ae:scratch/instant-task-session.md` records foc
 Desktop/iOS query, receipt and recovery passes; Rust operations/schema/DTO passes;
 fmt/clippy and multiplatform checks. Archive/documentation checks remain gate-owned.
 
-Current cut checks (2026-11-15; `LF_*` cleared):
-- `swift build --build-tests --package-path swift --jobs 4 -Xswiftc -gnone`; private-Home/network-boundary `swift test --skip-build --no-parallel --filter 'ClientWorkQueryTests|WorkSelectionTests|DashboardWorkspaceTests|WorkNavigationTests'`: build + 16 XCTest/68 Swift Testing passed.
-- `scripts/test_ios.py -only-testing:LoopflowiOSTests/ClientWorkQueryTests -only-testing:LoopflowiOSTests/MobileTaskCreationTests`: 35 passed; disposable Simulator removed.
-- Rust library `work::selection_tests::` (19), selection completion/unknown execution regression (1), existing reported-attention regression (1), `server::schema::tests::` (8): passed; schema regenerated.
-- 10k-row SQLite `EXPLAIN QUERY PLAN`: Machine query range uses its primary-key index; operation sequence lookup uses its unique covering index.
-- `cargo fmt`, multiplatform boundaries and `git diff --check`: passed. Clippy passed. Gate owns wider suites and archive/documentation checks; native latency remains unmeasured.
+Current pass checks (2026-11-15; inherited `LF_*` cleared):
+- `swift build --build-tests --package-path swift --jobs 4 -Xswiftc -gnone` + private-Home/network-boundary `swift test --skip-build --disable-sandbox --no-parallel --filter 'ClientWorkQueryTests|taskConfirmationDeadline'`: build, 21 XCTest and 1 Swift Testing passed; gate owns wider Desktop suites.
+- `scripts/test_ios.py -only-testing:LoopflowiOSTests/ClientWorkQueryTests -only-testing:LoopflowiOSTests/MobileTaskCreationTests`: 40 passed, including the production Complete leaf and 18 success/refusal/supersession order cases; disposable Simulator removed.
+- Multiplatform boundaries, `cargo fmt` and `git diff --check`: passed. Rust code is unchanged from `052baca0dc`; its focused checks/clippy remain applicable. Gate owns archive/documentation checks; native latency remains unmeasured.

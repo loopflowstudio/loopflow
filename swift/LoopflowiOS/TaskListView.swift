@@ -30,6 +30,7 @@ final class TaskFeed {
     @ObservationIgnored private var observation: RemoteTaskObservation?
     @ObservationIgnored private var reader: Task<Void, Never>?
     @ObservationIgnored private var generation = 0
+    @ObservationIgnored private var lease: UUID?
 
     init(client: RemoteMobileClient) { self.client = client }
 
@@ -37,32 +38,18 @@ final class TaskFeed {
         stop()
         let current = generation
         waiting = Perf.begin("tasks_current")
-        let saved = try? await client.journal.cachedPlans(machine: client.savedMachine.machineID,
-            for: .viewSelect(expression: filter.expression(wave: wave)))
+        mount()
+        await client.interaction.refreshFromStore()
         guard current == generation else { return }
-        if let saved, let repositories = try? RemoteTaskObservation.decodePlans(saved.projection).get() {
-            self.repositories = repositories
-            loaded = true
-            Perf.launch("tasks_saved")
-        } else {
-            repositories = []
-            loaded = false
-        }
+        if loaded { Perf.launch("tasks_saved") }
         let observation = client.observeTasks(expression: filter.expression(wave: wave))
         self.observation = observation
         reader = Task { [weak self] in
             do {
                 for try await update in observation.readings {
                     guard let self, current == self.generation else { return }
-                    if update.invalidated {
-                        self.repositories = []
-                        self.loaded = false
-                    }
-                    switch update.reading {
-                    case .success(let repositories):
-                        let changed = repositories != self.repositories || !self.loaded
-                        if changed { self.repositories = repositories }
-                        self.loaded = true
+                    switch update {
+                    case .success:
                         self.error = nil
                         Perf.launch("tasks_current")
                         if let waiting = self.waiting { Perf.end(waiting, self.filter.rawValue) }
@@ -73,22 +60,50 @@ final class TaskFeed {
                 }
                 throw RegistryQueryError("Task updates ended.")
             } catch {
-                guard let self, current == self.generation else { return }
-                self.stop()
+                guard let self, current == self.generation, !Task.isCancelled else { return }
+                self.observation?.close()
+                self.observation = nil
+                self.reader = nil
                 self.error = machineConnectionMessage(error)
             }
         }
     }
 
+    func mount() {
+        if let lease { client.interaction.close(lease); self.lease = nil }
+        let current = generation
+        do {
+            lease = try client.interaction.open(.viewSelect(expression: filter.expression(wave: wave))) { [weak self] plans in
+                guard let self, current == self.generation else { return }
+                guard let plans else { self.repositories = []; self.loaded = false; return }
+                switch RemoteTaskObservation.decodePlans(plans) {
+                case .success(let repositories): self.repositories = repositories; self.loaded = true
+                case .failure(let error): self.error = error.message
+                }
+            }
+        } catch { self.error = error.localizedDescription }
+    }
+
+    func complete(_ task: WorkViewPlan.Content, selected: WorkWorkspaceKey?, visible: [WorkWorkspaceKey],
+                  select: (WorkWorkspaceKey?) -> Void) {
+        guard let directory = repositories.first(where: { $0.repository == task.work.repository })?.path else { return }
+        do {
+            try client.interaction.complete(task.work, issue: task.identifier ?? task.work.id,
+                directory: directory, selected: selected, visible: visible, select: select)
+        } catch { self.error = error.localizedDescription }
+    }
+
     func refresh() async {
         guard let observation else { await start(); return }
         do { try await observation.refresh() } catch {
-            stop()
+            reader?.cancel(); reader = nil
+            observation.close(); self.observation = nil
             self.error = machineConnectionMessage(error)
         }
     }
 
     func stop() {
+        if let lease { client.interaction.close(lease); self.lease = nil }
         generation += 1
         reader?.cancel()
         reader = nil
@@ -119,7 +134,8 @@ struct TaskListView: View {
     @State private var drafts: [WorkWorkspaceKey: String] = [:]
     @State private var creation: MobileTaskCreation?
     @State private var created: WorkViewPlan.Content?
-    @State private var showingCreated = false
+    @State private var path: [WorkWorkspaceKey] = []
+    @State private var retained: [WorkWorkspaceKey: WorkViewPlan.Content] = [:]
     /// The repository shown, by durable ID; empty shows every repository.
     @AppStorage("repository") private var repository = ""
     @Environment(\.colorScheme) private var colorScheme
@@ -166,9 +182,15 @@ struct TaskListView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             List {
-                if let error = feed.error {
+                ForEach(client.interaction.failures) { failure in
+                    VStack(alignment: .leading) {
+                        Text(failure.message)
+                        Button("Retry Complete") { client.interaction.retry(failure.id) }
+                    }
+                }
+                if let error = feed.error ?? client.interaction.cacheError {
                     VStack(alignment: .leading, spacing: 8) {
                         Label("Couldn’t update Tasks", systemImage: "wifi.exclamationmark").font(Typography.strong(15))
                         Text(error).font(Typography.caption(13))
@@ -225,10 +247,12 @@ struct TaskListView: View {
                 }
             }
             .searchable(text: $search, prompt: "Search Tasks")
-            .navigationDestination(isPresented: $showingCreated) {
-                if let created { workspace(created) }
+            .navigationDestination(for: WorkWorkspaceKey.self) { work in
+                if let task = retained[work] ?? feed.repositories.flatMap(\.tasks).first(where: { $0.work == work }) { workspace(task) }
             }
-            .sheet(item: $creation, onDismiss: { showingCreated = created != nil }) { model in
+            .sheet(item: $creation, onDismiss: {
+                if let created { retained[created.work] = created; path = [created.work] }
+            }) { model in
                 MobileNewTaskView(model: model, theme: theme) { opening in
                     opening.presented()
                     created = opening.task
@@ -280,7 +304,8 @@ struct TaskListView: View {
         .environment(\.palette, theme.palette)
         .onChange(of: repository) { feed.wave = nil }
         .task(id: [feed.filter.rawValue, feed.wave ?? "", String(scenePhase == .active)]) {
-            if scenePhase == .active { await feed.start() } else { feed.stop() }
+            if scenePhase == .active { await feed.start() }
+            else { await client.interaction.persistPending(); feed.stop() }
         }
     }
 
@@ -291,10 +316,11 @@ struct TaskListView: View {
     }
 
     private func link(_ task: WorkViewPlan.Content) -> some View {
-        NavigationLink { workspace(task) } label: { row(task) }
-            .simultaneousGesture(TapGesture().onEnded {
-                PerfClock.interaction(.taskSelect, .gesture, id: task.work.id)
-            })
+        Button {
+            PerfClock.interaction(.taskSelect, .gesture, id: task.work.id)
+            retained[task.work] = task
+            path = [task.work]
+        } label: { row(task) }
             .listRowInsets(EdgeInsets(top: 12, leading: 20, bottom: 12, trailing: 16))
             .listRowBackground(theme.palette.background)
     }
@@ -302,7 +328,15 @@ struct TaskListView: View {
     private func workspace(_ task: WorkViewPlan.Content) -> some View {
         TaskWorkspaceView(client: client, task: task, theme: theme, draft: Binding(
             get: { drafts[task.work] ?? "" },
-            set: { drafts[task.work] = $0 }))
+            set: { drafts[task.work] = $0 }), complete: {
+                let visible = sections.flatMap { $0.open + $0.quiet }.map(\.work)
+                feed.complete(task, selected: path.last, visible: visible) { next in
+                    if let next, let content = feed.repositories.flatMap(\.tasks).first(where: { $0.work == next }) {
+                        retained[next] = content
+                    }
+                    path = next.map { [$0] } ?? []
+                }
+            }, completionDirectory: feed.repositories.first { $0.repository == task.work.repository }?.path)
     }
 
     private func row(_ task: WorkViewPlan.Content) -> some View {

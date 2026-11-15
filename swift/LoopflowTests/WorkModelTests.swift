@@ -920,7 +920,7 @@ struct WorkModelStreamTests {
         let fixture = try WorkTestFixture.load()
         let feed = WorkFeed()
         let query = RegistryQuery(subscribeWork: { await feed.open() }) { args, _ in
-            guard args.starts(with: ["task", "complete"]) else { throw RegistryQueryError("unexpected command") }
+            guard args.starts(with: ["task", "claim"]) else { throw RegistryQueryError("unexpected command") }
             try await Task.sleep(for: .milliseconds(100))
             return ""
         }
@@ -931,7 +931,7 @@ struct WorkModelStreamTests {
         await feed.send(try fixture.planningFrame(sequence: 1, answers: nil))
         try await eventually { model.roadmap.value != nil }
         let found = try #require(model.task(id: "issue-now"))
-        let action = Task { await model.completeTask(found.task) }
+        let action = Task { await model.assignTask(found.task, claimed: true) }
         try await eventually { model.navigation.taskRunDrafts[found.task.id]?.phase == .runningCommand }
         let request = try await feed.request(2)
         #expect(model.navigation.taskRunDrafts[found.task.id]?.phase == .awaitingObservation)
@@ -1154,7 +1154,7 @@ private actor WorkFeed {
     }
 }
 
-private struct WorkTestFixture {
+struct WorkTestFixture {
     let roadmap: RoadmapSnapshot
     let waves: [Wave]
     let workActivity: WorkActivitySnapshot
@@ -1162,7 +1162,7 @@ private struct WorkTestFixture {
     let roadmapJSON: String
     let wavesJSON: String
     let workActivityJSON: String
-    let activityArguments: ActivityArguments
+    fileprivate let activityArguments: ActivityArguments
     let query: RegistryQuery
 
     static func load(sourceFile: String = #filePath) throws -> WorkTestFixture {
@@ -1218,7 +1218,7 @@ private struct WorkTestFixture {
         )
     }
 
-    func streaming(_ feed: WorkFeed) -> RegistryQuery {
+    fileprivate func streaming(_ feed: WorkFeed) -> RegistryQuery {
         RegistryQuery(subscribeWork: { await feed.open() }) { args, _ in
             throw RegistryQueryError("a streamed window ran lf \(args.joined(separator: " "))")
         }

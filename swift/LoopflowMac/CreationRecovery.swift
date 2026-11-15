@@ -18,6 +18,18 @@ extension ClientWorkStore {
     }
 }
 
+@MainActor
+extension WorkInteraction {
+    private static var machines: [String: WorkInteraction] = [:]
+
+    static func local(_ machine: String) -> WorkInteraction {
+        if let owner = machines[machine] { return owner }
+        let owner = WorkInteraction(machine: machine, store: .shared)
+        machines[machine] = owner
+        return owner
+    }
+}
+
 @MainActor @Observable
 final class CreationRecovery {
     static let shared = CreationRecovery()

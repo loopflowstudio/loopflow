@@ -22,6 +22,19 @@ public struct ClientWorkQuery: Codable, Sendable {
 
     public var projection: [ProjectedWorkPlan] { rendered ?? makeProjection() }
 
+    func applying(_ intents: [WorkQueryEffect]) -> ClientWorkQuery {
+        var result = self
+        var layers = effects ?? []
+        var sequence = layers.map(\.sequence).max() ?? 0
+        for intent in intents where !layers.contains(where: { $0.operationID == intent.operationID }) {
+            sequence += 1
+            layers.append(WorkQueryEffect(operationID: intent.operationID, sequence: sequence,
+                directory: intent.directory, kind: intent.kind, issue: intent.issue, resolution: intent.resolution))
+        }
+        result.effects = layers
+        return result
+    }
+
     private func makeProjection() -> [ProjectedWorkPlan] {
         plans.map { plan in
             var membership = plan.membership

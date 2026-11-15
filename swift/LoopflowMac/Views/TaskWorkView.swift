@@ -15,7 +15,8 @@ struct TaskWorkflowHeader: View {
     @State private var expandedTasks: Set<String> = []
 
     private var lifecycleLabel: String {
-        switch task.lifecycle {
+        if model.isCompleting(task) { return "Completing…" }
+        return switch task.lifecycle {
         case .done: "Completed"
         case .abandoned: "Canceled"
         default: task.lifecycle.label.capitalized
@@ -83,8 +84,8 @@ struct TaskWorkflowHeader: View {
                         .disabled(acting || readingUnavailable != nil)
                         .accessibilityIdentifier("task-reopen")
                 } else {
-                    Button("Complete") { Task { await model.completeTask(task) } }
-                        .disabled(acting || readingUnavailable != nil)
+                    Button("Complete") { model.completeTask(task) }
+                        .disabled(acting || model.isCompleting(task) || readingUnavailable != nil)
                         .accessibilityIdentifier("task-complete")
                     Button(task.runtime?.owner == nil ? "Claim" : "Unassign") {
                         Task { await model.assignTask(task, claimed: task.runtime?.owner == nil) }
@@ -147,7 +148,7 @@ struct TaskWorkflowHeader: View {
                         .textSelection(.enabled)
                         .accessibilityIdentifier("task-completion-pending")
                     Button("Retry completion") {
-                        Task { await model.completeTask(task) }
+                        model.completeTask(task)
                     }
                     .buttonStyle(WorkOutlineButtonStyle())
                     .disabled(acting || readingUnavailable != nil)
@@ -630,7 +631,7 @@ struct TaskActionItems: View {
         if task.isCompleted {
             Button("Reopen Task") { Task { await model.reopenTask(task) } }.disabled(unavailable)
         } else {
-            Button("Complete Task") { Task { await model.completeTask(task) } }.disabled(unavailable)
+            Button("Complete Task") { model.completeTask(task) }.disabled(unavailable)
             Button(task.runtime?.owner == nil ? "Claim Task" : "Unassign Task") {
                 Task { await model.assignTask(task, claimed: task.runtime?.owner == nil) }
             }.disabled(unavailable)

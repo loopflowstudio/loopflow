@@ -11,7 +11,8 @@
   SQLite through SQLite3; this reversible choice avoids another dependency.
   GRDB is not adopted. Protocol revision 6 now adds stamped subscriptions;
   confirmed Work bases and ordered completion effects now share the outbox.
-  Synchronous interaction, provenance and full membership migration remain open.
+  Shared synchronous Complete now consumes those effects on both hosts; provenance
+  and full membership migration remain open.
 - Completion navigation: Jack Heart replied “1b for the question (or show noting)”
   to the numbered choice in `scratch/concept-review.html`. Remove the row and
   select the next Task immediately; an empty state is allowed when none remains.
@@ -45,6 +46,7 @@
   cross-platform interaction cutover is not claimed.
 
 - Completion now transfers lagging stored-query effects on retirement; query
-  open/close leases and finite invalidation for closed bases remain migration work.
+  open/close leases now belong to the presentation owner; finite invalidation for
+  closed bases remains migration work.
   New completion reload requirements are scoped to repository and declared effect;
   preexisting broad requirements retain their conservative meaning until epoch reset.

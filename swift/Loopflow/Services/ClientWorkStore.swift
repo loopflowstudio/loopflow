@@ -41,6 +41,7 @@ public actor ClientWorkStore {
     private let read: @Sendable (ServedRead) async throws -> String
     private let observe: @Sendable (String) -> ReceiptWatch
     private let send: @Sendable (Data) async throws -> Void
+    private var publication: UInt64 = 0
     private var observers: [UUID: AsyncStream<Void>.Continuation] = [:]
 
     public init(directory: URL,
@@ -74,11 +75,29 @@ public actor ClientWorkStore {
     }
 
     private func removeObserver(_ id: UUID) { observers.removeValue(forKey: id) }
-    private func changed() { for observer in observers.values { observer.yield(()) } }
+    private func changed() {
+        publication &+= 1
+        for observer in observers.values { observer.yield(()) }
+    }
 
-    public func save(_ record: SubmittedOperation) throws {
+    struct Presentation: Sendable {
+        let revision: UInt64
+        let requested: Set<String>
+        let records: [SubmittedOperation]
+        let queries: [String: ClientWorkQuery]
+    }
+
+    func presentation(machine: String, queries: [String: ServedRead]) throws -> Presentation {
+        var readings: [String: ClientWorkQuery] = [:]
+        for (key, read) in queries { readings[key] = try cachedPlans(machine: machine, for: read) }
+        return Presentation(revision: publication, requested: Set(queries.keys), records: try pending().filter { $0.destination == machine }, queries: readings)
+    }
+
+    @discardableResult
+    public func save(_ record: SubmittedOperation) throws -> UInt64 {
         try disk().save(record)
         changed()
+        return publication
     }
 
     public func isRecovering(_ id: String) -> Bool { active.contains(id) }

@@ -14,12 +14,6 @@ struct RepositoryTasks: Equatable {
 
 typealias MobileTaskReading = Result<[RepositoryTasks], RegistryQueryError>
 
-/// Presentation of a confirmed query; invalidation also withdraws retained rows.
-struct TaskListReading {
-    let reading: MobileTaskReading
-    let invalidated: Bool
-}
-
 /// The Tasks a Work reading shows, in the Machine's order.
 func mobileTasks(_ plan: ProjectedWorkPlan) throws -> [WorkViewPlan.Content] {
     guard plan.resolution.unavailable.isEmpty else {
@@ -39,15 +33,15 @@ func mobileTasks(_ plan: ProjectedWorkPlan) throws -> [WorkViewPlan.Content] {
 /// lost connection resumes the same reading on the next one.
 @MainActor
 final class RemoteTaskObservation {
-    let readings: AsyncThrowingStream<TaskListReading, any Error>
-    private let continuation: AsyncThrowingStream<TaskListReading, any Error>.Continuation
+    let readings: AsyncThrowingStream<Result<Void, RegistryQueryError>, any Error>
+    private let continuation: AsyncThrowingStream<Result<Void, RegistryQueryError>, any Error>.Continuation
     private let watch: ServerWatch<RawJSON>
     private var reader: Task<Void, Never>?
     private var nextCheckpoint: UInt64 = 0
     private var refreshing: (id: UInt64, continuation: CheckedContinuation<Void, any Error>)?
     private var closed = false
 
-    init(query: ServedRead, store: ClientWorkStore, connect: @escaping @Sendable () async throws -> ServerLink) {
+    init(query: ServedRead, interaction: WorkInteraction, connect: @escaping @Sendable () async throws -> ServerLink) {
         watch = ServerLink.subscribe(query, connect: connect) { update -> RawJSON? in
             guard case .reading(let frame) = update else { return nil }
             return frame
@@ -63,18 +57,14 @@ final class RemoteTaskObservation {
                         try frame.decode(SubscriptionReading<[WorkViewPlan]>.self)
                     }.value
                     guard !self.closed, !Task.isCancelled else { return }
-                    let reading: MobileTaskReading
-                    var invalidated = false
-                    if let plans = envelope.body, let stamp = envelope.stamp, envelope.unavailable == nil {
-                        if let confirmed = try await store.receivePlans(plans, stamp: stamp, for: query) {
-                            reading = Self.decodePlans(confirmed.projection)
-                        } else {
-                            invalidated = true
-                            reading = .failure(RegistryQueryError("Waiting for a covering Work reading"))
-                        }
-                    } else { reading = try Self.decode(frame: frame).reading }
+                    let reading: Result<Void, RegistryQueryError>
+                    if let reason = envelope.unavailable { reading = .failure(RegistryQueryError(reason)) }
+                    else if let plans = envelope.body, let stamp = envelope.stamp {
+                        try await interaction.receive(plans, stamp: stamp, for: query)
+                        reading = .success(())
+                    } else { throw RegistryQueryError("Task reading is missing its stamped contents") }
                     guard !self.closed else { return }
-                    self.receive((envelope.answers, reading), invalidated: invalidated)
+                    self.receive((envelope.answers, reading))
                 }
                 throw RegistryQueryError("Task updates ended. Refresh to reconnect.")
             } catch { self?.close(error: error) }
@@ -113,8 +103,8 @@ final class RemoteTaskObservation {
         refreshing = nil
     }
 
-    private func receive(_ reading: (answers: UInt64?, reading: MobileTaskReading), invalidated: Bool) {
-        continuation.yield(TaskListReading(reading: reading.reading, invalidated: invalidated))
+    private func receive(_ reading: (answers: UInt64?, reading: Result<Void, RegistryQueryError>)) {
+        continuation.yield(reading.reading)
         if let refreshing, let answers = reading.answers, answers >= refreshing.id {
             self.refreshing = nil
             refreshing.continuation.resume()

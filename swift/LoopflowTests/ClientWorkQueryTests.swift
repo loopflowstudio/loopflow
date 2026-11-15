@@ -5,7 +5,7 @@ import XCTest
 /// The same persisted-query cases run in the Desktop and phone test targets.
 @MainActor
 final class ClientWorkQueryTests: XCTestCase {
-    private func plan() throws -> WorkViewPlan {
+    func plan() throws -> WorkViewPlan {
         let url = Bundle(for: Self.self).url(forResource: "view_plan", withExtension: "json")
             ?? URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
@@ -13,7 +13,7 @@ final class ClientWorkQueryTests: XCTestCase {
         return try JSONDecoder().decode(WorkViewPlan.self, from: Data(contentsOf: url))
     }
 
-    private func stamp(_ query: String, revision: Int64, epoch: String = "epoch") -> ReadingStamp {
+    func stamp(_ query: String, revision: Int64, epoch: String = "epoch") -> ReadingStamp {
         // All fields, including nullable query, exercise the wire decoder.
         try! JSONDecoder().decode(ReadingStamp.self, from: JSONSerialization.data(withJSONObject: [
             "machine": "machine", "epoch": epoch, "schema": ServerProtocol.revision, "query": query,
@@ -21,7 +21,7 @@ final class ClientWorkQueryTests: XCTestCase {
                 "processes": revision, "usage": revision]]))
     }
 
-    private func receipt(kind: String = "session.new", stage: String = "session.input_replaced",
+    func receipt(kind: String = "session.new", stage: String = "session.input_replaced",
                          planning: OperationCommit.PlanningEffect = .none, diagnostic: String? = nil,
                          resolution: OperationCommit.Resolution = .committed) throws -> OperationReceipt {
         let declaration: [String: Any] = ["resolution": resolution.rawValue, "stage": stage, "resources": ["session"],
@@ -35,13 +35,13 @@ final class ClientWorkQueryTests: XCTestCase {
             "commits": [declaration], "planning": NSNull(), "created_at": 1, "updated_at": 2]))
     }
 
-    private func store(_ directory: URL) -> ClientWorkStore {
+    func store(_ directory: URL) -> ClientWorkStore {
         ClientWorkStore(directory: directory, machine: { "machine" }, read: { _ in "null" }, observe: { _ in
             ServerWatch(updates: AsyncThrowingStream { $0.finish() }, checkpoint: { _ in }, cancel: {})
         }, send: { _ in XCTFail("Cache and retirement must not send commands") })
     }
 
-    private func save(_ directory: URL, receipt: OperationReceipt) throws {
+    func save(_ directory: URL, receipt: OperationReceipt) throws {
         let database = try ClientWorkDatabase(directory: directory)
         let command: ServedWrite = receipt.kind == "task.update"
             ? .taskUpdate(directory: "/repo", issue: "task", notes: "Original words")
@@ -177,7 +177,7 @@ final class ClientWorkQueryTests: XCTestCase {
         XCTAssertEqual(delayed?.stamp.revisions.planning, 12)
     }
 
-    private func workingPlan(_ ids: [String], explicit: Bool = false) throws -> WorkViewPlan {
+    func workingPlan(_ ids: [String], explicit: Bool = false) throws -> WorkViewPlan {
         var body = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(plan())) as? [String: Any])
         let repository = try XCTUnwrap(body["repo"] as? String)
         body["repo_path"] = "/repo"
@@ -206,7 +206,7 @@ final class ClientWorkQueryTests: XCTestCase {
         return try JSONDecoder().decode(WorkViewPlan.self, from: JSONSerialization.data(withJSONObject: body))
     }
 
-    private func complete(_ directory: URL) throws -> ClientWorkDatabase {
+    func complete(_ directory: URL) throws -> ClientWorkDatabase {
         let database = try ClientWorkDatabase(directory: directory)
         try database.save(SubmittedOperation(requestID: "saved", destination: "machine",
             payload: JSONEncoder().encode(ServedWrite.taskComplete(directory: "/repo", issue: "a")),
@@ -444,4 +444,268 @@ final class ClientWorkQueryTests: XCTestCase {
         XCTAssertTrue(projected?.resolution.unavailable.contains("Work a content awaits confirmation") == true)
     }
 
+    func key(_ query: ServedRead) throws -> String {
+        let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
+        return String(decoding: try encoder.encode(query), as: UTF8.self)
+    }
+
+    func testCompletePublishesAndNavigatesWhileDiskAndNetworkAreHeld() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let query = ServedRead.viewSelect(expression: "state:working")
+        let base = try workingPlan(["a", "b"])
+        let seed = store(directory)
+        _ = try await seed.receivePlans([base], stamp: stamp("list", revision: 6), for: query)
+        let prepared = try await seed.presentation(machine: "machine", queries: [key(query): query])
+        let hold = HeldIntentDisk()
+        let disk = ClientWorkStore(directory: directory, prepareDirectory: { _ in hold.enter() }, machine: { "machine" },
+            read: { _ in "null" }, observe: { _ in ServerWatch(updates: AsyncThrowingStream { _ in }, checkpoint: { _ in }, cancel: {}) },
+            send: { _ in XCTFail("No send before save or receipt lookup") })
+        let owner = WorkInteraction(machine: "machine", store: disk)
+        defer { hold.release(); owner.shutdown() }
+        var first: [ProjectedWorkPlan] = []
+        let lease = try owner.open(query) { first = $0 ?? [] }
+        owner.apply(prepared)
+        var entered = hold.entered.makeAsyncIterator()
+        _ = await entered.next() // The store actor is now blocked opening disk.
+        var selected: WorkWorkspaceKey? = base.contents[0].work
+        let work = try XCTUnwrap(selected)
+        let visible = base.contents.map(\.work)
+        let id = try owner.complete(work, issue: "a", directory: "/repo", selected: selected, visible: visible) { selected = $0 }
+        XCTAssertEqual(selected?.id, "b")
+        XCTAssertEqual(first.first?.projection.visible.map(\.work.id), ["b"])
+        XCTAssertEqual(first.first?.taskCount, 1)
+        XCTAssertEqual(first.first?.confirmed, base)
+        var second: [ProjectedWorkPlan] = []
+        let secondLease = try owner.open(query) { second = $0 ?? [] }
+        XCTAssertEqual(second.first?.taskCount, 1, "Another mounted feed needs no new Machine frame")
+        owner.close(lease)
+        owner.apply(prepared) // A prepared base crosses the gesture/save boundary.
+        XCTAssertEqual(second.first?.taskCount, 1)
+        selected = work // Later deliberate navigation must survive save and replies.
+        hold.release()
+        await owner.persistPending()
+        await owner.refreshFromStore()
+        XCTAssertEqual(second.first?.taskCount, 1, "Durable adoption must not remove twice")
+        XCTAssertEqual(selected, work)
+        let saved = try await disk.pending()
+        XCTAssertEqual(saved.map(\.id), [id])
+        owner.close(secondLease)
+        let restarted = store(directory)
+        let restored = try await restarted.cachedPlans(machine: "machine", for: query)
+        XCTAssertEqual(restored?.projection.first?.projection.visible.map(\.work.id), ["b"])
+        XCTAssertEqual(restored?.projection.first?.taskCount, 1)
+    }
+
+    func testProductionIntentReconcilesEveryReceiptListCountOrderWithoutReselecting() async throws {
+        let cases = [OperationCommit.Resolution.committed, .superseded, .definitelyRefused].flatMap { disposition in
+            [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]].map { (disposition, $0) }
+        }
+        for (disposition, order) in cases {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let server = HeldCompletionMachine()
+            let disk = ClientWorkStore(directory: directory, machine: { "machine" }, read: { _ in "null" },
+                observe: { server.observe($0) }, send: { server.send($0) })
+            let owner = WorkInteraction(machine: "machine", store: disk)
+            defer { owner.shutdown() }
+            let list = ServedRead.viewSelect(expression: "state:working")
+            let count = ServedRead.desktopViewGet(directory: "/repo", expression: "state:working")
+            var shown: [ProjectedWorkPlan] = []
+            var counted: [ProjectedWorkPlan] = []
+            _ = try owner.open(list) { shown = $0 ?? [] }
+            _ = try owner.open(count) { counted = $0 ?? [] }
+            let base = try workingPlan(["a", "b"])
+            try await owner.receive([base], stamp: stamp("list", revision: 6), for: list)
+            try await owner.receive([base], stamp: stamp("count", revision: 6), for: count)
+            var selection: WorkWorkspaceKey? = base.contents[0].work
+            var navigations = 0
+            let id = try owner.complete(base.contents[0].work, issue: "a", directory: "/repo", selected: selection,
+                visible: base.contents.map(\.work)) { selection = $0; navigations += 1 }
+            XCTAssertEqual(shown.first?.taskCount, 1)
+            XCTAssertEqual(counted.first?.taskCount, 1)
+            await owner.persistPending()
+            var observing = server.observations.makeAsyncIterator()
+            _ = await observing.next()
+            server.publish(try completionFrame(nil, epoch: "epoch"))
+            var sent = server.sends.makeAsyncIterator()
+            _ = await sent.next()
+            var received = Set<Int>()
+            for step in order {
+                received.insert(step)
+                if step == 0 {
+                    var result = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(
+                        receipt(kind: "task.complete", stage: "task.completed", resolution: disposition))) as? [String: Any])
+                    result["request_id"] = id
+                    let resolved = try JSONDecoder().decode(OperationReceipt.self, from: JSONSerialization.data(withJSONObject: result))
+                    server.publish(try completionFrame(resolved, epoch: "epoch"))
+                    for await _ in await disk.changes() {
+                        if try await disk.pending().isEmpty { break }
+                    }
+                    await owner.refreshFromStore()
+                } else {
+                    let query = step == 1 ? list : count
+                    try await owner.receive([disposition == .committed ? workingPlan(["b"]) : base], stamp: stamp(step == 1 ? "list" : "count", revision: 7), for: query)
+                }
+                func expected(_ queryStep: Int) -> Int {
+                    disposition != .committed && received.contains(0)
+                        && (disposition == .definitelyRefused || received.contains(queryStep)) ? 2 : 1
+                }
+                XCTAssertEqual(shown.first?.taskCount, expected(1), "\(disposition), order \(order), step \(step)")
+                XCTAssertEqual(counted.first?.taskCount, expected(2))
+                XCTAssertEqual(selection?.id, "b")
+                XCTAssertEqual(navigations, 1)
+                let restored = try await store(directory).cachedPlans(machine: "machine", for: list)
+                XCTAssertEqual(restored?.projection.first?.taskCount, expected(1))
+            }
+            XCTAssertEqual(server.submissions.count, 1)
+        }
+    }
+
+    func testSaveFailureWithdrawsOnlyItsLayerAndRetainsOriginalCommandForRetry() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let query = ServedRead.viewSelect(expression: "state:working")
+        let base = try workingPlan(["a", "b"])
+        let seed = store(directory)
+        _ = try await seed.receivePlans([base], stamp: stamp("list", revision: 6), for: query)
+        let prepared = try await seed.presentation(machine: "machine", queries: [key(query): query])
+        let fault = IntentDiskFault()
+        let disk = ClientWorkStore(directory: directory, prepareDirectory: { _ in try fault.check() }, machine: { "machine" },
+            read: { _ in "null" }, observe: { _ in ServerWatch(updates: AsyncThrowingStream { $0.finish() }, checkpoint: { _ in }, cancel: {}) },
+            send: { _ in XCTFail("No missing lookup authorizes a send") })
+        let owner = WorkInteraction(machine: "machine", store: disk)
+        defer { owner.shutdown() }
+        var shown: [ProjectedWorkPlan] = []
+        _ = try owner.open(query) { shown = $0 ?? [] }
+        owner.apply(prepared)
+        var selection: WorkWorkspaceKey? = base.contents[0].work
+        let failed = try owner.complete(base.contents[0].work, issue: "a", directory: "/repo", selected: selection,
+            visible: base.contents.map(\.work)) { selection = $0 }
+        await owner.persistPending()
+        await owner.refreshFromStore()
+        XCTAssertEqual(owner.cacheError, "Disk unavailable")
+        XCTAssertEqual(shown.first?.taskCount, 2)
+        XCTAssertEqual(owner.failures.first?.id, failed)
+        XCTAssertEqual(selection?.id, "b")
+        fault.recover()
+        _ = try owner.complete(base.contents[1].work, issue: "b", directory: "/repo", selected: selection,
+            visible: base.contents.map(\.work)) { selection = $0 }
+        XCTAssertEqual(shown.first?.projection.visible.map(\.work.id), ["a"])
+        await owner.persistPending()
+        XCTAssertEqual(shown.first?.taskCount, 1)
+        let retained = try XCTUnwrap(owner.failures.first { $0.id == failed })
+        XCTAssertEqual(retained.record.destination, "machine")
+        owner.retry(failed)
+        XCTAssertEqual(shown.first?.taskCount, 0)
+        await owner.persistPending()
+        let saved = try await disk.pending()
+        XCTAssertEqual(saved.count, 2)
+        XCTAssertEqual(saved.last?.payload, retained.record.payload)
+        XCTAssertEqual(selection?.id, "a", "Retry and save failure cannot navigate again")
+    }
+
+    func testDispatchedCompleteSurvivesReplacementEpochWithoutReplayAfterRestart() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let server = HeldCompletionMachine()
+        let disk = ClientWorkStore(directory: directory, machine: { "machine" }, read: { _ in "null" },
+            observe: { server.observe($0) }, send: { server.send($0) })
+        let owner = WorkInteraction(machine: "machine", store: disk)
+        defer { owner.shutdown() }
+        let query = ServedRead.viewSelect(expression: "state:working")
+        var shown: [ProjectedWorkPlan] = []
+        _ = try owner.open(query) { shown = $0 ?? [] }
+        let base = try workingPlan(["a", "b"])
+        try await owner.receive([base], stamp: stamp("list", revision: 6), for: query)
+        let id = try owner.complete(base.contents[0].work, issue: "a", directory: "/repo", selected: nil,
+            visible: base.contents.map(\.work)) { _ in XCTFail("An unselected Complete cannot navigate") }
+        await owner.persistPending()
+        var observing = server.observations.makeAsyncIterator()
+        _ = await observing.next()
+        server.publish(try completionFrame(nil, epoch: "epoch"))
+        var sent = server.sends.makeAsyncIterator()
+        _ = await sent.next()
+        try await owner.receive([base], stamp: stamp("list", revision: 1, epoch: "replacement"), for: query)
+        XCTAssertEqual(shown.first?.taskCount, 1)
+        owner.shutdown()
+        let replacementServer = HeldCompletionMachine()
+        replacementServer.publish(try completionFrame(nil, epoch: "replacement"))
+        let replacement = ClientWorkStore(directory: directory, machine: { "machine" }, read: { _ in "null" },
+            observe: { replacementServer.observe($0) }, send: { replacementServer.send($0) })
+        let restarted = WorkInteraction(machine: "machine", store: replacement)
+        defer { restarted.shutdown() }
+        _ = try restarted.open(query) { shown = $0 ?? [] }
+        var reopened = replacementServer.observations.makeAsyncIterator()
+        _ = await reopened.next()
+        for await _ in await replacement.changes() {
+            if !(await replacement.isRecovering(id)) { break }
+        }
+        await restarted.refreshFromStore()
+        XCTAssertEqual(shown.first?.taskCount, 1)
+        XCTAssertTrue(replacementServer.submissions.isEmpty)
+        try await restarted.receive([base], stamp: stamp("list", revision: 99), for: query)
+        XCTAssertEqual(shown.first?.taskCount, 1)
+        let pending = try await replacement.pending()
+        XCTAssertEqual(pending.map(\.id), [id])
+        let cached = try await replacement.cachedPlans(machine: "machine", for: query)
+        XCTAssertEqual(cached?.stamp.epoch, "replacement")
+    }
+
+
+
+    func completionFrame(_ receipt: OperationReceipt?, epoch: String) throws -> SubscriptionReading<OperationReceipt> {
+        let wire: [String: Any] = ["body": try receipt.map { try JSONSerialization.jsonObject(with: JSONEncoder().encode($0)) } ?? NSNull(),
+            "stamp": try JSONSerialization.jsonObject(with: JSONEncoder().encode(stamp("receipt", revision: 7, epoch: epoch))),
+            "unavailable": NSNull(), "answers": NSNull()]
+        return try JSONDecoder().decode(SubscriptionReading<OperationReceipt>.self, from: JSONSerialization.data(withJSONObject: wire))
+    }
+
+}
+
+final class HeldIntentDisk: @unchecked Sendable {
+    private let semaphore = DispatchSemaphore(value: 0)
+    let entered: AsyncStream<Void>
+    private let entering: AsyncStream<Void>.Continuation
+    init() { (entered, entering) = AsyncStream.makeStream() }
+    func enter() { entering.yield(()); semaphore.wait() }
+    func release() { semaphore.signal() }
+}
+
+private final class IntentDiskFault: @unchecked Sendable {
+    private let lock = NSLock()
+    private var failing = true
+    func check() throws {
+        if lock.withLock({ failing }) { throw RegistryQueryError("Disk unavailable") }
+    }
+    func recover() { lock.withLock { failing = false } }
+}
+
+private final class HeldCompletionMachine: @unchecked Sendable {
+    private let lock = NSLock()
+    private var watches: [UUID: AsyncThrowingStream<SubscriptionReading<OperationReceipt>, any Error>.Continuation] = [:]
+    private var current: SubscriptionReading<OperationReceipt>?
+    private var sent: [Data] = []
+    var submissions: [Data] { lock.withLock { sent } }
+    let observations: AsyncStream<Void>
+    private let observing: AsyncStream<Void>.Continuation
+    let sends: AsyncStream<Void>
+    private let sending: AsyncStream<Void>.Continuation
+    init() {
+        (observations, observing) = AsyncStream.makeStream()
+        (sends, sending) = AsyncStream.makeStream()
+    }
+    func observe(_ id: String) -> ClientWorkStore.ReceiptWatch {
+        let key = UUID()
+        let (stream, continuation) = AsyncThrowingStream<SubscriptionReading<OperationReceipt>, any Error>.makeStream()
+        lock.withLock { watches[key] = continuation; if let current { continuation.yield(current) } }
+        observing.yield(())
+        return ServerWatch(updates: stream, checkpoint: { _ in }, cancel: { [self] in
+            lock.withLock { watches.removeValue(forKey: key)?.finish() }
+        })
+    }
+    func publish(_ frame: SubscriptionReading<OperationReceipt>) {
+        lock.withLock { current = frame; for watch in watches.values { watch.yield(frame) } }
+    }
+    func send(_ data: Data) { lock.withLock { sent.append(data) }; sending.yield(()) }
 }

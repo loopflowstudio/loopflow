@@ -53,6 +53,8 @@ final class RemoteMobileClient: MobileTaskCreationClient {
         })
     }()
 
+    lazy var interaction = WorkInteraction(machine: savedMachine.machineID, store: journal)
+
     /// The Machine's typed reads and writes, as Desktop makes them.
     var query: RegistryQuery {
         RegistryQuery.served(deadline: Self.requestDeadline) { [self] in try await connection() }
@@ -60,7 +62,7 @@ final class RemoteMobileClient: MobileTaskCreationClient {
 
     /// Every repository's Tasks matching `expression`, kept current.
     func observeTasks(expression: String) -> RemoteTaskObservation {
-        RemoteTaskObservation(query: .viewSelect(expression: expression), store: journal) { [self] in try await connection() }
+        RemoteTaskObservation(query: .viewSelect(expression: expression), interaction: interaction) { [self] in try await connection() }
     }
 
     /// The Machine's Waves that are still in use.

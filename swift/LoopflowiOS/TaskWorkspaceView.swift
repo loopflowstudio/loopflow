@@ -8,6 +8,13 @@ struct TaskWorkspaceView: View {
     let task: WorkViewPlan.Content
     let theme: ThemeDefinition
     @Binding var draft: String
+    var complete: (() -> Void)? = nil
+    var completionDirectory: String? = nil
+
+    private var completionPending: Bool {
+        guard let completionDirectory else { return false }
+        return client.interaction.isCompleting(issue: task.identifier ?? task.work.id, directory: completionDirectory)
+    }
     @State private var showsChanges = false
 
     var body: some View {
@@ -37,7 +44,23 @@ struct TaskWorkspaceView: View {
                     }
             }
         }
+        .toolbar {
+            if let complete {
+                ToolbarItem(placement: .topBarTrailing) {
+                    TaskCompleteButton(complete: complete, pending: completionPending)
+                }
+            }
+        }
         .onAppear { PerfClock.interaction(.taskSelect, .contentMounted, id: task.work.id) }
+    }
+}
+
+struct TaskCompleteButton: View {
+    let complete: () -> Void
+    var pending = false
+    var body: some View {
+        Button(pending ? "Completing…" : "Complete", action: complete)
+            .disabled(pending).accessibilityIdentifier("task-complete")
     }
 }
 

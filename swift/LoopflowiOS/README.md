@@ -43,6 +43,14 @@ Opening a Task opens its conversation and fits the terminal to the phone.
 **Changes** lists the files the Task changed; each opens its diff, and the diff
 opens the whole file. A Task with no conversation opens on its Changes.
 
+**Complete** removes the Task from affected feeds and counts immediately, then
+replaces this route with the next visible Task or returns to the list. Other feeds
+keep their selections. The same command saves before sending; **Retry Complete**
+recovers its original identity after a failure. Save failure restores membership
+without changing your newer navigation. A retained Task shows **Completing…** while
+its command remains pending. These local changes work while the network is waiting;
+provider readiness still comes from the Session connection.
+
 The device touched last has the terminal. When another device takes it, the
 phone stops drawing and offers **Continue here**.
 

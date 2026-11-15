@@ -112,6 +112,52 @@ final class WorkModel {
     @ObservationIgnored private var workspaceRegistry: SessionsWorkspaceRegistry?
     @ObservationIgnored private var workspaceRepository: String?
 
+    @ObservationIgnored private var interaction: WorkInteraction?
+    @ObservationIgnored private var queryLeases: [UUID] = []
+    @ObservationIgnored private var leasedScope: WorkScope?
+
+    private func closeQueryLeases() {
+        for lease in queryLeases { interaction?.close(lease) }
+        queryLeases = []
+        leasedScope = nil
+    }
+
+    private func mountQueries(_ scope: WorkScope, machine: String) throws {
+        guard leasedScope != scope || interaction?.machine != machine else { return }
+        closeQueryLeases()
+        if interaction?.machine != machine { interaction = .local(machine) }
+        leasedScope = scope
+        for part in [WorkPart.selections, .taskList] {
+            guard let read = part.read(for: scope) else { continue }
+            guard let interaction else { return }
+            let lease = try interaction.open(read) { [weak self] plans in
+                guard let self, self.workScope == scope, self.observingMachineId == machine else { return }
+                if part == .selections {
+                    if let plans { self.applyProjectedSelectionPlans(plans, reason: "") }
+                    else { self.selectionPlans = .unavailable(lastGood: nil, reason: "Waiting for a covering Work reading") }
+                } else if let plans { self.applyProjectedTaskList(plans.first, wave: scope.taskListWave, reason: "") }
+                else {
+                    self.taskListReadings[self.repositoryReadingKey(self.repoPath ?? "")] =
+                        (scope.taskListWave, .unavailable(lastGood: nil, reason: "Waiting for a covering Work reading"))
+                }
+            }
+            queryLeases.append(lease)
+        }
+    }
+
+    #if DEBUG
+    func useInteractionForTesting(_ interaction: WorkInteraction) { self.interaction = interaction }
+    #endif
+
+    func isCompleting(_ task: RoadmapTask) -> Bool {
+        interaction?.isCompleting(issue: task.task.identifier, directory: WaveOrigin.cached(task.task.repo)) == true
+    }
+
+    var presentationError: String? { interaction?.cacheError }
+
+    var completionFailures: [WorkInteraction.Failure] { interaction?.failures ?? [] }
+    func retryCompletion(_ id: String) { interaction?.retry(id) }
+
     private var viewOpening: UUID?
     private var selectionOpening: DesktopOpening?
     /// Tasks whose abandonment was requested; they leave the sidebar at once.
@@ -1531,6 +1577,7 @@ final class WorkModel {
     /// The window's one refresh owner: one reader process whose frames say
     /// what changed. Runs until cancelled, reopening the reader when it ends.
     func keepWorkCurrent() async {
+        defer { closeQueryLeases() }
         if usesFixedFixture { return }
         await restoreConfirmedPlans()
         guard !Task.isCancelled else { return }
@@ -1592,20 +1639,10 @@ final class WorkModel {
     private func restoreConfirmedPlans() async {
         guard let machine = observingMachineId else { return }
         let scope = workScope
-        let generation = taskListGeneration
-        for part in [WorkPart.selections, .taskList] {
-            guard let read = part.read(for: scope) else { continue }
-            do {
-                let cached = try await ClientWorkStore.shared.cachedPlans(machine: machine, for: read)
-                guard scope == workScope, machine == observingMachineId,
-                      generation == taskListGeneration else { return }
-                if part == .selections {
-                    if let cached { applyProjectedSelectionPlans(cached.projection, reason: "") }
-                } else if let cached {
-                    applyProjectedTaskList(cached.projection.first, wave: scope.taskListWave, reason: "")
-                }
-            } catch { dashboardError = error.localizedDescription }
-        }
+        do {
+            try mountQueries(scope, machine: machine)
+            await interaction?.refreshFromStore()
+        } catch { dashboardError = error.localizedDescription }
     }
 
     var workScope: WorkScope {
@@ -1622,8 +1659,11 @@ final class WorkModel {
     /// Tell the reader what this window shows now. Frames for the previous
     /// scope are ignored from here on.
     func syncWorkScope() {
-        guard workObservation != nil else { return }
         let scope = workScope
+        if let machine = observingMachineId {
+            do { try mountQueries(scope, machine: machine) } catch { dashboardError = error.localizedDescription }
+        }
+        guard workObservation != nil else { return }
         guard scope != sentScope else { return }
         sentScope = scope
         scopeFloor = send { .scope(id: $0, scope) }
@@ -1735,10 +1775,9 @@ final class WorkModel {
                let read = WorkPart.selections.read(for: scope) {
                 let machine = workMachine
                 do {
-                    let confirmed = try await ClientWorkStore.shared.receivePlans(body, stamp: stamp, for: read)
-                    guard scope == sentScope, machine == workMachine, answers >= max(planningFloor, scopeFloor) else { return }
-                    if let confirmed { applyProjectedSelectionPlans(confirmed.projection, reason: reason) }
-                    else { selectionPlans = .unavailable(lastGood: nil, reason: "Waiting for a covering Work reading") }
+                    guard stamp.machine == observingMachineId, scope == workScope else { return }
+                    try mountQueries(scope, machine: stamp.machine)
+                    try await interaction?.receive(body, stamp: stamp, for: read)
                 } catch {
                     guard scope == sentScope, machine == workMachine else { return }
                     selectionPlans = .unavailable(lastGood: nil, reason: error.localizedDescription)
@@ -1751,14 +1790,9 @@ final class WorkModel {
                let read = WorkPart.taskList.read(for: scope) {
                 let machine = workMachine
                 do {
-                    let confirmed = try await ClientWorkStore.shared.receivePlans([body], stamp: stamp, for: read)
-                    guard scope == sentScope, machine == workMachine, answers >= max(planningFloor, scopeFloor) else { return }
-                    if let confirmed { applyProjectedTaskList(confirmed.projection.first, wave: scope.taskListWave, reason: reason) }
-                    else {
-                        taskListGeneration &+= 1
-                        taskListReadings[repositoryReadingKey(repoPath ?? "")] =
-                            (scope.taskListWave, .unavailable(lastGood: nil, reason: "Waiting for a covering Work reading"))
-                    }
+                    guard stamp.machine == observingMachineId, scope == workScope else { return }
+                    try mountQueries(scope, machine: stamp.machine)
+                    try await interaction?.receive([body], stamp: stamp, for: read)
                 } catch {
                     guard scope == sentScope, machine == workMachine else { return }
                     taskListGeneration &+= 1
@@ -2736,13 +2770,21 @@ final class WorkModel {
         }
     }
 
-    func completeTask(_ task: RoadmapTask) async {
-        let interaction = UUID().uuidString
-        PerfClock.interaction(.taskComplete, .gesture, id: interaction)
-        await performTaskAction(task.id) {
-            defer { PerfClock.interaction(.taskComplete, .commandReturned, id: interaction) }
-            try await query.completeTask(issue: task.task.identifier, cwd: WaveOrigin.resolve(task.task.repo))
+    func completeTask(_ task: RoadmapTask) {
+        guard let machine = observingMachineId else {
+            dashboardError = "Waiting for the original Machine"
+            return
         }
+        do {
+            try mountQueries(workScope, machine: machine)
+            guard let interaction else { return }
+            let repository = taskList?.repository ?? selectionPlans.value?.first?.repository ?? ""
+            func key(_ id: String) -> WorkWorkspaceKey { WorkWorkspaceKey(repository: repository, kind: .task, id: id) }
+            let visible = (sidebarTaskIDs + sidebarAutonomousTaskIDs).map(key)
+            _ = try interaction.complete(key(task.id), issue: task.task.identifier,
+                directory: WaveOrigin.cached(task.task.repo), selected: selection.flatMap { $0.kind == .task ? key($0.id) : nil },
+                visible: visible) { [self] next in select(next.map { .task(id: $0.id) }) }
+        } catch { dashboardError = error.localizedDescription }
     }
 
     func reopenTask(_ task: RoadmapTask) async {

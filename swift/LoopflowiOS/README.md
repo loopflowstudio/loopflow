@@ -29,10 +29,22 @@ you**, **Working now**, **Backlog** or **Done** — in the Machine's order, with
 with a conversation come first; started Tasks nobody has opened a conversation
 for fold under "N without a conversation". Search covers title and checkout
 path. Pull to refresh. **+** opens New Task: describe the work, pick a
-repository, **Create & start**. The shared SQLite outbox saves the original request
+repository, **Create & start**. The editor closes immediately into the submitted
+conversation. Its words remain visible while the Machine prepares the Task and
+Session; native attachment controls input. Leaving for another Task keeps that
+selection when a receipt arrives. Saved requests stay in the list for recovery;
+**Retry opening** opens the same result without creating again.
+
+The shared SQLite outbox saves the original request
 before `operation.submit` admits it. Receipt subscriptions observe preparation;
 a lost answer is recovered by its original request ID. A replacement Machine
 database never authorizes another submission of an unanswered request.
+Released phone submission files import to each request's original Machine store,
+including exact words, request IDs and saved outcomes. Matching outbox records keep
+their receipt and send history. Conflicting or unreadable files remain intact;
+missing historical receipts require inspection rather than another submission.
+Unsent editor text remains a draft.
+
 The Task feed restores confirmed query bases from that same SQLite store. Older
 replies cannot replace newer saved bases; a retired command leaves a required
 reload fence so an older saved list cannot be shown as current. Returning to a

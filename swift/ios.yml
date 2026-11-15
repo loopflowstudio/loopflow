@@ -47,6 +47,7 @@ targets:
     sources:
       - path: LoopflowiOSTests
       - path: LoopflowTests/ClientWorkQueryTests.swift
+      - path: LoopflowTests/CreationInteractionTests.swift
       - path: ../tests/fixtures/dto/view_plan.json
         buildPhase: resources
       - path: ../rust/loopflow/tests/fixtures/dto/server

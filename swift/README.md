@@ -84,13 +84,13 @@ The sheet closes immediately into the new conversation, with your request and
 **Starting conversation…** visible while its workspace and provider prepare.
 The live conversation replaces that status in place; typing becomes available
 when it is connected and ready. You can navigate elsewhere while it starts;
-completion leaves your newer selection alone. Launch presentation lasts until a
-current Task reading confirms the admitted creation. A stale reading cannot bring
-back Start; a current reading with no Graph restores ordinary Task controls.
-An unavailable reading shows its error while the conversation stays open.
+completion leaves your newer selection alone. Filed identity, Graph admission,
+native attachment and Work query freshness remain separate facts. A stale query
+cannot replace the operation's saved outcome.
 
-Launch errors appear in the conversation. If the request could not be saved,
-return to the New Task editor to edit and submit it. If the Task exists but its
+Launch errors appear in the conversation. **Retry recovery** uses the original
+request ID, including after a local save failure. **Edit request** returns unsaved
+words to the editor. If the Task exists but its
 conversation could not open, retry opening that conversation. For an unanswered
 submission, use [creation recovery](../docs/server.md#recover-a-submitted-creation)
 before creating another Task with the same request.
@@ -914,17 +914,13 @@ epoch. Recovery on a replacement database retains an unanswered request rather
 than sending it again. Released journal files import transactionally with their
 original payloads; an absent receipt cannot prove that an imported request was
 never sent.
-`CreationPresentation` retires a finished submission when its Task or Session view
-mounts, including promotion. Inspect retains unconfirmed launches or conversation
-changes. Current Task readings still reconcile through the launch checkpoint.
-New Task presents the submitted request before saving or sending it. That starting
-view does not retire the saved submission; the actual result must mount first.
-An earlier New Task reply leaves later navigation and a newer New Task sheet
-alone. Its result stays registered for recovery until presented. Admission also
-requests a Task checkpoint: only a matching row at or beyond that checkpoint and
-the current scope ends launch reconciliation. Native readiness and unrelated
-frames cannot confirm it. Reopening observation requests another checkpoint;
-navigation away retains reconciliation until a current reading arrives on return.
+`WorkInteraction` publishes New Task's operation and submitted words synchronously,
+then saves before sending. Receipt stages bind exact Task and Session identities
+without waiting for a finished command. The operation remains recoverable after
+navigation leaves it. The native owner controls attachment and input readiness;
+mounting the result acknowledges presentation only. Query coverage and unresolved
+recovery remain in the shared store, independently of that acknowledgment.
+`CreationPresentation` also acknowledges mounted Session changes and promotion.
 See the [creation contract](../rust/loopflow/src/server/README.md#creation-receipts).
 
 The parts: the plan, the repository's Dashboard plans

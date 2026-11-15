@@ -1,47 +1,46 @@
 <!doctype html>
-<html lang="en">
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-906 · Start opens the conversation</title>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LOO-906 · A submitted conversation is one thing on both hosts</title>
 <style>
-:root{color-scheme:light dark}body{font:16px/1.5 system-ui,sans-serif;margin:0}main{max-width:760px;margin:auto;padding:24px}header,small{font-size:13px;opacity:.75}h1{font-size:28px;line-height:1.2}h2{font-size:20px}table{width:100%;border-collapse:collapse}td,th{text-align:left;vertical-align:top;padding:8px;border-bottom:1px solid #8886}code{overflow-wrap:anywhere}blockquote{margin:16px 0;padding-left:16px;border-left:3px solid #888}li{margin:12px 0}@media(max-width:520px){main{padding:14px}td,th{padding:5px}table{font-size:12px}}
-</style>
-<main>
-<header>LOO-906 · concept-review · 2026-11-15<br>Reviewed code: 14d5127895. Sources: scratch/{instant-task-session,questions,desktop-reactivity-feedback}.md; shared WorkInteraction, ClientWorkStore, ClientWorkDatabase and OperationDeclaration; Desktop WorkModel; iOS MobileTaskCreation, MobileNewTaskView, TaskListView and RemoteMobileClient; query and creation tests.</header>
-<h1>Start opens the conversation</h1>
-<p><strong>Next direction: iterate to implement.</strong> Give both hosts one operation-backed launch destination. The existing design settles this; no product choice is open.</p>
-<p><strong>Biggest mismatch:</strong> the phone still asks for <strong>Open Task</strong> after creation. Desktop shows submitted words immediately, but owns a separate launch handoff. Shared durable admission has not yet replaced those presentation lifecycles.</p>
-<table>
-<tr><th>Action</th><th>Concept</th><th>API / owner</th></tr>
-<tr><td>Start</td><td>Submitted conversation</td><td>Proposed shared synchronous begin → local operation selection</td></tr>
-<tr><td>Prepare / recover</td><td>Immutable saved request</td><td>Existing ClientWorkStore + receipt owner</td></tr>
-<tr><td>Show admitted result</td><td>Exact Task / Session binding</td><td>Proposed shared presentation → host native attachment</td></tr>
-<tr><td>Leave / return</td><td>Local destination</td><td>Host selection generation; operation remains saved</td></tr>
-</table>
-<h2>Existing → proposed</h2>
-<p><strong>Existing:</strong> bounded reusable query answers, shared leases and transactional closed-base reload requirements are built. Focused Desktop/iOS passes are recorded in the working design. Desktop launch publishes a StartingTask before waiting. iOS retains submission/outcome in a draft file and opens the Task through a separate sheet callback.</p>
-<blockquote><strong>Proposed experience:</strong> Start → editor closes → submitted words appear in the selected conversation → exact admitted Session attaches there. Leave for B while A prepares: B stays selected. Retry opening A uses its recorded Session.</blockquote>
-<table>
-<tr><th>Journey</th><th>Proposed visible result / recovery</th></tr>
-<tr><td>Save or admission held</td><td>Conversation shows submitted words immediately; native readiness governs input.</td></tr>
-<tr><td>Filed; Graph admission held</td><td>Keep exact identity and preparation in place; filing alone does not mean ready.</td></tr>
-<tr><td>Save fails</td><td>Keep editable words and the same unsent intent; send nothing.</td></tr>
-<tr><td>Reply lost; restart</td><td>Recover original ID on original Machine. Uncertain delivery never permits blind replay.</td></tr>
-<tr><td>Attachment fails</td><td>Retry opening the recorded Session; never create another Task.</td></tr>
-<tr><td>Result displayed; list held</td><td>Acknowledge presentation independently; keep query coverage and unresolved recovery.</td></tr>
-</table>
-<details>
-<summary>Follow the handoff through persistence and recovery</summary>
-<p>Generalize the shared intent path already used by Complete. Publish before discovery/disk/network; persist before sending. Derive presentation from immutable commands and current receipt evidence. Bind identities in place without reply-driven navigation or fake wire records. Keep attachment and input with native owners.</p>
-<p>Import phone submission/outcome/savedRequests into the existing SQLite owner before deleting their writers. Preserve original Machine, ID, words and result; validate matching outbox records without resetting send history. Keep unreadable or conflicting sources recoverable, and sources until commit. Legacy records without send evidence follow lookup/inspection policy. Editor text remains a draft.</p>
-<p>Replace Desktop launch/checkpoint ownership and phone sheet-owned actions and recovery lists together. A result mount acknowledges what was displayed; a sheet callback cannot establish presentation, query incorporation or readiness. Keep the bounded query working set and scoped floors.</p>
+:root{color-scheme:light dark;--bg:#faf8f4;--fg:#292924;--muted:#67665e;--line:#cdc9bd;--accent:#365d49;--new:#e4efe6}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.45 system-ui,sans-serif}main{max-width:800px;margin:auto;padding:26px 22px}header,small{font-size:12px;color:var(--muted)}h1{font:600 29px/1.15 system-ui;margin:20px 0 12px}h2{font-size:18px;margin:24px 0 8px}p{margin:10px 0}table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;vertical-align:top;border-bottom:1px solid var(--line);padding:8px 6px}td.new{background:var(--new)}blockquote{margin:14px 0;padding:4px 14px;border-left:3px solid var(--accent)}code{font-size:12px;overflow-wrap:anywhere}li{margin:9px 0}details{margin-top:16px}@media(prefers-color-scheme:dark){:root{--bg:#20221f;--fg:#ecece4;--muted:#b5b5a8;--line:#4c5046;--accent:#a5ccb0;--new:#2c382f}}@media(max-width:540px){main{padding:20px 12px}table{font-size:12px}th,td{padding:6px 3px}h1{font-size:25px}}
+</style><main>
+<header>LOO-906 · concept-review (headless, in the Graph) · 2026-11-15<br>Built from: scratch/instant-task-session.md; scratch/questions.md; the uncommitted creation cut on 6e944e73b5 — swift/Loopflow/Services/{CreationOperation,WorkInteraction,ClientWorkStore,ClientWorkDatabase}.swift; swift/LoopflowMac/{WorkModel,CreationRecovery}.swift and Views/{NewTaskSheet,WorkNavigator,SessionsView}.swift; swift/LoopflowiOS/{MobileTaskCreation,MobileNewTaskView,TaskListView}.swift.</header>
+<h1>Start now opens the conversation at once. Each host still decides what that conversation means.</h1>
+<p>No decision is needed to continue. The review sends the work back to implement with the direction below. Two copy questions at the end are optional.</p>
+<p><strong>Built in this cut:</strong> Start publishes the operation and its words before disk or network on both hosts, saves before sending, keeps a later selection when the receipt arrives, and imports released phone files with their IDs and outcomes.</p>
+<p><strong>Biggest mismatch:</strong> the shared store owns the request, but Desktop and the phone each work out which requests to list, what counts as having seen the result, and which button to offer. They disagree.</p>
+
+<h2>The same request, on each host today</h2>
+<table><thead><tr><th></th><th>Desktop</th><th>Phone</th><th>Proposed, both</th></tr></thead><tbody>
+<tr><td>Listed after its conversation was opened</td><td>No, unless it needs inspection</td><td>Yes, as “Saved request”, until the command retires</td><td class="new">No, unless it needs inspection</td></tr>
+<tr><td>Open the filed Task from its ordinary row</td><td>Counts as seen; request row goes</td><td>Does not count; request row stays</td><td class="new">Counts, from any route</td></tr>
+<tr><td>Button for <code>interaction.retry(id)</code></td><td>“Retry recovery”, beside an error</td><td>“Check status”, always</td><td class="new">“Try again” before save; “Check request” after</td></tr>
+<tr><td>Row text while all is well</td><td colspan="2">“Saving request…” / “Saved request”</td><td class="new">The words; a line only when something needs you</td></tr>
+<tr><td>Receipt bound, Work query lagging</td><td>Reads the Task directly, then opens (lagging case not run)</td><td>“The filed Task is not available yet” + tap Retry opening</td><td class="new">Conversation opens</td></tr>
+<tr><td>A failed creation appears</td><td>Sidebar row and a CreationRecovery item</td><td>Once</td><td class="new">Once</td></tr>
+</tbody></table>
+
+<h2>One interaction, including recovery</h2>
+<blockquote><strong>Proposed:</strong> Start A → editor closes, A’s words are selected. Go to B. A files; its Task appears in the list beside the request row. Open A from either row → its conversation, and the request row is gone, also after restart. If the save had failed instead: <em>Try again</em> sends the same request, <em>Edit request</em> returns the words. If the reply was lost: <em>Check request</em> looks up the original on its Machine. If the Session exists but did not attach: <em>Retry opening</em>. None of these moves you off B.</blockquote>
+
+<h2>Actions → concept → API</h2>
+<table><thead><tr><th>Action</th><th>Concept</th><th>API</th></tr></thead><tbody>
+<tr><td>Start</td><td>Submitted conversation, identified by its operation</td><td><code>WorkInteraction.createTask(… select:)</code> — built</td></tr>
+<tr><td>See it in the list; act on it</td><td>Its one derived state: status line + applicable actions</td><td class="new"><code>CreationOperation</code> state, derived in the shared owner — proposed; today each view reads <code>failures</code>, <code>receipt</code>, <code>legacyOutcome</code></td></tr>
+<tr><td>Open the result</td><td>The result was shown</td><td class="new">acknowledge by Task/Session resource on <code>WorkInteraction</code> — proposed; replaces <code>pendingCreations</code>’ filter and creation in <code>CreationRecovery</code></td></tr>
+<tr><td>Type</td><td>Native Session readiness</td><td>Existing native owners — unchanged</td></tr>
+</tbody></table>
+
+<details><summary>Three smaller findings</summary>
+<p><strong>Made-up repository.</strong> Desktop <code>beginTask</code> freezes <code>repoPath ?? "/"</code> into a command that can never be edited. Proposed: Start needs a resolved repository; otherwise the editor keeps the words.</p>
+<p><strong>Retired phone requests keep their words.</strong> Every phone creation stays in the outbox table with its full text after retirement, to stop a surviving editor file from submitting again. Proposed: keep the identity and a digest, drop the text, and drop the row once its source can no longer resurrect it.</p>
+<p><strong>Still unexercised on Desktop’s production path:</strong> attachment failure and Retry opening for a creation, restart after an uncertain send, held Graph admission after filing. Two clients converging on one closed query, the wider mutation cutover and a native latency baseline also remain open.</p>
 </details>
-<h2>Questions for the next implementation check</h2>
+
+<h2>Questions (optional; work continues on the proposed answer)</h2>
 <ol>
-<li>Do both production Start actions select submitted words before held save/admission?<br><strong>1a.</strong> Demonstrated. <strong>1b.</strong> Complete the shared handoff. Current direction: 1b.</li>
-<li>Do departure, failed attachment and restart recover the same operation and Session?<br><strong>2a.</strong> Demonstrated on both hosts. <strong>2b.</strong> Repair the ownership gap before cutover.</li>
-<li>Can legacy phone requests migrate without losing a result, resetting send evidence or overwriting a newer draft?<br><strong>3a.</strong> Demonstrated across import crashes and conflicts. <strong>3b.</strong> Implement transactional import before deleting old writers. Current direction: 3b.</li>
+<li><strong>Button names.</strong><br>1a — “Try again”, “Edit request”, “Check request”, “Retry opening” (proposed).<br>1b — other words; say which.</li>
+<li><strong>Where an unopened request sits.</strong><br>2a — above the Task list, as built on both hosts.<br>2b — inside the section where its Task will land.</li>
 </ol>
-<p><small>Headless outcome: design changed → iterate to implement. No code changed or builds ran in this review. Wider mutation/provenance and retained-native cutover remain open; native latency remains unmeasured. No publish or merge.</small></p>
-</main>
-</html>
+<small>Earlier answers stand: Jack Heart replied “1b for the question (or show noting)” on completion navigation and “1a” on disconnected routine edits. No shipping or merge decision is requested.</small>
+</main></html>

@@ -129,8 +129,13 @@ struct TaskListView: View {
     @State private var search = ""
     @State private var drafts: [WorkWorkspaceKey: String] = [:]
     @State private var creation: MobileTaskCreation?
-    @State private var created: WorkViewPlan.Content?
-    @State private var path: [WorkWorkspaceKey] = []
+    private enum Destination: Hashable {
+        case work(WorkWorkspaceKey)
+        case operation(String)
+        var work: WorkWorkspaceKey? { if case .work(let key) = self { key } else { nil } }
+    }
+    @State private var path: [Destination] = []
+    @State private var selectedOperation: CreationOperation?
     @State private var retained: [WorkWorkspaceKey: WorkViewPlan.Content] = [:]
     /// The repository shown, by durable ID; empty shows every repository.
     @AppStorage("repository") private var repository = ""
@@ -180,7 +185,17 @@ struct TaskListView: View {
     var body: some View {
         NavigationStack(path: $path) {
             List {
-                ForEach(client.interaction.failures) { failure in
+                ForEach(client.interaction.creations) { operation in
+                    Button { selectedOperation = operation; path = [.operation(operation.id)] } label: {
+                        VStack(alignment: .leading) {
+                            Text(operation.request).lineLimit(2)
+                            Text(operation.error ?? (operation.saved ? "Saved request" : "Saving request…")).font(Typography.caption(13))
+                        }
+                    }
+                }
+                ForEach(client.interaction.failures.filter { failure in
+                    !client.interaction.creations.contains { $0.id == failure.id }
+                }) { failure in
                     VStack(alignment: .leading) {
                         Text(failure.message)
                         Button("Retry Complete") { client.interaction.retry(failure.id) }
@@ -243,15 +258,25 @@ struct TaskListView: View {
                 }
             }
             .searchable(text: $search, prompt: "Search Tasks")
-            .navigationDestination(for: WorkWorkspaceKey.self) { work in
-                if let task = retained[work] ?? feed.repositories.flatMap(\.tasks).first(where: { $0.work == work }) { workspace(task) }
+            .navigationDestination(for: Destination.self) { destination in
+                switch destination {
+                case .work(let work):
+                    if let task = retained[work] ?? feed.repositories.flatMap(\.tasks).first(where: { $0.work == work }) { workspace(task) }
+                case .operation(let id):
+                    if let operation = (selectedOperation?.id == id ? selectedOperation : nil) ?? client.interaction.creations.first(where: { $0.id == id }) {
+                        MobileCreationConversation(client: client, operation: operation, theme: theme) { operation in
+                            client.interaction.editCreation(operation.id) { original in
+                                creation = MobileTaskCreation(client: client, request: original)
+                                path = []
+                            }
+                        }
+                    }
+                }
             }
-            .sheet(item: $creation, onDismiss: {
-                if let created { retained[created.work] = created; path = [created.work] }
-            }) { model in
-                MobileNewTaskView(model: model, theme: theme) { opening in
-                    opening.presented()
-                    created = opening.task
+            .sheet(item: $creation) { model in
+                MobileNewTaskView(model: model, theme: theme) { operation in
+                    selectedOperation = operation
+                    path = [.operation(operation.id)]
                     creation = nil
                 }
             }
@@ -276,7 +301,6 @@ struct TaskListView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        created = nil
                         creation = MobileTaskCreation(client: client)
                     } label: { Image(systemName: "plus") }
                         .accessibilityLabel("New Task")
@@ -315,7 +339,7 @@ struct TaskListView: View {
         Button {
             PerfClock.interaction(.taskSelect, .gesture, id: task.work.id)
             retained[task.work] = task
-            path = [task.work]
+            path = [.work(task.work)]
         } label: { row(task) }
             .listRowInsets(EdgeInsets(top: 12, leading: 20, bottom: 12, trailing: 16))
             .listRowBackground(theme.palette.background)
@@ -326,11 +350,11 @@ struct TaskListView: View {
             get: { drafts[task.work] ?? "" },
             set: { drafts[task.work] = $0 }), complete: {
                 let visible = sections.flatMap { $0.open + $0.quiet }.map(\.work)
-                feed.complete(task, selected: path.last, visible: visible) { next in
+                feed.complete(task, selected: path.last?.work, visible: visible) { next in
                     if let next, let content = feed.repositories.flatMap(\.tasks).first(where: { $0.work == next }) {
                         retained[next] = content
                     }
-                    path = next.map { [$0] } ?? []
+                    path = next.map { [.work($0)] } ?? []
                 }
             }, completionDirectory: feed.repositories.first { $0.repository == task.work.repository }?.path)
     }

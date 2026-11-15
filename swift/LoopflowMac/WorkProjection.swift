@@ -223,31 +223,13 @@ struct WaveViewRatios: Equatable {
 @MainActor
 @Observable
 final class WorkNavigation {
-    @MainActor @Observable
-    final class StartingTask: Identifiable {
-        let id = UUID().uuidString
+    struct TaskCreationDraft {
         let request: String
-        let directory: String?
-        let wave: WaveSnapshot?
+        let wave: String?
         let graph: String?
-        var receipt: TaskCreateReceipt?
-        var error: String?
-        var canEdit = false
-
-        init(request: String, directory: String?, wave: WaveSnapshot?, graph: String?) {
-            self.request = request
-            self.directory = directory
-            self.wave = wave
-            self.graph = graph
-        }
     }
-    var startingTask: StartingTask?
-    var newTaskDraft: StartingTask?
-    struct PendingTaskReconciliation {
-        let requestID: String
-        var floor: Int
-    }
-    var pendingTaskReconciliations: [String: PendingTaskReconciliation] = [:]
+    var newTaskDraft: TaskCreationDraft?
+    var startingTask: CreationOperation?
 
     enum SidebarFilter: String, CaseIterable {
         case working = "Working tasks"

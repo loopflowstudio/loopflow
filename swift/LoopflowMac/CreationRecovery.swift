@@ -95,6 +95,7 @@ final class CreationRecovery {
         }
         await refresh()
     }
+    @ObservationIgnored private var interactions: [String: WorkInteraction] = [:]
     private var recoveryErrors: [String: String] = [:]
     @ObservationIgnored private var recoveryTasks: [String: Task<Void, Never>] = [:]
     private var refreshing = false
@@ -112,6 +113,10 @@ final class CreationRecovery {
     }
 
     func retry(_ id: String) async {
+        if let owner = interactions.values.first(where: { $0.creations.contains { $0.id == id } }) {
+            owner.retry(id)
+            return
+        }
         let previous = recoveryTasks[id]
         previous?.cancel()
         await previous?.value
@@ -134,6 +139,14 @@ final class CreationRecovery {
                 recoveryErrors.removeValue(forKey: id)
             }
             for record in records where recoveryTasks[record.id] == nil {
+                if let command = try? JSONDecoder().decode(JSONValue.self, from: record.payload),
+                   command["kind"] == .string("task.create") {
+                    let owner = interactions[record.destination] ?? (submissions === ClientWorkStore.shared
+                        ? WorkInteraction.local(record.destination) : WorkInteraction(machine: record.destination, store: submissions))
+                    interactions[record.destination] = owner
+                    owner.start()
+                    continue
+                }
                 if await submissions.isRecovering(record.id) { continue }
                 recoveryTasks[record.id] = Task { [weak self, submissions] in
                     do {
@@ -151,9 +164,8 @@ final class CreationRecovery {
             for record in records {
                 do {
                     guard let operation = try await submissions.receipt(record.id) else {
-                        if let error = recoveryErrors[record.id] {
-                            current.append(Item(id: record.id, text: error, complete: false, resource: nil))
-                        }
+                        let error = recoveryErrors[record.id] ?? interactions[record.destination]?.creations.first(where: { $0.id == record.id })?.error
+                        current.append(Item(id: record.id, text: error ?? "Request saved; checking its original result", complete: false, resource: nil))
                         continue
                     }
                     let result = operation.result ?? operation.commits.last(where: { $0.stage == "task.filed" })?.result

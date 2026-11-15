@@ -14,6 +14,10 @@ final class ClientWorkDatabase {
         var presentedAt: Date?
         var receiptUnavailable: Bool?
         var departedEpochs: [String]?
+        var legacyOutcome: JSONValue?
+        var legacySource: JSONValue?
+        var retiredAt: Date?
+        var imported: Bool?
     }
     private struct Epochs: Codable {
         var current: String
@@ -53,6 +57,8 @@ final class ClientWorkDatabase {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
         try execute("CREATE TABLE IF NOT EXISTS operations (sequence INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, state BLOB NOT NULL)")
+        try execute("CREATE UNIQUE INDEX IF NOT EXISTS operations_draft ON operations(json_extract(CAST(state AS TEXT),'$.record.draftID'))")
+        try execute("CREATE INDEX IF NOT EXISTS operations_pending ON operations(sequence) WHERE json_extract(CAST(state AS TEXT),'$.retiredAt') IS NULL")
         try execute("CREATE TABLE IF NOT EXISTS work_queries (id TEXT PRIMARY KEY, state BLOB NOT NULL)")
         try execute("CREATE INDEX IF NOT EXISTS work_queries_with_effects ON work_queries(id) WHERE json_array_length(CAST(state AS TEXT),'$.effects')>0")
         try execute("CREATE TABLE IF NOT EXISTS work_epochs (id TEXT PRIMARY KEY, state BLOB NOT NULL)")
@@ -64,25 +70,18 @@ final class ClientWorkDatabase {
             .filter { $0.pathExtension == "json" }
         let records = try files.map { try JSONDecoder().decode(SubmittedOperation.self, from: Data(contentsOf: $0)) }
             .sorted { ($0.submittedAt, $0.id) < ($1.submittedAt, $1.id) }
-        try execute("BEGIN IMMEDIATE")
-        do {
-            for record in records {
-                // Released journals did not record a send epoch. Absence after
-                // migration cannot prove that their effect never happened.
-                try save(record, sentEpoch: "")
-            }
-            try execute("COMMIT")
-        } catch {
-            try? execute("ROLLBACK")
-            throw error
-        }
+        try importLegacy(records.map { LegacyOperation(record: $0, outcome: nil) })
         for file in files { try FileManager.default.removeItem(at: file) }
     }
 
     deinit { sqlite3_close(connection) }
 
     func pending() throws -> [SubmittedOperation] {
-        try rows("SELECT state FROM operations ORDER BY sequence").map { try JSONDecoder().decode(State.self, from: $0).record }
+        try rows("SELECT state FROM operations WHERE json_extract(CAST(state AS TEXT),'$.retiredAt') IS NULL ORDER BY sequence").map { try JSONDecoder().decode(State.self, from: $0).record }
+    }
+
+    func draftSubmitted(_ id: String) throws -> Bool {
+        try !rows("SELECT CAST(1 AS BLOB) FROM operations WHERE json_extract(CAST(state AS TEXT),'$.record.draftID')=? LIMIT 1", id: id).isEmpty
     }
 
     func state(_ id: String) throws -> State? {
@@ -98,6 +97,43 @@ final class ClientWorkDatabase {
         }
         let state = State(record: record, sentEpoch: sentEpoch, receiptEpoch: nil, observedEpoch: nil, receipt: nil)
         try execute("INSERT INTO operations(id,state) VALUES(?,?)", id: record.id, data: JSONEncoder().encode(state))
+    }
+
+    func importLegacy(_ values: [LegacyOperation]) throws {
+        try transaction {
+            for value in values {
+                try save(value.record, sentEpoch: "")
+                guard var state = try state(value.record.id) else {
+                    throw RegistryQueryError("The imported operation disappeared")
+                }
+                if let outcome = value.outcome, let receipt = state.receipt {
+                    try validateLegacy(outcome, receipt: receipt)
+                }
+                if let previous = state.legacyOutcome, let outcome = value.outcome, previous != outcome {
+                    throw RegistryQueryError("This operation identity already has another saved outcome")
+                }
+                if let previous = state.legacySource, let source = value.source, previous != source {
+                    throw RegistryQueryError("This operation identity already has another saved submission")
+                }
+                state.imported = true
+                if state.legacyOutcome == nil { state.legacyOutcome = value.outcome }
+                if state.legacySource == nil { state.legacySource = value.source }
+                try update(state)
+            }
+        }
+    }
+
+    private func validateLegacy(_ outcome: JSONValue, receipt: OperationReceipt) throws {
+        guard receipt.validation == .bound else { return }
+        let result = receipt.result ?? receipt.commits.last(where: { $0.stage == "task.filed" })?.result
+        if case .string(let original) = outcome["task_id"],
+           case .string(let current) = result?["task"]["id"], original != current {
+            throw RegistryQueryError("The current receipt names another Task; the original saved outcome is retained")
+        }
+        if case .string(let original) = outcome["receipt"]["session_id"],
+           case .string(let current) = result?["session_id"], original != current {
+            throw RegistryQueryError("The current receipt names another Session; the original saved outcome is retained")
+        }
     }
 
     /// Epoch departure survives reconnect and restart; an old subscription can
@@ -148,6 +184,7 @@ final class ClientWorkDatabase {
         // need domain recovery before they can confirm this saved operation.
         guard state.receiptEpoch == nil || state.receiptEpoch == epoch else { return }
         if state.receiptEpoch == epoch, let previous = state.receipt, previous.revision > receipt.revision { return }
+        if let outcome = state.legacyOutcome { try validateLegacy(outcome, receipt: receipt) }
         state.receiptUnavailable = false
         if state.receiptEpoch != epoch || state.receipt?.revision != receipt.revision {
             state.receipt = receipt
@@ -219,7 +256,13 @@ final class ClientWorkDatabase {
         }
         try execute("INSERT OR REPLACE INTO work_requirements(id,state) VALUES(?,?)",
             id: state.record.destination, data: JSONEncoder().encode(requirements))
-        try execute("DELETE FROM operations WHERE id=?", id: id)
+        if state.imported == true || state.record.draftID != nil {
+            // A source editor or released file may survive a crash. Keep its
+            // retired identity here so reopening it cannot resurrect work.
+            var retired = state
+            retired.retiredAt = Date()
+            try update(retired)
+        } else { try execute("DELETE FROM operations WHERE id=?", id: id) }
     }
 
     func retainQueries(machine: String, keys: Set<String>) throws {

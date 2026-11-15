@@ -19,12 +19,10 @@ struct NewTaskSheet: View {
     init(model: WorkModel) {
         self.model = model
         if let draft = model.navigation.newTaskDraft {
-            _waveID = State(initialValue: draft.wave?.id)
+            _waveID = State(initialValue: model.visibleRoadmaps.first { $0.wave.name == draft.wave }?.wave.id)
             _request = State(initialValue: draft.request)
             _graph = State(initialValue: draft.graph)
-        } else {
-            _waveID = State(initialValue: model.sidebarWave?.wave.id)
-        }
+        } else { _waveID = State(initialValue: model.sidebarWave?.wave.id) }
     }
 
     private var wave: WaveSnapshot? {
@@ -291,7 +289,7 @@ private struct WorkflowChooser: View {
 /// The submitted words remain visible until the real native conversation attaches.
 struct StartingTaskView: View {
     let model: WorkModel
-    let launch: WorkNavigation.StartingTask
+    let launch: CreationOperation
     @Environment(\.palette) private var palette
 
     var recovery: CreationRecovery = .shared
@@ -308,12 +306,15 @@ struct StartingTaskView: View {
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            if let error = launch.error, showsLaunchStatus {
+            if let error = model.taskOpening?.reason ?? launch.error, showsLaunchStatus {
                 Text(error).foregroundStyle(palette.warning).textSelection(.enabled)
-                if launch.canEdit {
-                    Button("Edit request") { model.editStartingTask(launch) }
-                } else if launch.receipt?.sessionId != nil {
+                if model.canEditCreation(launch.id) {
+                    Button("Edit request") { model.editCreation(launch.id) }
+                }
+                if launch.receipt?.sessionId != nil {
                     Button("Retry opening") { Task { await model.openCreatedTask(launch) } }
+                } else {
+                    Button("Retry recovery") { model.retryCreation(launch.id) }
                 }
             } else if showsLaunchStatus {
                 Text("Starting conversation…").foregroundStyle(palette.textSecondary)
@@ -326,7 +327,11 @@ struct StartingTaskView: View {
         .background(palette.background)
         .accessibilityIdentifier("starting-task-conversation")
         .onAppear {
+            PerfClock.interaction(.taskCreate, .contentMounted, id: launch.id)
             Perf.$inputTrace.withValue(launch.id) { Perf.agentInput("creation_surface") }
+        }
+        .task(id: launch.receipt?.sessionId) {
+            if launch.receipt?.sessionId != nil { await model.openCreatedTask(launch) }
         }
     }
 }

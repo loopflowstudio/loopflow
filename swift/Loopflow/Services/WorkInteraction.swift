@@ -20,14 +20,16 @@ public final class WorkInteraction {
         let id: String
         let payload: Data
         let submittedAt: Date
+        let draftID: String?
         var destination: String?
         var record: SubmittedOperation? {
             destination.map { SubmittedOperation(requestID: id, destination: $0, payload: payload,
-                version: ServerProtocol.revision, submittedAt: submittedAt) }
+                version: ServerProtocol.revision, submittedAt: submittedAt, draftID: draftID) }
         }
-        let effect: WorkQueryEffect
+        let effect: WorkQueryEffect?
         var savedRevision: UInt64?
     }
+    public private(set) var creations: [CreationOperation] = []
     public private(set) var machine: String?
     public private(set) var failures: [Failure] = []
     public private(set) var cacheError: String?
@@ -44,7 +46,6 @@ public final class WorkInteraction {
     @ObservationIgnored private var bases: [String: ClientWorkQuery] = [:]
     @ObservationIgnored private var intents: [Intent] = []
     @ObservationIgnored private var revision: UInt64 = 0
-    @ObservationIgnored private var resumed = false
     @ObservationIgnored private var changes: Task<Void, Never>?
     @ObservationIgnored private var saving: Task<Void, Never>?
     @ObservationIgnored private var deliveries: [String: Task<Void, Never>] = [:]
@@ -52,6 +53,12 @@ public final class WorkInteraction {
     public init(machine: String?, store: ClientWorkStore) {
         self.machine = machine
         self.store = store
+    }
+
+    deinit {
+        changes?.cancel()
+        saving?.cancel()
+        for task in deliveries.values { task.cancel() }
     }
 
     /// A local endpoint may reveal its Machine after a gesture. Binding keeps
@@ -72,15 +79,8 @@ public final class WorkInteraction {
         leases[id] = Lease(key: key, receive: receive)
         prune()
         receive(reconciled.contains(key) ? bases[key].map(project) : nil)
-        if changes == nil {
-            changes = Task { [weak self, store] in
-                for await _ in await store.changes() {
-                    guard !Task.isCancelled else { return }
-                    await self?.refreshFromStore()
-                    await self?.resumeSaved()
-                }
-            }
-        } else { Task { [weak self] in await self?.refreshFromStore() } }
+        if changes == nil { start() }
+        else { Task { [weak self] in await self?.refreshFromStore() } }
         return id
     }
 
@@ -88,12 +88,46 @@ public final class WorkInteraction {
         leases[id] = nil
         prune()
         if leases.isEmpty {
-            changes?.cancel(); changes = nil
             generation &+= 1
             reconciled = []
         }
         Task { [weak self] in await self?.refreshFromStore() }
     }
+
+    /// Command observation belongs to the Machine, independently of query leases.
+    public func start() {
+        guard changes == nil else { return }
+        changes = Task { [weak self, store] in
+            for await _ in await store.changes() {
+                guard !Task.isCancelled else { return }
+                await self?.refreshFromStore()
+                await self?.resumeSaved()
+            }
+        }
+    }
+
+    /// Freeze and publish the operation before Machine discovery, save or send.
+    @discardableResult
+    public func createTask(request: String, directory: String, wave: String? = nil, graph: String? = nil, draftID: String? = nil,
+                           select: (CreationOperation) -> Void) -> CreationOperation {
+        let id = UUID().uuidString.lowercased()
+        PerfClock.interaction(.taskCreate, .gesture, id: id)
+        let command = ServedWrite.taskCreate(directory: directory, requestID: id, title: nil,
+            request: request, wave: wave, graph: graph, session: nil, run: true)
+        let intent = Intent(id: id, payload: try! JSONEncoder().encode(command), submittedAt: Date(), draftID: draftID,
+            destination: machine, effect: nil)
+        let operation = CreationOperation(id: id, request: request, directory: directory, wave: wave,
+            graph: graph, submittedAt: intent.submittedAt, destination: machine)
+        creations.append(operation)
+        intents.append(intent)
+        select(operation)
+        PerfClock.interaction(.taskCreate, .statePublished, id: id)
+        start()
+        enqueue(intent)
+        return operation
+    }
+
+    public func presented(_ id: String) async throws { try await store.presented(id) }
 
     private func prune() {
         let pinned = Set(leases.values.map(\.key))
@@ -123,7 +157,7 @@ public final class WorkInteraction {
         let payload = try! JSONEncoder().encode(ServedWrite.taskComplete(directory: directory, issue: issue))
         let effect = WorkQueryEffect(operationID: id, sequence: 0, directory: directory,
             kind: "task.complete", issue: issue, resolution: nil)
-        let intent = Intent(id: id, payload: payload, submittedAt: Date(), destination: machine, effect: effect)
+        let intent = Intent(id: id, payload: payload, submittedAt: Date(), draftID: nil, destination: machine, effect: effect)
         intents.append(intent)
         publish()
         if selected == work {
@@ -138,6 +172,17 @@ public final class WorkInteraction {
         return id
     }
 
+    public func canEditCreation(_ id: String) -> Bool {
+        failures.contains { $0.id == id && !$0.saved } && creations.contains { $0.id == id }
+    }
+
+    public func editCreation(_ id: String, edit: (CreationOperation) -> Void) {
+        guard canEditCreation(id), let operation = creations.first(where: { $0.id == id }) else { return }
+        failures.removeAll { $0.id == id }
+        creations.removeAll { $0.id == id }
+        edit(operation)
+    }
+
     public func retry(_ id: String) {
         guard let failure = failures.first(where: { $0.id == id }) else { return }
         if failure.saved, let record = failure.record {
@@ -147,6 +192,7 @@ public final class WorkInteraction {
         }
         guard let intent = failure.intent else { return }
         failures.removeAll { $0.id == id }
+        creations.first { $0.id == id }?.clearFailure()
         intents.append(intent)
         publish()
         enqueue(intent)
@@ -169,6 +215,7 @@ public final class WorkInteraction {
                 }
                 guard let record = intent.record else { return }
                 let revision = try await store.save(record)
+                creations.first { $0.id == intent.id }?.markSaved()
                 guard !Task.isCancelled else { return }
                 if let index = intents.firstIndex(where: { $0.id == intent.id }) {
                     intents[index].savedRevision = revision
@@ -178,19 +225,18 @@ public final class WorkInteraction {
             } catch {
                 intents.removeAll { $0.id == intent.id }
                 failures.append(Failure(record: intent.record, message: error.localizedDescription, saved: false, id: intent.id, intent: intent))
+                creations.first { $0.id == intent.id }?.fail(error.localizedDescription)
                 publish()
             }
         }
     }
 
     private func resumeSaved() async {
-        guard !resumed, machine != nil else { return }
-        resumed = true
-        guard let records = try? await store.pending() else { resumed = false; return }
+        guard machine != nil, let records = try? await store.pending() else { return }
         for record in records where record.destination == machine {
-            guard deliveries[record.id] == nil,
+            guard deliveries[record.id] == nil, !failures.contains(where: { $0.id == record.id }),
                   let command = try? JSONDecoder().decode(JSONValue.self, from: record.payload),
-                  case .object(let fields) = command, fields["kind"] == .string("task.complete") else { continue }
+                  case .object(let fields) = command, (fields["kind"] == .string("task.complete") || fields["kind"] == .string("task.create")) else { continue }
             deliver(record)
         }
     }
@@ -201,17 +247,20 @@ public final class WorkInteraction {
             defer { self?.deliveries[record.id] = nil }
             do {
                 _ = try await store.reconcile(record)
-                PerfClock.interaction(.taskComplete, .commandReturned, id: record.id)
+                let command = try? JSONDecoder().decode(JSONValue.self, from: record.payload)
+                PerfClock.interaction(command?["kind"] == .string("task.create") ? .taskCreate : .taskComplete,
+                    .commandReturned, id: record.id)
                 try await store.observeSaved(record)
             } catch {
                 guard !Task.isCancelled else { return }
+                self?.creations.first { $0.id == record.id }?.fail(error.localizedDescription)
                 self?.failures.append(Failure(record: record, message: error.localizedDescription, saved: true, id: record.id, intent: nil))
             }
         }
     }
 
     private func project(_ base: ClientWorkQuery) -> [ProjectedWorkPlan] {
-        base.applying(intents.map(\.effect)).projection
+        base.applying(intents.compactMap(\.effect)).projection
     }
 
     public func isCompleting(issue: String, directory: String) -> Bool {
@@ -232,12 +281,12 @@ public final class WorkInteraction {
     public func persistPending() async { await saving?.value }
 
     public func refreshFromStore() async {
-        let queries = reads
+        let queries = leases.isEmpty ? [:] : reads
         let generation = generation
         guard let machine else { return }
         do {
             let update = try await store.presentation(machine: machine, queries: queries,
-                reusable: changes == nil ? [] : Set(queries.keys))
+                reusable: leases.isEmpty ? [] : Set(queries.keys))
             guard generation == self.generation, changes != nil else { return }
             apply(update)
             cacheError = nil
@@ -251,8 +300,25 @@ public final class WorkInteraction {
         guard update.revision >= revision else { return }
         revision = update.revision
         let savedIDs = Set(update.records.map(\.id))
+        for (id, task) in deliveries where !savedIDs.contains(id) {
+            task.cancel()
+            deliveries[id] = nil
+        }
         intents.removeAll { savedIDs.contains($0.id) || $0.savedRevision.map { $0 <= update.revision } == true }
         saved = update.records
+        for value in update.creations {
+            let operation: CreationOperation
+            if let existing = creations.first(where: { $0.id == value.record.id }) { operation = existing }
+            else {
+                operation = CreationOperation(value)
+                creations.append(operation)
+            }
+            operation.receive(value)
+        }
+        creations.removeAll { operation in
+            !savedIDs.contains(operation.id) && !intents.contains(where: { $0.id == operation.id })
+                && !failures.contains(where: { $0.id == operation.id })
+        }
         for key in update.requested where reads[key] != nil {
             bases[key] = update.queries[key]
             reconciled.insert(key)

@@ -8,12 +8,33 @@ public struct SubmittedOperation: Codable, Sendable, Identifiable {
     public let payload: Data
     public let version: Int
     public let submittedAt: Date
+    public let draftID: String?
+    public init(requestID: String, destination: String, payload: Data, version: Int, submittedAt: Date, draftID: String? = nil) {
+        self.requestID = requestID
+        self.destination = destination
+        self.payload = payload
+        self.version = version
+        self.submittedAt = submittedAt
+        self.draftID = draftID
+    }
     public var id: String { requestID }
 
     func hasSameCommand(as other: SubmittedOperation) throws -> Bool {
         guard destination == other.destination else { return false }
         return try JSONDecoder().decode(JSONValue.self, from: payload) ==
             JSONDecoder().decode(JSONValue.self, from: other.payload)
+    }
+}
+
+/// Released client evidence has no send epoch. Import never makes it unsent.
+public struct LegacyOperation: Sendable {
+    public let record: SubmittedOperation
+    public let outcome: JSONValue?
+    public let source: JSONValue?
+    public init(record: SubmittedOperation, outcome: JSONValue?, source: JSONValue? = nil) {
+        self.record = record
+        self.outcome = outcome
+        self.source = source
     }
 }
 
@@ -85,6 +106,7 @@ public actor ClientWorkStore {
         let requested: Set<String>
         let records: [SubmittedOperation]
         let queries: [String: ClientWorkQuery]
+        let creations: [CreationOperationSnapshot]
     }
 
     func retainQueries(machine: String, keys: Set<String>) throws {
@@ -95,7 +117,14 @@ public actor ClientWorkStore {
         try retainQueries(machine: machine, keys: reusable ?? Set(queries.keys))
         var readings: [String: ClientWorkQuery] = [:]
         for (key, read) in queries { readings[key] = try cachedPlans(machine: machine, for: read) }
-        return Presentation(revision: publication, requested: Set(queries.keys), records: try pending().filter { $0.destination == machine }, queries: readings)
+        let records = try pending().filter { $0.destination == machine }
+        let creations = try records.compactMap { record -> CreationOperationSnapshot? in
+            guard let command = try? JSONDecoder().decode(JSONValue.self, from: record.payload),
+                  command["kind"] == .string("task.create") else { return nil }
+            return try CreationOperationSnapshot(record: record, command: command,
+                receipt: receipt(record.id), recovery: recovery(record.id), legacyOutcome: disk().state(record.id)?.legacyOutcome)
+        }
+        return Presentation(revision: publication, requested: Set(queries.keys), records: records, queries: readings, creations: creations)
     }
 
     @discardableResult
@@ -104,6 +133,29 @@ public actor ClientWorkStore {
         changed()
         return publication
     }
+
+    public func importLegacy(_ values: [LegacyOperation]) throws {
+        try disk().importLegacy(values)
+        changed()
+    }
+
+    /// Import an unavailable Machine's local evidence without creating a
+    /// transport or changing its destination. The same database owns the commit.
+    public static func importLegacy(_ values: [LegacyOperation], directory: URL,
+                                    prepareDirectory: @escaping @Sendable (URL) throws -> Void) async throws {
+        try await Task.detached {
+            try ClientWorkDatabase(directory: directory, prepareDirectory: prepareDirectory).importLegacy(values)
+        }.value
+    }
+
+    public static func draftSubmitted(_ id: String, directory: URL,
+                                      prepareDirectory: @escaping @Sendable (URL) throws -> Void) async throws -> Bool {
+        try await Task.detached {
+            try ClientWorkDatabase(directory: directory, prepareDirectory: prepareDirectory).draftSubmitted(id)
+        }.value
+    }
+
+    public func draftSubmitted(_ id: String) throws -> Bool { try disk().draftSubmitted(id) }
 
     public func resolveMachine() async throws -> String { try await currentMachine() }
 
@@ -201,7 +253,7 @@ public actor ClientWorkStore {
     public func observeSaved(_ record: SubmittedOperation) async throws {
         guard active.insert(record.id).inserted else { return }
         defer { active.remove(record.id); changed() }
-        guard try disk().state(record.id) != nil else { return }
+        guard let state = try disk().state(record.id), state.retiredAt == nil else { return }
         try await verify(record)
         let watch = observe(record.id)
         defer { watch.cancel() }
@@ -209,7 +261,7 @@ public actor ClientWorkStore {
         for try await frame in watch.updates {
             try Task.checkCancellation()
             _ = try receive(frame, record: record, cursor: &cursor)
-            if try disk().state(record.id) == nil { return }
+            if try disk().state(record.id)?.retiredAt != nil || disk().state(record.id) == nil { return }
         }
         try Task.checkCancellation()
         throw RegistryQueryError("Receipt observation ended; the original request is retained")

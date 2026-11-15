@@ -155,7 +155,21 @@ final class WorkModel {
 
     var presentationError: String? { interaction?.cacheError }
 
-    var completionFailures: [WorkInteraction.Failure] { interaction?.failures ?? [] }
+    var pendingCreations: [CreationOperation] {
+        interaction?.creations.filter { $0.recovery?.resultPresented != true || $0.recovery?.needsInspection == true } ?? []
+    }
+    var completionFailures: [WorkInteraction.Failure] {
+        interaction?.failures.filter { failure in !pendingCreations.contains { $0.id == failure.id } } ?? []
+    }
+
+    func selectCreation(_ operation: CreationOperation) {
+        setRepoPath(operation.directory)
+        dismissTaskLink()
+        taskOpening = nil
+        navigation.palette = nil
+        navigation.selection = nil
+        navigation.startingTask = operation
+    }
     func retryCompletion(_ id: String) { interaction?.retry(id) }
 
     @ObservationIgnored private var navigationGeneration = 0
@@ -502,12 +516,18 @@ final class WorkModel {
                     Perf.agentInput("creation_input_ready", task: receipt.task.id,
                                     session: receipt.sessionId ?? "")
                 }
-                navigation.startingTask = nil
-            case .failed, .elsewhere: launch.error = taskOpening?.reason
             default: break
             }
         }
     }
+    var preparingCreation: Bool { navigation.startingTask != nil && taskOpening?.status != .usable }
+
+    func mountedCreation(taskID: String) async {
+        guard let operation = navigation.startingTask, operation.receipt?.task.id == taskID,
+              taskOpening?.status == .usable else { return }
+        try? await interaction?.presented(operation.id)
+    }
+
     @ObservationIgnored private var destinationGeneration = 0
 
     @ObservationIgnored private var taskLinkExpectedID: String?
@@ -1703,15 +1723,6 @@ final class WorkModel {
                 graphCatalogRevisions = [:]
                 graphCatalogRequests = [:]
                 (planningFloor, sessionsFloor, scopeFloor, taskFloor, sentScope) = (0, 0, 0, 0, nil)
-                // Opening can buffer a read before admission. Replay after opening,
-                // rather than treating the reader's initial cache as confirmation.
-                let pending = navigationByRepo.values.contains { !$0.pendingTaskReconciliations.isEmpty }
-                let floor = pending ? send { .checkpoint(id: $0, replay: ["task"]) } : 0
-                for owner in navigationByRepo.values {
-                    for id in owner.pendingTaskReconciliations.keys {
-                        owner.pendingTaskReconciliations[id]?.floor = floor
-                    }
-                }
                 syncWorkScope()
                 for try await frame in opened.frames {
                     guard !Task.isCancelled else { break }
@@ -1932,16 +1943,13 @@ final class WorkModel {
         case .task(let body):
             guard answers >= max(taskFloor, scopeFloor) else { return }
             // Retain authoritative rows even when planning has dropped their Task.
-            if let body, let row = body.row, row.task.identifier == body.task,
-               answers >= (navigation.pendingTaskReconciliations[row.id]?.floor ?? 0) {
+            if let body, let row = body.row, row.task.identifier == body.task {
                 if subscribedTaskRow != .available(row) { subscribedTaskRow = .available(row) }
             } else if body == nil {
                 subscribedTaskRow = .unavailable(lastGood: subscribedTaskRow.value, reason: reason)
             }
             guard let shown = selection, shown.kind == .task,
                   let task = task(id: shown.id)?.task else { return }
-            let pending = navigation.pendingTaskReconciliations[task.id]
-            guard answers >= (pending?.floor ?? 0) else { return }
             guard let body else {
                 taskWork.values[task.id] = .unavailable(lastGood: taskWork[task.id].value, reason: reason)
                 comments.values[task.id] = .unavailable(lastGood: comments[task.id].value, reason: reason)
@@ -1949,14 +1957,6 @@ final class WorkModel {
                 break
             }
             guard body.task == task.task.identifier else { return }
-            if pending != nil, body.row?.task.id != task.id || body.row?.task.identifier != body.task {
-                taskWork.values[task.id] = .unavailable(lastGood: taskWork[task.id].value,
-                    reason: "The admitted Task is absent from its current reading")
-                break
-            }
-            if let row = body.row, row.task.id == task.id, row.task.identifier == body.task {
-                navigation.pendingTaskReconciliations.removeValue(forKey: task.id)
-            }
             if comments[task.id] != .available(body.comments) { comments.values[task.id] = .available(body.comments) }
             let next = WorkReading.available(body.work)
             if taskWork[task.id] != next { taskWork.values[task.id] = next }
@@ -2710,88 +2710,45 @@ final class WorkModel {
         graphDefaults[key] = reading(from: result, lastGood: previous)
     }
 
-    /// Install the submitted conversation before any storage or network wait.
+    /// Selection publishes the submitted operation before disk or network work.
     @discardableResult
-    func beginTask(request: String, wave: WaveSnapshot?, graph: String?) -> Task<Void, Never> {
-        guard navigation.startingTask == nil else { return Task {} }
+    func beginTask(request: String, wave: WaveSnapshot?, graph: String?) -> CreationOperation? {
+        guard navigation.startingTask == nil else { return nil }
         dismissTaskLink()
-        let owner = navigation
-        let launch = WorkNavigation.StartingTask(request: request, directory: repoPath, wave: wave, graph: graph)
-        owner.palette = nil
-        owner.startingTask = launch
-        Perf.$inputTrace.withValue(launch.id) { Perf.agentInput("creation_start") }
-        return Task { await submitTask(launch, owner: owner) }
-    }
-
-    private func submitTask(_ launch: WorkNavigation.StartingTask, owner: WorkNavigation) async {
-        let destination = destinationGeneration
-        do {
-            let receipt = try await query.createTask(request: launch.request, wave: launch.wave?.name,
-                graph: launch.graph, cwd: launch.directory, requestID: launch.id)
-            Perf.$inputTrace.withValue(launch.id) {
-                Perf.agentInput("creation_admitted", task: receipt.task.id, session: receipt.sessionId ?? "")
+        taskOpening = nil
+        let navigation = navigation
+        let interaction = interaction ?? WorkInteraction.local(observingMachineId)
+        self.interaction = interaction
+        let operation = interaction.createTask(request: request, directory: repoPath ?? "/",
+            wave: wave?.name, graph: graph) { operation in
+                navigation.palette = nil
+                navigation.selection = nil
+                navigation.startingTask = operation
             }
-            launch.receipt = receipt
-            let floor = workObservation == nil ? 0 : send { .checkpoint(id: $0, replay: ["task"]) }
-            owner.pendingTaskReconciliations[receipt.task.id] = .init(requestID: launch.id, floor: floor)
-            taskWork.values[receipt.task.id] = workObservation == nil
-                ? .unavailable(lastGood: nil, reason: "Task update accepted; Work observation is unavailable")
-                : .loading
-            CreationRecovery.shared.awaitingPresentation(launch.id, of: .task(receipt.task.id))
-            guard navigation === owner, owner.startingTask === launch,
-                  destinationGeneration == destination else { return }
-            await openCreatedTask(launch)
-            if !query.streamsWork { await reconcileCreatedTask(launch, owner: owner) }
-            try? await confirmWorkUpdate()
-        } catch {
-            launch.error = error.localizedDescription
-            launch.canEdit = !(error is OperationSubmissionError)
+        Perf.$inputTrace.withValue(operation.id) { Perf.agentInput("creation_start") }
+        return operation
+    }
+
+    func canEditCreation(_ id: String) -> Bool { interaction?.canEditCreation(id) == true }
+
+    func editCreation(_ id: String) {
+        interaction?.editCreation(id) { operation in
+            navigation.newTaskDraft = .init(request: operation.request, wave: operation.wave, graph: operation.graph)
+            navigation.startingTask = nil
+            navigation.palette = .newTask
         }
     }
 
-    private func reconcileCreatedTask(_ launch: WorkNavigation.StartingTask, owner: WorkNavigation) async {
-        guard let receipt = launch.receipt else { return }
-        let destination = destinationGeneration
-        do {
-            let reading = try await query.taskStatus(task: receipt.task.identifier, cwd: launch.directory)
-            guard navigation === owner, destinationGeneration == destination, selection == .task(id: receipt.task.id),
-                  owner.pendingTaskReconciliations[receipt.task.id]?.requestID == launch.id else { return }
-            guard let row = reading.row, row.id == receipt.task.id, let work = reading.overview else {
-                throw RegistryQueryError("The admitted Task is absent from its current reading")
-            }
-            subscribedTaskRow = .available(row)
-            taskWork.values[receipt.task.id] = .available(work)
-            owner.pendingTaskReconciliations.removeValue(forKey: receipt.task.id)
-        } catch {
-            guard navigation === owner, destinationGeneration == destination else { return }
-            taskWork.values[receipt.task.id] = .unavailable(lastGood: taskWork[receipt.task.id].value,
-                                                          reason: error.localizedDescription)
-        }
-    }
+    func retryCreation(_ id: String) { interaction?.retry(id) }
 
-    func openCreatedTask(_ launch: WorkNavigation.StartingTask) async {
-        guard navigation.startingTask === launch, let receipt = launch.receipt else { return }
-        guard let session = receipt.sessionId else {
-            launch.error = "The Task was filed, but its conversation was not admitted. Inspect its creation receipt."
-            return
-        }
-        launch.error = nil
-        await Perf.$inputTrace.withValue(launch.id) {
-            await openTaskLink(TaskLink(issue: receipt.task.id, repo: launch.directory, session: session, conversation: true),
+    func openCreatedTask(_ operation: CreationOperation) async {
+        guard navigation.startingTask === operation, let receipt = operation.receipt,
+              let session = receipt.sessionId else { return }
+        await Perf.$inputTrace.withValue(operation.id) {
+            await openTaskLink(TaskLink(issue: receipt.task.id, repo: operation.directory, session: session, conversation: true),
                                expectedTaskID: receipt.task.id, intent: .start, preservingCreation: true)
         }
-        // The native owner completes presentation after its surface is usable.
-        if navigation.startingTask === launch {
-            if taskOpening?.status == .opening { launch.error = nil }
-            showsTaskLink = false
-        }
-    }
-
-    func editStartingTask(_ launch: WorkNavigation.StartingTask) {
-        guard navigation.startingTask === launch, launch.canEdit else { return }
-        navigation.newTaskDraft = launch
-        navigation.startingTask = nil
-        navigation.palette = .newTask
+        if navigation.startingTask === operation { showsTaskLink = false }
     }
 
     /// Ship the Task, then confirm its subscription update; it moves to Shipping

@@ -48,11 +48,10 @@ Restoring workspace, Not started/Start, and Conversation change unconfirmed.
 
 ## What the current code establishes
 
-Both clients use SwiftUI/Observation; their command, cache and navigation owners
-still disagree about when an interaction happened. Desktop `WorkModel`/
-`TaskRunDraft`, launch checkpoints and `abandoningTaskIDs`, plus mobile
-`MobileTaskDraft`/view-owned `SessionLink`, remain replacement targets (see the
-delete list). Revision-6 subscriptions now provide exact-query snapshot stamps;
+Start and Complete now use shared SwiftUI/Observation interaction and outbox
+owners on both clients. Other mutations still disagree about when an interaction
+happened. Desktop `TaskRunDraft` and `abandoningTaskIDs`, plus mobile view-owned
+`SessionLink`, remain replacement targets (see the delete list). Revision-6 subscriptions now provide exact-query snapshot stamps;
 server operation admission covers all typed writes, while live client outbox
 migration still specializes creation. Native Session/Graph owners retain readiness.
 Predecessor map: `bb936ac371`; earlier Desktop design: `7030e08a`.
@@ -489,13 +488,14 @@ existing bounded input owners: no offline keystroke queue or automatic resend.
   `WorkNavigator.waveRow`'s delayed selection. Remove view-owned mobile
   `SessionLink` teardown on ordinary Task switching; keep explicit Close,
   background policy and memory-pressure eviction under the retained owner.
-- Desktop `createdTaskIDs` predecessor and this pass's request-specific
-  `pendingTaskReconciliations`/checkpoint exception, `StartingTask` submission state,
-  `TaskRunDraft.phase`, `abandoningTaskIDs`, mutation-specific refresh barriers and
-  rename/bind replacement bookkeeping. Replace their consumers in the same cut.
-- Mobile `MobileTaskOutcome`, submitted/outcome/savedRequests portions of
-  `MobileTaskDraft`, sheet-owned mutation lifetime and result-owned Open Task gate.
-  Keep unsent drafts, repository selection and device protection.
+- Removed in the creation cut: Desktop `StartingTask` submission state and
+  `pendingTaskReconciliations`/checkpoint exceptions, mobile `MobileTaskOutcome`,
+  submitted/outcome/savedRequests draft writers, sheet-owned sends and Open Task
+  gate, with exclusive predecessor fixtures. Preserve native attachment/retry,
+  original identities/outcomes, unsent drafts, repository picker and protection.
+  `LegacyTaskDraft` reads released files only; SQLite commits precede rewrites.
+- Still remove Desktop `TaskRunDraft.phase`, `abandoningTaskIDs`, other mutation
+  refresh barriers and rename/bind replacement bookkeeping with their consumers.
 - Removed: creation-only `CreationSubmissions` and `CreationRecovery`'s status
   poll. The shared SQLite outbox replaces the sender and saved-command owner.
   Remaining: per-view presentation map. Generalize/migrate their exact
@@ -585,50 +585,17 @@ Required domain correlation stays inspectable when unavailable. A newer Work
 reading cannot replace an earlier command's original outcome. Attachment owns
 input readiness and Retry opening for the same Session.
 
-### A destination identifies a query, not its last answer
+### Query destinations and leases
 
-Built at `3b096ece9d`; the full direction is at
-`cfebc7f89a:scratch/instant-task-session.md`. A query destination is its original
-Machine/repository and query identity (requested expression while canonical
-resolution is pending; saved Dashboard ID across expression edits). History holds
-no `WorkViewPlan`/`ProjectedWorkPlan`. Every displayed Work query mounts through
-`WorkInteraction.open`/`close`; stamped answers enter `receive`; a write's returned
-plan requests freshness but never publishes membership. Destination generation is
-separate from query freshness: a late answer warms its cache but cannot select,
-replace another destination or present native tiles for a departed route. Complete
-navigates by the origin's displayed occurrence order, deduplicated by full Work
-identity.
-
-Exercised (Desktop `DesktopWorkInteractionTests`, shared/iOS `ClientWorkQueryTests`):
-cached expression A→B→back during a held Complete save with reordered list
-replies; origin order opposite the sidebar; stamped saved-Dashboard refresh after
-an unrelated write; delayed Dashboard save after leaving and returning; cold query
-selection before its read with failure kept in that destination; independent
-same-query leases; restart with a lagging list; phone filter reopening. The Desktop model now also exercises refresh failure, close of one of two
-same-query mounts, covering refresh and restart as one sequence.
-
-### Closing a view must not keep its whole answer alive
-
-Built at `14d5127895`; the full direction and acceptance list are at
-`3d2a4aa931:scratch/instant-task-session.md`. A mounted lease, a reusable
-prepared answer and a durable reload requirement are separate internal owners;
-opening, closing and returning stay the only actions people see. Live leases pin
-their entry; eight recent unleased answers stay reusable. Last-lease close
-suspends observation; reopening reconciles disk/outbox before first display, and
-publication generations reject pre-suspension answers. Retirement transfers a
-resolved effect into a retained usable base, or invalidates a closed base with a
-compact floor scoped by Machine/epoch/schema, repository, effect and domains, in
-the outbox transaction. Close and eviction never resend, infer refusal,
-acknowledge presentation or release an execution lane. Host usage docs
-(`swift/README.md`, `swift/LoopflowiOS/README.md`) describe the lifecycle.
-
-Exercised on both hosts by shared `ClientWorkQueryTests`: closed settlement for
-committed, superseded and refused resolutions with reopen and restart; changed
-saved plan against an older list; eviction beyond the bound with independent
-leases pinned; 67 repeated completions compacted to one floor; a later effect
-cannot revive an invalidated base. Desktop adds one-of-two-window close during a
-failed refresh, then restart. Not exercised: two clients (Desktop and phone)
-converging on the same closed query.
+Built through `6e944e73b5a63bf4dfc28d091c21834e997e902d`; that commit's
+`scratch/instant-task-session.md` retains the detailed contracts, exercised
+counterexamples and check results. History holds original query identity, never
+answers. Shared leases pin live queries; eight recent unleased answers are reusable.
+Reopen reconciles disk/outbox before cached publication; generations reject earlier
+replies. Retirement transfers lagging effects into retained bases or invalidates
+closed bases under compact scoped floors. No close, eviction, acknowledgment or
+native mount permits replay. Two-client convergence on the same closed query
+remains unexercised.
 
 ### Start selects a conversation owned by the operation
 
@@ -699,39 +666,119 @@ Retain query-close, bounded-reuse, epoch and reordered-reply coverage. Native
 reaction/input measurements and the wider mutation/provenance migration remain
 required; this direction does not finish the cross-platform cut.
 
+### A submitted conversation is one thing on both hosts
+
+Headless concept-review of the uncommitted creation cut on `6e944e73b5`,
+2026-11-15. Next implement direction. No product choice is open: each item follows
+from "hosts render it" and "once its result is shown, remove the redundant
+recovery prompt" above. Synchronous publication, save-before-send, departure and
+import are built and stay as they are.
+
+The shared owner holds the operation but each host still decides what it means.
+Seen in the working tree:
+
+- **Which requests are listed.** Desktop `WorkModel.pendingCreations` hides a
+  presented creation unless it needs inspection. `TaskListView` lists every
+  `interaction.creations` entry, so the phone keeps a "Saved request" row for a
+  conversation already opened, until query coverage retires the command.
+- **What shows a result.** Desktop acknowledges by resource through
+  `CreationPresentation`: opening the filed Task from its ordinary row counts.
+  On the phone only `MobileCreationConversation` acknowledges, so opening the same
+  Task from the list leaves its request row behind.
+- **What to do next.** Both call `interaction.retry(id)`; Desktop labels it
+  **Retry recovery** and shows it only beside an error, the phone labels it
+  **Check status** and always shows it. For an unsaved request that call saves and
+  sends for the first time; neither label says so. Desktop reads
+  `receipt?.sessionId` for **Retry opening**, the phone `operation.sessionID`.
+- **Row text.** "Saving request…" / "Saved request" name storage. A filed Task
+  whose conversation is starting reads "Saved request".
+- **Two failure lists.** A creation failure is in `WorkInteraction.failures` and
+  in `CreationOperation.error`; both hosts filter `failures` against `creations`,
+  and `canEditCreation` looks the ID up in `failures`.
+- **Two Desktop owners.** `CreationRecovery` builds its own `interactions` map,
+  delegates `retry`, and now lists every receipt-less creation as "Request saved;
+  checking its original result" while the sidebar lists the same operation.
+- **Opening on the phone needs a query answer.** `MobileCreationConversation.open`
+  runs one `viewPlan` read when the receipt binds. A lagging read shows "The filed
+  Task is not available yet" and waits for a tap on **Retry opening**: the removed
+  Open Task gate, back as an error.
+- **A made-up repository.** Desktop `beginTask` freezes `repoPath ?? "/"` into the
+  immutable command.
+- **Retired phone requests keep their words.** Every editor-linked creation
+  (`draftID`) and every import stays in `operations` with its full payload after
+  retirement; one row per phone creation, never removed.
+
+Build:
+
+- `CreationOperation` derives its own state once, in the shared owner, from the
+  saved command, receipt stages, recovery and failure: one status line and the
+  applicable actions. Unsaved: retry the save, or return the words to the editor.
+  Saved with no bound outcome: look up the original request. Session recorded but
+  not attached: Retry opening. Needs inspection: show the receipt. No status line
+  while preparation proceeds normally beyond the existing "Starting
+  conversation…". Hosts render that state; neither reads `failures`, `receipt` or
+  `legacyOutcome` to choose a button. Same labels on both (see `questions.md`).
+- `WorkInteraction` exposes the listed requests (unpresented, or needing
+  inspection) and takes acknowledgment by resource: a mounted Task or Session
+  acknowledges every operation whose result it is, from any route. Delete
+  `WorkModel.pendingCreations`' filter, the hosts' `failures`/`creations`
+  cross-filters, and creation from `CreationRecovery` (`interactions`, the
+  delegated `retry`, the receipt-less item, the presentation map for Tasks).
+  `failures` holds commands that have no destination of their own.
+- The phone opens the operation's conversation from the receipt's Task and
+  Session through the retained native owner. A lagging Work query delays list
+  facts, never the conversation, and is not shown as an error. Attachment failure
+  alone offers Retry opening.
+- Start is available only with a resolved repository; with none, the editor
+  keeps the words. Never freeze a placeholder scope.
+- A retired identity keeps what recognizes its source (request ID, draft ID,
+  command digest, retirement time), not the authored words. Drop it once its
+  source can no longer resurrect it: the single editor file carries a different
+  draft ID, or the released file has been rewritten.
+
+Show next, production views on both hosts: Start A, leave, A files and its Task
+appears in the list; open it from that row; the request row is gone on both
+hosts and stays gone after restart. Hold the Work query after the receipt binds:
+the conversation opens with no error and no tap. Fail the save: one action
+retries the same ID, one returns the words; neither is offered after save. One
+failed creation appears once on Desktop. Retire a phone creation, crash before
+editor cleanup, reopen: no second command, and no request text in the retired
+row. Desktop attachment failure and Retry opening for a creation, restart after
+uncertain send, and held Graph admission after filing are still unexercised on
+Desktop's production path.
+
 ## Current implementation cut
 
-Production Complete uses shared `WorkInteraction` on both hosts; Desktop queries
-are mounted stamped subscriptions with the bounded lifecycle above. A retained
-base past 64 retired effects becomes cold under its floor; a partial SQLite index
-bounds eviction cleanup to effect-bearing bases. Legacy broad floors, epoch
-recovery, unsent intent and unseen results keep their semantics.
+Start and Complete publish through shared `WorkInteraction` on both hosts. Creation
+freezes ID/payload/scope/time before its synchronous selection callback, saves before
+send and derives `CreationOperation` from the saved command and receipt stages.
+Desktop keeps the operation selected through native readiness; iOS replaces its
+editor with an operation route. Neither receipt nor recovery navigates after
+leaving. Attachment Retry uses the recorded Session. A mounted result acknowledges
+presentation without settling independent query/planning obligations. Unsaved
+failure retains words for same-ID retry or deliberate editing.
 
-Complete no longer discovers a Machine or mounts queries before publication.
-An unsaved intent contains immutable payload, ID and submission time; an unknown
-Machine binds through its existing store's endpoint before saving that same
-command. A saved command's destination is never changed. Save failure retains its
-intent for same-ID retry. Navigation uses the originating displayed occurrence
-order, deduplicated by full Work identity. Generic checkpoint behavior and other
-mutation families remain on their existing owners pending the full cutover.
+Phone files import each original Machine/ID/command/source/outcome into SQLite,
+transactionally per Machine and idempotently across source cleanup crashes.
+Matching rows keep their send epoch and receipt; conflicts leave the source intact.
+Imported missing send evidence remains inspectable, never unsent. Editor revisions
+are associated with submitted commands in that transaction; surviving editor files
+cannot submit again after save or retirement. Imported and editor-linked retired
+rows retain their identity in the existing owner, outside indexed pending reads.
+No second receipt ledger exists. Other-Machine imports/lookups open no transport.
 
-Existing architecture and checks before this pass:
-`052baca0dcb44c83b7c4f830f8c0a86001d3cebe:scratch/instant-task-session.md`.
-Protocol 6, Git-free immutable admission, submitted/canonical identity, the single
-receipt owner, correlated planning resolutions, presentation acknowledgment,
-stamped durable Work cache, portable membership and retirement transfer remain
-in place. Ordered query effects stop independently on covering semantic fences;
-lagging lists retain their effects across retirement/restart. No SQL/native
-latency diagnosis follows from these correctness checks.
+Query leases retain their previous bounded semantics. Last-close suspends query
+publication while command recovery continues; reopening reconciles before display,
+including without a network event. Retirement cancels its receipt observer and
+transfers lagging effects or scoped reload floors. The complete prior contracts and
+query checks remain at `6e944e73b5a:scratch/instant-task-session.md`.
 
-Remaining, next first: creation cutover on both clients (direction above);
-exhaustive effect/dependency declarations and normalized cross-query provenance;
-remaining mutation-family recovery and resource lanes (remote/files/config/planning);
-retained-occurrence (mobile `SessionLink`) cutover; projected inspection
-DTO alongside confirmed inspection; historical-restoration epoch reset;
-crash/native acceptance and a valid benchmark baseline. This remains one
-indivisible cross-platform PR; no shipping or merge decision is recorded.
-SQLite fences cannot certify filesystem/provider readiness.
+Remaining: disconnected Complete/rename/move delivery and Waiting for connection
+under the recorded 1a direction; cross-client closed-query convergence; exhaustive
+effect/dependency declarations and cross-query provenance; other mutation recovery
+and resource lanes; retained mobile `SessionLink`; projected inspection;
+historical-restoration epoch reset; valid native benchmark baseline. One cross-platform PR; no shipping decision. SQLite
+fences cannot certify filesystem/provider readiness.
 
 ### Admission identity and recovery contract
 
@@ -781,8 +828,51 @@ Checks before this cut: `d9bf1c21ae:scratch/instant-task-session.md` records foc
 Desktop/iOS query, receipt and recovery passes; Rust operations/schema/DTO passes;
 fmt/clippy and multiplatform checks. Archive/documentation checks remain gate-owned.
 
-Query-lifecycle checks (2026-11-15; inherited `LF_*` cleared):
-- `swift build --build-tests --package-path swift --jobs 4 -Xswiftc -gnone` and `scripts/test_desktop.sh --skip-build --filter ClientWorkQueryTests`: build and 32 focused Desktop checks passed; the final all-leases-close-during-save assertion also passed by exact filter. Gate owns wider suites.
-- `scripts/test_ios.py -only-testing:LoopflowiOSTests/ClientWorkQueryTests`: 28 shared cases passed, including bounded retention, closed settlement/restart, changed saved plans and invalidation across two different completions. The final held-save assertion passed separately by exact method filter. iOS also logged SQLite vnode-unlinked diagnostics during fixture directory removal while handles remained open; fixture teardown remains a gate follow-up.
-- 10,000-query SQLite `EXPLAIN QUERY PLAN`: cleanup uses `SEARCH work_queries USING INDEX work_queries_with_effects (id>? AND id<?)`; retained metadata stays one scoped floor across 67 completions in the shared regression test.
-- Multiplatform boundaries and `git diff --check`: passed. No Rust change in this cut; gate owns documentation/archive checks. Native latency remains unmeasured. Earlier check details: `741c95cbd7:scratch/instant-task-session.md`.
+Earlier checks: `6e944e73b5a:scratch/instant-task-session.md`. Creation checks
+(2026-11-15; inherited `LF_*` cleared):
+- `swift build --build-tests --package-path swift --jobs 4 -Xswiftc -gnone` and `scripts/test_desktop.sh --skip-build --filter 'ClientWorkQueryTests|operationConversationUsesNativeReadiness|OperationRecoveryPresentationTests'`: build and 44 checks passed; gate owns wider suites.
+- `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/MobileTaskCreationTests -only-testing:LoopflowiOSTests/ClientWorkQueryTests`: 41 checks passed, including held admission/attachment, departure, restart, legacy conflict and newer-editor races; Simulator removed.
+- `scripts/check_swift_multiplatform_boundaries.py`, `git diff --check`: passed. 10k SQLite rows use `operations_pending` for live records and `operations_draft` for origin lookup; gate owns archive/documented-command checks. Native latency remains unmeasured.
+
+## Conversation concept review · 2026-11-15
+
+The experience has three independent owners: local selection/disclosure, projected
+Work plus pending commands, and retained native Session readiness. One stable
+destination renders those facts; delivery milestones never become replacement
+screens. Local selection and cached presentation must remain useful when no
+Machine request can finish. Completion removes its displayed occurrence and moves
+to the next Task (the earlier quoted 1b); rejection restores membership without
+undoing a later selection. Successful domain changes survive later sync errors.
+
+Current inspected code: shared `WorkInteraction.complete` publishes before save
+and invokes origin selection synchronously. Shared creation publication is being
+implemented by the live worker. `assignTask`, `moveTask`, `reopenTask` still use
+`performTaskAction` and confirmation waits; Abandon retains a separate local set.
+`OperationDeclaration` covers six kinds. These are unfinished cutover, not the
+final shared contract. The review changed no production code or execution state.
+
+Proposed usage, implementation still required:
+> Select a recent Task to see its retained conversation immediately. Expand a
+> Wave without waiting for the Machine. Complete removes the Task and opens the
+> next one, or an empty view. Pending changes show where they were made. If a
+> change is refused, its row/value returns with an explanation; your current
+> selection stays where you put it.
+
+Jack Heart replied “1a” to conversation concept-review question 1 on 2026-11-15.
+The numbered option was: “Save routine edits while disconnected, show ‘Waiting
+for connection,’ and send on reconnect.” Complete, rename and move save and project
+locally on both clients, then deliver in order to their original Machine. Pending
+changes survive app restart. Unknown delivery is recovered by original ID, never
+blindly replayed. A definite refusal restores the affected value/membership without
+changing later navigation. Native terminal input, control takeover and execution
+readiness retain their existing live-owner rules. This settles disconnected routine
+editing; implementation and recovery coverage remain required before shipped docs
+claim the behavior.
+
+Show next: the same four journeys (Start, Complete, recent Task, Wave expansion)
+on Desktop and mobile with held responses, failed save, lost answer, reconnect and
+rapid navigation. Measure visible response separately from Session input readiness.
+The twenty-pass run and the large protocol diff do not establish that experience;
+native baseline remains missing. Keep ADEMark/workflow coverage and the quiet-host
+constraint; do not trade away required recovery for smaller code. Existing skills
+need no new interaction rule.

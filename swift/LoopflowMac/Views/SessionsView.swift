@@ -1646,8 +1646,8 @@ struct SessionsContentView: View {
 
     private var navigation: WorkNavigation { model.navigation }
     private var terminalsVisible: Bool {
-        navigation.startingTask == nil && !navigation.showsSelection && workspaces.selectedWork != nil
-            && (fileTask?.task.awaitsStart != true || fileTask.map { navigation.pendingTaskReconciliations[$0.task.id] != nil } == true)
+        !model.preparingCreation && !navigation.showsSelection && workspaces.selectedWork != nil
+            && (navigation.startingTask?.receipt?.task.id == currentKey.id || fileTask?.task.awaitsStart != true)
             && showsTerminals(currentKey, fileTask?.task, workspace)
     }
 
@@ -1683,10 +1683,10 @@ struct SessionsContentView: View {
                     description: Text("Open a repository, Wave or Task from the sidebar."))
             }
         }
-        .allowsHitTesting(navigation.startingTask == nil)
-        .accessibilityHidden(navigation.startingTask != nil)
+        .allowsHitTesting(!model.preparingCreation)
+        .accessibilityHidden(model.preparingCreation)
         .overlay {
-            if let launch = navigation.startingTask {
+            if let launch = navigation.startingTask, model.preparingCreation {
                 StartingTaskView(model: model, launch: launch)
             }
         }
@@ -1696,12 +1696,7 @@ struct SessionsContentView: View {
     /// The Task's workflow bar and provider transition; a starting launch owns the pane instead.
     @ViewBuilder private var mainPaneHeader: some View {
         if navigation.startingTask == nil, let task = model.breadcrumb?.task?.task {
-            if navigation.pendingTaskReconciliations[task.id] == nil {
-                TaskWorkflowBar(model: model, task: task, work: model.taskWork[task.id])
-            } else if let error = model.taskWork[task.id].errorMessage {
-                Text("Workflow could not be read: \(error)")
-                    .foregroundStyle(palette.warning).padding(12)
-            }
+            TaskWorkflowBar(model: model, task: task, work: model.taskWork[task.id])
         }
         if navigation.startingTask == nil,
            let transition = model.visibleSessions.first(where: { $0.id == navigation.selectedSessionId })?.transition {
@@ -1875,7 +1870,7 @@ struct SessionsContentView: View {
                         }
                     }
             }
-            if let task, task.task.awaitsStart, active, navigation.startingTask == nil, navigation.pendingTaskReconciliations[task.task.id] == nil {
+            if let task, task.task.awaitsStart, active, navigation.startingTask == nil {
                 // The Session slot offers Start; its brief stays beside it.
                 GeometryReader { geometry in
                     HStack(spacing: 0) {
@@ -1898,7 +1893,7 @@ struct SessionsContentView: View {
                     WaveTiles(model: model, workspaces: workspaces, sessions: store, view: view)
                 }
             } else if terminals {
-                conversationPanes(key, entry, isFocused: active && navigation.palette == nil && navigation.startingTask == nil)
+                conversationPanes(key, entry, isFocused: active && navigation.palette == nil && !model.preparingCreation)
             } else if active {
                 HSplitView {
                     WorkSurfaceView(model: model, onOpenSession: openSession,
@@ -1914,6 +1909,9 @@ struct SessionsContentView: View {
         .clipShape(PaneGeometry.workspaceShape)
         .accessibilityIdentifier("work-workspace-\(key.id)")
         .modifier(CreationPresentation(recovery: .shared, resource: .task(key.id), visible: active && task != nil && navigation.startingTask == nil))
+        .task(id: active && !model.preparingCreation ? navigation.startingTask?.id : nil) {
+            if active { await model.mountedCreation(taskID: key.id) }
+        }
         .onChange(of: task.map { $0.task.isCompleted }, initial: true) { _, completed in
             if let completed { workspaces.updateCompletion(key, completed: completed) }
         }

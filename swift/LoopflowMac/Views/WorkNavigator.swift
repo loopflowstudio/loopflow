@@ -66,6 +66,15 @@ struct WorkNavigator: View {
                 .compactMap({ $0 }).contains(error) {
                 Text(error).font(Typography.body(11)).foregroundStyle(palette.warning).padding(10)
             }
+            ForEach(model.pendingCreations) { operation in
+                Button { model.selectCreation(operation) } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(operation.receipt?.task.title ?? operation.request).lineLimit(2)
+                        Text(operation.error ?? (operation.saved ? "Saved request" : "Saving request…")).font(Typography.body(11))
+                            .foregroundStyle(palette.textSecondary)
+                    }
+                }.buttonStyle(.plain).padding(10)
+            }
             ForEach(model.completionFailures) { failure in
                 VStack(alignment: .leading, spacing: 4) {
                     Text(failure.message).font(Typography.body(11)).foregroundStyle(palette.warning)

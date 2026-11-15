@@ -1,5 +1,11 @@
 # Working assumptions
 
+- Jack Heart replied “1a” to the 2026-11-15 conversation review's disconnected-edit
+  question: save and project Complete/rename/move locally, show “Waiting for
+  connection,” and deliver on reconnect to the original Machine. Retain across
+  restart; recover uncertain sends without duplicate execution. Implementation
+  remains required on both clients.
+
 - Scope now covers Desktop and mobile interaction state throughout the app;
   launch, completion, cached/recent Task selection and Wave disclosure are
   representative acceptance journeys. The earlier
@@ -60,3 +66,17 @@
   sizing: eight unleased prepared answers plus pinned live queries, with at most
   64 retired effects per retained base; exceeding that budget makes the base cold
   under its reload floor. These are internal cache sizes, not product preferences.
+
+- Creation keeps retired imported/editor-linked identities in the same SQLite
+  owner to prevent source-file resurrection after a crash. Indexed pending reads
+  exclude them. Editor revision IDs distinguish a newer unsent draft. Legacy
+  files have no submission time; their modification date seeds the retained record.
+  These are internal migration choices, not product preferences.
+
+- Creation action labels, headless reversible choice from the 2026-11-15
+  concept-review: one vocabulary on both hosts, replacing Desktop "Retry
+  recovery" and phone "Check status" for the same call. Proposed: **Try again**
+  (never saved), **Edit request**, **Check request** (saved, outcome unknown),
+  **Retry opening** (Session recorded, not attached). Copy only; nobody has
+  stated a preference. Request rows currently sit above the Task list on both
+  hosts; their position has not been discussed.

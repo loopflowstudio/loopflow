@@ -133,6 +133,9 @@ fn snapshot_preview_fixture() {
             output.extend_from_slice(b"provider finished\r\n");
             output.extend(wire::event("nonce", 2, Event::ChildExited { code: 0 }));
             socket.write_all(&wire::frame(Tag::Out, &output)).unwrap();
+            socket
+                .write_all(&wire::frame(Tag::Close, br#"{"reason":"finished"}"#))
+                .unwrap();
             return;
         }
         if reports_directory {

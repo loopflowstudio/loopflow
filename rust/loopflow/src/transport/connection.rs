@@ -206,8 +206,8 @@ impl Status {
         self.publish(self.reading.state, self.reading.input, None);
     }
 
-    pub(super) fn ended(&mut self) {
-        self.publish("ended", false, None);
+    pub(super) fn ended(&mut self, message: Option<&str>) {
+        self.publish("ended", false, message);
     }
 
     pub(super) fn closed(&self) -> bool {

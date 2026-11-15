@@ -7,6 +7,34 @@ import Testing
 @Suite(.serialized)
 @MainActor
 struct ServerConnectionTests {
+    @Test(arguments: [
+        nil,
+        "Session terminal replaced; reattach by Session.",
+        "Session terminal retired; resume when needed.",
+    ] as [String?])
+    func orderlyCloseShowsItsReasonWithoutOfferingRecovery(message: String?) async throws {
+        let connection = ServerConnection()
+        defer { connection.stop() }
+        try connection.start { _ in }
+        var relay: Relay? = try Relay(connection)
+        var bytes = try JSONSerialization.data(withJSONObject: [
+            "generation": 1, "state": "ended", "input": false, "native_ready": false,
+            "message": message as Any? ?? NSNull()
+        ])
+        bytes.append(10)
+        try relay?.write(bytes)
+        try await wait { connection.reading.state == .ended }
+        #expect(connection.reading.title == (message ?? "Session ended."))
+        #expect(!connection.reading.acceptsInput)
+        #expect(!connection.reading.canMoveHere)
+        #expect(!connection.canRetry)
+        connection.retry()
+        #expect(try relay?.pendingAction() == nil)
+        relay = nil
+        try await Task.sleep(for: .milliseconds(60))
+        #expect(connection.reading.state == .ended)
+    }
+
     @Test func openingWaitsForNativeReadinessAndRecoversInPlace() async throws {
         let connection = ServerConnection()
         defer { connection.stop() }

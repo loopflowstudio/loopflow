@@ -390,6 +390,8 @@ and their consumers must converge together.
    membership and persistence dependencies before cutting consumers over.
    Completion navigation is specified above.
 2. Extend receipt/commit-stamp contracts and domain recovery; migrate saved data.
+   Done: stamped subscription readings (revision 6). Remaining: commit fences,
+   generalized operation receipts and recovery in `client_operations.sql`.
 3. Build shared transactional client store and projection reducer; cut both
    transports over, including query membership. Delete predecessor owners.
 4. Move selection, disclosure, launch, completion and every mutation family through
@@ -397,6 +399,9 @@ and their consumers must converge together.
    retain native execution and input owners. Update product/API docs together.
 5. Measure actual latency and remove demonstrated backend waits independently of
    presentation; run the full acceptance matrix and native demo.
+
+Slices 3–5 have not started. The Desktop launch checkpoint and synchronous Wave
+selection are interim; slice 3 deletes the launch exception.
 
 Headless acceptance uses deterministic held/reordered replies, not timing sleeps:
 shared reducer tests cover overlapping success/failure, stale reads, partial pages,
